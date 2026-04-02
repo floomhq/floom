@@ -81,9 +81,9 @@ http.route({
   }),
 });
 
-// POST /api/automations/:id/update — skill updates automation code.
+// POST /api/automations/:id/update|run — skill updates or triggers automation.
 http.route({
-  path: "/api/automations",
+  pathPrefix: "/api/automations/",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     try {
@@ -146,7 +146,7 @@ http.route({
 
 // GET /api/runs/:runId — skill polls run status.
 http.route({
-  path: "/api/runs",
+  pathPrefix: "/api/runs/",
   method: "GET",
   handler: httpAction(async (ctx, request) => {
     try {

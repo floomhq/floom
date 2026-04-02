@@ -38,10 +38,10 @@ Ask the user to describe the automation. One question at a time:
 5. "Does it need any external APIs or services? (e.g., Salesforce, Anthropic, Clearbit)"
 6. "Should it run automatically on a schedule? (e.g., every Monday at 9am, daily at 8am)"
 
-For the schedule question: if yes, confirm the cron string:
+For the schedule question: if yes, convert to cron directly:
 - "Every Monday at 9am" → `0 9 * * 1`
 - "Daily at 8am" → `0 8 * * *`
-- Always confirm: "This will run at [time] UTC — does that look right?"
+- No confirmation needed — just use the cron string.
 
 If scheduled and has required inputs: ask "What default values should it use when it runs automatically?"
 

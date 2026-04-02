@@ -25,11 +25,18 @@ export default function GalleryPage() {
   const { isAuthenticated } = useConvexAuth();
 
   const automations = useQuery(
-    api.automations.gallery,
-    isAuthenticated
-      ? { department: dept === "all" ? undefined : dept, q: query || undefined }
-      : "skip"
+    api.automations.list,
+    isAuthenticated ? {} : "skip"
   );
+
+  const filtered = automations?.filter((a) => {
+    if (dept !== "all" && a.department !== dept) return false;
+    if (query) {
+      const q = query.toLowerCase();
+      return a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q);
+    }
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -98,7 +105,7 @@ export default function GalleryPage() {
         )}
 
         {/* Empty state */}
-        {automations !== undefined && automations.length === 0 && (
+        {filtered !== undefined && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Box size={40} className="text-gray-200 mb-4" />
             {query ? (
@@ -134,9 +141,9 @@ export default function GalleryPage() {
         )}
 
         {/* Cards grid */}
-        {automations !== undefined && automations.length > 0 && (
+        {filtered !== undefined && filtered.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {automations.map((automation) => (
+            {filtered.map((automation) => (
               <AutomationCard
                 key={automation._id}
                 automation={automation}

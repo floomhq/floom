@@ -85,11 +85,7 @@ export function isValidCron(cron: string): boolean {
 }
 
 // Select the best E2B template based on dependencies.
-export function selectE2BTemplate(deps: string[]): string {
-  const dataScienceDeps = ["pandas", "numpy", "openpyxl", "PyMuPDF", "fitz"];
-  const hasDataScience = deps.some((d) =>
-    dataScienceDeps.some((ds) => d.toLowerCase().includes(ds.toLowerCase()))
-  );
-
-  return hasDataScience ? "data-science" : "enrichment";
+// Uses E2B's built-in base template — custom templates can be swapped in later.
+export function selectE2BTemplate(_deps: string[]): string {
+  return "base";
 }

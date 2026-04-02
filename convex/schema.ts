@@ -26,7 +26,7 @@ export default defineSchema({
     ),
     schedule: v.union(v.string(), v.null()),
     scheduleInputs: v.union(v.any(), v.null()),
-    currentVersionId: v.id("automationVersions"),
+    currentVersionId: v.union(v.id("automationVersions"), v.literal("placeholder")),
     currentVersion: v.number(),
   })
     .index("by_orgId", ["orgId"])

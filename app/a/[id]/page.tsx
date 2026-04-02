@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useConvexAuth } from "convex/react";
+import { use } from "react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { useState, useCallback } from "react";
@@ -17,10 +18,11 @@ import { Share2, Eye, EyeOff } from "lucide-react";
 type Tab = "run" | "code" | "versions";
 
 export default function AutomationPage({
-  params,
+  params: paramsPromise,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const params = use(paramsPromise);
   const { isAuthenticated } = useConvexAuth();
   const automation = useQuery(
     api.automations.get,
