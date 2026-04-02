@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useMutation, useAction } from "convex/react";
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { useState, useCallback } from "react";
@@ -21,16 +21,18 @@ export default function AutomationPage({
 }: {
   params: { id: string };
 }) {
-  const automation = useQuery(api.automations.get, {
-    id: params.id as Id<"automations">,
-  });
+  const { isAuthenticated } = useConvexAuth();
+  const automation = useQuery(
+    api.automations.get,
+    isAuthenticated ? { id: params.id as Id<"automations"> } : "skip"
+  );
 
   const [tab, setTab] = useState<Tab>("run");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const setPublic = useMutation(api.automations.setPublic);
-  const triggerRun = useAction(api.runs.trigger);
+  const triggerRun = useMutation(api.runs.trigger);
 
   const handleShare = useCallback(() => {
     navigator.clipboard.writeText(window.location.href);

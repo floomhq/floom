@@ -2,10 +2,9 @@
 
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Nav } from "@/components/Nav";
 import { Trash2, Copy, Check, RefreshCw, Key, Terminal } from "lucide-react";
-import { useUser } from "@clerk/nextjs";
 
 type SettingsSection = "api-key" | "secrets";
 
@@ -55,16 +54,22 @@ export default function SettingsPage() {
 }
 
 function ApiKeySection() {
-  const { user } = useUser();
   const [copied, setCopied] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
 
-  // Clerk API key — generated on first load, stored in user metadata
-  const apiKey = (user?.publicMetadata?.deploySkillApiKey as string) ?? null;
-  const platformUrl =
-    typeof window !== "undefined" ? window.location.origin : "https://yourplatform.com";
+  const apiKey = useQuery(api.users.getApiKey);
+  const generateApiKey = useMutation(api.users.generateApiKey);
 
-  const installCommand = `curl -s ${platformUrl}/install-skill.sh | bash`;
+  const [origin, setOrigin] = useState("https://yourplatform.com");
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+
+  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL ?? "";
+  const platformUrl = convexUrl.replace(".cloud", ".site");
+  const installCommand = `curl -s ${origin}/install-skill.sh | bash`;
+  const configJson = apiKey
+    ? JSON.stringify({ api_key: apiKey, platform_url: platformUrl }, null, 2)
+    : null;
 
   async function copyKey() {
     if (!apiKey) return;
@@ -79,22 +84,30 @@ function ApiKeySection() {
     setTimeout(() => setCopiedInstall(false), 2000);
   }
 
+  async function copyConfig() {
+    if (!configJson) return;
+    await navigator.clipboard.writeText(configJson);
+    setCopiedConfig(true);
+    setTimeout(() => setCopiedConfig(false), 2000);
+  }
+
   return (
     <div className="space-y-6">
       <section>
         <h2 className="text-sm font-semibold text-gray-700 mb-1">API Key</h2>
         <p className="text-xs text-gray-500 mb-3">
-          Use this in{" "}
+          Use this to authenticate the{" "}
           <code className="font-mono bg-gray-100 px-1 py-0.5 rounded text-xs">
-            ~/.claude/deploy-skill-config.json
-          </code>
+            deploy-skill
+          </code>{" "}
+          Claude Code skill.
         </p>
         {apiKey ? (
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center gap-2 border border-gray-200 rounded px-3 py-2 bg-gray-50 font-mono text-sm">
               <Key size={14} className="text-gray-400 shrink-0" />
               <span className="text-gray-700 truncate">
-                dsk_•••••••••••••••••••••••
+                {apiKey.slice(0, 12)}••••••••••••••••••••••••
               </span>
             </div>
             <button
@@ -106,21 +119,48 @@ function ApiKeySection() {
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-2 border border-gray-200 rounded px-3 py-2 text-sm text-gray-400 bg-gray-50">
-            <Key size={14} className="text-gray-300" />
-            API key not yet generated — sign out and back in.
+          <button
+            onClick={() => generateApiKey()}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded text-sm text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+          >
+            <Key size={14} />
+            Generate API key
+          </button>
+        )}
+        {apiKey && (
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={() => generateApiKey()}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700"
+            >
+              <RefreshCw size={12} />
+              Regenerate key
+            </button>
+            <span className="text-xs text-red-500">
+              ⚠ Regenerating invalidates the old key.
+            </span>
           </div>
         )}
-        <div className="mt-2 flex items-center gap-2">
-          <button className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700">
-            <RefreshCw size={12} />
-            Regenerate key
-          </button>
-          <span className="text-xs text-red-500">
-            ⚠ Regenerating invalidates the old key.
-          </span>
-        </div>
       </section>
+
+      {apiKey && configJson && (
+        <section>
+          <h2 className="text-sm font-semibold text-gray-700 mb-1">Quick Setup</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Paste this into your terminal to configure the skill in one step:
+          </p>
+          <div className="relative">
+            <pre className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono text-gray-700 overflow-x-auto">{`cat > ~/.claude/deploy-skill-config.json << 'EOF'\n${configJson}\nEOF`}</pre>
+            <button
+              onClick={copyConfig}
+              className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-white border border-gray-200 rounded text-xs text-gray-500 hover:bg-gray-50"
+            >
+              {copiedConfig ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+              {copiedConfig ? "Copied!" : "Copy"}
+            </button>
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-sm font-semibold text-gray-700 mb-1">

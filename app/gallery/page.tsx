@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -22,11 +22,14 @@ export default function GalleryPage() {
   const [dept, setDept] = useState("all");
   const [query, setQuery] = useState("");
   const router = useRouter();
+  const { isAuthenticated } = useConvexAuth();
 
-  const automations = useQuery(api.automations.gallery, {
-    department: dept === "all" ? undefined : dept,
-    q: query || undefined,
-  });
+  const automations = useQuery(
+    api.automations.gallery,
+    isAuthenticated
+      ? { department: dept === "all" ? undefined : dept, q: query || undefined }
+      : "skip"
+  );
 
   return (
     <div className="min-h-screen bg-white flex flex-col">

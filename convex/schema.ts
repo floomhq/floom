@@ -86,9 +86,11 @@ export default defineSchema({
     clerkUserId: v.string(),
     orgId: v.string(),
     createdAt: v.number(),
+    apiKey: v.optional(v.string()), // dsk_... for CLI auth
   })
     .index("by_clerkUserId", ["clerkUserId"])
-    .index("by_orgId", ["orgId"]),
+    .index("by_orgId", ["orgId"])
+    .index("by_apiKey", ["apiKey"]),
 
   // Org-scoped secrets. AES-256 encrypted. Never returned to frontend.
   secrets: defineTable({

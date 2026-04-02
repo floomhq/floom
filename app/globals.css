@@ -1,9 +1,10 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@source "../app/**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
 
-:root {
-  --primary: #0F62FE;
+@theme {
+  --color-primary: #0F62FE;
+  --radius-card: 8px;
 }
 
 * {

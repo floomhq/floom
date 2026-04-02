@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { encrypt, decrypt } from "./lib/crypto";
 
@@ -108,7 +108,7 @@ export const list = query({
 
 // Internal: decrypt all org secrets for E2B execution.
 // Returns Record<name, decrypted_value>.
-export const listDecrypted = query({
+export const listDecrypted = internalQuery({
   args: { automationId: v.id("automations") },
   handler: async (ctx, args) => {
     const automation = await ctx.db.get(args.automationId);

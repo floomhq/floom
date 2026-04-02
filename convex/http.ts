@@ -4,48 +4,22 @@ import { api, internal } from "./_generated/api";
 
 const http = httpRouter();
 
-// Helper: verify Clerk API key from Authorization header.
-// Returns { clerkUserId, orgId } or throws.
+// Helper: verify dsk_... API key from Authorization header.
+// Looks up the user in Convex by their stored API key.
 async function verifyClerkApiKey(
-  request: Request
+  request: Request,
+  ctx: { runQuery: Function }
 ): Promise<{ clerkUserId: string; orgId: string }> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     throw new Error("Missing Authorization header");
   }
-  const token = authHeader.slice(7);
+  const apiKey = authHeader.slice(7);
 
-  // Validate with Clerk API
-  const clerkSecretKey = process.env.CLERK_SECRET_KEY;
-  if (!clerkSecretKey) throw new Error("Clerk not configured");
+  const user = await ctx.runQuery(internal.users.getByApiKey, { apiKey });
+  if (!user) throw new Error("Invalid API key");
 
-  // Use Clerk's verify token endpoint
-  const res = await fetch(
-    `https://api.clerk.com/v1/tokens/verify`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${clerkSecretKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ token }),
-    }
-  );
-
-  if (!res.ok) {
-    throw new Error("Invalid API key");
-  }
-
-  const data = (await res.json()) as {
-    user_id?: string;
-    org_id?: string;
-    sub?: string;
-  };
-  const clerkUserId = data.user_id ?? data.sub ?? "";
-  const orgId = data.org_id ?? clerkUserId;
-
-  if (!clerkUserId) throw new Error("Could not extract user from token");
-  return { clerkUserId, orgId };
+  return { clerkUserId: user.clerkUserId, orgId: user.orgId };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -65,7 +39,7 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     try {
-      const { clerkUserId } = await verifyClerkApiKey(request);
+      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
 
       // Ensure user exists in Convex
       const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
@@ -121,7 +95,7 @@ http.route({
 
       if (!automationId) return errorResponse("Automation ID required");
 
-      const { clerkUserId } = await verifyClerkApiKey(request);
+      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
       const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
       if (!user) return errorResponse("User not found", 401);
 
@@ -149,10 +123,11 @@ http.route({
       }
 
       if (action === "run") {
-        const result = await ctx.runAction(api.runs.trigger, {
-          automationId: automationId as Parameters<typeof api.runs.trigger>[0]["automationId"],
+        const result = await ctx.runMutation(internal.runs.triggerInternal, {
+          automationId: automationId as Parameters<typeof internal.runs.triggerInternal>[0]["automationId"],
           inputs: body.inputs ?? {},
           triggeredBy: "skill",
+          clerkUserId,
         });
         return jsonResponse(result);
       }
@@ -179,7 +154,7 @@ http.route({
       const runId = url.pathname.split("/")[3];
       if (!runId) return errorResponse("Run ID required");
 
-      const { clerkUserId } = await verifyClerkApiKey(request);
+      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
       const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
       if (!user) return errorResponse("User not found", 401);
 
