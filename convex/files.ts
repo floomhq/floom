@@ -1,0 +1,51 @@
+import { action } from "./_generated/server";
+import { v } from "convex/values";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+function getR2Client(): S3Client {
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  });
+}
+
+// Generate R2 presigned PUT URL for file uploads.
+// 1hr TTL for upload. File accessible for 7 days (lifecycle rule in R2 bucket).
+export const getUploadUrl = action({
+  args: {
+    filename: v.string(),
+    contentType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthorized");
+
+    const bucket = process.env.R2_BUCKET_NAME;
+    const publicUrl = process.env.R2_PUBLIC_URL;
+    if (!bucket || !publicUrl) {
+      throw new Error("R2 not configured");
+    }
+
+    // Sanitize filename to prevent path traversal
+    const safeName = args.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const uuid = crypto.randomUUID();
+    const key = `uploads/${identity.subject}/${uuid}/${safeName}`;
+
+    const client = getR2Client();
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: args.contentType,
+    });
+
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
+    const fileUrl = `${publicUrl}/${key}`;
+
+    return { uploadUrl, fileUrl };
+  },
+});
