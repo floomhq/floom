@@ -3,8 +3,8 @@
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { Sandbox } from "e2b";
-import { selectE2BTemplate } from "./lib/manifest";
+import { Sandbox } from "@e2b/code-interpreter";
+
 
 const EXECUTION_TIMEOUT_S = 5 * 60; // 5 minutes
 
@@ -74,24 +74,23 @@ export const executeRun = internalAction({
 
     const manifest = version.manifest as { python_dependencies?: string[] };
     const deps = manifest.python_dependencies ?? [];
-    const template = selectE2BTemplate(deps);
 
     let sandbox: Sandbox | null = null;
     let logs = "";
 
     try {
-      // 5. Create E2B sandbox with org secrets as env vars
-      sandbox = await Sandbox.create(template, {
+      // 5. Create E2B sandbox (code-interpreter template — has pandas, numpy, pillow, etc. pre-installed)
+      sandbox = await Sandbox.create({
         apiKey: process.env.E2B_API_KEY,
-        envVars: secrets,
-        timeout: EXECUTION_TIMEOUT_S,
+        envs: secrets,
+        timeoutMs: EXECUTION_TIMEOUT_S * 1000,
       });
 
       // 6. Install Python dependencies
       if (deps.length > 0) {
         const pkgList = deps.map((d) => JSON.stringify(d)).join(" ");
         const installOut = await sandbox.commands.run(
-          `pip install -q ${pkgList}`,
+          `python3 -m pip install -q ${pkgList}`,
           { timeoutMs: 60_000 }
         );
         if (installOut.exitCode !== 0) {
@@ -105,7 +104,7 @@ export const executeRun = internalAction({
       const code = buildExecutionCode(version.code, run.inputs);
       await sandbox.files.write("/home/user/run.py", code);
 
-      const result = await sandbox.commands.run("python /home/user/run.py", {
+      const result = await sandbox.commands.run("python3 /home/user/run.py", {
         timeoutMs: EXECUTION_TIMEOUT_S * 1000,
       });
 
