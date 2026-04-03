@@ -13,7 +13,7 @@ export default function SettingsPage() {
 
   const sections = [
     { id: "api-key" as const, label: "API Key" },
-    { id: "secrets" as const, label: "Org Secrets" },
+    { id: "secrets" as const, label: "Workspace Secrets" },
   ];
 
   return (
@@ -232,9 +232,9 @@ function SecretsSection() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-0.5">Org Secrets</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-0.5">Workspace Secrets</h2>
         <p className="text-xs text-gray-500">
-          Shared with your entire org. Never shown after saving.
+          Shared with your entire workspace. Never shown after saving.
         </p>
       </div>
 

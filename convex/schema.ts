@@ -16,17 +16,13 @@ export default defineSchema({
       v.literal("deploying"),
       v.literal("failed")
     ),
-    department: v.union(
-      v.literal("sales"),
-      v.literal("cs"),
-      v.literal("marketing"),
-      v.literal("finance"),
-      v.literal("product"),
-      v.literal("other")
-    ),
     schedule: v.union(v.string(), v.null()),
+    scheduleEnabled: v.optional(v.boolean()),
     scheduleInputs: v.union(v.any(), v.null()),
-    currentVersionId: v.union(v.id("automationVersions"), v.literal("placeholder")),
+    currentVersionId: v.union(
+      v.id("automationVersions"),
+      v.literal("placeholder")
+    ),
     currentVersion: v.number(),
   })
     .index("by_orgId", ["orgId"])

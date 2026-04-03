@@ -23,7 +23,6 @@ export type ManifestOutput = {
 export type Manifest = {
   name: string;
   description: string;
-  department?: string;
   schedule?: string | null;
   scheduleInputs?: Record<string, unknown> | null;
   inputs: ManifestInput[];

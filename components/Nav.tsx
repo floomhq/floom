@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 import { clsx } from "clsx";
 
 export function Nav() {
@@ -37,7 +37,19 @@ export function Nav() {
             {label}
           </Link>
         ))}
-        <div className="ml-2">
+        <OrganizationSwitcher
+          hidePersonal={false}
+          afterSelectOrganizationUrl="/gallery"
+          afterSelectPersonalUrl="/gallery"
+          appearance={{
+            elements: {
+              rootBox: "ml-2",
+              organizationSwitcherTrigger:
+                "px-2 py-1 rounded text-sm text-gray-600 hover:bg-gray-50 border border-gray-200 transition-colors",
+            },
+          }}
+        />
+        <div className="ml-1">
           <UserButton />
         </div>
       </div>

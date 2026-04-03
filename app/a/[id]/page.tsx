@@ -7,13 +7,12 @@ import { Id } from "@/convex/_generated/dataModel";
 import { useState, useCallback } from "react";
 import { Nav } from "@/components/Nav";
 import { StatusDot } from "@/components/ui/StatusDot";
-import { DeptBadge } from "@/components/ui/DeptBadge";
 import { RunForm } from "./RunForm";
 import { OutputPanel } from "./OutputPanel";
 import { RunHistory } from "./RunHistory";
 import { CodeTab } from "./CodeTab";
 import { VersionsTab } from "./VersionsTab";
-import { Share2, Eye, EyeOff } from "lucide-react";
+import { Share2, Eye, EyeOff, Pause, Play } from "lucide-react";
 
 type Tab = "run" | "code" | "versions";
 
@@ -34,6 +33,7 @@ export default function AutomationPage({
   const [copied, setCopied] = useState(false);
 
   const setPublic = useMutation(api.automations.setPublic);
+  const setScheduleEnabled = useMutation(api.automations.setScheduleEnabled);
   const triggerRun = useMutation(api.runs.trigger);
 
   const handleShare = useCallback(() => {
@@ -49,6 +49,15 @@ export default function AutomationPage({
       isPublicToOrg: !automation.isPublicToOrg,
     });
   }, [automation, params.id, setPublic]);
+
+  const handleToggleSchedule = useCallback(async () => {
+    if (!automation) return;
+    const currentlyEnabled = automation.scheduleEnabled !== false;
+    await setScheduleEnabled({
+      id: params.id as Id<"automations">,
+      enabled: !currentlyEnabled,
+    });
+  }, [automation, params.id, setScheduleEnabled]);
 
   const handleRun = useCallback(
     async (inputs: Record<string, unknown>) => {
@@ -94,7 +103,6 @@ export default function AutomationPage({
       <div className="px-4 py-3 border-b border-gray-200">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 min-w-0">
-            <DeptBadge department={automation.department} />
             <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
               v{automation.currentVersion}
             </span>
@@ -110,6 +118,25 @@ export default function AutomationPage({
               <Share2 size={14} />
               {copied ? "Copied!" : "Share"}
             </button>
+            {automation.isOwner && automation.schedule && (
+              <button
+                onClick={handleToggleSchedule}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
+                title={automation.scheduleEnabled === false ? "Resume schedule" : "Pause schedule"}
+              >
+                {automation.scheduleEnabled === false ? (
+                  <>
+                    <Play size={14} className="text-amber-500" />
+                    <span>Paused</span>
+                  </>
+                ) : (
+                  <>
+                    <Pause size={14} className="text-gray-500" />
+                    <span>Pause</span>
+                  </>
+                )}
+              </button>
+            )}
             {automation.isOwner && (
               <button
                 onClick={handleTogglePublic}

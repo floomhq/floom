@@ -34,9 +34,8 @@ Ask the user to describe the automation. One question at a time:
 1. "What does this automation do? Describe it in plain language."
 2. "What information does it need as input? (e.g., a URL, a text paste, a file)"
 3. "What should the output look like? (a table, a number, a text summary)"
-4. "Which department is this for? (Sales / CS / Marketing / Finance / Product / Other)"
-5. "Does it need any external APIs or services? (e.g., Salesforce, Anthropic, Clearbit)"
-6. "Should it run automatically on a schedule? (e.g., every Monday at 9am, daily at 8am)"
+4. "Does it need any external APIs or services? (e.g., Salesforce, Anthropic, Clearbit)"
+5. "Should it run automatically on a schedule? (e.g., every Monday at 9am, daily at 8am)"
 
 For the schedule question: if yes, confirm the cron string:
 - "Every Monday at 9am" → `0 9 * * 1`
@@ -86,7 +85,6 @@ def run(param1: type, param2: type = default) -> dict:
 {
   "name": "Automation Name",
   "description": "One-sentence description",
-  "department": "sales|cs|marketing|finance|product|other",
   "schedule": "0 9 * * 1",
   "scheduleInputs": {"param1": "default_value"},
   "inputs": [
@@ -158,7 +156,7 @@ PLATFORM=$(cat ~/.claude/deploy-skill-config.json | python3 -c "import sys,json;
 For each missing secret, ask one at a time:
 ```
 This automation needs ANTHROPIC_API_KEY. Do you have one?
-If yes: paste it and I'll store it securely for all your org's automations.
+If yes: paste it and I'll store it securely for all your workspace's automations.
 If no: I'll skip this for now — you can add it in Settings before running.
 ```
 

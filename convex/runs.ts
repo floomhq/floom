@@ -63,8 +63,12 @@ export const trigger = mutation({
 
     const triggeredBy = args.triggeredBy ?? "manual";
 
-    // Cron deduplication: skip if a run is already in progress
+    // Cron deduplication + pause check
     if (triggeredBy === "schedule") {
+      if (automation.scheduleEnabled === false) {
+        throw new Error("CRON_PAUSED: Scheduled runs are paused for this automation");
+      }
+
       const runningRun = await ctx.db
         .query("runs")
         .withIndex("by_automationId", (q) =>

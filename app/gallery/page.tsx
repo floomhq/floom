@@ -5,21 +5,9 @@ import { api } from "@/convex/_generated/api";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
-import { DeptBadge } from "@/components/ui/DeptBadge";
 import { Search, Box, ArrowRight } from "lucide-react";
 
-const DEPARTMENTS = [
-  { value: "all", label: "All" },
-  { value: "sales", label: "Sales" },
-  { value: "cs", label: "CS" },
-  { value: "marketing", label: "Marketing" },
-  { value: "finance", label: "Finance" },
-  { value: "product", label: "Product" },
-  { value: "other", label: "Other" },
-];
-
 export default function GalleryPage() {
-  const [dept, setDept] = useState("all");
   const [query, setQuery] = useState("");
   const router = useRouter();
   const { isAuthenticated } = useConvexAuth();
@@ -30,7 +18,6 @@ export default function GalleryPage() {
   );
 
   const filtered = automations?.filter((a) => {
-    if (dept !== "all" && a.department !== dept) return false;
     if (query) {
       const q = query.toLowerCase();
       return a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q);
@@ -46,7 +33,7 @@ export default function GalleryPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-semibold text-gray-900">
-            Org Automations
+            Workspace Automations
           </h1>
           <div className="relative">
             <Search
@@ -61,35 +48,6 @@ export default function GalleryPage() {
               className="pl-8 pr-3 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 w-64"
             />
           </div>
-        </div>
-
-        {/* Department filter tabs */}
-        <div className="flex gap-1 mb-6 overflow-x-auto pb-1">
-          {DEPARTMENTS.map((d) => {
-            const count =
-              d.value === "all"
-                ? automations?.length
-                : automations?.filter(
-                    (a: { department: string }) => a.department === d.value
-                  ).length;
-
-            return (
-              <button
-                key={d.value}
-                onClick={() => setDept(d.value)}
-                className={`shrink-0 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                  dept === d.value
-                    ? "bg-gray-900 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                {d.label}
-                {count !== undefined && count > 0 && (
-                  <span className="ml-1.5 text-xs opacity-70">{count}</span>
-                )}
-              </button>
-            );
-          })}
         </div>
 
         {/* Loading */}
@@ -123,7 +81,7 @@ export default function GalleryPage() {
             ) : (
               <>
                 <p className="text-gray-500 text-sm">
-                  No automations shared with your org yet.
+                  No automations shared with your workspace yet.
                 </p>
                 <p className="text-gray-400 text-xs mt-1 max-w-xs">
                   When the automation person deploys one and makes it public,
@@ -161,7 +119,6 @@ type Automation = {
   _id: string;
   name: string;
   description: string;
-  department: "sales" | "cs" | "marketing" | "finance" | "product" | "other";
   currentVersion: number;
   createdAt: number;
 };
@@ -176,7 +133,6 @@ function AutomationCard({
   return (
     <div className="border border-gray-200 rounded-card p-4 flex flex-col hover:border-gray-300 hover:shadow-sm transition-all">
       <div className="flex items-center justify-between mb-2">
-        <DeptBadge department={automation.department} />
         <span className="text-xs text-gray-400">
           v{automation.currentVersion}
         </span>

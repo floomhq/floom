@@ -5,7 +5,6 @@ import { validateManifestStructure } from "./lib/manifest";
 type ManifestArg = {
   name: string;
   description: string;
-  department?: string;
   schedule?: string | null;
   scheduleInputs?: Record<string, unknown> | null;
   inputs: Array<{ name: string; label: string; type: string }>;
@@ -32,28 +31,19 @@ export const list = query({
 
     const orgId = user.orgId;
 
-    // Own automations
-    const own = await ctx.db
+    // All automations in this workspace, filtered by visibility:
+    // - private (isPublicToOrg=false): only shown to their creator
+    // - public (isPublicToOrg=true): shown to all workspace members
+    const all = await ctx.db
       .query("automations")
-      .withIndex("by_createdBy", (q) => q.eq("createdBy", user._id))
+      .withIndex("by_orgId", (q) => q.eq("orgId", orgId))
       .collect();
 
-    // Org-public automations not created by this user
-    const orgPublic = await ctx.db
-      .query("automations")
-      .withIndex("by_orgId_isPublicToOrg", (q) =>
-        q.eq("orgId", orgId).eq("isPublicToOrg", true)
-      )
-      .collect();
+    const visible = all.filter(
+      (a) => a.createdBy === user._id || a.isPublicToOrg
+    );
 
-    // Deduplicate
-    const seen = new Set(own.map((a) => a._id));
-    const combined = [
-      ...own,
-      ...orgPublic.filter((a) => !seen.has(a._id)),
-    ];
-
-    return combined.sort((a, b) => b.createdAt - a.createdAt);
+    return visible.sort((a, b) => b.createdAt - a.createdAt);
   },
 });
 
@@ -213,7 +203,6 @@ export const deploy = mutation({
     const manifest = args.manifest as {
       name: string;
       description: string;
-      department?: string;
       schedule?: string | null;
       scheduleInputs?: Record<string, unknown> | null;
       inputs: Array<{ name: string; label: string; type: string }>;
@@ -227,14 +216,6 @@ export const deploy = mutation({
       throw new Error(`Validation failed: ${validationError.message}`);
     }
 
-    const department = (manifest.department as
-      | "sales"
-      | "cs"
-      | "marketing"
-      | "finance"
-      | "product"
-      | "other") ?? "other";
-
     // Create a placeholder automation first so we have the ID
     const automationId = await ctx.db.insert("automations", {
       name: manifest.name,
@@ -244,7 +225,6 @@ export const deploy = mutation({
       isPublicToOrg: false,
       createdAt: Date.now(),
       status: "active",
-      department,
       schedule: manifest.schedule ?? null,
       scheduleInputs: manifest.scheduleInputs ?? null,
       // Temporary placeholder — will be patched below
@@ -333,6 +313,33 @@ export const update = mutation({
   },
 });
 
+// Pause/resume scheduled runs. No new version created.
+export const setScheduleEnabled = mutation({
+  args: {
+    id: v.id("automations"),
+    enabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthorized");
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkUserId", (q) =>
+        q.eq("clerkUserId", identity.subject)
+      )
+      .unique();
+    if (!user) throw new Error("User not found");
+
+    const automation = await ctx.db.get(args.id);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+
+    await ctx.db.patch(args.id, { scheduleEnabled: args.enabled });
+    return { id: args.id, scheduleEnabled: args.enabled };
+  },
+});
+
 // Visibility toggle. No new version created.
 export const setPublic = mutation({
   args: {
@@ -363,7 +370,6 @@ export const setPublic = mutation({
 // Org gallery — isPublicToOrg=true automations for the caller's org.
 export const gallery = query({
   args: {
-    department: v.optional(v.string()),
     q: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -384,13 +390,6 @@ export const gallery = query({
         q.eq("orgId", user.orgId).eq("isPublicToOrg", true)
       )
       .collect();
-
-    // Filter by department
-    if (args.department && args.department !== "all") {
-      automations = automations.filter(
-        (a) => a.department === args.department
-      );
-    }
 
     // Text search on name + description
     if (args.q) {
@@ -448,14 +447,6 @@ export const deployInternal = internalMutation({
       throw new Error(`Validation failed: ${validationError.message}`);
     }
 
-    const department = (manifest.department as
-      | "sales"
-      | "cs"
-      | "marketing"
-      | "finance"
-      | "product"
-      | "other") ?? "other";
-
     const automationId = await ctx.db.insert("automations", {
       name: manifest.name,
       description: manifest.description,
@@ -464,7 +455,6 @@ export const deployInternal = internalMutation({
       isPublicToOrg: false,
       createdAt: Date.now(),
       status: "active",
-      department,
       schedule: manifest.schedule ?? null,
       scheduleInputs: manifest.scheduleInputs ?? null,
       currentVersionId: "placeholder" as Parameters<typeof ctx.db.patch>[0],
