@@ -367,6 +367,50 @@ export const setPublic = mutation({
   },
 });
 
+// Delete automation + all versions and runs.
+export const remove = mutation({
+  args: { id: v.id("automations") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthorized");
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkUserId", (q) =>
+        q.eq("clerkUserId", identity.subject)
+      )
+      .unique();
+    if (!user) throw new Error("User not found");
+
+    const automation = await ctx.db.get(args.id);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+
+    // Delete all versions
+    const versions = await ctx.db
+      .query("automationVersions")
+      .withIndex("by_automationId", (q) => q.eq("automationId", args.id))
+      .collect();
+    for (const version of versions) {
+      await ctx.db.delete(version._id);
+    }
+
+    // Delete all runs
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_automationId", (q) => q.eq("automationId", args.id))
+      .collect();
+    for (const run of runs) {
+      await ctx.db.delete(run._id);
+    }
+
+    // Delete the automation itself
+    await ctx.db.delete(args.id);
+
+    return { success: true };
+  },
+});
+
 // Org gallery — isPublicToOrg=true automations for the caller's org.
 export const gallery = query({
   args: {

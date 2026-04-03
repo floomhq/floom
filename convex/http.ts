@@ -144,6 +144,36 @@ http.route({
   }),
 });
 
+// POST /api/secrets — skill stores an org secret.
+http.route({
+  path: "/api/secrets",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
+      const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
+      if (!user) return errorResponse("User not found", 401);
+
+      const body = (await request.json()) as { name: string; value: string };
+      if (!body.name || !body.value) return errorResponse("name and value are required");
+
+      const result = await ctx.runMutation(internal.secrets.upsertInternal, {
+        clerkUserId,
+        name: body.name,
+        value: body.value,
+      });
+
+      return jsonResponse(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      if (msg.includes("Unauthorized") || msg.includes("Invalid API key")) {
+        return errorResponse(msg, 401);
+      }
+      return errorResponse(msg, 400);
+    }
+  }),
+});
+
 // GET /api/runs/:runId — skill polls run status.
 http.route({
   pathPrefix: "/api/runs/",

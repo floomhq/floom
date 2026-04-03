@@ -1,4 +1,9 @@
-import { internalQuery, mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { encrypt, decrypt } from "./lib/crypto";
 
@@ -20,9 +25,7 @@ export const upsert = mutation({
 
     const user = await ctx.db
       .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
       .unique();
     if (!user) throw new Error("User not found");
 
@@ -61,9 +64,7 @@ export const remove = mutation({
 
     const user = await ctx.db
       .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
       .unique();
     if (!user) throw new Error("User not found");
 
@@ -89,9 +90,7 @@ export const list = query({
 
     const user = await ctx.db
       .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
       .unique();
     if (!user) throw new Error("User not found");
 
@@ -103,6 +102,45 @@ export const list = query({
     return secrets
       .map((s) => ({ name: s.name, createdAt: s.createdAt }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+// Internal: store a secret by clerkUserId (used by HTTP action).
+export const upsertInternal = internalMutation({
+  args: {
+    clerkUserId: v.string(),
+    name: v.string(),
+    value: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
+      .unique();
+    if (!user) throw new Error("User not found");
+
+    const encryptionKey = getEncryptionKey();
+    const encryptedValue = await encrypt(args.value, encryptionKey);
+
+    const existing = await ctx.db
+      .query("secrets")
+      .withIndex("by_orgId_name", (q) =>
+        q.eq("orgId", user.orgId).eq("name", args.name)
+      )
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, { encryptedValue });
+    } else {
+      await ctx.db.insert("secrets", {
+        orgId: user.orgId,
+        name: args.name,
+        encryptedValue,
+        createdAt: Date.now(),
+      });
+    }
+
+    return { name: args.name, stored: true };
   },
 });
 

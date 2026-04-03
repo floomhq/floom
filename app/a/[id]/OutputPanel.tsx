@@ -252,6 +252,22 @@ function OutputBlock({ name, value }: { name: string; value: unknown }) {
   );
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function linkify(text: string): string {
+  const escaped = escapeHtml(text);
+  return escaped.replace(
+    /(https?:\/\/[^\s<>&"'`,;)}\]]+)/g,
+    '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+}
+
 function TableOutput({
   label,
   rows,
@@ -289,9 +305,9 @@ function TableOutput({
           CSV
         </button>
       </div>
-      <div className="border border-gray-200 rounded overflow-hidden overflow-x-auto">
+      <div className="border border-gray-200 rounded overflow-hidden overflow-x-auto max-h-[500px] overflow-y-auto">
         <table className="output-table">
-          <thead>
+          <thead className="sticky top-0 z-10">
             <tr>
               {columns.map((col) => (
                 <th key={col}>{col.replace(/_/g, " ")}</th>
@@ -302,7 +318,23 @@ function TableOutput({
             {rows.map((row, i) => (
               <tr key={i}>
                 {columns.map((col) => (
-                  <td key={col}>{String(row[col] ?? "")}</td>
+                  <td key={col}>
+                    <div
+                      className="td-cell"
+                      tabIndex={0}
+                      onFocus={(e) => e.currentTarget.classList.add("expanded")}
+                      onBlur={(e) => e.currentTarget.classList.remove("expanded")}
+                      dangerouslySetInnerHTML={{
+                        __html: linkify(String(row[col] ?? "")),
+                      }}
+                      onClick={(e) => {
+                        // Don't steal focus from link clicks
+                        if ((e.target as HTMLElement).tagName === "A") {
+                          e.stopPropagation();
+                        }
+                      }}
+                    />
+                  </td>
                 ))}
               </tr>
             ))}
