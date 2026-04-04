@@ -3,7 +3,7 @@
 
 set -e
 
-PLATFORM_URL="${1:-https://yourplatform.com}"
+PLATFORM_URL="${1:-https://dashboard.floom.dev}"
 SKILL_DIR="$HOME/.claude/skills/floom"
 
 echo "Installing floom from $PLATFORM_URL..."

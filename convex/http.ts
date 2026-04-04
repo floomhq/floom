@@ -65,7 +65,7 @@ http.route({
       });
 
       const platformUrl =
-        process.env.NEXT_PUBLIC_APP_URL ?? "https://yourplatform.com";
+        process.env.NEXT_PUBLIC_APP_URL ?? "https://dashboard.floom.dev";
 
       return jsonResponse({
         id: result.id,

@@ -61,7 +61,7 @@ function ApiKeySection() {
   const apiKey = useQuery(api.users.getApiKey);
   const generateApiKey = useMutation(api.users.generateApiKey);
 
-  const [origin, setOrigin] = useState("https://yourplatform.com");
+  const [origin, setOrigin] = useState("https://dashboard.floom.dev");
   useEffect(() => { setOrigin(window.location.origin); }, []);
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL ?? "";

@@ -16,11 +16,11 @@ export const sendFailureEmail = internalAction({
     const { Resend } = await import("resend");
     const resend = new Resend(resendKey);
 
-    const platformUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://yourplatform.com";
+    const platformUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://dashboard.floom.dev";
     const automationUrl = `${platformUrl}/a/${args.automationId}`;
 
     await resend.emails.send({
-      from: "Floom <noreply@yourplatform.com>",
+      from: "Floom <noreply@floom.dev>",
       to: args.toEmail,
       subject: `Scheduled run failed: ${args.automationName}`,
       html: `
