@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 
 // Public trigger — mutation (not action) so we have db for auth + rate limit.
 // Mutations can schedule background actions via ctx.scheduler.runAfter().
