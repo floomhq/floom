@@ -262,6 +262,7 @@ export default function AutomationPage({
               runId={activeRunId}
               lastRun={lastRun ?? null}
               currentVersion={automation.currentVersion}
+              manifestOutputs={automation.manifest?.outputs ?? []}
             />
           </div>
         </div>
