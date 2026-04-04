@@ -7,7 +7,7 @@ export default defineSchema({
   automations: defineTable({
     name: v.string(),
     description: v.string(),
-    createdBy: v.id("users"),
+    createdBy: v.string(), // Clerk user ID
     orgId: v.string(), // from Clerk JWT
     isPublicToOrg: v.boolean(),
     createdAt: v.number(),
@@ -36,7 +36,7 @@ export default defineSchema({
     code: v.string(),
     manifest: v.any(),
     createdAt: v.number(),
-    createdBy: v.id("users"),
+    createdBy: v.string(), // Clerk user ID
     changeNote: v.union(v.string(), v.null()),
   }).index("by_automationId", ["automationId"]),
 
@@ -77,15 +77,16 @@ export default defineSchema({
     .index("by_automationId_startedAt", ["automationId", "startedAt"]),
 
   // Users — synced from Clerk on first login.
+  // orgId is deprecated — org context now comes from Clerk JWT.
+  // Field kept optional for backwards compat with existing records.
   users: defineTable({
     email: v.string(),
     clerkUserId: v.string(),
-    orgId: v.string(),
+    orgId: v.optional(v.string()),
     createdAt: v.number(),
     apiKey: v.optional(v.string()), // dsk_... for CLI auth
   })
     .index("by_clerkUserId", ["clerkUserId"])
-    .index("by_orgId", ["orgId"])
     .index("by_apiKey", ["apiKey"]),
 
   // Org-scoped secrets. AES-256 encrypted. Never returned to frontend.

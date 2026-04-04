@@ -10,7 +10,7 @@ const http = httpRouter();
 async function verifyClerkApiKey(
   request: Request,
   ctx: { runQuery: Function }
-): Promise<{ clerkUserId: string; orgId: string }> {
+): Promise<{ clerkUserId: string }> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     throw new Error("Missing Authorization header");
@@ -20,7 +20,12 @@ async function verifyClerkApiKey(
   const user = await ctx.runQuery(internal.users.getByApiKey, { apiKey });
   if (!user) throw new Error("Invalid API key");
 
-  return { clerkUserId: user.clerkUserId, orgId: user.orgId };
+  return { clerkUserId: user.clerkUserId };
+}
+
+// Extract orgId from X-Org-Id header (required for CLI org-scoped operations).
+function getOrgId(request: Request, clerkUserId: string): string {
+  return request.headers.get("X-Org-Id") ?? clerkUserId;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -56,12 +61,15 @@ http.route({
         return errorResponse("code and manifest are required");
       }
 
+      const orgId = getOrgId(request, clerkUserId);
+
       // Run deploy mutation with system auth (since HTTP actions use bearer, not Clerk session)
       const result = await ctx.runMutation(internal.automations.deployInternal, {
         code: body.code,
         manifest: body.manifest,
         changeNote: body.changeNote,
         clerkUserId,
+        orgId,
       });
 
       const platformUrl =
@@ -124,11 +132,13 @@ http.route({
       }
 
       if (action === "run") {
+        const orgId = getOrgId(request, clerkUserId);
         const result = await ctx.runMutation(internal.runs.triggerInternal, {
           automationId: automationId as Id<"automations">,
           inputs: body.inputs ?? {},
           triggeredBy: "skill",
           clerkUserId,
+          orgId,
         });
         return jsonResponse(result);
       }
@@ -158,8 +168,9 @@ http.route({
       const body = (await request.json()) as { name: string; value: string };
       if (!body.name || !body.value) return errorResponse("name and value are required");
 
+      const orgId = getOrgId(request, clerkUserId);
       const result = await ctx.runMutation(internal.secrets.upsertInternal, {
-        clerkUserId,
+        orgId,
         name: body.name,
         value: body.value,
       });
@@ -196,10 +207,11 @@ http.route({
       if (!run) return errorResponse("Run not found", 404);
 
       // Verify the run belongs to the user's org
+      const orgId = getOrgId(request, clerkUserId);
       const automation = await ctx.runQuery(internal.automations.getInternal, {
         id: run.automationId,
       });
-      if (!automation || automation.orgId !== user.orgId) {
+      if (!automation || automation.orgId !== orgId) {
         return errorResponse("Run not found", 404);
       }
 

@@ -1,6 +1,7 @@
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { validateManifestStructure } from "./lib/manifest";
+import { requireAuth } from "./lib/auth";
 
 type ManifestArg = {
   name: string;
@@ -19,18 +20,7 @@ type ManifestArg = {
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
-
-    const orgId = user.orgId;
+    const { userId, orgId } = await requireAuth(ctx);
 
     // All automations in this workspace, filtered by visibility:
     // - private (isPublicToOrg=false): only shown to their creator
@@ -41,7 +31,7 @@ export const list = query({
       .collect();
 
     const visible = all.filter(
-      (a) => a.createdBy === user._id || a.isPublicToOrg
+      (a) => a.createdBy === userId || a.isPublicToOrg
     );
 
     const sorted = visible.sort((a, b) => b.createdAt - a.createdAt);
@@ -73,24 +63,15 @@ export const list = query({
 export const get = query({
   args: { id: v.id("automations") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) return null;
 
     // Access check: owner or org member with isPublicToOrg
     if (
-      automation.createdBy !== user._id &&
-      !(automation.isPublicToOrg && automation.orgId === user.orgId)
+      automation.createdBy !== userId &&
+      !(automation.isPublicToOrg && automation.orgId === orgId)
     ) {
       throw new Error("Forbidden");
     }
@@ -114,7 +95,7 @@ export const get = query({
       ...automation,
       manifest: version?.manifest ?? null,
       runs,
-      isOwner: automation.createdBy === user._id,
+      isOwner: automation.createdBy === userId,
     };
   },
 });
@@ -130,23 +111,14 @@ export const getInternal = internalQuery({
 export const getVersions = query({
   args: { automationId: v.id("automations") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.automationId);
     if (!automation) return [];
 
     if (
-      automation.createdBy !== user._id &&
-      !(automation.isPublicToOrg && automation.orgId === user.orgId)
+      automation.createdBy !== userId &&
+      !(automation.isPublicToOrg && automation.orgId === orgId)
     ) {
       throw new Error("Forbidden");
     }
@@ -184,26 +156,17 @@ export const getVersions = query({
 export const getVersion = query({
   args: { versionId: v.id("automationVersions") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const version = await ctx.db.get(args.versionId);
     if (!version) return null;
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
 
     const automation = await ctx.db.get(version.automationId);
     if (!automation) return null;
 
     if (
-      automation.createdBy !== user._id &&
-      !(automation.isPublicToOrg && automation.orgId === user.orgId)
+      automation.createdBy !== userId &&
+      !(automation.isPublicToOrg && automation.orgId === orgId)
     ) {
       throw new Error("Forbidden");
     }
@@ -221,16 +184,7 @@ export const deploy = mutation({
     changeNote: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const manifest = args.manifest as {
       name: string;
@@ -252,8 +206,8 @@ export const deploy = mutation({
     const automationId = await ctx.db.insert("automations", {
       name: manifest.name,
       description: manifest.description,
-      createdBy: user._id,
-      orgId: user.orgId,
+      createdBy: userId,
+      orgId,
       isPublicToOrg: false,
       createdAt: Date.now(),
       status: "active",
@@ -271,7 +225,7 @@ export const deploy = mutation({
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
-      createdBy: user._id,
+      createdBy: userId,
       changeNote: args.changeNote ?? null,
     });
 
@@ -295,20 +249,11 @@ export const update = mutation({
     changeNote: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+    if (automation.createdBy !== userId) throw new Error("Forbidden");
 
     const manifest = args.manifest as { name?: string; description?: string };
 
@@ -329,7 +274,7 @@ export const update = mutation({
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
-      createdBy: user._id,
+      createdBy: userId,
       changeNote: args.changeNote ?? null,
     });
 
@@ -352,20 +297,11 @@ export const setScheduleEnabled = mutation({
     enabled: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+    if (automation.createdBy !== userId) throw new Error("Forbidden");
 
     await ctx.db.patch(args.id, { scheduleEnabled: args.enabled });
     return { id: args.id, scheduleEnabled: args.enabled };
@@ -379,20 +315,11 @@ export const setPublic = mutation({
     isPublicToOrg: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+    if (automation.createdBy !== userId) throw new Error("Forbidden");
 
     await ctx.db.patch(args.id, { isPublicToOrg: args.isPublicToOrg });
     return { id: args.id, isPublicToOrg: args.isPublicToOrg };
@@ -403,20 +330,11 @@ export const setPublic = mutation({
 export const remove = mutation({
   args: { id: v.id("automations") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+    if (automation.createdBy !== userId) throw new Error("Forbidden");
 
     // Delete all versions
     const versions = await ctx.db
@@ -449,21 +367,12 @@ export const gallery = query({
     q: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { orgId } = await requireAuth(ctx);
 
     let automations = await ctx.db
       .query("automations")
       .withIndex("by_orgId_isPublicToOrg", (q) =>
-        q.eq("orgId", user.orgId).eq("isPublicToOrg", true)
+        q.eq("orgId", orgId).eq("isPublicToOrg", true)
       )
       .collect();
 
@@ -506,16 +415,9 @@ export const deployInternal = internalMutation({
     manifest: v.any(),
     changeNote: v.optional(v.string()),
     clerkUserId: v.string(),
+    orgId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", args.clerkUserId)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
-
     const manifest = args.manifest as ManifestArg;
 
     const validationError = validateManifestStructure(args.code, manifest as Parameters<typeof validateManifestStructure>[1]);
@@ -526,8 +428,8 @@ export const deployInternal = internalMutation({
     const automationId = await ctx.db.insert("automations", {
       name: manifest.name,
       description: manifest.description,
-      createdBy: user._id,
-      orgId: user.orgId,
+      createdBy: args.clerkUserId,
+      orgId: args.orgId,
       isPublicToOrg: false,
       createdAt: Date.now(),
       status: "active",
@@ -543,7 +445,7 @@ export const deployInternal = internalMutation({
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
-      createdBy: user._id,
+      createdBy: args.clerkUserId,
       changeNote: args.changeNote ?? null,
     });
 
@@ -563,17 +465,9 @@ export const updateInternal = internalMutation({
     clerkUserId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", args.clerkUserId)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
-
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== user._id) throw new Error("Forbidden");
+    if (automation.createdBy !== args.clerkUserId) throw new Error("Forbidden");
 
     const manifest = args.manifest as ManifestArg;
 
@@ -590,7 +484,7 @@ export const updateInternal = internalMutation({
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
-      createdBy: user._id,
+      createdBy: args.clerkUserId,
       changeNote: args.changeNote ?? null,
     });
 

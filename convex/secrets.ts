@@ -6,6 +6,7 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { encrypt, decrypt } from "./lib/crypto";
+import { requireAuth } from "./lib/auth";
 
 function getEncryptionKey(): string {
   const key = process.env.SECRETS_ENCRYPTION_KEY;
@@ -20,14 +21,7 @@ export const upsert = mutation({
     value: v.string(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const encryptionKey = getEncryptionKey();
     const encryptedValue = await encrypt(args.value, encryptionKey);
@@ -36,7 +30,7 @@ export const upsert = mutation({
     const existing = await ctx.db
       .query("secrets")
       .withIndex("by_orgId_name", (q) =>
-        q.eq("orgId", user.orgId).eq("name", args.name)
+        q.eq("orgId", orgId).eq("name", args.name)
       )
       .unique();
 
@@ -44,7 +38,7 @@ export const upsert = mutation({
       await ctx.db.patch(existing._id, { encryptedValue });
     } else {
       await ctx.db.insert("secrets", {
-        orgId: user.orgId,
+        orgId,
         name: args.name,
         encryptedValue,
         createdAt: Date.now(),
@@ -59,19 +53,12 @@ export const upsert = mutation({
 export const remove = mutation({
   args: { name: v.string() },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const secret = await ctx.db
       .query("secrets")
       .withIndex("by_orgId_name", (q) =>
-        q.eq("orgId", user.orgId).eq("name", args.name)
+        q.eq("orgId", orgId).eq("name", args.name)
       )
       .unique();
 
@@ -85,18 +72,11 @@ export const remove = mutation({
 // List secret names only — never decrypted values.
 export const list = query({
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const secrets = await ctx.db
       .query("secrets")
-      .withIndex("by_orgId", (q) => q.eq("orgId", user.orgId))
+      .withIndex("by_orgId", (q) => q.eq("orgId", orgId))
       .collect();
 
     return secrets
@@ -105,27 +85,21 @@ export const list = query({
   },
 });
 
-// Internal: store a secret by clerkUserId (used by HTTP action).
+// Internal: store a secret by org (used by HTTP action).
 export const upsertInternal = internalMutation({
   args: {
-    clerkUserId: v.string(),
+    orgId: v.string(),
     name: v.string(),
     value: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
-    if (!user) throw new Error("User not found");
-
     const encryptionKey = getEncryptionKey();
     const encryptedValue = await encrypt(args.value, encryptionKey);
 
     const existing = await ctx.db
       .query("secrets")
       .withIndex("by_orgId_name", (q) =>
-        q.eq("orgId", user.orgId).eq("name", args.name)
+        q.eq("orgId", args.orgId).eq("name", args.name)
       )
       .unique();
 
@@ -133,7 +107,7 @@ export const upsertInternal = internalMutation({
       await ctx.db.patch(existing._id, { encryptedValue });
     } else {
       await ctx.db.insert("secrets", {
-        orgId: user.orgId,
+        orgId: args.orgId,
         name: args.name,
         encryptedValue,
         createdAt: Date.now(),

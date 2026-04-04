@@ -7,6 +7,7 @@ import {
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+import { requireAuth } from "./lib/auth";
 
 // Public trigger — mutation (not action) so we have db for auth + rate limit.
 // Mutations can schedule background actions via ctx.scheduler.runAfter().
@@ -19,24 +20,15 @@ export const trigger = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.automationId);
     if (!automation) throw new Error("Automation not found");
 
     // Access check: owner or org member if public
     if (
-      automation.createdBy !== user._id &&
-      !(automation.isPublicToOrg && automation.orgId === user.orgId)
+      automation.createdBy !== userId &&
+      !(automation.isPublicToOrg && automation.orgId === orgId)
     ) {
       throw new Error("Forbidden");
     }
@@ -117,8 +109,7 @@ export const trigger = mutation({
 export const get = query({
   args: { runId: v.id("runs") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthorized");
+    const { userId, orgId } = await requireAuth(ctx);
 
     const run = await ctx.db.get(args.runId);
     if (!run) return null;
@@ -126,17 +117,9 @@ export const get = query({
     const automation = await ctx.db.get(run.automationId);
     if (!automation) return null;
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", identity.subject)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
-
     if (
-      automation.createdBy !== user._id &&
-      !(automation.isPublicToOrg && automation.orgId === user.orgId)
+      automation.createdBy !== userId &&
+      !(automation.isPublicToOrg && automation.orgId === orgId)
     ) {
       throw new Error("Forbidden");
     }
@@ -211,7 +194,10 @@ export const finishRun = internalMutation({
       if (run?.triggeredBy === "schedule") {
         const automation = run ? await ctx.db.get(run.automationId) : null;
         if (automation) {
-          const creator = await ctx.db.get(automation.createdBy);
+          const creator = await ctx.db
+            .query("users")
+            .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", automation.createdBy))
+            .unique();
           if (creator) {
             await ctx.scheduler.runAfter(
               0,
@@ -241,22 +227,15 @@ export const triggerInternal = internalMutation({
       v.union(v.literal("manual"), v.literal("skill"), v.literal("schedule"))
     ),
     clerkUserId: v.string(),
+    orgId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) =>
-        q.eq("clerkUserId", args.clerkUserId)
-      )
-      .unique();
-    if (!user) throw new Error("User not found");
-
     const automation = await ctx.db.get(args.automationId);
     if (!automation) throw new Error("Automation not found");
 
     if (
-      automation.createdBy !== user._id &&
-      !(automation.isPublicToOrg && automation.orgId === user.orgId)
+      automation.createdBy !== args.clerkUserId &&
+      !(automation.isPublicToOrg && automation.orgId === args.orgId)
     ) {
       throw new Error("Forbidden");
     }
