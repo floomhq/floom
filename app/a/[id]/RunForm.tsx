@@ -26,10 +26,12 @@ export function RunForm({
   manifest,
   onRun,
   automationId,
+  isRunning = false,
 }: {
   manifest: Manifest | null;
   onRun: (inputs: Record<string, unknown>) => Promise<void>;
   automationId: string;
+  isRunning?: boolean;
 }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -104,11 +106,11 @@ export function RunForm({
         <p className="text-sm">No inputs required.</p>
         <button
           onClick={() => onRun({})}
-          disabled={running}
+          disabled={running || isRunning}
           className="mt-4 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
-          {running ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-          {running ? "Running..." : "Run Now"}
+          {running || isRunning ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+          {running || isRunning ? "Running..." : "Run Now"}
         </button>
       </div>
     );
@@ -237,15 +239,15 @@ export function RunForm({
 
       <button
         type="submit"
-        disabled={running}
+        disabled={running || isRunning}
         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
       >
-        {running ? (
+        {running || isRunning ? (
           <Loader2 size={16} className="animate-spin" />
         ) : (
           <Play size={16} />
         )}
-        {running ? "Running..." : "Run Now"}
+        {running || isRunning ? "Running..." : "Run Now"}
       </button>
     </form>
   );

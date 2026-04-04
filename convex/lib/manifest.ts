@@ -16,7 +16,7 @@ export type ManifestInput = {
 export type ManifestOutput = {
   name: string;
   label: string;
-  type: "text" | "table" | "integer";
+  type: "text" | "table" | "integer" | "html" | "pdf";
   columns?: string[]; // for table
 };
 

@@ -6,6 +6,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { useState, useEffect } from "react";
 import { Download, Clock, AlertCircle, Key, XCircle } from "lucide-react";
 import { StatusDot } from "@/components/ui/StatusDot";
+import * as XLSX from "xlsx";
 
 type Run = {
   _id: string;
@@ -19,10 +20,12 @@ type Run = {
   version: number;
 };
 
+type ManifestOutputType = "text" | "table" | "integer" | "html" | "pdf";
+
 type Output = {
   name: string;
   label: string;
-  type: "text" | "table" | "integer";
+  type: ManifestOutputType;
   columns?: string[];
 };
 
@@ -30,10 +33,12 @@ export function OutputPanel({
   runId,
   lastRun,
   currentVersion,
+  manifestOutputs = [],
 }: {
   runId: string | null;
   lastRun: Run | null;
   currentVersion: number;
+  manifestOutputs?: Output[];
 }) {
   const activeRun = useQuery(
     api.runs.get,
@@ -116,6 +121,7 @@ export function OutputPanel({
     <SuccessOutput
       run={displayRun}
       currentVersion={currentVersion}
+      manifestOutputs={manifestOutputs}
     />
   );
 }
@@ -180,9 +186,11 @@ function ErrorOutput({ run }: { run: Run }) {
 function SuccessOutput({
   run,
   currentVersion,
+  manifestOutputs = [],
 }: {
   run: Run;
   currentVersion: number;
+  manifestOutputs?: Output[];
 }) {
   const outputs = run.outputs as Record<string, unknown> | null;
   if (!outputs) return null;
@@ -199,9 +207,10 @@ function SuccessOutput({
         </p>
       )}
 
-      {entries.map(([key, value]) => (
-        <OutputBlock key={key} name={key} value={value} />
-      ))}
+      {entries.map(([key, value]) => {
+        const manifestOut = manifestOutputs.find((o) => o.name === key);
+        return <OutputBlock key={key} name={key} value={value} manifestType={manifestOut?.type} />;
+      })}
 
       <p className="text-xs text-gray-400 mt-2">
         {attrLine}
@@ -211,7 +220,15 @@ function SuccessOutput({
   );
 }
 
-function OutputBlock({ name, value }: { name: string; value: unknown }) {
+function OutputBlock({ name, value, manifestType }: { name: string; value: unknown; manifestType?: ManifestOutputType }) {
+  // Manifest-declared types take priority over duck typing
+  if (manifestType === "html" && typeof value === "string") {
+    return <HtmlOutput label={name} html={value} />;
+  }
+  if (manifestType === "pdf" && typeof value === "string") {
+    return <PdfOutput label={name} base64={value} />;
+  }
+
   if (Array.isArray(value) && value.length > 0 && typeof value[0] === "object") {
     return <TableOutput label={name} rows={value as Record<string, unknown>[]} />;
   }
@@ -268,6 +285,59 @@ function linkify(text: string): string {
   );
 }
 
+function HtmlOutput({ label, html }: { label: string; html: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+        {label.replace(/_/g, " ")}
+      </p>
+      <div className="border border-gray-200 rounded overflow-hidden">
+        <iframe
+          srcDoc={html}
+          sandbox="allow-scripts"
+          className="w-full h-96 bg-white"
+          title={label}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PdfOutput({ label, base64 }: { label: string; base64: string }) {
+  function downloadPDF() {
+    try {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${label}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // base64 decode failed
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+        {label.replace(/_/g, " ")}
+      </p>
+      <div className="flex items-center gap-3 p-4 border border-gray-200 rounded bg-gray-50">
+        <div className="text-sm text-gray-600">PDF generated successfully.</div>
+        <button
+          onClick={downloadPDF}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+        >
+          <Download size={14} />
+          Download PDF
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TableOutput({
   label,
   rows,
@@ -291,19 +361,35 @@ function TableOutput({
     a.click();
   }
 
+  function downloadXLSX() {
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    XLSX.writeFile(wb, `${label}.xlsx`);
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
           {label.replace(/_/g, " ")}
         </p>
-        <button
-          onClick={downloadCSV}
-          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
-        >
-          <Download size={12} />
-          CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={downloadCSV}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+          >
+            <Download size={12} />
+            CSV
+          </button>
+          <button
+            onClick={downloadXLSX}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+          >
+            <Download size={12} />
+            XLSX
+          </button>
+        </div>
       </div>
       <div className="border border-gray-200 rounded overflow-hidden overflow-x-auto max-h-[500px] overflow-y-auto">
         <table className="output-table">
