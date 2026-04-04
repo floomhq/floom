@@ -17,6 +17,7 @@ type ManifestArg = {
 // All automations visible to the caller: own + org-public.
 // No code returned — code is on the version record.
 export const list = query({
+  args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthorized");
@@ -43,7 +44,28 @@ export const list = query({
       (a) => a.createdBy === user._id || a.isPublicToOrg
     );
 
-    return visible.sort((a, b) => b.createdAt - a.createdAt);
+    const sorted = visible.sort((a, b) => b.createdAt - a.createdAt);
+
+    // Enrich each automation with last run info
+    const enriched = await Promise.all(
+      sorted.map(async (a) => {
+        const lastRun = await ctx.db
+          .query("runs")
+          .withIndex("by_automationId_startedAt", (q) =>
+            q.eq("automationId", a._id)
+          )
+          .order("desc")
+          .first();
+
+        return {
+          ...a,
+          lastRunStatus: lastRun?.status ?? null,
+          lastRunAt: lastRun?.startedAt ?? null,
+        };
+      })
+    );
+
+    return enriched;
   },
 });
 
