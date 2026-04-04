@@ -13,7 +13,7 @@ Deploy Python automations and share them with your team — no infra required.
 ## Setup
 
 Your API key is stored in `~/.claude/floom-config.json`.
-If it's not there yet, get it from **yourplatform.com/settings**.
+If it's not there yet, get it from **dashboard.floom.dev/settings**.
 
 ```bash
 # Check config
@@ -23,13 +23,13 @@ cat ~/.claude/floom-config.json 2>/dev/null || echo "NOT_CONFIGURED"
 If NOT_CONFIGURED:
 
 ```
-Paste your Floom API key from yourplatform.com/settings:
+Paste your Floom API key from dashboard.floom.dev/settings:
 ```
 
 Then write it:
 
 ```bash
-echo '{"api_key": "PASTE_KEY_HERE", "platform_url": "https://yourplatform.com"}' > ~/.claude/floom-config.json
+echo '{"api_key": "PASTE_KEY_HERE", "platform_url": "https://dashboard.floom.dev"}' > ~/.claude/floom-config.json
 ```
 
 ---
@@ -167,7 +167,7 @@ Call the platform to get stored secret names:
 
 ```bash
 API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
+PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://dashboard.floom.dev'))")
 # Note: check stored secrets via the platform's HTTP action (once deployed)
 ```
 
@@ -203,7 +203,7 @@ JSONEOF
 
 # Deploy
 API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
+PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://dashboard.floom.dev'))")
 
 curl -s -X POST "$PLATFORM/api/deploy" \
   -H "Authorization: Bearer $API_KEY" \
@@ -332,7 +332,7 @@ When a run errors, offer to debug:
 | Error                 | What to say                                                                    |
 | --------------------- | ------------------------------------------------------------------------------ |
 | 400 Validation failed | "The code has an issue: [message]. Let me fix that."                           |
-| 401 Unauthorized      | "Your API key isn't working. Get a new one from yourplatform.com/settings."    |
+| 401 Unauthorized      | "Your API key isn't working. Get a new one from dashboard.floom.dev/settings."    |
 | 403 Forbidden         | "You don't have permission to update this automation."                         |
 | Rate limit exceeded   | "You've hit the limit of 50 runs/hour. Try again in a bit."                    |
 | Missing secret        | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
