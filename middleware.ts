@@ -15,8 +15,14 @@ const LANDING_HOSTS = ["floom.dev", "www.floom.dev"];
 export default clerkMiddleware(async (auth, request) => {
   const hostname = request.headers.get("host")?.split(":")[0] ?? "";
 
-  // floom.dev is fully public — rewrites in next.config.ts handle routing to /marketing/*
+  // floom.dev is fully public — rewrite to /marketing/* so app/marketing/ pages are served
   if (LANDING_HOSTS.includes(hostname)) {
+    const { pathname, search } = request.nextUrl;
+    if (!pathname.startsWith("/marketing")) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/marketing${pathname}`;
+      return NextResponse.rewrite(url);
+    }
     return NextResponse.next();
   }
 

@@ -8,18 +8,6 @@ const convexSiteUrl =
 const nextConfig: NextConfig = {
   async rewrites() {
     return {
-      beforeFiles: [
-        {
-          source: "/:path*",
-          has: [{ type: "host", value: "floom.dev" }],
-          destination: "/marketing/:path*",
-        },
-        {
-          source: "/:path*",
-          has: [{ type: "host", value: "www.floom.dev" }],
-          destination: "/marketing/:path*",
-        },
-      ],
       fallback: [
         {
           source: "/api/:path*",
