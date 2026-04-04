@@ -12,6 +12,7 @@ import { OutputPanel } from "./OutputPanel";
 import { RunHistory } from "./RunHistory";
 import { CodeTab } from "./CodeTab";
 import { VersionsTab } from "./VersionsTab";
+import { SecretsTab } from "./SecretsTab";
 import {
   Share2,
   Eye,
@@ -23,7 +24,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-type Tab = "run" | "code" | "versions";
+type Tab = "run" | "code" | "versions" | "secrets";
 
 export default function AutomationPage({
   params: paramsPromise,
@@ -228,7 +229,7 @@ export default function AutomationPage({
 
       {/* Tab bar */}
       <div className="flex border-b border-gray-200 px-4">
-        {(["run", "code", "versions"] as Tab[]).map((t) => (
+        {(["run", "code", "versions", "secrets"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -281,6 +282,12 @@ export default function AutomationPage({
       {tab === "versions" && (
         <div className="flex-1 overflow-y-auto">
           <VersionsTab automationId={params.id as Id<"automations">} />
+        </div>
+      )}
+
+      {tab === "secrets" && automation.isOwner && (
+        <div className="flex-1 overflow-y-auto">
+          <SecretsTab />
         </div>
       )}
 
