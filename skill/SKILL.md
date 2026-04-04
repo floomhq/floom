@@ -1,8 +1,7 @@
 ---
 name: floom
 description: |
-  Deploy Python automations to the cloud and share them with your team.
-  Create, update, and debug automations from Claude Code — no infra required.
+  Build and deploy agents to the cloud and share them with your team.
   Use when: "deploy automation", "create automation", "floom", "deploy python script",
   "schedule a script", "fix automation".
 ---
@@ -22,10 +21,13 @@ cat ~/.claude/floom-config.json 2>/dev/null || echo "NOT_CONFIGURED"
 ```
 
 If NOT_CONFIGURED:
+
 ```
 Paste your Floom API key from yourplatform.com/settings:
 ```
+
 Then write it:
+
 ```bash
 echo '{"api_key": "PASTE_KEY_HERE", "platform_url": "https://yourplatform.com"}' > ~/.claude/floom-config.json
 ```
@@ -47,6 +49,7 @@ Ask the user to describe the automation. One question at a time:
 5. "Should it run automatically on a schedule? (e.g., every Monday at 9am, daily at 8am)"
 
 For the schedule question: if yes, convert to cron directly:
+
 - "Every Monday at 9am" → `0 9 * * 1`
 - "Daily at 8am" → `0 8 * * *`
 - No confirmation needed — just use the cron string.
@@ -75,6 +78,7 @@ def run(param1: type, param2: type = default) -> dict:
 ```
 
 **Rules:**
+
 - Function named exactly `run`
 - All inputs are function parameters (no globals)
 - Returns a dict — keys match manifest output names exactly
@@ -82,6 +86,7 @@ def run(param1: type, param2: type = default) -> dict:
 - Use `# type: ignore` only if truly necessary
 
 **Dependency selection:**
+
 - Anthropic SDK: `anthropic` (always available in E2B `enrichment` template)
 - Data/CSV/Excel: `pandas`, `openpyxl` (in E2B `data-science` template)
 - PDF parsing: `PyMuPDF` (in E2B `data-science` template)
@@ -95,7 +100,7 @@ def run(param1: type, param2: type = default) -> dict:
   "name": "Automation Name",
   "description": "One-sentence description",
   "schedule": "0 9 * * 1",
-  "scheduleInputs": {"param1": "default_value"},
+  "scheduleInputs": { "param1": "default_value" },
   "inputs": [
     {
       "name": "param_name",
@@ -125,6 +130,7 @@ def run(param1: type, param2: type = default) -> dict:
 ```
 
 **Input type guide:**
+
 - `text` — short strings (name, query, ID)
 - `textarea` — long text (transcript paste, document, prompt) — use for 500+ char inputs
 - `url` — links (CSV URL, API endpoint, image URL)
@@ -135,6 +141,7 @@ def run(param1: type, param2: type = default) -> dict:
 ### Step 4: Show for review
 
 Show both files to the user. Say:
+
 ```
 Here's what I'll deploy:
 
@@ -150,12 +157,14 @@ Does this look right? I'll deploy when you confirm.
 ### Step 5: Handle secrets
 
 Read config:
+
 ```bash
 cat ~/.claude/floom-config.json
 ```
 
 Check which secrets from `secrets_needed` the user already has stored.
 Call the platform to get stored secret names:
+
 ```bash
 API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
 PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
@@ -163,6 +172,7 @@ PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(
 ```
 
 For each missing secret, ask one at a time:
+
 ```
 This automation needs ANTHROPIC_API_KEY. Do you have one?
 If yes: paste it and I'll store it securely for all your workspace's automations.
@@ -170,6 +180,7 @@ If no: I'll skip this for now — you can add it in Settings before running.
 ```
 
 Store each secret:
+
 ```bash
 curl -s -X POST "$PLATFORM/api/secrets" \
   -H "Authorization: Bearer $API_KEY" \
@@ -201,6 +212,7 @@ curl -s -X POST "$PLATFORM/api/deploy" \
 ```
 
 On success (JSON with `id` and `url`):
+
 ```
 ✓ Deployed! Your automation is live:
 
@@ -212,6 +224,7 @@ Want me to run a test right now?
 ```
 
 On error:
+
 ```
 Deploy failed: [error message]
 
@@ -251,6 +264,7 @@ curl -s -X POST "$PLATFORM/api/automations/[ID]/run" \
 ```
 
 Poll for completion (every 3s, up to 5 min):
+
 ```bash
 while true; do
   STATUS=$(curl -s "$PLATFORM/api/runs/[RUN_ID]" -H "Authorization: Bearer $API_KEY" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'])")
@@ -278,22 +292,26 @@ When a run errors, offer to debug:
 ## Canonical Examples
 
 ### Sales: Outbound Personalization
+
 - Inputs: `leads_url` (url), `tone` (enum: professional/casual/direct), `max_leads` (integer, default 50)
 - Output: `messages` (table: name, company, subject, body), `processed_count` (integer)
 - Deps: anthropic, pandas, requests
 - No schedule (manual)
 
 ### CS: Customer Health Score
+
 - Inputs: `usage_csv_url` (url), `tickets_csv_url` (url)
 - Output: `scores` (table: account, health_score, risk_flag), `at_risk_count` (integer)
 - Deps: anthropic, pandas, requests
 
 ### Marketing: Content Repurposing
+
 - Inputs: `blog_post` (textarea), `formats` (enum: all/linkedin/twitter/email)
 - Output: `linkedin_post` (text), `tweet_thread` (text), `email_newsletter` (text)
 - Deps: anthropic
 
 ### Finance: Pipeline Digest
+
 - Inputs: `crm_url` (url), `min_amount` (integer, default 10000)
 - Output: `deals` (table: name, stage, amount, owner), `pipeline_total` (integer)
 - Schedule: `0 9 * * 1` (Monday 9am UTC)
@@ -301,6 +319,7 @@ When a run errors, offer to debug:
 - Deps: anthropic, requests
 
 ### Marketing: Competitor Monitoring
+
 - Inputs: `competitor_urls` (textarea), `notify_email` (text)
 - Output: `changes` (table: competitor, change_type, description), `change_count` (integer)
 - Schedule: `0 8 * * 1` (Weekly Monday 8am)
@@ -310,10 +329,10 @@ When a run errors, offer to debug:
 
 ## Error Messages
 
-| Error | What to say |
-|-------|-------------|
-| 400 Validation failed | "The code has an issue: [message]. Let me fix that." |
-| 401 Unauthorized | "Your API key isn't working. Get a new one from yourplatform.com/settings." |
-| 403 Forbidden | "You don't have permission to update this automation." |
-| Rate limit exceeded | "You've hit the limit of 50 runs/hour. Try again in a bit." |
-| Missing secret | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
+| Error                 | What to say                                                                    |
+| --------------------- | ------------------------------------------------------------------------------ |
+| 400 Validation failed | "The code has an issue: [message]. Let me fix that."                           |
+| 401 Unauthorized      | "Your API key isn't working. Get a new one from yourplatform.com/settings."    |
+| 403 Forbidden         | "You don't have permission to update this automation."                         |
+| Rate limit exceeded   | "You've hit the limit of 50 runs/hour. Try again in a bit."                    |
+| Missing secret        | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
