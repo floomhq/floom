@@ -1,3 +1,4 @@
+import { Id } from "./_generated/dataModel";
 import {
   internalMutation,
   internalQuery,
@@ -84,10 +85,14 @@ export const trigger = mutation({
       }
     }
 
+    if (automation.currentVersionId === "placeholder") {
+      throw new Error("Automation is still deploying");
+    }
+
     // Create run record (status=pending)
     const runId = await ctx.db.insert("runs", {
       automationId: args.automationId,
-      versionId: automation.currentVersionId,
+      versionId: automation.currentVersionId as Id<"automationVersions">,
       version: automation.currentVersion,
       inputs: args.inputs,
       outputs: null,
@@ -277,11 +282,15 @@ export const triggerInternal = internalMutation({
       throw new Error("Rate limit exceeded: 50 runs per hour per org");
     }
 
+    if (automation.currentVersionId === "placeholder") {
+      throw new Error("Automation is still deploying");
+    }
+
     const triggeredBy = args.triggeredBy ?? "skill";
 
     const runId = await ctx.db.insert("runs", {
       automationId: args.automationId,
-      versionId: automation.currentVersionId,
+      versionId: automation.currentVersionId as Id<"automationVersions">,
       version: automation.currentVersion,
       inputs: args.inputs,
       outputs: null,

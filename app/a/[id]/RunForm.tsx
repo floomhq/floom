@@ -78,7 +78,7 @@ export function RunForm({
     setFileNames((p) => ({ ...p, [input.name]: file.name }));
 
     try {
-      const { uploadUrl, fileUrl } = await getUploadUrl({
+      const { uploadUrl, fileKey } = await getUploadUrl({
         filename: file.name,
         contentType: file.type || "application/octet-stream",
       });
@@ -91,7 +91,7 @@ export function RunForm({
 
       if (!res.ok) throw new Error("Upload failed");
 
-      setValues((p) => ({ ...p, [input.name]: fileUrl }));
+      setValues((p) => ({ ...p, [input.name]: fileKey }));
       setFileUploads((p) => ({ ...p, [input.name]: "ready" }));
     } catch {
       setFileUploads((p) => ({ ...p, [input.name]: "error" }));
