@@ -4,6 +4,7 @@ import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { Sandbox } from "@e2b/code-interpreter";
+import { generateDownloadUrl } from "./files";
 
 
 const EXECUTION_TIMEOUT_S = 5 * 60; // 5 minutes
@@ -100,8 +101,20 @@ export const executeRun = internalAction({
         }
       }
 
-      // 7. Write + execute user code
-      const code = buildExecutionCode(version.code, run.inputs);
+      // 7. Resolve file inputs: replace R2 keys with presigned GET URLs
+      const resolvedInputs = { ...(run.inputs as Record<string, unknown>) };
+      const manifestInputs =
+        (manifest as { inputs?: { name: string; type: string }[] }).inputs ?? [];
+      for (const mi of manifestInputs) {
+        const val = resolvedInputs[mi.name];
+        if (mi.type === "file" && typeof val === "string" && !val.startsWith("http")) {
+          // R2 key from form upload — resolve to presigned GET URL
+          resolvedInputs[mi.name] = await generateDownloadUrl(val, 600);
+        }
+      }
+
+      // 8. Write + execute user code
+      const code = buildExecutionCode(version.code, resolvedInputs);
       await sandbox.files.write("/home/user/run.py", code);
 
       const result = await sandbox.commands.run("python3 /home/user/run.py", {

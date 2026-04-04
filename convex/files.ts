@@ -1,9 +1,13 @@
 import { action } from "./_generated/server";
 import { v } from "convex/values";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-function getR2Client(): S3Client {
+export function getR2Client(): S3Client {
   return new S3Client({
     region: "auto",
     endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -14,8 +18,21 @@ function getR2Client(): S3Client {
   });
 }
 
+// Generate a presigned GET URL for an R2 key. Used at execution time so
+// the Python sandbox can fetch the file without the bucket being public.
+export async function generateDownloadUrl(
+  key: string,
+  expiresIn = 3600
+): Promise<string> {
+  const bucket = process.env.R2_BUCKET_NAME;
+  if (!bucket) throw new Error("R2_BUCKET_NAME not configured");
+  const client = getR2Client();
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  return getSignedUrl(client, command, { expiresIn });
+}
+
 // Generate R2 presigned PUT URL for file uploads.
-// 1hr TTL for upload. File accessible for 7 days (lifecycle rule in R2 bucket).
+// 1hr TTL for upload. File accessible for 30 days (lifecycle rule in R2 bucket).
 export const getUploadUrl = action({
   args: {
     filename: v.string(),
@@ -26,8 +43,7 @@ export const getUploadUrl = action({
     if (!identity) throw new Error("Unauthorized");
 
     const bucket = process.env.R2_BUCKET_NAME;
-    const publicUrl = process.env.R2_PUBLIC_URL;
-    if (!bucket || !publicUrl) {
+    if (!bucket) {
       throw new Error("R2 not configured");
     }
 
@@ -44,8 +60,7 @@ export const getUploadUrl = action({
     });
 
     const uploadUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
-    const fileUrl = `${publicUrl}/${key}`;
 
-    return { uploadUrl, fileUrl };
+    return { uploadUrl, fileKey: key };
   },
 });

@@ -17,13 +17,19 @@ function getKeyMaterial(hexKey: string): Uint8Array {
 
 async function importKey(hexKey: string): Promise<CryptoKey> {
   const keyMaterial = getKeyMaterial(hexKey);
-  return crypto.subtle.importKey("raw", keyMaterial, { name: ALGORITHM }, false, [
-    "encrypt",
-    "decrypt",
-  ]);
+  return crypto.subtle.importKey(
+    "raw",
+    keyMaterial.buffer as ArrayBuffer,
+    { name: ALGORITHM },
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
 
-export async function encrypt(plaintext: string, hexKey: string): Promise<string> {
+export async function encrypt(
+  plaintext: string,
+  hexKey: string
+): Promise<string> {
   const key = await importKey(hexKey);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
@@ -42,9 +48,14 @@ export async function encrypt(plaintext: string, hexKey: string): Promise<string
   return btoa(String.fromCharCode(...combined));
 }
 
-export async function decrypt(encryptedBase64: string, hexKey: string): Promise<string> {
+export async function decrypt(
+  encryptedBase64: string,
+  hexKey: string
+): Promise<string> {
   const key = await importKey(hexKey);
-  const combined = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
+  const combined = Uint8Array.from(atob(encryptedBase64), (c) =>
+    c.charCodeAt(0)
+  );
 
   const iv = combined.slice(0, 12);
   const ciphertext = combined.slice(12);
