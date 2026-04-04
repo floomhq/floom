@@ -6,6 +6,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { useState, useEffect } from "react";
 import { Download, Clock, AlertCircle, Key, XCircle } from "lucide-react";
 import { StatusDot } from "@/components/ui/StatusDot";
+import * as XLSX from "xlsx";
 
 type Run = {
   _id: string;
@@ -291,19 +292,35 @@ function TableOutput({
     a.click();
   }
 
+  function downloadXLSX() {
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    XLSX.writeFile(wb, `${label}.xlsx`);
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
           {label.replace(/_/g, " ")}
         </p>
-        <button
-          onClick={downloadCSV}
-          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
-        >
-          <Download size={12} />
-          CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={downloadCSV}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+          >
+            <Download size={12} />
+            CSV
+          </button>
+          <button
+            onClick={downloadXLSX}
+            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+          >
+            <Download size={12} />
+            XLSX
+          </button>
+        </div>
       </div>
       <div className="border border-gray-200 rounded overflow-hidden overflow-x-auto max-h-[500px] overflow-y-auto">
         <table className="output-table">
