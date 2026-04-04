@@ -241,7 +241,7 @@ export default function AutomationPage({
       {tab === "run" && (
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
           {/* Left: Run form (55%) */}
-          <div className="lg:w-[55%] border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto">
+          <div className="lg:w-[40%] border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto">
             <RunForm
               manifest={automation.manifest}
               onRun={handleRun}
@@ -249,7 +249,7 @@ export default function AutomationPage({
             />
           </div>
           {/* Right: Output panel (45%) */}
-          <div className="lg:w-[45%] overflow-y-auto">
+          <div className="lg:w-[60%] overflow-y-auto">
             <OutputPanel
               runId={activeRunId}
               lastRun={lastRun ?? null}
