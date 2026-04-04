@@ -10,7 +10,7 @@ const isPublicRoute = createRouteMatcher([
   "/marketing(.*)",
 ]);
 
-const LANDING_HOSTS = ["floom.dev", "www.floom.dev"];
+const LANDING_HOSTS = ["floom.dev", "www.floom.dev", "localhost"];
 
 export default clerkMiddleware(async (auth, request) => {
   const hostname = request.headers.get("host")?.split(":")[0] ?? "";

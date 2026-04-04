@@ -1,8 +1,17 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, DM_Serif_Display, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const dmSerif = DM_Serif_Display({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-dm-serif",
+});
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains",
+});
 
 export const metadata: Metadata = {
   title: "Floom",
@@ -15,7 +24,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="h-full">
+    <html
+      lang="en"
+      className={`h-full ${inter.variable} ${dmSerif.variable} ${jetbrainsMono.variable}`}
+      style={
+        {
+          "--font-body": inter.style.fontFamily,
+          "--font-brand": dmSerif.style.fontFamily,
+          "--font-mono": jetbrainsMono.style.fontFamily,
+        } as React.CSSProperties
+      }
+    >
       <body className={`${inter.className} min-h-full antialiased`}>
         {children}
       </body>
