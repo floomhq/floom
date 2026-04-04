@@ -77,12 +77,9 @@ export default defineSchema({
     .index("by_automationId_startedAt", ["automationId", "startedAt"]),
 
   // Users — synced from Clerk on first login.
-  // orgId is deprecated — org context now comes from Clerk JWT.
-  // Field kept optional for backwards compat with existing records.
   users: defineTable({
     email: v.string(),
     clerkUserId: v.string(),
-    orgId: v.optional(v.string()),
     createdAt: v.number(),
     apiKey: v.optional(v.string()), // dsk_... for CLI auth
   })
