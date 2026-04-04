@@ -97,4 +97,20 @@ export default defineSchema({
   })
     .index("by_orgId", ["orgId"])
     .index("by_orgId_name", ["orgId", "name"]),
+
+  // Feedback tickets and help requests submitted via the in-app widget.
+  feedback: defineTable({
+    orgId: v.string(),
+    clerkUserId: v.string(),
+    message: v.string(),
+    agentResponse: v.string(),
+    automationId: v.optional(v.id("automations")),
+    automationName: v.optional(v.string()),
+    pageUrl: v.string(),
+    status: v.union(v.literal("open"), v.literal("in_progress"), v.literal("resolved")),
+    subscribers: v.array(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_orgId", ["orgId"])
+    .index("by_clerkUserId", ["clerkUserId"]),
 });
