@@ -62,13 +62,13 @@ function ApiKeySection() {
   const generateApiKey = useMutation(api.users.generateApiKey);
 
   const [origin, setOrigin] = useState("https://dashboard.floom.dev");
-  useEffect(() => { setOrigin(window.location.origin); }, []);
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
-  const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL ?? "";
-  const platformUrl = convexUrl.replace(".cloud", ".site");
   const installCommand = `curl -s ${origin}/install-skill.sh | bash -s -- ${origin}`;
   const configJson = apiKey
-    ? JSON.stringify({ api_key: apiKey, platform_url: platformUrl }, null, 2)
+    ? JSON.stringify({ api_key: apiKey, platform_url: origin }, null, 2)
     : null;
 
   async function copyKey() {
@@ -114,7 +114,11 @@ function ApiKeySection() {
               onClick={copyKey}
               className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded text-sm text-gray-600 hover:bg-gray-50 transition-colors"
             >
-              {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+              {copied ? (
+                <Check size={14} className="text-emerald-500" />
+              ) : (
+                <Copy size={14} />
+              )}
               {copied ? "Copied!" : "Copy"}
             </button>
           </div>
@@ -145,7 +149,9 @@ function ApiKeySection() {
 
       {apiKey && configJson && (
         <section>
-          <h2 className="text-sm font-semibold text-gray-700 mb-1">Quick Setup</h2>
+          <h2 className="text-sm font-semibold text-gray-700 mb-1">
+            Quick Setup
+          </h2>
           <p className="text-xs text-gray-500 mb-3">
             Paste this into your terminal to configure the skill in one step:
           </p>
@@ -155,7 +161,11 @@ function ApiKeySection() {
               onClick={copyConfig}
               className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-white border border-gray-200 rounded text-xs text-gray-500 hover:bg-gray-50"
             >
-              {copiedConfig ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+              {copiedConfig ? (
+                <Check size={11} className="text-emerald-500" />
+              ) : (
+                <Copy size={11} />
+              )}
               {copiedConfig ? "Copied!" : "Copy"}
             </button>
           </div>
@@ -232,7 +242,9 @@ function SecretsSection() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-0.5">Workspace Secrets</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-0.5">
+          Workspace Secrets
+        </h2>
         <p className="text-xs text-gray-500">
           Shared with your entire workspace. Never shown after saving.
         </p>
@@ -307,9 +319,7 @@ function SecretsSection() {
             {saving ? "Saving..." : "Add"}
           </button>
         </div>
-        {saveError && (
-          <p className="text-xs text-red-500">{saveError}</p>
-        )}
+        {saveError && <p className="text-xs text-red-500">{saveError}</p>}
       </form>
     </div>
   );
