@@ -1,29 +1,38 @@
-# Deploy Skill
+---
+name: floom
+description: |
+  Deploy Python automations to the cloud and share them with your team.
+  Create, update, and debug automations from Claude Code — no infra required.
+  Use when: "deploy automation", "create automation", "floom", "deploy python script",
+  "schedule a script", "fix automation".
+---
+
+# Floom
 
 Deploy Python automations and share them with your team — no infra required.
 
 ## Setup
 
-Your API key is stored in `~/.claude/deploy-skill-config.json`.
+Your API key is stored in `~/.claude/floom-config.json`.
 If it's not there yet, get it from **yourplatform.com/settings**.
 
 ```bash
 # Check config
-cat ~/.claude/deploy-skill-config.json 2>/dev/null || echo "NOT_CONFIGURED"
+cat ~/.claude/floom-config.json 2>/dev/null || echo "NOT_CONFIGURED"
 ```
 
 If NOT_CONFIGURED:
 ```
-Paste your Deploy Skill API key from yourplatform.com/settings:
+Paste your Floom API key from yourplatform.com/settings:
 ```
 Then write it:
 ```bash
-echo '{"api_key": "PASTE_KEY_HERE", "platform_url": "https://yourplatform.com"}' > ~/.claude/deploy-skill-config.json
+echo '{"api_key": "PASTE_KEY_HERE", "platform_url": "https://yourplatform.com"}' > ~/.claude/floom-config.json
 ```
 
 ---
 
-## Deploy Flow (`/deploy-skill`)
+## Deploy Flow (`/floom`)
 
 Run this when the user wants to deploy a new automation.
 
@@ -142,14 +151,14 @@ Does this look right? I'll deploy when you confirm.
 
 Read config:
 ```bash
-cat ~/.claude/deploy-skill-config.json
+cat ~/.claude/floom-config.json
 ```
 
 Check which secrets from `secrets_needed` the user already has stored.
 Call the platform to get stored secret names:
 ```bash
-API_KEY=$(cat ~/.claude/deploy-skill-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-PLATFORM=$(cat ~/.claude/deploy-skill-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
+API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
+PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
 # Note: check stored secrets via the platform's HTTP action (once deployed)
 ```
 
@@ -172,23 +181,23 @@ curl -s -X POST "$PLATFORM/api/secrets" \
 
 ```bash
 # Write files to temp dir
-mkdir -p /tmp/deploy-skill-deploy
-cat > /tmp/deploy-skill-deploy/automation.py << 'PYEOF'
+mkdir -p /tmp/floom-deploy
+cat > /tmp/floom-deploy/automation.py << 'PYEOF'
 [GENERATED CODE]
 PYEOF
 
-cat > /tmp/deploy-skill-deploy/manifest.json << 'JSONEOF'
+cat > /tmp/floom-deploy/manifest.json << 'JSONEOF'
 [GENERATED MANIFEST]
 JSONEOF
 
 # Deploy
-API_KEY=$(cat ~/.claude/deploy-skill-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-PLATFORM=$(cat ~/.claude/deploy-skill-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
+API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
+PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://yourplatform.com'))")
 
 curl -s -X POST "$PLATFORM/api/deploy" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"code\": $(python3 -c 'import json,sys; print(json.dumps(open("/tmp/deploy-skill-deploy/automation.py").read()))'), \"manifest\": $(cat /tmp/deploy-skill-deploy/manifest.json)}"
+  -d "{\"code\": $(python3 -c 'import json,sys; print(json.dumps(open("/tmp/floom-deploy/automation.py").read()))'), \"manifest\": $(cat /tmp/floom-deploy/manifest.json)}"
 ```
 
 On success (JSON with `id` and `url`):
@@ -211,7 +220,7 @@ Want me to fix the issue and try again?
 
 ---
 
-## Update Flow (`/deploy-skill update [url or name]`)
+## Update Flow (`/floom update [url or name]`)
 
 1. Fetch current code from platform (via Convex SDK — not HTTP, so ask user to paste current code or re-describe changes)
 2. Show existing code, ask what to change
@@ -255,7 +264,7 @@ done
 
 ---
 
-## Fix Flow (`/deploy-skill fix [url]`)
+## Fix Flow (`/floom fix [url]`)
 
 When a run errors, offer to debug:
 

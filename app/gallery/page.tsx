@@ -88,7 +88,7 @@ export default function GalleryPage() {
                   it&apos;ll appear here.
                 </p>
                 <a
-                  href="https://github.com/deploy-skill"
+                  href="https://github.com/floom"
                   className="mt-3 text-sm text-blue-600 hover:underline"
                 >
                   → Learn how to deploy one

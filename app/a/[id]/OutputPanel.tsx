@@ -132,7 +132,7 @@ function ErrorOutput({ run }: { run: Run }) {
     runtime_error: {
       icon: <XCircle size={18} className="text-red-500 shrink-0 mt-0.5" />,
       title: "Runtime error",
-      detail: `Fix with: /deploy-skill fix [url]`,
+      detail: `Fix with: /floom fix [url]`,
     },
     sandbox_error: {
       icon: <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />,
@@ -142,7 +142,7 @@ function ErrorOutput({ run }: { run: Run }) {
     syntax_error: {
       icon: <XCircle size={18} className="text-red-500 shrink-0 mt-0.5" />,
       title: "Syntax error in automation code",
-      detail: `Fix with: /deploy-skill fix [url]`,
+      detail: `Fix with: /floom fix [url]`,
     },
   };
 

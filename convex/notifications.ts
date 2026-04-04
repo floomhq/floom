@@ -20,7 +20,7 @@ export const sendFailureEmail = internalAction({
     const automationUrl = `${platformUrl}/a/${args.automationId}`;
 
     await resend.emails.send({
-      from: "Deploy Skill <noreply@yourplatform.com>",
+      from: "Floom <noreply@yourplatform.com>",
       to: args.toEmail,
       subject: `Scheduled run failed: ${args.automationName}`,
       html: `
@@ -28,7 +28,7 @@ export const sendFailureEmail = internalAction({
         <p><strong>Error type:</strong> ${args.errorType}</p>
         <p><strong>Error:</strong> ${args.error}</p>
         <p><a href="${automationUrl}">View run history →</a></p>
-        <p>To fix: run <code>/deploy-skill fix ${automationUrl}</code> in Claude Code.</p>
+        <p>To fix: run <code>/floom fix ${automationUrl}</code> in Claude Code.</p>
       `,
     });
   },

@@ -19,7 +19,7 @@ export function Nav() {
         href="/gallery"
         className="font-semibold text-sm text-gray-900 hover:text-primary"
       >
-        deploy-skill
+        floom
       </Link>
 
       <div className="flex items-center gap-1">

@@ -1,21 +1,21 @@
 #!/bin/bash
-# Deploy Skill installer — installs the deploy-skill into Claude Code
+# Floom installer — installs the floom skill into Claude Code
 
 set -e
 
 PLATFORM_URL="${1:-https://yourplatform.com}"
-SKILL_DIR="$HOME/.claude/skills/deploy-skill"
+SKILL_DIR="$HOME/.claude/skills/floom"
 
-echo "Installing deploy-skill from $PLATFORM_URL..."
+echo "Installing floom from $PLATFORM_URL..."
 
 mkdir -p "$SKILL_DIR"
 
-curl -s "$PLATFORM_URL/skill/SKILL.md" -o "$SKILL_DIR/SKILL.md"
+curl -sL "$PLATFORM_URL/api/skill" -o "$SKILL_DIR/SKILL.md"
 
 echo ""
-echo "✓ deploy-skill installed at $SKILL_DIR/SKILL.md"
+echo "✓ floom installed at $SKILL_DIR/SKILL.md"
 echo ""
 echo "Next steps:"
 echo "  1. Open Claude Code in any project"
 echo "  2. Get your API key from $PLATFORM_URL/settings"
-echo "  3. Type /deploy-skill to get started"
+echo "  3. Type /floom to get started"

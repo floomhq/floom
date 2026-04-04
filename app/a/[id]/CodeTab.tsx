@@ -44,7 +44,7 @@ export function CodeTab({
       <p className="mt-3 text-xs text-gray-500">
         To update: run{" "}
         <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">
-          /deploy-skill
+          /floom
         </code>{" "}
         in Claude Code.
       </p>

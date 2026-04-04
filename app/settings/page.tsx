@@ -66,7 +66,7 @@ function ApiKeySection() {
 
   const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL ?? "";
   const platformUrl = convexUrl.replace(".cloud", ".site");
-  const installCommand = `curl -s ${origin}/install-skill.sh | bash`;
+  const installCommand = `curl -s ${origin}/install-skill.sh | bash -s -- ${origin}`;
   const configJson = apiKey
     ? JSON.stringify({ api_key: apiKey, platform_url: platformUrl }, null, 2)
     : null;
@@ -98,7 +98,7 @@ function ApiKeySection() {
         <p className="text-xs text-gray-500 mb-3">
           Use this to authenticate the{" "}
           <code className="font-mono bg-gray-100 px-1 py-0.5 rounded text-xs">
-            deploy-skill
+            floom
           </code>{" "}
           Claude Code skill.
         </p>
@@ -150,7 +150,7 @@ function ApiKeySection() {
             Paste this into your terminal to configure the skill in one step:
           </p>
           <div className="relative">
-            <pre className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono text-gray-700 overflow-x-auto">{`cat > ~/.claude/deploy-skill-config.json << 'EOF'\n${configJson}\nEOF`}</pre>
+            <pre className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono text-gray-700 overflow-x-auto">{`cat > ~/.claude/floom-config.json << 'EOF'\n${configJson}\nEOF`}</pre>
             <button
               onClick={copyConfig}
               className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-white border border-gray-200 rounded text-xs text-gray-500 hover:bg-gray-50"
@@ -167,7 +167,7 @@ function ApiKeySection() {
           Install Skill
         </h2>
         <p className="text-xs text-gray-500 mb-3">
-          Run this in your terminal to install the deploy-skill in Claude Code:
+          Run this in your terminal to install floom in Claude Code:
         </p>
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center gap-2 border border-gray-200 rounded px-3 py-2 bg-gray-50">

@@ -6,6 +6,8 @@ const isPublicRoute = createRouteMatcher([
   // Automation pages are public if the automation is public-to-org.
   // Auth is enforced at the data layer (Convex query) not middleware.
   "/a/(.*)",
+  "/api/skill",
+  "/install-skill.sh",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
