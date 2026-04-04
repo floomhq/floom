@@ -1,4 +1,4 @@
-import { mutation, query, internalMutation } from "./_generated/server";
+import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { validateManifestStructure } from "./lib/manifest";
 
@@ -74,7 +74,10 @@ export const get = query({
     }
 
     // Fetch current version (manifest for run form)
-    const version = await ctx.db.get(automation.currentVersionId);
+    const version =
+      automation.currentVersionId !== "placeholder"
+        ? await ctx.db.get(automation.currentVersionId)
+        : null;
 
     // 20 most recent runs
     const runs = await ctx.db
@@ -91,6 +94,13 @@ export const get = query({
       runs,
       isOwner: automation.createdBy === user._id,
     };
+  },
+});
+
+export const getInternal = internalQuery({
+  args: { id: v.id("automations") },
+  handler: async (ctx, args) => {
+    return ctx.db.get(args.id);
   },
 });
 
@@ -228,7 +238,7 @@ export const deploy = mutation({
       schedule: manifest.schedule ?? null,
       scheduleInputs: manifest.scheduleInputs ?? null,
       // Temporary placeholder — will be patched below
-      currentVersionId: "placeholder" as Parameters<typeof ctx.db.patch>[0],
+      currentVersionId: "placeholder" as const,
       currentVersion: 1,
     });
 
@@ -486,7 +496,7 @@ export const deployInternal = internalMutation({
 
     const manifest = args.manifest as ManifestArg;
 
-    const validationError = validateManifestStructure(args.code, manifest);
+    const validationError = validateManifestStructure(args.code, manifest as Parameters<typeof validateManifestStructure>[1]);
     if (validationError) {
       throw new Error(`Validation failed: ${validationError.message}`);
     }
@@ -501,7 +511,7 @@ export const deployInternal = internalMutation({
       status: "active",
       schedule: manifest.schedule ?? null,
       scheduleInputs: manifest.scheduleInputs ?? null,
-      currentVersionId: "placeholder" as Parameters<typeof ctx.db.patch>[0],
+      currentVersionId: "placeholder" as const,
       currentVersion: 1,
     });
 
@@ -545,7 +555,7 @@ export const updateInternal = internalMutation({
 
     const manifest = args.manifest as ManifestArg;
 
-    const validationError = validateManifestStructure(args.code, manifest);
+    const validationError = validateManifestStructure(args.code, manifest as Parameters<typeof validateManifestStructure>[1]);
     if (validationError) {
       throw new Error(`Validation failed: ${validationError.message}`);
     }

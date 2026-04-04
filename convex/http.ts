@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 
 const http = httpRouter();
 
@@ -112,7 +113,7 @@ http.route({
         }
 
         const result = await ctx.runMutation(internal.automations.updateInternal, {
-          id: automationId as Parameters<typeof internal.automations.updateInternal>[0]["id"],
+          id: automationId as Id<"automations">,
           code: body.code,
           manifest: body.manifest,
           changeNote: body.changeNote,
@@ -124,7 +125,7 @@ http.route({
 
       if (action === "run") {
         const result = await ctx.runMutation(internal.runs.triggerInternal, {
-          automationId: automationId as Parameters<typeof internal.runs.triggerInternal>[0]["automationId"],
+          automationId: automationId as Id<"automations">,
           inputs: body.inputs ?? {},
           triggeredBy: "skill",
           clerkUserId,
@@ -189,10 +190,18 @@ http.route({
       if (!user) return errorResponse("User not found", 401);
 
       const run = await ctx.runQuery(internal.runs.getInternal, {
-        runId: runId as Parameters<typeof internal.runs.getInternal>[0]["runId"],
+        runId: runId as Id<"runs">,
       });
 
       if (!run) return errorResponse("Run not found", 404);
+
+      // Verify the run belongs to the user's org
+      const automation = await ctx.runQuery(internal.automations.getInternal, {
+        id: run.automationId,
+      });
+      if (!automation || automation.orgId !== user.orgId) {
+        return errorResponse("Run not found", 404);
+      }
 
       return jsonResponse(run);
     } catch (err) {
