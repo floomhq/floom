@@ -40,6 +40,7 @@ export default function AutomationPage({
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("run");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -79,12 +80,17 @@ export default function AutomationPage({
 
   const handleRun = useCallback(
     async (inputs: Record<string, unknown>) => {
-      const result = await triggerRun({
-        automationId: params.id as Id<"automations">,
-        inputs,
-        triggeredBy: "manual",
-      });
-      setActiveRunId(result.runId);
+      setIsRunning(true);
+      try {
+        const result = await triggerRun({
+          automationId: params.id as Id<"automations">,
+          inputs,
+          triggeredBy: "manual",
+        });
+        setActiveRunId(result.runId);
+      } finally {
+        setIsRunning(false);
+      }
     },
     [params.id, triggerRun]
   );
@@ -240,16 +246,17 @@ export default function AutomationPage({
       {/* Main content */}
       {tab === "run" && (
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          {/* Left: Run form (55%) */}
-          <div className="lg:w-[40%] border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto">
+          {/* Left: Run form (40%) - dims when output is showing and not running */}
+          <div className={`lg:w-[40%] border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto transition-opacity duration-200 ${!isRunning && (lastRun || activeRunId) ? "opacity-60" : "opacity-100"}`}>
             <RunForm
               manifest={automation.manifest}
               onRun={handleRun}
               automationId={params.id}
+              isRunning={isRunning}
             />
           </div>
-          {/* Right: Output panel (45%) */}
-          <div className="lg:w-[60%] overflow-y-auto">
+          {/* Right: Output panel (60%) - dims while input is being filled (no run yet) */}
+          <div className={`lg:w-[60%] overflow-y-auto transition-opacity duration-200 ${isRunning ? "opacity-100" : !lastRun && !activeRunId ? "opacity-40" : "opacity-100"}`}>
             <OutputPanel
               runId={activeRunId}
               lastRun={lastRun ?? null}
