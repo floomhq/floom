@@ -35,16 +35,23 @@ type Manifest = {
   inputs: ManifestInput[];
 };
 
+type GetUploadUrlFn = (args: {
+  filename: string;
+  contentType: string;
+}) => Promise<{ uploadUrl: string; fileKey: string }>;
+
 export function RunForm({
   manifest,
   onRun,
   automationId,
   isRunning = false,
+  getUploadUrlAction,
 }: {
   manifest: Manifest | null;
   onRun: (inputs: Record<string, unknown>) => Promise<void>;
   automationId: string;
   isRunning?: boolean;
+  getUploadUrlAction?: GetUploadUrlFn;
 }) {
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const initial: Record<string, unknown> = {};
@@ -61,7 +68,8 @@ export function RunForm({
     Record<string, "idle" | "uploading" | "ready" | "error">
   >({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
-  const getUploadUrl = useAction(api.files.getUploadUrl);
+  const defaultGetUploadUrl = useAction(api.files.getUploadUrl);
+  const getUploadUrl = getUploadUrlAction ?? defaultGetUploadUrl;
 
   const inputs = manifest?.inputs ?? [];
 

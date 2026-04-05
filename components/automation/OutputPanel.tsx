@@ -43,16 +43,19 @@ export function OutputPanel({
   lastRun,
   currentVersionId,
   manifestOutputs = [],
+  runData,
 }: {
   runId: string | null;
   lastRun: Run | null;
   currentVersionId: string;
   manifestOutputs?: Output[];
+  runData?: Run | null;
 }) {
-  const activeRun = useQuery(
+  const queriedRun = useQuery(
     api.runs.get,
-    runId ? { runId: runId as Id<"runs"> } : "skip"
+    runId && !runData ? { runId: runId as Id<"runs"> } : "skip"
   );
+  const activeRun = runData ?? queriedRun;
 
   const [elapsed, setElapsed] = useState(0);
 
