@@ -177,7 +177,8 @@ export default function GalleryPage() {
                 return (
                   <CommandItem
                     key={a._id}
-                    value={`${a._id} ${a.name} ${a.description}`}
+                    value={a._id}
+                    keywords={[a.name, a.description]}
                     onSelect={() => {
                       setPaletteOpen(false);
                       router.push(`/a/${a._id}`);
