@@ -202,14 +202,16 @@ export default function AutomationPage({
 
       {/* Tabs */}
       <Tabs defaultValue="run" className="flex-1 flex flex-col gap-0">
-        <TabsList variant="line" className="px-4 border-b">
-          <TabsTrigger value="run">Run</TabsTrigger>
-          <TabsTrigger value="code">Code</TabsTrigger>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
-          {automation.isOwner && (
-            <TabsTrigger value="secrets">Secrets</TabsTrigger>
-          )}
-        </TabsList>
+        <div className="px-4 py-2 border-b">
+          <TabsList>
+            <TabsTrigger value="run">Run</TabsTrigger>
+            <TabsTrigger value="code">Code</TabsTrigger>
+            <TabsTrigger value="versions">Versions</TabsTrigger>
+            {automation.isOwner && (
+              <TabsTrigger value="secrets">Secrets</TabsTrigger>
+            )}
+          </TabsList>
+        </div>
 
         <TabsContent value="run" className="flex-1 flex flex-col">
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
