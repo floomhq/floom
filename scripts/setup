@@ -2,7 +2,7 @@
 # Floom setup — run after cloning the repo (can be cloned anywhere)
 set -e
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL_DIR="$HOME/.claude/skills/floom"
 CONFIG_FILE="$HOME/.claude/floom-config.json"
 PLATFORM_URL="https://dashboard.floom.dev"
