@@ -1806,13 +1806,14 @@ export default function MarketingPage() {
                     color: "var(--floom-text-secondary)",
                   }}
                 >
-                  curl -fsSL https://floom.dev/skill.md -o
-                  ~/.claude/skills/floom.md
+                  git clone https://github.com/floomhq/floom.git
+                  ~/.claude/skills/floom-repo &amp;&amp;
+                  ~/.claude/skills/floom-repo/scripts/setup
                 </code>
                 <button
                   onClick={() => {
                     navigator.clipboard.writeText(
-                      "curl -fsSL https://floom.dev/skill.md -o ~/.claude/skills/floom.md"
+                      "git clone https://github.com/floomhq/floom.git ~/.claude/skills/floom-repo && ~/.claude/skills/floom-repo/scripts/setup"
                     );
                     const btn = document.getElementById("copy-skill-btn");
                     if (btn) {
