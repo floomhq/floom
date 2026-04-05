@@ -1,31 +1,35 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 
 const http = httpRouter();
 
-// Helper: verify dsk_... API key from Authorization header.
-// Looks up the user in Convex by their stored API key.
-async function verifyClerkApiKey(
+// Helper: verify floom_... API key from Authorization header.
+// SHA-256 hashes the key and looks it up in the apiKeys table.
+async function verifyApiKey(
   request: Request,
   ctx: { runQuery: Function }
-): Promise<{ clerkUserId: string }> {
+): Promise<{ orgId: Id<"organizations">; keyId: Id<"apiKeys">; keyName: string }> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     throw new Error("Missing Authorization header");
   }
-  const apiKey = authHeader.slice(7);
+  const rawKey = authHeader.slice(7).trim();
 
-  const user = await ctx.runQuery(internal.users.getByApiKey, { apiKey });
-  if (!user) throw new Error("Invalid API key");
+  const encoded = new TextEncoder().encode(rawKey);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+  const hashedKey = Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 
-  return { clerkUserId: user.clerkUserId };
-}
+  const apiKey = await ctx.runQuery(internal.apiKeys.getByHashedKey, {
+    hashedKey,
+  });
+  if (!apiKey) throw new Error("Invalid API key");
+  if (apiKey.revokedAt) throw new Error("API key has been revoked");
 
-// Extract orgId from X-Org-Id header (required for CLI org-scoped operations).
-function getOrgId(request: Request, clerkUserId: string): string {
-  return request.headers.get("X-Org-Id") ?? clerkUserId;
+  return { orgId: apiKey.orgId, keyId: apiKey._id, keyName: apiKey.name };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -45,11 +49,7 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     try {
-      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
-
-      // Ensure user exists in Convex
-      const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
-      if (!user) return errorResponse("User not found — sign in to the platform first", 401);
+      const { orgId, keyName } = await verifyApiKey(request, ctx);
 
       const body = (await request.json()) as {
         code: string;
@@ -61,14 +61,11 @@ http.route({
         return errorResponse("code and manifest are required");
       }
 
-      const orgId = getOrgId(request, clerkUserId);
-
-      // Run deploy mutation with system auth (since HTTP actions use bearer, not Clerk session)
       const result = await ctx.runMutation(internal.automations.deployInternal, {
         code: body.code,
         manifest: body.manifest,
         changeNote: body.changeNote,
-        clerkUserId,
+        clerkUserId: "api:" + keyName,
         orgId,
       });
 
@@ -81,7 +78,7 @@ http.route({
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      if (msg.includes("Unauthorized") || msg.includes("Invalid API key")) {
+      if (msg.includes("Unauthorized") || msg.includes("Invalid API key") || msg.includes("revoked")) {
         return errorResponse(msg, 401);
       }
       return errorResponse(msg, 400);
@@ -103,9 +100,7 @@ http.route({
 
       if (!automationId) return errorResponse("Automation ID required");
 
-      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
-      const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
-      if (!user) return errorResponse("User not found", 401);
+      const { orgId, keyName } = await verifyApiKey(request, ctx);
 
       const body = (await request.json()) as {
         code?: string;
@@ -119,24 +114,31 @@ http.route({
           return errorResponse("code and manifest are required");
         }
 
+        // Verify org ownership
+        const automation = await ctx.runQuery(internal.automations.getInternal, {
+          id: automationId as Id<"automations">,
+        });
+        if (!automation || automation.orgId !== orgId) {
+          return errorResponse("Forbidden", 403);
+        }
+
         const result = await ctx.runMutation(internal.automations.updateInternal, {
           id: automationId as Id<"automations">,
           code: body.code,
           manifest: body.manifest,
           changeNote: body.changeNote,
-          clerkUserId,
+          clerkUserId: "api:" + keyName,
         });
 
         return jsonResponse(result);
       }
 
       if (action === "run") {
-        const orgId = getOrgId(request, clerkUserId);
         const result = await ctx.runMutation(internal.runs.triggerInternal, {
           automationId: automationId as Id<"automations">,
           inputs: body.inputs ?? {},
           triggeredBy: "skill",
-          clerkUserId,
+          clerkUserId: "api:" + keyName,
           orgId,
         });
         return jsonResponse(result);
@@ -145,7 +147,7 @@ http.route({
       return errorResponse("Unknown action", 404);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      if (msg.includes("Unauthorized") || msg.includes("Invalid API key")) {
+      if (msg.includes("Unauthorized") || msg.includes("Invalid API key") || msg.includes("revoked")) {
         return errorResponse(msg, 401);
       }
       if (msg.includes("Forbidden")) return errorResponse(msg, 403);
@@ -160,14 +162,11 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     try {
-      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
-      const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
-      if (!user) return errorResponse("User not found", 401);
+      const { orgId } = await verifyApiKey(request, ctx);
 
       const body = (await request.json()) as { name: string; value: string };
       if (!body.name || !body.value) return errorResponse("name and value are required");
 
-      const orgId = getOrgId(request, clerkUserId);
       const result = await ctx.runMutation(internal.secrets.upsertInternal, {
         orgId,
         name: body.name,
@@ -177,7 +176,7 @@ http.route({
       return jsonResponse(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      if (msg.includes("Unauthorized") || msg.includes("Invalid API key")) {
+      if (msg.includes("Unauthorized") || msg.includes("Invalid API key") || msg.includes("revoked")) {
         return errorResponse(msg, 401);
       }
       return errorResponse(msg, 400);
@@ -195,9 +194,7 @@ http.route({
       const runId = url.pathname.split("/")[3];
       if (!runId) return errorResponse("Run ID required");
 
-      const { clerkUserId } = await verifyClerkApiKey(request, ctx);
-      const user = await ctx.runQuery(api.users.getByClerkId, { clerkUserId });
-      if (!user) return errorResponse("User not found", 401);
+      const { orgId } = await verifyApiKey(request, ctx);
 
       const run = await ctx.runQuery(internal.runs.getInternal, {
         runId: runId as Id<"runs">,
@@ -205,8 +202,7 @@ http.route({
 
       if (!run) return errorResponse("Run not found", 404);
 
-      // Verify the run belongs to the user's org
-      const orgId = getOrgId(request, clerkUserId);
+      // Verify the run belongs to the API key's org
       const automation = await ctx.runQuery(internal.automations.getInternal, {
         id: run.automationId,
       });

@@ -25,11 +25,8 @@ export const trigger = mutation({
     const automation = await ctx.db.get(args.automationId);
     if (!automation) throw new Error("Automation not found");
 
-    // Access check: owner or org member if public
-    if (
-      automation.createdBy !== userId &&
-      !(automation.isPublicToOrg && automation.orgId === orgId)
-    ) {
+    // Access check: must belong to caller's org
+    if (automation.orgId !== orgId) {
       throw new Error("Forbidden");
     }
 
@@ -116,10 +113,7 @@ export const get = query({
     const automation = await ctx.db.get(run.automationId);
     if (!automation) return null;
 
-    if (
-      automation.createdBy !== userId &&
-      !(automation.isPublicToOrg && automation.orgId === orgId)
-    ) {
+    if (automation.orgId !== orgId) {
       throw new Error("Forbidden");
     }
 
@@ -227,16 +221,14 @@ export const triggerInternal = internalMutation({
       v.union(v.literal("manual"), v.literal("skill"), v.literal("schedule"))
     ),
     clerkUserId: v.string(),
-    orgId: v.string(),
+    orgId: v.id("organizations"),
   },
   handler: async (ctx, args) => {
     const automation = await ctx.db.get(args.automationId);
     if (!automation) throw new Error("Automation not found");
 
-    if (
-      automation.createdBy !== args.clerkUserId &&
-      !(automation.isPublicToOrg && automation.orgId === args.orgId)
-    ) {
+    // Verify the automation belongs to the caller's org
+    if (automation.orgId !== args.orgId) {
       throw new Error("Forbidden");
     }
 

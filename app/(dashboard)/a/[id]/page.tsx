@@ -15,8 +15,6 @@ import { VersionsTab } from "./VersionsTab";
 import { SecretsTab } from "./SecretsTab";
 import {
   Share2,
-  Eye,
-  EyeOff,
   Pause,
   Play,
   MoreHorizontal,
@@ -46,7 +44,6 @@ export default function AutomationPage({
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const setPublic = useMutation(api.automations.setPublic);
   const setScheduleEnabled = useMutation(api.automations.setScheduleEnabled);
   const triggerRun = useMutation(api.runs.trigger);
   const removeAutomation = useMutation(api.automations.remove);
@@ -56,14 +53,6 @@ export default function AutomationPage({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, []);
-
-  const handleTogglePublic = useCallback(async () => {
-    if (!automation) return;
-    await setPublic({
-      id: params.id as Id<"automations">,
-      isPublicToOrg: !automation.isPublicToOrg,
-    });
-  }, [automation, params.id, setPublic]);
 
   const handleToggleSchedule = useCallback(async () => {
     if (!automation) return;
@@ -162,24 +151,6 @@ export default function AutomationPage({
                   <>
                     <Pause size={14} className="text-gray-500" />
                     <span>Pause</span>
-                  </>
-                )}
-              </button>
-            )}
-            {automation.isOwner && (
-              <button
-                onClick={handleTogglePublic}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
-              >
-                {automation.isPublicToOrg ? (
-                  <>
-                    <Eye size={14} className="text-emerald-500" />
-                    <span>Public</span>
-                  </>
-                ) : (
-                  <>
-                    <EyeOff size={14} />
-                    <span>Private</span>
                   </>
                 )}
               </button>

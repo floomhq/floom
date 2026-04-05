@@ -18,7 +18,7 @@ function UserSync() {
   useEffect(() => {
     if (!isLoaded || !user) return;
     const email = user.primaryEmailAddress?.emailAddress ?? "";
-    upsert({ clerkUserId: user.id, email }).catch(console.error);
+    upsert({ email }).catch(console.error);
   }, [user?.id, isLoaded, upsert]);
 
   return null;

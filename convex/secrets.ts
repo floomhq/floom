@@ -88,7 +88,7 @@ export const list = query({
 // Internal: store a secret by org (used by HTTP action).
 export const upsertInternal = internalMutation({
   args: {
-    orgId: v.string(),
+    orgId: v.id("organizations"),
     name: v.string(),
     value: v.string(),
   },

@@ -15,26 +15,19 @@ type ManifestArg = {
   manifest_version?: string;
 };
 
-// All automations visible to the caller: own + org-public.
+// All automations in the caller's org.
 // No code returned — code is on the version record.
 export const list = query({
   args: {},
   handler: async (ctx) => {
     const { userId, orgId } = await requireAuth(ctx);
 
-    // All automations in this workspace, filtered by visibility:
-    // - private (isPublicToOrg=false): only shown to their creator
-    // - public (isPublicToOrg=true): shown to all workspace members
     const all = await ctx.db
       .query("automations")
       .withIndex("by_orgId", (q) => q.eq("orgId", orgId))
       .collect();
 
-    const visible = all.filter(
-      (a) => a.createdBy === userId || a.isPublicToOrg
-    );
-
-    const sorted = visible.sort((a, b) => b.createdAt - a.createdAt);
+    const sorted = all.sort((a, b) => b.createdAt - a.createdAt);
 
     // Enrich each automation with last run info
     const enriched = await Promise.all(
@@ -73,11 +66,8 @@ export const get = query({
     const automation = await ctx.db.get(args.id);
     if (!automation) return null;
 
-    // Access check: owner or org member with isPublicToOrg
-    if (
-      automation.createdBy !== userId &&
-      !(automation.isPublicToOrg && automation.orgId === orgId)
-    ) {
+    // Access check: must belong to caller's org
+    if (automation.orgId !== orgId) {
       throw new Error("Forbidden");
     }
 
@@ -136,10 +126,7 @@ export const getVersions = query({
     const automation = await ctx.db.get(args.automationId);
     if (!automation) return [];
 
-    if (
-      automation.createdBy !== userId &&
-      !(automation.isPublicToOrg && automation.orgId === orgId)
-    ) {
+    if (automation.orgId !== orgId) {
       throw new Error("Forbidden");
     }
 
@@ -184,10 +171,7 @@ export const getVersion = query({
     const automation = await ctx.db.get(version.automationId);
     if (!automation) return null;
 
-    if (
-      automation.createdBy !== userId &&
-      !(automation.isPublicToOrg && automation.orgId === orgId)
-    ) {
+    if (automation.orgId !== orgId) {
       throw new Error("Forbidden");
     }
 
@@ -228,7 +212,6 @@ export const deploy = mutation({
       description: manifest.description,
       createdBy: userId,
       orgId,
-      isPublicToOrg: false,
       createdAt: Date.now(),
       status: "active",
       schedule: manifest.schedule ?? null,
@@ -327,24 +310,6 @@ export const setScheduleEnabled = mutation({
   },
 });
 
-// Visibility toggle. No new version created.
-export const setPublic = mutation({
-  args: {
-    id: v.id("automations"),
-    isPublicToOrg: v.boolean(),
-  },
-  handler: async (ctx, args) => {
-    const { userId } = await requireAuth(ctx);
-
-    const automation = await ctx.db.get(args.id);
-    if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== userId) throw new Error("Forbidden");
-
-    await ctx.db.patch(args.id, { isPublicToOrg: args.isPublicToOrg });
-    return { id: args.id, isPublicToOrg: args.isPublicToOrg };
-  },
-});
-
 // Delete automation + all versions and runs.
 export const remove = mutation({
   args: { id: v.id("automations") },
@@ -380,7 +345,7 @@ export const remove = mutation({
   },
 });
 
-// Org gallery — isPublicToOrg=true automations for the caller's org.
+// Org gallery — all automations for the caller's org.
 export const gallery = query({
   args: {
     q: v.optional(v.string()),
@@ -390,9 +355,7 @@ export const gallery = query({
 
     let automations = await ctx.db
       .query("automations")
-      .withIndex("by_orgId_isPublicToOrg", (q) =>
-        q.eq("orgId", orgId).eq("isPublicToOrg", true)
-      )
+      .withIndex("by_orgId", (q) => q.eq("orgId", orgId))
       .collect();
 
     // Text search on name + description
@@ -434,7 +397,7 @@ export const deployInternal = internalMutation({
     manifest: v.any(),
     changeNote: v.optional(v.string()),
     clerkUserId: v.string(),
-    orgId: v.string(),
+    orgId: v.id("organizations"),
   },
   handler: async (ctx, args) => {
     const manifest = args.manifest as ManifestArg;
@@ -449,7 +412,6 @@ export const deployInternal = internalMutation({
       description: manifest.description,
       createdBy: args.clerkUserId,
       orgId: args.orgId,
-      isPublicToOrg: false,
       createdAt: Date.now(),
       status: "active",
       schedule: manifest.schedule ?? null,
@@ -485,7 +447,6 @@ export const updateInternal = internalMutation({
   handler: async (ctx, args) => {
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== args.clerkUserId) throw new Error("Forbidden");
 
     const manifest = args.manifest as ManifestArg;
 

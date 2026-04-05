@@ -1,8 +1,9 @@
 import { MutationCtx, QueryCtx, ActionCtx } from "../_generated/server";
+import { Id } from "../_generated/dataModel";
 
 export type AuthedUser = {
-  userId: string; // Clerk user ID (identity.subject)
-  orgId: string;
+  userId: string;
+  orgId: Id<"organizations">;
 };
 
 // Shared auth helper for Convex functions (queries/mutations/actions).
@@ -15,10 +16,19 @@ export async function requireAuth(
     throw new Error("Unauthorized");
   }
 
-  const userId = identity.subject;
-  // Clerk puts orgId in the "org_id" claim via JWT template
-  const orgId =
+  const userId = identity.tokenIdentifier;
+  const clerkOrgId =
     (identity as { org_id?: string }).org_id ?? identity.tokenIdentifier;
 
-  return { userId, orgId };
+  // Look up the org - it should exist from the upsert on login
+  const org = await (ctx as QueryCtx).db
+    .query("organizations")
+    .withIndex("by_clerkOrgId", (q: any) => q.eq("clerkOrgId", clerkOrgId))
+    .unique();
+
+  if (!org) {
+    throw new Error("Organization not found. Please reload the page.");
+  }
+
+  return { userId, orgId: org._id };
 }
