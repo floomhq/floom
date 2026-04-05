@@ -3,20 +3,20 @@
 export type ManifestInput = {
   name: string;
   label: string;
-  type: "text" | "textarea" | "url" | "file" | "integer" | "enum";
+  type: "text" | "textarea" | "url" | "file" | "number" | "enum" | "boolean" | "date";
   description?: string;
   required?: boolean;
   default?: unknown;
   options?: string[]; // for enum
   accept?: string; // for file
-  min?: number; // for integer
-  max?: number; // for integer
+  min?: number; // for number
+  max?: number; // for number
 };
 
 export type ManifestOutput = {
   name: string;
   label: string;
-  type: "text" | "table" | "integer" | "html" | "pdf";
+  type: "text" | "table" | "number" | "html" | "pdf" | "image";
   columns?: string[]; // for table
 };
 
@@ -47,6 +47,21 @@ export function validateManifestStructure(
   code: string,
   manifest: Manifest
 ): ValidationError | null {
+  // "integer" accepted as legacy alias for "number"
+  const VALID_INPUT_TYPES = new Set(["text", "textarea", "url", "file", "number", "integer", "enum", "boolean", "date"]);
+  const VALID_OUTPUT_TYPES = new Set(["text", "table", "number", "integer", "html", "pdf", "image"]);
+
+  for (const input of manifest.inputs) {
+    if (!VALID_INPUT_TYPES.has(input.type)) {
+      return { code: "input_mismatch" as const, message: `Unknown input type "${input.type}"` };
+    }
+  }
+  for (const output of manifest.outputs) {
+    if (!VALID_OUTPUT_TYPES.has(output.type)) {
+      return { code: "output_mismatch" as const, message: `Unknown output type "${output.type}"` };
+    }
+  }
+
   // 1. No exec(..., globals()) usage
   if (/exec\s*\(.*globals\s*\(\s*\)/.test(code)) {
     return {

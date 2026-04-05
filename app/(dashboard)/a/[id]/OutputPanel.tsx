@@ -3,6 +3,7 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
+import { detectImageFormat } from "@/lib/detectImageFormat";
 import { useState, useEffect } from "react";
 import { Download, Clock, AlertCircle, Key, XCircle } from "lucide-react";
 import { StatusDot } from "@/components/ui/StatusDot";
@@ -28,7 +29,7 @@ type Run = {
   versionId: string;
 };
 
-type ManifestOutputType = "text" | "table" | "integer" | "html" | "pdf";
+type ManifestOutputType = "text" | "table" | "number" | "html" | "pdf" | "image";
 
 type Output = {
   name: string;
@@ -252,6 +253,9 @@ function OutputBlock({
   if (manifestType === "pdf" && typeof value === "string") {
     return <PdfOutput label={name} base64={value} />;
   }
+  if (manifestType === "image" && typeof value === "string") {
+    return <ImageOutput label={name} base64={value} />;
+  }
 
   if (
     Array.isArray(value) &&
@@ -368,6 +372,37 @@ function PdfOutput({ label, base64 }: { label: string; base64: string }) {
             Download PDF
           </Button>
         </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Extracted to @/lib/detectImageFormat.ts for testability
+
+function ImageOutput({ label, base64 }: { label: string; base64: string }) {
+  const { mime, ext } = detectImageFormat(base64);
+  const src = base64.startsWith("data:") ? base64 : `data:${mime};base64,${base64}`;
+
+  function downloadImage() {
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = `${label}.${ext}`;
+    a.click();
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          {label.replace(/_/g, " ")}
+        </p>
+        <Button variant="link" size="xs" onClick={downloadImage}>
+          <Download className="size-3" />
+          Download
+        </Button>
+      </div>
+      <Card className="overflow-hidden p-0">
+        <img src={src} alt={label} className="w-full" />
       </Card>
     </div>
   );
