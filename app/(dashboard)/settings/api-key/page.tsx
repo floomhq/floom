@@ -124,7 +124,7 @@ export default function ApiKeyPage() {
             {/* Existing keys list */}
             {keys && keys.length > 0 && (
               <div className="divide-y divide-border rounded-lg border">
-                {keys.map((k: { _id: string; name: string; prefix: string; revokedAt?: number | null }) => (
+                {keys.map((k) => (
                   <div
                     key={k._id}
                     className="flex items-center justify-between px-3 py-2.5"

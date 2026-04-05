@@ -60,7 +60,7 @@ export function CodeTab({
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {versions.map((v: { _id: string; version: number; changeNote?: string; createdAt: number }) => (
+              {versions.map((v) => (
                 <SelectItem key={v._id} value={v._id}>
                   v{v.version}
                   {v._id === currentVersionId ? " (current)" : ""}

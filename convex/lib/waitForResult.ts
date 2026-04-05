@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
+import { Doc } from "../_generated/dataModel";
 
 const POLL_INTERVAL_MS = 500;
 const TERMINAL_STATUSES = ["success", "error", "timeout"];
@@ -14,7 +15,7 @@ export const waitForTestRun = internalAction({
     testRunId: v.id("testRuns"),
     waitMs: v.number(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Doc<"testRuns"> | null> => {
     const deadline = Date.now() + args.waitMs;
     while (Date.now() < deadline) {
       await sleep(POLL_INTERVAL_MS);
@@ -37,7 +38,7 @@ export const waitForRun = internalAction({
     runId: v.id("runs"),
     waitMs: v.number(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Doc<"runs"> | null> => {
     const deadline = Date.now() + args.waitMs;
     while (Date.now() < deadline) {
       await sleep(POLL_INTERVAL_MS);
