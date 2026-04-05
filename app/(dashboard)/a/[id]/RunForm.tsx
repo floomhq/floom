@@ -16,11 +16,12 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 
 type ManifestInput = {
   name: string;
   label: string;
-  type: "text" | "textarea" | "url" | "file" | "integer" | "enum";
+  type: "text" | "textarea" | "url" | "file" | "number" | "enum" | "boolean" | "date";
   description?: string;
   required?: boolean;
   default?: unknown;
@@ -62,7 +63,7 @@ export function RunForm({
       if (input.required !== false && !values[input.name]) {
         if (input.type === "file" && !values[input.name]) {
           newErrors[input.name] = "Required";
-        } else if (!values[input.name] && values[input.name] !== 0) {
+        } else if (!values[input.name] && values[input.name] !== 0 && values[input.name] !== false) {
           newErrors[input.name] = "Required";
         }
       }
@@ -197,7 +198,7 @@ export function RunForm({
             />
           )}
 
-          {input.type === "integer" && (
+          {input.type === "number" && (
             <Input
               type="number"
               value={
@@ -208,9 +209,10 @@ export function RunForm({
               onChange={(e) =>
                 setValues((p) => ({
                   ...p,
-                  [input.name]: parseInt(e.target.value) || 0,
+                  [input.name]: e.target.value === "" ? undefined : parseFloat(e.target.value),
                 }))
               }
+              step="any"
               min={input.min}
               max={input.max}
               aria-invalid={!!errors[input.name]}
@@ -243,6 +245,26 @@ export function RunForm({
                 ))}
               </SelectContent>
             </Select>
+          )}
+
+          {input.type === "boolean" && (
+            <Switch
+              checked={(values[input.name] as boolean) ?? (input.default as boolean) ?? false}
+              onCheckedChange={(checked) =>
+                setValues((p) => ({ ...p, [input.name]: checked }))
+              }
+            />
+          )}
+
+          {input.type === "date" && (
+            <Input
+              type="date"
+              value={(values[input.name] as string) ?? (input.default as string) ?? ""}
+              onChange={(e) =>
+                setValues((p) => ({ ...p, [input.name]: e.target.value }))
+              }
+              className="w-48"
+            />
           )}
 
           {input.type === "file" && (
