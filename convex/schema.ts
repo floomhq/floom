@@ -9,7 +9,8 @@ export default defineSchema({
     manifest: v.any(),
     createdAt: v.number(),
     createdBy: v.string(),
-  }).index("by_org", ["orgId"])
+  })
+    .index("by_org", ["orgId"])
     .index("by_created_at", ["createdAt"]),
 
   // Automation metadata + current version pointer.
@@ -32,9 +33,15 @@ export default defineSchema({
       v.id("automationVersions"),
       v.literal("placeholder")
     ),
+    // Publishing fields — flat model for v1
+    publishedSlug: v.optional(v.string()),
+    publishAccess: v.optional(v.union(v.literal("public"), v.literal("email"))),
+    allowedEmails: v.optional(v.array(v.string())),
+    publishedAt: v.optional(v.number()),
   })
     .index("by_orgId", ["orgId"])
-    .index("by_createdBy", ["createdBy"]),
+    .index("by_createdBy", ["createdBy"])
+    .index("by_publishedSlug", ["publishedSlug"]),
 
   // Immutable snapshot at each deploy/update. Code lives in artifacts.
   automationVersions: defineTable({
@@ -72,8 +79,10 @@ export default defineSchema({
     triggeredBy: v.union(
       v.literal("manual"),
       v.literal("skill"),
-      v.literal("schedule")
+      v.literal("schedule"),
+      v.literal("published")
     ),
+    viewToken: v.optional(v.string()),
     durationMs: v.union(v.number(), v.null()),
     startedAt: v.number(),
     finishedAt: v.union(v.number(), v.null()),

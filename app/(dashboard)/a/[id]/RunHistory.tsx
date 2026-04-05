@@ -69,8 +69,8 @@ export function RunHistory({
               </span>
               <Badge variant="secondary">v{run.version}</Badge>
               <span className="text-xs text-muted-foreground flex-1">
-                {run.triggeredBy === "schedule"
-                  ? "schedule"
+                {run.triggeredBy === "published"
+                  ? "public link"
                   : run.triggeredBy}
               </span>
               {run.durationMs != null && (

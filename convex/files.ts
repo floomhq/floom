@@ -1,4 +1,5 @@
 import { action } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import {
   S3Client,
@@ -54,6 +55,42 @@ export const getUploadUrl = action({
     const safeName = args.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
     const uuid = crypto.randomUUID();
     const key = `uploads/${identity.subject}/${uuid}/${safeName}`;
+
+    const client = getR2Client();
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: args.contentType,
+    });
+
+    const uploadUrl = await getSignedUrl(client, command, { expiresIn: 3600 });
+
+    return { uploadUrl, fileKey: key };
+  },
+});
+
+// Public file upload for published automations. No auth required.
+// Scopes uploads under the automation's slug to keep them organized.
+export const getPublishedUploadUrl = action({
+  args: {
+    slug: v.string(),
+    filename: v.string(),
+    contentType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // Verify automation is published and active
+    const automation = await ctx.runQuery(
+      internal.automations.getPublishedInternal,
+      { slug: args.slug }
+    );
+    if (!automation) throw new Error("Automation not found");
+
+    const bucket = process.env.R2_BUCKET_NAME;
+    if (!bucket) throw new Error("R2 not configured");
+
+    const safeName = args.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const uuid = crypto.randomUUID();
+    const key = `uploads/published/${args.slug}/${uuid}/${safeName}`;
 
     const client = getR2Client();
     const command = new PutObjectCommand({
