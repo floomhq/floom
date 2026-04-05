@@ -148,3 +148,31 @@ export const listDecrypted = internalQuery({
     return decrypted;
   },
 });
+
+// Internal: decrypt all org secrets by orgId directly.
+// Used by test runs which may not have an automationId.
+export const listDecryptedByOrg = internalQuery({
+  args: { orgId: v.id("organizations") },
+  handler: async (ctx, args) => {
+    const secrets = await ctx.db
+      .query("secrets")
+      .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
+      .collect();
+
+    const encryptionKey = getEncryptionKey();
+    const decrypted: Record<string, string> = {};
+
+    for (const secret of secrets) {
+      try {
+        decrypted[secret.name] = await decrypt(
+          secret.encryptedValue,
+          encryptionKey
+        );
+      } catch {
+        // Skip corrupted entries
+      }
+    }
+
+    return decrypted;
+  },
+});

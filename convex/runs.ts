@@ -8,6 +8,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { requireAuth } from "./lib/auth";
+import { checkOrgRateLimit } from "./lib/rateLimit";
 
 // Public trigger — mutation (not action) so we have db for auth + rate limit.
 // Mutations can schedule background actions via ctx.scheduler.runAfter().
@@ -30,26 +31,7 @@ export const trigger = mutation({
       throw new Error("Forbidden");
     }
 
-    // Rate limit: 50 runs/hour per org (atomic — single-writer prevents races)
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const orgAutomations = await ctx.db
-      .query("automations")
-      .withIndex("by_orgId", (q) => q.eq("orgId", automation.orgId))
-      .collect();
-
-    let orgRunCount = 0;
-    for (const a of orgAutomations) {
-      const runs = await ctx.db
-        .query("runs")
-        .withIndex("by_automationId", (q) => q.eq("automationId", a._id))
-        .filter((q) => q.gte(q.field("startedAt"), oneHourAgo))
-        .collect();
-      orgRunCount += runs.length;
-    }
-
-    if (orgRunCount >= 50) {
-      throw new Error("Rate limit exceeded: 50 runs per hour per org");
-    }
+    await checkOrgRateLimit(ctx, automation.orgId);
 
     const triggeredBy = args.triggeredBy ?? "manual";
 
@@ -118,7 +100,7 @@ export const get = query({
     }
 
     const versionDoc = await ctx.db.get(run.versionId);
-    return { ...run, version: versionDoc?.version ?? "1" };
+    return { ...run, version: versionDoc?.version ?? 1 };
   },
 });
 
@@ -232,26 +214,7 @@ export const triggerInternal = internalMutation({
       throw new Error("Forbidden");
     }
 
-    // Rate limit: 50 runs/hour per org
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const orgAutomations = await ctx.db
-      .query("automations")
-      .withIndex("by_orgId", (q) => q.eq("orgId", automation.orgId))
-      .collect();
-
-    let orgRunCount = 0;
-    for (const a of orgAutomations) {
-      const runs = await ctx.db
-        .query("runs")
-        .withIndex("by_automationId", (q) => q.eq("automationId", a._id))
-        .filter((q) => q.gte(q.field("startedAt"), oneHourAgo))
-        .collect();
-      orgRunCount += runs.length;
-    }
-
-    if (orgRunCount >= 50) {
-      throw new Error("Rate limit exceeded: 50 runs per hour per org");
-    }
+    await checkOrgRateLimit(ctx, automation.orgId);
 
     if (automation.currentVersionId === "placeholder") {
       throw new Error("Automation is still deploying");

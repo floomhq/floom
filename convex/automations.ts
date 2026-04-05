@@ -46,7 +46,7 @@ export const list = query({
 
         return {
           ...a,
-          currentVersion: versionDoc?.version ?? "1",
+          currentVersion: versionDoc?.version ?? 1,
           lastRunStatus: lastRun?.status ?? null,
           lastRunAt: lastRun?.startedAt ?? null,
         };
@@ -86,14 +86,14 @@ export const get = query({
       .order("desc")
       .take(20);
 
-    // Enrich runs with version string from version doc
-    const versionCache = new Map<string, string>();
+    // Enrich runs with version number from version doc
+    const versionCache = new Map<string, number>();
     const runs = await Promise.all(
       rawRuns.map(async (r) => {
         let ver = versionCache.get(r.versionId);
-        if (!ver) {
+        if (ver === undefined) {
           const doc = await ctx.db.get(r.versionId);
-          ver = doc?.version ?? "1";
+          ver = doc?.version ?? 1;
           versionCache.set(r.versionId, ver);
         }
         return { ...r, version: ver };
@@ -102,7 +102,7 @@ export const get = query({
 
     return {
       ...automation,
-      currentVersion: version?.version ?? "1",
+      currentVersion: version?.version ?? 1,
       manifest: version?.manifest ?? null,
       runs,
       isOwner: automation.createdBy === userId,
@@ -223,7 +223,7 @@ export const deploy = mutation({
     // Create version 1
     const versionId = await ctx.db.insert("automationVersions", {
       automationId,
-      version: "1",
+      version: 1,
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
@@ -269,7 +269,7 @@ export const update = mutation({
     const currentVersionDoc = automation.currentVersionId !== "placeholder"
       ? await ctx.db.get(automation.currentVersionId)
       : null;
-    const newVersion = String(parseInt(currentVersionDoc?.version ?? "0") + 1);
+    const newVersion = (currentVersionDoc?.version ?? 0) + 1;
 
     const versionId = await ctx.db.insert("automationVersions", {
       automationId: args.id,
@@ -373,6 +373,55 @@ export const gallery = query({
   },
 });
 
+// Rollback to a previous version.
+export const rollback = mutation({
+  args: {
+    id: v.id("automations"),
+    versionId: v.id("automationVersions"),
+  },
+  handler: async (ctx, args) => {
+    const { userId, orgId } = await requireAuth(ctx);
+
+    const automation = await ctx.db.get(args.id);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== orgId) throw new Error("Forbidden");
+
+    const version = await ctx.db.get(args.versionId);
+    if (!version) throw new Error("Version not found");
+    if (version.automationId !== args.id) {
+      throw new Error("Version does not belong to this automation");
+    }
+
+    await ctx.db.patch(args.id, { currentVersionId: args.versionId });
+
+    return { id: args.id, currentVersion: version.version };
+  },
+});
+
+// Internal rollback — called from HTTP action (bearer token auth).
+export const rollbackInternal = internalMutation({
+  args: {
+    id: v.id("automations"),
+    versionId: v.id("automationVersions"),
+    orgId: v.id("organizations"),
+  },
+  handler: async (ctx, args) => {
+    const automation = await ctx.db.get(args.id);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== args.orgId) throw new Error("Forbidden");
+
+    const version = await ctx.db.get(args.versionId);
+    if (!version) throw new Error("Version not found");
+    if (version.automationId !== args.id) {
+      throw new Error("Version does not belong to this automation");
+    }
+
+    await ctx.db.patch(args.id, { currentVersionId: args.versionId });
+
+    return { id: args.id, currentVersion: version.version };
+  },
+});
+
 // Internal: check if a scheduled run is already in progress (cron dedup).
 // Returns true if a run exists with status=running for this automation.
 export const hasRunningRun = internalMutation({
@@ -421,7 +470,7 @@ export const deployInternal = internalMutation({
 
     const versionId = await ctx.db.insert("automationVersions", {
       automationId,
-      version: "1",
+      version: 1,
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
@@ -459,7 +508,7 @@ export const updateInternal = internalMutation({
     const currentVersionDoc = automation.currentVersionId !== "placeholder"
       ? await ctx.db.get(automation.currentVersionId)
       : null;
-    const newVersion = String(parseInt(currentVersionDoc?.version ?? "0") + 1);
+    const newVersion = (currentVersionDoc?.version ?? 0) + 1;
 
     const versionId = await ctx.db.insert("automationVersions", {
       automationId: args.id,

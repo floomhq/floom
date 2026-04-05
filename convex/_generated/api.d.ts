@@ -17,9 +17,12 @@ import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_crypto from "../lib/crypto.js";
 import type * as lib_manifest from "../lib/manifest.js";
+import type * as lib_rateLimit from "../lib/rateLimit.js";
+import type * as lib_waitForResult from "../lib/waitForResult.js";
 import type * as notifications from "../notifications.js";
 import type * as runs from "../runs.js";
 import type * as secrets from "../secrets.js";
+import type * as testRuns from "../testRuns.js";
 import type * as users from "../users.js";
 
 import type {
@@ -38,9 +41,12 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/crypto": typeof lib_crypto;
   "lib/manifest": typeof lib_manifest;
+  "lib/rateLimit": typeof lib_rateLimit;
+  "lib/waitForResult": typeof lib_waitForResult;
   notifications: typeof notifications;
   runs: typeof runs;
   secrets: typeof secrets;
+  testRuns: typeof testRuns;
   users: typeof users;
 }>;
 

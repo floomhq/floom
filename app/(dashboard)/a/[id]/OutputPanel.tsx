@@ -17,7 +17,7 @@ type Run = {
   error: string | null;
   durationMs: number | null;
   startedAt: number;
-  version: string; // derived from versionId doc
+  version: number; // derived from versionId doc
   versionId: string;
 };
 

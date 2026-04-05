@@ -10,7 +10,7 @@ type Run = {
   startedAt: number;
   durationMs: number | null;
   triggeredBy: string;
-  version: string;
+  version: number;
   outputs: unknown;
   inputs: unknown;
   errorType: string | null;

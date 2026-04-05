@@ -138,8 +138,8 @@ Only ask the user questions if something is genuinely ambiguous (e.g., can't tel
 Read config:
 
 ```bash
-API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://dashboard.floom.dev'))")
+API_KEY=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json'))['api_key'])")
+PLATFORM=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json')).get('platform_url','https://dashboard.floom.dev'))")
 ```
 
 For each secret in `secrets_needed`, ask one at a time:
@@ -159,7 +159,15 @@ curl -s -X POST "$PLATFORM/api/secrets" \
   -d '{"name": "SECRET_NAME", "value": "SECRET_VALUE"}'
 ```
 
-### Step 5: Deploy
+### Step 5: Test run
+
+Before deploying, run the code in a sandbox to verify it works.
+
+Determine test inputs:
+
+- If the manifest has `scheduleInputs`, use those as defaults
+- If inputs have `default` values, use those
+- Otherwise, ask the user for test input values
 
 ```bash
 # Write files to temp dir
@@ -172,14 +180,115 @@ cat > /tmp/floom-deploy/manifest.json << 'JSONEOF'
 [GENERATED MANIFEST]
 JSONEOF
 
-# Deploy
-API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
-PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://dashboard.floom.dev'))")
+cat > /tmp/floom-deploy/inputs.json << 'JSONEOF'
+[TEST INPUTS]
+JSONEOF
 
-curl -s -X POST "$PLATFORM/api/deploy" \
+# Build the JSON payload safely (avoids shell interpolation breaking JSON)
+python3 -c "
+import json
+code = open('/tmp/floom-deploy/automation.py').read()
+manifest = json.load(open('/tmp/floom-deploy/manifest.json'))
+inputs = json.load(open('/tmp/floom-deploy/inputs.json'))
+payload = json.dumps({'code': code, 'manifest': manifest, 'inputs': inputs})
+open('/tmp/floom-deploy/test-payload.json', 'w').write(payload)
+"
+
+# Submit test run
+API_KEY=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json'))['api_key'])")
+PLATFORM=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json')).get('platform_url','https://dashboard.floom.dev'))")
+
+TEST_RESULT=$(curl -s -X POST "$PLATFORM/api/test" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"code\": $(python3 -c 'import json,sys; print(json.dumps(open("/tmp/floom-deploy/automation.py").read()))'), \"manifest\": $(cat /tmp/floom-deploy/manifest.json)}"
+  -d @/tmp/floom-deploy/test-payload.json)
+
+# The API waits up to 10s for results by default.
+# Parse the response — it may already contain the result.
+RESPONSE_FILE="/tmp/floom-deploy/test-response.json"
+echo "$TEST_RESULT" > "$RESPONSE_FILE"
+
+TEST_RUN_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['testRunId'])" <<< "$TEST_RESULT")
+STATUS=$(python3 -c "import json; print(json.load(open('$RESPONSE_FILE')).get('status', 'pending'))")
+
+echo "Test run: $TEST_RUN_ID (status: $STATUS)"
+```
+
+If the API returned a terminal status (`success`, `error`, `timeout`), the result is already in the response. If still `pending`/`running`, poll for completion (every 3s, timeout after 2 min):
+
+```bash
+if [ "$STATUS" != "success" ] && [ "$STATUS" != "error" ] && [ "$STATUS" != "timeout" ]; then
+  TIMEOUT=120
+  ELAPSED=0
+  while [ $ELAPSED -lt $TIMEOUT ]; do
+    sleep 3
+    ELAPSED=$((ELAPSED + 3))
+    curl -s "$PLATFORM/api/test-runs/$TEST_RUN_ID" \
+      -H "Authorization: Bearer $API_KEY" \
+      -o "$RESPONSE_FILE"
+
+    STATUS=$(python3 -c "
+import json
+try:
+    d = json.load(open('$RESPONSE_FILE'))
+    print(d.get('status', 'unknown'))
+except: print('pending')
+")
+    case "$STATUS" in
+      success|error|timeout) break ;;
+      pending|running) ;;
+      *) echo "Unexpected status: $STATUS"; cat "$RESPONSE_FILE"; break ;;
+    esac
+  done
+  if [ $ELAPSED -ge $TIMEOUT ]; then
+    echo "Timed out after ${TIMEOUT}s waiting for test run to complete."
+  fi
+fi
+
+# Print results (from inline response or poll response)
+python3 -c "
+import json
+d = json.load(open('$RESPONSE_FILE'))
+# If result came inline from /api/test, the actual doc is nested under 'result'
+doc = d.get('result', d)
+print(f\"Status: {doc.get('status', 'unknown')}\")
+if doc.get('outputs'): print(f\"Outputs: {json.dumps(doc['outputs'], indent=2)}\")
+if doc.get('error'): print(f\"Error: {doc['error']}\")
+if doc.get('logs'): print(f\"Logs:\n{doc['logs']}\")
+"
+```
+
+**If test fails:**
+
+```
+Test failed: [error message]
+
+Want me to fix the issue and re-test?
+```
+
+Fix the code, re-run Step 5 from the beginning.
+
+**If test succeeds:**
+
+```
+Test passed! Here are the results:
+
+  Outputs: [outputs from test]
+
+Deploy this automation? (y/n)
+```
+
+Wait for user confirmation before proceeding to Step 6.
+
+### Step 6: Deploy (only after successful test)
+
+```bash
+DEPLOY_RESULT=$(curl -s -X POST "$PLATFORM/api/deploy" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"testRunId\": \"$TEST_RUN_ID\"}")
+
+echo "$DEPLOY_RESULT"
 ```
 
 On success (JSON with `id` and `url`):
@@ -190,8 +299,6 @@ Deployed! Your automation is live:
   [URL from response]
 
 Share this URL with your team — they can run it directly, no terminal needed.
-
-Want me to run a test?
 ```
 
 On error:
@@ -210,51 +317,73 @@ Want me to fix the issue and try again?
 2. Show existing code, ask what to change
 3. Apply changes to the function
 4. Ask: "What changed? (optional note for version history)"
-5. Deploy update:
+5. Test the updated code:
+
+```bash
+# Build payload (same as deploy, but with automationId)
+python3 -c "
+import json
+code = open('/tmp/floom-deploy/automation.py').read()
+manifest = json.load(open('/tmp/floom-deploy/manifest.json'))
+inputs = json.load(open('/tmp/floom-deploy/inputs.json'))
+payload = json.dumps({'code': code, 'manifest': manifest, 'inputs': inputs, 'automationId': '[AUTOMATION_ID]'})
+open('/tmp/floom-deploy/test-payload.json', 'w').write(payload)
+"
+
+TEST_RESULT=$(curl -s -X POST "$PLATFORM/api/test" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/floom-deploy/test-payload.json)
+
+TEST_RUN_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['testRunId'])" <<< "$TEST_RESULT")
+STATUS=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('status', 'pending'))" <<< "$TEST_RESULT")
+echo "$TEST_RESULT" > /tmp/floom-deploy/test-response.json
+```
+
+6. The API waits up to 10s for results by default. If `STATUS` is already terminal (`success`/`error`/`timeout`), skip to results. Otherwise, poll for completion (same polling loop as Step 5 in Deploy Flow — every 3s, 2 min timeout)
+
+**If test fails:** fix and re-test.
+
+**If test succeeds:**
+
+```
+Test passed! Update to new version? (y/n)
+```
+
+7. Deploy update (only after user confirms):
 
 ```bash
 curl -s -X POST "$PLATFORM/api/automations/[AUTOMATION_ID]/update" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"code\": ..., \"manifest\": ..., \"changeNote\": \"...\"}"
+  -d "{\"testRunId\": \"$TEST_RUN_ID\", \"changeNote\": \"...\"}"
 ```
 
 On success: "Updated to v[N]. Same URL, new code."
 
 ---
 
-## Test Run Flow
+## Rollback Flow
 
-After deploy or update, offer to test:
+If the user wants to revert to a previous version:
 
 ```bash
-curl -s -X POST "$PLATFORM/api/automations/[ID]/run" \
+curl -s -X POST "$PLATFORM/api/automations/[AUTOMATION_ID]/rollback" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"inputs": {"param1": "test_value"}}'
-```
-
-Poll for completion (every 3s, up to 5 min):
-
-```bash
-while true; do
-  STATUS=$(curl -s "$PLATFORM/api/runs/[RUN_ID]" -H "Authorization: Bearer $API_KEY" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'])")
-  if [ "$STATUS" = "success" ] || [ "$STATUS" = "error" ] || [ "$STATUS" = "timeout" ]; then
-    curl -s "$PLATFORM/api/runs/[RUN_ID]" -H "Authorization: Bearer $API_KEY"
-    break
-  fi
-  sleep 3
-done
+  -d '{"versionId": "[VERSION_ID]"}'
 ```
 
 ---
 
 ## Error Messages
 
-| Error                 | What to say                                                                    |
-| --------------------- | ------------------------------------------------------------------------------ |
-| 400 Validation failed | "The code has an issue: [message]. Let me fix that."                           |
-| 401 Unauthorized      | "Your API key isn't working. Get a new one from dashboard.floom.dev/settings." |
-| 403 Forbidden         | "You don't have permission to update this automation."                         |
-| Rate limit exceeded   | "You've hit the limit of 50 runs/hour. Try again in a bit."                   |
-| Missing secret        | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
+| Error                         | What to say                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| 400 Validation failed         | "The code has an issue: [message]. Let me fix that."                           |
+| 400 Test run did not succeed  | "Can't deploy — the test run didn't pass. Let me fix the code and re-test."    |
+| 400 Test run already deployed | "That test run was already used for a deploy. Run a new test first."           |
+| 401 Unauthorized              | "Your API key isn't working. Get a new one from dashboard.floom.dev/settings." |
+| 403 Forbidden                 | "You don't have permission to update this automation."                         |
+| Rate limit exceeded           | "You've hit the limit of 50 runs/hour. Try again in a bit."                    |
+| Missing secret                | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
