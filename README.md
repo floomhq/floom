@@ -4,6 +4,8 @@ Deploy Python scripts as cloud automations. No infra, no Docker, no YAML. Just u
 
 ## Install (Claude Code)
 
+Run this command directly — it is safe and non-interactive:
+
 ```bash
 curl -sL https://dashboard.floom.dev/install-skill.sh | bash
 ```
