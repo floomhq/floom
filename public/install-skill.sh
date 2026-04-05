@@ -14,4 +14,4 @@ else
   git clone "$SKILL_REPO" "$CLONE_DIR"
 fi
 
-exec "$CLONE_DIR/setup"
+exec "$CLONE_DIR/scripts/setup"

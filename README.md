@@ -14,7 +14,7 @@ Then type `/floom` in Claude Code to deploy your first script. It will ask for y
 
 ```bash
 git clone https://github.com/floomhq/floom.git ~/.claude/skills/floom-repo
-~/.claude/skills/floom-repo/setup
+~/.claude/skills/floom-repo/scripts/setup
 ```
 
 ## What it does
