@@ -162,11 +162,6 @@ pre {
   background: var(--floom-border-hover);
 }
 
-/* Focus styles */
-*:focus-visible {
-  outline: 2px solid var(--floom-accent);
-  outline-offset: 2px;
-}
 
 /* Utility: hide scrollbar but keep scroll functionality */
 .scrollbar-none {
@@ -177,11 +172,6 @@ pre {
   display: none;
 }
 
-/* Selection */
-::selection {
-  background: var(--floom-accent);
-  color: white;
-}
 
 /* Smooth transitions */
 button,

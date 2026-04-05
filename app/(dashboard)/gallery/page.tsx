@@ -33,6 +33,7 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
+  CommandSeparator,
 } from "@/components/ui/command";
 
 export default function GalleryPage() {
@@ -157,17 +158,20 @@ export default function GalleryPage() {
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         title="Search Automations"
-        description="Search for an automation to open..."
+        description="Search for an automation to open"
+        className="sm:max-w-lg"
       >
         <Command>
           <CommandInput placeholder="Search automations..." />
-          <CommandList>
+          <CommandList className="max-h-80">
             <CommandEmpty>
-              {automations?.length === 0
-                ? "No automations in this workspace yet."
-                : "No matching automations. Try a different search term."}
+              <p className="text-muted-foreground">
+                {automations?.length === 0
+                  ? "No automations in this workspace yet."
+                  : "No matching automations."}
+              </p>
             </CommandEmpty>
-            <CommandGroup heading="Automations">
+            <CommandGroup>
               {(automations ?? []).map((a: Automation) => {
                 const status = statusConfig[a.status];
                 return (
@@ -178,23 +182,23 @@ export default function GalleryPage() {
                       setPaletteOpen(false);
                       router.push(`/a/${a._id}`);
                     }}
+                    className="py-2.5"
                   >
                     <span
                       className={cn(
                         "size-2 rounded-full shrink-0",
                         status.color
                       )}
-                      aria-label={`Status: ${status.label}`}
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{a.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-xs text-muted-foreground line-clamp-1">
                         {a.description}
                       </p>
                     </div>
                     {a.schedule && a.scheduleEnabled !== false && (
-                      <span className="text-xs text-muted-foreground shrink-0 flex items-center gap-1">
-                        <Clock size={11} />
+                      <span className="text-[11px] text-muted-foreground/60 shrink-0 flex items-center gap-1">
+                        <Clock size={10} />
                         {formatSchedule(a.schedule)}
                       </span>
                     )}
@@ -203,6 +207,21 @@ export default function GalleryPage() {
               })}
             </CommandGroup>
           </CommandList>
+          <CommandSeparator />
+          <div className="flex items-center gap-4 px-3 py-2 text-[11px] text-muted-foreground/60">
+            <span>
+              <kbd className="px-1 py-0.5 bg-muted rounded border text-[10px] mr-1">↑↓</kbd>
+              navigate
+            </span>
+            <span>
+              <kbd className="px-1 py-0.5 bg-muted rounded border text-[10px] mr-1">↵</kbd>
+              open
+            </span>
+            <span>
+              <kbd className="px-1 py-0.5 bg-muted rounded border text-[10px] mr-1">esc</kbd>
+              close
+            </span>
+          </div>
         </Command>
       </CommandDialog>
     </div>
