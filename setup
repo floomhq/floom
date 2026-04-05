@@ -17,6 +17,16 @@ fi
 ln -sf "$REPO_DIR/skills/floom" "$SKILL_DIR"
 echo "✓ Linked $SKILL_DIR -> $REPO_DIR/skills/floom"
 
+# ── Parse arguments ─────────────────────────────────────────────
+API_KEY=""
+for arg in "$@"; do
+  case "$arg" in
+    --api-key=*) API_KEY="${arg#--api-key=}" ;;
+    --api-key)   shift_next=1 ;;
+    *)           [ "${shift_next:-}" = "1" ] && API_KEY="$arg" && shift_next="" ;;
+  esac
+done
+
 # ── Configure API key ───────────────────────────────────────────
 if [ -f "$CONFIG_FILE" ]; then
   EXISTING_KEY=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE')).get('api_key',''))" 2>/dev/null || true)
@@ -28,23 +38,14 @@ if [ -f "$CONFIG_FILE" ]; then
   fi
 fi
 
-echo ""
-echo "Get your API key from: $PLATFORM_URL/settings"
-echo ""
-printf "Paste your API key: "
-read -r API_KEY
-
-if [ -z "$API_KEY" ]; then
+if [ -n "$API_KEY" ]; then
+  echo "{\"api_key\": \"$API_KEY\", \"platform_url\": \"$PLATFORM_URL\"}" | python3 -c "import sys,json; json.dump(json.load(sys.stdin), open('$CONFIG_FILE','w'), indent=2)"
+  echo "✓ Wrote config to $CONFIG_FILE"
+else
   echo ""
-  echo "⚠ Skipped API key. Add it later:"
-  echo "  echo '{\"api_key\": \"YOUR_KEY\", \"platform_url\": \"$PLATFORM_URL\"}' > $CONFIG_FILE"
-  echo ""
-  echo "Done! Type /floom in Claude Code to get started."
-  exit 0
+  echo "✓ Skill installed. Get your API key from: $PLATFORM_URL/settings"
+  echo "  Then type /floom in Claude Code — it will help you configure the key."
 fi
-
-echo "{\"api_key\": \"$API_KEY\", \"platform_url\": \"$PLATFORM_URL\"}" | python3 -c "import sys,json; json.dump(json.load(sys.stdin), open('$CONFIG_FILE','w'), indent=2)"
-echo "✓ Wrote config to $CONFIG_FILE"
 
 echo ""
 echo "Done! Type /floom in Claude Code to get started."

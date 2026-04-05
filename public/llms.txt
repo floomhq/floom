@@ -10,13 +10,14 @@ Floom is a deployment platform for Python scripts. You create a python script, a
 2. Floom tests it in a secure sandbox (E2B)
 3. On success, deploys it as a cloud automation with a shareable URL
 
-## Claude Code skill
+## Install as Claude Code skill
 
-Install the /floom skill to deploy directly from Claude Code:
-
-```
+```bash
 curl -sL https://dashboard.floom.dev/install-skill.sh | bash
 ```
+
+This clones the repo, symlinks the skill into `~/.claude/skills/floom`, and you're done.
+On first `/floom` use, you'll be asked for your API key from dashboard.floom.dev/settings.
 
 ## Links
 
