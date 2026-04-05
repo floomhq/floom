@@ -88,7 +88,7 @@ Derive the manifest from the adapted code:
     {
       "name": "param_name",
       "label": "Human Label",
-      "type": "text|textarea|url|file|integer|enum",
+      "type": "text|textarea|url|file|number|enum|boolean|date",
       "description": "What to put here",
       "required": true,
       "options": ["opt1", "opt2"],
@@ -102,7 +102,7 @@ Derive the manifest from the adapted code:
     {
       "name": "output_key",
       "label": "Human Label",
-      "type": "text|table|integer",
+      "type": "text|table|number",
       "columns": ["col1", "col2"]
     }
   ],
@@ -118,16 +118,19 @@ Derive the manifest from the adapted code:
 - `textarea` — long text (transcript, document, prompt) — use for 500+ char inputs
 - `url` — links (CSV URL, API endpoint)
 - `file` — file upload (.pdf, .csv, .xlsx) — function receives R2 URL string
-- `integer` — numbers (limit, count, year)
+- `number` — any number: integers, floats, percentages (limit, price, threshold)
 - `enum` — fixed choices (tone: professional/casual)
+- `boolean` — true/false toggle (dry run, include headers)
+- `date` — date picker, value passed as ISO string "2024-01-15"
 
 **Output type guide:**
 
 - `text` — string output
 - `table` — list of dicts (include `columns` array)
-- `integer` — numeric output
+- `number` — numeric output (displayed as large formatted number)
 - `html` — rendered HTML
 - `pdf` — PDF document
+- `image` — base64-encoded image (matplotlib chart, screenshot)
 
 For schedule: convert natural language to cron directly. "Every Monday at 9am" -> `0 9 * * 1`. If scheduled and has required inputs, set `scheduleInputs` with defaults.
 
