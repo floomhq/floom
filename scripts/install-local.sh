@@ -23,8 +23,8 @@ echo "Installing floom skill (local dev)..."
 
 # Install skill from local source
 mkdir -p "$SKILL_DIR"
-cp "$REPO_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
-echo "  Copied skill/SKILL.md -> $SKILL_DIR/SKILL.md"
+cp "$REPO_DIR/skills/floom/SKILL.md" "$SKILL_DIR/SKILL.md"
+echo "  Copied skills/floom/SKILL.md -> $SKILL_DIR/SKILL.md"
 
 # Load api_key from .env.local
 FLOOM_DEV_AGENT_KEY=$(grep '^FLOOM_DEV_AGENT_KEY=' "$ENV_FILE" | cut -d'=' -f2-)

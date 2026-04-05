@@ -1,5 +1,5 @@
 #!/bin/bash
-# Floom setup — run after cloning to ~/.claude/skills/floom
+# Floom setup — run after cloning the repo (can be cloned anywhere)
 set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -7,21 +7,15 @@ SKILL_DIR="$HOME/.claude/skills/floom"
 CONFIG_FILE="$HOME/.claude/floom-config.json"
 PLATFORM_URL="https://dashboard.floom.dev"
 
-# ── Check location ──────────────────────────────────────────────
-if [ "$REPO_DIR" != "$SKILL_DIR" ]; then
-  echo "Error: floom must be cloned to ~/.claude/skills/floom"
-  echo ""
-  echo "  git clone https://github.com/floom-dev/floom.git ~/.claude/skills/floom"
-  echo "  cd ~/.claude/skills/floom && ./setup"
-  exit 1
+# ── Symlink skills/floom into ~/.claude/skills/ ────────────────
+mkdir -p "$HOME/.claude/skills"
+if [ -L "$SKILL_DIR" ]; then
+  rm "$SKILL_DIR"
+elif [ -d "$SKILL_DIR" ]; then
+  rm -rf "$SKILL_DIR"
 fi
-
-# ── Symlink SKILL.md to root so Claude Code discovers it ────────
-if [ -L "$SKILL_DIR/SKILL.md" ]; then
-  rm "$SKILL_DIR/SKILL.md"
-fi
-ln -sf "$REPO_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
-echo "✓ Linked SKILL.md"
+ln -sf "$REPO_DIR/skills/floom" "$SKILL_DIR"
+echo "✓ Linked $SKILL_DIR -> $REPO_DIR/skills/floom"
 
 # ── Configure API key ───────────────────────────────────────────
 if [ -f "$CONFIG_FILE" ]; then
