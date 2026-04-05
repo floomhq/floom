@@ -69,6 +69,26 @@ export const remove = mutation({
   },
 });
 
+// Decrypt a single secret value (for show/copy in UI).
+export const getDecryptedValue = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const { userId, orgId } = await requireAuth(ctx);
+
+    const secret = await ctx.db
+      .query("secrets")
+      .withIndex("by_orgId_name", (q) =>
+        q.eq("orgId", orgId).eq("name", args.name)
+      )
+      .unique();
+
+    if (!secret) throw new Error("Secret not found");
+
+    const encryptionKey = getEncryptionKey();
+    return await decrypt(secret.encryptedValue, encryptionKey);
+  },
+});
+
 // List secret names only — never decrypted values.
 export const list = query({
   handler: async (ctx) => {
