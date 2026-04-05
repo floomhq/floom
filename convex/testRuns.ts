@@ -1,25 +1,18 @@
 import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { validateManifestStructure } from "./lib/manifest";
 import { checkOrgRateLimit } from "./lib/rateLimit";
 
-// Create a test run — validates code, checks rate limit, schedules executor.
+// Create a test run — checks rate limit, schedules executor.
+// Manifest validation happens at artifact creation time.
 export const triggerTestInternal = internalMutation({
   args: {
     orgId: v.id("organizations"),
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     inputs: v.any(),
     automationId: v.optional(v.id("automations")),
   },
   handler: async (ctx, args) => {
-    const manifest = args.manifest as Parameters<typeof validateManifestStructure>[1];
-    const validationError = validateManifestStructure(args.code, manifest);
-    if (validationError) {
-      throw new Error(`Validation failed: ${validationError.message}`);
-    }
-
     // If testing an update, verify org ownership
     if (args.automationId) {
       const automation = await ctx.db.get(args.automationId);
@@ -33,8 +26,7 @@ export const triggerTestInternal = internalMutation({
     const testRunId = await ctx.db.insert("testRuns", {
       orgId: args.orgId,
       automationId: args.automationId,
-      code: args.code,
-      manifest: args.manifest,
+      artifactId: args.artifactId,
       inputs: args.inputs,
       outputs: null,
       logs: "",
@@ -110,9 +102,3 @@ export const finishTestRun = internalMutation({
   },
 });
 
-export const markUsed = internalMutation({
-  args: { testRunId: v.id("testRuns") },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.testRunId, { usedAt: Date.now() });
-  },
-});

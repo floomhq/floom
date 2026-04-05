@@ -53,7 +53,42 @@ function errorResponse(message: string, status = 400): Response {
   return jsonResponse({ error: message }, status);
 }
 
-// POST /api/test — run code in sandbox before deploying.
+// POST /api/artifacts — create an immutable code+manifest blob.
+http.route({
+  path: "/api/artifacts",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const { orgId, keyId } = await verifyApiKey(request, ctx);
+
+      const body = (await request.json()) as {
+        code: string;
+        manifest: unknown;
+      };
+
+      if (!body.code || !body.manifest) {
+        return errorResponse("code and manifest are required");
+      }
+
+      const result = await ctx.runMutation(internal.artifacts.create, {
+        orgId,
+        code: body.code,
+        manifest: body.manifest,
+        createdBy: keyId as string,
+      });
+
+      return jsonResponse({ artifactId: result.artifactId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      if (msg.includes("Unauthorized") || msg.includes("Invalid API key") || msg.includes("revoked")) {
+        return errorResponse(msg, 401);
+      }
+      return errorResponse(msg, 400);
+    }
+  }),
+});
+
+// POST /api/test — run artifact in sandbox before deploying.
 http.route({
   path: "/api/test",
   method: "POST",
@@ -62,23 +97,32 @@ http.route({
       const { orgId } = await verifyApiKey(request, ctx);
 
       const body = (await request.json()) as {
-        code: string;
-        manifest: unknown;
+        artifactId: string;
         inputs: unknown;
         automationId?: string;
         wait?: number;
       };
 
-      if (!body.code || !body.manifest) {
-        return errorResponse("code and manifest are required");
+      if (!body.artifactId) {
+        return errorResponse("artifactId is required");
+      }
+
+      // Fetch artifact and verify org ownership
+      const artifact = await ctx.runQuery(internal.artifacts.get, {
+        id: body.artifactId as Id<"artifacts">,
+      });
+      if (!artifact) {
+        return errorResponse("Artifact not found", 404);
+      }
+      if (artifact.orgId !== orgId) {
+        return errorResponse("Forbidden", 403);
       }
 
       const result = await ctx.runMutation(
         internal.testRuns.triggerTestInternal,
         {
           orgId,
-          code: body.code,
-          manifest: body.manifest,
+          artifactId: body.artifactId as Id<"artifacts">,
           inputs: body.inputs ?? {},
           automationId: body.automationId
             ? (body.automationId as Id<"automations">)
@@ -142,7 +186,7 @@ http.route({
   }),
 });
 
-// POST /api/deploy — deploy from a successful test run.
+// POST /api/deploy — deploy from an artifact.
 http.route({
   path: "/api/deploy",
   method: "POST",
@@ -151,41 +195,33 @@ http.route({
       const { orgId, keyName } = await verifyApiKey(request, ctx);
 
       const body = (await request.json()) as {
-        testRunId: string;
+        artifactId: string;
+        name?: string;
+        description?: string;
         changeNote?: string;
       };
 
-      if (!body.testRunId) {
-        return errorResponse("testRunId is required");
+      if (!body.artifactId) {
+        return errorResponse("artifactId is required");
       }
 
-      // Fetch and validate the test run
-      const testRun = await ctx.runQuery(internal.testRuns.getInternal, {
-        testRunId: body.testRunId as Id<"testRuns">,
+      // Fetch and validate the artifact
+      const artifact = await ctx.runQuery(internal.artifacts.get, {
+        id: body.artifactId as Id<"artifacts">,
       });
 
-      if (!testRun || testRun.orgId !== orgId) {
-        return errorResponse("Test run not found", 404);
+      if (!artifact) {
+        return errorResponse("Artifact not found", 404);
       }
-      if (testRun.status !== "success") {
-        return errorResponse("Test run did not succeed", 400);
-      }
-      if (testRun.usedAt) {
-        return errorResponse("Test run already deployed", 400);
+      if (artifact.orgId !== orgId) {
+        return errorResponse("Forbidden", 403);
       }
 
-      // Deploy using code from the test run
       const result = await ctx.runMutation(internal.automations.deployInternal, {
-        code: testRun.code,
-        manifest: testRun.manifest,
+        artifactId: body.artifactId as Id<"artifacts">,
         changeNote: body.changeNote,
         clerkUserId: "api:" + keyName,
         orgId,
-      });
-
-      // Mark test run as consumed
-      await ctx.runMutation(internal.testRuns.markUsed, {
-        testRunId: body.testRunId as Id<"testRuns">,
       });
 
       const platformUrl =
@@ -303,9 +339,7 @@ http.route({
       const { orgId, keyName } = await verifyApiKey(request, ctx);
 
       const body = (await request.json()) as {
-        testRunId?: string;
-        code?: string;
-        manifest?: unknown;
+        artifactId?: string;
         changeNote?: string;
         inputs?: unknown;
         versionId?: string;
@@ -313,28 +347,20 @@ http.route({
       };
 
       if (action === "update") {
-        if (!body.testRunId) {
-          return errorResponse("testRunId is required");
+        if (!body.artifactId) {
+          return errorResponse("artifactId is required");
         }
 
-        // Fetch and validate the test run
-        const testRun = await ctx.runQuery(internal.testRuns.getInternal, {
-          testRunId: body.testRunId as Id<"testRuns">,
+        // Fetch and validate the artifact
+        const artifact = await ctx.runQuery(internal.artifacts.get, {
+          id: body.artifactId as Id<"artifacts">,
         });
 
-        if (!testRun || testRun.orgId !== orgId) {
-          return errorResponse("Test run not found", 404);
+        if (!artifact) {
+          return errorResponse("Artifact not found", 404);
         }
-        if (testRun.status !== "success") {
-          return errorResponse("Test run did not succeed", 400);
-        }
-        if (testRun.usedAt) {
-          return errorResponse("Test run already deployed", 400);
-        }
-
-        // If test run was linked to an automation, verify it matches
-        if (testRun.automationId && testRun.automationId !== automationId) {
-          return errorResponse("Test run was for a different automation", 400);
+        if (artifact.orgId !== orgId) {
+          return errorResponse("Forbidden", 403);
         }
 
         // Verify org ownership of the automation
@@ -347,15 +373,9 @@ http.route({
 
         const result = await ctx.runMutation(internal.automations.updateInternal, {
           id: automationId as Id<"automations">,
-          code: testRun.code,
-          manifest: testRun.manifest,
+          artifactId: body.artifactId as Id<"artifacts">,
           changeNote: body.changeNote,
           clerkUserId: "api:" + keyName,
-        });
-
-        // Mark test run as consumed
-        await ctx.runMutation(internal.testRuns.markUsed, {
-          testRunId: body.testRunId as Id<"testRuns">,
         });
 
         return jsonResponse(result);

@@ -2,6 +2,16 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Immutable code+manifest blobs. Created once, referenced by testRuns and automationVersions.
+  artifacts: defineTable({
+    orgId: v.id("organizations"),
+    code: v.string(),
+    manifest: v.any(),
+    createdAt: v.number(),
+    createdBy: v.string(),
+  }).index("by_org", ["orgId"])
+    .index("by_created_at", ["createdAt"]),
+
   // Automation metadata + current version pointer.
   // Code lives in automationVersions.
   automations: defineTable({
@@ -26,12 +36,11 @@ export default defineSchema({
     .index("by_orgId", ["orgId"])
     .index("by_createdBy", ["createdBy"]),
 
-  // Immutable snapshot of code + manifest at each deploy/update.
+  // Immutable snapshot at each deploy/update. Code lives in artifacts.
   automationVersions: defineTable({
     automationId: v.id("automations"),
     version: v.number(),
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     createdAt: v.number(),
     createdBy: v.string(), // Clerk user ID
     changeNote: v.union(v.string(), v.null()),
@@ -101,12 +110,11 @@ export default defineSchema({
   }).index("by_clerkUserId", ["clerkUserId"]),
 
   // Test runs — sandbox execution of code before deploying as a version.
-  // Code stored inline (not in automationVersions). Counts toward rate limits.
+  // Code lives in artifacts. Counts toward rate limits.
   testRuns: defineTable({
     orgId: v.id("organizations"),
     automationId: v.optional(v.id("automations")), // present when testing update
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     inputs: v.any(),
     outputs: v.union(v.any(), v.null()),
     logs: v.string(),
@@ -129,7 +137,6 @@ export default defineSchema({
     durationMs: v.union(v.number(), v.null()),
     startedAt: v.number(),
     finishedAt: v.union(v.number(), v.null()),
-    usedAt: v.optional(v.number()), // set when deployed — prevents double-deploy
   })
     .index("by_orgId_startedAt", ["orgId", "startedAt"])
     .index("by_automationId", ["automationId"]),

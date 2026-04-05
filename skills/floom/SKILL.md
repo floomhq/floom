@@ -162,15 +162,9 @@ curl -s -X POST "$PLATFORM/api/secrets" \
   -d '{"name": "SECRET_NAME", "value": "SECRET_VALUE"}'
 ```
 
-### Step 5: Test run
+### Step 5: Upload artifact
 
-Before deploying, run the code in a sandbox to verify it works.
-
-Determine test inputs:
-
-- If the manifest has `scheduleInputs`, use those as defaults
-- If inputs have `default` values, use those
-- Otherwise, ask the user for test input values
+Upload the code and manifest as an artifact. This stores them on the platform and returns an `artifactId` used for testing or deploying.
 
 ```bash
 # Write files to temp dir
@@ -183,31 +177,66 @@ cat > /tmp/floom-deploy/manifest.json << 'JSONEOF'
 [GENERATED MANIFEST]
 JSONEOF
 
-cat > /tmp/floom-deploy/inputs.json << 'JSONEOF'
-[TEST INPUTS]
-JSONEOF
-
 # Build the JSON payload safely (avoids shell interpolation breaking JSON)
 python3 -c "
 import json
 code = open('/tmp/floom-deploy/automation.py').read()
 manifest = json.load(open('/tmp/floom-deploy/manifest.json'))
-inputs = json.load(open('/tmp/floom-deploy/inputs.json'))
-payload = json.dumps({'code': code, 'manifest': manifest, 'inputs': inputs})
-open('/tmp/floom-deploy/test-payload.json', 'w').write(payload)
+payload = json.dumps({'code': code, 'manifest': manifest})
+open('/tmp/floom-deploy/artifact-payload.json', 'w').write(payload)
 "
 
-# Submit test run
+# Upload artifact
 API_KEY=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json'))['api_key'])")
 PLATFORM=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json')).get('platform_url','https://dashboard.floom.dev'))")
+
+ARTIFACT_RESULT=$(curl -s -X POST "$PLATFORM/api/artifacts" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/floom-deploy/artifact-payload.json)
+
+ARTIFACT_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['artifactId'])" <<< "$ARTIFACT_RESULT")
+echo "Artifact uploaded: $ARTIFACT_ID"
+```
+
+### Step 6: Ask user — test or deploy?
+
+```
+Your code is uploaded. What would you like to do?
+
+1. Test first — run in sandbox to verify it works before deploying
+2. Deploy immediately — skip testing and go live now
+```
+
+Wait for user's choice.
+
+### Step 7a: Test path
+
+If the user chose to test first:
+
+Determine test inputs:
+- If the manifest has `scheduleInputs`, use those as defaults
+- If inputs have `default` values, use those
+- Otherwise, ask the user for test input values
+
+```bash
+cat > /tmp/floom-deploy/inputs.json << 'JSONEOF'
+[TEST INPUTS]
+JSONEOF
+
+# Build test payload
+python3 -c "
+import json
+inputs = json.load(open('/tmp/floom-deploy/inputs.json'))
+payload = json.dumps({'artifactId': '$ARTIFACT_ID', 'inputs': inputs})
+open('/tmp/floom-deploy/test-payload.json', 'w').write(payload)
+"
 
 TEST_RESULT=$(curl -s -X POST "$PLATFORM/api/test" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d @/tmp/floom-deploy/test-payload.json)
 
-# The API waits up to 10s for results by default.
-# Parse the response — it may already contain the result.
 RESPONSE_FILE="/tmp/floom-deploy/test-response.json"
 echo "$TEST_RESULT" > "$RESPONSE_FILE"
 
@@ -252,7 +281,6 @@ fi
 python3 -c "
 import json
 d = json.load(open('$RESPONSE_FILE'))
-# If result came inline from /api/test, the actual doc is nested under 'result'
 doc = d.get('result', d)
 print(f\"Status: {doc.get('status', 'unknown')}\")
 if doc.get('outputs'): print(f\"Outputs: {json.dumps(doc['outputs'], indent=2)}\")
@@ -261,35 +289,30 @@ if doc.get('logs'): print(f\"Logs:\n{doc['logs']}\")
 "
 ```
 
-**If test fails:**
+**If test fails (autonomous fix loop):**
+
+Fix the code and re-upload as a NEW artifact (go back to Step 5). Loop autonomously up to 5 attempts. Do NOT ask the user between retries. After 5 failures, report the last error and ask:
 
 ```
-Test failed: [error message]
+Test failed after 5 attempts. Last error: [error message]
 
-Want me to fix the issue and re-test?
+1. Deploy anyway (the code that failed tests)
+2. Abort
 ```
 
-Fix the code, re-run Step 5 from the beginning.
+**If test succeeds:** proceed to Step 8 (deploy).
 
-**If test succeeds:**
+### Step 7b: Deploy immediately path
 
-```
-Test passed! Here are the results:
+If the user chose to deploy immediately, skip testing and go directly to Step 8.
 
-  Outputs: [outputs from test]
-
-Deploy this automation? (y/n)
-```
-
-Wait for user confirmation before proceeding to Step 6.
-
-### Step 6: Deploy (only after successful test)
+### Step 8: Deploy
 
 ```bash
 DEPLOY_RESULT=$(curl -s -X POST "$PLATFORM/api/deploy" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"testRunId\": \"$TEST_RUN_ID\"}")
+  -d "{\"artifactId\": \"$ARTIFACT_ID\"}")
 
 echo "$DEPLOY_RESULT"
 ```
@@ -338,16 +361,34 @@ This returns the full automation including `code` and `manifest`. Use the curren
 2. Show existing code, ask what to change
 3. Apply changes to the function
 4. Ask: "What changed? (optional note for version history)"
-5. Test the updated code:
+5. Upload the updated code as an artifact (same as Deploy Flow Step 5):
 
 ```bash
-# Build payload (same as deploy, but with automationId)
 python3 -c "
 import json
 code = open('/tmp/floom-deploy/automation.py').read()
 manifest = json.load(open('/tmp/floom-deploy/manifest.json'))
+payload = json.dumps({'code': code, 'manifest': manifest})
+open('/tmp/floom-deploy/artifact-payload.json', 'w').write(payload)
+"
+
+ARTIFACT_RESULT=$(curl -s -X POST "$PLATFORM/api/artifacts" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/floom-deploy/artifact-payload.json)
+
+ARTIFACT_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['artifactId'])" <<< "$ARTIFACT_RESULT")
+```
+
+6. Ask user: test or deploy immediately? (same as Deploy Flow Step 6)
+
+7. If testing: test with the artifact (same as Deploy Flow Step 7a, but include `automationId`):
+
+```bash
+python3 -c "
+import json
 inputs = json.load(open('/tmp/floom-deploy/inputs.json'))
-payload = json.dumps({'code': code, 'manifest': manifest, 'inputs': inputs, 'automationId': '[AUTOMATION_ID]'})
+payload = json.dumps({'artifactId': '$ARTIFACT_ID', 'inputs': inputs, 'automationId': '[AUTOMATION_ID]'})
 open('/tmp/floom-deploy/test-payload.json', 'w').write(payload)
 "
 
@@ -355,29 +396,17 @@ TEST_RESULT=$(curl -s -X POST "$PLATFORM/api/test" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d @/tmp/floom-deploy/test-payload.json)
-
-TEST_RUN_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['testRunId'])" <<< "$TEST_RESULT")
-STATUS=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('status', 'pending'))" <<< "$TEST_RESULT")
-echo "$TEST_RESULT" > /tmp/floom-deploy/test-response.json
 ```
 
-6. The API waits up to 10s for results by default. If `STATUS` is already terminal (`success`/`error`/`timeout`), skip to results. Otherwise, poll for completion (same polling loop as Step 5 in Deploy Flow — every 3s, 2 min timeout)
+Same polling and fix loop as Deploy Flow Step 7a.
 
-**If test fails:** fix and re-test.
-
-**If test succeeds:**
-
-```
-Test passed! Update to new version? (y/n)
-```
-
-7. Deploy update (only after user confirms):
+8. Deploy update:
 
 ```bash
 curl -s -X POST "$PLATFORM/api/automations/[AUTOMATION_ID]/update" \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"testRunId\": \"$TEST_RUN_ID\", \"changeNote\": \"...\"}"
+  -d "{\"artifactId\": \"$ARTIFACT_ID\", \"changeNote\": \"...\"}"
 ```
 
 On success: "Updated to v[N]. Same URL, new code."
@@ -402,8 +431,8 @@ curl -s -X POST "$PLATFORM/api/automations/[AUTOMATION_ID]/rollback" \
 | Error                         | What to say                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------ |
 | 400 Validation failed         | "The code has an issue: [message]. Let me fix that."                           |
-| 400 Test run did not succeed  | "Can't deploy — the test run didn't pass. Let me fix the code and re-test."    |
-| 400 Test run already deployed | "That test run was already used for a deploy. Run a new test first."           |
+| 404 Artifact not found        | "The uploaded code wasn't found. Let me re-upload and try again."              |
+| 403 Forbidden                 | "That artifact belongs to a different workspace."                              |
 | 401 Unauthorized              | "Your API key isn't working. Get a new one from dashboard.floom.dev/settings." |
 | 403 Forbidden                 | "You don't have permission to update this automation."                         |
 | Rate limit exceeded           | "You've hit the limit of 50 runs/hour. Try again in a bit."                    |
@@ -491,22 +520,42 @@ Get full automation detail including current code and manifest. Use this to fetc
 curl -s "$PLATFORM/api/automations/[AUTOMATION_ID]" -H "Authorization: Bearer $API_KEY"
 ```
 
-### POST /api/test
+### POST /api/artifacts
 
-Run code in a sandbox before deploying. Returns a `testRunId` used for deploy or update. The API waits up to 10s for results by default.
+Upload code and manifest as an immutable artifact. Returns an `artifactId` used for testing or deploying.
 
 **Body:**
 ```json
 {
   "code": "def run(x):\n    return {\"result\": x * 2}\n",
-  "manifest": { ... },
-  "inputs": { "x": 5 },
-  "automationId": "abc123"
+  "manifest": { ... }
 }
 ```
 
 - `code` (required) — Python source with a `run()` function
 - `manifest` (required) — manifest object (see Step 3 above)
+
+**Response (200):**
+```json
+{
+  "artifactId": "art123"
+}
+```
+
+### POST /api/test
+
+Run an artifact's code in a sandbox before deploying. Returns a `testRunId`. The API waits up to 10s for results by default.
+
+**Body:**
+```json
+{
+  "artifactId": "art123",
+  "inputs": { "x": 5 },
+  "automationId": "abc123"
+}
+```
+
+- `artifactId` (required) — ID from POST /api/artifacts
 - `inputs` (required) — dict of input values matching manifest input names
 - `automationId` (optional) — link to existing automation (for updates, ensures secrets are available)
 - `wait` (optional) — seconds to wait for result (default 10, max 10)
@@ -542,15 +591,17 @@ Poll test run status until terminal (`success`, `error`, `timeout`).
 
 ### POST /api/deploy
 
-Deploy from a successful test run. Creates a new automation.
+Deploy an artifact as a new automation. No test required.
 
 **Body:**
 ```json
 {
-  "testRunId": "xyz789",
+  "artifactId": "art123",
   "changeNote": "Initial deploy"
 }
 ```
+
+- `artifactId` (required) — ID from POST /api/artifacts
 
 **Response (200):**
 ```json
@@ -562,15 +613,17 @@ Deploy from a successful test run. Creates a new automation.
 
 ### POST /api/automations/:id/update
 
-Deploy a new version of an existing automation from a successful test run.
+Deploy a new version of an existing automation from an artifact.
 
 **Body:**
 ```json
 {
-  "testRunId": "xyz789",
+  "artifactId": "art123",
   "changeNote": "Added error handling"
 }
 ```
+
+- `artifactId` (required) — ID from POST /api/artifacts
 
 **Response (200):**
 ```json
