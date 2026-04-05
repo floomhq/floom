@@ -107,6 +107,15 @@ describe("validateManifestStructure", () => {
     const result = validateManifestStructure("def run(): pass", manifest);
     expect(result).toBeNull();
   });
+
+  it("accepts legacy 'integer' as alias for 'number'", () => {
+    const manifest = makeManifest({
+      inputs: [{ name: "x", label: "X", type: "integer" as any }],
+      outputs: [{ name: "y", label: "Y", type: "integer" as any }],
+    });
+    const result = validateManifestStructure("def run(x): pass", manifest);
+    expect(result).toBeNull();
+  });
 });
 
 describe("isValidCron", () => {

@@ -47,8 +47,9 @@ export function validateManifestStructure(
   code: string,
   manifest: Manifest
 ): ValidationError | null {
-  const VALID_INPUT_TYPES = new Set(["text", "textarea", "url", "file", "number", "enum", "boolean", "date"]);
-  const VALID_OUTPUT_TYPES = new Set(["text", "table", "number", "html", "pdf", "image"]);
+  // "integer" accepted as legacy alias for "number"
+  const VALID_INPUT_TYPES = new Set(["text", "textarea", "url", "file", "number", "integer", "enum", "boolean", "date"]);
+  const VALID_OUTPUT_TYPES = new Set(["text", "table", "number", "integer", "html", "pdf", "image"]);
 
   for (const input of manifest.inputs) {
     if (!VALID_INPUT_TYPES.has(input.type)) {

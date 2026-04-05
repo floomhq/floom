@@ -46,7 +46,15 @@ export function RunForm({
   automationId: string;
   isRunning?: boolean;
 }) {
-  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [values, setValues] = useState<Record<string, unknown>>(() => {
+    const initial: Record<string, unknown> = {};
+    for (const input of manifest?.inputs ?? []) {
+      if (input.type === "boolean") {
+        initial[input.name] = (input.default as boolean) ?? false;
+      }
+    }
+    return initial;
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [fileUploads, setFileUploads] = useState<
