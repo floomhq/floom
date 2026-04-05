@@ -24,8 +24,9 @@ export async function checkOrgRateLimit(
   for (const a of orgAutomations) {
     const runs = await ctx.db
       .query("runs")
-      .withIndex("by_automationId", (q) => q.eq("automationId", a._id))
-      .filter((q) => q.gte(q.field("startedAt"), oneHourAgo))
+      .withIndex("by_automationId_startedAt", (q) =>
+        q.eq("automationId", a._id).gte("startedAt", oneHourAgo)
+      )
       .collect();
     count += runs.length;
   }
@@ -41,5 +42,28 @@ export async function checkOrgRateLimit(
 
   if (count >= RATE_LIMIT) {
     throw new Error("Rate limit exceeded: 50 runs per hour per org");
+  }
+}
+
+const PUBLISHED_RATE_LIMIT = 10;
+
+/**
+ * Check published automation rate limit.
+ * Throws if the automation has exceeded 10 published runs in the last hour.
+ */
+export async function checkPublishedRateLimit(
+  ctx: MutationCtx,
+  automationId: Id<"automations">
+): Promise<void> {
+  const oneHourAgo = Date.now() - RATE_WINDOW_MS;
+  const recentRuns = await ctx.db
+    .query("runs")
+    .withIndex("by_automationId_startedAt", (q) =>
+      q.eq("automationId", automationId).gte("startedAt", oneHourAgo)
+    )
+    .filter((q) => q.eq(q.field("triggeredBy"), "published"))
+    .collect();
+  if (recentRuns.length >= PUBLISHED_RATE_LIMIT) {
+    throw new Error("Rate limit exceeded: 10 published runs per hour");
   }
 }
