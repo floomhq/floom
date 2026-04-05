@@ -261,7 +261,7 @@ export default function AutomationPage({
             <OutputPanel
               runId={activeRunId}
               lastRun={lastRun ?? null}
-              currentVersion={automation.currentVersion}
+              currentVersionId={automation.currentVersionId as string}
               manifestOutputs={automation.manifest?.outputs ?? []}
             />
           </div>
@@ -275,7 +275,6 @@ export default function AutomationPage({
             currentVersionId={
               automation.currentVersionId as Id<"automationVersions">
             }
-            currentVersion={automation.currentVersion}
           />
         </div>
       )}

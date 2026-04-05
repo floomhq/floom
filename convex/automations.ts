@@ -47,8 +47,13 @@ export const list = query({
           .order("desc")
           .first();
 
+        const versionDoc = a.currentVersionId !== "placeholder"
+          ? await ctx.db.get(a.currentVersionId)
+          : null;
+
         return {
           ...a,
+          currentVersion: versionDoc?.version ?? "1",
           lastRunStatus: lastRun?.status ?? null,
           lastRunAt: lastRun?.startedAt ?? null,
         };
@@ -83,7 +88,7 @@ export const get = query({
         : null;
 
     // 20 most recent runs
-    const runs = await ctx.db
+    const rawRuns = await ctx.db
       .query("runs")
       .withIndex("by_automationId_startedAt", (q) =>
         q.eq("automationId", args.id)
@@ -91,8 +96,23 @@ export const get = query({
       .order("desc")
       .take(20);
 
+    // Enrich runs with version string from version doc
+    const versionCache = new Map<string, string>();
+    const runs = await Promise.all(
+      rawRuns.map(async (r) => {
+        let ver = versionCache.get(r.versionId);
+        if (!ver) {
+          const doc = await ctx.db.get(r.versionId);
+          ver = doc?.version ?? "1";
+          versionCache.set(r.versionId, ver);
+        }
+        return { ...r, version: ver };
+      })
+    );
+
     return {
       ...automation,
+      currentVersion: version?.version ?? "1",
       manifest: version?.manifest ?? null,
       runs,
       isOwner: automation.createdBy === userId,
@@ -215,13 +235,12 @@ export const deploy = mutation({
       scheduleInputs: manifest.scheduleInputs ?? null,
       // Temporary placeholder — will be patched below
       currentVersionId: "placeholder" as const,
-      currentVersion: 1,
     });
 
     // Create version 1
     const versionId = await ctx.db.insert("automationVersions", {
       automationId,
-      version: 1,
+      version: "1",
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
@@ -232,10 +251,7 @@ export const deploy = mutation({
     // Patch the automation with the real versionId
     await ctx.db.patch(automationId, { currentVersionId: versionId });
 
-    return {
-      id: automationId,
-      currentVersion: 1,
-    };
+    return { id: automationId };
   },
 });
 
@@ -266,7 +282,11 @@ export const update = mutation({
       throw new Error(`Validation failed: ${validationError.message}`);
     }
 
-    const newVersion = automation.currentVersion + 1;
+    // Derive next version number from the current version doc
+    const currentVersionDoc = automation.currentVersionId !== "placeholder"
+      ? await ctx.db.get(automation.currentVersionId)
+      : null;
+    const newVersion = String(parseInt(currentVersionDoc?.version ?? "0") + 1);
 
     const versionId = await ctx.db.insert("automationVersions", {
       automationId: args.id,
@@ -280,13 +300,12 @@ export const update = mutation({
 
     await ctx.db.patch(args.id, {
       currentVersionId: versionId,
-      currentVersion: newVersion,
       // Update name/description if manifest changed
       ...(manifest.name ? { name: manifest.name } : {}),
       ...(manifest.description ? { description: manifest.description } : {}),
     });
 
-    return { id: args.id, currentVersion: newVersion };
+    return { id: args.id };
   },
 });
 
@@ -436,12 +455,11 @@ export const deployInternal = internalMutation({
       schedule: manifest.schedule ?? null,
       scheduleInputs: manifest.scheduleInputs ?? null,
       currentVersionId: "placeholder" as const,
-      currentVersion: 1,
     });
 
     const versionId = await ctx.db.insert("automationVersions", {
       automationId,
-      version: 1,
+      version: "1",
       code: args.code,
       manifest: args.manifest,
       createdAt: Date.now(),
@@ -451,7 +469,7 @@ export const deployInternal = internalMutation({
 
     await ctx.db.patch(automationId, { currentVersionId: versionId });
 
-    return { id: automationId, currentVersion: 1 };
+    return { id: automationId };
   },
 });
 
@@ -476,7 +494,11 @@ export const updateInternal = internalMutation({
       throw new Error(`Validation failed: ${validationError.message}`);
     }
 
-    const newVersion = automation.currentVersion + 1;
+    // Derive next version number from the current version doc
+    const currentVersionDoc = automation.currentVersionId !== "placeholder"
+      ? await ctx.db.get(automation.currentVersionId)
+      : null;
+    const newVersion = String(parseInt(currentVersionDoc?.version ?? "0") + 1);
 
     const versionId = await ctx.db.insert("automationVersions", {
       automationId: args.id,
@@ -490,11 +512,10 @@ export const updateInternal = internalMutation({
 
     await ctx.db.patch(args.id, {
       currentVersionId: versionId,
-      currentVersion: newVersion,
       ...(manifest.name ? { name: manifest.name } : {}),
       ...(manifest.description ? { description: manifest.description } : {}),
     });
 
-    return { id: args.id, currentVersion: newVersion };
+    return { id: args.id };
   },
 });

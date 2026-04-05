@@ -8,11 +8,9 @@ import { useState } from "react";
 export function CodeTab({
   automationId,
   currentVersionId,
-  currentVersion,
 }: {
   automationId: Id<"automations">;
   currentVersionId: Id<"automationVersions">;
-  currentVersion: number;
 }) {
   const versions = useQuery(api.automations.getVersions, { automationId });
   const [selectedVersionId, setSelectedVersionId] = useState<Id<"automationVersions">>(currentVersionId);

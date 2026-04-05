@@ -17,7 +17,8 @@ type Run = {
   error: string | null;
   durationMs: number | null;
   startedAt: number;
-  version: number;
+  version: string; // derived from versionId doc
+  versionId: string;
 };
 
 type ManifestOutputType = "text" | "table" | "integer" | "html" | "pdf";
@@ -32,12 +33,12 @@ type Output = {
 export function OutputPanel({
   runId,
   lastRun,
-  currentVersion,
+  currentVersionId,
   manifestOutputs = [],
 }: {
   runId: string | null;
   lastRun: Run | null;
-  currentVersion: number;
+  currentVersionId: string;
   manifestOutputs?: Output[];
 }) {
   const activeRun = useQuery(
@@ -120,7 +121,7 @@ export function OutputPanel({
   return (
     <SuccessOutput
       run={displayRun}
-      currentVersion={currentVersion}
+      currentVersionId={currentVersionId}
       manifestOutputs={manifestOutputs}
     />
   );
@@ -185,11 +186,11 @@ function ErrorOutput({ run }: { run: Run }) {
 
 function SuccessOutput({
   run,
-  currentVersion,
+  currentVersionId,
   manifestOutputs = [],
 }: {
   run: Run;
-  currentVersion: number;
+  currentVersionId: string;
   manifestOutputs?: Output[];
 }) {
   const outputs = run.outputs as Record<string, unknown> | null;
@@ -197,13 +198,13 @@ function SuccessOutput({
 
   const entries = Object.entries(outputs);
   const attrLine = `From run v${run.version} · ${formatTime(run.startedAt)}`;
-  const isStale = run.version < currentVersion;
+  const isStale = run.versionId !== currentVersionId;
 
   return (
     <div className="p-4 space-y-4">
       {isStale && (
         <p className="text-xs text-gray-400 italic">
-          Showing output from v{run.version}. Run again to get v{currentVersion} results.
+          Showing output from v{run.version}. Run again to get latest results.
         </p>
       )}
 

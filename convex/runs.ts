@@ -85,7 +85,6 @@ export const trigger = mutation({
     const runId = await ctx.db.insert("runs", {
       automationId: args.automationId,
       versionId: automation.currentVersionId as Id<"automationVersions">,
-      version: automation.currentVersion,
       inputs: args.inputs,
       outputs: null,
       logs: "",
@@ -124,7 +123,8 @@ export const get = query({
       throw new Error("Forbidden");
     }
 
-    return run;
+    const versionDoc = await ctx.db.get(run.versionId);
+    return { ...run, version: versionDoc?.version ?? "1" };
   },
 });
 
@@ -270,7 +270,6 @@ export const triggerInternal = internalMutation({
     const runId = await ctx.db.insert("runs", {
       automationId: args.automationId,
       versionId: automation.currentVersionId as Id<"automationVersions">,
-      version: automation.currentVersion,
       inputs: args.inputs,
       outputs: null,
       logs: "",

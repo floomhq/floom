@@ -23,7 +23,6 @@ export default defineSchema({
       v.id("automationVersions"),
       v.literal("placeholder")
     ),
-    currentVersion: v.number(),
   })
     .index("by_orgId", ["orgId"])
     .index("by_createdBy", ["createdBy"])
@@ -32,7 +31,7 @@ export default defineSchema({
   // Immutable snapshot of code + manifest at each deploy/update.
   automationVersions: defineTable({
     automationId: v.id("automations"),
-    version: v.number(),
+    version: v.string(),
     code: v.string(),
     manifest: v.any(),
     createdAt: v.number(),
@@ -44,7 +43,6 @@ export default defineSchema({
   runs: defineTable({
     automationId: v.id("automations"),
     versionId: v.id("automationVersions"),
-    version: v.number(),
     inputs: v.any(),
     outputs: v.union(v.any(), v.null()),
     logs: v.string(),

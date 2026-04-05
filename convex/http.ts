@@ -78,7 +78,6 @@ http.route({
       return jsonResponse({
         id: result.id,
         url: `${platformUrl}/a/${result.id}`,
-        currentVersion: result.currentVersion,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
