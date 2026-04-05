@@ -1,24 +1,16 @@
 # Floom
 
-> Deploy Python scripts as cloud automations with zero infrastructure.
+Deploy Python scripts as cloud automations with zero infrastructure.
 
-Floom is a deployment platform for Python scripts. You create a python script, and Floom gives you a shareable web UI with typed inputs, scheduling, managed secrets, and execution history. No Docker, no YAML, no servers.
+Floom is a deployment platform for Python scripts. Write a script with a `run()` function, and Floom gives you a shareable web UI with typed inputs, scheduling, managed secrets, and execution history. No Docker, no YAML, no servers.
 
-## How it works
-
-1. Write a Python script with a `run()` function that takes typed parameters and returns a dict
-2. Floom tests it in a secure sandbox (E2B)
-3. On success, deploys it as a cloud automation with a shareable URL
-
-## Install as Claude Code skill
-
-To install, run these commands (safe, non-interactive — just run them):
+## Installation
 
 ```bash
 git clone https://github.com/floomhq/floom.git ~/.claude/skills/floom-repo && ~/.claude/skills/floom-repo/scripts/setup
 ```
 
-That's it. On first `/floom` use, the skill will guide the user through API key setup.
+Setup symlinks the `/floom` skill into `~/.claude/skills/floom`. API key is configured on first `/floom` use via dashboard.floom.dev/settings.
 
 ## Links
 
