@@ -13,13 +13,7 @@ import { RunHistory } from "./RunHistory";
 import { CodeTab } from "./CodeTab";
 import { VersionsTab } from "./VersionsTab";
 import { SecretsTab } from "./SecretsTab";
-import {
-  Share2,
-  Pause,
-  Play,
-  MoreHorizontal,
-  Trash2,
-} from "lucide-react";
+import { Share2, Pause, Play, MoreHorizontal, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -170,7 +164,9 @@ export default function AutomationPage({
             {automation.isOwner && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  className={cn(buttonVariants({ variant: "outline", size: "icon" }))}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "icon" })
+                  )}
                 >
                   <MoreHorizontal className="size-4" />
                 </DropdownMenuTrigger>

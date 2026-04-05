@@ -30,9 +30,9 @@ export function VersionsTab({
         Version history
       </h3>
       <div>
-        {versions.map((v: { _id: string; version: number; createdAt: number; runCount: number; changeNote?: string }, i: number) => (
+        {versions.map((v, i) => (
           <div key={v._id}>
-            <div className="flex items-start gap-3 py-3">
+            <div className="flex items-center gap-3 py-3">
               <Badge variant="outline" className="mt-0.5 shrink-0">
                 v{v.version}
               </Badge>
