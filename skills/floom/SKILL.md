@@ -112,16 +112,16 @@ Derive the manifest from the adapted code:
 }
 ```
 
-**Input type guide:**
+**Input type guide — all values are passed to `run()` as the Python type shown:**
 
-- `text` — short strings (name, query, ID)
-- `textarea` — long text (transcript, document, prompt) — use for 500+ char inputs
-- `url` — links (CSV URL, API endpoint)
-- `file` — file upload (.pdf, .csv, .xlsx) — function receives R2 URL string
-- `number` — any number: integers, floats, percentages (limit, price, threshold)
-- `enum` — fixed choices (tone: professional/casual)
-- `boolean` — true/false toggle (dry run, include headers)
-- `date` — date picker, value passed as ISO string "2024-01-15"
+- `text` — `str`. Short strings (name, query, ID). Example: `run(name: str)` receives `"Alice"`
+- `textarea` — `str`. Long text (transcript, document, prompt) — use for 500+ char inputs. Example: `run(transcript: str)` receives `"Full text here..."`
+- `url` — `str`. Links (CSV URL, API endpoint). Example: `run(feed_url: str)` receives `"https://example.com/data.csv"`
+- `file` — `str`. File upload (.pdf, .csv, .xlsx) — function receives an R2 URL string, not file contents. Use `requests.get()` or `httpx.get()` to download. Example: `run(document: str)` receives `"https://r2.floom.dev/uploads/abc123.pdf"`
+- `number` — `float` or `int`. Any number: integers, floats, percentages. Example: `run(limit: int)` receives `10`; `run(threshold: float)` receives `0.75`
+- `enum` — `str`. Fixed choices (tone: professional/casual). The value is one of the `options` strings. Example: `run(tone: str)` receives `"professional"`
+- `boolean` — `bool`. True/false toggle (dry run, include headers). Example: `run(dry_run: bool)` receives `True` or `False` (Python booleans, not strings)
+- `date` — `str` (ISO 8601 format). Date picker value passed as a **string**, not a date object. Example: `run(target_date: str)` receives `"2024-01-15"`. Parse with `datetime.fromisoformat(target_date)` if you need a date object
 
 **Output type guide:**
 
