@@ -3,6 +3,10 @@ import { v } from "convex/values";
 import { validateManifestStructure } from "./lib/manifest";
 import { requireAuth } from "./lib/auth";
 
+function isOwner(createdBy: string, userId: string): boolean {
+  return createdBy === userId || userId.endsWith(`|${createdBy}`);
+}
+
 type ManifestArg = {
   name: string;
   description: string;
@@ -105,7 +109,7 @@ export const get = query({
       currentVersion: version?.version ?? 1,
       manifest: version?.manifest ?? null,
       runs,
-      isOwner: automation.createdBy === userId,
+      isOwner: isOwner(automation.createdBy, userId),
     };
   },
 });
@@ -340,7 +344,7 @@ export const update = mutation({
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== userId) throw new Error("Forbidden");
+    if (!isOwner(automation.createdBy, userId)) throw new Error("Forbidden");
 
     const manifest = args.manifest as { name?: string; description?: string };
 
@@ -391,7 +395,7 @@ export const setScheduleEnabled = mutation({
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== userId) throw new Error("Forbidden");
+    if (!isOwner(automation.createdBy, userId)) throw new Error("Forbidden");
 
     await ctx.db.patch(args.id, { scheduleEnabled: args.enabled });
     return { id: args.id, scheduleEnabled: args.enabled };
@@ -402,11 +406,11 @@ export const setScheduleEnabled = mutation({
 export const remove = mutation({
   args: { id: v.id("automations") },
   handler: async (ctx, args) => {
-    const { userId } = await requireAuth(ctx);
+    const { orgId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
-    if (automation.createdBy !== userId) throw new Error("Forbidden");
+    if (automation.orgId !== orgId) throw new Error("Forbidden");
 
     // Delete all versions
     const versions = await ctx.db
@@ -424,6 +428,15 @@ export const remove = mutation({
       .collect();
     for (const run of runs) {
       await ctx.db.delete(run._id);
+    }
+
+    // Delete all test runs
+    const testRuns = await ctx.db
+      .query("testRuns")
+      .withIndex("by_automationId", (q) => q.eq("automationId", args.id))
+      .collect();
+    for (const testRun of testRuns) {
+      await ctx.db.delete(testRun._id);
     }
 
     // Delete the automation itself

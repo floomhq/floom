@@ -130,7 +130,9 @@ export default defineSchema({
     startedAt: v.number(),
     finishedAt: v.union(v.number(), v.null()),
     usedAt: v.optional(v.number()), // set when deployed — prevents double-deploy
-  }).index("by_orgId_startedAt", ["orgId", "startedAt"]),
+  })
+    .index("by_orgId_startedAt", ["orgId", "startedAt"])
+    .index("by_automationId", ["automationId"]),
 
   // Org-scoped secrets. AES-256 encrypted. Never returned to frontend.
   secrets: defineTable({
