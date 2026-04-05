@@ -1,6 +1,7 @@
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuth } from "./lib/auth";
+import { nanoid } from "nanoid";
+import { requireAuth, optionalAuth } from "./lib/auth";
 
 function isOwner(createdBy: string, userId: string): boolean {
   return createdBy === userId || userId.endsWith(`|${createdBy}`);
@@ -577,6 +578,126 @@ export const deployInternal = internalMutation({
   },
 });
 
+// Publish an automation with a shareable slug.
+export const publish = mutation({
+  args: {
+    automationId: v.id("automations"),
+    access: v.union(v.literal("public"), v.literal("email")),
+    allowedEmails: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const { orgId } = await requireAuth(ctx);
+    const automation = await ctx.db.get(args.automationId);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== orgId) throw new Error("Forbidden");
+    if (automation.status !== "active") throw new Error("Can only publish active automations");
+
+    // If already has a slug (was published before), reuse it
+    let slug = automation.publishedSlug;
+    if (!slug) {
+      for (let i = 0; i < 3; i++) {
+        const candidate = nanoid(10);
+        const existing = await ctx.db
+          .query("automations")
+          .withIndex("by_publishedSlug", (q) => q.eq("publishedSlug", candidate))
+          .first();
+        if (!existing) { slug = candidate; break; }
+      }
+      if (!slug) throw new Error("Failed to generate unique slug");
+    }
+
+    await ctx.db.patch(args.automationId, {
+      publishedSlug: slug,
+      publishAccess: args.access,
+      allowedEmails: args.access === "email" ? (args.allowedEmails ?? []) : undefined,
+      publishedAt: Date.now(),
+    });
+
+    return { slug };
+  },
+});
+
+// Unpublish an automation. Keeps slug reserved for re-publish.
+export const unpublish = mutation({
+  args: {
+    automationId: v.id("automations"),
+  },
+  handler: async (ctx, args) => {
+    const { orgId } = await requireAuth(ctx);
+    const automation = await ctx.db.get(args.automationId);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== orgId) throw new Error("Forbidden");
+
+    await ctx.db.patch(args.automationId, {
+      publishedAt: undefined,
+      publishAccess: undefined,
+      allowedEmails: undefined,
+    });
+
+    return { success: true };
+  },
+});
+
+// Update publish access settings without changing slug or publishedAt.
+export const updatePublishAccess = mutation({
+  args: {
+    automationId: v.id("automations"),
+    access: v.union(v.literal("public"), v.literal("email")),
+    allowedEmails: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const { orgId } = await requireAuth(ctx);
+    const automation = await ctx.db.get(args.automationId);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== orgId) throw new Error("Forbidden");
+    if (!automation.publishedAt) throw new Error("Automation is not currently published");
+
+    await ctx.db.patch(args.automationId, {
+      publishAccess: args.access,
+      allowedEmails: args.access === "email" ? (args.allowedEmails ?? []) : undefined,
+    });
+
+    return { success: true };
+  },
+});
+
+// Get a published automation by slug. No auth required for public access.
+export const getPublished = query({
+  args: { slug: v.string() },
+  handler: async (ctx, args) => {
+    const automation = await ctx.db
+      .query("automations")
+      .withIndex("by_publishedSlug", (q) => q.eq("publishedSlug", args.slug))
+      .first();
+
+    if (!automation) return null;
+    if (!automation.publishedAt) return { unpublished: true as const };
+    if (automation.status !== "active") return { unavailable: true as const, name: automation.name };
+
+    // Load manifest from current version's artifact
+    const version = automation.currentVersionId !== "placeholder"
+      ? await ctx.db.get(automation.currentVersionId)
+      : null;
+    const artifact = version?.artifactId ? await ctx.db.get(version.artifactId) : null;
+    const manifest = artifact?.manifest ?? null;
+
+    if (automation.publishAccess === "public") {
+      return { name: automation.name, description: automation.description, manifest, automationId: automation._id };
+    }
+
+    // Email-gated
+    const auth = await optionalAuth(ctx);
+    if (!auth) return { requiresAuth: true as const, name: automation.name, description: automation.description };
+
+    const email = auth.email;
+    if (!email || !automation.allowedEmails?.some(e => e.toLowerCase() === email.toLowerCase())) {
+      return { accessDenied: true as const, name: automation.name };
+    }
+
+    return { name: automation.name, description: automation.description, manifest, automationId: automation._id };
+  },
+});
+
 // Internal: update mutation called from HTTP action (bearer token auth).
 export const updateInternal = internalMutation({
   args: {
@@ -617,5 +738,19 @@ export const updateInternal = internalMutation({
     });
 
     return { id: args.id };
+  },
+});
+
+// Internal: check if an automation is published and active (used by file upload action).
+export const getPublishedInternal = internalQuery({
+  args: { slug: v.string() },
+  handler: async (ctx, args) => {
+    const automation = await ctx.db
+      .query("automations")
+      .withIndex("by_publishedSlug", (q) => q.eq("publishedSlug", args.slug))
+      .first();
+    if (!automation || !automation.publishedAt) return null;
+    if (automation.status !== "active") return null;
+    return { _id: automation._id, orgId: automation.orgId };
   },
 });

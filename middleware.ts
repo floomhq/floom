@@ -8,6 +8,7 @@ const isPublicRoute = createRouteMatcher([
   "/api/(.*)",
   "/install-skill.sh",
   "/marketing(.*)",
+  "/p/(.*)",
 ]);
 
 const LANDING_HOSTS = ["floom.dev", "www.floom.dev"];

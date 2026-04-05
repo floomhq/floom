@@ -7,8 +7,9 @@ import {
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
-import { requireAuth } from "./lib/auth";
-import { checkOrgRateLimit } from "./lib/rateLimit";
+import { nanoid } from "nanoid";
+import { requireAuth, optionalAuth } from "./lib/auth";
+import { checkOrgRateLimit, checkPublishedRateLimit } from "./lib/rateLimit";
 
 // Public trigger — mutation (not action) so we have db for auth + rate limit.
 // Mutations can schedule background actions via ctx.scheduler.runAfter().
@@ -240,6 +241,96 @@ export const triggerInternal = internalMutation({
     await ctx.scheduler.runAfter(0, internal.executor.executeRun, { runId });
 
     return { runId };
+  },
+});
+
+// Public trigger for published automations — no auth required (email-gated access optional).
+// Note: "published" triggeredBy is only set by this mutation, not by trigger() or triggerInternal().
+export const triggerPublished = mutation({
+  args: {
+    slug: v.string(),
+    inputs: v.any(),
+  },
+  handler: async (ctx, args) => {
+    // Look up automation by slug
+    const automation = await ctx.db
+      .query("automations")
+      .withIndex("by_publishedSlug", (q) => q.eq("publishedSlug", args.slug))
+      .first();
+
+    if (!automation || !automation.publishedAt)
+      throw new Error("Automation not found");
+    if (automation.status !== "active")
+      throw new Error("Automation is temporarily unavailable");
+    if (automation.currentVersionId === "placeholder")
+      throw new Error("Automation is still deploying");
+
+    // Validate inputs is a plain object (public endpoint, untrusted input)
+    if (args.inputs !== null && typeof args.inputs === "object" && !Array.isArray(args.inputs)) {
+      // OK — plain object
+    } else if (args.inputs === null || args.inputs === undefined) {
+      // OK — no inputs
+    } else {
+      throw new Error("Invalid inputs: expected an object");
+    }
+
+    // Email-gated access check
+    if (automation.publishAccess === "email") {
+      const auth = await optionalAuth(ctx);
+      if (!auth?.email) throw new Error("Sign in required");
+      if (!automation.allowedEmails?.some(e => e.toLowerCase() === auth.email!.toLowerCase()))
+        throw new Error("Access denied");
+    }
+
+    // Rate limits
+    await checkPublishedRateLimit(ctx, automation._id);
+    await checkOrgRateLimit(ctx, automation.orgId);
+
+    // Generate viewToken
+    const viewToken = nanoid(21);
+
+    const runId = await ctx.db.insert("runs", {
+      automationId: automation._id,
+      versionId: automation.currentVersionId as Id<"automationVersions">,
+      inputs: args.inputs,
+      outputs: null,
+      logs: "",
+      status: "pending",
+      errorType: null,
+      error: null,
+      triggeredBy: "published",
+      viewToken,
+      durationMs: null,
+      startedAt: Date.now(),
+      finishedAt: null,
+    });
+
+    await ctx.scheduler.runAfter(0, internal.executor.executeRun, { runId });
+
+    return { runId, viewToken };
+  },
+});
+
+// Public query for published run results — auth via viewToken, not session.
+export const getPublishedRun = query({
+  args: {
+    runId: v.id("runs"),
+    viewToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) return null;
+    if (run.triggeredBy !== "published" || run.viewToken !== args.viewToken)
+      return null;
+
+    return {
+      status: run.status,
+      outputs: run.outputs,
+      logs: run.logs,
+      error: run.error,
+      errorType: run.errorType,
+      durationMs: run.durationMs,
+    };
   },
 });
 
