@@ -178,7 +178,7 @@ async function executeInSandbox(params: {
   }
 }
 
-// Execute a deployed automation run (code from automationVersions).
+// Execute a deployed automation run (code from artifacts via automationVersions).
 export const executeRun = internalAction({
   args: { runId: v.id("runs") },
   handler: async (ctx, args) => {
@@ -192,6 +192,23 @@ export const executeRun = internalAction({
     });
     if (!version) throw new Error("Version not found");
 
+    // Fetch artifact for code+manifest
+    const artifact = await ctx.runQuery(internal.artifacts.get, {
+      id: version.artifactId,
+    });
+    if (!artifact) {
+      await ctx.runMutation(internal.runs.finishRun, {
+        runId: args.runId,
+        status: "error",
+        errorType: "sandbox_error",
+        error: "Artifact not found",
+        outputs: null,
+        logs: "",
+        durationMs: 0,
+      });
+      return;
+    }
+
     await ctx.runMutation(internal.runs.updateRunStatus, {
       runId: args.runId,
       status: "running",
@@ -202,8 +219,8 @@ export const executeRun = internalAction({
     })) as Record<string, string>;
 
     const result = await executeInSandbox({
-      code: version.code,
-      manifest: version.manifest as { python_dependencies?: string[]; inputs?: Array<{ name: string; type: string }> },
+      code: artifact.code,
+      manifest: artifact.manifest as { python_dependencies?: string[]; inputs?: Array<{ name: string; type: string }> },
       inputs: run.inputs as Record<string, unknown>,
       secrets,
     });
@@ -215,7 +232,7 @@ export const executeRun = internalAction({
   },
 });
 
-// Execute a test run (code stored inline on the testRun record).
+// Execute a test run (code from artifacts).
 export const executeTestRun = internalAction({
   args: { testRunId: v.id("testRuns") },
   handler: async (ctx, args) => {
@@ -223,6 +240,23 @@ export const executeTestRun = internalAction({
       testRunId: args.testRunId,
     });
     if (!testRun) throw new Error("Test run not found");
+
+    // Fetch artifact for code+manifest
+    const artifact = await ctx.runQuery(internal.artifacts.get, {
+      id: testRun.artifactId,
+    });
+    if (!artifact) {
+      await ctx.runMutation(internal.testRuns.finishTestRun, {
+        testRunId: args.testRunId,
+        status: "error",
+        errorType: "sandbox_error",
+        error: "Artifact not found",
+        outputs: null,
+        logs: "",
+        durationMs: 0,
+      });
+      return;
+    }
 
     await ctx.runMutation(internal.testRuns.updateStatus, {
       testRunId: args.testRunId,
@@ -234,8 +268,8 @@ export const executeTestRun = internalAction({
     })) as Record<string, string>;
 
     const result = await executeInSandbox({
-      code: testRun.code,
-      manifest: testRun.manifest as { python_dependencies?: string[]; inputs?: Array<{ name: string; type: string }> },
+      code: artifact.code,
+      manifest: artifact.manifest as { python_dependencies?: string[]; inputs?: Array<{ name: string; type: string }> },
       inputs: testRun.inputs as Record<string, unknown>,
       secrets,
     });

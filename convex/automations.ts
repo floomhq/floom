@@ -1,6 +1,5 @@
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
-import { validateManifestStructure } from "./lib/manifest";
 import { requireAuth } from "./lib/auth";
 
 function isOwner(createdBy: string, userId: string): boolean {
@@ -81,6 +80,8 @@ export const get = query({
         ? await ctx.db.get(automation.currentVersionId)
         : null;
 
+    const artifact = version ? await ctx.db.get(version.artifactId) : null;
+
     // 20 most recent runs
     const rawRuns = await ctx.db
       .query("runs")
@@ -107,7 +108,7 @@ export const get = query({
     return {
       ...automation,
       currentVersion: version?.version ?? 1,
-      manifest: version?.manifest ?? null,
+      manifest: artifact?.manifest ?? null,
       runs,
       isOwner: isOwner(automation.createdBy, userId),
     };
@@ -137,6 +138,8 @@ export const getDetailInternal = internalQuery({
         ? await ctx.db.get(automation.currentVersionId)
         : null;
 
+    const artifact = version ? await ctx.db.get(version.artifactId) : null;
+
     return {
       id: automation._id,
       name: automation.name,
@@ -146,8 +149,8 @@ export const getDetailInternal = internalQuery({
       scheduleEnabled: automation.scheduleEnabled ?? true,
       createdAt: automation.createdAt,
       currentVersion: version?.version ?? 1,
-      code: version?.code ?? null,
-      manifest: version?.manifest ?? null,
+      code: artifact?.code ?? null,
+      manifest: artifact?.manifest ?? null,
     };
   },
 });
@@ -267,7 +270,13 @@ export const getVersion = query({
       throw new Error("Forbidden");
     }
 
-    return version;
+    const artifact = await ctx.db.get(version.artifactId);
+
+    return {
+      ...version,
+      code: artifact?.code ?? null,
+      manifest: artifact?.manifest ?? null,
+    };
   },
 });
 
@@ -275,28 +284,22 @@ export const getVersion = query({
 // Called from: frontend useMutation + HTTP action for skill CLI.
 export const deploy = mutation({
   args: {
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     changeNote: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId, orgId } = await requireAuth(ctx);
 
-    const manifest = args.manifest as {
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact) throw new Error("Artifact not found");
+    if (artifact.orgId !== orgId) throw new Error("Forbidden");
+
+    const manifest = artifact.manifest as {
       name: string;
       description: string;
       schedule?: string | null;
       scheduleInputs?: Record<string, unknown> | null;
-      inputs: Array<{ name: string; label: string; type: string }>;
-      outputs: Array<{ name: string; label: string; type: string }>;
-      secrets_needed?: string[];
     };
-
-    // Validate manifest structure
-    const validationError = validateManifestStructure(args.code, manifest as Parameters<typeof validateManifestStructure>[1]);
-    if (validationError) {
-      throw new Error(`Validation failed: ${validationError.message}`);
-    }
 
     // Create a placeholder automation first so we have the ID
     const automationId = await ctx.db.insert("automations", {
@@ -316,8 +319,7 @@ export const deploy = mutation({
     const versionId = await ctx.db.insert("automationVersions", {
       automationId,
       version: 1,
-      code: args.code,
-      manifest: args.manifest,
+      artifactId: args.artifactId,
       createdAt: Date.now(),
       createdBy: userId,
       changeNote: args.changeNote ?? null,
@@ -335,27 +337,21 @@ export const deploy = mutation({
 export const update = mutation({
   args: {
     id: v.id("automations"),
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     changeNote: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireAuth(ctx);
+    const { userId, orgId } = await requireAuth(ctx);
 
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
     if (!isOwner(automation.createdBy, userId)) throw new Error("Forbidden");
 
-    const manifest = args.manifest as { name?: string; description?: string };
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact) throw new Error("Artifact not found");
+    if (artifact.orgId !== orgId) throw new Error("Forbidden");
 
-    // Validate
-    const validationError = validateManifestStructure(
-      args.code,
-      args.manifest as Parameters<typeof validateManifestStructure>[1]
-    );
-    if (validationError) {
-      throw new Error(`Validation failed: ${validationError.message}`);
-    }
+    const manifest = artifact.manifest as { name?: string; description?: string };
 
     // Derive next version number from the current version doc
     const currentVersionDoc = automation.currentVersionId !== "placeholder"
@@ -366,8 +362,7 @@ export const update = mutation({
     const versionId = await ctx.db.insert("automationVersions", {
       automationId: args.id,
       version: newVersion,
-      code: args.code,
-      manifest: args.manifest,
+      artifactId: args.artifactId,
       createdAt: Date.now(),
       createdBy: userId,
       changeNote: args.changeNote ?? null,
@@ -543,19 +538,17 @@ export const hasRunningRun = internalMutation({
 // Internal: deploy mutation called from HTTP action (bearer token auth).
 export const deployInternal = internalMutation({
   args: {
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     changeNote: v.optional(v.string()),
     clerkUserId: v.string(),
     orgId: v.id("organizations"),
   },
   handler: async (ctx, args) => {
-    const manifest = args.manifest as ManifestArg;
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact) throw new Error("Artifact not found");
+    if (artifact.orgId !== args.orgId) throw new Error("Forbidden");
 
-    const validationError = validateManifestStructure(args.code, manifest as Parameters<typeof validateManifestStructure>[1]);
-    if (validationError) {
-      throw new Error(`Validation failed: ${validationError.message}`);
-    }
+    const manifest = artifact.manifest as ManifestArg;
 
     const automationId = await ctx.db.insert("automations", {
       name: manifest.name,
@@ -572,8 +565,7 @@ export const deployInternal = internalMutation({
     const versionId = await ctx.db.insert("automationVersions", {
       automationId,
       version: 1,
-      code: args.code,
-      manifest: args.manifest,
+      artifactId: args.artifactId,
       createdAt: Date.now(),
       createdBy: args.clerkUserId,
       changeNote: args.changeNote ?? null,
@@ -589,8 +581,7 @@ export const deployInternal = internalMutation({
 export const updateInternal = internalMutation({
   args: {
     id: v.id("automations"),
-    code: v.string(),
-    manifest: v.any(),
+    artifactId: v.id("artifacts"),
     changeNote: v.optional(v.string()),
     clerkUserId: v.string(),
   },
@@ -598,12 +589,11 @@ export const updateInternal = internalMutation({
     const automation = await ctx.db.get(args.id);
     if (!automation) throw new Error("Automation not found");
 
-    const manifest = args.manifest as ManifestArg;
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact) throw new Error("Artifact not found");
+    if (artifact.orgId !== automation.orgId) throw new Error("Forbidden");
 
-    const validationError = validateManifestStructure(args.code, manifest as Parameters<typeof validateManifestStructure>[1]);
-    if (validationError) {
-      throw new Error(`Validation failed: ${validationError.message}`);
-    }
+    const manifest = artifact.manifest as ManifestArg;
 
     // Derive next version number from the current version doc
     const currentVersionDoc = automation.currentVersionId !== "placeholder"
@@ -614,8 +604,7 @@ export const updateInternal = internalMutation({
     const versionId = await ctx.db.insert("automationVersions", {
       automationId: args.id,
       version: newVersion,
-      code: args.code,
-      manifest: args.manifest,
+      artifactId: args.artifactId,
       createdAt: Date.now(),
       createdBy: args.clerkUserId,
       changeNote: args.changeNote ?? null,
