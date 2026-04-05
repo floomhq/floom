@@ -53,7 +53,11 @@ export function CodeTab({
             }
           >
             <SelectTrigger size="sm">
-              <SelectValue />
+              <SelectValue placeholder="Select version">
+                {selectedVersion
+                  ? `v${selectedVersion.version}${selectedVersion._id === currentVersionId ? " (current)" : ""}${selectedVersion.changeNote ? ` · ${selectedVersion.changeNote}` : ""}`
+                  : "Select version"}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {versions.map((v: { _id: string; version: number; changeNote?: string; createdAt: number }) => (
