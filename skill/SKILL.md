@@ -1,14 +1,14 @@
 ---
 name: floom
 description: |
-  Build and deploy agents to the cloud and share them with your team.
-  Use when: "deploy automation", "create automation", "floom", "deploy python script",
-  "schedule a script", "fix automation".
+  Deploy Python scripts to the cloud and share them with your team.
+  Use when: "deploy automation", "deploy python script", "floom",
+  "schedule a script", "update automation".
 ---
 
 # Floom
 
-Deploy Python automations and share them with your team — no infra required.
+Deploy Python scripts as cloud automations — no infra required.
 
 ## Setup
 
@@ -36,64 +36,47 @@ echo '{"api_key": "PASTE_KEY_HERE", "platform_url": "https://dashboard.floom.dev
 
 ## Deploy Flow (`/floom`)
 
-Run this when the user wants to deploy a new automation.
+### Step 1: Get the script
 
-### Step 1: Gather requirements
+Get the user's Python script. Be flexible:
 
-Ask the user to describe the automation. One question at a time:
+- If the user points to a file, read it
+- If the user pastes code, use that
+- If unclear, ask: "Which Python script do you want to deploy?"
 
-1. "What does this automation do? Describe it in plain language."
-2. "What information does it need as input? (e.g., a URL, a text paste, a file)"
-3. "What should the output look like? (a table, a number, a text summary)"
-4. "Does it need any external APIs or services? (e.g., Salesforce, Anthropic, Clearbit)"
-5. "Should it run automatically on a schedule? (e.g., every Monday at 9am, daily at 8am)"
+### Step 2: Adapt to platform format
 
-For the schedule question: if yes, convert to cron directly:
+The platform requires a `run()` function that takes inputs as parameters and returns a dict.
 
-- "Every Monday at 9am" → `0 9 * * 1`
-- "Daily at 8am" → `0 8 * * *`
-- No confirmation needed — just use the cron string.
+**If the script already has a `run()` function:** validate it returns a dict and move on.
 
-If scheduled and has required inputs: ask "What default values should it use when it runs automatically?"
+**If it doesn't:** adapt the script:
 
-### Step 2: Generate code
-
-Write a Python function with this exact signature:
-
-```python
-def run(param1: type, param2: type = default) -> dict:
-    """
-    One-sentence description.
-
-    Args:
-        param1: Description
-        param2: Description (default: X)
-
-    Returns:
-        key1: Description
-        key2: Description
-    """
-    # implementation
-    return {"key1": value1, "key2": value2}
-```
+1. Identify inputs — look for hardcoded values, config variables, CLI args (`sys.argv`, `argparse`), environment variables (`os.environ`), or constants that should be parameterized
+2. Identify outputs — look for print statements, return values, file writes, or data that represents the result
+3. Wrap the script body in `def run(param1, param2, ...) -> dict:` with inputs as parameters
+4. Capture outputs as a return dict: `return {"key1": value1, "key2": value2}`
+5. Preserve all imports and helper functions outside `run()`
 
 **Rules:**
 
 - Function named exactly `run`
-- All inputs are function parameters (no globals)
+- All inputs are function parameters (no globals, no CLI args, no env vars for user inputs)
 - Returns a dict — keys match manifest output names exactly
 - No `exec(..., globals())` — subprocess isolation is handled by the platform
-- Use `# type: ignore` only if truly necessary
+- Secrets (API keys, tokens) stay as `os.environ["SECRET_NAME"]` — the platform injects them
 
 **Dependency selection:**
 
-- Anthropic SDK: `anthropic` (always available in E2B `enrichment` template)
-- Data/CSV/Excel: `pandas`, `openpyxl` (in E2B `data-science` template)
-- PDF parsing: `PyMuPDF` (in E2B `data-science` template)
+- Anthropic SDK: `anthropic` (always available in E2B)
+- Data/CSV/Excel: `pandas`, `openpyxl`
+- PDF parsing: `PyMuPDF`
 - HTTP requests: `requests`, `httpx` (always available)
 - Unknown deps: list them in `python_dependencies` — platform pip installs at run time
 
 ### Step 3: Generate manifest
+
+Derive the manifest from the adapted code:
 
 ```json
 {
@@ -123,7 +106,7 @@ def run(param1: type, param2: type = default) -> dict:
       "columns": ["col1", "col2"]
     }
   ],
-  "secrets_needed": ["ANTHROPIC_API_KEY", "SALESFORCE_TOKEN"],
+  "secrets_needed": ["ANTHROPIC_API_KEY"],
   "python_dependencies": ["anthropic", "pandas"],
   "manifest_version": "1.0"
 }
@@ -132,51 +115,39 @@ def run(param1: type, param2: type = default) -> dict:
 **Input type guide:**
 
 - `text` — short strings (name, query, ID)
-- `textarea` — long text (transcript paste, document, prompt) — use for 500+ char inputs
-- `url` — links (CSV URL, API endpoint, image URL)
-- `file` — file upload (.pdf, .csv, .xlsx, image) — function receives R2 URL string
+- `textarea` — long text (transcript, document, prompt) — use for 500+ char inputs
+- `url` — links (CSV URL, API endpoint)
+- `file` — file upload (.pdf, .csv, .xlsx) — function receives R2 URL string
 - `integer` — numbers (limit, count, year)
-- `enum` — fixed choices (tone: professional/casual, format: summary/bullets)
+- `enum` — fixed choices (tone: professional/casual)
 
-### Step 4: Show for review
+**Output type guide:**
 
-Show both files to the user. Say:
+- `text` — string output
+- `table` — list of dicts (include `columns` array)
+- `integer` — numeric output
+- `html` — rendered HTML
+- `pdf` — PDF document
 
-```
-Here's what I'll deploy:
+For schedule: convert natural language to cron directly. "Every Monday at 9am" -> `0 9 * * 1`. If scheduled and has required inputs, set `scheduleInputs` with defaults.
 
-**automation.py** — [X lines]
-[code block]
+Only ask the user questions if something is genuinely ambiguous (e.g., can't tell what the inputs should be). Otherwise, infer everything from the code.
 
-**manifest.json**
-[json block]
-
-Does this look right? I'll deploy when you confirm.
-```
-
-### Step 5: Handle secrets
+### Step 4: Handle secrets
 
 Read config:
 
 ```bash
-cat ~/.claude/floom-config.json
-```
-
-Check which secrets from `secrets_needed` the user already has stored.
-Call the platform to get stored secret names:
-
-```bash
 API_KEY=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin)['api_key'])")
 PLATFORM=$(cat ~/.claude/floom-config.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('platform_url','https://dashboard.floom.dev'))")
-# Note: check stored secrets via the platform's HTTP action (once deployed)
 ```
 
-For each missing secret, ask one at a time:
+For each secret in `secrets_needed`, ask one at a time:
 
 ```
 This automation needs ANTHROPIC_API_KEY. Do you have one?
 If yes: paste it and I'll store it securely for all your workspace's automations.
-If no: I'll skip this for now — you can add it in Settings before running.
+If no: I'll skip this — you can add it in Settings before running.
 ```
 
 Store each secret:
@@ -188,13 +159,13 @@ curl -s -X POST "$PLATFORM/api/secrets" \
   -d '{"name": "SECRET_NAME", "value": "SECRET_VALUE"}'
 ```
 
-### Step 6: Deploy
+### Step 5: Deploy
 
 ```bash
 # Write files to temp dir
 mkdir -p /tmp/floom-deploy
 cat > /tmp/floom-deploy/automation.py << 'PYEOF'
-[GENERATED CODE]
+[ADAPTED CODE]
 PYEOF
 
 cat > /tmp/floom-deploy/manifest.json << 'JSONEOF'
@@ -214,13 +185,13 @@ curl -s -X POST "$PLATFORM/api/deploy" \
 On success (JSON with `id` and `url`):
 
 ```
-✓ Deployed! Your automation is live:
+Deployed! Your automation is live:
 
   [URL from response]
 
-Share this URL with your team. They can run it directly — no terminal needed.
+Share this URL with your team — they can run it directly, no terminal needed.
 
-Want me to run a test right now?
+Want me to run a test?
 ```
 
 On error:
@@ -235,9 +206,9 @@ Want me to fix the issue and try again?
 
 ## Update Flow (`/floom update [url or name]`)
 
-1. Fetch current code from platform (via Convex SDK — not HTTP, so ask user to paste current code or re-describe changes)
+1. Fetch current code from platform (ask user to paste current code or re-describe changes)
 2. Show existing code, ask what to change
-3. Regenerate function with changes
+3. Apply changes to the function
 4. Ask: "What changed? (optional note for version history)"
 5. Deploy update:
 
@@ -278,61 +249,12 @@ done
 
 ---
 
-## Fix Flow (`/floom fix [url]`)
-
-When a run errors, offer to debug:
-
-1. Fetch the error from the platform
-2. Analyze the traceback
-3. Identify the fix
-4. Update the automation via the update flow
-
----
-
-## Canonical Examples
-
-### Sales: Outbound Personalization
-
-- Inputs: `leads_url` (url), `tone` (enum: professional/casual/direct), `max_leads` (integer, default 50)
-- Output: `messages` (table: name, company, subject, body), `processed_count` (integer)
-- Deps: anthropic, pandas, requests
-- No schedule (manual)
-
-### CS: Customer Health Score
-
-- Inputs: `usage_csv_url` (url), `tickets_csv_url` (url)
-- Output: `scores` (table: account, health_score, risk_flag), `at_risk_count` (integer)
-- Deps: anthropic, pandas, requests
-
-### Marketing: Content Repurposing
-
-- Inputs: `blog_post` (textarea), `formats` (enum: all/linkedin/twitter/email)
-- Output: `linkedin_post` (text), `tweet_thread` (text), `email_newsletter` (text)
-- Deps: anthropic
-
-### Finance: Pipeline Digest
-
-- Inputs: `crm_url` (url), `min_amount` (integer, default 10000)
-- Output: `deals` (table: name, stage, amount, owner), `pipeline_total` (integer)
-- Schedule: `0 9 * * 1` (Monday 9am UTC)
-- Schedule inputs: `{"crm_url": "stored_in_secrets_or_ask", "min_amount": 10000}`
-- Deps: anthropic, requests
-
-### Marketing: Competitor Monitoring
-
-- Inputs: `competitor_urls` (textarea), `notify_email` (text)
-- Output: `changes` (table: competitor, change_type, description), `change_count` (integer)
-- Schedule: `0 8 * * 1` (Weekly Monday 8am)
-- Deps: anthropic, requests
-
----
-
 ## Error Messages
 
 | Error                 | What to say                                                                    |
 | --------------------- | ------------------------------------------------------------------------------ |
 | 400 Validation failed | "The code has an issue: [message]. Let me fix that."                           |
-| 401 Unauthorized      | "Your API key isn't working. Get a new one from dashboard.floom.dev/settings."    |
+| 401 Unauthorized      | "Your API key isn't working. Get a new one from dashboard.floom.dev/settings." |
 | 403 Forbidden         | "You don't have permission to update this automation."                         |
-| Rate limit exceeded   | "You've hit the limit of 50 runs/hour. Try again in a bit."                    |
+| Rate limit exceeded   | "You've hit the limit of 50 runs/hour. Try again in a bit."                   |
 | Missing secret        | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
