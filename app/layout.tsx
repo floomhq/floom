@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
-import { Inter, DM_Serif_Display, JetBrains_Mono } from "next/font/google";
+import { Inter, DM_Serif_Display, JetBrains_Mono, Geist } from "next/font/google";
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const dmSerif = DM_Serif_Display({
@@ -26,7 +29,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`h-full ${inter.variable} ${dmSerif.variable} ${jetbrainsMono.variable}`}
+      className={cn("h-full", inter.variable, dmSerif.variable, jetbrainsMono.variable, "font-sans", geist.variable)}
       style={
         {
           "--font-body": inter.style.fontFamily,
