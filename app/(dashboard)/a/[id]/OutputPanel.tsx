@@ -130,7 +130,10 @@ export function OutputPanel({
 function ErrorOutput({ run }: { run: Run }) {
   const [showLogs, setShowLogs] = useState(false);
 
-  const errorMessages: Record<string, { icon: React.ReactNode; title: string; detail: string }> = {
+  const errorMessages: Record<
+    string,
+    { icon: React.ReactNode; title: string; detail: string }
+  > = {
     missing_secret: {
       icon: <Key size={18} className="text-red-500 shrink-0 mt-0.5" />,
       title: `Missing API key${run.error ? `: ${run.error.replace("Missing secrets: ", "")}` : ""}`,
@@ -142,7 +145,9 @@ function ErrorOutput({ run }: { run: Run }) {
       detail: `Fix with: /floom fix [url]`,
     },
     sandbox_error: {
-      icon: <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />,
+      icon: (
+        <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+      ),
       title: "Temporary service error",
       detail: "Try again in a moment.",
     },
@@ -153,7 +158,8 @@ function ErrorOutput({ run }: { run: Run }) {
     },
   };
 
-  const errInfo = errorMessages[run.errorType ?? "runtime_error"] ??
+  const errInfo =
+    errorMessages[run.errorType ?? "runtime_error"] ??
     errorMessages.runtime_error;
 
   return (
@@ -210,7 +216,14 @@ function SuccessOutput({
 
       {entries.map(([key, value]) => {
         const manifestOut = manifestOutputs.find((o) => o.name === key);
-        return <OutputBlock key={key} name={key} value={value} manifestType={manifestOut?.type} />;
+        return (
+          <OutputBlock
+            key={key}
+            name={key}
+            value={value}
+            manifestType={manifestOut?.type}
+          />
+        );
       })}
 
       <p className="text-xs text-gray-400 mt-2">
@@ -221,7 +234,15 @@ function SuccessOutput({
   );
 }
 
-function OutputBlock({ name, value, manifestType }: { name: string; value: unknown; manifestType?: ManifestOutputType }) {
+function OutputBlock({
+  name,
+  value,
+  manifestType,
+}: {
+  name: string;
+  value: unknown;
+  manifestType?: ManifestOutputType;
+}) {
   // Manifest-declared types take priority over duck typing
   if (manifestType === "html" && typeof value === "string") {
     return <HtmlOutput label={name} html={value} />;
@@ -230,8 +251,14 @@ function OutputBlock({ name, value, manifestType }: { name: string; value: unkno
     return <PdfOutput label={name} base64={value} />;
   }
 
-  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "object") {
-    return <TableOutput label={name} rows={value as Record<string, unknown>[]} />;
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    typeof value[0] === "object"
+  ) {
+    return (
+      <TableOutput label={name} rows={value as Record<string, unknown>[]} />
+    );
   }
 
   if (typeof value === "number") {
@@ -407,10 +434,12 @@ function TableOutput({
                 {columns.map((col) => (
                   <td key={col}>
                     <div
-                      className="td-cell"
+                      className="td-cell hover:bg-gray-100"
                       tabIndex={0}
                       onFocus={(e) => e.currentTarget.classList.add("expanded")}
-                      onBlur={(e) => e.currentTarget.classList.remove("expanded")}
+                      onBlur={(e) =>
+                        e.currentTarget.classList.remove("expanded")
+                      }
                       dangerouslySetInnerHTML={{
                         __html: linkify(String(row[col] ?? "")),
                       }}
