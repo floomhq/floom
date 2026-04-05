@@ -118,7 +118,7 @@ export const get = query({
     }
 
     const versionDoc = await ctx.db.get(run.versionId);
-    return { ...run, version: versionDoc?.version ?? "1" };
+    return { ...run, version: versionDoc?.version ?? 1 };
   },
 });
 

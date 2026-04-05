@@ -156,7 +156,7 @@ type Automation = {
   _id: string;
   name: string;
   description: string;
-  currentVersion: string;
+  currentVersion: number;
   createdAt: number;
   status: "active" | "deploying" | "failed";
   schedule: string | null;

@@ -29,7 +29,7 @@ export default defineSchema({
   // Immutable snapshot of code + manifest at each deploy/update.
   automationVersions: defineTable({
     automationId: v.id("automations"),
-    version: v.string(),
+    version: v.number(),
     code: v.string(),
     manifest: v.any(),
     createdAt: v.number(),
