@@ -1,0 +1,56 @@
+#!/bin/bash
+# Floom setup — run after cloning to ~/.claude/skills/floom
+set -e
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILL_DIR="$HOME/.claude/skills/floom"
+CONFIG_FILE="$HOME/.claude/floom-config.json"
+PLATFORM_URL="https://dashboard.floom.dev"
+
+# ── Check location ──────────────────────────────────────────────
+if [ "$REPO_DIR" != "$SKILL_DIR" ]; then
+  echo "Error: floom must be cloned to ~/.claude/skills/floom"
+  echo ""
+  echo "  git clone https://github.com/floom-dev/floom.git ~/.claude/skills/floom"
+  echo "  cd ~/.claude/skills/floom && ./setup"
+  exit 1
+fi
+
+# ── Symlink SKILL.md to root so Claude Code discovers it ────────
+if [ -L "$SKILL_DIR/SKILL.md" ]; then
+  rm "$SKILL_DIR/SKILL.md"
+fi
+ln -sf "$REPO_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
+echo "✓ Linked SKILL.md"
+
+# ── Configure API key ───────────────────────────────────────────
+if [ -f "$CONFIG_FILE" ]; then
+  EXISTING_KEY=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE')).get('api_key',''))" 2>/dev/null || true)
+  if [ -n "$EXISTING_KEY" ]; then
+    echo "✓ Config exists ($CONFIG_FILE)"
+    echo ""
+    echo "Done! Type /floom in Claude Code to get started."
+    exit 0
+  fi
+fi
+
+echo ""
+echo "Get your API key from: $PLATFORM_URL/settings"
+echo ""
+printf "Paste your API key: "
+read -r API_KEY
+
+if [ -z "$API_KEY" ]; then
+  echo ""
+  echo "⚠ Skipped API key. Add it later:"
+  echo "  echo '{\"api_key\": \"YOUR_KEY\", \"platform_url\": \"$PLATFORM_URL\"}' > $CONFIG_FILE"
+  echo ""
+  echo "Done! Type /floom in Claude Code to get started."
+  exit 0
+fi
+
+echo "{\"api_key\": \"$API_KEY\", \"platform_url\": \"$PLATFORM_URL\"}" | python3 -c "import sys,json; json.dump(json.load(sys.stdin), open('$CONFIG_FILE','w'), indent=2)"
+echo "✓ Wrote config to $CONFIG_FILE"
+
+echo ""
+echo "Done! Type /floom in Claude Code to get started."

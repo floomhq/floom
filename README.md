@@ -4,17 +4,14 @@ Deploy Python scripts as cloud automations. No infra, no Docker, no YAML. Just u
 
 ## Install (Claude Code)
 
-Paste this into Claude Code:
-
+```bash
+git clone https://github.com/floom-dev/floom.git ~/.claude/skills/floom
+cd ~/.claude/skills/floom && ./setup
 ```
-curl -sL https://dashboard.floom.dev/install-skill.sh | bash
-```
 
-Then:
+Setup will ask for your API key — get it from [dashboard.floom.dev/settings](https://dashboard.floom.dev/settings).
 
-1. Get your API key from [dashboard.floom.dev/settings](https://dashboard.floom.dev/settings)
-2. Add it to `~/.claude/floom-config.json`
-3. Type `/floom` to deploy your first script
+Then type `/floom` in Claude Code to deploy your first script.
 
 ## What it does
 
