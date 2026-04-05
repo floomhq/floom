@@ -373,6 +373,55 @@ export const gallery = query({
   },
 });
 
+// Rollback to a previous version.
+export const rollback = mutation({
+  args: {
+    id: v.id("automations"),
+    versionId: v.id("automationVersions"),
+  },
+  handler: async (ctx, args) => {
+    const { userId, orgId } = await requireAuth(ctx);
+
+    const automation = await ctx.db.get(args.id);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== orgId) throw new Error("Forbidden");
+
+    const version = await ctx.db.get(args.versionId);
+    if (!version) throw new Error("Version not found");
+    if (version.automationId !== args.id) {
+      throw new Error("Version does not belong to this automation");
+    }
+
+    await ctx.db.patch(args.id, { currentVersionId: args.versionId });
+
+    return { id: args.id, currentVersion: version.version };
+  },
+});
+
+// Internal rollback — called from HTTP action (bearer token auth).
+export const rollbackInternal = internalMutation({
+  args: {
+    id: v.id("automations"),
+    versionId: v.id("automationVersions"),
+    orgId: v.id("organizations"),
+  },
+  handler: async (ctx, args) => {
+    const automation = await ctx.db.get(args.id);
+    if (!automation) throw new Error("Automation not found");
+    if (automation.orgId !== args.orgId) throw new Error("Forbidden");
+
+    const version = await ctx.db.get(args.versionId);
+    if (!version) throw new Error("Version not found");
+    if (version.automationId !== args.id) {
+      throw new Error("Version does not belong to this automation");
+    }
+
+    await ctx.db.patch(args.id, { currentVersionId: args.versionId });
+
+    return { id: args.id, currentVersion: version.version };
+  },
+});
+
 // Internal: check if a scheduled run is already in progress (cron dedup).
 // Returns true if a run exists with status=running for this automation.
 export const hasRunningRun = internalMutation({

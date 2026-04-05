@@ -78,8 +78,7 @@ export default defineSchema({
     name: v.string(),
     createdAt: v.number(),
     createdBy: v.string(),
-  })
-    .index("by_clerkOrgId", ["clerkOrgId"]),
+  }).index("by_clerkOrgId", ["clerkOrgId"]),
 
   // Org-scoped API keys. SHA-256 hashed. Full key shown once on creation.
   apiKeys: defineTable({
@@ -99,8 +98,39 @@ export default defineSchema({
     email: v.string(),
     clerkUserId: v.string(),
     createdAt: v.number(),
-  })
-    .index("by_clerkUserId", ["clerkUserId"]),
+  }).index("by_clerkUserId", ["clerkUserId"]),
+
+  // Test runs — sandbox execution of code before deploying as a version.
+  // Code stored inline (not in automationVersions). Counts toward rate limits.
+  testRuns: defineTable({
+    orgId: v.id("organizations"),
+    automationId: v.optional(v.id("automations")), // present when testing update
+    code: v.string(),
+    manifest: v.any(),
+    inputs: v.any(),
+    outputs: v.union(v.any(), v.null()),
+    logs: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("success"),
+      v.literal("error"),
+      v.literal("timeout")
+    ),
+    errorType: v.union(
+      v.literal("timeout"),
+      v.literal("syntax_error"),
+      v.literal("runtime_error"),
+      v.literal("missing_secret"),
+      v.literal("sandbox_error"),
+      v.null()
+    ),
+    error: v.union(v.string(), v.null()),
+    durationMs: v.union(v.number(), v.null()),
+    startedAt: v.number(),
+    finishedAt: v.union(v.number(), v.null()),
+    usedAt: v.optional(v.number()), // set when deployed — prevents double-deploy
+  }).index("by_orgId_startedAt", ["orgId", "startedAt"]),
 
   // Org-scoped secrets. AES-256 encrypted. Never returned to frontend.
   secrets: defineTable({
