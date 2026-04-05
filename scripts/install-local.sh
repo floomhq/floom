@@ -25,26 +25,16 @@ mkdir -p "$SKILL_DIR"
 cp "$SCRIPT_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
 echo "  Copied skill/SKILL.md -> $SKILL_DIR/SKILL.md"
 
-# Write dev config (preserves existing api_key if present)
-if [ -f "$CONFIG_FILE" ]; then
-  EXISTING_KEY=$(python3 -c "import json; print(json.load(open('$CONFIG_FILE')).get('api_key',''))" 2>/dev/null || true)
-  if [ -n "$EXISTING_KEY" ]; then
-    python3 -c "
-import json
-cfg = json.load(open('$CONFIG_FILE'))
-cfg['platform_url'] = '$PLATFORM_URL'
-json.dump(cfg, open('$CONFIG_FILE', 'w'), indent=2)
-print('\n')
-"
-    echo "  Updated platform_url -> $PLATFORM_URL (kept existing api_key)"
-  else
-    echo "{\"api_key\": \"\", \"platform_url\": \"$PLATFORM_URL\"}" | python3 -c "import sys,json; json.dump(json.load(sys.stdin), open('$CONFIG_FILE','w'), indent=2)"
-    echo "  Wrote config (no api_key found — add one from the app)"
-  fi
-else
-  echo "{\"api_key\": \"\", \"platform_url\": \"$PLATFORM_URL\"}" | python3 -c "import sys,json; json.dump(json.load(sys.stdin), open('$CONFIG_FILE','w'), indent=2)"
-  echo "  Created config (add your api_key from the app)"
+# Load api_key from .env.local
+FLOOM_DEV_AGENT_KEY=$(grep '^FLOOM_DEV_AGENT_KEY=' "$ENV_FILE" | cut -d'=' -f2-)
+if [ -z "$FLOOM_DEV_AGENT_KEY" ]; then
+  echo "Error: FLOOM_DEV_AGENT_KEY not set in .env.local"
+  exit 1
 fi
+
+# Write dev config
+echo "{\"api_key\": \"$FLOOM_DEV_AGENT_KEY\", \"platform_url\": \"$PLATFORM_URL\"}" | python3 -c "import sys,json; json.dump(json.load(sys.stdin), open('$CONFIG_FILE','w'), indent=2)"
+echo "  Wrote config (api_key from .env.local, platform_url: $PLATFORM_URL)"
 
 echo ""
 echo "Done! Dev environment configured:"
