@@ -4,7 +4,8 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useState, useEffect } from "react";
 import { Nav } from "@/components/Nav";
-import { Trash2, Copy, Check, RefreshCw, Key, Terminal } from "lucide-react";
+import { Trash2, Copy, Check, Key, Terminal, Plus, Ban } from "lucide-react";
+import { Id } from "@/convex/_generated/dataModel";
 
 type SettingsSection = "api-key" | "secrets";
 
@@ -54,12 +55,26 @@ export default function SettingsPage() {
 }
 
 function ApiKeySection() {
-  const [copied, setCopied] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
-  const [copiedConfig, setCopiedConfig] = useState(false);
+  const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
+  const [copiedNewKey, setCopiedNewKey] = useState(false);
+  const [keyName, setKeyName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [orgId, setOrgId] = useState<Id<"organizations"> | null>(null);
 
-  const apiKey = useQuery(api.users.getApiKey);
-  const generateApiKey = useMutation(api.users.generateApiKey);
+  const createKey = useMutation(api.apiKeys.create);
+  const revokeKey = useMutation(api.apiKeys.revoke);
+  const keys = useQuery(api.apiKeys.list, orgId ? { orgId } : "skip");
+
+  // Get orgId from the user upsert on mount
+  const upsertUser = useMutation(api.users.upsert);
+  useEffect(() => {
+    upsertUser({ email: "" })
+      .then((result) => {
+        if (result?.orgId) setOrgId(result.orgId);
+      })
+      .catch(() => {});
+  }, [upsertUser]);
 
   const [origin, setOrigin] = useState("https://dashboard.floom.dev");
   useEffect(() => {
@@ -67,16 +82,6 @@ function ApiKeySection() {
   }, []);
 
   const installCommand = `curl -s ${origin}/install-skill.sh | bash -s -- ${origin}`;
-  const configJson = apiKey
-    ? JSON.stringify({ api_key: apiKey, platform_url: origin }, null, 2)
-    : null;
-
-  async function copyKey() {
-    if (!apiKey) return;
-    await navigator.clipboard.writeText(apiKey);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
 
   async function copyInstall() {
     await navigator.clipboard.writeText(installCommand);
@@ -84,93 +89,120 @@ function ApiKeySection() {
     setTimeout(() => setCopiedInstall(false), 2000);
   }
 
-  async function copyConfig() {
-    if (!configJson) return;
-    await navigator.clipboard.writeText(configJson);
-    setCopiedConfig(true);
-    setTimeout(() => setCopiedConfig(false), 2000);
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!orgId || !keyName.trim()) return;
+    setCreating(true);
+    try {
+      const rawKey = await createKey({ orgId, name: keyName.trim() });
+      setNewKeyValue(rawKey);
+      setKeyName("");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function copyNewKey() {
+    if (!newKeyValue) return;
+    await navigator.clipboard.writeText(newKeyValue);
+    setCopiedNewKey(true);
+    setTimeout(() => setCopiedNewKey(false), 2000);
   }
 
   return (
     <div className="space-y-6">
       <section>
-        <h2 className="text-sm font-semibold text-gray-700 mb-1">API Key</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-1">API Keys</h2>
         <p className="text-xs text-gray-500 mb-3">
-          Use this to authenticate the{" "}
+          Org-scoped keys to authenticate the{" "}
           <code className="font-mono bg-gray-100 px-1 py-0.5 rounded text-xs">
             floom
           </code>{" "}
           Claude Code skill.
         </p>
-        {apiKey ? (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2 border border-gray-200 rounded px-3 py-2 bg-gray-50 font-mono text-sm">
-              <Key size={14} className="text-gray-400 shrink-0" />
-              <span className="text-gray-700 truncate">
-                {apiKey.slice(0, 12)}••••••••••••••••••••••••
-              </span>
-            </div>
-            <button
-              onClick={copyKey}
-              className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-            >
-              {copied ? (
-                <Check size={14} className="text-emerald-500" />
-              ) : (
-                <Copy size={14} />
-              )}
-              {copied ? "Copied!" : "Copy"}
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => generateApiKey()}
-            className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded text-sm text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-          >
-            <Key size={14} />
-            Generate API key
-          </button>
-        )}
-        {apiKey && (
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              onClick={() => generateApiKey()}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700"
-            >
-              <RefreshCw size={12} />
-              Regenerate key
-            </button>
-            <span className="text-xs text-red-500">
-              ⚠ Regenerating invalidates the old key.
-            </span>
-          </div>
-        )}
-      </section>
 
-      {apiKey && configJson && (
-        <section>
-          <h2 className="text-sm font-semibold text-gray-700 mb-1">
-            Quick Setup
-          </h2>
-          <p className="text-xs text-gray-500 mb-3">
-            Paste this into your terminal to configure the skill in one step:
-          </p>
-          <div className="relative">
-            <pre className="bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono text-gray-700 overflow-x-auto">{`cat > ~/.claude/floom-config.json << 'EOF'\n${configJson}\nEOF`}</pre>
-            <button
-              onClick={copyConfig}
-              className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-white border border-gray-200 rounded text-xs text-gray-500 hover:bg-gray-50"
-            >
-              {copiedConfig ? (
-                <Check size={11} className="text-emerald-500" />
-              ) : (
-                <Copy size={11} />
-              )}
-              {copiedConfig ? "Copied!" : "Copy"}
-            </button>
+        {/* New key banner */}
+        {newKeyValue && (
+          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded">
+            <p className="text-xs text-emerald-800 font-medium mb-1">
+              New API key created. Copy it now -- it will not be shown again.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs font-mono text-emerald-900 bg-emerald-100 px-2 py-1 rounded truncate">
+                {newKeyValue}
+              </code>
+              <button
+                onClick={copyNewKey}
+                className="flex items-center gap-1 px-2 py-1 bg-white border border-emerald-200 rounded text-xs text-emerald-700 hover:bg-emerald-50"
+              >
+                {copiedNewKey ? (
+                  <Check size={11} className="text-emerald-500" />
+                ) : (
+                  <Copy size={11} />
+                )}
+                {copiedNewKey ? "Copied!" : "Copy"}
+              </button>
+            </div>
           </div>
-        </section>
-      )}
+        )}
+
+        {/* Existing keys list */}
+        {keys && keys.length > 0 && (
+          <div className="divide-y divide-gray-100 border border-gray-200 rounded mb-4">
+            {keys.map((k) => (
+              <div
+                key={k._id}
+                className="flex items-center justify-between px-3 py-2.5"
+              >
+                <div className="flex items-center gap-3">
+                  <Key size={14} className="text-gray-400" />
+                  <div>
+                    <span className="text-sm text-gray-700 font-medium">
+                      {k.name}
+                    </span>
+                    <span className="text-xs text-gray-400 ml-2 font-mono">
+                      {k.prefix}...
+                    </span>
+                    {k.revokedAt && (
+                      <span className="text-xs text-red-500 ml-2">Revoked</span>
+                    )}
+                  </div>
+                </div>
+                {!k.revokedAt && (
+                  <button
+                    onClick={() => revokeKey({ keyId: k._id })}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    title="Revoke key"
+                  >
+                    <Ban size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Create key form */}
+        <form onSubmit={handleCreate} className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Key name (e.g. dev-laptop)"
+            value={keyName}
+            onChange={(e) => setKeyName(e.target.value)}
+            className="flex-1 px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={creating || !keyName.trim() || !orgId}
+            className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          >
+            <Plus size={14} />
+            {creating ? "Creating..." : "Create key"}
+          </button>
+        </form>
+      </section>
 
       <section>
         <h2 className="text-sm font-semibold text-gray-700 mb-1">

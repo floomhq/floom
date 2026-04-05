@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as apiKeys from "../apiKeys.js";
 import type * as automations from "../automations.js";
 import type * as crons from "../crons.js";
 import type * as executor from "../executor.js";
@@ -28,6 +29,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  apiKeys: typeof apiKeys;
   automations: typeof automations;
   crons: typeof crons;
   executor: typeof executor;

@@ -1,76 +1,53 @@
-import { internalQuery, mutation, query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-
-function generateKey(): string {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return "dsk_" + Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 // Called from the frontend on first authenticated load (upsert pattern).
 export const upsert = mutation({
   args: {
-    clerkUserId: v.string(),
     email: v.string(),
   },
   handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", args.clerkUserId))
-      .unique();
-
-    if (existing) {
-      return existing._id;
-    }
-
-    return await ctx.db.insert("users", {
-      clerkUserId: args.clerkUserId,
-      email: args.email,
-      createdAt: Date.now(),
-    });
-  },
-});
-
-// Generate (or regenerate) the CLI API key for the current user.
-export const generateApiKey = mutation({
-  handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthorized");
 
-    const user = await ctx.db
+    const tokenId = identity.tokenIdentifier;
+
+    // Upsert user
+    const existing = await ctx.db
       .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", tokenId))
       .unique();
-    if (!user) throw new Error("User not found");
 
-    const apiKey = generateKey();
-    await ctx.db.patch(user._id, { apiKey });
-    return apiKey;
-  },
-});
+    const userId = existing
+      ? existing._id
+      : await ctx.db.insert("users", {
+          clerkUserId: tokenId,
+          email: args.email,
+          createdAt: Date.now(),
+        });
 
-// Return the current user's API key (masked for display).
-export const getApiKey = query({
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
+    // Upsert organization
+    const clerkOrgId =
+      (identity as { org_id?: string }).org_id ?? tokenId;
+    const orgName =
+      (identity as { org_name?: string }).org_name ?? "Personal";
 
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", identity.subject))
+    let org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerkOrgId", (q) => q.eq("clerkOrgId", clerkOrgId))
       .unique();
-    return user?.apiKey ?? null;
-  },
-});
 
-// Internal: look up a user by their CLI API key.
-export const getByApiKey = internalQuery({
-  args: { apiKey: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
-      .query("users")
-      .withIndex("by_apiKey", (q) => q.eq("apiKey", args.apiKey))
-      .unique();
+    if (!org) {
+      const orgId = await ctx.db.insert("organizations", {
+        clerkOrgId,
+        name: orgName,
+        createdAt: Date.now(),
+        createdBy: tokenId,
+      });
+      org = await ctx.db.get(orgId);
+    }
+
+    return { userId, orgId: org!._id };
   },
 });
 

@@ -8,8 +8,7 @@ export default defineSchema({
     name: v.string(),
     description: v.string(),
     createdBy: v.string(), // Clerk user ID
-    orgId: v.string(), // from Clerk JWT
-    isPublicToOrg: v.boolean(),
+    orgId: v.id("organizations"),
     createdAt: v.number(),
     status: v.union(
       v.literal("active"),
@@ -25,8 +24,7 @@ export default defineSchema({
     ),
   })
     .index("by_orgId", ["orgId"])
-    .index("by_createdBy", ["createdBy"])
-    .index("by_orgId_isPublicToOrg", ["orgId", "isPublicToOrg"]),
+    .index("by_createdBy", ["createdBy"]),
 
   // Immutable snapshot of code + manifest at each deploy/update.
   automationVersions: defineTable({
@@ -74,19 +72,39 @@ export default defineSchema({
     .index("by_automationId", ["automationId"])
     .index("by_automationId_startedAt", ["automationId", "startedAt"]),
 
+  // Organizations — synced from Clerk or auto-created for personal accounts.
+  organizations: defineTable({
+    clerkOrgId: v.string(),
+    name: v.string(),
+    createdAt: v.number(),
+    createdBy: v.string(),
+  })
+    .index("by_clerkOrgId", ["clerkOrgId"]),
+
+  // Org-scoped API keys. SHA-256 hashed. Full key shown once on creation.
+  apiKeys: defineTable({
+    orgId: v.id("organizations"),
+    name: v.string(),
+    prefix: v.string(),
+    hashedKey: v.string(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+    revokedAt: v.optional(v.number()),
+  })
+    .index("by_hashedKey", ["hashedKey"])
+    .index("by_orgId", ["orgId"]),
+
   // Users — synced from Clerk on first login.
   users: defineTable({
     email: v.string(),
     clerkUserId: v.string(),
     createdAt: v.number(),
-    apiKey: v.optional(v.string()), // dsk_... for CLI auth
   })
-    .index("by_clerkUserId", ["clerkUserId"])
-    .index("by_apiKey", ["apiKey"]),
+    .index("by_clerkUserId", ["clerkUserId"]),
 
   // Org-scoped secrets. AES-256 encrypted. Never returned to frontend.
   secrets: defineTable({
-    orgId: v.string(),
+    orgId: v.id("organizations"),
     name: v.string(),
     encryptedValue: v.string(),
     createdAt: v.number(),
