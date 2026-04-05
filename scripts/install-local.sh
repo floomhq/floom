@@ -5,7 +5,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILL_DIR="$HOME/.claude/skills/floom"
 CONFIG_FILE="$HOME/.claude/floom-config.json"
-ENV_FILE="$SCRIPT_DIR/.env.local"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$REPO_DIR/.env.local"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Error: .env.local not found at $ENV_FILE"
@@ -22,7 +23,7 @@ echo "Installing floom skill (local dev)..."
 
 # Install skill from local source
 mkdir -p "$SKILL_DIR"
-cp "$SCRIPT_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
+cp "$REPO_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
 echo "  Copied skill/SKILL.md -> $SKILL_DIR/SKILL.md"
 
 # Load api_key from .env.local
