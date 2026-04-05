@@ -3,13 +3,14 @@
 set -e
 
 SKILL_DIR="$HOME/.claude/skills/floom"
+CLONE_DIR="$HOME/.claude/skills/floom-repo"
 CONFIG_FILE="$HOME/.claude/floom-config.json"
 TMP_DEPLOY="/tmp/floom-deploy"
 TMP_LOG="/tmp/floom-dev.log"
 
 removed=0
 
-for target in "$SKILL_DIR" "$CONFIG_FILE" "$TMP_DEPLOY" "$TMP_LOG"; do
+for target in "$SKILL_DIR" "$CLONE_DIR" "$CONFIG_FILE" "$TMP_DEPLOY" "$TMP_LOG"; do
   if [ -e "$target" ]; then
     rm -rf "$target"
     echo "Removed $target"
