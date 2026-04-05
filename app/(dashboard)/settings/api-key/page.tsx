@@ -5,6 +5,24 @@ import { api } from "@/convex/_generated/api";
 import { useState, useEffect } from "react";
 import { Copy, Check, Key, Terminal, Plus, Ban } from "lucide-react";
 import { Id } from "@/convex/_generated/dataModel";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 
 export default function ApiKeyPage() {
   const [copiedInstall, setCopiedInstall] = useState(false);
@@ -64,125 +82,144 @@ export default function ApiKeyPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section>
-        <h2 className="text-sm font-semibold text-gray-700 mb-1">API Keys</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          Org-scoped keys to authenticate the{" "}
-          <code className="font-mono bg-gray-100 px-1 py-0.5 rounded text-xs">
-            floom
-          </code>{" "}
-          Claude Code skill.
-        </p>
+    <TooltipProvider>
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>API Keys</CardTitle>
+            <CardDescription>
+              Org-scoped keys to authenticate the{" "}
+              <code className="font-mono bg-muted px-1 py-0.5 rounded text-xs">
+                floom
+              </code>{" "}
+              Claude Code skill.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* New key banner */}
+            {newKeyValue && (
+              <Alert>
+                <Key className="size-4" />
+                <AlertTitle>
+                  New API key created. Copy it now -- it will not be shown again.
+                </AlertTitle>
+                <AlertDescription>
+                  <div className="flex items-center gap-2 mt-2">
+                    <code className="flex-1 text-xs font-mono bg-muted px-2 py-1 rounded truncate">
+                      {newKeyValue}
+                    </code>
+                    <Button variant="outline" size="sm" onClick={copyNewKey}>
+                      {copiedNewKey ? (
+                        <Check className="size-3 text-emerald-500" />
+                      ) : (
+                        <Copy className="size-3" />
+                      )}
+                      {copiedNewKey ? "Copied!" : "Copy"}
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
 
-        {/* New key banner */}
-        {newKeyValue && (
-          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded">
-            <p className="text-xs text-emerald-800 font-medium mb-1">
-              New API key created. Copy it now -- it will not be shown again.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 text-xs font-mono text-emerald-900 bg-emerald-100 px-2 py-1 rounded truncate">
-                {newKeyValue}
-              </code>
-              <button
-                onClick={copyNewKey}
-                className="flex items-center gap-1 px-2 py-1 bg-white border border-emerald-200 rounded text-xs text-emerald-700 hover:bg-emerald-50"
-              >
-                {copiedNewKey ? (
-                  <Check size={11} className="text-emerald-500" />
-                ) : (
-                  <Copy size={11} />
-                )}
-                {copiedNewKey ? "Copied!" : "Copy"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Existing keys list */}
-        {keys && keys.length > 0 && (
-          <div className="divide-y divide-gray-100 border border-gray-200 rounded mb-4">
-            {keys.map((k) => (
-              <div
-                key={k._id}
-                className="flex items-center justify-between px-3 py-2.5"
-              >
-                <div className="flex items-center gap-3">
-                  <Key size={14} className="text-gray-400" />
-                  <div>
-                    <span className="text-sm text-gray-700 font-medium">
-                      {k.name}
-                    </span>
-                    <span className="text-xs text-gray-400 ml-2 font-mono">
-                      {k.prefix}...
-                    </span>
-                    {k.revokedAt && (
-                      <span className="text-xs text-red-500 ml-2">Revoked</span>
+            {/* Existing keys list */}
+            {keys && keys.length > 0 && (
+              <div className="divide-y divide-border rounded-lg border">
+                {keys.map((k: { _id: string; name: string; prefix: string; revokedAt?: number | null }) => (
+                  <div
+                    key={k._id}
+                    className="flex items-center justify-between px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Key className="size-3.5 text-muted-foreground" />
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {k.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground font-mono">
+                          {k.prefix}...
+                        </span>
+                        {k.revokedAt && (
+                          <Badge variant="destructive">Revoked</Badge>
+                        )}
+                      </div>
+                    </div>
+                    {!k.revokedAt && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => revokeKey({ keyId: k._id })}
+                            />
+                          }
+                        >
+                          <Ban className="size-3.5 text-muted-foreground hover:text-destructive" />
+                        </TooltipTrigger>
+                        <TooltipContent>Revoke key</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
-                </div>
-                {!k.revokedAt && (
-                  <button
-                    onClick={() => revokeKey({ keyId: k._id })}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
-                    title="Revoke key"
-                  >
-                    <Ban size={14} />
-                  </button>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* Create key form */}
-        <form onSubmit={handleCreate} className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Key name (e.g. dev-laptop)"
-            value={keyName}
-            onChange={(e) => setKeyName(e.target.value)}
-            className="flex-1 px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-          <button
-            type="submit"
-            disabled={creating || !keyName.trim() || !orgId}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            <Plus size={14} />
-            {creating ? "Creating..." : "Create key"}
-          </button>
-        </form>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold text-gray-700 mb-1">
-          Install Skill
-        </h2>
-        <p className="text-xs text-gray-500 mb-3">
-          Run this in your terminal to install floom in Claude Code:
-        </p>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 border border-gray-200 rounded px-3 py-2 bg-gray-50">
-            <Terminal size={14} className="text-gray-400 shrink-0" />
-            <code className="text-xs font-mono text-gray-700 truncate">
-              {installCommand}
-            </code>
-          </div>
-          <button
-            onClick={copyInstall}
-            className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            {copiedInstall ? (
-              <Check size={14} className="text-emerald-500" />
-            ) : (
-              <Copy size={14} />
             )}
-            {copiedInstall ? "Copied!" : "Copy"}
-          </button>
-        </div>
-      </section>
-    </div>
+
+            {/* Create key form */}
+            <form onSubmit={handleCreate} className="flex items-center gap-2">
+              <Input
+                type="text"
+                placeholder="Key name (e.g. dev-laptop)"
+                value={keyName}
+                onChange={(e) => setKeyName(e.target.value)}
+                className="flex-1"
+              />
+              <Button
+                type="submit"
+                disabled={creating || !keyName.trim() || !orgId}
+              >
+                <Plus className="size-3.5" />
+                {creating ? "Creating..." : "Create key"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Separator />
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Install Skill</CardTitle>
+            <CardDescription>
+              Run this in your terminal to install floom in Claude Code:
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2">
+                <Terminal className="size-3.5 text-muted-foreground shrink-0" />
+                <code className="text-xs font-mono text-foreground truncate">
+                  {installCommand}
+                </code>
+              </div>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button variant="outline" onClick={copyInstall} />
+                  }
+                >
+                  {copiedInstall ? (
+                    <Check className="size-3.5 text-emerald-500" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                  {copiedInstall ? "Copied!" : "Copy"}
+                </TooltipTrigger>
+                <TooltipContent>Copy install command</TooltipContent>
+              </Tooltip>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </TooltipProvider>
   );
 }

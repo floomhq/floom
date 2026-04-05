@@ -21,8 +21,26 @@ import {
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-
-type Tab = "run" | "code" | "versions" | "secrets";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AutomationPage({
   params: paramsPromise,
@@ -37,11 +55,9 @@ export default function AutomationPage({
   );
 
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("run");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const setScheduleEnabled = useMutation(api.automations.setScheduleEnabled);
@@ -87,10 +103,10 @@ export default function AutomationPage({
 
   if (automation === undefined) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-background">
         <Nav />
         <div className="flex items-center justify-center h-64">
-          <div className="animate-pulse text-gray-400 text-sm">Loading...</div>
+          <Skeleton className="h-4 w-24" />
         </div>
       </div>
     );
@@ -98,10 +114,10 @@ export default function AutomationPage({
 
   if (automation === null) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-background">
         <Nav />
         <div className="flex items-center justify-center h-64">
-          <p className="text-gray-500">Automation not found.</p>
+          <p className="text-muted-foreground">Automation not found.</p>
         </div>
       </div>
     );
@@ -110,32 +126,28 @@ export default function AutomationPage({
   const lastRun = automation.runs?.[0];
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col">
       <Nav />
 
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200">
+      <div className="px-4 py-3 border-b">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
-              v{automation.currentVersion}
-            </span>
-            <h1 className="font-semibold text-gray-900 truncate">
+            <Badge variant="secondary">v{automation.currentVersion}</Badge>
+            <h1 className="font-semibold text-foreground truncate">
               {automation.name}
             </h1>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleShare}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
-            >
-              <Share2 size={14} />
+            <Button variant="outline" size="sm" onClick={handleShare}>
+              <Share2 className="size-3.5" />
               {copied ? "Copied!" : "Share"}
-            </button>
+            </Button>
             {automation.isOwner && automation.schedule && (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleToggleSchedule}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
                 title={
                   automation.scheduleEnabled === false
                     ? "Resume schedule"
@@ -144,51 +156,41 @@ export default function AutomationPage({
               >
                 {automation.scheduleEnabled === false ? (
                   <>
-                    <Play size={14} className="text-amber-500" />
+                    <Play className="size-3.5 text-amber-500" />
                     <span>Paused</span>
                   </>
                 ) : (
                   <>
-                    <Pause size={14} className="text-gray-500" />
+                    <Pause className="size-3.5 text-muted-foreground" />
                     <span>Pause</span>
                   </>
                 )}
-              </button>
+              </Button>
             )}
             {automation.isOwner && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowMenu(!showMenu)}
-                  className="flex items-center justify-center w-8 h-8 text-gray-500 hover:text-gray-900 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={cn(buttonVariants({ variant: "outline", size: "icon" }))}
                 >
-                  <MoreHorizontal size={16} />
-                </button>
-                {showMenu && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() => setShowMenu(false)}
-                    />
-                    <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[160px]">
-                      <button
-                        onClick={() => {
-                          setShowMenu(false);
-                          setShowDeleteConfirm(true);
-                        }}
-                        className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        <Trash2 size={14} />
-                        Delete automation
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                  <MoreHorizontal className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setShowDeleteConfirm(true)}
+                  >
+                    <Trash2 />
+                    Delete automation
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </div>
-        <p className="text-sm text-gray-500 mt-0.5">{automation.description}</p>
-        <div className="text-xs text-gray-400 mt-1 flex items-center gap-3">
+        <p className="text-sm text-muted-foreground mt-0.5">
+          {automation.description}
+        </p>
+        <div className="text-xs text-muted-foreground/60 mt-1 flex items-center gap-3">
           {lastRun && (
             <span>Last run {formatRelativeTime(lastRun.startedAt)}</span>
           )}
@@ -198,112 +200,110 @@ export default function AutomationPage({
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="flex border-b border-gray-200 px-4">
-        {(["run", "code", "versions", "secrets"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ${
-              tab === t
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      {/* Tabs */}
+      <Tabs defaultValue="run" className="flex-1 flex flex-col gap-0">
+        <TabsList variant="line" className="px-4 border-b">
+          <TabsTrigger value="run">Run</TabsTrigger>
+          <TabsTrigger value="code">Code</TabsTrigger>
+          <TabsTrigger value="versions">Versions</TabsTrigger>
+          {automation.isOwner && (
+            <TabsTrigger value="secrets">Secrets</TabsTrigger>
+          )}
+        </TabsList>
 
-      {/* Main content */}
-      {tab === "run" && (
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          {/* Left: Run form (40%) - dims when output is showing and not running */}
-          <div className={`lg:w-[40%] border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto transition-opacity duration-200 ${!isRunning && (lastRun || activeRunId) ? "opacity-60" : "opacity-100"}`}>
-            <RunForm
-              manifest={automation.manifest}
-              onRun={handleRun}
-              automationId={params.id}
-              isRunning={isRunning}
-            />
+        <TabsContent value="run" className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            {/* Left: Run form (40%) */}
+            <div
+              className={cn(
+                "lg:w-[40%] border-b lg:border-b-0 lg:border-r overflow-y-auto transition-opacity duration-200",
+                !isRunning && (lastRun || activeRunId)
+                  ? "opacity-60"
+                  : "opacity-100"
+              )}
+            >
+              <RunForm
+                manifest={automation.manifest}
+                onRun={handleRun}
+                automationId={params.id}
+                isRunning={isRunning}
+              />
+            </div>
+            {/* Right: Output panel (60%) */}
+            <div
+              className={cn(
+                "lg:w-[60%] overflow-y-auto transition-opacity duration-200",
+                isRunning
+                  ? "opacity-100"
+                  : !lastRun && !activeRunId
+                    ? "opacity-40"
+                    : "opacity-100"
+              )}
+            >
+              <OutputPanel
+                runId={activeRunId}
+                lastRun={lastRun ?? null}
+                currentVersionId={automation.currentVersionId as string}
+                manifestOutputs={automation.manifest?.outputs ?? []}
+              />
+            </div>
           </div>
-          {/* Right: Output panel (60%) - dims while input is being filled (no run yet) */}
-          <div className={`lg:w-[60%] overflow-y-auto transition-opacity duration-200 ${isRunning ? "opacity-100" : !lastRun && !activeRunId ? "opacity-40" : "opacity-100"}`}>
-            <OutputPanel
-              runId={activeRunId}
-              lastRun={lastRun ?? null}
-              currentVersionId={automation.currentVersionId as string}
-              manifestOutputs={automation.manifest?.outputs ?? []}
-            />
-          </div>
-        </div>
-      )}
 
-      {tab === "code" && (
-        <div className="flex-1 overflow-y-auto">
+          {/* Run history */}
+          <Separator />
+          <RunHistory
+            runs={automation.runs ?? []}
+            onSelectRun={(runId) => setActiveRunId(runId)}
+          />
+        </TabsContent>
+
+        <TabsContent value="code" className="flex-1 overflow-y-auto">
           <CodeTab
             automationId={params.id as Id<"automations">}
             currentVersionId={
               automation.currentVersionId as Id<"automationVersions">
             }
           />
-        </div>
-      )}
+        </TabsContent>
 
-      {tab === "versions" && (
-        <div className="flex-1 overflow-y-auto">
+        <TabsContent value="versions" className="flex-1 overflow-y-auto">
           <VersionsTab automationId={params.id as Id<"automations">} />
-        </div>
-      )}
+        </TabsContent>
 
-      {tab === "secrets" && automation.isOwner && (
-        <div className="flex-1 overflow-y-auto">
-          <SecretsTab />
-        </div>
-      )}
-
-      {/* Run history */}
-      {tab === "run" && (
-        <div className="border-t border-gray-200">
-          <RunHistory
-            runs={automation.runs ?? []}
-            onSelectRun={(runId) => setActiveRunId(runId)}
-          />
-        </div>
-      )}
+        {automation.isOwner && (
+          <TabsContent value="secrets" className="flex-1 overflow-y-auto">
+            <SecretsTab />
+          </TabsContent>
+        )}
+      </Tabs>
 
       {/* Delete confirmation dialog */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Delete automation
-            </h3>
-            <p className="mt-2 text-sm text-gray-500">
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete automation</DialogTitle>
+            <DialogDescription>
               Are you sure you want to delete{" "}
-              <span className="font-medium text-gray-700">
+              <span className="font-medium text-foreground">
                 {automation.name}
               </span>
               ? This will permanently remove the automation, all versions, and
               run history. This action cannot be undone.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded hover:bg-red-700 transition-colors"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -317,7 +317,6 @@ function formatRelativeTime(ts: number): string {
 }
 
 function describeSchedule(cron: string): string {
-  // Very simple cron description — improve with a lib if needed
   const parts = cron.split(" ");
   if (parts.length !== 5) return cron;
   const [min, hour, , , dow] = parts;

@@ -3,7 +3,19 @@
 import { useState, useRef } from "react";
 import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { Play, Loader2 } from "lucide-react";
+import { Play, Loader2, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 
 type ManifestInput = {
   name: string;
@@ -36,7 +48,9 @@ export function RunForm({
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
-  const [fileUploads, setFileUploads] = useState<Record<string, "idle" | "uploading" | "ready" | "error">>({});
+  const [fileUploads, setFileUploads] = useState<
+    Record<string, "idle" | "uploading" | "ready" | "error">
+  >({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const getUploadUrl = useAction(api.files.getUploadUrl);
 
@@ -102,16 +116,20 @@ export function RunForm({
 
   if (inputs.length === 0) {
     return (
-      <div className="p-6 flex flex-col items-center justify-center h-full min-h-[200px] text-gray-400">
+      <div className="p-6 flex flex-col items-center justify-center h-full min-h-[200px] text-muted-foreground">
         <p className="text-sm">No inputs required.</p>
-        <button
+        <Button
           onClick={() => onRun({})}
           disabled={running || isRunning}
-          className="mt-4 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          className="mt-4"
         >
-          {running || isRunning ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+          {running || isRunning ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Play className="size-4" />
+          )}
           {running || isRunning ? "Running..." : "Run Now"}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -119,102 +137,112 @@ export function RunForm({
   return (
     <form onSubmit={handleSubmit} className="p-4 space-y-4">
       {inputs.map((input) => (
-        <div key={input.name}>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">
+        <div key={input.name} className="space-y-1.5">
+          <Label>
             {input.label}
             {input.required !== false && (
-              <span className="text-red-500 ml-1">*</span>
+              <span className="text-destructive ml-1">*</span>
             )}
-          </label>
+          </Label>
           {input.description && (
-            <p className="text-xs text-gray-500 mb-1">{input.description}</p>
+            <p className="text-xs text-muted-foreground">
+              {input.description}
+            </p>
           )}
 
           {input.type === "text" && (
-            <input
+            <Input
               type="text"
               value={(values[input.name] as string) ?? ""}
               onChange={(e) =>
                 setValues((p) => ({ ...p, [input.name]: e.target.value }))
               }
-              className={`w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                errors[input.name] ? "border-red-400" : "border-gray-300"
-              }`}
+              aria-invalid={!!errors[input.name]}
             />
           )}
 
           {input.type === "textarea" && (
             <div className="relative">
-              <textarea
+              <Textarea
                 value={(values[input.name] as string) ?? ""}
                 onChange={(e) =>
                   setValues((p) => ({ ...p, [input.name]: e.target.value }))
                 }
                 rows={4}
                 maxLength={10000}
-                className={`w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[96px] max-h-[288px] ${
-                  errors[input.name] ? "border-red-400" : "border-gray-300"
-                }`}
+                aria-invalid={!!errors[input.name]}
+                className="resize-y min-h-[96px] max-h-[288px]"
                 onFocus={(e) => {
-                  // Expand on focus (mobile: fullscreen overlay effect)
                   e.target.style.maxHeight = "none";
                 }}
                 onBlur={(e) => {
                   e.target.style.maxHeight = "288px";
                 }}
               />
-              <span className="absolute bottom-2 right-2 text-xs text-gray-400 pointer-events-none">
+              <span className="absolute bottom-2 right-2 text-xs text-muted-foreground pointer-events-none">
                 {((values[input.name] as string) ?? "").length} / 10,000
               </span>
             </div>
           )}
 
           {input.type === "url" && (
-            <input
+            <Input
               type="url"
               value={(values[input.name] as string) ?? ""}
               onChange={(e) =>
                 setValues((p) => ({ ...p, [input.name]: e.target.value }))
               }
-              className={`w-full px-3 py-2 border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                errors[input.name] ? "border-red-400" : "border-gray-300"
-              }`}
               placeholder="https://"
+              aria-invalid={!!errors[input.name]}
             />
           )}
 
           {input.type === "integer" && (
-            <input
+            <Input
               type="number"
-              value={(values[input.name] as number) ?? (input.default as number) ?? ""}
+              value={
+                (values[input.name] as number) ??
+                (input.default as number) ??
+                ""
+              }
               onChange={(e) =>
-                setValues((p) => ({ ...p, [input.name]: parseInt(e.target.value) || 0 }))
+                setValues((p) => ({
+                  ...p,
+                  [input.name]: parseInt(e.target.value) || 0,
+                }))
               }
               min={input.min}
               max={input.max}
-              className={`w-32 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                errors[input.name] ? "border-red-400" : "border-gray-300"
-              }`}
+              aria-invalid={!!errors[input.name]}
+              className="w-32"
             />
           )}
 
           {input.type === "enum" && (
-            <select
-              value={(values[input.name] as string) ?? (input.default as string) ?? ""}
-              onChange={(e) =>
-                setValues((p) => ({ ...p, [input.name]: e.target.value }))
+            <Select
+              value={
+                (values[input.name] as string) ??
+                (input.default as string) ??
+                ""
               }
-              className={`px-3 py-2 border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                errors[input.name] ? "border-red-400" : "border-gray-300"
-              }`}
+              onValueChange={(val) =>
+                setValues((p) => ({ ...p, [input.name]: val }))
+              }
             >
-              {!input.default && <option value="">Select...</option>}
-              {input.options?.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                aria-invalid={!!errors[input.name]}
+                className="w-full"
+              >
+                <SelectValue placeholder="Select..." />
+              </SelectTrigger>
+              <SelectContent>
+                {input.options?.map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
 
           {input.type === "file" && (
@@ -232,23 +260,23 @@ export function RunForm({
           )}
 
           {errors[input.name] && (
-            <p className="text-xs text-red-500 mt-1">{errors[input.name]}</p>
+            <p className="text-xs text-destructive">{errors[input.name]}</p>
           )}
         </div>
       ))}
 
-      <button
+      <Button
         type="submit"
         disabled={running || isRunning}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        className="w-full"
       >
         {running || isRunning ? (
-          <Loader2 size={16} className="animate-spin" />
+          <Loader2 className="size-4 animate-spin" />
         ) : (
-          <Play size={16} />
+          <Play className="size-4" />
         )}
         {running || isRunning ? "Running..." : "Run Now"}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -270,12 +298,13 @@ function FileDropzone({
 
   return (
     <div
-      className={`border-2 border-dashed rounded p-4 text-center cursor-pointer transition-colors ${
-        state === "idle" ? "border-gray-300 hover:border-blue-400" :
-        state === "ready" ? "border-emerald-400 bg-emerald-50" :
-        state === "error" ? "border-red-400 bg-red-50" :
-        "border-blue-300 bg-blue-50"
-      }`}
+      className={cn(
+        "rounded-lg border-2 border-dashed p-4 text-center cursor-pointer transition-colors",
+        state === "idle" && "border-border hover:border-ring",
+        state === "ready" && "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20",
+        state === "error" && "border-destructive bg-destructive/5",
+        state === "uploading" && "border-ring bg-ring/5"
+      )}
       onClick={() => state === "idle" && ref.current?.click()}
       onDrop={(e) => {
         e.preventDefault();
@@ -295,32 +324,36 @@ function FileDropzone({
         }}
       />
       {state === "idle" && (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           Drop file here or click to upload
           {input.accept && (
-            <span className="block text-xs mt-1 text-gray-400">
+            <span className="block text-xs mt-1 text-muted-foreground/60">
               Accepts: {input.accept}
             </span>
           )}
         </p>
       )}
       {state === "uploading" && (
-        <p className="text-sm text-blue-600">Uploading...</p>
+        <p className="text-sm text-primary">Uploading...</p>
       )}
       {state === "ready" && (
-        <div className="flex items-center justify-center gap-2 text-sm text-emerald-700">
+        <div className="flex items-center justify-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
           <span>{fileName} ✓</span>
-          <button
+          <Button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onClear(); }}
-            className="text-gray-400 hover:text-gray-600 ml-2"
+            variant="ghost"
+            size="icon-xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
           >
-            ×
-          </button>
+            <X className="size-3" />
+          </Button>
         </div>
       )}
       {state === "error" && (
-        <p className="text-sm text-red-600">Upload failed — try again</p>
+        <p className="text-sm text-destructive">Upload failed — try again</p>
       )}
     </div>
   );

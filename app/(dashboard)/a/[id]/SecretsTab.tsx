@@ -4,6 +4,21 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useState } from "react";
 import { Trash2, Plus, ShieldCheck } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 export function SecretsTab() {
   const secrets = useQuery(api.secrets.list);
@@ -38,96 +53,127 @@ export function SecretsTab() {
   return (
     <div className="p-4 max-w-lg">
       <div className="flex items-center gap-2 mb-4">
-        <ShieldCheck size={16} className="text-gray-500" />
-        <h3 className="text-sm font-medium text-gray-700">Org Secrets</h3>
+        <ShieldCheck className="size-4 text-muted-foreground" />
+        <h3 className="text-sm font-medium text-foreground">Org Secrets</h3>
       </div>
-      <p className="text-xs text-gray-500 mb-4">
-        Secrets are encrypted and shared across all automations in your org.
-        Values are never visible after saving.
-      </p>
+
+      <Alert className="mb-4">
+        <AlertDescription>
+          Secrets are encrypted and shared across all automations in your org.
+          Values are never visible after saving.
+        </AlertDescription>
+      </Alert>
 
       {/* Add secret form */}
-      <form onSubmit={handleSubmit} className="border border-gray-200 rounded p-3 mb-4 space-y-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            Name <span className="text-gray-400">(e.g. ANTHROPIC_API_KEY)</span>
-          </label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="SECRET_NAME"
-            className="w-full px-3 py-2 border border-gray-300 rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
-            required
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            Value
-          </label>
-          <input
-            type="password"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="••••••••"
-            className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-            required
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={status === "saving" || !name.trim() || !value.trim()}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          <Plus size={14} />
-          {status === "saving" ? "Saving..." : status === "saved" ? "Saved!" : "Save Secret"}
-        </button>
-      </form>
+      <Card className="mb-4">
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>
+                Name{" "}
+                <span className="text-muted-foreground font-normal">
+                  (e.g. ANTHROPIC_API_KEY)
+                </span>
+              </Label>
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="SECRET_NAME"
+                className="font-mono"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Value</Label>
+              <Input
+                type="password"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+                required
+              />
+            </div>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={status === "saving" || !name.trim() || !value.trim()}
+            >
+              <Plus className="size-3.5" />
+              {status === "saving"
+                ? "Saving..."
+                : status === "saved"
+                  ? "Saved!"
+                  : "Save Secret"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Secret list */}
       {secrets === undefined ? (
-        <div className="text-sm text-gray-400 animate-pulse">Loading...</div>
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
       ) : secrets.length === 0 ? (
-        <p className="text-xs text-gray-400">No secrets stored yet.</p>
+        <p className="text-xs text-muted-foreground">No secrets stored yet.</p>
       ) : (
         <ul className="space-y-1">
-          {secrets.map((s) => (
+          {secrets.map((s: { name: string }) => (
             <li
               key={s.name}
-              className="flex items-center justify-between px-3 py-2 border border-gray-200 rounded text-sm"
+              className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm"
             >
-              <div>
-                <span className="font-mono text-gray-800 text-xs">{s.name}</span>
-                <span className="ml-3 text-gray-400 text-xs">••••••••</span>
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-foreground text-xs">
+                  {s.name}
+                </span>
+                <Badge variant="secondary">
+                  \u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022
+                </Badge>
               </div>
-              {deleteConfirm === s.name ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-red-600">Delete?</span>
-                  <button
-                    onClick={() => handleDelete(s.name)}
-                    className="text-xs text-red-600 hover:text-red-800 font-medium"
-                  >
-                    Yes
-                  </button>
-                  <button
-                    onClick={() => setDeleteConfirm(null)}
-                    className="text-xs text-gray-500 hover:text-gray-700"
-                  >
-                    No
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setDeleteConfirm(s.name)}
-                  className="text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setDeleteConfirm(s.name)}
+              >
+                <Trash2 className="size-3.5 text-muted-foreground" />
+              </Button>
             </li>
           ))}
         </ul>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => !open && setDeleteConfirm(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete secret</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-foreground font-mono">
+                {deleteConfirm}
+              </span>
+              ? Automations using this secret will fail until it is re-added.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

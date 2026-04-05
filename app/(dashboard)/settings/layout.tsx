@@ -3,6 +3,9 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Nav } from "@/components/Nav";
+import { buttonVariants } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 const sections = [
   { href: "/settings/api-key", label: "API Key" },
@@ -20,7 +23,8 @@ export default function SettingsLayout({
     <div className="min-h-screen bg-white flex flex-col">
       <Nav />
       <div className="max-w-4xl mx-auto w-full px-4 py-6 flex-1">
-        <h1 className="text-lg font-semibold text-gray-900 mb-6">Settings</h1>
+        <h1 className="text-lg font-semibold text-foreground">Settings</h1>
+        <Separator className="my-4" />
         <div className="flex gap-6">
           {/* Sidebar nav */}
           <nav className="w-40 shrink-0">
@@ -29,11 +33,13 @@ export default function SettingsLayout({
                 <li key={s.href}>
                   <Link
                     href={s.href}
-                    className={`block w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                    className={cn(
+                      buttonVariants({ variant: "ghost" }),
+                      "w-full justify-start",
                       pathname === s.href
-                        ? "bg-gray-100 text-gray-900 font-medium"
-                        : "text-gray-600 hover:text-gray-900"
-                    }`}
+                        ? "bg-muted text-foreground font-medium"
+                        : "text-muted-foreground"
+                    )}
                   >
                     {s.label}
                   </Link>

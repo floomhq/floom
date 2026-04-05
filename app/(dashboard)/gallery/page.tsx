@@ -2,7 +2,7 @@
 
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import {
@@ -13,9 +13,27 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  Command,
+  Command as CommandIcon,
 } from "lucide-react";
-import { clsx } from "clsx";
+import { cn } from "@/lib/utils";
+import {
+  Card,
+  CardHeader,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@/components/ui/command";
 
 export default function GalleryPage() {
   const [query, setQuery] = useState("");
@@ -28,7 +46,7 @@ export default function GalleryPage() {
     isAuthenticated ? {} : "skip"
   );
 
-  const filtered = automations?.filter((a) => {
+  const filtered = automations?.filter((a: Automation) => {
     if (query) {
       const q = query.toLowerCase();
       return (
@@ -61,26 +79,24 @@ export default function GalleryPage() {
           <h1 className="text-lg font-semibold text-gray-900">
             Workspace Automations
           </h1>
-          <button
+          <Button
+            variant="outline"
             onClick={() => setPaletteOpen(true)}
-            className="flex items-center gap-2 pl-3 pr-2 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-400 hover:text-gray-600 hover:border-gray-300 transition-colors w-64"
+            className="w-64 justify-start gap-2 text-muted-foreground font-normal"
           >
             <Search size={14} />
             <span className="flex-1 text-left">Search automations...</span>
-            <kbd className="flex items-center gap-0.5 px-1.5 py-0.5 bg-gray-100 rounded text-[11px] font-medium text-gray-500 border border-gray-200">
-              <Command size={11} />K
+            <kbd className="flex items-center gap-0.5 px-1.5 py-0.5 bg-muted rounded text-[11px] font-medium text-muted-foreground border border-border">
+              <CommandIcon size={11} />K
             </kbd>
-          </button>
+          </Button>
         </div>
 
         {/* Loading */}
         {automations === undefined && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="border border-gray-200 rounded-lg p-4 animate-pulse h-40"
-              />
+              <Skeleton key={i} className="h-40 rounded-xl" />
             ))}
           </div>
         )}
@@ -91,28 +107,29 @@ export default function GalleryPage() {
             <Box size={40} className="text-gray-200 mb-4" />
             {query ? (
               <>
-                <p className="text-gray-500 text-sm">
+                <p className="text-muted-foreground text-sm">
                   No automations match &ldquo;{query}&rdquo;.
                 </p>
-                <button
+                <Button
+                  variant="link"
                   onClick={() => setQuery("")}
-                  className="mt-2 text-sm text-blue-600 hover:underline"
+                  className="mt-2"
                 >
                   Clear search
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                <p className="text-gray-900 font-medium text-sm">
+                <p className="text-foreground font-medium text-sm">
                   No automations in your workspace yet
                 </p>
-                <p className="text-gray-400 text-xs mt-1 max-w-xs">
+                <p className="text-muted-foreground text-xs mt-1 max-w-xs">
                   Deploy your first automation with the Floom CLI, then make it
                   public to share with your team.
                 </p>
                 <a
                   href="https://github.com/floom"
-                  className="mt-3 text-sm text-blue-600 hover:underline"
+                  className={cn(buttonVariants({ variant: "link" }), "mt-3")}
                 >
                   Learn how to deploy
                 </a>
@@ -124,7 +141,7 @@ export default function GalleryPage() {
         {/* Cards grid */}
         {filtered !== undefined && filtered.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((automation) => (
+            {filtered.map((automation: Automation) => (
               <AutomationCard
                 key={automation._id}
                 automation={automation}
@@ -136,16 +153,58 @@ export default function GalleryPage() {
       </div>
 
       {/* Command Palette */}
-      {paletteOpen && (
-        <CommandPalette
-          automations={automations ?? []}
-          onClose={() => setPaletteOpen(false)}
-          onSelect={(id) => {
-            setPaletteOpen(false);
-            router.push(`/a/${id}`);
-          }}
-        />
-      )}
+      <CommandDialog
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        title="Search Automations"
+        description="Search for an automation to open..."
+      >
+        <Command>
+          <CommandInput placeholder="Search automations..." />
+          <CommandList>
+            <CommandEmpty>
+              {automations?.length === 0
+                ? "No automations in this workspace yet."
+                : "No matching automations. Try a different search term."}
+            </CommandEmpty>
+            <CommandGroup heading="Automations">
+              {(automations ?? []).map((a: Automation) => {
+                const status = statusConfig[a.status];
+                return (
+                  <CommandItem
+                    key={a._id}
+                    value={`${a.name} ${a.description}`}
+                    onSelect={() => {
+                      setPaletteOpen(false);
+                      router.push(`/a/${a._id}`);
+                    }}
+                  >
+                    <span
+                      className={cn(
+                        "size-2 rounded-full shrink-0",
+                        status.color
+                      )}
+                      aria-label={`Status: ${status.label}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{a.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {a.description}
+                      </p>
+                    </div>
+                    {a.schedule && a.scheduleEnabled !== false && (
+                      <span className="text-xs text-muted-foreground shrink-0 flex items-center gap-1">
+                        <Clock size={11} />
+                        {formatSchedule(a.schedule)}
+                      </span>
+                    )}
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </CommandDialog>
     </div>
   );
 }
@@ -173,7 +232,16 @@ const statusConfig = {
   failed: { color: "bg-red-500", label: "Failed" },
 } as const;
 
-const runStatusIcon: Record<string, { icon: typeof CheckCircle2; className: string }> = {
+const statusBadgeVariant = {
+  active: "secondary" as const,
+  deploying: "outline" as const,
+  failed: "destructive" as const,
+};
+
+const runStatusIcon: Record<
+  string,
+  { icon: typeof CheckCircle2; className: string }
+> = {
   success: { icon: CheckCircle2, className: "text-green-500" },
   error: { icon: XCircle, className: "text-red-500" },
   timeout: { icon: XCircle, className: "text-red-500" },
@@ -183,7 +251,6 @@ const runStatusIcon: Record<string, { icon: typeof CheckCircle2; className: stri
 
 function formatSchedule(schedule: string | null): string | null {
   if (!schedule) return null;
-  // Common cron patterns to human-readable
   if (schedule === "* * * * *") return "Every minute";
   if (schedule === "0 * * * *") return "Every hour";
   if (schedule === "0 0 * * *") return "Daily";
@@ -219,7 +286,8 @@ function AutomationCard({
     : null;
 
   return (
-    <div
+    <Card
+      size="sm"
       role="link"
       tabIndex={0}
       onClick={() => router.push(href)}
@@ -229,223 +297,61 @@ function AutomationCard({
           router.push(href);
         }
       }}
-      className="border border-gray-200 rounded-lg p-4 flex flex-col cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      className="cursor-pointer hover:ring-foreground/20 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {/* Top row: status + version + schedule */}
-      <div className="flex items-center gap-2 mb-2">
-        <span className="flex items-center gap-1.5">
+      <CardHeader className="flex-row items-center gap-2">
+        <Badge
+          variant={statusBadgeVariant[automation.status]}
+          className="gap-1.5"
+        >
           <span
-            className={clsx("w-2 h-2 rounded-full", status.color)}
+            className={cn("size-2 rounded-full", status.color)}
             aria-label={`Status: ${status.label}`}
           />
-          <span className="text-xs text-gray-500">{status.label}</span>
-        </span>
-        <span className="text-xs text-gray-300">v{automation.currentVersion}</span>
+          {status.label}
+        </Badge>
+        <Badge variant="outline" className="text-muted-foreground">
+          v{automation.currentVersion}
+        </Badge>
         {scheduleLabel && automation.scheduleEnabled !== false && (
-          <span className="ml-auto flex items-center gap-1 text-xs text-gray-400">
+          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
             <Clock size={11} />
             {scheduleLabel}
           </span>
         )}
-      </div>
+      </CardHeader>
 
-      {/* Name */}
-      <h3 className="font-semibold text-gray-900 text-sm mb-1 leading-tight">
-        {automation.name}
-      </h3>
+      <CardContent className="flex flex-col gap-1 flex-1">
+        {/* Name */}
+        <h3 className="font-semibold text-foreground text-sm leading-tight">
+          {automation.name}
+        </h3>
 
-      {/* Description */}
-      <p className="text-xs text-gray-500 flex-1 line-clamp-2 leading-relaxed">
-        {automation.description}
-      </p>
+        {/* Description */}
+        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+          {automation.description}
+        </p>
 
-      {/* Last run */}
-      {automation.lastRunAt && runIcon && (
-        <div className="flex items-center gap-1.5 mt-2 text-xs text-gray-400">
-          <runIcon.icon size={12} className={runIcon.className} />
-          <span>
-            Last run {formatRelativeTime(automation.lastRunAt)}
-          </span>
-        </div>
-      )}
+        {/* Last run */}
+        {automation.lastRunAt && runIcon && (
+          <div className="flex items-center gap-1.5 mt-2 text-xs text-muted-foreground">
+            <runIcon.icon size={12} className={runIcon.className} />
+            <span>Last run {formatRelativeTime(automation.lastRunAt)}</span>
+          </div>
+        )}
+      </CardContent>
 
       {/* Footer */}
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
-        <span className="text-xs text-gray-400">
+      <CardFooter className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">
           {formatRelativeTime(automation.createdAt)}
         </span>
-        <span className="flex items-center gap-1 text-xs font-medium text-blue-600">
+        <span className="flex items-center gap-1 text-xs font-medium text-primary">
           Open
           <ArrowRight size={12} />
         </span>
-      </div>
-    </div>
-  );
-}
-
-// --- Command Palette ---
-
-function CommandPalette({
-  automations,
-  onClose,
-  onSelect,
-}: {
-  automations: Automation[];
-  onClose: () => void;
-  onSelect: (id: string) => void;
-}) {
-  const [search, setSearch] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  const results = automations.filter((a) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      a.name.toLowerCase().includes(q) ||
-      a.description.toLowerCase().includes(q)
-    );
-  });
-
-  // Auto-focus input
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Reset selection when results change
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [search]);
-
-  // Scroll selected item into view
-  useEffect(() => {
-    if (listRef.current) {
-      const selected = listRef.current.children[selectedIndex] as HTMLElement;
-      selected?.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedIndex]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (results[selectedIndex]) {
-          onSelect(results[selectedIndex]._id);
-        }
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    },
-    [results, selectedIndex, onSelect, onClose]
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Search automations"
-    >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" />
-
-      {/* Modal */}
-      <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden border border-gray-200"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
-        {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-          <Search size={16} className="text-gray-400 shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search automations..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
-            aria-label="Search automations"
-          />
-          <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[11px] font-medium text-gray-400 border border-gray-200">
-            esc
-          </kbd>
-        </div>
-
-        {/* Results */}
-        <div ref={listRef} className="max-h-72 overflow-y-auto">
-          {results.length === 0 && (
-            <div className="px-4 py-8 text-center">
-              <p className="text-sm text-gray-500">
-                {automations.length === 0
-                  ? "No automations in this workspace yet."
-                  : "No matching automations. Try a different search term."}
-              </p>
-            </div>
-          )}
-          {results.map((a, i) => {
-            const status = statusConfig[a.status];
-            return (
-              <button
-                key={a._id}
-                onClick={() => onSelect(a._id)}
-                className={clsx(
-                  "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
-                  i === selectedIndex
-                    ? "bg-blue-50"
-                    : "hover:bg-gray-50"
-                )}
-              >
-                <span
-                  className={clsx("w-2 h-2 rounded-full shrink-0", status.color)}
-                  aria-label={`Status: ${status.label}`}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">
-                    {a.name}
-                  </p>
-                  <p className="text-xs text-gray-500 truncate">
-                    {a.description}
-                  </p>
-                </div>
-                {a.schedule && a.scheduleEnabled !== false && (
-                  <span className="text-xs text-gray-400 shrink-0 flex items-center gap-1">
-                    <Clock size={11} />
-                    {formatSchedule(a.schedule)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Footer hint */}
-        {results.length > 0 && (
-          <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-4 text-[11px] text-gray-400">
-            <span>
-              <kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-200 mr-1">↑↓</kbd>
-              navigate
-            </span>
-            <span>
-              <kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-200 mr-1">↵</kbd>
-              open
-            </span>
-            <span>
-              <kbd className="px-1 py-0.5 bg-gray-100 rounded border border-gray-200 mr-1">esc</kbd>
-              close
-            </span>
-          </div>
-        )}
-      </div>
-    </div>
+      </CardFooter>
+    </Card>
   );
 }

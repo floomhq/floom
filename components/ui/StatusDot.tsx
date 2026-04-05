@@ -1,4 +1,5 @@
-import { clsx } from "clsx";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 type Status = "pending" | "running" | "success" | "error" | "timeout";
 
@@ -8,6 +9,14 @@ const colors: Record<Status, string> = {
   success: "bg-emerald-500",
   error: "bg-red-500",
   timeout: "bg-amber-500",
+};
+
+const badgeVariantMap: Record<Status, "secondary" | "destructive" | "default" | "outline"> = {
+  pending: "secondary",
+  running: "default",
+  success: "secondary",
+  error: "destructive",
+  timeout: "outline",
 };
 
 const labels: Record<Status, string> = {
@@ -29,19 +38,29 @@ export function StatusDot({
 }) {
   const dotSize = size === "xs" ? "w-1.5 h-1.5" : "w-2 h-2";
 
+  const dot = (
+    <span
+      className={cn(
+        "rounded-full inline-block relative",
+        dotSize,
+        colors[status],
+        status === "running" && "animate-pulse"
+      )}
+    />
+  );
+
+  if (showLabel) {
+    return (
+      <Badge variant={badgeVariantMap[status]} className="gap-1.5">
+        {dot}
+        {labels[status]}
+      </Badge>
+    );
+  }
+
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span
-        className={clsx(
-          "rounded-full inline-block relative",
-          dotSize,
-          colors[status],
-          status === "running" && "animate-pulse"
-        )}
-      />
-      {showLabel && (
-        <span className="text-xs text-gray-600">{labels[status]}</span>
-      )}
+      {dot}
     </span>
   );
 }

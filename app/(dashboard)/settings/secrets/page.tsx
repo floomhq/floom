@@ -4,6 +4,42 @@ import { useQuery, useMutation, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useState } from "react";
 import { Copy, Check, Eye, EyeOff, Pencil, MinusCircle, Undo2 } from "lucide-react";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 
 export default function SecretsPage() {
   const convex = useConvex();
@@ -129,189 +165,254 @@ export default function SecretsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-0.5">
-          Workspace Secrets
-        </h2>
-        <p className="text-xs text-gray-500">
-          View and configure environment variables for your workspace.
-        </p>
-      </div>
-
-      {/* Existing secrets */}
-      {secrets === undefined && (
-        <div className="animate-pulse space-y-2">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-12 bg-gray-100 rounded" />
-          ))}
-        </div>
-      )}
-
-      {secrets !== undefined && secrets.length === 0 && (
-        <p className="text-xs text-gray-400">No secrets saved yet.</p>
-      )}
-
-      {secrets !== undefined && secrets.length > 0 && (
-        <div>
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-4 px-3 py-2 text-xs text-gray-500 border-b border-gray-200">
-            <span>Name</span>
-            <span>Value</span>
-            <span className="w-24" />
-          </div>
-
-          {/* Rows */}
-          <div className="divide-y divide-gray-100">
-            {secrets.map((secret) => (
-              <div key={secret.name}>
-                {editingSecret === secret.name ? (
-                  /* Edit mode */
-                  <div className="grid grid-cols-[1fr_1fr_auto] gap-4 items-center px-3 py-3">
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value.toUpperCase())}
-                      className="px-3 py-2 border border-gray-300 rounded text-sm font-mono bg-gray-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <input
-                      type="text"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 rounded text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={saveEdit}
-                        disabled={editSaving || !editName.trim() || !editValue.trim()}
-                        className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                      >
-                        {editSaving ? "Saving..." : "Save"}
-                      </button>
-                      <button
-                        onClick={cancelEdit}
-                        className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-                      >
-                        <Undo2 size={12} />
-                        Undo Edit
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* Display mode */
-                  <div className="grid grid-cols-[1fr_1fr_auto] gap-4 items-center px-3 py-3 min-w-0">
-                    <span className="text-sm font-mono font-medium text-gray-800 truncate">
-                      {secret.name}
-                    </span>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <button
-                        onClick={() => toggleVisibility(secret.name)}
-                        className="text-gray-400 hover:text-gray-600 transition-colors shrink-0"
-                        title={visibleSecrets.has(secret.name) ? "Hide value" : "Show value"}
-                      >
-                        {visibleSecrets.has(secret.name) ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                      <span className="text-sm text-gray-600 font-mono min-w-0 break-all">
-                        {visibleSecrets.has(secret.name) && decryptedValues[secret.name]
-                          ? decryptedValues[secret.name]
-                          : "••••••••••••••"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => startEdit(secret.name)}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                        title="Edit"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleCopy(secret.name)}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                        title="Copy value"
-                      >
-                        {copiedSecret === secret.name ? (
-                          <Check size={14} className="text-emerald-500" />
-                        ) : (
-                          <Copy size={14} />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setConfirmDelete(secret.name)}
-                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                        title="Delete"
-                      >
-                        <MinusCircle size={14} />
-                      </button>
-                    </div>
-                  </div>
-                )}
+    <TooltipProvider>
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Workspace Secrets</CardTitle>
+            <CardDescription>
+              View and configure environment variables for your workspace.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Loading state */}
+            {secrets === undefined && (
+              <div className="space-y-2">
+                {[1, 2].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            )}
 
-      {/* Add secret form */}
-      <form onSubmit={handleAdd} className="space-y-2">
-        <h3 className="text-xs font-medium text-gray-600">Add secret</h3>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Name (e.g. ANTHROPIC_API_KEY)"
-            value={name}
-            onChange={(e) => setName(e.target.value.toUpperCase())}
-            className="flex-1 px-3 py-2 border border-gray-200 rounded text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-          <input
-            type="password"
-            placeholder="Value"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="flex-1 px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-          <button
-            type="submit"
-            disabled={saving || !name.trim() || !value.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {saving ? "Saving..." : "Add"}
-          </button>
-        </div>
-        {saveError && <p className="text-xs text-red-500">{saveError}</p>}
-      </form>
+            {/* Empty state */}
+            {secrets !== undefined && secrets.length === 0 && (
+              <p className="text-sm text-muted-foreground">No secrets saved yet.</p>
+            )}
 
-      {/* Delete confirmation dialog */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-2">
-              Delete secret
-            </h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Are you sure you want to delete{" "}
-              <code className="font-mono bg-gray-100 px-1 py-0.5 rounded text-xs">
-                {confirmDelete}
-              </code>
-              ? This action cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="px-3 py-1.5 border border-gray-200 rounded text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+            {/* Secrets table */}
+            {secrets !== undefined && secrets.length > 0 && (
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[200px]">Name</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead className="w-28">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {secrets.map((secret: { name: string }) => (
+                    <TableRow key={secret.name}>
+                      {editingSecret === secret.name ? (
+                        <>
+                          <TableCell>
+                            <Input
+                              type="text"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value.toUpperCase())}
+                              className="font-mono"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="text"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                onClick={saveEdit}
+                                disabled={editSaving || !editName.trim() || !editValue.trim()}
+                              >
+                                {editSaving ? "Saving..." : "Save"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={cancelEdit}
+                              >
+                                <Undo2 className="size-3" />
+                                Cancel
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell>
+                            <span className="font-mono font-medium">
+                              {secret.name}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-start gap-2 min-w-0 overflow-hidden">
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      onClick={() => toggleVisibility(secret.name)}
+                                    />
+                                  }
+                                >
+                                  {visibleSecrets.has(secret.name) ? (
+                                    <EyeOff className="size-3.5" />
+                                  ) : (
+                                    <Eye className="size-3.5" />
+                                  )}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {visibleSecrets.has(secret.name) ? "Hide value" : "Show value"}
+                                </TooltipContent>
+                              </Tooltip>
+                              {visibleSecrets.has(secret.name) && decryptedValues[secret.name] ? (
+                                <span className="text-sm font-mono min-w-0 break-all whitespace-pre-wrap">
+                                  {decryptedValues[secret.name]}
+                                </span>
+                              ) : (
+                                <Badge variant="secondary" className="font-mono">
+                                  {"••••••••••••••"}
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      onClick={() => startEdit(secret.name)}
+                                    />
+                                  }
+                                >
+                                  <Pencil className="size-3.5" />
+                                </TooltipTrigger>
+                                <TooltipContent>Edit</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      onClick={() => handleCopy(secret.name)}
+                                    />
+                                  }
+                                >
+                                  {copiedSecret === secret.name ? (
+                                    <Check className="size-3.5 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="size-3.5" />
+                                  )}
+                                </TooltipTrigger>
+                                <TooltipContent>Copy value</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <Button
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      onClick={() => setConfirmDelete(secret.name)}
+                                    />
+                                  }
+                                >
+                                  <MinusCircle className="size-3.5" />
+                                </TooltipTrigger>
+                                <TooltipContent>Delete</TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Add secret form */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Add secret</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleAdd} className="space-y-3">
+              <div className="flex items-end gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="secret-name">Name</Label>
+                  <Input
+                    id="secret-name"
+                    type="text"
+                    placeholder="e.g. ANTHROPIC_API_KEY"
+                    value={name}
+                    onChange={(e) => setName(e.target.value.toUpperCase())}
+                    className="font-mono"
+                  />
+                </div>
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="secret-value">Value</Label>
+                  <Input
+                    id="secret-value"
+                    type="password"
+                    placeholder="Value"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  disabled={saving || !name.trim() || !value.trim()}
+                >
+                  {saving ? "Saving..." : "Add"}
+                </Button>
+              </div>
+              {saveError && (
+                <p className="text-sm text-destructive">{saveError}</p>
+              )}
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Delete confirmation dialog */}
+        <Dialog open={!!confirmDelete} onOpenChange={(open) => !open && setConfirmDelete(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete secret</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete{" "}
+                <code className="font-mono bg-muted px-1 py-0.5 rounded text-xs">
+                  {confirmDelete}
+                </code>
+                ? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose
+                className={cn(buttonVariants({ variant: "outline" }))}
               >
                 Cancel
-              </button>
-              <button
-                onClick={() => handleDelete(confirmDelete)}
-                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 transition-colors"
+              </DialogClose>
+              <Button
+                variant="destructive"
+                onClick={() => confirmDelete && handleDelete(confirmDelete)}
               >
                 Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   );
 }

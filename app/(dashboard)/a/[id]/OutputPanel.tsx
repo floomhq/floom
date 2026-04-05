@@ -7,6 +7,13 @@ import { useState, useEffect } from "react";
 import { Download, Clock, AlertCircle, Key, XCircle } from "lucide-react";
 import { StatusDot } from "@/components/ui/StatusDot";
 import * as XLSX from "xlsx";
+import { cn } from "@/lib/utils";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type Run = {
   _id: string;
@@ -17,7 +24,7 @@ type Run = {
   error: string | null;
   durationMs: number | null;
   startedAt: number;
-  version: number; // derived from versionId doc
+  version: number;
   versionId: string;
 };
 
@@ -65,8 +72,8 @@ export function OutputPanel({
   if (!displayRun) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[300px] p-8 text-center">
-        <div className="text-gray-300 text-4xl mb-3">→</div>
-        <p className="text-sm text-gray-400">
+        <div className="text-muted-foreground/30 text-4xl mb-3">&rarr;</div>
+        <p className="text-sm text-muted-foreground">
           Run this automation to see output here
         </p>
       </div>
@@ -78,16 +85,16 @@ export function OutputPanel({
       <div className="flex flex-col items-center justify-center h-full min-h-[300px] p-8">
         <div className="space-y-3 text-center">
           <StatusDot status="running" size="sm" />
-          <p className="text-sm text-gray-600 font-medium">
+          <p className="text-sm text-foreground font-medium">
             Running v{displayRun.version}...
           </p>
           {displayRun.status === "running" && (
-            <p className="text-xs text-gray-400">{elapsed}s elapsed</p>
+            <p className="text-xs text-muted-foreground">{elapsed}s elapsed</p>
           )}
           <div className="mt-4 space-y-2 w-48">
-            <div className="h-3 bg-gray-100 rounded animate-pulse" />
-            <div className="h-3 bg-gray-100 rounded animate-pulse w-3/4" />
-            <div className="h-3 bg-gray-100 rounded animate-pulse w-1/2" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
           </div>
         </div>
       </div>
@@ -97,18 +104,13 @@ export function OutputPanel({
   if (displayRun.status === "timeout") {
     return (
       <div className="p-4">
-        <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded">
-          <Clock size={18} className="text-amber-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-amber-800">
-              Automation timed out (4.5 min limit)
-            </p>
-            <p className="text-xs text-amber-700 mt-1">
-              Try processing fewer items, or ask the automation owner to
-              optimize.
-            </p>
-          </div>
-        </div>
+        <Alert>
+          <Clock className="size-4 text-amber-500" />
+          <AlertTitle>Automation timed out (4.5 min limit)</AlertTitle>
+          <AlertDescription>
+            Try processing fewer items, or ask the automation owner to optimize.
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -135,24 +137,22 @@ function ErrorOutput({ run }: { run: Run }) {
     { icon: React.ReactNode; title: string; detail: string }
   > = {
     missing_secret: {
-      icon: <Key size={18} className="text-red-500 shrink-0 mt-0.5" />,
+      icon: <Key className="size-4 text-destructive" />,
       title: `Missing API key${run.error ? `: ${run.error.replace("Missing secrets: ", "")}` : ""}`,
-      detail: "An org admin can add it in Settings → Org Secrets.",
+      detail: "An org admin can add it in Settings \u2192 Org Secrets.",
     },
     runtime_error: {
-      icon: <XCircle size={18} className="text-red-500 shrink-0 mt-0.5" />,
+      icon: <XCircle className="size-4 text-destructive" />,
       title: "Runtime error",
       detail: `Fix with: /floom fix [url]`,
     },
     sandbox_error: {
-      icon: (
-        <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
-      ),
+      icon: <AlertCircle className="size-4 text-amber-500" />,
       title: "Temporary service error",
       detail: "Try again in a moment.",
     },
     syntax_error: {
-      icon: <XCircle size={18} className="text-red-500 shrink-0 mt-0.5" />,
+      icon: <XCircle className="size-4 text-destructive" />,
       title: "Syntax error in automation code",
       detail: `Fix with: /floom fix [url]`,
     },
@@ -164,28 +164,30 @@ function ErrorOutput({ run }: { run: Run }) {
 
   return (
     <div className="p-4 space-y-3">
-      <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded">
+      <Alert variant="destructive">
         {errInfo.icon}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-red-800">{errInfo.title}</p>
-          <p className="text-xs text-red-700 mt-1">{errInfo.detail}</p>
+        <AlertTitle>{errInfo.title}</AlertTitle>
+        <AlertDescription>
+          {errInfo.detail}
           {run.errorType === "runtime_error" && run.error && (
             <div className="mt-2">
               <button
                 onClick={() => setShowLogs(!showLogs)}
-                className="text-xs text-red-600 hover:text-red-800 underline"
+                className="text-xs text-destructive/80 hover:text-destructive underline"
               >
-                {showLogs ? "▼ Hide traceback" : "▶ Show traceback"}
+                {showLogs ? "\u25BC Hide traceback" : "\u25B6 Show traceback"}
               </button>
               {showLogs && (
-                <pre className="mt-2 text-xs bg-red-100 p-2 rounded overflow-x-auto text-red-900 max-h-48 overflow-y-auto">
-                  {run.error}
-                </pre>
+                <ScrollArea className="mt-2 max-h-48">
+                  <pre className="text-xs bg-destructive/5 p-2 rounded overflow-x-auto">
+                    {run.error}
+                  </pre>
+                </ScrollArea>
               )}
             </div>
           )}
-        </div>
-      </div>
+        </AlertDescription>
+      </Alert>
     </div>
   );
 }
@@ -203,13 +205,13 @@ function SuccessOutput({
   if (!outputs) return null;
 
   const entries = Object.entries(outputs);
-  const attrLine = `From run v${run.version} · ${formatTime(run.startedAt)}`;
+  const attrLine = `From run v${run.version} \u00B7 ${formatTime(run.startedAt)}`;
   const isStale = run.versionId !== currentVersionId;
 
   return (
     <div className="p-4 space-y-4">
       {isStale && (
-        <p className="text-xs text-gray-400 italic">
+        <p className="text-xs text-muted-foreground italic">
           Showing output from v{run.version}. Run again to get latest results.
         </p>
       )}
@@ -226,9 +228,9 @@ function SuccessOutput({
         );
       })}
 
-      <p className="text-xs text-gray-400 mt-2">
+      <p className="text-xs text-muted-foreground mt-2">
         {attrLine}
-        {isStale && " · Run again to refresh"}
+        {isStale && " \u00B7 Run again to refresh"}
       </p>
     </div>
   );
@@ -263,34 +265,38 @@ function OutputBlock({
 
   if (typeof value === "number") {
     return (
-      <div>
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-          {name.replace(/_/g, " ")}
-        </p>
-        <p className="text-5xl font-bold text-gray-900 tabular-nums">
-          {value.toLocaleString()}
-        </p>
-      </div>
+      <Card size="sm">
+        <CardContent>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+            {name.replace(/_/g, " ")}
+          </p>
+          <p className="text-5xl font-bold text-foreground tabular-nums">
+            {value.toLocaleString()}
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   if (typeof value === "string") {
     return (
       <div>
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
           {name.replace(/_/g, " ")}
         </p>
-        <div className="text-sm text-gray-800 whitespace-pre-wrap">{value}</div>
+        <div className="text-sm text-foreground whitespace-pre-wrap">
+          {value}
+        </div>
       </div>
     );
   }
 
   return (
     <div>
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
         {name.replace(/_/g, " ")}
       </p>
-      <pre className="text-xs text-gray-700 bg-gray-50 p-2 rounded overflow-x-auto">
+      <pre className="text-xs text-muted-foreground bg-muted p-2 rounded overflow-x-auto">
         {JSON.stringify(value, null, 2)}
       </pre>
     </div>
@@ -316,17 +322,17 @@ function linkify(text: string): string {
 function HtmlOutput({ label, html }: { label: string; html: string }) {
   return (
     <div>
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
         {label.replace(/_/g, " ")}
       </p>
-      <div className="border border-gray-200 rounded overflow-hidden">
+      <Card className="overflow-hidden p-0">
         <iframe
           srcDoc={html}
           sandbox="allow-scripts"
-          className="w-full h-96 bg-white"
+          className="w-full h-96 bg-background"
           title={label}
         />
-      </div>
+      </Card>
     </div>
   );
 }
@@ -349,19 +355,20 @@ function PdfOutput({ label, base64 }: { label: string; base64: string }) {
 
   return (
     <div>
-      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
         {label.replace(/_/g, " ")}
       </p>
-      <div className="flex items-center gap-3 p-4 border border-gray-200 rounded bg-gray-50">
-        <div className="text-sm text-gray-600">PDF generated successfully.</div>
-        <button
-          onClick={downloadPDF}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-        >
-          <Download size={14} />
-          Download PDF
-        </button>
-      </div>
+      <Card size="sm">
+        <CardContent className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            PDF generated successfully.
+          </span>
+          <Button size="sm" onClick={downloadPDF}>
+            <Download className="size-3.5" />
+            Download PDF
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -399,63 +406,63 @@ function TableOutput({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           {label.replace(/_/g, " ")}
         </p>
         <div className="flex items-center gap-2">
-          <button
-            onClick={downloadCSV}
-            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
-          >
-            <Download size={12} />
+          <Button variant="link" size="xs" onClick={downloadCSV}>
+            <Download className="size-3" />
             CSV
-          </button>
-          <button
-            onClick={downloadXLSX}
-            className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
-          >
-            <Download size={12} />
+          </Button>
+          <Button variant="link" size="xs" onClick={downloadXLSX}>
+            <Download className="size-3" />
             XLSX
-          </button>
+          </Button>
         </div>
       </div>
-      <div className="border border-gray-200 rounded overflow-hidden overflow-x-auto max-h-[500px] overflow-y-auto">
-        <table className="output-table">
-          <thead className="sticky top-0 z-10">
-            <tr>
-              {columns.map((col) => (
-                <th key={col}>{col.replace(/_/g, " ")}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i}>
+      <div className="rounded-lg border overflow-hidden">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
+              <tr className="border-b">
                 {columns.map((col) => (
-                  <td key={col}>
-                    <div
-                      className="td-cell hover:bg-gray-100"
-                      tabIndex={0}
-                      onFocus={(e) => e.currentTarget.classList.add("expanded")}
-                      onBlur={(e) =>
-                        e.currentTarget.classList.remove("expanded")
-                      }
-                      dangerouslySetInnerHTML={{
-                        __html: linkify(String(row[col] ?? "")),
-                      }}
-                      onClick={(e) => {
-                        // Don't steal focus from link clicks
-                        if ((e.target as HTMLElement).tagName === "A") {
-                          e.stopPropagation();
-                        }
-                      }}
-                    />
-                  </td>
+                  <th
+                    key={col}
+                    className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                  >
+                    {col.replace(/_/g, " ")}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  {columns.map((col) => (
+                    <td key={col} className="px-3 py-2 align-top text-sm min-w-[120px] max-w-[300px]">
+                      <div
+                        className="output-cell"
+                        tabIndex={0}
+                        onFocus={(e) => e.currentTarget.classList.add("expanded")}
+                        onBlur={(e) =>
+                          e.currentTarget.classList.remove("expanded")
+                        }
+                        dangerouslySetInnerHTML={{
+                          __html: linkify(String(row[col] ?? "")),
+                        }}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).tagName === "A") {
+                            e.stopPropagation();
+                          }
+                        }}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
