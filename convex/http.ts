@@ -205,6 +205,87 @@ http.route({
   }),
 });
 
+// GET /api/automations — list automations for the authenticated org.
+http.route({
+  path: "/api/automations",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const { orgId } = await verifyApiKey(request, ctx);
+
+      const url = new URL(request.url);
+      const q = url.searchParams.get("q") ?? undefined;
+
+      const automations = await ctx.runQuery(
+        internal.automations.listInternal,
+        { orgId, q }
+      );
+
+      const platformUrl =
+        process.env.NEXT_PUBLIC_APP_URL ?? "https://dashboard.floom.dev";
+
+      const withUrls = automations.map((a: any) => ({
+        ...a,
+        url: `${platformUrl}/a/${a.id}`,
+      }));
+
+      return jsonResponse({ automations: withUrls });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      if (
+        msg.includes("Unauthorized") ||
+        msg.includes("Invalid API key") ||
+        msg.includes("revoked")
+      ) {
+        return errorResponse(msg, 401);
+      }
+      return errorResponse(msg, 400);
+    }
+  }),
+});
+
+// GET /api/automations/:id — full automation detail including code.
+http.route({
+  pathPrefix: "/api/automations/",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    try {
+      const url = new URL(request.url);
+      const automationId = url.pathname.split("/")[3];
+      if (!automationId) return errorResponse("Automation ID required");
+
+      const { orgId } = await verifyApiKey(request, ctx);
+
+      const automation = await ctx.runQuery(
+        internal.automations.getDetailInternal,
+        { id: automationId as Id<"automations">, orgId }
+      );
+
+      if (!automation) {
+        return errorResponse("Automation not found", 404);
+      }
+
+      const platformUrl =
+        process.env.NEXT_PUBLIC_APP_URL ?? "https://dashboard.floom.dev";
+
+      return jsonResponse({
+        ...automation,
+        url: `${platformUrl}/a/${automation.id}`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      if (
+        msg.includes("Unauthorized") ||
+        msg.includes("Invalid API key") ||
+        msg.includes("revoked")
+      ) {
+        return errorResponse(msg, 401);
+      }
+      return errorResponse(msg, 400);
+    }
+  }),
+});
+
 // POST /api/automations/:id/update|run|rollback — skill updates, triggers, or rolls back automation.
 http.route({
   pathPrefix: "/api/automations/",

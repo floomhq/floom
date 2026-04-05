@@ -313,7 +313,25 @@ Want me to fix the issue and try again?
 
 ## Update Flow (`/floom update [url or name]`)
 
-1. Fetch current code from platform (ask user to paste current code or re-describe changes)
+1. Find the automation to update:
+
+```bash
+# Search by name
+AUTOMATIONS=$(curl -s "$PLATFORM/api/automations?q=SEARCH_TERM" \
+  -H "Authorization: Bearer $API_KEY")
+echo "$AUTOMATIONS"
+```
+
+Pick the matching automation ID from the list, then fetch its current code:
+
+```bash
+AUTOMATION=$(curl -s "$PLATFORM/api/automations/[AUTOMATION_ID]" \
+  -H "Authorization: Bearer $API_KEY")
+echo "$AUTOMATION"
+```
+
+This returns the full automation including `code` and `manifest`. Use the current code as the starting point.
+
 2. Show existing code, ask what to change
 3. Apply changes to the function
 4. Ask: "What changed? (optional note for version history)"
@@ -387,3 +405,224 @@ curl -s -X POST "$PLATFORM/api/automations/[AUTOMATION_ID]/rollback" \
 | 403 Forbidden                 | "You don't have permission to update this automation."                         |
 | Rate limit exceeded           | "You've hit the limit of 50 runs/hour. Try again in a bit."                    |
 | Missing secret                | "This automation needs [SECRET_NAME] but it's not stored. Want to add it now?" |
+
+---
+
+## API Reference
+
+All endpoints require `Authorization: Bearer <API_KEY>` header. The API key is stored in `~/.claude/floom-config.json`.
+
+```bash
+API_KEY=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json'))['api_key'])")
+PLATFORM=$(python3 -c "import json; print(json.load(open('$HOME/.claude/floom-config.json')).get('platform_url','https://dashboard.floom.dev'))")
+```
+
+### GET /api/automations
+
+List all automations in the workspace. Use to discover existing automations before deploying (avoids creating duplicates).
+
+**Query params:**
+- `q` (optional) — case-insensitive search on name and description
+
+**Response (200):**
+```json
+{
+  "automations": [
+    {
+      "id": "abc123",
+      "name": "Daily Report",
+      "description": "Generates daily sales summary",
+      "status": "active",
+      "schedule": "0 9 * * *",
+      "scheduleEnabled": true,
+      "currentVersion": 3,
+      "createdAt": 1712300000000,
+      "lastRunStatus": "success",
+      "lastRunAt": 1712350000000,
+      "url": "https://dashboard.floom.dev/a/abc123"
+    }
+  ]
+}
+```
+
+**Example:**
+```bash
+# List all
+curl -s "$PLATFORM/api/automations" -H "Authorization: Bearer $API_KEY"
+
+# Search by name
+curl -s "$PLATFORM/api/automations?q=daily+report" -H "Authorization: Bearer $API_KEY"
+```
+
+### GET /api/automations/:id
+
+Get full automation detail including current code and manifest. Use this to fetch existing code before modifying and deploying an update.
+
+**Response (200):**
+```json
+{
+  "id": "abc123",
+  "name": "Daily Report",
+  "description": "Generates daily sales summary",
+  "status": "active",
+  "schedule": "0 9 * * *",
+  "scheduleEnabled": true,
+  "currentVersion": 3,
+  "createdAt": 1712300000000,
+  "code": "import os\n\ndef run(query):\n    ...\n    return {\"result\": data}\n",
+  "manifest": {
+    "name": "Daily Report",
+    "description": "...",
+    "inputs": [...],
+    "outputs": [...],
+    "secrets_needed": ["ANTHROPIC_API_KEY"],
+    "python_dependencies": ["anthropic"],
+    "manifest_version": "1.0"
+  },
+  "url": "https://dashboard.floom.dev/a/abc123"
+}
+```
+
+**Example:**
+```bash
+curl -s "$PLATFORM/api/automations/[AUTOMATION_ID]" -H "Authorization: Bearer $API_KEY"
+```
+
+### POST /api/test
+
+Run code in a sandbox before deploying. Returns a `testRunId` used for deploy or update. The API waits up to 10s for results by default.
+
+**Body:**
+```json
+{
+  "code": "def run(x):\n    return {\"result\": x * 2}\n",
+  "manifest": { ... },
+  "inputs": { "x": 5 },
+  "automationId": "abc123"
+}
+```
+
+- `code` (required) — Python source with a `run()` function
+- `manifest` (required) — manifest object (see Step 3 above)
+- `inputs` (required) — dict of input values matching manifest input names
+- `automationId` (optional) — link to existing automation (for updates, ensures secrets are available)
+- `wait` (optional) — seconds to wait for result (default 10, max 10)
+
+**Response (200):**
+```json
+{
+  "testRunId": "xyz789",
+  "status": "success",
+  "result": {
+    "status": "success",
+    "outputs": { "result": 10 },
+    "logs": "..."
+  }
+}
+```
+
+If `status` is `pending` or `running`, poll with GET /api/test-runs/:id.
+
+### GET /api/test-runs/:id
+
+Poll test run status until terminal (`success`, `error`, `timeout`).
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "outputs": { "result": 10 },
+  "logs": "...",
+  "error": null
+}
+```
+
+### POST /api/deploy
+
+Deploy from a successful test run. Creates a new automation.
+
+**Body:**
+```json
+{
+  "testRunId": "xyz789",
+  "changeNote": "Initial deploy"
+}
+```
+
+**Response (200):**
+```json
+{
+  "id": "abc123",
+  "url": "https://dashboard.floom.dev/a/abc123"
+}
+```
+
+### POST /api/automations/:id/update
+
+Deploy a new version of an existing automation from a successful test run.
+
+**Body:**
+```json
+{
+  "testRunId": "xyz789",
+  "changeNote": "Added error handling"
+}
+```
+
+**Response (200):**
+```json
+{ "id": "abc123" }
+```
+
+### POST /api/automations/:id/run
+
+Trigger an automation run with given inputs.
+
+**Body:**
+```json
+{
+  "inputs": { "query": "hello" },
+  "wait": 10
+}
+```
+
+- `inputs` (required) — dict of input values
+- `wait` (optional) — seconds to wait for result (default 10, max 10)
+
+**Response (200):**
+```json
+{
+  "runId": "run456",
+  "status": "success",
+  "result": { "status": "success", "outputs": { ... } }
+}
+```
+
+If `status` is `pending` or `running`, poll with GET /api/runs/:runId.
+
+### GET /api/runs/:runId
+
+Poll run status until terminal (`success`, `error`, `timeout`).
+
+### POST /api/automations/:id/rollback
+
+Revert to a previous version.
+
+**Body:**
+```json
+{ "versionId": "ver789" }
+```
+
+### POST /api/secrets
+
+Store or update an org secret. Secrets are encrypted at rest and injected into automations at run time.
+
+**Body:**
+```json
+{ "name": "ANTHROPIC_API_KEY", "value": "sk-ant-..." }
+```
+
+**Response (200):**
+```json
+{ "name": "ANTHROPIC_API_KEY", "stored": true }
+```

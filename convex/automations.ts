@@ -117,6 +117,94 @@ export const getInternal = internalQuery({
   },
 });
 
+// Full automation detail + code — called from HTTP action (bearer token auth).
+export const getDetailInternal = internalQuery({
+  args: {
+    id: v.id("automations"),
+    orgId: v.id("organizations"),
+  },
+  handler: async (ctx, args) => {
+    const automation = await ctx.db.get(args.id);
+    if (!automation) return null;
+    if (automation.orgId !== args.orgId) return null;
+
+    const version =
+      automation.currentVersionId !== "placeholder"
+        ? await ctx.db.get(automation.currentVersionId)
+        : null;
+
+    return {
+      id: automation._id,
+      name: automation.name,
+      description: automation.description,
+      status: automation.status,
+      schedule: automation.schedule,
+      scheduleEnabled: automation.scheduleEnabled ?? true,
+      createdAt: automation.createdAt,
+      currentVersion: version?.version ?? 1,
+      code: version?.code ?? null,
+      manifest: version?.manifest ?? null,
+    };
+  },
+});
+
+// List automations for an org — called from HTTP action (bearer token auth).
+export const listInternal = internalQuery({
+  args: {
+    orgId: v.id("organizations"),
+    q: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    let automations = await ctx.db
+      .query("automations")
+      .withIndex("by_orgId", (q) => q.eq("orgId", args.orgId))
+      .collect();
+
+    if (args.q) {
+      const q = args.q.toLowerCase();
+      automations = automations.filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          a.description.toLowerCase().includes(q)
+      );
+    }
+
+    const sorted = automations.sort((a, b) => b.createdAt - a.createdAt);
+
+    const enriched = await Promise.all(
+      sorted.map(async (a) => {
+        const lastRun = await ctx.db
+          .query("runs")
+          .withIndex("by_automationId_startedAt", (q) =>
+            q.eq("automationId", a._id)
+          )
+          .order("desc")
+          .first();
+
+        const versionDoc =
+          a.currentVersionId !== "placeholder"
+            ? await ctx.db.get(a.currentVersionId)
+            : null;
+
+        return {
+          id: a._id,
+          name: a.name,
+          description: a.description,
+          status: a.status,
+          schedule: a.schedule,
+          scheduleEnabled: a.scheduleEnabled ?? true,
+          currentVersion: versionDoc?.version ?? 1,
+          createdAt: a.createdAt,
+          lastRunStatus: lastRun?.status ?? null,
+          lastRunAt: lastRun?.startedAt ?? null,
+        };
+      })
+    );
+
+    return enriched;
+  },
+});
+
 // Version history for an automation.
 export const getVersions = query({
   args: { automationId: v.id("automations") },
