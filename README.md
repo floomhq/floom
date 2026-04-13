@@ -15,6 +15,34 @@ One manifest, four surfaces. Any CLI, MCP server, or Python library becomes a ch
 - `spec/protocol.md` — the Floom Protocol spec
 - `examples/*` — example manifests for the 15 launch apps
 
+## Self-host in 60 seconds
+
+```bash
+# Create your apps config
+cat > apps.yaml <<'EOF'
+apps:
+  - slug: stripe
+    type: proxied
+    openapi_spec_url: https://docs.stripe.com/api/openapi.json
+    base_url: https://api.stripe.com
+    auth: bearer
+    secrets: [STRIPE_SECRET_KEY]
+    display_name: Stripe
+    description: "Payment processing API."
+EOF
+
+# Run Floom
+docker run -p 3051:3051 \
+  -v $(pwd)/apps.yaml:/app/config/apps.yaml:ro \
+  -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
+  -e STRIPE_SECRET_KEY=sk_... \
+  ghcr.io/floomhq/floom-monorepo:latest
+```
+
+Floom boots, fetches the Stripe OpenAPI spec, generates a chat UI + MCP server + HTTP endpoint. Point your agent at `http://localhost:3051/mcp/app/stripe`.
+
+See [docs/SELF_HOST.md](./docs/SELF_HOST.md) for the full guide.
+
 ## Install
 
 ```bash
