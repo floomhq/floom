@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChatStore } from '../store/chatStore';
 import { TopBar } from '../components/TopBar';
+import { Footer } from '../components/Footer';
 import { PromptBox } from '../components/PromptBox';
 import { TrustStrip } from '../components/TrustStrip';
 import { AppIcon } from '../components/AppIcon';
@@ -94,6 +95,56 @@ export function ChatPage() {
     submitPillPrompt('Show me all public apps', 'public-apps');
   };
 
+  // Persistent pill row — always visible regardless of thread state
+  const PillRow = () => (
+    <div className="pills" style={{ marginTop: 16 }}>
+      <button
+        type="button"
+        className="pill"
+        data-testid="pill-public-apps"
+        onClick={() => submitPillPrompt('Show me all public apps', 'public-apps')}
+      >
+        Public apps
+      </button>
+      <button
+        type="button"
+        className="pill"
+        data-testid="pill-my-apps"
+        onClick={() => submitPillPrompt('Show me my apps', 'my-apps')}
+      >
+        My apps
+      </button>
+      <button
+        type="button"
+        className="pill"
+        data-testid="pill-build-your-own"
+        onClick={() => submitPillPrompt('I want to build my own app', 'build-your-own')}
+      >
+        Build your own
+      </button>
+      <button
+        type="button"
+        className="pill"
+        data-testid="pill-about-floom"
+        onClick={() => submitPillPrompt('What is Floom?', 'about-floom')}
+      >
+        About Floom
+      </button>
+      <button
+        type="button"
+        className="pill"
+        data-testid="pill-connect-github"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        onClick={() => submitPillPrompt('Connect my GitHub', 'connect-github')}
+      >
+        <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor">
+          <use href="#icon-github" />
+        </svg>
+        Connect GitHub
+      </button>
+    </div>
+  );
+
   return (
     <div className={`page-root sidebar-push-layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
       <TopBar onSignIn={handleSignIn} />
@@ -167,6 +218,10 @@ export function ChatPage() {
               />
             ))}
           </div>
+          {/* Persistent pill dock — stays visible above the bottom prompt */}
+          <div style={{ maxWidth: 680, margin: '24px auto 0', paddingLeft: 0 }}>
+            <PillRow />
+          </div>
         </main>
       )}
 
@@ -185,6 +240,8 @@ export function ChatPage() {
       )}
 
       <Sidebar app={currentApp} open={sidebarOpen} onClose={closeSidebar} />
+
+      <Footer />
 
       {/* Silence unused */}
       <span hidden>{navigate.length}</span>
@@ -212,10 +269,10 @@ function EmptyHero({
       }}
     >
       <h1 className="headline" style={{ maxWidth: 680 }}>
-        Infra for<span className="headline-dim"> agentic work.</span>
+        What can your agent<span className="headline-dim"> do for you?</span>
       </h1>
       <p className="subhead">
-        OpenAPI in. Production product out. MCP server, CLI, HTTP API, and chat UI — auto-generated from any OpenAPI spec.
+        Describe what you need. Floom routes it to the right agent-ready app, runs it, and gives you back the result.
       </p>
 
       <PromptBox autoFocus onSubmit={onSubmit} />
