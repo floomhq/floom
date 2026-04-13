@@ -387,10 +387,10 @@ export function CreatorHeroPage() {
         </h2>
         <ul style={{ margin: '20px 0', paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <li style={{ fontSize: 15, lineHeight: 1.7, color: 'var(--ink)' }}>
-            If your tool already has an OpenAPI spec (Stripe, GitHub, Linear, your own SaaS), paste the URL. Floom wraps it in 10 seconds.
+            Wrap an external OpenAPI spec (Stripe, GitHub, Linear, your own SaaS) — <strong>proxied mode</strong>. Paste the URL, Floom wraps it in 10 seconds.
           </li>
           <li style={{ fontSize: 15, lineHeight: 1.7, color: 'var(--ink)' }}>
-            If it's a Python library or CLI, add a 20-line FastAPI wrapper. Floom does the rest.
+            Host your own as a FastAPI wrapper — <strong>hosted mode</strong>. Add a 20-line Python server and a <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>floom.yaml</code>. Floom builds, runs, and wraps it.
           </li>
           <li style={{ fontSize: 15, lineHeight: 1.7, color: 'var(--muted)' }}>
             If it's a GitHub repo with no OpenAPI yet, we'll auto-generate one from the README and entrypoint — coming soon.
@@ -531,7 +531,7 @@ function PlumbingCell({ name, desc, live }: { name: string; desc: string; live: 
           letterSpacing: '0.06em',
         }}
       >
-        {live ? 'live' : 'soon'}
+        {live ? 'Live' : 'Coming soon'}
       </div>
       <p style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 600, color: 'var(--ink)', paddingRight: 48 }}>
         {name}

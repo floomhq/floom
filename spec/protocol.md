@@ -26,7 +26,7 @@ secrets: [STRIPE_SECRET_KEY]
 ```yaml
 name: flyfast
 type: hosted
-runtime: python3.12
+runtime: python3.12      # optional, auto-detected from pyproject.toml/requirements.txt
 openapi_spec: ./openapi.yaml
 build: pip install .
 run: uvicorn flyfast.server:app --port 8000

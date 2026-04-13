@@ -195,6 +195,19 @@ body {
   main[style*="grid-template-columns"] {
     grid-template-columns: 1fr !important;
   }
+  /* Protocol: prevent code blocks from causing horizontal overflow */
+  [data-testid="protocol-page"] pre,
+  [data-testid="protocol-page"] code {
+    overflow-x: auto;
+    max-width: 100%;
+    white-space: pre;
+    word-break: normal;
+  }
+  [data-testid="protocol-page"] article {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
 }
 
 /* ── FloomApp standalone spacing ─────────────────────────────────────────── */

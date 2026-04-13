@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
+import { Footer } from '../components/Footer';
 import { FloomApp } from '../components/FloomApp';
 import { getApp } from '../api/client';
 import type { AppDetail } from '../lib/types';
 
 export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
-  const navigate = useNavigate();
   const [app, setApp] = useState<AppDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -87,6 +87,7 @@ export function AppPermalinkPage() {
         <main className="main" style={{ paddingTop: 80, textAlign: 'center' }}>
           <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading…</p>
         </main>
+        <Footer />
       </div>
     );
   }
@@ -118,6 +119,7 @@ export function AppPermalinkPage() {
             Back to all apps
           </Link>
         </main>
+        <Footer />
       </div>
     );
   }
@@ -185,26 +187,48 @@ export function AppPermalinkPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <CopyButton text={permalinkUrl} />
-            <button
-              type="button"
-              onClick={() => navigate(`/chat?app=${app.slug}`)}
+            <a
+              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Try ${app.name} on Floom — ${app.description}`)}&url=${encodeURIComponent(permalinkUrl)}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                padding: '8px 16px',
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                color: 'var(--ink)',
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              Share on X
+            </a>
+            <Link
+              to={`/chat?app=${app.slug}`}
               style={{
                 padding: '8px 16px',
                 background: 'var(--accent)',
                 color: '#fff',
-                border: 'none',
                 borderRadius: 8,
                 fontSize: 13,
                 fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
               }}
             >
-              Try in chat
-            </button>
+              Try in chat →
+            </Link>
           </div>
         </div>
       </main>
+      <Footer />
     </div>
   );
 }
