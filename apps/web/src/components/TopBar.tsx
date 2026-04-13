@@ -16,21 +16,21 @@ export function TopBar({ onSignIn }: Props) {
         </Link>
         {/* Desktop nav */}
         <nav className="topbar-links topbar-links-desktop">
-          <button
-            type="button"
-            className="topbar-nav-btn"
-            data-testid="topbar-public-apps"
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('floom:pill', { detail: { pill: 'public-apps' } }));
-            }}
-          >
-            public apps
-          </button>
+          <Link to="/apps" className="topbar-nav-btn" data-testid="topbar-apps">
+            apps
+          </Link>
+          <Link to="/chat" className="topbar-nav-btn" data-testid="topbar-chat">
+            chat
+          </Link>
+          <Link to="/protocol" className="topbar-nav-btn" data-testid="topbar-protocol">
+            protocol
+          </Link>
           <a
-            href="https://github.com/floomhq/floom"
+            href="https://github.com/floomhq/floom-monorepo"
             target="_blank"
             rel="noreferrer"
             style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+            data-testid="topbar-github"
           >
             <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor">
               <use href="#icon-github" />
@@ -41,6 +41,7 @@ export function TopBar({ onSignIn }: Props) {
             type="button"
             className="btn-signin"
             onClick={onSignIn}
+            data-testid="topbar-signin"
             style={{ cursor: 'pointer', background: 'var(--card)', fontFamily: 'inherit' }}
           >
             Sign in
@@ -63,19 +64,32 @@ export function TopBar({ onSignIn }: Props) {
       {/* Mobile dropdown */}
       {menuOpen && (
         <div className="topbar-mobile-menu" role="menu">
-          <button
-            type="button"
+          <Link
+            to="/apps"
             className="topbar-mobile-link"
             role="menuitem"
-            onClick={() => {
-              setMenuOpen(false);
-              window.dispatchEvent(new CustomEvent('floom:pill', { detail: { pill: 'public-apps' } }));
-            }}
+            onClick={() => setMenuOpen(false)}
           >
-            Public apps
-          </button>
+            Apps
+          </Link>
+          <Link
+            to="/chat"
+            className="topbar-mobile-link"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+          >
+            Chat
+          </Link>
+          <Link
+            to="/protocol"
+            className="topbar-mobile-link"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+          >
+            Protocol
+          </Link>
           <a
-            href="https://github.com/floomhq/floom"
+            href="https://github.com/floomhq/floom-monorepo"
             target="_blank"
             rel="noreferrer"
             className="topbar-mobile-link"
