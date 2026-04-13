@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FloomWordmark } from './Logo';
 
 interface Props {
   onSignIn?: () => void;
@@ -81,16 +82,13 @@ export function TopBar({ onSignIn: _onSignIn }: Props) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
-        <Link to="/" className="brand">
-          floom
+        <Link to="/" className="brand" style={{ display: 'flex', alignItems: 'center', textDecoration: 'none', color: 'var(--ink)' }}>
+          <FloomWordmark size={24} />
         </Link>
         {/* Desktop nav — hidden on mobile via CSS; aria-hidden added for screen reader cleanliness */}
         <nav className="topbar-links topbar-links-desktop" aria-label="Desktop navigation">
           <Link to="/apps" className="topbar-nav-btn" data-testid="topbar-apps">
             apps
-          </Link>
-          <Link to="/chat" className="topbar-nav-btn" data-testid="topbar-chat">
-            chat
           </Link>
           <Link to="/protocol" className="topbar-nav-btn" data-testid="topbar-protocol">
             protocol
@@ -141,14 +139,6 @@ export function TopBar({ onSignIn: _onSignIn }: Props) {
             onClick={() => setMenuOpen(false)}
           >
             Apps
-          </Link>
-          <Link
-            to="/chat"
-            className="topbar-mobile-link"
-            role="menuitem"
-            onClick={() => setMenuOpen(false)}
-          >
-            Chat
           </Link>
           <Link
             to="/protocol"
