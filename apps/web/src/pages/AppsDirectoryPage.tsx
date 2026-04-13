@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
+import { Footer } from '../components/Footer';
 import { AppIcon } from '../components/AppIcon';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
@@ -14,6 +15,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   'analytics': 'Analytics',
   'productivity': 'Productivity',
   'writing': 'Writing',
+  'ai': 'AI',
+  'seo': 'SEO',
 };
 
 export function AppsDirectoryPage() {
@@ -149,7 +152,7 @@ export function AppsDirectoryPage() {
             data-testid="apps-grid"
           >
             {filtered.map((app) => (
-              <AppCard key={app.slug} app={app} onClick={() => navigate(`/p/${app.slug}`)} />
+              <AppCard key={app.slug} app={app} onClick={() => {}} />
             ))}
           </div>
         )}
@@ -195,14 +198,15 @@ export function AppsDirectoryPage() {
           </a>
         </div>
       </main>
+      <Footer />
     </div>
   );
 }
 
 function AppCard({ app, onClick }: { app: HubApp; onClick: () => void }) {
   return (
-    <button
-      type="button"
+    <Link
+      to={`/p/${app.slug}`}
       className="app-tile"
       data-testid={`app-card-${app.slug}`}
       onClick={onClick}
@@ -215,6 +219,8 @@ function AppCard({ app, onClick }: { app: HubApp; onClick: () => void }) {
         gap: 8,
         cursor: 'pointer',
         minHeight: 130,
+        textDecoration: 'none',
+        color: 'inherit',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -287,7 +293,7 @@ function AppCard({ app, onClick }: { app: HubApp; onClick: () => void }) {
           new
         </span>
       </div>
-    </button>
+    </Link>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
+import { Footer } from '../components/Footer';
 // Import the protocol markdown at build time via Vite ?raw
 import protocolMd from '@spec/protocol.md?raw';
 
@@ -521,6 +522,7 @@ export function ProtocolPage() {
           </div>
         </article>
       </main>
+      <Footer />
     </div>
   );
 }
