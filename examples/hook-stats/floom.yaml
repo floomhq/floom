@@ -1,0 +1,38 @@
+name: Hook Stats
+description: Analyze your Claude Code bash command log.
+actions:
+  analyze:
+    label: Analyze Log
+    inputs:
+      - name: log_content
+        label: bash-commands.log content
+        type: textarea
+        required: true
+        description: Paste the contents of ~/.claude/bash-commands.log (each line begins
+          with a [timestamp] prefix).
+    outputs:
+      - name: total
+        label: Total Commands
+        type: number
+      - name: today
+        label: Today
+        type: number
+      - name: top_commands
+        label: Top Commands
+        type: json
+      - name: git
+        label: Git Operations
+        type: json
+      - name: per_day
+        label: Per Day (last 7)
+        type: json
+      - name: report
+        label: Report
+        type: text
+    description: Parse a Claude Code bash-commands.log and return top commands, git
+      stats, and per-day activity.
+runtime: python
+python_dependencies: []
+node_dependencies: {}
+secrets_needed: []
+manifest_version: "2.0"

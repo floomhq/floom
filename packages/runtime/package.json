@@ -1,0 +1,32 @@
+{
+  "name": "@floom/runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/runtime/index.ts",
+  "types": "./src/runtime/index.ts",
+  "exports": {
+    ".": "./src/runtime/index.ts",
+    "./deploy": "./src/deploy/pipeline.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/detect/*.test.ts",
+    "test:runtime": "tsx --test tests/runtime/*.test.ts",
+    "deploy-github": "tsx scripts/deploy-github.ts"
+  },
+  "dependencies": {
+    "@e2b/code-interpreter": "2.4.0",
+    "@floom/detect": "workspace:*",
+    "@floom/manifest": "workspace:*",
+    "e2b": "2.19.0",
+    "yaml": "2.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,26 @@
+name: FlyFast
+description: Search flights like you would text a friend. Up to 100 combinations
+  from one natural-language query.
+actions:
+  search:
+    label: Search Flights
+    inputs:
+      - name: prompt
+        label: What flight do you need?
+        type: textarea
+        required: true
+        placeholder: Cheap flight from Berlin to Lisbon first week of May
+    outputs:
+      - name: results
+        label: Flight Results
+        type: json
+    description: Natural-language flight search. Describe your trip in plain English
+      and get scored flight options back.
+runtime: python
+python_dependencies:
+  - httpx>=0.27
+node_dependencies: {}
+secrets_needed:
+  - FLYFAST_INTERNAL_TOKEN
+manifest_version: "2.0"
+knowledge_enabled: false

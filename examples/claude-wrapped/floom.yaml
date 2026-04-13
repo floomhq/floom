@@ -1,0 +1,40 @@
+name: Claude Wrapped
+description: Spotify Wrapped for Claude Code. Visualize your AI coding stats
+  from session transcripts.
+actions:
+  generate:
+    label: Generate Wrapped
+    inputs:
+      - name: jsonl_sessions
+        label: Session JSONL
+        type: textarea
+        required: true
+        description: Paste the full contents of one or more
+          ~/.claude/projects/<project>/<session>.jsonl files. Separate multiple
+          sessions with a line containing only '---'.
+      - name: author
+        label: Author
+        type: text
+        required: false
+        default: Claude Code User
+        description: Display name for the report header.
+      - name: project_slug
+        label: Project Slug
+        type: text
+        required: false
+        default: my-project
+        description: Slug used to group sessions under a single project bucket.
+    outputs:
+      - name: sessions
+        label: Sessions Parsed
+        type: number
+      - name: html
+        label: Wrapped Report
+        type: html
+    description: Generate a Claude Code Wrapped HTML report from one or more pasted
+      session JSONL files.
+runtime: python
+python_dependencies: []
+node_dependencies: {}
+secrets_needed: []
+manifest_version: "2.0"

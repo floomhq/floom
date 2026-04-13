@@ -1,0 +1,181 @@
+/* The wireframe design system — CSS variables, all layout primitives,
+   every component (chat thread, prompt box, app card, terminal, etc).
+   Copied verbatim from the Floom Chat wireframes so the implementation
+   matches the design spec 1:1. MUST precede @tailwind directives. */
+@import './wireframe.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Critical: fix sticky nav broken by overflow:hidden on html ─────── */
+/* The wireframe.css sets html,body{overflow-x:hidden} which creates a  */
+/* new scroll container and breaks position:sticky on the topbar.       */
+/* Fix: unset overflow on html so the viewport is the scroll container. */
+/* The body gets overflow-x:hidden to prevent horizontal scroll.        */
+/* ── Critical: fix sticky nav broken by overflow:hidden on html ─────── */
+/* The wireframe.css sets html,body{overflow-x:hidden} which creates a  */
+/* new scroll container and breaks position:sticky on the topbar.       */
+/* Fix: set overflow:visible on html and body so the viewport is the    */
+/* scroll container. Use overflow-x:clip on body (clip does NOT create  */
+/* a new scroll container, unlike hidden).                              */
+html {
+  overflow: visible !important;
+}
+body {
+  overflow-x: clip !important;
+  overflow-y: visible !important;
+}
+
+/* React-specific adjustments: remove the wireframe dev nav offset so the
+   topbar sits flush against the top. */
+.page-root {
+  padding-top: 0 !important;
+}
+.topbar {
+  top: 0 !important;
+  height: 56px;
+}
+.sidebar,
+.sidebar-backdrop {
+  top: 0 !important;
+}
+
+/* ── Topbar nav button (plain nav links styled as nav) ──────────────── */
+.topbar-nav-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.1s;
+}
+.topbar-nav-btn:hover {
+  color: var(--ink);
+}
+
+/* ── Mobile hamburger ────────────────────────────────────────────────── */
+.topbar-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.topbar-hamburger span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--ink);
+  border-radius: 2px;
+  transition: transform 0.2s, opacity 0.2s;
+}
+
+.topbar-mobile-menu {
+  background: var(--card);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+.topbar-mobile-link {
+  display: block;
+  padding: 14px 24px;
+  font-size: 15px;
+  color: var(--ink);
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+}
+.topbar-mobile-link:last-child {
+  border-bottom: none;
+}
+.topbar-mobile-link:hover {
+  background: var(--bg);
+}
+
+/* ── Mobile responsive ───────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Reduce main padding so content fits within 375px */
+  .main {
+    padding: 48px 16px 80px;
+  }
+
+  /* Headline: 56px → 36px so it fits in 2 lines at 375px */
+  .headline {
+    font-size: 36px !important;
+    max-width: 100% !important;
+  }
+
+  /* Subhead slightly smaller */
+  .subhead {
+    font-size: 15px;
+    max-width: 100%;
+  }
+
+  /* Pills: single row, horizontal scroll */
+  .pills {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+  .pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Trending: 2-column on small screens */
+  .trending-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px;
+  }
+
+  /* Trust strip: wrap logos on mobile */
+  .trust-logos {
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+  }
+
+  /* Run button: minimum 44px tap target */
+  .prompt-box-run {
+    height: 44px !important;
+    min-height: 44px;
+  }
+
+  /* Hide desktop nav links, show hamburger */
+  .topbar-links-desktop {
+    display: none !important;
+  }
+  .topbar-hamburger {
+    display: flex !important;
+  }
+
+  /* Sidebar: full width on mobile */
+  .sidebar {
+    width: 100% !important;
+    max-width: 100vw;
+  }
+}
+
+@media (min-width: 641px) {
+  .topbar-hamburger {
+    display: none !important;
+  }
+  .topbar-mobile-menu {
+    display: none !important;
+  }
+}

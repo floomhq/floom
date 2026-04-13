@@ -1,0 +1,11 @@
+node_modules
+dist
+.turbo
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage
+data/*.db
+data/*.sqlite

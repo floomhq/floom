@@ -1,0 +1,34 @@
+name: Dep Check
+description: Find dead imports in your project. One bash script.
+actions:
+  analyze:
+    label: Find Dead Imports
+    inputs:
+      - name: repo_url
+        label: Repo URL
+        type: url
+        required: true
+        description: Public HTTPS git URL (e.g. https://github.com/owner/repo).
+      - name: branch
+        label: Branch
+        type: text
+        required: false
+        default: ""
+        description: Optional branch or ref to check out. Defaults to the repo default
+          branch.
+    outputs:
+      - name: count
+        label: Dead Import Count
+        type: number
+      - name: dead_imports
+        label: Dead Imports
+        type: json
+    description: Clone a public git repo and list any imports that reference files
+      that no longer exist.
+runtime: python
+python_dependencies: []
+node_dependencies: {}
+secrets_needed: []
+manifest_version: "2.0"
+apt_packages:
+  - jq

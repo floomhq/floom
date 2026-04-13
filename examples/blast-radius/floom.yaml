@@ -1,0 +1,47 @@
+name: Blast Radius
+description: Find all files affected by your changes. One bash script, zero dependencies.
+actions:
+  analyze:
+    label: Analyze Repo
+    inputs:
+      - name: repo_url
+        label: Repo URL
+        type: url
+        required: true
+        description: Public HTTPS git URL (e.g. https://github.com/owner/repo).
+      - name: base_branch
+        label: Base Branch
+        type: text
+        required: false
+        default: HEAD~5
+        description: Branch/ref to diff against. Defaults to HEAD~5 (last 5 commits).
+          Use "main" to diff against the main branch.
+      - name: head_ref
+        label: Head Ref
+        type: text
+        required: false
+        default: HEAD
+        description: Ref to check out before diffing. Leave as HEAD to use the default
+          branch.
+    outputs:
+      - name: summary
+        label: Summary
+        type: text
+      - name: changed
+        label: Changed Files
+        type: json
+      - name: affected
+        label: Affected Files
+        type: json
+      - name: tests
+        label: Test Files
+        type: json
+    description: Clone a public git repo and report which files are affected by a
+      branch diff.
+runtime: python
+python_dependencies: []
+node_dependencies: {}
+secrets_needed: []
+manifest_version: "2.0"
+apt_packages:
+  - jq
