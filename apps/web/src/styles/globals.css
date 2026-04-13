@@ -255,3 +255,141 @@ body {
   color: var(--muted);
   line-height: 1.5;
 }
+
+/* ── Hero 2-column layout ───────────────────────────────────────────────── */
+.hero-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: center;
+}
+.hero-2col-left {
+  /* left text column */
+}
+.hero-2col-right {
+  /* right visual column */
+}
+.hero-manifest-card {
+  background: #0e0e0c;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 16px;
+  padding: 24px;
+}
+.hero-manifest-pre {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: rgba(212,212,200,0.9);
+  line-height: 1.8;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+.social-proof-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+/* ── Manifest 2-column ──────────────────────────────────────────────────── */
+.manifest-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+/* ── Self-host 2-column ─────────────────────────────────────────────────── */
+.selfhost-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+/* ── Apps directory featured cards ─────────────────────────────────────── */
+.featured-apps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 40px;
+}
+.featured-app-card {
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s;
+}
+.featured-app-card:hover {
+  border-color: var(--accent);
+}
+
+/* ── p/:slug 2-column layout ────────────────────────────────────────────── */
+.permalink-2col {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  gap: 32px;
+  align-items: start;
+}
+
+/* ── Protocol diagram ───────────────────────────────────────────────────── */
+.protocol-flow-diagram {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 40px;
+  overflow-x: auto;
+}
+.protocol-comparison-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin: 16px 0;
+}
+
+@media (max-width: 900px) {
+  .hero-2col {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .hero-2col-right {
+    /* show visual below text on smaller screens */
+  }
+  .manifest-2col {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .selfhost-2col {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .featured-apps-grid {
+    grid-template-columns: 1fr;
+  }
+  .permalink-2col {
+    grid-template-columns: 1fr;
+  }
+  .protocol-comparison-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .featured-apps-grid {
+    grid-template-columns: 1fr;
+  }
+  .social-proof-row {
+    gap: 16px;
+  }
+}
