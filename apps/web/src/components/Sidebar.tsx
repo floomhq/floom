@@ -73,7 +73,7 @@ export function Sidebar({ app, open, onClose }: Props) {
                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
                     {name}
                   </span>{' '}
-                  — {spec.label}
+                  : {spec.label}
                 </li>
               ))}
             </ul>
