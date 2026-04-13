@@ -1,4 +1,5 @@
 // POST /api/run — start a run on an app.
+// Also handles POST /api/:slug/run — the slug-based endpoint for self-hosted use.
 // Returns { run_id } immediately. The client opens /api/run/:id/stream as SSE
 // to receive stdout lines live, and GET /api/run/:id for the final status.
 import { Hono } from 'hono';
@@ -205,3 +206,59 @@ function safeParse(raw: string | null): unknown {
     return null;
   }
 }
+
+// ---------- slug-based run router ----------
+// POST /api/:slug/run — convenience endpoint for self-hosted instances.
+// Accepts { action?, inputs? } body; slug is from the URL path.
+export const slugRunRouter = new Hono<{ Variables: { slug: string } }>();
+
+slugRunRouter.post('/', async (c) => {
+  const slug = c.req.param('slug');
+  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
+  if (row.status !== 'active') {
+    return c.json({ error: `App is ${row.status}, cannot run` }, 409);
+  }
+
+  let manifest: NormalizedManifest;
+  try {
+    manifest = JSON.parse(row.manifest) as NormalizedManifest;
+  } catch {
+    return c.json({ error: 'App manifest is corrupted' }, 500);
+  }
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    action?: unknown;
+    inputs?: unknown;
+  };
+
+  const actionNames = Object.keys(manifest.actions);
+  const actionName =
+    (typeof body.action === 'string' && body.action) ||
+    (manifest.actions.run ? 'run' : actionNames[0]);
+  const actionSpec = manifest.actions[actionName];
+  if (!actionSpec) {
+    return c.json({ error: `Action "${actionName}" not found` }, 400);
+  }
+
+  let validated: Record<string, unknown>;
+  try {
+    validated = validateInputs(
+      actionSpec,
+      (body.inputs as Record<string, unknown>) ?? {},
+    );
+  } catch (err) {
+    const e = err as ManifestError;
+    return c.json({ error: e.message, field: e.field }, 400);
+  }
+
+  const runId = newRunId();
+  db.prepare(
+    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status)
+     VALUES (?, ?, NULL, ?, ?, 'pending')`,
+  ).run(runId, row.id, actionName, JSON.stringify(validated));
+
+  dispatchRun(row, manifest, runId, actionName, validated);
+
+  return c.json({ run_id: runId, status: 'pending' });
+});

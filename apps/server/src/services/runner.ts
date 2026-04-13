@@ -2,6 +2,7 @@
 // container run, streams output to the log bus, and updates the run record.
 import { db } from '../db.js';
 import { runAppContainer } from './docker.js';
+import { runProxied } from './proxied-runner.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import type {
   AppRecord,
@@ -127,14 +128,61 @@ export function dispatchRun(
 
   updateRun(runId, { status: 'running' });
 
-  void runActionWorker({
-    appId: app.id,
-    runId,
-    action,
-    inputs,
-    secrets,
-    image: app.docker_image ?? undefined,
-  });
+  if (app.app_type === 'proxied') {
+    void runProxiedWorker({ app, manifest, runId, action, inputs, secrets });
+  } else {
+    void runActionWorker({
+      appId: app.id,
+      runId,
+      action,
+      inputs,
+      secrets,
+      image: app.docker_image ?? undefined,
+    });
+  }
+}
+
+async function runProxiedWorker(opts: {
+  app: AppRecord;
+  manifest: NormalizedManifest;
+  runId: string;
+  action: string;
+  inputs: Record<string, unknown>;
+  secrets: Record<string, string>;
+}): Promise<void> {
+  const logStream = getOrCreateStream(opts.runId);
+  try {
+    const result = await runProxied({
+      app: opts.app,
+      manifest: opts.manifest,
+      action: opts.action,
+      inputs: opts.inputs,
+      secrets: opts.secrets,
+    });
+    for (const line of result.logs.split('\n')) {
+      if (line) logStream.append(line, 'stdout');
+    }
+    updateRun(opts.runId, {
+      status: result.status,
+      outputs: result.outputs,
+      error: result.error || null,
+      error_type: result.status === 'error' ? 'runtime_error' : null,
+      logs: result.logs,
+      duration_ms: result.duration_ms,
+      finished: true,
+    });
+  } catch (err) {
+    const e = err as Error;
+    updateRun(opts.runId, {
+      status: 'error',
+      error: e.message || 'Proxied runner crashed',
+      error_type: 'runtime_error',
+      logs: e.stack || '',
+      finished: true,
+    });
+  } finally {
+    logStream.finish();
+  }
 }
 
 async function runActionWorker(opts: {
