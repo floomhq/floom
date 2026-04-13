@@ -2,7 +2,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { CreatorHeroPage } from './pages/CreatorHeroPage';
-import { ChatPage } from './pages/ChatPage';
 import { AppsDirectoryPage } from './pages/AppsDirectoryPage';
 import { AppPermalinkPage } from './pages/AppPermalinkPage';
 import { ProtocolPage } from './pages/ProtocolPage';
@@ -15,11 +14,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <IconSprite />
     <BrowserRouter>
       <Routes>
-        {/* Creator hero — new landing */}
+        {/* Creator hero */}
         <Route path="/" element={<CreatorHeroPage />} />
-        {/* Chat moved to /chat */}
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/c/:threadId" element={<ChatPage />} />
         {/* Apps directory */}
         <Route path="/apps" element={<AppsDirectoryPage />} />
         {/* Standalone app permalink */}
@@ -27,6 +23,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         {/* Protocol spec page */}
         <Route path="/protocol" element={<ProtocolPage />} />
         {/* Legacy redirects */}
+        <Route path="/chat" element={<Navigate to="/" replace />} />
+        <Route path="/c/:threadId" element={<Navigate to="/" replace />} />
         <Route path="/browse" element={<Navigate to="/apps" replace />} />
         <Route path="/about" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />

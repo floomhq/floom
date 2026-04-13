@@ -28,7 +28,6 @@ export function Footer() {
       </p>
       <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <Link to="/apps" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>apps</Link>
-        <Link to="/chat" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>chat</Link>
         <Link to="/protocol" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>protocol</Link>
         <a href="https://github.com/floomhq/floom-monorepo" target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>github</a>
       </nav>
