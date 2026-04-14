@@ -1,0 +1,45 @@
+# Floom apps.yaml — declare which external APIs to expose as Floom apps.
+# Mount this file at /app/config/apps.yaml and set FLOOM_APPS_CONFIG to that
+# path. See docs/SELF_HOST.md for the full schema.
+
+apps:
+  # Reference OpenAPI spec with no auth required — useful for verifying
+  # your install works end-to-end.
+  - slug: petstore
+    type: proxied
+    openapi_spec_url: https://petstore3.swagger.io/api/v3/openapi.json
+    display_name: Petstore
+    description: "OpenAPI 3.0 reference pet store. No auth required."
+    category: developer-tools
+
+  # Modern transactional email API — bearer auth, clean JSON.
+  # Remove if you don't use Resend, or replace with any API that has an
+  # OpenAPI spec URL.
+  - slug: resend
+    type: proxied
+    openapi_spec_url: https://raw.githubusercontent.com/resend/resend-openapi/main/resend.yaml
+    auth: bearer
+    secrets: [RESEND_API_KEY]
+    display_name: Resend
+    description: "Transactional email API."
+    category: communication
+
+  # httpbin — another zero-auth test endpoint. Useful for confirming headers
+  # and request/response shapes.
+  # - slug: httpbin
+  #   type: proxied
+  #   openapi_spec_url: https://httpbin.org/spec.json
+  #   display_name: HTTPBin
+  #   description: "Echo any HTTP request."
+  #   category: developer-tools
+
+  # Stripe — HUGE spec (587 operations). Set FLOOM_MAX_ACTIONS_PER_APP=0 or
+  # a high number in env to lift the default 200-action cap.
+  # - slug: stripe
+  #   type: proxied
+  #   openapi_spec_url: https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
+  #   auth: bearer
+  #   secrets: [STRIPE_SECRET_KEY]
+  #   display_name: Stripe
+  #   description: "Payments, subscriptions, invoicing."
+  #   category: commerce

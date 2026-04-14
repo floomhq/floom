@@ -1,30 +1,49 @@
 version: "3.9"
 
-# Floom self-hosted — local reference compose file.
+# Floom self-hosted — reference compose file for v0.2.0+.
 # Usage:
-#   1. Copy apps.yaml.example to apps.yaml and edit it.
+#   1. Copy docker/apps.yaml.example to docker/apps.yaml and edit it.
 #   2. docker compose -f docker/docker-compose.yml up -d
 #   3. Open http://localhost:3051
+#
+# Proxied-only by default. The 15 historical hosted apps (flyfast, bouncer,
+# blast-radius, ...) are opt-in via FLOOM_SEED_APPS=true AND mounting
+# /var/run/docker.sock. See docs/SELF_HOST.md.
 
 services:
   floom:
-    image: ghcr.io/floomhq/floom-monorepo:latest
+    image: ghcr.io/floomhq/floom-monorepo:v0.2.0
     ports:
       - "3051:3051"
     volumes:
-      # Persist SQLite data across restarts
+      # Persist SQLite data and per-app state across restarts
       - floom_data:/data
-      # Mount your apps.yaml config (optional)
+      # Mount your apps.yaml config (optional but usually what you want)
       - ./apps.yaml:/app/config/apps.yaml:ro
+      # Uncomment ONLY if FLOOM_SEED_APPS=true and you trust the network:
+      # mounting docker.sock grants host root.
+      # - /var/run/docker.sock:/var/run/docker.sock
     environment:
       PORT: "3051"
       DATA_DIR: "/data"
-      # Point to your apps config (optional — remove if not using OpenAPI ingest)
       FLOOM_APPS_CONFIG: "/app/config/apps.yaml"
-      # Secrets for your apps (add as many as needed)
+      # Uncomment and choose a long random string to gate /api/*, /mcp/*,
+      # and /p/* behind a shared bearer token. /api/health stays open.
+      # FLOOM_AUTH_TOKEN: "change_me_to_a_long_random_string"
+      #
+      # Uncomment to opt into the 15 bundled docker apps (requires
+      # docker.sock mount above).
+      # FLOOM_SEED_APPS: "true"
+      #
+      # Raise the ingest cap for huge specs (Stripe = 587, GitHub = 1107).
+      # Set to 0 for unlimited.
+      # FLOOM_MAX_ACTIONS_PER_APP: "500"
+      #
+      # Secrets for your apps (add as many as needed — any env var matching
+      # a name in apps.yaml 'secrets:' list is picked up as a per-app secret).
       # OPENAI_API_KEY: "sk-..."
       # STRIPE_SECRET_KEY: "sk_..."
-      # PLAUSIBLE_API_KEY: "..."
+      # RESEND_API_KEY: "re_..."
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3051/api/health"]
