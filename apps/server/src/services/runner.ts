@@ -101,6 +101,10 @@ function extractUserLogs(stdout: string): string {
 /**
  * Fire-and-forget: dispatch a run in the background. Updates the run row as
  * it progresses and feeds the log stream with output chunks.
+ *
+ * `perCallSecrets` (optional) is an override passed by the MCP layer via the
+ * Floom MCP _auth extension. These values are merged into the per-run secrets
+ * for this invocation only; they are never persisted to the secrets table.
  */
 export function dispatchRun(
   app: AppRecord,
@@ -108,6 +112,7 @@ export function dispatchRun(
   runId: string,
   action: string,
   inputs: Record<string, unknown>,
+  perCallSecrets?: Record<string, string>,
 ): void {
   // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
   const globalRows = db
@@ -120,6 +125,12 @@ export function dispatchRun(
   const mergedSecrets: Record<string, string> = {};
   for (const row of globalRows) mergedSecrets[row.name] = row.value;
   for (const row of appRows) mergedSecrets[row.name] = row.value;
+  // Per-call secrets (from MCP _auth meta param) win over persisted secrets.
+  if (perCallSecrets) {
+    for (const [k, v] of Object.entries(perCallSecrets)) {
+      if (v && v.length > 0) mergedSecrets[k] = v;
+    }
+  }
 
   const secrets: Record<string, string> = {};
   for (const name of manifest.secrets_needed || []) {

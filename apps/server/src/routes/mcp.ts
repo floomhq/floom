@@ -53,7 +53,10 @@ async function waitForRun(runId: string): Promise<RunRecord> {
   return row;
 }
 
-function buildZodSchema(inputs: InputSpec[]): Record<string, z.ZodType> {
+function buildZodSchema(
+  inputs: InputSpec[],
+  secretsNeeded: string[],
+): Record<string, z.ZodType> {
   const schema: Record<string, z.ZodType> = {};
   for (const inp of inputs) {
     let field: z.ZodType;
@@ -81,6 +84,27 @@ function buildZodSchema(inputs: InputSpec[]): Record<string, z.ZodType> {
     }
     schema[inp.name] = field;
   }
+  // Per-user secrets injection (Floom MCP extension).
+  // When the app declares secrets_needed, advertise them as an optional
+  // `_auth` meta object. The MCP client can populate it per call; values
+  // are injected into the per-run secrets and never persisted server-side.
+  if (secretsNeeded.length > 0) {
+    const authShape: Record<string, z.ZodType> = {};
+    for (const name of secretsNeeded) {
+      authShape[name] = z
+        .string()
+        .optional()
+        .describe(`Per-user secret: ${name}`);
+    }
+    schema._auth = z
+      .object(authShape)
+      .optional()
+      .describe(
+        `Per-user secrets for this app. Required: ${secretsNeeded.join(
+          ', ',
+        )}. These values are used for this call only and are never stored server-side.`,
+      );
+  }
   return schema;
 }
 
@@ -88,8 +112,10 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
   const manifest = JSON.parse(app.manifest) as NormalizedManifest;
   const server = new McpServer({
     name: `floom-chat-${app.slug}`,
-    version: '0.1.0',
+    version: '0.2.0',
   });
+
+  const secretsNeeded = manifest.secrets_needed || [];
 
   for (const [actionName, actionSpec] of Object.entries(manifest.actions) as Array<
     [string, ActionSpec]
@@ -105,7 +131,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
       {
         title: actionSpec.label,
         description: toolDescription,
-        inputSchema: buildZodSchema(actionSpec.inputs),
+        inputSchema: buildZodSchema(actionSpec.inputs, secretsNeeded),
       },
       async (rawInputs) => {
         const fresh = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as
@@ -123,9 +149,27 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
             content: [{ type: 'text' as const, text: `App is ${fresh.status}, cannot run` }],
           };
         }
+
+        // Extract the Floom MCP _auth extension from the raw inputs before
+        // validating against the action's input schema. _auth is per-call
+        // secrets that the MCP client can supply on each tool invocation.
+        // Never persisted server-side.
+        const raw = { ...(rawInputs as Record<string, unknown>) };
+        let perCallSecrets: Record<string, string> | undefined;
+        if (raw._auth && typeof raw._auth === 'object' && raw._auth !== null) {
+          const authObj = raw._auth as Record<string, unknown>;
+          perCallSecrets = {};
+          for (const [k, v] of Object.entries(authObj)) {
+            if (typeof v === 'string' && v.length > 0) {
+              perCallSecrets[k] = v;
+            }
+          }
+          delete raw._auth;
+        }
+
         let validated: Record<string, unknown>;
         try {
-          validated = validateInputs(actionSpec, rawInputs as Record<string, unknown>);
+          validated = validateInputs(actionSpec, raw);
         } catch (err) {
           const e = err as ManifestError;
           return {
@@ -135,10 +179,51 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
         }
         const runId = newRunId();
         const freshManifest = JSON.parse(fresh.manifest) as NormalizedManifest;
+
+        // If the app requires secrets and none are available (neither
+        // server-side persisted nor per-call _auth), return a structured
+        // missing_secrets error so the MCP client can prompt the user.
+        if (secretsNeeded.length > 0) {
+          const available = new Set<string>();
+          // Server-side persisted secrets
+          const rows = db
+            .prepare(
+              'SELECT name FROM secrets WHERE (app_id IS NULL OR app_id = ?) AND value != ""',
+            )
+            .all(fresh.id) as { name: string }[];
+          for (const r of rows) available.add(r.name);
+          // Per-call secrets
+          for (const k of Object.keys(perCallSecrets || {})) available.add(k);
+
+          const missing = secretsNeeded.filter((n) => !available.has(n));
+          if (missing.length > 0) {
+            const errorPayload = {
+              error: 'missing_secrets',
+              required: missing,
+              help: `This app needs ${missing.join(
+                ', ',
+              )}. Supply them via the _auth meta argument: {"_auth": {"${missing[0]}": "your_value"}}`,
+            };
+            return {
+              isError: true,
+              content: [
+                { type: 'text' as const, text: JSON.stringify(errorPayload, null, 2) },
+              ],
+            };
+          }
+        }
+
         db.prepare(
           `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
         ).run(runId, fresh.id, actionName, JSON.stringify(validated));
-        dispatchRun(fresh, freshManifest, runId, actionName, validated);
+        dispatchRun(
+          fresh,
+          freshManifest,
+          runId,
+          actionName,
+          validated,
+          perCallSecrets,
+        );
         const done = await waitForRun(runId);
         return {
           isError: done.status !== 'success',
@@ -207,7 +292,19 @@ mcpRouter.all('/search', async (c) => {
 mcpRouter.all('/app/:slug', async (c) => {
   const slug = c.req.param('slug');
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
-  if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
+  if (!row) {
+    // Wrap unknown-app errors in a JSON-RPC envelope so MCP clients see a
+    // protocol-level error, not a bare HTTP 404. Return 200 per JSON-RPC
+    // convention — the error is in the envelope.
+    return c.json(
+      {
+        jsonrpc: '2.0',
+        error: { code: -32001, message: `App not found: ${slug}` },
+        id: null,
+      },
+      200,
+    );
+  }
   const server = createPerAppMcpServer(row);
   return handleMcp(server, c.req.raw);
 });
