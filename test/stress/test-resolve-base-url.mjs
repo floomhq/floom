@@ -142,14 +142,36 @@ assertEq(
   'empty spec returns null',
 );
 
-// Server URL is relative (starts with /) → null (we can't know host)
+// Server URL is relative and no fetch URL context → null
 assertEq(
   resolveBaseUrl(
     { servers: [{ url: '/api' }] },
     { slug: 'relative', type: 'proxied' },
   ),
   null,
-  'relative server URL returns null',
+  'relative server URL with no fetch context returns null',
+);
+
+// Spec-relative server URL resolved against fetch URL (Petstore pattern)
+assertEq(
+  resolveBaseUrl(
+    { servers: [{ url: '/api/v3' }] },
+    { slug: 'petstore', type: 'proxied' },
+    'https://petstore3.swagger.io/api/v3/openapi.json',
+  ),
+  'https://petstore3.swagger.io/api/v3',
+  'petstore spec-relative server URL',
+);
+
+// Last-resort: no servers, no host, but fetch URL provides origin
+assertEq(
+  resolveBaseUrl(
+    {},
+    { slug: 'noservers', type: 'proxied' },
+    'https://api.example.com/openapi.json',
+  ),
+  'https://api.example.com',
+  'last-resort fetch URL origin',
 );
 
 // GitHub (no servers block in older spec, but has host in Swagger 2)

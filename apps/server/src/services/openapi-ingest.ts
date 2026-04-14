@@ -4,6 +4,9 @@
 // apps table. Idempotent: re-running with the same config does not duplicate.
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
+// @ts-expect-error — json-schema-merge-allof has no types on npm
+import mergeAllOf from 'json-schema-merge-allof';
+import $RefParser from '@apidevtools/json-schema-ref-parser';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
@@ -36,24 +39,36 @@ interface OpenApiInfo {
   version?: string;
 }
 
+// Post-dereference JSON schema shape (all $refs inlined).
+// We accept almost anything — broad typing is intentional because real-world
+// specs are varied and we walk this structurally at runtime.
+interface JsonSchema {
+  type?: string | string[];
+  format?: string;
+  enum?: unknown[];
+  default?: unknown;
+  description?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  required?: string[];
+  allOf?: JsonSchema[];
+  oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
+  discriminator?: { propertyName?: string; mapping?: Record<string, string> };
+  nullable?: boolean;
+  [key: string]: unknown;
+}
+
 interface OpenApiParameter {
   name: string;
   in: 'query' | 'path' | 'header' | 'cookie';
   required?: boolean;
   description?: string;
-  schema?: {
-    type?: string;
-    enum?: string[];
-    default?: unknown;
-  };
+  schema?: JsonSchema;
 }
 
 interface OpenApiRequestBodyContent {
-  schema?: {
-    type?: string;
-    properties?: Record<string, { type?: string; description?: string; enum?: string[] }>;
-    required?: string[];
-  };
+  schema?: JsonSchema;
 }
 
 interface OpenApiOperation {
@@ -102,16 +117,133 @@ interface OpenApiSpec {
 
 // ---------- helpers ----------
 
+/**
+ * Collapse `allOf` / `oneOf` / `anyOf` into a single flat schema where possible.
+ *
+ * - allOf: merge all subschemas into one via json-schema-merge-allof. This
+ *   handles the composition-heavy specs (GitHub, Stripe, many generated).
+ * - oneOf / anyOf: merge by unioning properties from every branch. Required
+ *   fields are demoted to optional because different branches require
+ *   different subsets. When a `discriminator` is present, its propertyName
+ *   becomes a required enum with the branch names as options.
+ *
+ * This is a pragmatic flattening — it loses some precision (you can't
+ * enforce "if type=X then field Y required") but it produces a single JSON
+ * Schema that MCP tools can consume.
+ */
+function flattenComposition(schema: JsonSchema): JsonSchema {
+  if (!schema || typeof schema !== 'object') return schema;
+
+  // allOf: merge all subschemas. If it fails (incompatible schemas), fall
+  // back to a pragmatic object-property merge of the subschemas that have
+  // properties.
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    try {
+      const merged = mergeAllOf(schema, {
+        resolvers: {
+          defaultResolver: (compacted: unknown[]) => compacted[0],
+        },
+      }) as JsonSchema;
+      return flattenComposition(merged);
+    } catch {
+      // Manual fallback: union properties from any subschemas that have them.
+      const merged: JsonSchema = { ...schema, type: 'object', properties: {} };
+      delete merged.allOf;
+      const allRequired = new Set<string>(schema.required || []);
+      for (const sub of schema.allOf) {
+        const flat = flattenComposition(sub);
+        if (flat.properties) {
+          Object.assign(merged.properties!, flat.properties);
+        }
+        for (const r of flat.required || []) allRequired.add(r);
+      }
+      merged.required = Array.from(allRequired);
+      return merged;
+    }
+  }
+
+  // oneOf / anyOf: union properties. Required fields are demoted to optional
+  // because different branches have different required sets. Discriminator
+  // (if present) becomes a required enum.
+  const variants = schema.oneOf || schema.anyOf;
+  if (Array.isArray(variants) && variants.length > 0) {
+    const merged: JsonSchema = {
+      type: 'object',
+      properties: {},
+      description: schema.description,
+    };
+    const seen = new Set<string>();
+    for (const sub of variants) {
+      const flat = flattenComposition(sub);
+      if (flat.properties) {
+        for (const [k, v] of Object.entries(flat.properties)) {
+          if (!seen.has(k)) {
+            merged.properties![k] = v;
+            seen.add(k);
+          }
+        }
+      }
+    }
+    // If a discriminator is defined, surface it as a required enum listing
+    // the mapping keys (or the variant indices if no mapping).
+    if (schema.discriminator?.propertyName) {
+      const name = schema.discriminator.propertyName;
+      const options = schema.discriminator.mapping
+        ? Object.keys(schema.discriminator.mapping)
+        : variants
+            .map((v, i) => {
+              const t = flattenComposition(v);
+              // Try to extract a title or type tag; otherwise fall back to index.
+              return (t.type as string) || `variant_${i}`;
+            });
+      merged.properties![name] = {
+        type: 'string',
+        enum: options,
+        description: `Discriminator: pick one of ${options.join(', ')}`,
+      };
+      merged.required = [name];
+    }
+    return merged;
+  }
+
+  // Recurse into nested properties for deep nested composition.
+  if (schema.properties && typeof schema.properties === 'object') {
+    const newProps: Record<string, JsonSchema> = {};
+    for (const [k, v] of Object.entries(schema.properties)) {
+      newProps[k] = flattenComposition(v);
+    }
+    return { ...schema, properties: newProps };
+  }
+
+  return schema;
+}
+
+function schemaToInputType(schema: JsonSchema): InputSpec['type'] {
+  // Handle nullable unions like type: ["string", "null"] (OpenAPI 3.1).
+  const t = Array.isArray(schema.type)
+    ? schema.type.find((x) => x !== 'null') || schema.type[0]
+    : schema.type;
+  if (t === 'number' || t === 'integer') return 'number';
+  if (t === 'boolean') return 'boolean';
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) return 'enum';
+  if (schema.format === 'binary') return 'file';
+  if (schema.format === 'date' || schema.format === 'date-time') return 'date';
+  if (schema.format === 'uri' || schema.format === 'url') return 'url';
+  if (t === 'object' || t === 'array') return 'textarea';
+  return 'text';
+}
+
+function formatLabel(name: string): string {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function openApiParamToInput(param: OpenApiParameter): InputSpec {
-  const schema = param.schema || {};
-  let type: InputSpec['type'] = 'text';
-  if (schema.type === 'number' || schema.type === 'integer') type = 'number';
-  else if (schema.type === 'boolean') type = 'boolean';
-  else if (Array.isArray(schema.enum) && schema.enum.length > 0) type = 'enum';
+  const schema = flattenComposition(param.schema || {});
+  const type = schemaToInputType(schema);
 
   return {
     name: param.name,
-    label: param.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    label: formatLabel(param.name),
     type,
     required: param.required ?? false,
     description: param.description,
@@ -120,16 +252,23 @@ function openApiParamToInput(param: OpenApiParameter): InputSpec {
   };
 }
 
+/**
+ * Walk a fully-dereferenced request body schema and emit Floom InputSpecs.
+ * Returns [] if there are no structured properties (caller falls back to a
+ * freeform textarea). For multipart/form-data, maps `format: binary` to
+ * `type: file`.
+ */
 function bodySchemaToInputs(
   content: Record<string, OpenApiRequestBodyContent>,
   required: boolean,
 ): InputSpec[] {
-  const inputs: InputSpec[] = [];
-  // Prefer application/json, fall back to first content type
+  // Prefer application/json, then multipart, then first content type.
   const mediaType =
-    content['application/json'] || content[Object.keys(content)[0]];
-  if (!mediaType?.schema?.properties) {
-    // No structured schema — accept freeform text
+    content['application/json'] ||
+    content['multipart/form-data'] ||
+    content[Object.keys(content)[0]];
+
+  if (!mediaType?.schema) {
     return [
       {
         name: 'body',
@@ -140,22 +279,39 @@ function bodySchemaToInputs(
       },
     ];
   }
-  const required_fields = mediaType.schema.required || [];
-  for (const [propName, propSchema] of Object.entries(
-    mediaType.schema.properties,
-  )) {
-    let type: InputSpec['type'] = 'text';
-    if (propSchema.type === 'number' || propSchema.type === 'integer') type = 'number';
-    else if (propSchema.type === 'boolean') type = 'boolean';
-    else if (Array.isArray(propSchema.enum) && propSchema.enum.length > 0) type = 'enum';
+
+  // Flatten allOf/oneOf/anyOf so we have a single schema with .properties.
+  const schema = flattenComposition(mediaType.schema);
+
+  if (!schema.properties || Object.keys(schema.properties).length === 0) {
+    return [
+      {
+        name: 'body',
+        label: 'Request Body',
+        type: 'textarea',
+        required,
+        description: 'JSON request body',
+      },
+    ];
+  }
+
+  const required_fields = schema.required || [];
+  const inputs: InputSpec[] = [];
+  for (const [propName, rawProp] of Object.entries(schema.properties)) {
+    const propSchema = flattenComposition(rawProp);
+    const type = schemaToInputType(propSchema);
 
     inputs.push({
       name: propName,
-      label: propName.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      label: formatLabel(propName),
       type,
       required: required_fields.includes(propName),
-      description: propSchema.description,
+      description:
+        typeof propSchema.description === 'string'
+          ? propSchema.description
+          : undefined,
       options: type === 'enum' ? (propSchema.enum as string[]) : undefined,
+      default: propSchema.default,
     });
   }
   return inputs;
@@ -220,17 +376,18 @@ function operationToAction(
 /**
  * Resolve the effective base URL for a spec. Priority:
  *   1. appSpec.base_url (explicit override in apps.yaml) — wins if set
- *   2. spec.servers[0].url (OpenAPI 3.x) with variable substitution
+ *   2. spec.servers[0].url (OpenAPI 3.x) with variable substitution,
+ *      resolving spec-relative server URLs against the spec fetch URL
  *   3. Swagger 2.0 host + basePath + schemes[0]
- *   4. null if nothing found
+ *   4. Spec fetch URL origin (last-resort: better than null for server-less specs)
+ *   5. null if nothing found
  *
  * Variable substitution uses {var} placeholders from spec.servers[0].variables.
- * If a placeholder has no default, it is left as-is (and will cause a runtime
- * failure with a clear message — better than silently rewriting it).
  */
 export function resolveBaseUrl(
   spec: OpenApiSpec,
   appSpec: OpenApiAppSpec,
+  specFetchUrl?: string,
 ): string | null {
   // 1. Explicit override wins.
   if (appSpec.base_url) {
@@ -248,13 +405,28 @@ export function resolveBaseUrl(
         url = url.replace(new RegExp(`\\{${name}\\}`, 'g'), value);
       }
     }
-    // Handle server-relative URLs (starts with /): these are relative to
-    // the spec's fetch URL, which we don't track here. Caller should pass
-    // base_url explicitly in that case.
-    if (url.startsWith('/') || !url.startsWith('http')) {
-      return null;
+    // If the URL is absolute, return as-is.
+    if (/^https?:\/\//i.test(url)) {
+      return url;
     }
-    return url;
+    // Handle spec-relative server URLs. Per OpenAPI 3.x, a server URL that
+    // doesn't start with a scheme is relative to the spec's fetch URL.
+    // Petstore uses this: servers: [{ url: "/api/v3" }]
+    if (specFetchUrl) {
+      try {
+        const fetchUrl = new URL(specFetchUrl);
+        if (url.startsWith('/')) {
+          // Absolute path relative to fetch URL origin.
+          return `${fetchUrl.origin}${url.replace(/\/+$/, '')}`;
+        }
+        // Relative path: resolve against the fetch URL directory.
+        return new URL(url, fetchUrl).toString().replace(/\/+$/, '');
+      } catch {
+        // fall through
+      }
+    }
+    // Relative URL with no fetch context — can't resolve.
+    return null;
   }
 
   // 3. Swagger 2.0 host + basePath
@@ -263,6 +435,16 @@ export function resolveBaseUrl(
       (Array.isArray(spec.schemes) && spec.schemes[0]) || 'https';
     const basePath = spec.basePath || '';
     return `${scheme}://${spec.host}${basePath}`;
+  }
+
+  // 4. Last-resort: origin of the spec fetch URL (the API probably serves
+  // under the same origin the spec lives on).
+  if (specFetchUrl) {
+    try {
+      return new URL(specFetchUrl).origin;
+    } catch {
+      // fall through
+    }
   }
 
   return null;
@@ -387,6 +569,30 @@ async function fetchSpec(url: string): Promise<OpenApiSpec> {
   }
 }
 
+/**
+ * Dereference all $refs in the spec. Uses @apidevtools/json-schema-ref-parser
+ * with circular-ref support ('ignore' mode — cyclic refs become $ref objects
+ * that we leave alone, rather than throwing).
+ *
+ * On failure we return the original spec (callers see a degraded manifest but
+ * nothing crashes).
+ */
+export async function dereferenceSpec(spec: OpenApiSpec): Promise<OpenApiSpec> {
+  try {
+    // Deep clone so we don't mutate the cached original.
+    const clone = JSON.parse(JSON.stringify(spec));
+    const derefed = await $RefParser.dereference(clone, {
+      dereference: { circular: 'ignore' },
+    });
+    return derefed as unknown as OpenApiSpec;
+  } catch (err) {
+    console.warn(
+      `[openapi-ingest] $ref dereference failed: ${(err as Error).message}. Using raw spec.`,
+    );
+    return spec;
+  }
+}
+
 // ---------- public API ----------
 
 export interface IngestResult {
@@ -446,13 +652,26 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         }
       }
 
+      // Resolve all $refs so downstream walkers see inlined schemas.
+      // Cyclic refs (Stripe has some) are left in place rather than throwing.
+      const derefedSpec = await dereferenceSpec(spec);
+
       const secretNames = appSpec.secrets || [];
-      const manifest = specToManifest(spec, appSpec, secretNames);
-      const specCached = JSON.stringify(spec);
+      const manifest = specToManifest(derefedSpec, appSpec, secretNames);
+      // Cache the dereferenced spec so the proxied-runner operates on the
+      // same shape (path params, query params, request body, response schema)
+      // that the manifest declared. This also lets the runner walk request
+      // bodies without resolving refs itself.
+      const specCached = JSON.stringify(derefedSpec);
 
       // Resolve the effective base URL. appSpec.base_url wins, otherwise
-      // we read spec.servers[] (OpenAPI 3.x) or spec.host + basePath (Swagger 2).
-      const resolvedBaseUrl = resolveBaseUrl(spec, appSpec);
+      // we read spec.servers[] (OpenAPI 3.x) with spec-relative URL support,
+      // or spec.host + basePath (Swagger 2), or the spec fetch URL origin.
+      const resolvedBaseUrl = resolveBaseUrl(
+        derefedSpec,
+        appSpec,
+        appSpec.openapi_spec_url,
+      );
       if (!resolvedBaseUrl) {
         console.warn(
           `[openapi-ingest] ${appSpec.slug}: no base_url resolved (neither apps.yaml override nor spec.servers[]). Runtime calls will fail.`,
