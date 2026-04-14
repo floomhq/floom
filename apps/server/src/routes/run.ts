@@ -9,6 +9,7 @@ import { newRunId } from '../lib/ids.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
+import { checkAppVisibility } from '../lib/auth.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const runRouter = new Hono();
@@ -28,6 +29,8 @@ runRouter.post('/', async (c) => {
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
+  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  if (blocked) return blocked;
 
   let manifest: NormalizedManifest;
   try {
@@ -219,6 +222,8 @@ slugRunRouter.post('/', async (c) => {
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
+  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  if (blocked) return blocked;
 
   let manifest: NormalizedManifest;
   try {

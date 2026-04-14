@@ -9,6 +9,7 @@ import { newRunId } from '../lib/ids.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { pickApps } from '../services/embeddings.js';
+import { checkAppVisibility } from '../lib/auth.js';
 import type {
   ActionSpec,
   AppRecord,
@@ -305,6 +306,8 @@ mcpRouter.all('/app/:slug', async (c) => {
       200,
     );
   }
+  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  if (blocked) return blocked;
   const server = createPerAppMcpServer(row);
   return handleMcp(server, c.req.raw);
 });

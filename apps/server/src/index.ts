@@ -17,6 +17,7 @@ import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
+import { globalAuthMiddleware } from './lib/auth.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -24,6 +25,15 @@ const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 const app = new Hono();
 app.use('*', logger());
 app.use('*', cors({ origin: '*' }));
+// Global auth gate: if FLOOM_AUTH_TOKEN is set, every API/MCP/p route
+// requires a matching bearer token. /api/health is always open so health
+// probes work. If the env var is unset, this is a no-op.
+app.use('/api/*', globalAuthMiddleware);
+app.use('/mcp/*', globalAuthMiddleware);
+app.use('/p/*', globalAuthMiddleware);
+if (process.env.FLOOM_AUTH_TOKEN) {
+  console.log('[auth] FLOOM_AUTH_TOKEN is set — bearer auth required on all /api, /mcp, /p routes');
+}
 
 // API routes
 app.route('/api/health', healthRouter);
