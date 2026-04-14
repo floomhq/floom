@@ -461,15 +461,70 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
     }
 
     const res = await fetch(url, fetchInit);
-    const responseText = await res.text();
-    logs.push(`[proxied] HTTP ${res.status} (${Date.now() - start}ms)`);
+    const responseContentType = res.headers.get('content-type') || '';
+    const isStreaming =
+      responseContentType.includes('text/event-stream') ||
+      responseContentType.includes('application/x-ndjson') ||
+      responseContentType.includes('application/stream+json');
 
-    let parsed: unknown = responseText;
-    try {
-      parsed = JSON.parse(responseText);
-    } catch {
-      // leave as text
+    let responseText: string;
+    let parsed: unknown;
+
+    if (isStreaming && res.body) {
+      // Stream the body in chunks. We accumulate everything so the final
+      // `outputs` field contains the full response, but we also push each
+      // chunk into `logs` so SSE subscribers see it live.
+      logs.push(
+        `[proxied] streaming response (${responseContentType}) — reading chunks`,
+      );
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const chunks: string[] = [];
+      let buffered = '';
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        chunks.push(text);
+        buffered += text;
+        // Emit any complete newline-delimited chunks.
+        const lines = buffered.split('\n');
+        buffered = lines.pop() || '';
+        for (const line of lines) {
+          if (line.trim()) logs.push(`[stream] ${line}`);
+        }
+      }
+      if (buffered.trim()) logs.push(`[stream] ${buffered}`);
+      responseText = chunks.join('');
+
+      // NDJSON: parse each line as JSON and return an array.
+      // SSE: leave as text (clients already know the format).
+      if (responseContentType.includes('ndjson')) {
+        const out: unknown[] = [];
+        for (const line of responseText.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            out.push(JSON.parse(line));
+          } catch {
+            out.push(line);
+          }
+        }
+        parsed = out;
+      } else {
+        parsed = responseText;
+      }
+    } else {
+      responseText = await res.text();
+      parsed = responseText;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        // leave as text
+      }
     }
+
+    logs.push(`[proxied] HTTP ${res.status} (${Date.now() - start}ms)`);
 
     const duration_ms = Date.now() - start;
 
