@@ -48,6 +48,78 @@ app.route('/mcp', mcpRouter);
 app.route('/api/:slug/run', slugRunRouter);
 app.route('/api/deploy-waitlist', deployWaitlistRouter);
 
+// Tiny, hand-written OpenAPI 3 document describing Floom's own admin API.
+// Returned at /openapi.json so users hitting http://host/openapi.json get
+// something useful instead of the SPA index.html.
+app.get('/openapi.json', (c) =>
+  c.json({
+    openapi: '3.0.0',
+    info: {
+      title: 'Floom self-host API',
+      version: '0.2.0',
+      description:
+        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug.',
+    },
+    paths: {
+      '/api/health': {
+        get: {
+          summary: 'Server health',
+          responses: { '200': { description: 'OK' } },
+        },
+      },
+      '/api/hub': {
+        get: {
+          summary: 'List all registered apps',
+          responses: { '200': { description: 'JSON array of app records' } },
+        },
+      },
+      '/api/{slug}/run': {
+        post: {
+          summary: 'Run an action on an app',
+          parameters: [
+            {
+              name: 'slug',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    action: { type: 'string' },
+                    inputs: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+          responses: { '200': { description: 'run_id + status' } },
+        },
+      },
+      '/mcp/app/{slug}': {
+        post: {
+          summary: 'Per-app MCP Streamable HTTP endpoint',
+          description:
+            'Accepts JSON-RPC 2.0 initialize / tools/list / tools/call. Requires both application/json AND text/event-stream in the Accept header.',
+          parameters: [
+            {
+              name: 'slug',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: { '200': { description: 'JSON-RPC 2.0 response' } },
+        },
+      },
+    },
+  }),
+);
+
 // Static web — serve the built Vite bundle from apps/web/dist when it exists.
 // In dev, the web app is served on its own port by `vite` and this block is
 // effectively a no-op (dist directory doesn't exist).
@@ -70,12 +142,21 @@ if (webDist) {
   // (non-file paths under non-/api return index.html).
   const indexHtml = readFileSync(join(webDist, 'index.html'), 'utf-8');
 
+  // Paths that must never be swallowed by the SPA wildcard. These reach
+  // Hono's other route handlers or return a real 404. The order matters:
+  // prefix matches first, then exact matches.
+  const spaExcludedPrefixes = ['/api/', '/mcp'];
+  const spaExcludedExact = new Set(['/openapi.json', '/metrics', '/docs']);
+
   app.use('/*', async (c, next) => {
     const url = new URL(c.req.url);
     const pathname = url.pathname;
 
-    // Skip API + MCP routes — let Hono handle them.
-    if (pathname.startsWith('/api/') || pathname.startsWith('/mcp')) {
+    // Skip API + MCP routes and named utility endpoints — let Hono handle them.
+    if (
+      spaExcludedPrefixes.some((p) => pathname.startsWith(p)) ||
+      spaExcludedExact.has(pathname)
+    ) {
       return next();
     }
 
