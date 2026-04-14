@@ -270,23 +270,44 @@ export function resolveBaseUrl(
 
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 
+/**
+ * Read the max actions cap from the FLOOM_MAX_ACTIONS_PER_APP env var.
+ * Defaults to 200. Set to 0 for unlimited (useful for Stripe, GitHub, etc).
+ */
+function getMaxActionsCap(): number {
+  const raw = process.env.FLOOM_MAX_ACTIONS_PER_APP;
+  if (raw === undefined || raw === '') return 200;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 200;
+  return Math.floor(n); // 0 = unlimited
+}
+
 function specToManifest(
   spec: OpenApiSpec,
   appSpec: OpenApiAppSpec,
   secretNames: string[],
 ): NormalizedManifest {
   const actions: NormalizedManifest['actions'] = {};
-  const maxActions = 20; // cap to avoid huge manifests
+  const maxActions = getMaxActionsCap(); // 0 = unlimited
   let count = 0;
+  let truncatedAt: number | null = null;
 
-  for (const [path, pathItem] of Object.entries(spec.paths || {})) {
-    if (count >= maxActions) break;
+  outer: for (const [path, pathItem] of Object.entries(spec.paths || {})) {
     for (const method of HTTP_METHODS) {
       const op = pathItem[method as keyof OpenApiPath] as OpenApiOperation | undefined;
       if (!op) continue;
-      if (count >= maxActions) break;
+      if (maxActions > 0 && count >= maxActions) {
+        truncatedAt = count;
+        break outer;
+      }
       const action = operationToAction(method, path, op);
-      actions[action.name] = {
+      // Avoid collision: if we already used this name, append _2, _3, ...
+      let name = action.name;
+      let suffix = 2;
+      while (actions[name]) {
+        name = `${action.name}_${suffix++}`;
+      }
+      actions[name] = {
         label: action.description,
         description: action.description,
         inputs: action.inputs,
@@ -294,6 +315,19 @@ function specToManifest(
       };
       count++;
     }
+  }
+
+  if (truncatedAt !== null) {
+    // Count the total operations in the spec so the warning is actionable.
+    let total = 0;
+    for (const pathItem of Object.values(spec.paths || {})) {
+      for (const method of HTTP_METHODS) {
+        if (pathItem[method as keyof OpenApiPath]) total++;
+      }
+    }
+    console.warn(
+      `[openapi-ingest] ${appSpec.slug}: truncated at ${truncatedAt} actions (spec has ${total}). Raise FLOOM_MAX_ACTIONS_PER_APP to ${total} or 0 for unlimited.`,
+    );
   }
 
   // If no paths were parsed, add a single generic action
