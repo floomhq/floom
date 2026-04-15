@@ -230,12 +230,9 @@ export function getSessionMe(): Promise<SessionMePayload> {
   return request<SessionMePayload>('/api/session/me');
 }
 
-export function switchWorkspace(workspace_id: string): Promise<{ ok: true }> {
-  return request('/api/session/switch-workspace', {
-    method: 'POST',
-    body: JSON.stringify({ workspace_id }),
-  });
-}
+// Workspace switching UI is deferred — see docs/DEFERRED-UI.md and
+// feature/ui-workspace-switcher. The backend /api/session/switch-workspace
+// route stays live; the client wrapper is restored on that branch.
 
 // Better Auth endpoints are mounted at /auth/* in cloud mode. The UI calls
 // them directly; in OSS mode these 404, and the UI falls back to a

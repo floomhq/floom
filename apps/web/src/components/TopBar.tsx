@@ -2,41 +2,41 @@ import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Logo } from './Logo';
-import { useSession, refreshSession, clearSession } from '../hooks/useSession';
+import { useSession, clearSession } from '../hooks/useSession';
 import * as api from '../api/client';
-import type { SessionWorkspace } from '../lib/types';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface Props {
   onSignIn?: () => void;
 }
 
-// W4-minimal TopBar.
+// MVP TopBar.
 //
-// Three states:
+// Two states:
 //   1. Loading / OSS mode (local user) — show "Sign in" CTA that links to /login.
-//   2. Logged in — show avatar + name + dropdown (Settings / Workspace / Logout).
-//   3. Workspace switcher only renders when the user has > 1 workspace.
+//   2. Logged in — show avatar + name + dropdown (My dashboard / Creator /
+//      Settings / Sign out).
 //
-// Mobile: hamburger menu keeps the same links as before plus a sign-in /
-// logout entry.
+// The workspace switcher is deferred — see docs/DEFERRED-UI.md and
+// feature/ui-workspace-switcher. Every user auto-lands in their personal
+// workspace on signup; the backend still returns workspaces +
+// active_workspace in /api/session/me and the routes stay live, so the
+// switcher is a UI-only concern.
+//
+// Mobile: hamburger menu keeps the same links plus a sign-in / sign-out
+// entry.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function TopBar(_props: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
-  const [wsOpen, setWsOpen] = useState(false);
   const { data, isAuthenticated, refresh } = useSession();
   const navigate = useNavigate();
   const dropRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (dropRef.current && !dropRef.current.contains(e.target as Node)) {
         setDropOpen(false);
-      }
-      if (wsRef.current && !wsRef.current.contains(e.target as Node)) {
-        setWsOpen(false);
       }
     }
     document.addEventListener('mousedown', onClick);
@@ -53,16 +53,6 @@ export function TopBar(_props: Props = {}) {
     await refresh();
     setDropOpen(false);
     navigate('/');
-  }
-
-  async function handleSwitchWorkspace(w: SessionWorkspace) {
-    try {
-      await api.switchWorkspace(w.id);
-      await refreshSession();
-      setWsOpen(false);
-    } catch {
-      // no-op
-    }
   }
 
   const user = data?.user;
@@ -107,78 +97,6 @@ export function TopBar(_props: Props = {}) {
 
           {isAuthenticated && data ? (
             <>
-              {data.workspaces.length > 1 && (
-                <div ref={wsRef} style={{ position: 'relative', marginLeft: 4 }}>
-                  <button
-                    type="button"
-                    onClick={() => setWsOpen((v) => !v)}
-                    data-testid="topbar-workspace-trigger"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '6px 10px',
-                      border: '1px solid var(--line)',
-                      borderRadius: 8,
-                      background: 'var(--bg)',
-                      fontSize: 12,
-                      color: 'var(--ink)',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{data.active_workspace.name}</span>
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                      <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                  {wsOpen && (
-                    <div
-                      role="menu"
-                      data-testid="topbar-workspace-menu"
-                      style={{
-                        position: 'absolute',
-                        top: 'calc(100% + 6px)',
-                        right: 0,
-                        background: 'var(--card)',
-                        border: '1px solid var(--line)',
-                        borderRadius: 8,
-                        minWidth: 200,
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
-                        padding: 4,
-                        zIndex: 50,
-                      }}
-                    >
-                      {data.workspaces.map((w) => (
-                        <button
-                          key={w.id}
-                          type="button"
-                          role="menuitem"
-                          onClick={() => handleSwitchWorkspace(w)}
-                          style={{
-                            display: 'flex',
-                            width: '100%',
-                            padding: '8px 12px',
-                            background:
-                              w.id === data.active_workspace.id ? 'var(--bg)' : 'transparent',
-                            border: 'none',
-                            borderRadius: 6,
-                            textAlign: 'left',
-                            fontFamily: 'inherit',
-                            fontSize: 13,
-                            color: 'var(--ink)',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span style={{ flex: 1 }}>{w.name}</span>
-                          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{w.role}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               <div ref={dropRef} style={{ position: 'relative', marginLeft: 4 }}>
                 <button
                   type="button"
