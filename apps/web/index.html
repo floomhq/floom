@@ -3,8 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Floom — infra for agentic work</title>
-    <meta name="description" content="Floom is infra for agentic work. One manifest. Four surfaces. Any CLI, MCP server, or Python library becomes an MCP tool, an HTTP endpoint, a CLI command, and a web form in 10 seconds." />
+    <title>Floom · Production layer for vibe-coded AI apps</title>
+    <meta name="description" content="Vibe-coding speed. Production-grade safety. The production layer for AI apps that do real work." />
+    <meta property="og:title" content="Floom · Production layer for vibe-coded AI apps" />
+    <meta property="og:description" content="Vibe-coding speed. Production-grade safety. The production layer for AI apps that do real work." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://floom.dev" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Floom · Production layer for vibe-coded AI apps" />
+    <meta name="twitter:description" content="Vibe-coding speed. Production-grade safety. The production layer for AI apps that do real work." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,7 +20,20 @@
     />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- SPA fallback. Rendered before React hydrates so crawlers and curl
+           see the locked hero copy. Matches landing.floom.dev exactly. -->
+      <div style="display:none" data-spa-fallback>
+        <h1>Vibe-coding speed. Production-grade safety.</h1>
+        <p>The production layer for AI apps that do real work.</p>
+        <p><a href="/apps">Try an app</a> &middot; <a href="/build">Ship an app</a></p>
+      </div>
+    </div>
+    <noscript>
+      <h1>Vibe-coding speed. Production-grade safety.</h1>
+      <p>The production layer for AI apps that do real work.</p>
+      <p><a href="/apps">Try an app</a> &middot; <a href="/build">Ship an app</a></p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
