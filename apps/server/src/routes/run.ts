@@ -10,6 +10,7 @@ import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { checkAppVisibility } from '../lib/auth.js';
+import { resolveUserContext } from '../services/session.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const runRouter = new Hono();
@@ -59,12 +60,27 @@ runRouter.post('/', async (c) => {
     return c.json({ error: e.message, field: e.field }, 400);
   }
 
+  // W4M.1: scope the run by the current session so /api/me/runs can filter
+  // by user_id / device_id. In OSS mode this binds the run to the local
+  // user and the device cookie; in Cloud mode (W3.1) this is the real
+  // Better Auth user + their active workspace.
+  const ctx = await resolveUserContext(c);
+
   const runId = newRunId();
   const threadId = typeof body.thread_id === 'string' ? body.thread_id : null;
   db.prepare(
-    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status)
-     VALUES (?, ?, ?, ?, ?, 'pending')`,
-  ).run(runId, row.id, threadId, actionName, JSON.stringify(validated));
+    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+  ).run(
+    runId,
+    row.id,
+    threadId,
+    actionName,
+    JSON.stringify(validated),
+    ctx.workspace_id,
+    ctx.user_id,
+    ctx.device_id,
+  );
 
   dispatchRun(row, manifest, runId, actionName, validated);
 
@@ -257,13 +273,146 @@ slugRunRouter.post('/', async (c) => {
     return c.json({ error: e.message, field: e.field }, 400);
   }
 
+  // W4M.1: scope the run by the current session.
+  const ctx = await resolveUserContext(c);
+
   const runId = newRunId();
   db.prepare(
-    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status)
-     VALUES (?, ?, NULL, ?, ?, 'pending')`,
-  ).run(runId, row.id, actionName, JSON.stringify(validated));
+    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)
+     VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?)`,
+  ).run(
+    runId,
+    row.id,
+    actionName,
+    JSON.stringify(validated),
+    ctx.workspace_id,
+    ctx.user_id,
+    ctx.device_id,
+  );
 
   dispatchRun(row, manifest, runId, actionName, validated);
 
   return c.json({ run_id: runId, status: 'pending' });
+});
+
+// ---------- /api/me/runs : per-user run history ----------
+// Returns the caller's run history scoped by (workspace_id, user_id) in
+// cloud mode and by (workspace_id, device_id) in OSS mode. Joins `apps`
+// so the UI can render the app name + icon without a second fetch.
+export const meRouter = new Hono();
+
+meRouter.get('/runs', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const limit = Math.max(1, Math.min(200, Number(c.req.query('limit') || 50)));
+
+  // Two filters: authenticated caller scopes by user_id; anonymous caller
+  // scopes by device_id. Both also check workspace_id so cross-workspace
+  // leaks are impossible.
+  const scopeClause = ctx.is_authenticated
+    ? 'runs.workspace_id = ? AND runs.user_id = ?'
+    : 'runs.workspace_id = ? AND runs.device_id = ?';
+  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+
+  const rows = db
+    .prepare(
+      `SELECT runs.id, runs.action, runs.status, runs.duration_ms,
+              runs.started_at, runs.finished_at, runs.error, runs.error_type,
+              apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
+         FROM runs
+         LEFT JOIN apps ON apps.id = runs.app_id
+        WHERE ${scopeClause}
+        ORDER BY runs.started_at DESC
+        LIMIT ?`,
+    )
+    .all(ctx.workspace_id, scopeParam, limit) as Array<{
+    id: string;
+    action: string;
+    status: string;
+    duration_ms: number | null;
+    started_at: string;
+    finished_at: string | null;
+    error: string | null;
+    error_type: string | null;
+    app_slug: string | null;
+    app_name: string | null;
+    app_icon: string | null;
+  }>;
+
+  return c.json({
+    runs: rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      status: r.status,
+      duration_ms: r.duration_ms,
+      started_at: r.started_at,
+      finished_at: r.finished_at,
+      error: r.error,
+      error_type: r.error_type,
+      app_slug: r.app_slug,
+      app_name: r.app_name,
+      app_icon: r.app_icon,
+    })),
+  });
+});
+
+// GET /api/me/runs/:id — scoped fetch of a single run. Returns 404 if the
+// run exists but is owned by someone else, so probing run ids can't leak
+// another user's outputs.
+meRouter.get('/runs/:id', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const id = c.req.param('id');
+
+  const scopeClause = ctx.is_authenticated
+    ? 'runs.workspace_id = ? AND runs.user_id = ?'
+    : 'runs.workspace_id = ? AND runs.device_id = ?';
+  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+
+  const row = db
+    .prepare(
+      `SELECT runs.*, apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
+         FROM runs LEFT JOIN apps ON apps.id = runs.app_id
+        WHERE runs.id = ? AND ${scopeClause}
+        LIMIT 1`,
+    )
+    .get(id, ctx.workspace_id, scopeParam) as
+    | {
+        id: string;
+        app_id: string;
+        thread_id: string | null;
+        action: string;
+        inputs: string | null;
+        outputs: string | null;
+        logs: string;
+        status: string;
+        error: string | null;
+        error_type: string | null;
+        duration_ms: number | null;
+        started_at: string;
+        finished_at: string | null;
+        app_slug: string | null;
+        app_name: string | null;
+        app_icon: string | null;
+      }
+    | undefined;
+
+  if (!row) return c.json({ error: 'Run not found' }, 404);
+
+  return c.json({
+    id: row.id,
+    app_id: row.app_id,
+    app_slug: row.app_slug,
+    app_name: row.app_name,
+    app_icon: row.app_icon,
+    thread_id: row.thread_id,
+    action: row.action,
+    inputs: safeParse(row.inputs),
+    outputs: safeParse(row.outputs),
+    status: row.status,
+    error: row.error,
+    error_type: row.error_type,
+    duration_ms: row.duration_ms,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    logs: row.logs,
+  });
 });

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { AppIcon } from '../components/AppIcon';
+import { FeedbackButton } from '../components/FeedbackButton';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
 
@@ -224,6 +225,7 @@ export function AppsDirectoryPage() {
         </div>
       </main>
       <Footer />
+      <FeedbackButton />
     </div>
   );
 }

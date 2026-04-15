@@ -4,6 +4,8 @@ import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { FloomApp } from '../components/FloomApp';
 import { AppIcon } from '../components/AppIcon';
+import { AppReviews } from '../components/AppReviews';
+import { FeedbackButton } from '../components/FeedbackButton';
 import { getApp } from '../api/client';
 import type { AppDetail } from '../lib/types';
 
@@ -420,8 +422,12 @@ export function AppPermalinkPage() {
             </div>
           </div>
         )}
+
+        {/* W4-minimal: reviews section (renders on every tab) */}
+        <AppReviews slug={app.slug} />
       </main>
       <Footer />
+      <FeedbackButton />
     </div>
   );
 }

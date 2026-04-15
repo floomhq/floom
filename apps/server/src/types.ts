@@ -418,3 +418,39 @@ export interface StripeWebhookEventRecord {
   payload: string;
   received_at: string;
 }
+
+// =====================================================================
+// W4-minimal: reviews + feedback
+// =====================================================================
+
+/**
+ * One row per (workspace, app, user). Rating is 1-5. Re-submitting updates
+ * the existing row (idempotent upsert keyed on the UNIQUE constraint).
+ */
+export interface AppReviewRecord {
+  id: string;
+  workspace_id: string;
+  app_slug: string;
+  user_id: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Product-feedback entry. Anonymous callers may post; we hash their IP for
+ * per-source rate limiting. Email is optional.
+ */
+export interface FeedbackRecord {
+  id: string;
+  workspace_id: string | null;
+  user_id: string | null;
+  device_id: string | null;
+  email: string | null;
+  url: string | null;
+  text: string;
+  ip_hash: string | null;
+  created_at: string;
+}

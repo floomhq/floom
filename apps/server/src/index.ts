@@ -11,7 +11,7 @@ import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
 import { pickRouter } from './routes/pick.js';
 import { threadRouter } from './routes/thread.js';
-import { runRouter, slugRunRouter } from './routes/run.js';
+import { runRouter, slugRunRouter, meRouter } from './routes/run.js';
 import { jobsRouter } from './routes/jobs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { rendererRouter } from './routes/renderer.js';
@@ -20,6 +20,8 @@ import { memoryRouter, secretsRouter } from './routes/memory.js';
 import { connectionsRouter } from './routes/connections.js';
 import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
 import { stripeRouter } from './routes/stripe.js';
+import { reviewsRouter } from './routes/reviews.js';
+import { feedbackRouter } from './routes/feedback.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
@@ -75,6 +77,12 @@ app.route('/api/session', sessionRouter);
 // can't send a Bearer token. The other routes flow through the normal
 // /api global auth gate registered above.
 app.route('/api/stripe', stripeRouter);
+// W4-minimal: per-user run history, reviews, product feedback. /api/me
+// owns the scoped dashboard queries; /api/apps/:slug/reviews powers the
+// /p/:slug review surface; /api/feedback accepts in-app feedback.
+app.route('/api/me', meRouter);
+app.route('/api/apps', reviewsRouter);
+app.route('/api/feedback', feedbackRouter);
 
 // W3.1: when FLOOM_CLOUD_MODE=true, mount the Better Auth handler on /auth/*.
 // In OSS mode (the default), `getAuth()` returns null and this block is a
@@ -103,9 +111,9 @@ app.get('/openapi.json', (c) =>
     openapi: '3.0.0',
     info: {
       title: 'Floom self-host API',
-      version: '0.4.0-alpha.3',
+      version: '0.4.0-minimal',
       description:
-        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode.',
+        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI.',
     },
     paths: {
       '/api/health': {

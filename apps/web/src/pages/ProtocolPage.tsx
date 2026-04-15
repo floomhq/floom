@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
+import { FeedbackButton } from '../components/FeedbackButton';
 // Import the protocol markdown at build time via Vite ?raw
 import protocolMd from '../assets/protocol.md?raw';
 
@@ -758,6 +759,7 @@ export function ProtocolPage() {
         </article>
       </main>
       <Footer />
+      <FeedbackButton />
     </div>
   );
 }

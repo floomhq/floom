@@ -32,9 +32,11 @@ function log(label, ok, detail) {
 
 console.log('W3.3 schema tests');
 
-// ---- 1. user_version bumped to 6 ----
+// ---- 1. user_version bumped >= 6 ----
+// W4-minimal ships user_version=7 (adds app_reviews + feedback tables).
+// This test just confirms the W33 baseline of 6 or higher.
 const v = db.prepare('PRAGMA user_version').get();
-log('user_version = 6', v.user_version === 6, `got ${v.user_version}`);
+log('user_version >= 6', v.user_version >= 6, `got ${v.user_version}`);
 
 // ---- 2. stripe_accounts table exists ----
 const accountsTable = db

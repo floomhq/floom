@@ -661,7 +661,7 @@ function specToManifest(
   };
 }
 
-async function fetchSpec(url: string): Promise<OpenApiSpec> {
+export async function fetchSpec(url: string): Promise<OpenApiSpec> {
   const res = await fetch(url, {
     headers: { Accept: 'application/json, application/yaml, text/plain' },
     signal: AbortSignal.timeout(30_000),
@@ -914,4 +914,241 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
     `[openapi-ingest] done: ${apps_ingested} ingested, ${apps_failed} failed`,
   );
   return { apps_ingested, apps_failed, errors };
+}
+
+// =====================================================================
+// W4-minimal: in-memory ingest for /api/hub/ingest
+// =====================================================================
+
+/**
+ * Shape returned to the /build UI when a user submits an OpenAPI URL.
+ * The UI renders the detected values into an editable form, then POSTs
+ * the finalized manifest back via a second call.
+ */
+export interface DetectedApp {
+  slug: string;
+  name: string;
+  description: string;
+  actions: Array<{ name: string; label: string; description?: string }>;
+  auth_type: string | null;
+  category: string | null;
+  openapi_spec_url: string;
+  tools_count: number;
+  secrets_needed: string[];
+}
+
+/**
+ * Slug-ify a string into a URL-safe app slug. Used when the caller does
+ * not provide a slug for /api/hub/ingest.
+ */
+export function slugify(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'app';
+}
+
+/**
+ * Detect an app from an OpenAPI URL without persisting it. Used as the
+ * "preview" step of /build Step 2 — the UI shows what we found, user
+ * edits the name/slug, then clicks Publish.
+ */
+export async function detectAppFromUrl(
+  openapi_url: string,
+  requested_slug?: string,
+  requested_name?: string,
+): Promise<DetectedApp> {
+  const spec = await fetchSpec(openapi_url);
+  const derefed = await dereferenceSpec(spec);
+  const info = (derefed as { info?: { title?: string; description?: string } })
+    .info || {};
+  const name = requested_name || info.title || 'Untitled app';
+  const slug = slugify(requested_slug || name);
+
+  // We only need slug+name+auth_type+action list here — we don't persist.
+  // Build a lightweight appSpec compatible with specToManifest.
+  const appSpec: OpenApiAppSpec = {
+    slug,
+    type: 'proxied',
+    openapi_spec_url: openapi_url,
+    display_name: name,
+    description: info.description || undefined,
+    auth: 'none',
+  };
+  const manifest = specToManifest(derefed, appSpec, []);
+  const actions = Object.entries(manifest.actions).map(([k, v]) => ({
+    name: k,
+    label: v.label,
+    description: v.description,
+  }));
+
+  // Auth-type detection: read securitySchemes from the spec components.
+  type SpecWithComponents = {
+    components?: { securitySchemes?: Record<string, { type?: string; scheme?: string }> };
+  };
+  const schemes =
+    ((derefed as SpecWithComponents).components?.securitySchemes ?? {}) as Record<
+      string,
+      { type?: string; scheme?: string }
+    >;
+  let auth_type: string | null = null;
+  for (const scheme of Object.values(schemes)) {
+    if (scheme?.type === 'http' && scheme?.scheme === 'bearer') {
+      auth_type = 'bearer';
+      break;
+    }
+    if (scheme?.type === 'apiKey') {
+      auth_type = 'apikey';
+      break;
+    }
+  }
+
+  return {
+    slug,
+    name,
+    description: appSpec.description || info.description || manifest.description || '',
+    actions,
+    auth_type,
+    category: null,
+    openapi_spec_url: openapi_url,
+    tools_count: actions.length,
+    secrets_needed: manifest.secrets_needed || [],
+  };
+}
+
+/**
+ * Persist an app ingested from an OpenAPI URL. Called by POST /api/hub/ingest
+ * after the user confirms the detected manifest. Returns the persisted slug
+ * on success; throws with a human-readable message on failure.
+ *
+ * Overrides: name, description, slug, category. Anything else comes from the
+ * spec.
+ */
+export async function ingestAppFromUrl(args: {
+  openapi_url: string;
+  name?: string;
+  description?: string;
+  slug?: string;
+  category?: string;
+  workspace_id: string;
+  author_user_id: string;
+}): Promise<{ slug: string; name: string; created: boolean }> {
+  const { openapi_url } = args;
+  if (!openapi_url || !/^https?:\/\//i.test(openapi_url)) {
+    throw new Error('openapi_url must be an http(s) URL');
+  }
+
+  const spec = await fetchSpec(openapi_url);
+  const derefed = await dereferenceSpec(spec);
+  const specCached = JSON.stringify(derefed);
+  const info = (derefed as { info?: { title?: string; description?: string } })
+    .info || {};
+
+  const name = args.name || info.title || 'Untitled app';
+  const slug = slugify(args.slug || name);
+  const description = args.description || info.description || '';
+
+  // Refuse to silently collide with an existing app unless owned by same workspace.
+  const existing = db
+    .prepare('SELECT id, workspace_id FROM apps WHERE slug = ?')
+    .get(slug) as { id: string; workspace_id: string } | undefined;
+  if (existing && existing.workspace_id !== args.workspace_id && existing.workspace_id !== 'local') {
+    throw new Error(`slug "${slug}" is already taken`);
+  }
+
+  const appSpec: OpenApiAppSpec = {
+    slug,
+    type: 'proxied',
+    openapi_spec_url: openapi_url,
+    display_name: name,
+    description,
+    category: args.category,
+    auth: 'none',
+  };
+
+  const manifest = specToManifest(derefed, appSpec, manifest_secrets_from_spec(derefed));
+  const resolvedBaseUrl = resolveBaseUrl(derefed, appSpec, openapi_url);
+
+  if (existing) {
+    db.prepare(
+      `UPDATE apps SET
+         name=?, description=?, manifest=?, category=?, app_type='proxied',
+         base_url=?, auth_type=?, auth_config=NULL, openapi_spec_url=?,
+         openapi_spec_cached=?, visibility='public', is_async=0,
+         webhook_url=NULL, timeout_ms=NULL, retries=0, async_mode=NULL,
+         workspace_id=?, author=?, updated_at=datetime('now')
+       WHERE slug=?`,
+    ).run(
+      manifest.name,
+      description || manifest.description,
+      JSON.stringify(manifest),
+      args.category || null,
+      resolvedBaseUrl || null,
+      'none',
+      openapi_url,
+      specCached,
+      args.workspace_id,
+      args.author_user_id,
+      slug,
+    );
+    return { slug, name, created: false };
+  }
+
+  const appId = newAppId();
+  db.prepare(
+    `INSERT INTO apps (
+       id, slug, name, description, manifest, status, docker_image, code_path,
+       category, author, icon, app_type, base_url, auth_type, auth_config,
+       openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
+       timeout_ms, retries, async_mode, workspace_id
+     ) VALUES (
+       ?, ?, ?, ?, ?, 'active', NULL, ?,
+       ?, ?, NULL, 'proxied', ?, 'none', NULL,
+       ?, ?, 'public', 0, NULL,
+       NULL, 0, NULL, ?
+     )`,
+  ).run(
+    appId,
+    slug,
+    manifest.name,
+    description || manifest.description,
+    JSON.stringify(manifest),
+    `proxied:${slug}`,
+    args.category || null,
+    args.author_user_id,
+    resolvedBaseUrl || null,
+    openapi_url,
+    specCached,
+    args.workspace_id,
+  );
+
+  return { slug, name, created: true };
+}
+
+/**
+ * Pull secret names from an OpenAPI spec's `components.securitySchemes`. Used
+ * as the default secrets list when the caller doesn't specify any. Currently
+ * returns a single placeholder name per scheme (one secret = one scheme) —
+ * the UI lets the user rename later via the edit flow.
+ */
+function manifest_secrets_from_spec(spec: OpenApiSpec): string[] {
+  type SpecWithComponents = {
+    components?: { securitySchemes?: Record<string, { type?: string; scheme?: string; name?: string }> };
+  };
+  const schemes =
+    ((spec as SpecWithComponents).components?.securitySchemes ?? {}) as Record<
+      string,
+      { type?: string; scheme?: string; name?: string }
+    >;
+  const out: string[] = [];
+  for (const [key, scheme] of Object.entries(schemes)) {
+    if (scheme?.type === 'http' && scheme?.scheme === 'bearer') {
+      out.push((key || 'API_TOKEN').toUpperCase() + '_TOKEN');
+    } else if (scheme?.type === 'apiKey') {
+      out.push((key || 'API_KEY').toUpperCase() + '_KEY');
+    }
+  }
+  return out;
 }

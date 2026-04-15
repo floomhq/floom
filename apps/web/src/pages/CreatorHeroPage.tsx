@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { FloomApp } from '../components/FloomApp';
+import { FeedbackButton } from '../components/FeedbackButton';
 import {
   Server,
   Globe,
@@ -394,6 +395,7 @@ export function CreatorHeroPage() {
           <a href="https://github.com/floomhq/floom-monorepo" target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>github</a>
         </nav>
       </footer>
+      <FeedbackButton />
     </div>
   );
 }

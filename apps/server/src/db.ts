@@ -546,11 +546,54 @@ db.exec(`
 // email (we already have `email` on the column from W2.1).
 db.exec(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`);
 
+// ---------- W4-minimal: app reviews ----------
+// Per-user review rows. Unique (workspace_id, app_slug, user_id): each user
+// can only leave ONE review per app; re-submitting updates the existing row.
+// In OSS mode the user is the synthetic local user; in Cloud mode the real
+// Better Auth user. Device-scoped reviews are NOT persisted — anonymous
+// visitors cannot leave reviews (enforced in the route handler).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_reviews (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    app_slug TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    title TEXT,
+    body TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (workspace_id, app_slug, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_reviews_slug ON app_reviews(app_slug);
+  CREATE INDEX IF NOT EXISTS idx_app_reviews_user ON app_reviews(user_id);
+`);
+
+// ---------- W4-minimal: product feedback ----------
+// Raw feedback entries from the floating feedback button. Accepts from
+// anonymous and authenticated callers; stores URL + user_id for context.
+// Rate-limited at the route layer.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT,
+    user_id TEXT,
+    device_id TEXT,
+    email TEXT,
+    url TEXT,
+    text TEXT NOT NULL,
+    ip_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
+`);
+
 // Bump user_version so operators can see at a glance which schema
 // revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4;
 // W2.3 lands v5; W3.3 + W3.1 land v6 (rolled into the same alpha series).
+// W4-minimal lands v7 with app_reviews + feedback tables.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 6) {
-  db.pragma('user_version = 6');
+if (currentUserVersion < 7) {
+  db.pragma('user_version = 7');
 }
