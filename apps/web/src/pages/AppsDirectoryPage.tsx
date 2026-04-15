@@ -97,7 +97,7 @@ export function AppsDirectoryPage() {
             <span className="headline-dim">, agent-ready, right now.</span>
           </h1>
           <p className="subhead" style={{ maxWidth: 560 }}>
-            {apps.length > 0 ? apps.length : '15'} tools with a <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14 }}>floom.yaml</code> manifest. Each one exposes a chat interface, an MCP server, an HTTP API, and a CLI endpoint from the same source.
+            {apps.length > 0 ? apps.length : '15'} tools with a <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14 }}>floom.yaml</code> manifest. Each one exposes a web form, an MCP server, an HTTP API, and a CLI endpoint from the same source.
           </p>
         </div>
 

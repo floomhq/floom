@@ -1,6 +1,6 @@
 /* The wireframe design system — CSS variables, all layout primitives,
-   every component (chat thread, prompt box, app card, terminal, etc).
-   Copied verbatim from the Floom Chat wireframes so the implementation
+   every component (run thread, prompt box, app card, terminal, etc).
+   Copied verbatim from the Floom wireframes so the implementation
    matches the design spec 1:1. MUST precede @tailwind directives. */
 @import './wireframe.css';
 
