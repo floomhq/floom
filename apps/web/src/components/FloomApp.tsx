@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react';
 import type { AppDetail, ActionSpec, InputSpec, PickResult, RunRecord } from '../lib/types';
 import { AppIcon } from './AppIcon';
-import { StreamingTerminal } from './chat/StreamingTerminal';
-import { OutputPanel } from './chat/OutputPanel';
+import { StreamingTerminal } from './runner/StreamingTerminal';
+import { OutputPanel } from './runner/OutputPanel';
 import { Sidebar } from './Sidebar';
 import * as api from '../api/client';
 
