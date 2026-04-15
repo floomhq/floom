@@ -139,7 +139,7 @@ export function CreatorHeroPage() {
       >
         <div style={{ maxWidth: 700, margin: '0 auto' }}>
           <p className="label-mono" style={{ marginBottom: 8, textAlign: 'center' }}>Try it live</p>
-          <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)', textAlign: 'center' }}>
+          <h2 className="section-title-display" style={{ textAlign: 'center' }}>
             Run Hook Stats. No signup.
           </h2>
           <p style={{ fontSize: 14, color: 'var(--muted)', textAlign: 'center', maxWidth: 480, margin: '0 auto 32px', lineHeight: 1.6 }}>
@@ -159,7 +159,7 @@ export function CreatorHeroPage() {
       <section style={{ borderBottom: '1px solid var(--line)', padding: '64px 24px' }}>
         <div style={{ maxWidth: 900, margin: '0 auto' }}>
           <p className="label-mono" style={{ marginBottom: 8, textAlign: 'center' }}>Every Floom app gets</p>
-          <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 32px', color: 'var(--ink)', textAlign: 'center' }}>
+          <h2 className="section-title-display" style={{ textAlign: 'center', marginBottom: 32 }}>
             Four surfaces. One spec.
           </h2>
           <div
@@ -201,7 +201,7 @@ export function CreatorHeroPage() {
       >
         <div style={{ maxWidth: 700, margin: '0 auto' }}>
           <p className="label-mono" style={{ marginBottom: 8 }}>Open core</p>
-          <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)' }}>
+          <h2 className="section-title-display">
             Self-host. One command. Your data.
           </h2>
           <p style={{ fontSize: 15, color: 'var(--muted)', marginBottom: 28, maxWidth: 520, lineHeight: 1.6 }}>
