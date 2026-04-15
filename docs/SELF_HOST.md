@@ -1,6 +1,6 @@
 # Self-host Floom
 
-Run a full Floom instance — chat UI, MCP server, HTTP endpoint — on any machine with Docker.
+Run a full Floom instance — web form + output renderer, MCP server, HTTP endpoint, CLI — on any machine with Docker.
 
 ## Quick start
 
@@ -693,4 +693,4 @@ for the full walkthrough.
 - **v0.3.1** (April 2026): **Multi-tenant schema foundation** — 5 new tables (`workspaces`, `users`, `workspace_members`, `app_memory`, `user_secrets`) + `workspace_id`/`user_id`/`device_id` columns on `apps`/`runs`/`chat_threads`. Per-user app memory gated by manifest `memory_keys`. AES-256-GCM envelope-encrypted secrets vault. Session cookie (`floom_device`) with atomic rekey transaction for the upcoming W3.1 auth migration. New endpoints: `/api/memory/:app_slug`, `/api/secrets`. Single-codepath multi-tenant (OSS solo mode = synthetic `workspace_id='local'`). **Custom renderers** — creators can ship a `renderer.tsx` alongside their OpenAPI spec; Floom compiles it via esbuild and serves at `/renderer/:slug/bundle.js` with an ErrorBoundary fallback to the default shape renderer. Ships 10 default output components (text/markdown/code/table/object/image/pdf/audio/stream/error) + 13 default input components.
 - **v0.3.0** (April 2026): Async job queue primitive. `async: true` in `apps.yaml` wraps long-running apps (OpenPaper, research agents) in POST /jobs → GET /jobs/:id → webhook pattern. Background worker polls, claims, dispatches, enforces `timeout_ms`, retries N times, delivers webhooks with 5xx backoff. MCP `tools/call` on async apps returns immediately with a job-started payload.
 - **v0.2.0** (April 2026): OpenAPI ingest rewrite. $ref resolution, allOf/oneOf/anyOf flattening, spec.servers[] auto-detection, header/cookie/multipart support, OAuth2 client credentials, basic auth, FLOOM_AUTH_TOKEN gate, per-user MCP secrets via _auth extension, FLOOM_SEED_APPS opt-in for hosted apps, fixed base_url path-stripping, fixed SPA wildcard swallowing /openapi.json.
-- **v0.1.0** (April 2026): Initial self-host release. Proxied + hosted modes, MCP Streamable HTTP, SPA chat UI.
+- **v0.1.0** (April 2026): Initial self-host release. Proxied + hosted modes, MCP Streamable HTTP, SPA web form + output renderer.

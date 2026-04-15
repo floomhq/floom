@@ -4,7 +4,8 @@
  *
  * Grounding:
  *   - H2 Test 5 and Suite F: `onStdout` callback is sub-3ms jitter,
- *     safe for chat streaming. No buffering or polling needed.
+ *     safe for streaming to the web renderer (or any caller). No buffering
+ *     or polling needed.
  *   - Suite F: the default SDK `commands.run` timeout is 60s. For longer
  *     runs the caller must pass `timeoutMs` on RunOptions.
  */
@@ -126,9 +127,9 @@ export async function execute(
 
   // The SDK's Commands.run throws `CommandExitError` on non-zero exit (the
   // class implements `CommandResult` so exitCode/stdout/stderr are accessible
-  // on the error). We treat non-zero as a normal return value for chat apps
-  // because the UI needs to show "your app exited with 1" messages, not
-  // crash. Timeouts still throw `TimeoutError` and bubble up.
+  // on the error). We treat non-zero as a normal return value for Floom apps
+  // because the web renderer needs to show "your app exited with 1" messages,
+  // not crash. Timeouts still throw `TimeoutError` and bubble up.
   let exitCode: number;
   let rawStdout: string;
   let rawStderr: string;
@@ -142,9 +143,9 @@ export async function execute(
       },
       onStderr: (data: string) => {
         stderrChunks.push(data);
-        // Stderr is intentionally NOT streamed to the chat — users don't want
-        // to see pip's deprecation warnings alongside their output. The chat
-        // backend can decide to surface stderr only on non-zero exit.
+        // Stderr is intentionally NOT streamed to the caller — users don't
+        // want to see pip's deprecation warnings alongside their output. The
+        // Floom backend can decide to surface stderr only on non-zero exit.
       },
     });
     exitCode = result.exitCode;

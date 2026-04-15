@@ -1,6 +1,6 @@
 /**
  * Minimal structured logger. Stdout only, JSON lines. Consumers (the platform
- * layer, the chat backend, or a cron job) can pipe and parse at will.
+ * layer, the Floom backend, or a cron job) can pipe and parse at will.
  *
  * Levels: debug | info | warn | error.
  * Debug is suppressed unless FLOOM_LOG_DEBUG=1.

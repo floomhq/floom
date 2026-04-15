@@ -282,7 +282,7 @@ function createSearchMcpServer(): McpServer {
     {
       title: 'Search Apps',
       description:
-        'Search the Floom chat gallery by natural language. Returns matching apps with slug, name, and MCP URL.',
+        'Search the Floom app gallery by natural language. Returns matching apps with slug, name, and MCP URL.',
       inputSchema: {
         query: z.string().describe('Natural language description of what you need'),
         limit: z.number().optional().describe('Max results (default 5)'),
