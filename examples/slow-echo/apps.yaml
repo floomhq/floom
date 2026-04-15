@@ -1,0 +1,18 @@
+# Slow Echo — demonstrates the v0.3.0 async job queue.
+# Start the upstream first: node examples/slow-echo/server.mjs
+# Then boot Floom with FLOOM_APPS_CONFIG pointing at this file.
+
+apps:
+  - slug: slow-echo
+    type: proxied
+    openapi_spec_url: http://localhost:4101/openapi.json
+    display_name: Slow Echo
+    description: "Sleeps 5 seconds, then echoes the input. Async example for job queue."
+    category: developer-tools
+    async: true
+    async_mode: poll
+    timeout_ms: 60000
+    retries: 0
+    # webhook_url: http://localhost:4200/hook   # set to any HTTPS collector to
+    # receive job-completed POSTs with
+    # { job_id, slug, status, output, error, duration_ms, attempts }
