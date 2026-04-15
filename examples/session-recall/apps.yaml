@@ -1,0 +1,11 @@
+# Session Recall — proxied-mode (pure HTTP, no docker.sock required).
+# Start the upstream first: node examples/session-recall/server.mjs
+# Then point Floom at this file via FLOOM_APPS_CONFIG.
+
+apps:
+  - slug: session-recall
+    type: proxied
+    openapi_spec_url: http://localhost:4112/openapi.json
+    display_name: Session Recall
+    description: "Search and analyze Claude Code session transcripts. Keyword search, recent messages, and retry-loop report."
+    category: productivity
