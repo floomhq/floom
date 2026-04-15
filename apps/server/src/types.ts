@@ -281,4 +281,44 @@ export interface RekeyResult {
   app_memory: number;
   runs: number;
   chat_threads: number;
+  connections: number;
+}
+
+// =====================================================================
+// W2.3: Composio connections
+// =====================================================================
+
+export type ConnectionOwnerKind = 'device' | 'user';
+export type ConnectionStatus = 'pending' | 'active' | 'revoked' | 'expired';
+
+/**
+ * Per-user (or per-device, pre-login) connection to an external provider
+ * via Composio. Created when a user clicks "Connect Gmail" on /build,
+ * re-keyed to a real user_id when W3.1 Better Auth lands.
+ */
+export interface ConnectionRecord {
+  id: string;
+  workspace_id: string;
+  owner_kind: ConnectionOwnerKind;
+  owner_id: string;
+  provider: string;
+  composio_connection_id: string;
+  composio_account_id: string;
+  status: ConnectionStatus;
+  metadata_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Composio provider metadata persisted alongside a connection row. Shape
+ * varies per provider (email for Gmail, workspace name for Slack, etc.).
+ * Stored as JSON in `connections.metadata_json`.
+ */
+export interface ConnectionMetadata {
+  account_email?: string;
+  account_name?: string;
+  workspace_name?: string;
+  scopes?: string[];
+  [key: string]: unknown;
 }

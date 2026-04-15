@@ -1,6 +1,6 @@
 {
   "name": "@floom/server",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,10 +8,11 @@
     "build": "tsc && node scripts/copy-assets.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs && node ../../test/stress/test-w21-schema.mjs && node ../../test/stress/test-w21-session.mjs && node ../../test/stress/test-w21-app-memory.mjs && node ../../test/stress/test-w21-user-secrets.mjs && node ../../test/stress/test-w21-routes.mjs && tsx ../../test/stress/test-renderer-contract.mjs && tsx ../../test/stress/test-renderer-defaults.mjs && tsx ../../test/stress/test-renderer-bundler.mjs && tsx ../../test/stress/test-renderer-e2e.mjs"
+    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs && node ../../test/stress/test-w21-schema.mjs && node ../../test/stress/test-w21-session.mjs && node ../../test/stress/test-w21-app-memory.mjs && node ../../test/stress/test-w21-user-secrets.mjs && node ../../test/stress/test-w21-routes.mjs && tsx ../../test/stress/test-renderer-contract.mjs && tsx ../../test/stress/test-renderer-defaults.mjs && tsx ../../test/stress/test-renderer-bundler.mjs && tsx ../../test/stress/test-renderer-e2e.mjs && node ../../test/stress/test-w23-schema.mjs && node ../../test/stress/test-w23-composio-service.mjs && node ../../test/stress/test-w23-rekey.mjs && node ../../test/stress/test-w23-routes.mjs && node ../../test/stress/test-w23-integration.mjs"
   },
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "15.3.5",
+    "@composio/core": "0.6.10",
     "@floom/renderer": "workspace:*",
     "@hono/node-server": "1.13.7",
     "@modelcontextprotocol/sdk": "^1.29.0",

@@ -100,13 +100,22 @@ export function buildContext(
 }
 
 /**
- * Atomically re-key a device_id to a user_id across app_memory, runs, and
- * chat_threads. Returns the row counts. Runs inside a single SQLite
- * transaction so partial re-keys are impossible. Idempotent — if the rows
- * are already bound to the user, the WHERE clause filters them out.
+ * Atomically re-key a device_id to a user_id across app_memory, runs,
+ * chat_threads, and connections. Returns the row counts. Runs inside a
+ * single SQLite transaction so partial re-keys are impossible. Idempotent —
+ * if the rows are already bound to the user, the WHERE clause filters them
+ * out.
  *
  * This is called by the login handler on the first authenticated request
  * (post-W3.1). Pre-auth (today) it's exercised by tests only.
+ *
+ * Connections table (W2.3): anonymous rows use owner_kind='device' +
+ * owner_id=<device_id>. Re-key flips them to owner_kind='user' +
+ * owner_id=<user_id>. The Composio-side `composio_account_id` (e.g.
+ * `device:abc-123`) is NOT rewritten — Composio has no "rename user_id"
+ * endpoint. Instead we persist the legacy Composio user id on
+ * `users.composio_user_id` so subsequent Composio calls for this user know
+ * which external account to filter on.
  */
 export function rekeyDevice(
   device_id: string,
@@ -121,6 +130,7 @@ export function rekeyDevice(
     app_memory: 0,
     runs: 0,
     chat_threads: 0,
+    connections: 0,
   };
 
   const run = db.transaction(() => {
@@ -164,6 +174,45 @@ export function rekeyDevice(
       )
       .run(user_id, workspace_id, device_id, DEFAULT_USER_ID);
     result.chat_threads = threadRes.changes;
+
+    // connections (W2.3): flip device-owned rows to user-owned. The unique
+    // key is (workspace_id, owner_kind, owner_id, provider), so if the
+    // user already has a `user`-owned row for the same provider, we skip
+    // the device row (it stays as-is until the user revokes it manually).
+    // This preserves the "double-Gmail" fallback documented in the P.2
+    // research.
+    const conRes = db
+      .prepare(
+        `UPDATE connections
+           SET owner_kind = 'user',
+               owner_id = ?,
+               workspace_id = ?,
+               updated_at = datetime('now')
+         WHERE owner_kind = 'device'
+           AND owner_id = ?
+           AND workspace_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM connections c2
+              WHERE c2.workspace_id = connections.workspace_id
+                AND c2.owner_kind = 'user'
+                AND c2.owner_id = ?
+                AND c2.provider = connections.provider
+           )`,
+      )
+      .run(user_id, workspace_id, device_id, workspace_id, user_id);
+    result.connections = conRes.changes;
+
+    // Persist the legacy Composio user id ("device:<uuid>") on the user
+    // row so future Composio API calls for this user can still query the
+    // pre-login account. Only set if still null — never overwrite a user
+    // who already has a user-scoped Composio id.
+    if (result.connections > 0) {
+      db.prepare(
+        `UPDATE users
+           SET composio_user_id = COALESCE(composio_user_id, ?)
+         WHERE id = ?`,
+      ).run(`device:${device_id}`, user_id);
+    }
   });
 
   run();
