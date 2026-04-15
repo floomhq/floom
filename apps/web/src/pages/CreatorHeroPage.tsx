@@ -6,7 +6,7 @@ import {
   Server,
   Globe,
   Terminal,
-  MessageSquare,
+  LayoutTemplate,
 } from 'lucide-react';
 import type { AppDetail } from '../lib/types';
 import { getApp } from '../api/client';
@@ -58,7 +58,7 @@ const FOUR_THINGS = [
   { Icon: Server, label: 'MCP server', desc: 'Auto-generated from OpenAPI operations.' },
   { Icon: Globe, label: 'HTTP API', desc: 'Pass-through proxy with secrets injection.' },
   { Icon: Terminal, label: 'CLI', desc: '@floom/cli. Every operation is a command.' },
-  { Icon: MessageSquare, label: 'Chat UI', desc: 'Describe what you want, Floom routes it.' },
+  { Icon: LayoutTemplate, label: 'Web', desc: 'Hosted form + output renderer at /p/:slug.' },
 ];
 
 export function CreatorHeroPage() {

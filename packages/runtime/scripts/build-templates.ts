@@ -2,7 +2,7 @@
  * Build pre-baked templates for the top Floom apps.
  *
  * Reads a simple list of repos, deploys each one, and writes a
- * `templates.json` mapping slug -> templateId. The chat backend can then
+ * `templates.json` mapping slug -> templateId. The Floom backend can then
  * load this file at boot and use it as the warm-start cache.
  *
  * This is the "pre-bake snapshots for the top 10-20 most-used apps"

@@ -39,7 +39,7 @@ From the OpenAPI spec, Floom derives:
 - **MCP server**: each OpenAPI operation becomes an MCP tool, with the operation's parameters as the tool's inputs and the response schema as the output.
 - **HTTP API**: Floom proxies requests to the underlying service, injecting secrets at runtime and enforcing rate limits / access control.
 - **CLI**: each operation becomes a command. `floom run stripe list-customers --limit=10`.
-- **Chat UI**: inputs are rendered as form fields (typed by the OpenAPI schema). Long-running operations stream output.
+- **Web**: inputs are rendered as a form (typed by the OpenAPI schema) and outputs are piped through a built-in renderer. Long-running operations stream output.
 - **Typed SDKs**: openapi-generator spits out clients in any language.
 
 ## Plumbing layers (auto-applied)

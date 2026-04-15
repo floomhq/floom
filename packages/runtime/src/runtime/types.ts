@@ -1,7 +1,7 @@
 /**
  * Public types for the Floom e2b runtime v2.
  *
- * These are the types the Floom chat backend (and any future caller) will
+ * These are the types the Floom backend (and any future caller) will
  * import. Keep them stable. If you need to evolve them, add fields, don't
  * rename or remove.
  *
@@ -121,8 +121,8 @@ export interface RunResult {
   exitCode: number;
   output: string;
   /**
-   * Stderr output. Useful for debugging; the chat UI typically only surfaces
-   * this when exitCode != 0.
+   * Stderr output. Useful for debugging; the web renderer typically only
+   * surfaces this when exitCode != 0.
    */
   stderr: string;
   timingMs: RunTiming;

@@ -1,4 +1,4 @@
-import { Server, Globe, Terminal, MessageSquare, FileCode } from 'lucide-react';
+import { Server, Globe, Terminal, LayoutTemplate, FileCode } from 'lucide-react';
 
 // One spec, four surfaces. The diagram is a hub-and-spoke visual: an OpenAPI
 // node on the left, four agent surface nodes on the right, connected by SVG
@@ -25,9 +25,9 @@ const SURFACES = [
     accent: '#3d2bff',
   },
   {
-    Icon: MessageSquare,
-    label: 'Chat UI',
-    desc: 'Hosted form for every action. Share a permalink, no signup, no SDK.',
+    Icon: LayoutTemplate,
+    label: 'Web',
+    desc: 'Hosted form + output renderer for every action. Share a permalink, no signup, no SDK.',
     accent: '#3d2bff',
   },
 ];

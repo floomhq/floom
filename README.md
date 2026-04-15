@@ -2,11 +2,11 @@
 
 **Infra for agentic work.**
 
-One manifest, four surfaces. Any CLI, MCP server, or Python library becomes a chat, a tool call, and an HTTP endpoint in 10 seconds.
+One manifest, four surfaces. Any CLI, MCP server, or Python library becomes an MCP tool, an HTTP endpoint, a CLI command, and a web form in 10 seconds.
 
 ## What's in this repo
 
-- `apps/web` — the Floom.dev chat UI
+- `apps/web` — the Floom.dev web surface (form input + output renderer at `/p/:slug`)
 - `apps/server` — backend (Hono + SQLite + Docker runner)
 - `packages/runtime` — `@floom/runtime`, the e2b-backed execution layer
 - `packages/cli` — `@floom/cli`, the command-line tool
@@ -39,7 +39,7 @@ docker run -p 3051:3051 \
   ghcr.io/floomhq/floom-monorepo:latest
 ```
 
-Floom boots, fetches the Stripe OpenAPI spec, generates a chat UI + MCP server + HTTP endpoint. Point your agent at `http://localhost:3051/mcp/app/stripe`.
+Floom boots, fetches the Stripe OpenAPI spec, generates a web form + MCP server + HTTP endpoint + CLI. Point your agent at `http://localhost:3051/mcp/app/stripe`.
 
 See [docs/SELF_HOST.md](./docs/SELF_HOST.md) for the full guide.
 

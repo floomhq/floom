@@ -7,14 +7,14 @@ The e2b-backed runtime for Floom v2. Wraps any GitHub repo (MCP server, CLI tool
 - **Auto-detects** the runtime, build command, and run command for any public GitHub repo.
 - **Deploys** it to an e2b sandbox: clone, build, smoke test, pause.
 - **Runs** it on demand via a warm pause/connect cycle (~600ms cold start vs ~20-300s fresh build).
-- Returns streaming stdout so the chat UI can render output as it arrives.
+- Returns streaming stdout so the caller (web renderer, CLI, or MCP client) can render output as it arrives.
 
 ## Install
 
 This is a local package under `/opt/floom-e2b-runtime`. Not yet published to npm.
 
 ```bash
-# From the floom-chat repo (future integration):
+# From the floom-monorepo repo (future integration):
 npm install /opt/floom-e2b-runtime
 ```
 

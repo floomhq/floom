@@ -1,6 +1,7 @@
-// Shared types for the floom-chat backend.
-// A trimmed subset of the marketplace schema — chat-app only needs apps,
-// runs, secrets, hub_entries, embeddings, and chat threads.
+// Shared types for the Floom backend.
+// A trimmed subset of the marketplace schema — Floom needs apps, runs,
+// secrets, hub_entries, embeddings, and run threads (the legacy DB table
+// is still named `chat_threads`; types kept in sync for schema stability).
 
 export type InputType =
   | 'text'

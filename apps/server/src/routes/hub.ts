@@ -1,5 +1,5 @@
-// GET /api/hub — list every runnable app in the chat instance.
-// This is the "15 apps" grid for the Browse page.
+// GET /api/hub — list every runnable app in this Floom instance.
+// This is the "15 apps" grid for the apps directory page.
 import { Hono } from 'hono';
 import { db } from '../db.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';

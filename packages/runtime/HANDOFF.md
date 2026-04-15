@@ -1,18 +1,18 @@
-# Integrating @floom/e2b-runtime into floom-chat
+# Integrating @floom/e2b-runtime into floom-monorepo
 
-This document is for the integration pass that wires `@floom/e2b-runtime` into the `federicodeponte/floom-chat` repo. The runtime is complete and locally verified at `/opt/floom-e2b-runtime/`.
+This document is for the integration pass that wires `@floom/e2b-runtime` into the `floomhq/floom-monorepo` repo (legacy name: `floom-chat`). The runtime is complete and locally verified at `/opt/floom-e2b-runtime/`.
 
 ## What this package exposes
 
 Three capabilities:
 
 1. **Deploy**: `deployFromGithub(repoUrl)` — takes any public GitHub repo, runs auto-detect, spins up an e2b sandbox, builds, smoke-tests, and returns a paused `templateId`.
-2. **Run**: `runApp(manifest, inputs, secrets, onStream)` — connects to a paused sandbox (~600ms), executes the run command, streams stdout to the chat UI.
+2. **Run**: `runApp(manifest, inputs, secrets, onStream)` — connects to a paused sandbox (~600ms), executes the run command, streams stdout to the caller (the web renderer at `/p/:slug`, the CLI, or an MCP client).
 3. **Detect only**: `generateManifest(repoSnapshot)` — run the auto-detect pipeline offline (no sandbox, no e2b cost) to preview what would be deployed.
 
 ## How to import
 
-From `floom-chat`:
+From `floom-monorepo`:
 
 ```typescript
 // npm install /opt/floom-e2b-runtime  (or publish to npm first)
@@ -20,7 +20,7 @@ import { deployFromGithub, runApp } from '@floom/e2b-runtime';
 import type { Manifest, RunResult, DeployResult } from '@floom/e2b-runtime';
 ```
 
-## Where in floom-chat to add it
+## Where in floom-monorepo to add it
 
 ### 1. Replace the Docker runner
 
@@ -53,7 +53,7 @@ async function runViaE2b(req: RunRequest) {
 
 ### 2. Add deploy endpoint
 
-The deploy endpoint triggers `deployFromGithub` when a user pastes a GitHub URL. Wire it into the chat message handler:
+The deploy endpoint triggers `deployFromGithub` when a user pastes a GitHub URL. Wire it into the deploy request handler:
 
 ```typescript
 // apps/server/src/routes/deploy.ts
@@ -92,7 +92,7 @@ ALTER TABLE apps ADD COLUMN manifest JSONB;
 
 ### 4. Feature flag
 
-Add `FLOOM_RUNTIME=e2b` to the floom-chat `.env.local`. Default to `docker` until the e2b path is validated in production.
+Add `FLOOM_RUNTIME=e2b` to the floom-monorepo `.env.local`. Default to `docker` until the e2b path is validated in production.
 
 ## Env vars to add
 
@@ -111,7 +111,7 @@ FLOOM_LOG_DEBUG=1   # verbose logging from the runtime
 | Item | Notes |
 |------|-------|
 | DB schema for `template_id` | Add to apps table migration |
-| SSE streaming endpoint | Currently all runs are synchronous in floom-chat |
+| SSE streaming endpoint | Currently all runs are synchronous in floom-monorepo |
 | Rate limiting for deploy | Each deploy costs ~$0.01 in e2b credit + compute |
 | Error UX for draft manifests | When `isDraft: true`, show the YAML editor (H6 Scenario 2) |
 | Template refresh cron | Paused sandboxes expire (check e2b TTL, default 24h) |
@@ -137,7 +137,7 @@ Expiry:
 2. **Docker runtime** — Docker-in-Docker is not available in the default e2b template. Repos that require Docker to build/run will fail.
 3. **PHP/Ruby** — The manifest coerces these to `runtime: 'auto'`. The e2b base template has PHP and Ruby installed, but Composer and Bundler may need custom templates for large deps.
 4. **Private repos** — Need a `GITHUB_TOKEN` for clone. The UI needs a way to collect this at deploy time.
-5. **Sandbox GC** — When `Sandbox.connect` throws `SandboxNotFoundError` (sandbox expired), the caller needs to redeploy from scratch. The runtime throws; the chat backend must catch and redeploy.
+5. **Sandbox GC** — When `Sandbox.connect` throws `SandboxNotFoundError` (sandbox expired), the caller needs to redeploy from scratch. The runtime throws; the Floom backend must catch and redeploy.
 
 ## Files in this package
 
