@@ -1,16 +1,16 @@
-// Chat thread persistence. Threads are keyed by a browser-generated id,
-// no user auth — same anon waitlist model as the marketplace.
+// Run thread persistence. Threads are keyed by a browser-generated id,
+// no user auth: same anon waitlist model as the marketplace.
 import { Hono } from 'hono';
 import { db } from '../db.js';
 import { newThreadId, newTurnId } from '../lib/ids.js';
-import type { ChatThreadRecord, ChatTurnRecord } from '../types.js';
+import type { RunThreadRecord, RunTurnRecord } from '../types.js';
 
 export const threadRouter = new Hono();
 
 // POST /api/thread — create a new empty thread
 threadRouter.post('/', (c) => {
   const id = newThreadId();
-  db.prepare('INSERT INTO chat_threads (id, title) VALUES (?, NULL)').run(id);
+  db.prepare('INSERT INTO run_threads (id, title) VALUES (?, NULL)').run(id);
   return c.json({ id });
 });
 
@@ -18,13 +18,13 @@ threadRouter.post('/', (c) => {
 threadRouter.get('/:id', (c) => {
   const id = c.req.param('id');
   const thread = db
-    .prepare('SELECT * FROM chat_threads WHERE id = ?')
-    .get(id) as ChatThreadRecord | undefined;
+    .prepare('SELECT * FROM run_threads WHERE id = ?')
+    .get(id) as RunThreadRecord | undefined;
   if (!thread) return c.json({ error: 'Thread not found' }, 404);
 
   const turns = db
-    .prepare('SELECT * FROM chat_turns WHERE thread_id = ? ORDER BY turn_index ASC')
-    .all(id) as ChatTurnRecord[];
+    .prepare('SELECT * FROM run_turns WHERE thread_id = ? ORDER BY turn_index ASC')
+    .all(id) as RunTurnRecord[];
 
   return c.json({
     id: thread.id,
@@ -54,24 +54,24 @@ threadRouter.post('/:id/turn', async (c) => {
   }
 
   let thread = db
-    .prepare('SELECT * FROM chat_threads WHERE id = ?')
-    .get(id) as ChatThreadRecord | undefined;
+    .prepare('SELECT * FROM run_threads WHERE id = ?')
+    .get(id) as RunThreadRecord | undefined;
   if (!thread) {
     // Auto-create thread if missing, so the client can POST straight after
     // generating an id without a round-trip.
-    db.prepare('INSERT INTO chat_threads (id, title) VALUES (?, NULL)').run(id);
-    thread = db.prepare('SELECT * FROM chat_threads WHERE id = ?').get(id) as ChatThreadRecord;
+    db.prepare('INSERT INTO run_threads (id, title) VALUES (?, NULL)').run(id);
+    thread = db.prepare('SELECT * FROM run_threads WHERE id = ?').get(id) as RunThreadRecord;
   }
 
   const lastTurn = db
-    .prepare('SELECT MAX(turn_index) as max_idx FROM chat_turns WHERE thread_id = ?')
+    .prepare('SELECT MAX(turn_index) as max_idx FROM run_turns WHERE thread_id = ?')
     .get(id) as { max_idx: number | null };
   const nextIdx = (lastTurn.max_idx ?? -1) + 1;
 
   const turnId = newTurnId();
   const payloadJson = JSON.stringify(body.payload ?? {});
   db.prepare(
-    `INSERT INTO chat_turns (id, thread_id, turn_index, kind, payload)
+    `INSERT INTO run_turns (id, thread_id, turn_index, kind, payload)
      VALUES (?, ?, ?, ?, ?)`,
   ).run(turnId, id, nextIdx, kind, payloadJson);
 
@@ -84,11 +84,11 @@ threadRouter.post('/:id/turn', async (c) => {
     if (typeof text === 'string' && text.trim()) {
       const title = text.trim().slice(0, 60);
       db.prepare(
-        `UPDATE chat_threads SET title = ?, updated_at = datetime('now') WHERE id = ?`,
+        `UPDATE run_threads SET title = ?, updated_at = datetime('now') WHERE id = ?`,
       ).run(title, id);
     }
   } else {
-    db.prepare(`UPDATE chat_threads SET updated_at = datetime('now') WHERE id = ?`).run(id);
+    db.prepare(`UPDATE run_threads SET updated_at = datetime('now') WHERE id = ?`).run(id);
   }
 
   return c.json({

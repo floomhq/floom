@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // W2.3 rekeyDevice tests (connections branch). The W2.1 test already
-// exercises app_memory/runs/chat_threads rekey. This file tests the
+// exercises app_memory/runs/run_threads rekey. This file tests the
 // connections branch added in W2.3:
 //
 //   - device rows flip to user rows
@@ -111,7 +111,7 @@ db.prepare(
    VALUES (?, ?, ?, ?, 'pending', ?, NULL, ?)`,
 ).run('run_rk', 'app_rk', 'run', '{}', DEFAULT_WORKSPACE_ID, 'dev-anon');
 db.prepare(
-  `INSERT INTO chat_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
+  `INSERT INTO run_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
 ).run('thr_rk', DEFAULT_WORKSPACE_ID, 'dev-anon');
 
 // ---- 1. rekey: counts include connections ----
@@ -119,7 +119,7 @@ const res = session.rekeyDevice('dev-anon', 'alice', DEFAULT_WORKSPACE_ID);
 log('rekey: connections=2', res.connections === 2, `got ${res.connections}`);
 log('rekey: app_memory=1 (W2.1 still works)', res.app_memory === 1);
 log('rekey: runs=1 (W2.1 still works)', res.runs === 1);
-log('rekey: chat_threads=1 (W2.1 still works)', res.chat_threads === 1);
+log('rekey: run_threads=1 (W2.1 still works)', res.run_threads === 1);
 
 // ---- 2. connections rows now owned by alice ----
 const aliceConns = db
@@ -155,7 +155,7 @@ log(
   res2.connections === 0 &&
     res2.app_memory === 0 &&
     res2.runs === 0 &&
-    res2.chat_threads === 0,
+    res2.run_threads === 0,
 );
 
 // ---- 6. users.composio_user_id NOT overwritten on idempotent re-run ----

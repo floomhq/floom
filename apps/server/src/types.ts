@@ -1,7 +1,6 @@
 // Shared types for the Floom backend.
-// A trimmed subset of the marketplace schema — Floom needs apps, runs,
-// secrets, hub_entries, embeddings, and run threads (the legacy DB table
-// is still named `chat_threads`; types kept in sync for schema stability).
+// A trimmed subset of the marketplace schema: Floom needs apps, runs,
+// secrets, hub_entries, embeddings, and run threads.
 
 export type InputType =
   | 'text'
@@ -197,14 +196,14 @@ export interface SecretRecord {
   created_at: string;
 }
 
-export interface ChatThreadRecord {
+export interface RunThreadRecord {
   id: string;
   title: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface ChatTurnRecord {
+export interface RunTurnRecord {
   id: string;
   thread_id: string;
   turn_index: number;
@@ -342,7 +341,7 @@ export interface UserSecretRecord {
 export interface RekeyResult {
   app_memory: number;
   runs: number;
-  chat_threads: number;
+  run_threads: number;
   connections: number;
 }
 

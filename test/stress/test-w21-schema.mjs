@@ -64,12 +64,12 @@ log('runs.user_id added', runCols.includes('user_id'));
 log('runs.device_id added', runCols.includes('device_id'));
 
 const threadCols = db
-  .prepare('PRAGMA table_info(chat_threads)')
+  .prepare('PRAGMA table_info(run_threads)')
   .all()
   .map((r) => r.name);
-log('chat_threads.workspace_id added', threadCols.includes('workspace_id'));
-log('chat_threads.user_id added', threadCols.includes('user_id'));
-log('chat_threads.device_id added', threadCols.includes('device_id'));
+log('run_threads.workspace_id added', threadCols.includes('workspace_id'));
+log('run_threads.user_id added', threadCols.includes('user_id'));
+log('run_threads.device_id added', threadCols.includes('device_id'));
 
 // ---- 3. user_version bumped ----
 const userVersion = db.prepare('PRAGMA user_version').get().user_version;
