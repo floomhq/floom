@@ -375,10 +375,64 @@ if (!existingLocalMember) {
   ).run(DEFAULT_WORKSPACE_ID, DEFAULT_USER_ID);
 }
 
+// =====================================================================
+// ---------- W2.3: Composio connections (OAuth via Composio SDK) -------
+// =====================================================================
+// P.2 research (research/composio-validation.md) validated Composio as
+// the primary vendor for the /build "Connect a tool" ramp. Because this
+// wave ships before W3.1 Better Auth, we use the same `device_id`
+// fallback pattern W2.1 established for app_memory/runs/chat_threads:
+//
+//   - owner_kind='device' + owner_id=<floom_device cookie>  (pre-login)
+//   - owner_kind='user'   + owner_id=<users.id>             (post-login)
+//
+// On the first authenticated request, `rekeyDevice` (below) rewrites
+// the rows from device→user in the same transaction that re-keys the
+// other tables. Composio's own user_id (the opaque string we pass to
+// `composio.connectedAccounts.initiate`) is stored in
+// `connections.composio_account_id` and never rewritten; after re-key
+// we simply map the local user to the old Composio account via
+// `users.composio_user_id`.
+
+// ---------- connections (per-user OAuth state for Composio) ------------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS connections (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('device', 'user')),
+    owner_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    composio_connection_id TEXT NOT NULL,
+    composio_account_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'revoked', 'expired')),
+    metadata_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (workspace_id, owner_kind, owner_id, provider)
+  );
+  CREATE INDEX IF NOT EXISTS idx_connections_owner
+    ON connections(workspace_id, owner_kind, owner_id);
+  CREATE INDEX IF NOT EXISTS idx_connections_provider
+    ON connections(workspace_id, provider);
+  CREATE INDEX IF NOT EXISTS idx_connections_composio
+    ON connections(composio_connection_id);
+`);
+
+// users.composio_user_id: populated on first login when we map the
+// pre-auth `device:<uuid>` Composio user id to the authenticated user.
+// Nullable — only set once the user has connected at least one tool.
+const userCols = (db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[]).map(
+  (r) => r.name,
+);
+if (!userCols.includes('composio_user_id')) {
+  db.exec(`ALTER TABLE users ADD COLUMN composio_user_id TEXT`);
+}
+
 // Bump user_version so operators can see at a glance which schema
-// revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4.
+// revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4;
+// W2.3 lands v5.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 4) {
-  db.pragma('user_version = 4');
+if (currentUserVersion < 5) {
+  db.pragma('user_version = 5');
 }

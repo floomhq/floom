@@ -17,6 +17,7 @@ import { mcpRouter } from './routes/mcp.js';
 import { rendererRouter } from './routes/renderer.js';
 import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
 import { memoryRouter, secretsRouter } from './routes/memory.js';
+import { connectionsRouter } from './routes/connections.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
@@ -60,6 +61,8 @@ app.route('/api/deploy-waitlist', deployWaitlistRouter);
 // W2.1: per-user state
 app.route('/api/memory', memoryRouter);
 app.route('/api/secrets', secretsRouter);
+// W2.3: Composio OAuth connections (for /build Connect-a-tool ramp)
+app.route('/api/connections', connectionsRouter);
 
 // Tiny, hand-written OpenAPI 3 document describing Floom's own admin API.
 // Returned at /openapi.json so users hitting http://host/openapi.json get
@@ -69,9 +72,9 @@ app.get('/openapi.json', (c) =>
     openapi: '3.0.0',
     info: {
       title: 'Floom self-host API',
-      version: '0.3.1',
+      version: '0.3.2',
       description:
-        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets).',
+        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections).',
     },
     paths: {
       '/api/health': {
@@ -113,6 +116,63 @@ app.get('/openapi.json', (c) =>
         post: {
           summary: 'Upsert an encrypted per-user secret',
           responses: { '200': { description: '{ok: true}' } },
+        },
+      },
+      '/api/connections': {
+        get: {
+          summary: 'List Composio-backed OAuth connections for the current caller',
+          parameters: [
+            {
+              name: 'status',
+              in: 'query',
+              required: false,
+              schema: {
+                type: 'string',
+                enum: ['pending', 'active', 'revoked', 'expired'],
+              },
+            },
+          ],
+          responses: {
+            '200': { description: 'JSON {connections: [...]}' },
+          },
+        },
+      },
+      '/api/connections/initiate': {
+        post: {
+          summary: 'Kick off a Composio OAuth flow for a provider',
+          responses: {
+            '200': {
+              description: '{auth_url, connection_id, provider, expires_at}',
+            },
+            '400': { description: 'Missing or misconfigured provider' },
+            '502': { description: 'Composio upstream failure' },
+          },
+        },
+      },
+      '/api/connections/finish': {
+        post: {
+          summary: 'Poll Composio and finalize a pending connection',
+          responses: {
+            '200': { description: '{connection: serialized}' },
+            '404': { description: 'No such connection for caller' },
+          },
+        },
+      },
+      '/api/connections/{provider}': {
+        delete: {
+          summary: 'Revoke a Composio connection for a provider',
+          parameters: [
+            {
+              name: 'provider',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': { description: '{ok: true, connection: serialized}' },
+            '404': { description: 'No such connection' },
+          },
         },
       },
       '/api/{slug}/run': {

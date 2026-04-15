@@ -12,3 +12,4 @@ export const newSecretId = makeId('sec');
 export const newThreadId = makeId('thr');
 export const newTurnId = makeId('trn');
 export const newJobId = makeId('job');
+export const newConnectionId = makeId('con');
