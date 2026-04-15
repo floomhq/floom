@@ -24,7 +24,7 @@ const TERMINAL_SCRIPT: { text: string; cls?: string; delay?: number }[] = [
   { text: '[floom] generating MCP server     ✓  47 tools', cls: 'term-ok', delay: 1040 },
   { text: '[floom] generating HTTP proxy     ✓  /api/stripe/*', cls: 'term-ok', delay: 1180 },
   { text: '[floom] generating CLI commands   ✓  floom stripe …', cls: 'term-ok', delay: 1320 },
-  { text: '[floom] generating chat UI        ✓  /p/stripe', cls: 'term-ok', delay: 1460 },
+  { text: '[floom] generating web renderer   ✓  /p/stripe', cls: 'term-ok', delay: 1460 },
   { text: '', delay: 1520 },
   { text: '[floom] ready  →  http://localhost:3051', cls: 'term-ready', delay: 1620 },
 ];

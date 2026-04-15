@@ -1,4 +1,4 @@
-// Tiny fetch wrapper around the Floom Chat backend API.
+// Tiny fetch wrapper around the Floom backend API.
 import type {
   HubApp,
   AppDetail,

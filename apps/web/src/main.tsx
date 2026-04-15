@@ -23,8 +23,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         {/* Protocol spec page */}
         <Route path="/protocol" element={<ProtocolPage />} />
         {/* Legacy redirects */}
-        <Route path="/chat" element={<Navigate to="/" replace />} />
-        <Route path="/c/:threadId" element={<Navigate to="/" replace />} />
         <Route path="/browse" element={<Navigate to="/apps" replace />} />
         <Route path="/about" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />

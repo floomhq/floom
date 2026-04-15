@@ -19,9 +19,6 @@ export function NotFoundPage() {
           <Link to="/apps" className="pill" style={{ textDecoration: 'none' }}>
             Browse apps
           </Link>
-          <Link to="/chat" className="pill" style={{ textDecoration: 'none' }}>
-            Open chat
-          </Link>
         </div>
       </main>
     </div>

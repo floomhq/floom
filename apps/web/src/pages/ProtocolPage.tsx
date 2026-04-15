@@ -323,7 +323,7 @@ function FlowDiagram() {
             { label: 'MCP server', mono: true },
             { label: 'CLI', mono: true },
             { label: 'HTTP API', mono: true },
-            { label: 'Chat UI', mono: false },
+            { label: 'Web', mono: false },
           ].map(({ label, mono }) => (
             <div key={label} style={{
               background: 'var(--bg)',
