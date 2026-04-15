@@ -76,6 +76,8 @@ export interface AuthConfig {
   oauth2_scopes?: string;
 }
 
+export type AsyncMode = 'poll' | 'webhook' | 'stream';
+
 export interface AppRecord {
   id: string;
   slug: string;
@@ -96,8 +98,43 @@ export interface AppRecord {
   openapi_spec_url: string | null;
   openapi_spec_cached: string | null; // JSON-stringified OpenAPI spec
   visibility: 'public' | 'auth-required';
+  // Async job queue fields (v0.3.0). is_async comes back from SQLite as 0/1.
+  is_async: 0 | 1;
+  webhook_url: string | null;
+  timeout_ms: number | null;
+  retries: number;
+  async_mode: AsyncMode | null;
   created_at: string;
   updated_at: string;
+}
+
+// ---------- jobs (v0.3.0) ----------
+
+export type JobStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+
+export interface JobRecord {
+  id: string;
+  slug: string;
+  app_id: string;
+  action: string;
+  status: JobStatus;
+  input_json: string | null;
+  output_json: string | null;
+  error_json: string | null;
+  run_id: string | null;
+  webhook_url: string | null;
+  timeout_ms: number;
+  max_retries: number;
+  attempts: number;
+  per_call_secrets_json: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'timeout';

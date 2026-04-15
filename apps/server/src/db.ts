@@ -62,6 +62,29 @@ if (!appCols.includes('auth_config')) {
 if (!appCols.includes('visibility')) {
   db.exec(`ALTER TABLE apps ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`);
 }
+// Async job queue fields (v0.3.0) — nullable for backward compatibility.
+// When `is_async` is 1, calls go through the job queue (POST /api/:slug/jobs)
+// and MCP tools/call returns immediately with a job-started message.
+if (!appCols.includes('is_async')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN is_async INTEGER NOT NULL DEFAULT 0`);
+}
+// Creator-declared webhook URL. When a job finishes, Floom POSTs the result here.
+if (!appCols.includes('webhook_url')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN webhook_url TEXT`);
+}
+// Per-app max job runtime in ms. Default 30 minutes when NULL.
+if (!appCols.includes('timeout_ms')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN timeout_ms INTEGER`);
+}
+// Per-app retry count on job failure. Default 0 when NULL.
+if (!appCols.includes('retries')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN retries INTEGER NOT NULL DEFAULT 0`);
+}
+// Client contract for async apps: 'poll' (default), 'webhook', or 'stream'.
+// Stored for the manifest advertisement; runtime behavior is the same today.
+if (!appCols.includes('async_mode')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN async_mode TEXT`);
+}
 
 // ---------- runs (one per app invocation, optionally bound to a chat turn) ----------
 db.exec(`
@@ -82,6 +105,36 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_runs_thread ON runs(thread_id);
   CREATE INDEX IF NOT EXISTS idx_runs_app ON runs(app_id);
+`);
+
+// ---------- jobs (async job queue for long-running apps, v0.3.0) ----------
+// A job wraps a `dispatchRun` invocation with queue + timeout + retry + webhook
+// semantics. Jobs are claimed by the background worker and run to completion
+// in the same process. The client either polls `GET /api/:slug/jobs/:id` or
+// waits for a webhook POST to the creator-declared URL.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    input_json TEXT,
+    output_json TEXT,
+    error_json TEXT,
+    run_id TEXT,
+    webhook_url TEXT,
+    timeout_ms INTEGER NOT NULL DEFAULT 1800000,
+    max_retries INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    per_call_secrets_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_jobs_slug_status ON jobs(slug, status);
+  CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+  CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 `);
 
 // ---------- secrets (global or per-app) ----------
