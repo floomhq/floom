@@ -12,7 +12,7 @@
 //      In Cloud mode (post-W3.1) it reads the Better Auth session and
 //      returns the real workspace+user binding.
 //   3. rekeyDevice(...): atomic transaction that UPDATEs app_memory, runs,
-//      and chat_threads to swap `device_id → user_id`. Idempotent — safe to
+//      and run_threads to swap `device_id → user_id`. Idempotent — safe to
 //      call multiple times. Per P.4 section 8, this is the Linear 2022
 //      opportunistic-rekey pattern that runs on the first authenticated
 //      request after login.
@@ -248,7 +248,7 @@ export function buildContext(
 
 /**
  * Atomically re-key a device_id to a user_id across app_memory, runs,
- * chat_threads, and connections. Returns the row counts. Runs inside a
+ * run_threads, and connections. Returns the row counts. Runs inside a
  * single SQLite transaction so partial re-keys are impossible. Idempotent —
  * if the rows are already bound to the user, the WHERE clause filters them
  * out.
@@ -276,7 +276,7 @@ export function rekeyDevice(
   const result: RekeyResult = {
     app_memory: 0,
     runs: 0,
-    chat_threads: 0,
+    run_threads: 0,
     connections: 0,
   };
 
@@ -309,10 +309,10 @@ export function rekeyDevice(
       .run(user_id, workspace_id, device_id, DEFAULT_USER_ID);
     result.runs = runRes.changes;
 
-    // chat_threads: same as runs.
+    // run_threads: same as runs.
     const threadRes = db
       .prepare(
-        `UPDATE chat_threads
+        `UPDATE run_threads
            SET user_id = ?,
                workspace_id = ?,
                updated_at = datetime('now')
@@ -320,13 +320,13 @@ export function rekeyDevice(
            AND (user_id IS NULL OR user_id = ?)`,
       )
       .run(user_id, workspace_id, device_id, DEFAULT_USER_ID);
-    result.chat_threads = threadRes.changes;
+    result.run_threads = threadRes.changes;
 
     // connections (W2.3): flip device-owned rows to user-owned, and migrate
     // them to the target workspace. The match is by device_id alone, NOT
-    // by workspace_id — pre-login the user's connection lives in the
+    // by workspace_id: pre-login the user's connection lives in the
     // synthetic 'local' workspace, but post-login it must move into the
-    // user's real workspace, the same as app_memory/runs/chat_threads.
+    // user's real workspace, the same as app_memory/runs/run_threads.
     //
     // We still respect the unique key (workspace_id, owner_kind, owner_id,
     // provider): if a `user`-owned row for the same provider already exists

@@ -1,6 +1,6 @@
 {
   "name": "@floom/server",
-  "version": "0.4.0-minimal.6",
+  "version": "0.4.0-cleanup",
   "private": true,
   "type": "module",
   "scripts": {
