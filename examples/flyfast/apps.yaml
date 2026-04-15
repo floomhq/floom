@@ -1,0 +1,34 @@
+# FlyFast — reference Floom app with a custom renderer.
+#
+# Demonstrates the W2.2 custom renderer pattern: a creator ships a
+# `renderer.tsx` alongside their OpenAPI spec and Floom compiles it at ingest
+# time. The compiled bundle is served at /renderer/flyfast/bundle.js and the
+# web client lazy-loads it. If the component crashes, Floom falls back to the
+# `output_shape` default (table).
+#
+# To try this locally:
+#   FLOOM_APPS_CONFIG=./examples/flyfast/apps.yaml pnpm --filter @floom/server dev
+#   curl http://localhost:3051/renderer/flyfast/meta
+#   curl http://localhost:3051/renderer/flyfast/bundle.js
+
+apps:
+  - slug: flyfast
+    type: proxied
+    # Inline OpenAPI spec describing one action + the flight response schema
+    # that the renderer.tsx consumes. Floom's default output discriminator
+    # would map this to an array-of-objects table; the custom renderer
+    # overrides it with a richer flight-card view.
+    openapi_spec_url: ./openapi.yaml
+    display_name: FlyFast
+    description: Natural-language flight search, 100 combinations from one prompt.
+    category: travel
+    auth: bearer
+    secrets:
+      - FLYFAST_INTERNAL_TOKEN
+    renderer:
+      kind: component
+      entry: ./renderer.tsx
+      # Crash fallback. If renderer.tsx throws at render time, Floom swaps
+      # in the default `table` renderer (sort/filter/CSV export/Copy JSON)
+      # so the user always sees the raw results.
+      output_shape: table

@@ -1,0 +1,64 @@
+openapi: 3.0.3
+info:
+  title: FlyFast
+  version: 0.1.0
+  description: Natural-language flight search. Describe your trip in plain English and get scored flight options back.
+servers:
+  - url: https://api.flyfast.internal
+paths:
+  /search:
+    post:
+      operationId: search
+      summary: Search flights
+      description: Natural-language flight search. Returns up to 100 scored combinations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                  description: Natural-language prompt, e.g. "Cheap flight from Berlin to Lisbon first week of May"
+      responses:
+        '200':
+          description: Flight results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [origin, destination, carrier, price_eur, duration_minutes, stops, departure, arrival]
+                      properties:
+                        origin:
+                          type: string
+                        destination:
+                          type: string
+                        carrier:
+                          type: string
+                        carrier_logo:
+                          type: string
+                          format: uri
+                        price_eur:
+                          type: number
+                        duration_minutes:
+                          type: integer
+                        stops:
+                          type: integer
+                        departure:
+                          type: string
+                          format: date-time
+                        arrival:
+                          type: string
+                          format: date-time
+                        booking_url:
+                          type: string
+                          format: uri

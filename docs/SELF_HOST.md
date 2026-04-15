@@ -497,9 +497,89 @@ If you lose `FLOOM_MASTER_KEY` (or the `.floom-master-key` file), every
 `user_secrets` row is unrecoverable. Back it up. Rotate by rewrapping each
 workspace DEK with the new key (operational runbook forthcoming).
 
+## Custom renderers (v0.3.1)
+
+Every Floom app ships with a default renderer for its response — a table for array-of-objects, markdown for `type: string, format: markdown`, a syntax-highlighted code block when the schema has `x-floom-language`, a PDF viewer for `application/pdf`, and so on. The full shape discriminator is in `packages/renderer/src/contract/index.ts`.
+
+When the default isn't enough (e.g. FlyFast wants flight cards, Claude Wrapped wants a chart, OpenSlides wants a PPTX download button), creators ship a `renderer.tsx` alongside their OpenAPI spec and declare it in `apps.yaml`:
+
+```yaml
+apps:
+  - slug: flyfast
+    type: proxied
+    openapi_spec_url: ./openapi.yaml
+    display_name: FlyFast
+    renderer:
+      kind: component         # or "default" (skip compilation)
+      entry: ./renderer.tsx   # path relative to this manifest
+      output_shape: table     # crash fallback — default used when renderer.tsx throws
+```
+
+At ingest time Floom compiles the renderer via `esbuild` (ESM / browser target, React + @floom/renderer marked as externals) and writes the bundle to `DATA_DIR/renderers/<slug>.js`. The size cap is 256 KB per bundle — trim or split if you hit it.
+
+### What the renderer receives
+
+Creators import only the `RenderProps` type from `@floom/renderer/contract`. The shape follows the Vercel AI SDK `parts` state machine:
+
+```tsx
+import React from 'react';
+import type { RenderProps } from '@floom/renderer/contract';
+
+interface Flight { /* matches your openapi response schema */ }
+
+export default function FlyFastRenderer({ state, data, error }: RenderProps) {
+  if (state === 'input-available') return <div>Searching flights…</div>;
+  if (state === 'output-error')    return <div>Error: {error?.message}</div>;
+
+  const flights = (data as { results: Flight[] })?.results ?? [];
+  return (
+    <div>
+      {flights.sort((a, b) => a.price_eur - b.price_eur).map((f, i) => (
+        <FlightCard key={i} flight={f} />
+      ))}
+    </div>
+  );
+}
+```
+
+Three invocation states are mutually exclusive: `input-available`, `output-available`, `output-error`. Every render receives these four props: `state`, `data` (parsed response body), `schema` (optional JSON Schema), `error`. A `loading` boolean is also provided for renderers that care about stream mode.
+
+### Serving + loading the bundle
+
+The server exposes two routes per slug:
+
+```bash
+# Metadata about the compiled bundle
+curl http://localhost:3051/renderer/flyfast/meta
+# → { slug, output_shape, bytes, source_hash, compiled_at }
+
+# The ESM bundle itself (served with x-floom-renderer-hash + x-floom-renderer-shape headers)
+curl http://localhost:3051/renderer/flyfast/bundle.js
+```
+
+The web client lazy-loads the bundle with `React.lazy(() => import('/renderer/flyfast/bundle.js'))` when a run completes, wraps it in an `ErrorBoundary`, and falls back to the default shape renderer (`output_shape: table` in the example above) if the component crashes at runtime.
+
+### Error boundary + fallbacks
+
+Creators never have to worry about breaking a hub. If `renderer.tsx`:
+
+- fails to compile at ingest → Floom logs and keeps going (the app falls back to the default renderer for its schema)
+- exceeds 256 KB after minification → ingest throws per-app, other apps continue
+- crashes at render time in the user's browser → `RendererShell`'s error boundary catches it and swaps in the default for `output_shape`
+- returns an `output-error` state → Floom always uses its default `ErrorOutput` card (the custom renderer never gets a chance to re-style errors, which keeps the UX consistent across apps)
+
+### Reference implementation
+
+Check `examples/flyfast/` for a complete working example: `apps.yaml` + `openapi.yaml` + `renderer.tsx`. Point Floom at it with:
+
+```bash
+FLOOM_APPS_CONFIG=./examples/flyfast/apps.yaml pnpm --filter @floom/server dev
+curl http://localhost:3051/renderer/flyfast/meta
+```
+
 ## Version info
 
-- **v0.3.1** (April 2026): Multi-tenant schema foundation. 5 new tables (`workspaces`, `users`, `workspace_members`, `app_memory`, `user_secrets`) + `workspace_id`/`user_id`/`device_id` columns on `apps`/`runs`/`chat_threads`. Per-user app memory gated by manifest `memory_keys`. AES-256-GCM envelope-encrypted secrets vault. Session cookie (`floom_device`) with atomic rekey transaction for the upcoming W3.1 auth migration. New endpoints: `/api/memory/:app_slug`, `/api/secrets`. Single-codepath multi-tenant (OSS solo mode = synthetic `workspace_id='local'`).
+- **v0.3.1** (April 2026): **Multi-tenant schema foundation** — 5 new tables (`workspaces`, `users`, `workspace_members`, `app_memory`, `user_secrets`) + `workspace_id`/`user_id`/`device_id` columns on `apps`/`runs`/`chat_threads`. Per-user app memory gated by manifest `memory_keys`. AES-256-GCM envelope-encrypted secrets vault. Session cookie (`floom_device`) with atomic rekey transaction for the upcoming W3.1 auth migration. New endpoints: `/api/memory/:app_slug`, `/api/secrets`. Single-codepath multi-tenant (OSS solo mode = synthetic `workspace_id='local'`). **Custom renderers** — creators can ship a `renderer.tsx` alongside their OpenAPI spec; Floom compiles it via esbuild and serves at `/renderer/:slug/bundle.js` with an ErrorBoundary fallback to the default shape renderer. Ships 10 default output components (text/markdown/code/table/object/image/pdf/audio/stream/error) + 13 default input components.
 - **v0.3.0** (April 2026): Async job queue primitive. `async: true` in `apps.yaml` wraps long-running apps (OpenPaper, research agents) in POST /jobs → GET /jobs/:id → webhook pattern. Background worker polls, claims, dispatches, enforces `timeout_ms`, retries N times, delivers webhooks with 5xx backoff. MCP `tools/call` on async apps returns immediately with a job-started payload.
 - **v0.2.0** (April 2026): OpenAPI ingest rewrite. $ref resolution, allOf/oneOf/anyOf flattening, spec.servers[] auto-detection, header/cookie/multipart support, OAuth2 client credentials, basic auth, FLOOM_AUTH_TOKEN gate, per-user MCP secrets via _auth extension, FLOOM_SEED_APPS opt-in for hosted apps, fixed base_url path-stripping, fixed SPA wildcard swallowing /openapi.json.
 - **v0.1.0** (April 2026): Initial self-host release. Proxied + hosted modes, MCP Streamable HTTP, SPA chat UI.
