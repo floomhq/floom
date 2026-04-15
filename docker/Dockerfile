@@ -28,6 +28,9 @@ RUN pnpm install --frozen-lockfile
 # Copy all source
 COPY apps ./apps
 COPY packages ./packages
+# Copy the fast-apps sidecar bundle into the build context so the runtime
+# stage can grab it from the builder image. Pure .mjs source, no build step.
+COPY examples/fast-apps ./examples/fast-apps
 
 # Build server (TypeScript → dist/)
 RUN cd apps/server && pnpm run build
@@ -79,6 +82,13 @@ COPY --from=builder /app/apps/web/dist ./apps/web/dist
 # Copy @floom/renderer source — esbuild needs it at runtime for the renderer
 # bundler service (creator custom renderers are bundled on ingest).
 COPY --from=builder /app/packages/renderer/src ./packages/renderer/src
+
+# Copy the fast-apps sidecar bundle. Pure Node.js, no deps, forked as a
+# child process at server boot to register seven deterministic utility apps
+# (uuid, password, hash, base64, json-format, jwt-decode, word-count).
+# Set FLOOM_FAST_APPS=false to skip this on environments that prefer an
+# empty hub.
+COPY --from=builder /app/examples/fast-apps ./examples/fast-apps
 
 WORKDIR /app/apps/server
 

@@ -224,6 +224,91 @@ export function IconSprite() {
         />
       </symbol>
 
+      {/* Fast-apps wave: seven deterministic utility apps.
+          All glyphs follow the Lucide stroke style (1.5 width, round caps) so
+          they sit next to the other app icons without visual drift. */}
+      <symbol id="app-uuid" viewBox="0 0 24 24">
+        {/* Lucide `fingerprint` outline: four concentric arcs evoking a
+            hashable, random identifier. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M6 11a6 6 0 0 1 9.5-4.85M8 13c0-2.2 1.8-4 4-4s4 1.8 4 4v1.5M12 13v4M7 17.5c.5-1 1-2 1-3.5M12 20c0-1.5 0-3 0-4M17 19c-.5-.5-1-1.5-1-3"
+        />
+      </symbol>
+      <symbol id="app-password" viewBox="0 0 24 24">
+        {/* Lucide `key-round` outline: a closed key shape. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M21 2l-9.5 9.5M15.5 7.5l3 3M4 22a5 5 0 1 1 5-5 5 5 0 0 1-5 5zM4 17h.01"
+        />
+      </symbol>
+      <symbol id="app-hash" viewBox="0 0 24 24">
+        {/* Lucide `hash` outline. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"
+        />
+      </symbol>
+      <symbol id="app-base64" viewBox="0 0 24 24">
+        {/* Binary columns — eight small rectangles in two rows evoke a
+            base64-encoded buffer. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 6h4v5H4zM10 6h4v5h-4zM16 6h4v5h-4zM4 13h4v5H4zM10 13h4v5h-4zM16 13h4v5h-4z"
+        />
+      </symbol>
+      <symbol id="app-json-format" viewBox="0 0 24 24">
+        {/* Lucide `braces`: two curly brackets with a dot between. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"
+        />
+      </symbol>
+      <symbol id="app-jwt-decode" viewBox="0 0 24 24">
+        {/* Lucide `scan-line` — scanning bracket over a line — evokes
+            reading/inspecting a token without verifying it. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"
+        />
+      </symbol>
+      <symbol id="app-word-count" viewBox="0 0 24 24">
+        {/* Lucide `text-quote` / align-left with a counter tick — words and
+            lines stacked. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M17 6.1H3M21 12.1H3M15.1 18H3"
+        />
+      </symbol>
+
       {/* Default fallback app icon */}
       <symbol id="app-default" viewBox="0 0 24 24">
         <rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -257,6 +342,14 @@ export function iconForSlug(slug: string): string {
     'hook-stats': 'app-hookstats',
     bouncer: 'app-bouncer',
     openkeyword: 'app-openkeyword',
+    // Fast-apps wave
+    uuid: 'app-uuid',
+    password: 'app-password',
+    hash: 'app-hash',
+    base64: 'app-base64',
+    'json-format': 'app-json-format',
+    'jwt-decode': 'app-jwt-decode',
+    'word-count': 'app-word-count',
   };
   return map[slug] || 'app-default';
 }

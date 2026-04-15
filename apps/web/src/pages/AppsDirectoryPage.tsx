@@ -20,8 +20,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   'seo': 'SEO',
 };
 
-// Slugs that get featured cards at the top
-const FEATURED_SLUGS = ['flyfast', 'opendraft', 'openslides'];
+// Legacy hardcoded featured list. Kept as a fallback for older backends
+// that have not rolled out the server-side `featured` flag yet. When the
+// backend returns any app with `featured: true` we use the server list
+// instead (see `featuredApps` below).
+const FALLBACK_FEATURED_SLUGS = ['flyfast', 'opendraft', 'openslides'];
 
 export function AppsDirectoryPage() {
   const [apps, setApps] = useState<HubApp[]>([]);
@@ -69,19 +72,36 @@ export function AppsDirectoryPage() {
     return list;
   }, [apps, activeCategory, search]);
 
-  // Split into featured + rest when not filtering
+  // Split into featured + rest when not filtering. Prefer the server-side
+  // `featured` flag when at least one app has it set; otherwise fall back
+  // to the hardcoded legacy list so older backends keep working.
   const isFiltering = activeCategory !== 'all' || search.trim().length > 0;
+  const serverHasFeaturedFlag = useMemo(
+    () => apps.some((a) => a.featured === true),
+    [apps],
+  );
   const featuredApps = useMemo(() => {
     if (isFiltering) return [];
-    return FEATURED_SLUGS
+    if (serverHasFeaturedFlag) {
+      // Server-sorted: hub route already returns featured apps first by
+      // `featured DESC, avg_run_ms ASC, ...`, so we just filter and keep
+      // the backend order.
+      return apps.filter((a) => a.featured === true);
+    }
+    return FALLBACK_FEATURED_SLUGS
       .map((slug) => apps.find((a) => a.slug === slug))
       .filter(Boolean) as HubApp[];
-  }, [apps, isFiltering]);
+  }, [apps, isFiltering, serverHasFeaturedFlag]);
+
+  const featuredSlugSet = useMemo(
+    () => new Set(featuredApps.map((a) => a.slug)),
+    [featuredApps],
+  );
 
   const gridApps = useMemo(() => {
     if (isFiltering) return filtered;
-    return filtered.filter((a) => !FEATURED_SLUGS.includes(a.slug));
-  }, [filtered, isFiltering]);
+    return filtered.filter((a) => !featuredSlugSet.has(a.slug));
+  }, [filtered, isFiltering, featuredSlugSet]);
 
   return (
     <div className="page-root" data-testid="apps-directory">

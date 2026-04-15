@@ -94,6 +94,18 @@ if (!appCols.includes('retries')) {
 if (!appCols.includes('async_mode')) {
   db.exec(`ALTER TABLE apps ADD COLUMN async_mode TEXT`);
 }
+// Store-sort fields (fast-apps wave):
+//   featured: 1 for apps pinned to the top of /api/hub. Defaults to 0.
+//   avg_run_ms: observed mean run duration in milliseconds, refreshed
+//   by services/runner.ts after every successful run. NULL until we have
+//   at least one sample.
+if (!appCols.includes('featured')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN featured INTEGER NOT NULL DEFAULT 0`);
+}
+if (!appCols.includes('avg_run_ms')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN avg_run_ms INTEGER`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_featured_avg ON apps(featured, avg_run_ms)`);
 
 // ---------- runs (one per app invocation, optionally bound to a chat turn) ----------
 db.exec(`
@@ -592,8 +604,9 @@ db.exec(`
 // revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4;
 // W2.3 lands v5; W3.3 + W3.1 land v6 (rolled into the same alpha series).
 // W4-minimal lands v7 with app_reviews + feedback tables.
+// Fast-apps wave lands v8 with apps.featured + apps.avg_run_ms columns.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 7) {
-  db.pragma('user_version = 7');
+if (currentUserVersion < 8) {
+  db.pragma('user_version = 8');
 }

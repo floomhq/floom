@@ -71,6 +71,52 @@ export function updateRun(runId: string, patch: UpdateRunArgs): void {
   if (cols.length === 0) return;
   values.push(runId);
   db.prepare(`UPDATE runs SET ${cols.join(', ')} WHERE id = ?`).run(...values);
+
+  // Refresh apps.avg_run_ms whenever a run finishes successfully. Runs at
+  // most once per run completion and only when we have a concrete duration.
+  // This drives the data-driven sort in GET /api/hub (featured DESC,
+  // avg_run_ms ASC, ...) so the store reorders itself as real usage
+  // comes in.
+  if (patch.finished && patch.status === 'success' && typeof patch.duration_ms === 'number') {
+    refreshAppAvgRunMs(runId);
+  }
+}
+
+/**
+ * Recompute the rolling average run time for the app that owns the given
+ * run, looking at the last 20 successful runs. We keep the window small so
+ * one old slow cold-start doesn't dominate the average forever. If the app
+ * has no successful runs (shouldn't happen because this is called after a
+ * success) the column is left as-is.
+ */
+function refreshAppAvgRunMs(runId: string): void {
+  try {
+    const row = db
+      .prepare('SELECT app_id FROM runs WHERE id = ?')
+      .get(runId) as { app_id: string } | undefined;
+    if (!row) return;
+    const avgRow = db
+      .prepare(
+        `SELECT AVG(duration_ms) AS avg_ms FROM (
+           SELECT duration_ms FROM runs
+           WHERE app_id = ? AND status = 'success' AND duration_ms IS NOT NULL
+           ORDER BY started_at DESC
+           LIMIT 20
+         )`,
+      )
+      .get(row.app_id) as { avg_ms: number | null } | undefined;
+    const avg = avgRow?.avg_ms;
+    if (typeof avg === 'number' && Number.isFinite(avg)) {
+      db.prepare('UPDATE apps SET avg_run_ms = ? WHERE id = ?').run(
+        Math.round(avg),
+        row.app_id,
+      );
+    }
+  } catch (err) {
+    // Avg tracking is best-effort. A missing column (on an old DB),
+    // concurrency, or a bad join never blocks the run completion path.
+    console.warn(`[runner] failed to refresh avg_run_ms: ${(err as Error).message}`);
+  }
 }
 
 interface EntrypointResult {

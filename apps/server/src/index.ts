@@ -24,6 +24,7 @@ import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
+import { startFastApps } from './services/fast-apps-sidecar.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
 import { getAuth, isCloudMode } from './lib/better-auth.js';
@@ -111,9 +112,9 @@ app.get('/openapi.json', (c) =>
     openapi: '3.0.0',
     info: {
       title: 'Floom self-host API',
-      version: '0.4.0-minimal',
+      version: '0.4.0-minimal.2',
       description:
-        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI.',
+        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI. v0.4.0-minimal.2 adds seven deterministic fast utility apps (uuid, password, hash, base64, json-format, jwt-decode, word-count) bundled as a proxied Node sidecar, and the data-driven store sort (featured DESC, avg_run_ms ASC).',
     },
     paths: {
       '/api/health': {
@@ -563,6 +564,12 @@ async function boot(): Promise<void> {
         console.error('[openapi-ingest] failed:', err);
       });
   }
+
+  // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its
+  // seven deterministic utility apps. Opt-out via FLOOM_FAST_APPS=false.
+  startFastApps().catch((err) => {
+    console.error('[fast-apps] boot failed:', err);
+  });
 
   // Don't block boot on the network call.
   backfillAppEmbeddings().catch((err) => {

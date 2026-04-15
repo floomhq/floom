@@ -35,6 +35,13 @@ services:
       # docker.sock mount above).
       # FLOOM_SEED_APPS: "true"
       #
+      # Seven deterministic utility apps (uuid, password, hash, base64,
+      # json-format, jwt-decode, word-count) are bundled as a Node.js
+      # sidecar and forked at boot on localhost:$FAST_APPS_PORT (default
+      # 4200). Set FLOOM_FAST_APPS=false to disable.
+      # FLOOM_FAST_APPS: "false"
+      # FAST_APPS_PORT: "4200"
+      #
       # Raise the ingest cap for huge specs (Stripe = 587, GitHub = 1107).
       # Set to 0 for unlimited.
       # FLOOM_MAX_ACTIONS_PER_APP: "500"

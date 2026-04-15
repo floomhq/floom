@@ -1,0 +1,68 @@
+# Fast Apps — seven deterministic utility apps bundled with the Floom server.
+#
+# The sidecar server (examples/fast-apps/server.mjs) runs as a child process
+# next to the main Floom server on localhost:$FAST_APPS_PORT (default 4200).
+# This file is ingested at boot via ingestOpenApiApps. Each entry fetches
+# an OpenAPI 3.0 spec from the sidecar and registers the app as a proxied
+# row in the apps table with base_url = http://127.0.0.1:4200.
+#
+# Deterministic, sub-millisecond handlers. No external APIs, no secrets.
+# Every app ships with a Lucide-style SVG icon in
+# apps/web/src/components/IconSprite.tsx mapped by slug.
+
+apps:
+  - slug: uuid
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/uuid.json
+    display_name: UUID Generator
+    description: "Generate one or more UUID v4 or v7 strings. Pure random v4, or time-ordered v7 for sortable ids."
+    category: developer-tools
+    icon: uuid
+
+  - slug: password
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/password.json
+    display_name: Password Generator
+    description: "Cryptographically secure password generator. Rejection-sampled crypto.randomBytes, no modulo bias, configurable alphabet."
+    category: developer-tools
+    icon: password
+
+  - slug: hash
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/hash.json
+    display_name: Hash
+    description: "Compute md5, sha1, sha256, or sha512 digests of UTF-8 text. Returns the hex digest and byte length."
+    category: developer-tools
+    icon: hash
+
+  - slug: base64
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/base64.json
+    display_name: Base64
+    description: "Encode text to base64 or decode base64 back to text. Supports the URL-safe alphabet for tokens and JWTs."
+    category: developer-tools
+    icon: base64
+
+  - slug: json-format
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/json-format.json
+    display_name: JSON Formatter
+    description: "Parse and pretty-print JSON with configurable indent and optional sorted keys. Returns both formatted and minified forms."
+    category: developer-tools
+    icon: json-format
+
+  - slug: jwt-decode
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/jwt-decode.json
+    display_name: JWT Decoder
+    description: "Decode a JWT header and payload without verifying the signature. Shows algorithm, expiry, and claims for debugging."
+    category: developer-tools
+    icon: jwt-decode
+
+  - slug: word-count
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/word-count.json
+    display_name: Word Count
+    description: "Count words, characters, lines, sentences, and paragraphs. Estimates reading time at 220 words per minute."
+    category: writing
+    icon: word-count

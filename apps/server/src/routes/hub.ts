@@ -245,8 +245,18 @@ function safeParse(raw: string | null): unknown {
 
 hubRouter.get('/', (c) => {
   const category = c.req.query('category');
-  const sort = c.req.query('sort') || 'name';
-  let orderBy = 'name ASC';
+  const sort = c.req.query('sort') || 'default';
+  // Default store sort (fast-apps wave):
+  //   1. featured desc   — pinned apps always first
+  //   2. avg_run_ms asc  — fastest apps next (NULLs last so unmeasured
+  //      apps do not jump the queue on a default table)
+  //   3. created_at desc — newest third
+  //   4. name asc        — deterministic tiebreak
+  // `sort=name`, `sort=newest`, `sort=category` remain supported for
+  // creator views that want a predictable lexical order.
+  let orderBy =
+    'featured DESC, (avg_run_ms IS NULL) ASC, avg_run_ms ASC, created_at DESC, name ASC';
+  if (sort === 'name') orderBy = 'name ASC';
   if (sort === 'newest') orderBy = 'created_at DESC';
   if (sort === 'category') orderBy = 'category, name';
 
@@ -270,6 +280,11 @@ hubRouter.get('/', (c) => {
         actions: manifest ? Object.keys(manifest.actions) : [],
         runtime: manifest?.runtime ?? 'python',
         created_at: row.created_at,
+        // Fast-apps wave fields. `featured` is coerced to boolean for the
+        // JSON response so clients do not have to deal with 0/1. `avg_run_ms`
+        // stays nullable because an app that has never run has no average.
+        featured: row.featured === 1,
+        avg_run_ms: row.avg_run_ms,
         // Optional annotation for self-host blocked apps. Present only when
         // the manifest explicitly declares a blocked_reason. Surfaced on the
         // store card as a warning pill so users know the app is not

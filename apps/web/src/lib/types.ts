@@ -68,6 +68,17 @@ export interface HubApp {
   runtime: string;
   created_at: string;
   /**
+   * Pinned to the top of the store. Backend default order is
+   * `featured DESC, avg_run_ms ASC, created_at DESC, name ASC` so the
+   * frontend does not have to re-sort when this flag is set.
+   */
+  featured?: boolean;
+  /**
+   * Rolling average run time in milliseconds (last 20 successful runs).
+   * Null until at least one successful run has been recorded.
+   */
+  avg_run_ms?: number | null;
+  /**
    * Optional: if the app is blocked in this self-host environment
    * (e.g. `flyfast` pending internal flight-search infra), the reason is
    * surfaced here and rendered as a warning pill on the store card.

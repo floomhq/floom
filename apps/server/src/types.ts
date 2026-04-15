@@ -125,6 +125,12 @@ export interface AppRecord {
   // lists which keys this app is allowed to persist in `app_memory`.
   workspace_id: string;
   memory_keys: string | null; // JSON-stringified string[]
+  // Store-sort fields (fast-apps wave). featured is SQLite 0/1 used to pin
+  // apps to the top of /api/hub. avg_run_ms is the running mean of
+  // successful run durations in milliseconds, updated by services/runner.ts
+  // every time a run completes. NULL until we have at least one sample.
+  featured: 0 | 1;
+  avg_run_ms: number | null;
   created_at: string;
   updated_at: string;
 }
