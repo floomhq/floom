@@ -1,0 +1,11 @@
+# Hook Stats — proxied-mode (pure HTTP, no docker.sock required).
+# Start the upstream first: node examples/hook-stats/server.mjs
+# Then point Floom at this file via FLOOM_APPS_CONFIG.
+
+apps:
+  - slug: hook-stats
+    type: proxied
+    openapi_spec_url: http://localhost:4110/openapi.json
+    display_name: Hook Stats
+    description: "Analyze your Claude Code bash-commands.log. Top commands, git stats, per-day activity."
+    category: productivity
