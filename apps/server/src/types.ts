@@ -322,3 +322,44 @@ export interface ConnectionMetadata {
   scopes?: string[];
   [key: string]: unknown;
 }
+
+// =====================================================================
+// W3.3: Stripe Connect partner app
+// =====================================================================
+
+export type StripeAccountType = 'express' | 'standard';
+
+/**
+ * One row per (workspace, user) creator. Persists Stripe Express
+ * connected account state so the dashboard renders without an upstream
+ * poll. `requirements_json` is the verbatim Stripe `requirements` blob
+ * from `account.updated` for surfacing missing-document hints.
+ */
+export interface StripeAccountRecord {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  stripe_account_id: string;
+  account_type: StripeAccountType;
+  country: string | null;
+  charges_enabled: 0 | 1;
+  payouts_enabled: 0 | 1;
+  details_submitted: 0 | 1;
+  requirements_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Webhook idempotency ledger. Stripe retries deliver the same event id
+ * within minutes; the unique index on `event_id` rejects duplicates so
+ * each event executes exactly once.
+ */
+export interface StripeWebhookEventRecord {
+  id: string;
+  event_id: string;
+  event_type: string;
+  livemode: 0 | 1;
+  payload: string;
+  received_at: string;
+}

@@ -428,11 +428,73 @@ if (!userCols.includes('composio_user_id')) {
   db.exec(`ALTER TABLE users ADD COLUMN composio_user_id TEXT`);
 }
 
+// =====================================================================
+// ---------- W3.3: Stripe Connect partner app schema -------------------
+// =====================================================================
+// P.3 research (research/stripe-connect-validation.md) locked the design:
+// Express accounts default, direct charges only, application_fee_amount
+// = floor(amount * 0.05), Stripe Tax Basic per-merchant. Floom never
+// becomes the merchant of record. Each creator (workspace+user) onboards
+// to their own Stripe Express connected account; payments hit their
+// account directly and a 5% application fee is auto-transferred to the
+// Floom platform account.
+//
+// Two tables:
+//
+//   stripe_accounts:           one row per (workspace, user) creator.
+//                              Persists the Stripe account id + capability
+//                              flags so the creator dashboard can render
+//                              "ready / pending / rejected" without an
+//                              upstream poll on every page load. Updated
+//                              by the `account.updated` webhook.
+//
+//   stripe_webhook_events:     event-id dedupe ledger. The webhook handler
+//                              inserts (event_id) on first delivery and
+//                              skips on conflict. Stripe retries deliver
+//                              the same event id, so this gives us at-most-
+//                              once handling without distributed locking.
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS stripe_accounts (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    stripe_account_id TEXT NOT NULL UNIQUE,
+    account_type TEXT NOT NULL DEFAULT 'express'
+      CHECK (account_type IN ('express', 'standard')),
+    country TEXT,
+    charges_enabled INTEGER NOT NULL DEFAULT 0,
+    payouts_enabled INTEGER NOT NULL DEFAULT 0,
+    details_submitted INTEGER NOT NULL DEFAULT 0,
+    requirements_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (workspace_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_stripe_accounts_workspace
+    ON stripe_accounts(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_stripe_accounts_user
+    ON stripe_accounts(workspace_id, user_id);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE,
+    event_type TEXT NOT NULL,
+    livemode INTEGER NOT NULL DEFAULT 0,
+    payload TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_stripe_webhook_events_type
+    ON stripe_webhook_events(event_type);
+`);
+
 // Bump user_version so operators can see at a glance which schema
 // revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4;
-// W2.3 lands v5.
+// W2.3 lands v5; W3.3 lands v6.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 5) {
-  db.pragma('user_version = 5');
+if (currentUserVersion < 6) {
+  db.pragma('user_version = 6');
 }

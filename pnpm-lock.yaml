@@ -59,6 +59,9 @@ importers:
       nanoid:
         specifier: 5.0.9
         version: 5.0.9
+      stripe:
+        specifier: 17.7.0
+        version: 17.7.0
       yaml:
         specifier: 2.5.1
         version: 2.5.1
@@ -2177,6 +2180,10 @@ packages:
   strip-json-comments@2.0.1:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
+
+  stripe@17.7.0:
+    resolution: {integrity: sha512-aT2BU9KkizY9SATf14WhhYVv2uOapBWX0OFWF4xvcj1mPaNotlSc2CsxpS4DS46ZueSppmCF5BX1sNYBtwBvfw==}
+    engines: {node: '>=12.*'}
 
   style-to-js@1.1.21:
     resolution: {integrity: sha512-RjQetxJrrUJLQPHbLku6U/ocGtzyjbJMP9lCNK7Ag0CNh690nSH8woqWH9u16nMjYBAok+i7JO1NP2pOy8IsPQ==}
@@ -4461,6 +4468,11 @@ snapshots:
       character-entities-legacy: 3.0.0
 
   strip-json-comments@2.0.1: {}
+
+  stripe@17.7.0:
+    dependencies:
+      '@types/node': 22.9.0
+      qs: 6.15.1
 
   style-to-js@1.1.21:
     dependencies:

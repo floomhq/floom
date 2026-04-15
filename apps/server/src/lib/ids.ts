@@ -13,3 +13,6 @@ export const newThreadId = makeId('thr');
 export const newTurnId = makeId('trn');
 export const newJobId = makeId('job');
 export const newConnectionId = makeId('con');
+// W3.3: Stripe Connect partner app
+export const newStripeAccountRowId = makeId('sa');
+export const newStripeWebhookEventRowId = makeId('swe');
