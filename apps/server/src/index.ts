@@ -12,12 +12,14 @@ import { parseRouter } from './routes/parse.js';
 import { pickRouter } from './routes/pick.js';
 import { threadRouter } from './routes/thread.js';
 import { runRouter, slugRunRouter } from './routes/run.js';
+import { jobsRouter } from './routes/jobs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
+import { startJobWorker } from './services/worker.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -46,6 +48,8 @@ app.route('/mcp', mcpRouter);
 // Slug-based run endpoint: POST /api/:slug/run
 // Registered after /api/run to avoid prefix collision.
 app.route('/api/:slug/run', slugRunRouter);
+// Async job queue: POST/GET /api/:slug/jobs[/:job_id][/cancel]
+app.route('/api/:slug/jobs', jobsRouter);
 app.route('/api/deploy-waitlist', deployWaitlistRouter);
 
 // Tiny, hand-written OpenAPI 3 document describing Floom's own admin API.
@@ -235,6 +239,13 @@ async function boot(): Promise<void> {
   backfillAppEmbeddings().catch((err) => {
     console.error('[embeddings] backfill failed:', err);
   });
+
+  // Start the background job worker for async apps (v0.3.0).
+  // Opt-out via FLOOM_DISABLE_JOB_WORKER=true for tests that drive the
+  // worker manually via `processOneJob`.
+  if (process.env.FLOOM_DISABLE_JOB_WORKER !== 'true') {
+    startJobWorker();
+  }
 
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[server] listening on http://localhost:${info.port}`);
