@@ -9,11 +9,11 @@ type ConfigTab = 'claude' | 'cursor' | 'curl';
 
 const CLAUDE_CONFIG = `{
   "mcpServers": {
-    "floom": {
+    "floom-flyfast": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-fetch",
+        "mcp-remote",
         "https://preview.floom.dev/mcp/app/flyfast"
       ]
     }

@@ -461,21 +461,29 @@ function RunsTab() {
 }
 
 // ---------- Install tab ----------
-function InstallTab({ session }: { session: SessionMePayload | null }) {
+function InstallTab({ session: _session }: { session: SessionMePayload | null }) {
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://preview.floom.dev';
 
-  const mcpUrl = `${origin}/mcp`;
-  const userId = session?.user.is_local ? 'local' : session?.user.id || 'local';
+  // /mcp/search is the gallery-wide search endpoint that lets the agent
+  // discover any Floom app by natural language, then call it via its own
+  // /mcp/app/:slug endpoint.
+  const mcpUrl = `${origin}/mcp/search`;
 
+  // Claude Desktop's stable config format only accepts stdio servers with
+  // `command`/`args`. For remote HTTP MCP we wrap the URL with `mcp-remote`
+  // (the official Anthropic HTTP bridge). Use flyfast as a worked example so
+  // users can see how to add any app.
   const claudeConfig = JSON.stringify(
     {
       mcpServers: {
-        floom: {
-          url: `${origin}/mcp/app/flyfast`,
-          headers: {
-            'X-Floom-User': userId,
-          },
+        'floom-search': {
+          command: 'npx',
+          args: ['-y', 'mcp-remote', `${origin}/mcp/search`],
+        },
+        'floom-flyfast': {
+          command: 'npx',
+          args: ['-y', 'mcp-remote', `${origin}/mcp/app/flyfast`],
         },
       },
     },
