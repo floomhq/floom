@@ -31,7 +31,7 @@ docker run -d --name floom \
   -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
   -e RESEND_API_KEY=re_xxx \
-  ghcr.io/floomhq/floom:v0.3.0
+  ghcr.io/floomhq/floom-monorepo:v0.4.0-minimal.6
 
 # 3. Verify
 sleep 5
@@ -350,7 +350,7 @@ The 15 historic bundled apps (flyfast, bouncer, blast-radius, etc.) are hosted-m
 version: "3.9"
 services:
   floom:
-    image: ghcr.io/floomhq/floom:v0.3.0
+    image: ghcr.io/floomhq/floom-monorepo:v0.4.0-minimal.6
     ports:
       - "3051:3051"
     volumes:
