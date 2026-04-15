@@ -103,11 +103,72 @@ export interface RunStreamHandlers {
 
 /**
  * Open an SSE connection to /api/run/:id/stream. Returns a cleanup function.
+ *
+ * The SSE stream can drop mid-run (mobile network switches, proxy timeouts,
+ * ERR_NETWORK_CHANGED, etc.). When that happens we fall back to polling
+ * /api/run/:id every 1500ms so the UI still advances to `done`.
+ *
+ * A belt-and-suspenders polling watchdog also runs for the first ~4 seconds
+ * of every run: if no SSE event has been received by then, polling starts
+ * regardless. This catches the "SSE never connects" failure mode that shows
+ * up as a stuck "Starting container…" on clients that silently drop the
+ * connection before it opens.
  */
 export function streamRun(runId: string, handlers: RunStreamHandlers): () => void {
   const es = new EventSource(`/api/run/${runId}/stream`);
+  let closed = false;
+  let done = false;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  let sawEvent = false;
+
+  const markDone = (run: RunRecord) => {
+    if (done) return;
+    done = true;
+    handlers.onStatus?.(run);
+    close();
+  };
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    try {
+      es.close();
+    } catch {
+      // ignore
+    }
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+  };
+
+  const startPolling = () => {
+    if (pollTimer || done || closed) return;
+    const poll = async () => {
+      if (done || closed) return;
+      try {
+        const run = await getRun(runId);
+        // Forward status updates even for pending/running states so the UI
+        // can show progress hints when SSE is unavailable.
+        if (!done && ['success', 'error', 'timeout'].includes(run.status)) {
+          markDone(run);
+        }
+      } catch {
+        // Transient network error, try again on the next tick.
+      }
+    };
+    // Kick off an immediate poll so the UI doesn't have to wait 1.5s.
+    void poll();
+    pollTimer = setInterval(poll, 1500);
+  };
 
   es.addEventListener('log', (evt) => {
+    sawEvent = true;
     try {
       const data = JSON.parse((evt as MessageEvent).data);
       handlers.onLog?.(data);
@@ -117,11 +178,13 @@ export function streamRun(runId: string, handlers: RunStreamHandlers): () => voi
   });
 
   es.addEventListener('status', (evt) => {
+    sawEvent = true;
     try {
-      const data = JSON.parse((evt as MessageEvent).data);
-      handlers.onStatus?.(data);
+      const data = JSON.parse((evt as MessageEvent).data) as RunRecord;
       if (['success', 'error', 'timeout'].includes(data.status)) {
-        es.close();
+        markDone(data);
+      } else {
+        handlers.onStatus?.(data);
       }
     } catch {
       // ignore
@@ -129,11 +192,21 @@ export function streamRun(runId: string, handlers: RunStreamHandlers): () => voi
   });
 
   es.onerror = () => {
+    // Don't surface the error to the user yet. Start polling instead; if
+    // the run is already finished we'll pick it up on the first poll.
     handlers.onError?.(new Error('Stream disconnected'));
-    es.close();
+    startPolling();
   };
 
-  return () => es.close();
+  // Watchdog: if no SSE event fires within 4 seconds, assume the stream
+  // silently failed to connect and start polling anyway.
+  watchdog = setTimeout(() => {
+    if (!sawEvent && !done && !closed) {
+      startPolling();
+    }
+  }, 4000);
+
+  return close;
 }
 
 export function createThread(): Promise<{ id: string }> {
