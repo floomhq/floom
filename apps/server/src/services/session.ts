@@ -108,11 +108,17 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
   // Build a minimal Headers object Better Auth can introspect. The Hono
   // Context exposes the raw Request via `c.req.raw`, which already carries
   // Cookie / Authorization / origin / referer.
-  let session: { user: { id: string; email: string; name?: string }; session: { id: string } } | null = null;
+  type AuthSession = {
+    user: { id: string; email: string; name?: string | null };
+    session: { id: string };
+  };
+  let session: AuthSession | null = null;
   try {
-    const result = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (result) {
-      session = result as typeof session;
+    const result = (await auth.api.getSession({
+      headers: c.req.raw.headers,
+    })) as AuthSession | null;
+    if (result && result.user) {
+      session = result;
     }
   } catch {
     // Treat any auth lookup failure as anonymous; routes that require a

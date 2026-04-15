@@ -65,6 +65,28 @@ app.route('/api/memory', memoryRouter);
 app.route('/api/secrets', secretsRouter);
 // W2.3: Composio OAuth connections (for /build Connect-a-tool ramp)
 app.route('/api/connections', connectionsRouter);
+// W3.1: workspaces + members + invites + session
+app.route('/api/workspaces', workspacesRouter);
+app.route('/api/session', sessionRouter);
+
+// W3.1: when FLOOM_CLOUD_MODE=true, mount the Better Auth handler on /auth/*.
+// In OSS mode (the default), `getAuth()` returns null and this block is a
+// no-op. The handler owns its own basePath ("/auth") so we mount under "/" with
+// a wildcard. Better Auth handles every method itself.
+if (isCloudMode()) {
+  const auth = getAuth();
+  if (auth) {
+    // Hono `app.on(...)` accepts a method list + path. Better Auth's
+    // `handler` consumes the raw `Request` and returns a `Response`, which
+    // is exactly what `c.req.raw` and `c.body()` provide.
+    app.on(
+      ['GET', 'POST', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'],
+      '/auth/*',
+      (c) => auth.handler(c.req.raw),
+    );
+    console.log('[auth] FLOOM_CLOUD_MODE=true — Better Auth mounted at /auth/*');
+  }
+}
 
 // Tiny, hand-written OpenAPI 3 document describing Floom's own admin API.
 // Returned at /openapi.json so users hitting http://host/openapi.json get

@@ -72,8 +72,16 @@ const id2 = session.getOrCreateDeviceId(c2);
 log('getOrCreateDeviceId: existing cookie returned as-is', id2 === 'dev-existing-1234');
 
 // ---- 3. resolveUserContext shape in OSS mode ----
+// W3.1 made resolveUserContext async (so it can `await` Better Auth in cloud
+// mode). In OSS mode the inner branch is still synchronous, but the function
+// now returns a Promise — tests must await it.
 const c3 = makeCtx('dev-ctx-test');
-const ctx = session.resolveUserContext(c3);
+// Patch in c.req.raw so the Cloud branch's `c.req.raw.headers` access in
+// session.ts doesn't crash when isCloudMode() is false. In OSS mode the
+// branch short-circuits before this is read, but we provide a Headers stub
+// anyway for forward-safety.
+c3.req.raw = { headers: new Headers() };
+const ctx = await session.resolveUserContext(c3);
 log('resolveUserContext: workspace_id=local', ctx.workspace_id === DEFAULT_WORKSPACE_ID);
 log('resolveUserContext: user_id=local', ctx.user_id === DEFAULT_USER_ID);
 log('resolveUserContext: device_id echoed from cookie', ctx.device_id === 'dev-ctx-test');

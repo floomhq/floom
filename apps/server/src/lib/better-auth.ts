@@ -19,11 +19,22 @@
 //   - Passkeys (deferred)
 // W3.1 ships with: magic link, GitHub OAuth, Google OAuth, email+password,
 // API keys, organizations.
-import { betterAuth, type Auth } from 'better-auth';
-import { magicLink } from 'better-auth/plugins';
-import { organization } from 'better-auth/plugins';
+import { betterAuth } from 'better-auth';
+import { magicLink, organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import { db } from '../db.js';
+
+// Better Auth's `Auth` type is generic over its options. Inferring the exact
+// concrete type would couple every consumer to the full plugin tuple shape,
+// which TypeScript can't easily widen back to `Auth<BetterAuthOptions>`. We
+// expose a structural type with the bits Floom actually uses (handler +
+// api.getSession). Callers that need additional methods can cast.
+export interface FloomAuth {
+  handler: (req: Request) => Promise<Response>;
+  api: {
+    getSession: (args: { headers: Headers }) => Promise<unknown>;
+  };
+}
 
 /**
  * Returns true when Floom should boot Better Auth and bind every request
@@ -40,7 +51,7 @@ export function isCloudMode(): boolean {
  * Tests that flip FLOOM_CLOUD_MODE mid-run can call `_resetAuthForTests()`
  * to clear the cache.
  */
-let cachedAuth: Auth | null | undefined;
+let cachedAuth: FloomAuth | null | undefined;
 
 /**
  * Build the Better Auth instance from env. Returns null when cloud mode is
@@ -55,7 +66,7 @@ let cachedAuth: Auth | null | undefined;
  *   - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET
  *   - FLOOM_MAGIC_LINK_EMAIL_FROM (defaults to noreply@floom.dev)
  */
-export function getAuth(): Auth | null {
+export function getAuth(): FloomAuth | null {
   if (cachedAuth !== undefined) return cachedAuth;
   if (!isCloudMode()) {
     cachedAuth = null;
@@ -93,7 +104,7 @@ export function getAuth(): Auth | null {
   const magicLinkFrom =
     process.env.FLOOM_MAGIC_LINK_EMAIL_FROM || 'noreply@floom.dev';
 
-  cachedAuth = betterAuth({
+  const built = betterAuth({
     appName: 'Floom',
     secret,
     baseURL,
@@ -164,6 +175,10 @@ export function getAuth(): Auth | null {
       }),
     ],
   });
+  // Cast through `unknown` to widen the deeply-generic Better Auth return
+  // type to the structural FloomAuth interface above. The shape is verified
+  // by the integration test that round-trips a getSession call.
+  cachedAuth = built as unknown as FloomAuth;
   return cachedAuth;
 }
 
