@@ -36,6 +36,7 @@ import {
   WorkspaceNotFoundError,
 } from '../services/workspaces.js';
 import { isCloudMode } from '../lib/better-auth.js';
+import { requireAuthenticatedInCloud } from '../lib/auth.js';
 import type { WorkspaceRole } from '../types.js';
 
 export const workspacesRouter = new Hono();
@@ -124,6 +125,8 @@ function mapError(err: unknown): { status: 400 | 401 | 403 | 404 | 409 | 500; bo
  */
 workspacesRouter.post('/', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   let body: unknown;
   try {
     body = await c.req.json();
@@ -192,6 +195,8 @@ workspacesRouter.get('/:id', async (c) => {
  */
 workspacesRouter.patch('/:id', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const id = c.req.param('id') || '';
   let body: unknown;
   try {
@@ -225,6 +230,8 @@ workspacesRouter.patch('/:id', async (c) => {
  */
 workspacesRouter.delete('/:id', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const id = c.req.param('id') || '';
   try {
     ws.remove(ctx, id);
@@ -261,6 +268,8 @@ workspacesRouter.get('/:id/members', async (c) => {
  */
 workspacesRouter.patch('/:id/members/:user_id', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const id = c.req.param('id') || '';
   const target = c.req.param('user_id') || '';
   let body: unknown;
@@ -295,6 +304,8 @@ workspacesRouter.patch('/:id/members/:user_id', async (c) => {
  */
 workspacesRouter.delete('/:id/members/:user_id', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const id = c.req.param('id') || '';
   const target = c.req.param('user_id') || '';
   try {
@@ -318,6 +329,8 @@ workspacesRouter.delete('/:id/members/:user_id', async (c) => {
  */
 workspacesRouter.post('/:id/members/invite', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const id = c.req.param('id') || '';
   let body: unknown;
   try {

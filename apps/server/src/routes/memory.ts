@@ -19,6 +19,7 @@ import * as appMemory from '../services/app_memory.js';
 import * as userSecrets from '../services/user_secrets.js';
 import { MemoryKeyNotAllowedError } from '../services/app_memory.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
+import { requireAuthenticatedInCloud } from '../lib/auth.js';
 
 export const memoryRouter = new Hono();
 
@@ -50,6 +51,8 @@ memoryRouter.get('/:app_slug', async (c) => {
  */
 memoryRouter.post('/:app_slug', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const slug = c.req.param('app_slug') || '';
   let body: unknown;
   try {
@@ -94,6 +97,8 @@ memoryRouter.post('/:app_slug', async (c) => {
  */
 memoryRouter.delete('/:app_slug/:key', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const slug = c.req.param('app_slug') || '';
   const key = c.req.param('key') || '';
   try {
@@ -123,6 +128,8 @@ const SecretSetBody = z.object({
  */
 secretsRouter.get('/', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   try {
     const entries = userSecrets.listMasked(ctx);
     return c.json({ entries });
@@ -140,6 +147,8 @@ secretsRouter.get('/', async (c) => {
  */
 secretsRouter.post('/', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   let body: unknown;
   try {
     body = await c.req.json();
@@ -179,6 +188,8 @@ secretsRouter.post('/', async (c) => {
  */
 secretsRouter.delete('/:key', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const key = c.req.param('key') || '';
   try {
     const removed = userSecrets.del(ctx, key);
