@@ -12,92 +12,80 @@ import {
 import type { AppDetail } from '../lib/types';
 import { getApp } from '../api/client';
 
-// FlyFast stub so the demo renders immediately before the API responds
-const FLYFAST_STUB: AppDetail = {
-  slug: 'flyfast',
-  name: 'FlyFast',
-  description: 'Search flights like you would text a friend. Up to 100 combinations from one natural-language query.',
-  category: 'travel',
+// Inline demo stub. Hook Stats is a fast, no-signup productivity app that
+// matches the locked scope (internal tooling + weekend-vibe-coded apps).
+// FlyFast was blocked in W2.4c, so we run Hook Stats until the fast-apps
+// agent lands a faster option.
+const HOOK_STATS_STUB: AppDetail = {
+  slug: 'hook-stats',
+  name: 'Hook Stats',
+  description: 'Analyze your Claude Code bash command log. Top commands, git stats, per-day activity.',
+  category: 'productivity',
   author: 'buildingopen',
   icon: null,
-  actions: ['search'],
-  runtime: 'python',
+  actions: ['analyze'],
+  runtime: 'node',
   created_at: '',
   manifest: {
-    name: 'FlyFast',
-    description: 'Search flights like you would text a friend.',
+    name: 'Hook Stats',
+    description: 'Analyze your Claude Code bash command log.',
     actions: {
-      search: {
-        label: 'Search Flights',
-        description: 'Natural-language flight search.',
+      analyze: {
+        label: 'Analyze Log',
+        description: 'Paste a bash-commands.log and get stats back.',
         inputs: [
           {
-            name: 'prompt',
-            label: 'What flight do you need?',
+            name: 'log_content',
+            label: 'bash-commands.log content',
             type: 'textarea',
             required: true,
-            placeholder: 'Cheap flight from Berlin to Lisbon first week of May',
+            placeholder: '[2026-04-15T10:00:00Z] git status\n[2026-04-15T10:00:05Z] pnpm test',
           },
         ],
         outputs: [
-          { name: 'results', label: 'Flight Results', type: 'json' },
+          { name: 'report', label: 'Report', type: 'markdown' },
         ],
       },
     },
-    runtime: 'python',
-    python_dependencies: ['httpx>=0.27'],
+    runtime: 'node',
+    python_dependencies: [],
     node_dependencies: {},
-    secrets_needed: ['FLYFAST_INTERNAL_TOKEN'],
+    secrets_needed: [],
     manifest_version: '2.0',
   },
 };
+
+const SAMPLE_LOG = `[2026-04-15T10:00:00Z] git status
+[2026-04-15T10:00:05Z] git diff --stat
+[2026-04-15T10:01:00Z] pnpm build
+[2026-04-15T10:02:00Z] pnpm test
+[2026-04-15T10:05:00Z] git add -p
+[2026-04-15T10:06:00Z] git commit -m "fix"
+[2026-04-15T10:07:00Z] git push`;
 
 const DOCKER_CMD = `docker run -p 3051:3051 \\
   ghcr.io/floomhq/floom-monorepo:latest`;
 
 const FOUR_THINGS = [
-  { Icon: Server, label: 'MCP server', desc: 'Auto-generated from OpenAPI operations.' },
-  { Icon: Globe, label: 'HTTP API', desc: 'Pass-through proxy with secrets injection.' },
-  { Icon: Terminal, label: 'CLI', desc: '@floom/cli. Every operation is a command.' },
-  { Icon: LayoutTemplate, label: 'Web', desc: 'Hosted form + output renderer at /p/:slug.' },
+  { Icon: Server, label: 'MCP server', desc: 'Auto-generated from every OpenAPI operation. Drop into Claude, Cursor, Windsurf.' },
+  { Icon: Globe, label: 'HTTP API', desc: 'Pass-through proxy with auth, rate limits, secrets injection.' },
+  { Icon: Terminal, label: 'CLI', desc: '@floom/cli. Every action is a command. Pipe inputs, pipe outputs.' },
+  { Icon: LayoutTemplate, label: 'Web', desc: 'Hosted form and output renderer at /p/:slug. Share a link, no SDK.' },
 ];
 
 export function CreatorHeroPage() {
-  const [demoApp, setDemoApp] = useState<AppDetail>(FLYFAST_STUB);
+  const [demoApp, setDemoApp] = useState<AppDetail>(HOOK_STATS_STUB);
   const [dockerCopied, setDockerCopied] = useState(false);
-  const [waitlistEmail, setWaitlistEmail] = useState('');
-  const [waitlistState, setWaitlistState] = useState<'idle' | 'submitted' | 'error'>('idle');
-  const [waitlistError, setWaitlistError] = useState('');
 
   useEffect(() => {
-    document.title = 'Floom: infra for agentic work';
-    getApp('flyfast').then((a) => setDemoApp(a)).catch(() => {});
+    document.title = 'Floom · Production layer for vibe-coded AI apps';
+    getApp('hook-stats').then((a) => setDemoApp(a)).catch(() => {});
   }, []);
 
   const copyDocker = () => {
     try { navigator.clipboard.writeText(DOCKER_CMD).catch(() => {}); } catch { /* ignore */ }
     setDockerCopied(true);
     setTimeout(() => setDockerCopied(false), 2000);
-  };
-
-  const handleWaitlist = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const email = waitlistEmail.trim();
-    if (!email || !email.includes('@')) {
-      setWaitlistError('Please enter a valid email.');
-      return;
-    }
-    try {
-      const res = await fetch('/api/deploy-waitlist', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      if (!res.ok) throw new Error('server error');
-      setWaitlistState('submitted');
-    } catch {
-      setWaitlistError('Something went wrong. Try again.');
-    }
   };
 
   return (
@@ -112,54 +100,33 @@ export function CreatorHeroPage() {
           textAlign: 'center',
         }}
       >
-        <div style={{ maxWidth: 640, margin: '0 auto' }}>
-          <h1 className="headline" style={{ marginBottom: 16 }}>
-            Infra for<span className="headline-dim"> agentic work.</span>
+        <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          <h1
+            className="headline"
+            style={{ marginBottom: 20, textWrap: 'balance' as unknown as 'balance' }}
+          >
+            Vibe-coding speed.<br />Production-grade safety.
           </h1>
-          <p style={{ fontSize: 17, color: 'var(--muted)', margin: '0 auto 36px', maxWidth: 480, lineHeight: 1.6 }}>
-            OpenAPI in. Production product out.
+          <p style={{ fontSize: 18, color: 'var(--muted)', margin: '0 auto 36px', maxWidth: 540, lineHeight: 1.6 }}>
+            The production layer for AI apps that do real work.
           </p>
 
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
             <Link
               to="/apps"
               className="btn-primary"
-              style={{ padding: '11px 24px', fontSize: 15, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+              data-testid="hero-cta-try"
+              style={{ padding: '12px 26px', fontSize: 15, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
             >
-              Browse live apps
+              Try an app
             </Link>
-            <a
-              href="#self-host"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '11px 24px',
-                background: 'var(--card)',
-                border: '1px solid var(--line)',
-                color: 'var(--ink)',
-                borderRadius: 9,
-                fontSize: 15,
-                fontWeight: 500,
-                textDecoration: 'none',
-              }}
-            >
-              Self-host via Docker
-            </a>
             <Link
-              to="/protocol"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '11px 24px',
-                background: 'none',
-                color: 'var(--muted)',
-                borderRadius: 9,
-                fontSize: 15,
-                fontWeight: 500,
-                textDecoration: 'none',
-              }}
+              to="/build"
+              className="btn-primary"
+              data-testid="hero-cta-ship"
+              style={{ padding: '12px 26px', fontSize: 15, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
             >
-              Read the protocol
+              Ship an app
             </Link>
           </div>
         </div>
@@ -173,16 +140,17 @@ export function CreatorHeroPage() {
         <div style={{ maxWidth: 700, margin: '0 auto' }}>
           <p className="label-mono" style={{ marginBottom: 8, textAlign: 'center' }}>Try it live</p>
           <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)', textAlign: 'center' }}>
-            Run FlyFast. No signup.
+            Run Hook Stats. No signup.
           </h2>
-          <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 32, textAlign: 'center', maxWidth: 400, margin: '0 auto 32px' }}>
-            Type a flight request. Click Run. See real results.
+          <p style={{ fontSize: 14, color: 'var(--muted)', textAlign: 'center', maxWidth: 480, margin: '0 auto 32px', lineHeight: 1.6 }}>
+            Paste your Claude Code bash log, click Run, get a breakdown. The
+            same Floom layer (auth, logs, access) wraps every app on preview.
           </p>
           <FloomApp
             app={demoApp}
             standalone={true}
             showSidebar={false}
-            initialInputs={{ prompt: 'Cheap flight from Berlin to Lisbon first week of May' }}
+            initialInputs={{ log_content: SAMPLE_LOG }}
           />
         </div>
       </section>
@@ -197,7 +165,7 @@ export function CreatorHeroPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
               gap: 16,
             }}
           >
@@ -232,12 +200,14 @@ export function CreatorHeroPage() {
         style={{ borderBottom: '1px solid var(--line)', padding: '64px 24px' }}
       >
         <div style={{ maxWidth: 700, margin: '0 auto' }}>
-          <p className="label-mono" style={{ marginBottom: 8 }}>Open source</p>
+          <p className="label-mono" style={{ marginBottom: 8 }}>Open core</p>
           <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)' }}>
-            Run Floom on your own infra.
+            Self-host. One command. Your data.
           </h2>
-          <p style={{ fontSize: 15, color: 'var(--muted)', marginBottom: 28, maxWidth: 480 }}>
-            One command, one image, your data.
+          <p style={{ fontSize: 15, color: 'var(--muted)', marginBottom: 28, maxWidth: 520, lineHeight: 1.6 }}>
+            Docker and npx ship the whole engine: four surfaces, auth, access
+            control, activity, memory, schedules, webhooks, versions. Free
+            forever.
           </p>
 
           <div style={{ position: 'relative', marginBottom: 20 }}>
@@ -299,82 +269,17 @@ export function CreatorHeroPage() {
         </div>
       </section>
 
-      {/* Single honest waitlist */}
-      <section style={{ padding: '64px 24px 80px' }}>
-        <div
-          style={{
-            maxWidth: 520,
-            margin: '0 auto',
-            background: 'var(--card)',
-            border: '1px solid var(--line)',
-            borderRadius: 14,
-            padding: '32px',
-          }}
-        >
-          {waitlistState === 'submitted' ? (
-            <div data-testid="waitlist-success">
-              <p style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: 'var(--ink)' }}>
-                You're on the list.
-              </p>
-              <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>
-                We'll email you at <strong>{waitlistEmail}</strong> when creator accounts ship.
-              </p>
-            </div>
-          ) : (
-            <>
-              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                Coming v1.1
-              </p>
-              <p style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>
-                Cloud deploys.
-              </p>
-              <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--muted)', lineHeight: 1.6 }}>
-                Want creator accounts to deploy your own apps to floom.dev? Join the list.
-              </p>
-              <form
-                onSubmit={handleWaitlist}
-                data-testid="waitlist-form"
-                style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}
-              >
-                <input
-                  type="email"
-                  required
-                  className="input-field"
-                  placeholder="your@email.com"
-                  value={waitlistEmail}
-                  onChange={(e) => { setWaitlistEmail(e.target.value); setWaitlistError(''); }}
-                  style={{ flex: 1, minWidth: 200 }}
-                  data-testid="waitlist-email-input"
-                />
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  style={{ height: 40, padding: '0 22px', fontSize: 14 }}
-                  data-testid="waitlist-notify-btn"
-                >
-                  Join waitlist
-                </button>
-                {waitlistError && (
-                  <p style={{ width: '100%', margin: '4px 0 0', fontSize: 12, color: '#ef4444' }}>{waitlistError}</p>
-                )}
-              </form>
-            </>
-          )}
-        </div>
-      </section>
-
       {/* Footer */}
       <footer
         style={{
           maxWidth: 1200,
           margin: '0 auto',
-          padding: '24px 24px 40px',
+          padding: '32px 24px 48px',
           display: 'flex',
           flexWrap: 'wrap',
           gap: 16,
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderTop: '1px solid var(--line)',
         }}
       >
         <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
@@ -387,7 +292,7 @@ export function CreatorHeroPage() {
           >
             Federico De Ponte
           </a>{' '}
-          and contributors. MIT licensed.
+          and contributors.
         </p>
         <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
           <Link to="/apps" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>apps</Link>
