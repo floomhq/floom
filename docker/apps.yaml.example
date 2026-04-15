@@ -43,3 +43,20 @@ apps:
   #   display_name: Stripe
   #   description: "Payments, subscriptions, invoicing."
   #   category: commerce
+
+  # Long-running apps (v0.3.0+) — OpenPaper, research agents, slow ML pipelines.
+  # Declare `async: true` to wrap calls in the job queue: POST /api/:slug/jobs
+  # enqueues, GET /api/:slug/jobs/:id polls, and Floom POSTs webhook_url on
+  # completion. See docs/SELF_HOST.md "Long-running apps" for the full protocol.
+  # - slug: openpaper
+  #   type: proxied
+  #   openapi_spec_url: https://api.openpaper.dev/openapi.json
+  #   auth: bearer
+  #   secrets: [OPENPAPER_API_TOKEN]
+  #   display_name: OpenPaper
+  #   description: "Generate fully-cited academic papers (10-20 min)."
+  #   async: true
+  #   async_mode: poll                            # poll | webhook | stream
+  #   timeout_ms: 1800000                         # 30 minutes (default)
+  #   retries: 2                                  # re-queue on failure 2x
+  #   webhook_url: https://my-collector/hook      # POST on completion

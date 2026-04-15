@@ -54,6 +54,8 @@ Open `http://localhost:3051` in your browser or point an MCP client at `http://l
 | `FLOOM_SEED_APPS` | `false` | Set to `true` to seed the 15 bundled docker apps (flyfast, blast-radius, etc.). Requires `/var/run/docker.sock` mounted |
 | `FLOOM_AUTH_TOKEN` | — | When set, all `/api/*`, `/mcp/*`, `/p/*` requests require `Authorization: Bearer <token>`. `/api/health` stays open |
 | `FLOOM_MAX_ACTIONS_PER_APP` | `200` | Hard cap on how many operations one OpenAPI spec can expose. Set to `0` for unlimited (needed for Stripe, GitHub, etc.) |
+| `FLOOM_JOB_POLL_MS` | `1000` | Interval in ms at which the background worker polls the async job queue. Lower = faster pickup, more CPU |
+| `FLOOM_DISABLE_JOB_WORKER` | — | When set to `true`, the background worker does not start. Used by tests that drive the worker deterministically |
 | `OPENAI_API_KEY` | — | Optional. Enables embedding-based app search. Without it, search falls back to keyword matching |
 
 Any other env var matching a name in an app's `secrets` list (e.g. `RESEND_API_KEY`) is picked up as a server-side secret for that app.
@@ -189,6 +191,148 @@ Content-Type: application/json
 
 Returns `{ run_id, status }` immediately. Poll `GET /api/run/:run_id` for the result, or subscribe to `GET /api/run/:run_id/stream` for live logs via SSE.
 
+## Long-running apps (async job queue, v0.3.0+)
+
+Some apps (OpenPaper, research agents, slow ML pipelines) take 10-20 minutes to
+finish. Blocking an HTTP request that long is wrong: proxies kill the connection,
+MCP clients time out, and users get no feedback. Declare `async: true` in your
+`apps.yaml` entry and Floom wraps the call in a job queue with poll + webhook
+semantics.
+
+```yaml
+apps:
+  - slug: openpaper
+    type: proxied
+    openapi_spec_url: https://api.openpaper.dev/openapi.json
+    auth: bearer
+    secrets: [OPENPAPER_API_TOKEN]
+    async: true                                  # <-- enable the queue
+    async_mode: poll                             # poll | webhook | stream
+    timeout_ms: 1800000                          # 30 minutes (default)
+    retries: 2                                   # re-queue on failure up to 2x
+    webhook_url: https://my-collector/hook       # optional: POST on completion
+```
+
+### Protocol
+
+#### POST /api/:slug/jobs — enqueue
+
+```bash
+curl -sX POST http://localhost:3051/api/openpaper/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "action": "start_paper_generation",
+    "inputs": { "topic": "Graph neural networks for molecular design" },
+    "webhook_url": "https://my-collector/hook"
+  }'
+```
+
+Returns `202 Accepted` within a few ms:
+
+```json
+{
+  "job_id": "job_abc123",
+  "status": "queued",
+  "poll_url": "http://localhost:3051/api/openpaper/jobs/job_abc123",
+  "webhook_url_template": "http://localhost:3051/api/openpaper/jobs/job_abc123",
+  "cancel_url": "http://localhost:3051/api/openpaper/jobs/job_abc123/cancel"
+}
+```
+
+The `webhook_url`, `timeout_ms`, and `max_retries` fields in the request body
+are per-call overrides — they win over the `apps.yaml` defaults.
+
+#### GET /api/:slug/jobs/:job_id — poll
+
+```json
+{
+  "id": "job_abc123",
+  "slug": "openpaper",
+  "action": "start_paper_generation",
+  "status": "succeeded",
+  "input": { "topic": "..." },
+  "output": { "pdf_url": "https://...", "docx_url": "https://..." },
+  "error": null,
+  "attempts": 1,
+  "created_at": "2026-04-15 00:42:11",
+  "started_at": "2026-04-15 00:42:11",
+  "finished_at": "2026-04-15 00:58:47"
+}
+```
+
+Statuses: `queued` → `running` → `succeeded` | `failed` | `cancelled`.
+
+#### POST /api/:slug/jobs/:job_id/cancel — cancel
+
+Flips a queued or running job to `cancelled`. Terminal jobs stay terminal.
+
+### Webhook delivery
+
+When a job reaches a terminal state Floom POSTs to `webhook_url` with:
+
+```json
+{
+  "job_id": "job_abc123",
+  "slug": "openpaper",
+  "status": "succeeded",
+  "output": { ... },
+  "error": null,
+  "duration_ms": 996345,
+  "attempts": 1
+}
+```
+
+Headers: `content-type: application/json`, `x-floom-event: job.completed`,
+`user-agent: Floom-Webhook/0.3.0`.
+
+Delivery retries on 5xx and network errors with exponential backoff (500ms,
+1s, 2s by default). 4xx responses are permanent failures — fix your endpoint
+and requeue by re-enqueuing.
+
+### MCP clients
+
+For async apps, `tools/call` returns immediately with a job-started text
+payload instead of waiting 20 minutes:
+
+```json
+{
+  "content": [{
+    "type": "text",
+    "text": "{\"job_id\":\"job_abc123\",\"status\":\"queued\",\"poll_url\":\"...\",\"message\":\"Job started: job_abc123. Poll ... for status.\"}"
+  }]
+}
+```
+
+The MCP client picks up the `job_id` from the text and either polls the job
+endpoint or waits for the webhook. This lets Claude Desktop / Cursor kick off
+a 20-minute paper generation and come back to it later without holding the
+connection open.
+
+### Worked example
+
+`examples/slow-echo/` ships a tiny Node app that sleeps 5s and echoes its
+input. It's the canonical "did my async setup work" smoke test:
+
+```bash
+# Terminal 1
+node examples/slow-echo/server.mjs
+
+# Terminal 2
+FLOOM_APPS_CONFIG=examples/slow-echo/apps.yaml \
+  DATA_DIR=/tmp/floom-slow-echo \
+  node apps/server/dist/index.js
+
+# Terminal 3
+curl -sX POST http://localhost:3051/api/slow-echo/jobs \
+  -H 'content-type: application/json' \
+  -d '{"inputs": {"message": "hi"}}' | jq
+# { "job_id": "job_xxx", "status": "queued", ... }
+
+# A few seconds later
+curl -s http://localhost:3051/api/slow-echo/jobs/job_xxx | jq
+# { "status": "succeeded", "output": { "echoed": "hi", ... }, ... }
+```
+
 ## Proxied vs hosted mode
 
 | Mode | How it works | When to use |
@@ -260,5 +404,6 @@ Embeddings-based app search needs it. Safe to ignore — picker falls back to ke
 
 ## Version info
 
+- **v0.3.0** (April 2026): Async job queue primitive. `async: true` in `apps.yaml` wraps long-running apps (OpenPaper, research agents) in POST /jobs → GET /jobs/:id → webhook pattern. Background worker polls, claims, dispatches, enforces `timeout_ms`, retries N times, delivers webhooks with 5xx backoff. MCP `tools/call` on async apps returns immediately with a job-started payload.
 - **v0.2.0** (April 2026): OpenAPI ingest rewrite. $ref resolution, allOf/oneOf/anyOf flattening, spec.servers[] auto-detection, header/cookie/multipart support, OAuth2 client credentials, basic auth, FLOOM_AUTH_TOKEN gate, per-user MCP secrets via _auth extension, FLOOM_SEED_APPS opt-in for hosted apps, fixed base_url path-stripping, fixed SPA wildcard swallowing /openapi.json.
 - **v0.1.0** (April 2026): Initial self-host release. Proxied + hosted modes, MCP Streamable HTTP, SPA chat UI.
