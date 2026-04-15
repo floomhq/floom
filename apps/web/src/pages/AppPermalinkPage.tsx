@@ -29,6 +29,7 @@ export function AppPermalinkPage() {
   const [app, setApp] = useState<AppDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [comingSoonTarget, setComingSoonTarget] = useState<null | 'chatgpt' | 'notion'>(null);
 
   useEffect(() => {
     if (!slug) {
@@ -293,6 +294,24 @@ export function AppPermalinkPage() {
                 ctaHref="https://docs.anthropic.com/en/docs/claude-desktop"
               />
 
+              {/* Add to ChatGPT (coming soon) */}
+              <AddToProviderRow
+                label="ChatGPT"
+                title="Add to ChatGPT"
+                desc="One-click install into your ChatGPT custom GPT."
+                onClick={() => setComingSoonTarget('chatgpt')}
+                testId="add-to-chatgpt"
+              />
+
+              {/* Add to Notion (coming soon) */}
+              <AddToProviderRow
+                label="Notion"
+                title="Add to Notion"
+                desc="Embed this app as a Notion block with the Floom connector."
+                onClick={() => setComingSoonTarget('notion')}
+                testId="add-to-notion"
+              />
+
               {/* HTTP */}
               <div
                 style={{
@@ -428,6 +447,14 @@ export function AppPermalinkPage() {
       </main>
       <Footer />
       <FeedbackButton />
+
+      {comingSoonTarget && (
+        <ComingSoonModal
+          target={comingSoonTarget}
+          mcpUrl={mcpEndpoint}
+          onClose={() => setComingSoonTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -531,6 +558,245 @@ function CopyRow({ value }: { value: string }) {
       >
         {copied ? 'Copied' : 'Copy'}
       </button>
+    </div>
+  );
+}
+
+function AddToProviderRow({
+  label,
+  title,
+  desc,
+  onClick,
+  testId,
+}: {
+  label: string;
+  title: string;
+  desc: string;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      style={{
+        background: 'var(--card)',
+        border: '1px solid var(--line)',
+        borderRadius: 12,
+        padding: '20px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        width: '100%',
+        textAlign: 'left',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+          {label}
+        </span>
+        <p style={{ margin: '4px 0 4px', fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+          {title}
+        </p>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>{desc}</p>
+      </div>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 10px',
+          borderRadius: 999,
+          background: 'var(--accent-soft)',
+          color: 'var(--accent)',
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+      >
+        Coming soon
+      </span>
+    </button>
+  );
+}
+
+function ComingSoonModal({
+  target,
+  mcpUrl,
+  onClose,
+}: {
+  target: 'chatgpt' | 'notion';
+  mcpUrl: string;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const copy = () => {
+    try {
+      navigator.clipboard.writeText(mcpUrl).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const providerLabel = target === 'chatgpt' ? 'ChatGPT' : 'Notion';
+  const instructions =
+    target === 'chatgpt'
+      ? 'One-click install is coming soon. For now, copy the MCP URL and paste it into your ChatGPT custom GPT instructions under "Actions".'
+      : 'One-click install is coming soon. For now, copy the MCP URL and paste it into the Floom connector block in your Notion page.';
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="coming-soon-title"
+      data-testid={`coming-soon-modal-${target}`}
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(14, 14, 12, 0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--card)',
+          border: '1px solid var(--line)',
+          borderRadius: 14,
+          padding: '28px 28px 24px',
+          maxWidth: 460,
+          width: '100%',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        }}
+      >
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 10px',
+            borderRadius: 999,
+            background: 'var(--accent-soft)',
+            color: 'var(--accent)',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            marginBottom: 14,
+          }}
+        >
+          Coming soon
+        </div>
+        <h2
+          id="coming-soon-title"
+          style={{
+            fontSize: 20,
+            fontWeight: 700,
+            margin: '0 0 10px',
+            color: 'var(--ink)',
+          }}
+        >
+          Add to {providerLabel}
+        </h2>
+        <p
+          style={{
+            fontSize: 14,
+            color: 'var(--muted)',
+            margin: '0 0 20px',
+            lineHeight: 1.55,
+          }}
+        >
+          {instructions}
+        </p>
+        <div
+          style={{
+            background: 'var(--bg)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            padding: '10px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            marginBottom: 18,
+          }}
+        >
+          <code
+            style={{
+              flex: 1,
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: 12,
+              color: 'var(--ink)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {mcpUrl}
+          </code>
+          <button
+            type="button"
+            onClick={copy}
+            data-testid="coming-soon-copy-mcp"
+            style={{
+              padding: '6px 12px',
+              background: 'var(--accent)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              flexShrink: 0,
+            }}
+          >
+            {copied ? 'Copied' : 'Copy MCP URL'}
+          </button>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '8px 18px',
+              background: 'transparent',
+              color: 'var(--muted)',
+              border: '1px solid var(--line)',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
