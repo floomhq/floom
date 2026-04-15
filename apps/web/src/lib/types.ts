@@ -67,6 +67,13 @@ export interface HubApp {
   actions: string[];
   runtime: string;
   created_at: string;
+  /**
+   * Optional: if the app is blocked in this self-host environment
+   * (e.g. `flyfast` pending internal flight-search infra), the reason is
+   * surfaced here and rendered as a warning pill on the store card.
+   * Absence = app is runnable.
+   */
+  blocked_reason?: string;
 }
 
 export interface AppDetail extends HubApp {

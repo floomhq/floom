@@ -124,6 +124,28 @@ export function BrowsePage() {
                   {app.category || 'app'} · {app.actions.length}{' '}
                   action{app.actions.length === 1 ? '' : 's'}
                 </div>
+                {app.blocked_reason && (
+                  <div
+                    className="app-tile-blocked"
+                    title={app.blocked_reason}
+                    style={{
+                      marginTop: 8,
+                      fontSize: 11,
+                      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                      color: '#9a3a19',
+                      background: 'rgba(154, 58, 25, 0.08)',
+                      border: '1px solid rgba(154, 58, 25, 0.22)',
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      lineHeight: 1.35,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    hosted-mode only · {app.blocked_reason}
+                  </div>
+                )}
               </button>
             ))}
           </div>

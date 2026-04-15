@@ -65,6 +65,14 @@ export interface NormalizedManifest {
    * apps that don't need per-user state.
    */
   memory_keys?: string[];
+  /**
+   * W2.4c: optional free-text reason this app is blocked and cannot be run
+   * by self-hosters. Surfaced in /api/hub and rendered as a warning pill on
+   * the store card. Used e.g. to mark `flyfast` as "hosted-mode only pending
+   * internal flight-search infra". Setting this does NOT remove the app from
+   * the hub; it just annotates it.
+   */
+  blocked_reason?: string;
 }
 
 export type AuthType =

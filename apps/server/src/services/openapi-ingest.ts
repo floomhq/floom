@@ -74,6 +74,14 @@ interface OpenApiAppSpec {
    * 'stream' is reserved for future streaming support.
    */
   async_mode?: 'poll' | 'webhook' | 'stream';
+  /**
+   * Optional free-text reason this app is blocked and cannot be run by
+   * self-hosters. Surfaced in /api/hub and rendered as a warning pill on
+   * the store card. Used to mark apps like `flyfast` as "hosted-mode only
+   * pending internal infra". Setting this does NOT hide the app from the
+   * hub; it just annotates it. See docs/APPS-STATUS.md for the roadmap.
+   */
+  blocked_reason?: string;
 }
 
 interface AppsConfig {
@@ -627,6 +635,7 @@ function specToManifest(
     node_dependencies: {},
     secrets_needed: secretNames,
     manifest_version: '2.0',
+    ...(appSpec.blocked_reason ? { blocked_reason: appSpec.blocked_reason } : {}),
   };
 }
 

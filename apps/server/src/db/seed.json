@@ -326,7 +326,8 @@
           "FLYFAST_INTERNAL_TOKEN"
         ],
         "manifest_version": "2.0",
-        "knowledge_enabled": false
+        "knowledge_enabled": false,
+        "blocked_reason": "hosted-mode only: requires Federico's internal flight-search API. Self-hosters cannot run flyfast directly. See docs/APPS-STATUS.md for the v0.4 conversion roadmap."
       }
     },
     {
