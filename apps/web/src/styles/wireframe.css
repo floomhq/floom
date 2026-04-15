@@ -10,8 +10,10 @@
   --ink: #0e0e0c;
   --muted: #585550;
   --line: #e8e6e0;
-  --accent: #3d2bff;
-  --accent-soft: #e9e6ff;
+  /* Brand accent: Floom green. Matches landing.floom.dev's --accent
+     so preview + landing render identically. Hex: #059669 (emerald-600). */
+  --accent: #059669;
+  --accent-soft: #ecfdf5;
   --terminal-bg: #0e0e0c;
   --terminal-ink: #f1efe9;
   --success: #1a7f37;

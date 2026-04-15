@@ -4,21 +4,41 @@ interface LogoProps {
   withWordmark?: boolean;
 }
 
-export function Logo({ size = 20, className = '', withWordmark = false }: LogoProps) {
+/**
+ * Floom mark: rounded-square "f" in the brand accent. Shared with
+ * landing.floom.dev so both surfaces render the same wordmark. The
+ * gradient matches landing's `--accent` -> `#10b981`, and the drop
+ * shadow matches landing's `wordmark-f` class exactly. Hex values are
+ * inlined so the mark renders even in environments where the CSS var
+ * hasn't loaded yet.
+ */
+export function Logo({ size = 28, className = '', withWordmark = false }: LogoProps) {
+  const fontSize = Math.round(size * 0.5);
+  const radius = Math.max(6, Math.round(size * 0.29));
   return (
     <span className={`inline-flex items-center gap-2 ${className}`}>
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 48 48"
-        xmlns="http://www.w3.org/2000/svg"
+      <span
         aria-label="Floom"
+        role="img"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: radius,
+          background: 'linear-gradient(135deg, #059669, #10b981)',
+          color: '#fff',
+          fontWeight: 700,
+          fontSize,
+          fontFamily: 'Inter, system-ui, sans-serif',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow:
+            '0 1px 2px rgba(5, 150, 105, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25)',
+          lineHeight: 1,
+        }}
       >
-        <path
-          d="M10 6 Q4 6 4 12 L4 36 Q4 42 10 42 L28 42 L44 24 L28 6 Z"
-          fill="currentColor"
-        />
-      </svg>
+        f
+      </span>
       {withWordmark && <span className="font-semibold">floom</span>}
     </span>
   );

@@ -10,25 +10,25 @@ const SURFACES = [
     Icon: Server,
     label: 'MCP server',
     desc: 'Auto-generated from each OpenAPI operation. Drop into Claude Desktop, Cursor, Windsurf.',
-    accent: '#3d2bff',
+    accent: '#059669',
   },
   {
     Icon: Globe,
     label: 'HTTP API',
     desc: 'Pass-through proxy with secrets injection. Same routes as the upstream spec.',
-    accent: '#3d2bff',
+    accent: '#059669',
   },
   {
     Icon: Terminal,
     label: 'CLI',
     desc: '@floom/cli. Every action becomes a command. Pipe inputs, pipe outputs.',
-    accent: '#3d2bff',
+    accent: '#059669',
   },
   {
     Icon: LayoutTemplate,
     label: 'Web',
     desc: 'Hosted form + output renderer for every action. Share a permalink, no signup, no SDK.',
-    accent: '#3d2bff',
+    accent: '#059669',
   },
 ];
 
@@ -57,8 +57,8 @@ export function SurfacesDiagram() {
         >
           <defs>
             <linearGradient id="line-grad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#3d2bff" stopOpacity="0.45" />
-              <stop offset="100%" stopColor="#3d2bff" stopOpacity="0.05" />
+              <stop offset="0%" stopColor="#059669" stopOpacity="0.45" />
+              <stop offset="100%" stopColor="#059669" stopOpacity="0.05" />
             </linearGradient>
           </defs>
           <path d="M0 120 C 110 120, 180 30,  320 30"  stroke="url(#line-grad)" strokeWidth="1.2" />
