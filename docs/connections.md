@@ -99,7 +99,7 @@ In a single atomic SQLite transaction this:
 
 1. Rewrites `app_memory` rows from `device_id` → `user_id`.
 2. Rewrites `runs` rows from `device_id` → `user_id`.
-3. Rewrites `chat_threads` rows from `device_id` → `user_id`.
+3. Rewrites `run_threads` rows from `device_id` → `user_id`.
 4. **Rewrites `connections` rows from `device:<x>` → `user:<y>`**, skipping any row where the user already owns a `user`-scoped row for the same provider (the "double Gmail" scenario — one connection wins, the old device row stays behind for manual cleanup).
 5. Persists the legacy `device:<uuid>` Composio user id on `users.composio_user_id` (COALESCE, never overwrites). This lets future executeAction calls keep filtering Composio's own view of the world by the original key Composio knows about.
 

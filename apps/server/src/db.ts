@@ -171,25 +171,45 @@ db.exec(`
     ON secrets(name, COALESCE(app_id, '__global__'));
 `);
 
-// ---------- chat threads + turns ----------
-// v1 stores threads keyed by a browser-generated id. No user auth.
+// ---------- run threads + turns ----------
+// Threads are keyed by a browser-generated id. Originally named
+// `chat_threads`/`chat_turns` when the MVP was chat-shaped; v0.4.0 cleanup
+// renames them to `run_threads`/`run_turns` to match the product framing
+// (a thread is a sequence of app runs, not a chat).
+//
+// Migration for pre-cleanup DBs: if the legacy tables exist and the new
+// ones don't, RENAME in place. Idempotent and data-preserving.
+const legacyTableRows = db
+  .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN ('chat_threads','chat_turns','run_threads','run_turns')`)
+  .all() as { name: string }[];
+const legacyTables = new Set(legacyTableRows.map((r) => r.name));
+if (legacyTables.has('chat_threads') && !legacyTables.has('run_threads')) {
+  db.exec(`ALTER TABLE chat_threads RENAME TO run_threads`);
+}
+if (legacyTables.has('chat_turns') && !legacyTables.has('run_turns')) {
+  db.exec(`ALTER TABLE chat_turns RENAME TO run_turns`);
+}
+// Drop the old index name if the RENAME left it attached under the stale
+// label so the CREATE INDEX below lands on the new name.
+db.exec(`DROP INDEX IF EXISTS idx_turns_thread`);
+
 db.exec(`
-  CREATE TABLE IF NOT EXISTS chat_threads (
+  CREATE TABLE IF NOT EXISTS run_threads (
     id TEXT PRIMARY KEY,
     title TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE TABLE IF NOT EXISTS chat_turns (
+  CREATE TABLE IF NOT EXISTS run_turns (
     id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES run_threads(id) ON DELETE CASCADE,
     turn_index INTEGER NOT NULL,
     kind TEXT NOT NULL,
     payload TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  CREATE INDEX IF NOT EXISTS idx_turns_thread ON chat_turns(thread_id, turn_index);
+  CREATE INDEX IF NOT EXISTS idx_run_turns_thread ON run_turns(thread_id, turn_index);
 `);
 
 // ---------- embeddings (for the app picker) ----------
@@ -332,24 +352,24 @@ db.exec(
 );
 db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_device ON runs(device_id) WHERE device_id IS NOT NULL`);
 
-// chat_threads: workspace_id + user_id + device_id
+// run_threads: workspace_id + user_id + device_id
 const threadCols = (db
-  .prepare(`PRAGMA table_info(chat_threads)`)
+  .prepare(`PRAGMA table_info(run_threads)`)
   .all() as { name: string }[]).map((r) => r.name);
 if (!threadCols.includes('workspace_id')) {
-  db.exec(`ALTER TABLE chat_threads ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local'`);
+  db.exec(`ALTER TABLE run_threads ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local'`);
 }
 if (!threadCols.includes('user_id')) {
-  db.exec(`ALTER TABLE chat_threads ADD COLUMN user_id TEXT`);
+  db.exec(`ALTER TABLE run_threads ADD COLUMN user_id TEXT`);
 }
 if (!threadCols.includes('device_id')) {
-  db.exec(`ALTER TABLE chat_threads ADD COLUMN device_id TEXT`);
+  db.exec(`ALTER TABLE run_threads ADD COLUMN device_id TEXT`);
 }
 db.exec(
-  `CREATE INDEX IF NOT EXISTS idx_threads_workspace_user ON chat_threads(workspace_id, user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_threads_workspace_user ON run_threads(workspace_id, user_id)`,
 );
 db.exec(
-  `CREATE INDEX IF NOT EXISTS idx_threads_device ON chat_threads(device_id) WHERE device_id IS NOT NULL`,
+  `CREATE INDEX IF NOT EXISTS idx_threads_device ON run_threads(device_id) WHERE device_id IS NOT NULL`,
 );
 
 // ---------- bootstrap: ensure the synthetic 'local' workspace exists ----------
@@ -393,7 +413,7 @@ if (!existingLocalMember) {
 // P.2 research (research/composio-validation.md) validated Composio as
 // the primary vendor for the /build "Connect a tool" ramp. Because this
 // wave ships before W3.1 Better Auth, we use the same `device_id`
-// fallback pattern W2.1 established for app_memory/runs/chat_threads:
+// fallback pattern W2.1 established for app_memory/runs/run_threads:
 //
 //   - owner_kind='device' + owner_id=<floom_device cookie>  (pre-login)
 //   - owner_kind='user'   + owner_id=<users.id>             (post-login)
@@ -605,8 +625,9 @@ db.exec(`
 // W2.3 lands v5; W3.3 + W3.1 land v6 (rolled into the same alpha series).
 // W4-minimal lands v7 with app_reviews + feedback tables.
 // Fast-apps wave lands v8 with apps.featured + apps.avg_run_ms columns.
+// v0.4.0 cleanup sprint lands v9: chat_threads → run_threads, chat_turns → run_turns.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 8) {
-  db.pragma('user_version = 8');
+if (currentUserVersion < 9) {
+  db.pragma('user_version = 9');
 }

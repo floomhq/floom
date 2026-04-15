@@ -147,10 +147,10 @@ db.prepare(
    VALUES (?, ?, ?, ?, 'pending', ?, NULL, ?)`,
 ).run(runId, appId, 'run', '{}', DEFAULT_WORKSPACE_ID, 'dev-anon');
 
-// Seed 1 anonymous chat_thread row
+// Seed 1 anonymous run_thread row
 const threadId = newThreadId();
 db.prepare(
-  `INSERT INTO chat_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
+  `INSERT INTO run_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
 ).run(threadId, DEFAULT_WORKSPACE_ID, 'dev-anon');
 
 // First rekey: anonymous → real user 'alice'
@@ -162,7 +162,7 @@ db.prepare(
 const res1 = session.rekeyDevice('dev-anon', 'alice', DEFAULT_WORKSPACE_ID);
 log('rekeyDevice: app_memory count=2', res1.app_memory === 2, `got ${res1.app_memory}`);
 log('rekeyDevice: runs count=1', res1.runs === 1, `got ${res1.runs}`);
-log('rekeyDevice: chat_threads count=1', res1.chat_threads === 1, `got ${res1.chat_threads}`);
+log('rekeyDevice: run_threads count=1', res1.run_threads === 1, `got ${res1.run_threads}`);
 
 // Verify rows landed on alice
 const aliceMemCount = db
@@ -181,14 +181,14 @@ log('rekeyDevice: alice now owns 1 run', aliceRunCount === 1);
 const res2 = session.rekeyDevice('dev-anon', 'alice', DEFAULT_WORKSPACE_ID);
 log(
   'rekeyDevice: idempotent (no-op on re-run)',
-  res2.app_memory === 0 && res2.runs === 0 && res2.chat_threads === 0,
+  res2.app_memory === 0 && res2.runs === 0 && res2.run_threads === 0,
 );
 
 // Third rekey: non-existent device → zero changes (no crash)
 const res3 = session.rekeyDevice('dev-ghost', 'alice', DEFAULT_WORKSPACE_ID);
 log(
   'rekeyDevice: missing device_id yields 0/0/0',
-  res3.app_memory === 0 && res3.runs === 0 && res3.chat_threads === 0,
+  res3.app_memory === 0 && res3.runs === 0 && res3.run_threads === 0,
 );
 
 // ---- 5. scoped helper ----

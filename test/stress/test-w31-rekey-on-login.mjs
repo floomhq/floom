@@ -130,7 +130,7 @@ db.prepare(
    VALUES (?, ?, ?, ?, 'pending', ?, NULL, ?)`,
 ).run('run_rk_login', 'app_rk_login', 'r', '{}', DEFAULT_WORKSPACE_ID, 'dev-anon-99');
 db.prepare(
-  `INSERT INTO chat_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
+  `INSERT INTO run_threads (id, workspace_id, user_id, device_id) VALUES (?, ?, NULL, ?)`,
 ).run('thr_rk_login', DEFAULT_WORKSPACE_ID, 'dev-anon-99');
 db.prepare(
   `INSERT INTO connections
@@ -203,9 +203,9 @@ log('runs: user_id flipped', runRow?.user_id === 'usr_zara');
 log('runs: workspace_id flipped', runRow?.workspace_id === ctx2.workspace_id);
 
 const threadRow = db
-  .prepare('SELECT user_id, workspace_id FROM chat_threads WHERE id = ?')
+  .prepare('SELECT user_id, workspace_id FROM run_threads WHERE id = ?')
   .get('thr_rk_login');
-log('chat_threads: user_id flipped', threadRow?.user_id === 'usr_zara');
+log('run_threads: user_id flipped', threadRow?.user_id === 'usr_zara');
 
 const conRow = db
   .prepare('SELECT owner_kind, owner_id, workspace_id FROM connections WHERE id = ?')
