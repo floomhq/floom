@@ -1,7 +1,7 @@
 # Phase 2 critical fixes · v0.2.0
 
 **Sprint date:** 2026-04-14
-**Repo:** https://github.com/floomhq/floom-monorepo
+**Repo:** https://github.com/floomhq/floom
 **Base commit:** `2265b7f` (v0.1 baseline)
 **HEAD commit:** `03a34c3` + version bump (HEAD after this doc lands)
 **Tag:** `v0.2.0` (pending — to be cut after this report merges)
@@ -12,7 +12,7 @@
 |--------|-------|
 | Commits this sprint | 13 feat/fix/docs/ci + 1 version bump |
 | Fixes landed | 15 of 15 |
-| Image tag (pending) | `ghcr.io/floomhq/floom-monorepo:v0.2.0` + `:latest` (amd64 + arm64) |
+| Image tag (pending) | `ghcr.io/floomhq/floom:v0.2.0` + `:latest` (amd64 + arm64) |
 | Unit tests | 11 `buildUrl` + 13 `resolveBaseUrl` + 4 stress specs = 28 passing |
 | New typechecks | `pnpm --filter @floom/server typecheck` clean |
 | Lines changed | +1,877 / −185 in `apps/server/src` (excluding tests + docs) |
@@ -220,7 +220,7 @@ The proxied conversion of all 15 is deferred to v0.3 — it requires publishing 
 
 1. Verify the CI image build: after pushing the version-bump commit, cut the tag:
    ```
-   cd /root/floom-monorepo
+   cd /root/floom
    git tag -a v0.2.0 -m "Floom v0.2.0 — OpenAPI ingest rewrite"
    git push origin v0.2.0
    ```
@@ -228,11 +228,11 @@ The proxied conversion of all 15 is deferred to v0.3 — it requires publishing 
 
 2. Pull the published image on AX41 and smoke-test:
    ```
-   docker pull ghcr.io/floomhq/floom-monorepo:v0.2.0
+   docker pull ghcr.io/floomhq/floom:v0.2.0
    docker run --rm -d --name floom-v02-test -p 13060:3051 \
      -v /tmp/floom-e2e/apps.yaml:/app/config/apps.yaml:ro \
      -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
-     ghcr.io/floomhq/floom-monorepo:v0.2.0
+     ghcr.io/floomhq/floom:v0.2.0
    sleep 5
    curl -s http://localhost:13060/api/health | jq
    curl -sX POST http://localhost:13060/api/petstore/run -d '{"action":"findPetsByStatus","inputs":{"status":"available"}}' -H 'content-type: application/json'

@@ -18,8 +18,8 @@ cd /opt/floom-chat-deploy
 cp docker-compose.yml docker-compose.yml.$(date +%Y%m%d-%H%M%S).bak
 
 # 2. edit the image tag back to the last known-good tag, e.g.:
-#    image: ghcr.io/floomhq/floom-monorepo:v0.2.0
-sed -i 's|ghcr.io/floomhq/floom-monorepo:.*|ghcr.io/floomhq/floom-monorepo:v0.2.0|' docker-compose.yml
+#    image: ghcr.io/floomhq/floom:v0.2.0
+sed -i 's|ghcr.io/floomhq/floom:.*|ghcr.io/floomhq/floom:v0.2.0|' docker-compose.yml
 
 # 3. pull + restart — `--no-deps` keeps other services (nginx, etc.) untouched
 docker compose pull floom-chat
@@ -66,12 +66,12 @@ agent MUST:
    docker run -d --rm --name floom-rb-<prev> \
      -p 13952:3051 -e FLOOM_SEED_APPS=true \
      -v /var/run/docker.sock:/var/run/docker.sock \
-     ghcr.io/floomhq/floom-monorepo:<prev>
+     ghcr.io/floomhq/floom:<prev>
    ```
 3. Verify health + stress:
    ```bash
    curl -s http://localhost:13952/api/health | jq .
-   cd ~/floom-monorepo && FLOOM_STRESS_PORT=13952 \
+   cd ~/floom && FLOOM_STRESS_PORT=13952 \
      node test/stress/test-ingest-stress.mjs
    ```
 4. Stop + re-pin forward to the new release:
@@ -80,7 +80,7 @@ agent MUST:
    docker run -d --rm --name floom-rb-<new> \
      -p 13952:3051 -e FLOOM_SEED_APPS=true \
      -v /var/run/docker.sock:/var/run/docker.sock \
-     ghcr.io/floomhq/floom-monorepo:<new>
+     ghcr.io/floomhq/floom:<new>
    ```
 5. Verify health + stress again on the new pin.
 6. Append a drill entry to this file with timestamps, curl output, and
@@ -97,8 +97,8 @@ and escalate.
 
 - **Agent:** `b32c321d-f8b3-47a7-aede-e2b4aaa16114` (Opus 4.6, Claude Code)
 - **Drill port:** 13952
-- **Image under test:** `ghcr.io/floomhq/floom-monorepo:v0.3.2-rc.1`
-- **Rollback target:** `ghcr.io/floomhq/floom-monorepo:v0.2.0`
+- **Image under test:** `ghcr.io/floomhq/floom:v0.3.2-rc.1`
+- **Rollback target:** `ghcr.io/floomhq/floom:v0.2.0`
 
 **Step 1 — preview state snapshot (08:06:53Z)**
 
@@ -113,7 +113,7 @@ $ curl -sS https://preview.floom.dev/api/health | jq .
   "timestamp": "2026-04-15T08:06:54.075Z"
 }
 $ docker inspect floom-chat | jq -r '.[0].Config.Image'
-ghcr.io/floomhq/floom-monorepo:v0.2.0
+ghcr.io/floomhq/floom:v0.2.0
 ```
 
 **Step 2 — pin v0.2.0 on throwaway 13952 (08:06:54Z)**
@@ -122,7 +122,7 @@ ghcr.io/floomhq/floom-monorepo:v0.2.0
 $ docker run -d --rm --name floom-rb-v020 \
     -p 13952:3051 -e FLOOM_SEED_APPS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    ghcr.io/floomhq/floom-monorepo:v0.2.0
+    ghcr.io/floomhq/floom:v0.2.0
 2cf4d0f33edeec126f07692760209d93222ddf943430a8ea154d3acf8dc37012
 ```
 
@@ -163,7 +163,7 @@ floom-rb-v020
 $ docker run -d --rm --name floom-rb-rc1 \
     -p 13952:3051 -e FLOOM_SEED_APPS=true \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    ghcr.io/floomhq/floom-monorepo:v0.3.2-rc.1
+    ghcr.io/floomhq/floom:v0.3.2-rc.1
 9d82b254fb27c57157c5abd130b341ace7c63312fb78f544f89ed9e27037e085
 ```
 

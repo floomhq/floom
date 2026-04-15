@@ -1,6 +1,6 @@
-# Integrating @floom/e2b-runtime into floom-monorepo
+# Integrating @floom/e2b-runtime into floom
 
-This document is for the integration pass that wires `@floom/e2b-runtime` into the `floomhq/floom-monorepo` repo (legacy name: `floom-chat`). The runtime is complete and locally verified at `/opt/floom-e2b-runtime/`.
+This document is for the integration pass that wires `@floom/e2b-runtime` into the `floomhq/floom` repo (legacy name: `floom-chat`). The runtime is complete and locally verified at `/opt/floom-e2b-runtime/`.
 
 ## What this package exposes
 
@@ -12,7 +12,7 @@ Three capabilities:
 
 ## How to import
 
-From `floom-monorepo`:
+From `floom`:
 
 ```typescript
 // npm install /opt/floom-e2b-runtime  (or publish to npm first)
@@ -20,7 +20,7 @@ import { deployFromGithub, runApp } from '@floom/e2b-runtime';
 import type { Manifest, RunResult, DeployResult } from '@floom/e2b-runtime';
 ```
 
-## Where in floom-monorepo to add it
+## Where in floom to add it
 
 ### 1. Replace the Docker runner
 
@@ -92,7 +92,7 @@ ALTER TABLE apps ADD COLUMN manifest JSONB;
 
 ### 4. Feature flag
 
-Add `FLOOM_RUNTIME=e2b` to the floom-monorepo `.env.local`. Default to `docker` until the e2b path is validated in production.
+Add `FLOOM_RUNTIME=e2b` to the floom `.env.local`. Default to `docker` until the e2b path is validated in production.
 
 ## Env vars to add
 
@@ -111,7 +111,7 @@ FLOOM_LOG_DEBUG=1   # verbose logging from the runtime
 | Item | Notes |
 |------|-------|
 | DB schema for `template_id` | Add to apps table migration |
-| SSE streaming endpoint | Currently all runs are synchronous in floom-monorepo |
+| SSE streaming endpoint | Currently all runs are synchronous in floom |
 | Rate limiting for deploy | Each deploy costs ~$0.01 in e2b credit + compute |
 | Error UX for draft manifests | When `isDraft: true`, show the YAML editor (H6 Scenario 2) |
 | Template refresh cron | Paused sandboxes expire (check e2b TTL, default 24h) |
