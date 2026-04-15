@@ -114,7 +114,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
   const manifest = JSON.parse(app.manifest) as NormalizedManifest;
   const server = new McpServer({
     name: `floom-chat-${app.slug}`,
-    version: '0.2.0',
+    version: '0.3.0',
   });
 
   const secretsNeeded = manifest.secrets_needed || [];
@@ -275,7 +275,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
 function createSearchMcpServer(): McpServer {
   const server = new McpServer({
     name: 'floom-chat-search',
-    version: '0.2.0',
+    version: '0.3.0',
   });
   server.registerTool(
     'search_apps',

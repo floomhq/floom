@@ -1,6 +1,6 @@
 version: "3.9"
 
-# Floom self-hosted — reference compose file for v0.2.0+.
+# Floom self-hosted — reference compose file for v0.3.0+.
 # Usage:
 #   1. Copy docker/apps.yaml.example to docker/apps.yaml and edit it.
 #   2. docker compose -f docker/docker-compose.yml up -d
@@ -12,7 +12,7 @@ version: "3.9"
 
 services:
   floom:
-    image: ghcr.io/floomhq/floom-monorepo:v0.2.0
+    image: ghcr.io/floomhq/floom-monorepo:v0.3.0
     ports:
       - "3051:3051"
     volumes:
