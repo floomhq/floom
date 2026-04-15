@@ -402,8 +402,104 @@ Embeddings-based app search needs it. Safe to ignore — picker falls back to ke
 **Port already in use**
 `docker run -p 8080:3051 ...`
 
+## Multi-tenant model (v0.3.1)
+
+Floom ships a multi-tenant schema from day one. Solo mode is a special case:
+everything runs against a synthetic `workspace_id='local'` + `user_id='local'`
+row that Floom bootstraps on first boot. Cloud (W3.1) will add real users on
+top of the exact same schema — no feature flag, no branching, no migration
+pain.
+
+### The 5 new tables
+
+| Table | Purpose |
+|---|---|
+| `workspaces` | Tenant container. `wrapped_dek` holds the per-workspace data encryption key wrapped under the master KEK. |
+| `users` | Global identity. `auth_provider` is `local` in OSS mode; Cloud will add `google`, `github`, `oidc`, etc. |
+| `workspace_members` | `(workspace_id, user_id, role)` mapping. Role = `admin`/`editor`/`viewer`. |
+| `app_memory` | `(workspace_id, app_slug, user_id, key)` → JSON blob. Gated by the app manifest's `memory_keys` declaration. |
+| `user_secrets` | `(workspace_id, user_id, key)` → AES-256-GCM ciphertext. Per-workspace DEK wrapped with `FLOOM_MASTER_KEY`. |
+
+Existing tables (`apps`, `runs`, `chat_threads`) gained `workspace_id` + `user_id`
++ `device_id` columns, all idempotent, all defaulting to `'local'` for backward
+compatibility with v0.2/v0.3 databases.
+
+### Per-user app memory
+
+Creators declare `memory_keys` in their manifest:
+
+```yaml
+apps:
+  - slug: flyfast
+    memory_keys:
+      - last_search_destination
+      - preferred_currency
+```
+
+At runtime the app's handler can read and write these values through
+`/api/memory/:app_slug`. Keys not in the declared list are rejected with
+a 403 `memory_key_not_allowed`. Every row is scoped by `(workspace_id,
+app_slug, user_id)`, so two users of the same app never see each other's
+state, and two apps on the same account never leak memory across the
+installed-app boundary.
+
+### Per-user secrets vault
+
+The secrets vault uses AES-256-GCM envelope encryption:
+
+```
+FLOOM_MASTER_KEY (32-byte hex, env or ./.floom-master-key file)
+        │
+        └─ wraps ─► per-workspace DEK (32 bytes, random, in workspaces.wrapped_dek)
+                           │
+                           └─ encrypts ─► each user_secrets row
+```
+
+Resolution order at runtime (lowest → highest precedence):
+
+1. Global admin secrets (`secrets` table, `app_id IS NULL`)
+2. Per-app admin secrets (`secrets` table, `app_id = this app`)
+3. Per-user persisted secrets (`user_secrets` table, W2.1)
+4. Per-call MCP `_auth` override
+
+So a creator can ship a default `OPENAI_API_KEY` for their app, a user can
+bring their own (overriding the default), and an MCP client can still
+override both for a single invocation.
+
+### Session re-key (anonymous → authenticated)
+
+Before auth lands (W3.1), every request carries a `floom_device` cookie
+(HttpOnly, SameSite=Lax, 10-year TTL). All memory/runs/threads created
+during an anonymous session are bound to that device_id.
+
+When auth ships, the login handler calls `rekeyDevice(device_id, user_id,
+workspace_id)` once on the first authenticated request. This runs an
+atomic transaction that rewrites `user_id` on every row matching the
+device_id. Idempotent — re-running is a no-op. Same pattern Linear
+documented in 2022. No force migration, no data loss, no leftover orphans.
+
+### Migration path to Cloud
+
+1. Dump SQLite: `sqlite3 data/floom-chat.db .dump > floom.sql`
+2. Convert to Postgres: `pgloader floom.db postgres://...` (or manual `.dump`
+   tweaks — both work because the schemas are byte-for-byte identical).
+3. Every row already has `workspace_id='local'` — you're now a legal
+   multi-tenant Postgres instance with one workspace.
+4. Rename: `UPDATE workspaces SET slug='my-team' WHERE id='local';`
+5. Invite real users; their `rekeyDevice` calls migrate the anonymous rows
+   into their new accounts on first login.
+
+Same flow Plausible and n8n ship today.
+
+### Master key back-up
+
+If you lose `FLOOM_MASTER_KEY` (or the `.floom-master-key` file), every
+`user_secrets` row is unrecoverable. Back it up. Rotate by rewrapping each
+workspace DEK with the new key (operational runbook forthcoming).
+
 ## Version info
 
+- **v0.3.1** (April 2026): Multi-tenant schema foundation. 5 new tables (`workspaces`, `users`, `workspace_members`, `app_memory`, `user_secrets`) + `workspace_id`/`user_id`/`device_id` columns on `apps`/`runs`/`chat_threads`. Per-user app memory gated by manifest `memory_keys`. AES-256-GCM envelope-encrypted secrets vault. Session cookie (`floom_device`) with atomic rekey transaction for the upcoming W3.1 auth migration. New endpoints: `/api/memory/:app_slug`, `/api/secrets`. Single-codepath multi-tenant (OSS solo mode = synthetic `workspace_id='local'`).
 - **v0.3.0** (April 2026): Async job queue primitive. `async: true` in `apps.yaml` wraps long-running apps (OpenPaper, research agents) in POST /jobs → GET /jobs/:id → webhook pattern. Background worker polls, claims, dispatches, enforces `timeout_ms`, retries N times, delivers webhooks with 5xx backoff. MCP `tools/call` on async apps returns immediately with a job-started payload.
 - **v0.2.0** (April 2026): OpenAPI ingest rewrite. $ref resolution, allOf/oneOf/anyOf flattening, spec.servers[] auto-detection, header/cookie/multipart support, OAuth2 client credentials, basic auth, FLOOM_AUTH_TOKEN gate, per-user MCP secrets via _auth extension, FLOOM_SEED_APPS opt-in for hosted apps, fixed base_url path-stripping, fixed SPA wildcard swallowing /openapi.json.
 - **v0.1.0** (April 2026): Initial self-host release. Proxied + hosted modes, MCP Streamable HTTP, SPA chat UI.
