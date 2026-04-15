@@ -1,21 +1,25 @@
-// W4-minimal: /me — user dashboard.
+// MVP: /me — user dashboard.
 //
-// v11-faithful sidebar shell with 9 items across 3 sections:
+// v11-faithful sidebar shell with 8 items across 3 sections:
 //   Personal:  Your apps (real → runs), Folders*, Saved results*,
 //              Schedules*, My tickets*
 //   Workspace: Shared with me*
-//   More:      Browse the store (link → /apps), Connected tools (real),
-//              Install to Claude (real)
+//   More:      Browse the store (link → /apps), Install to Claude (real)
 //
 // Items marked * render a ComingSoonStub. Every real tab reads from a real
 // endpoint, no mocks. Empty states have real icons + CTAs.
+//
+// The Connected tools tab (Composio OAuth to 150+ tools) is deferred and
+// is NOT listed as coming-soon per the MVP scope — see docs/DEFERRED-UI.md
+// and feature/ui-composio-connections. Backend /api/connections routes
+// stay live on main.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
-import type { MeRunSummary, ConnectionRecord, SessionMePayload } from '../lib/types';
+import type { MeRunSummary, SessionMePayload } from '../lib/types';
 
 type Tab =
   | 'your-apps'
@@ -24,7 +28,6 @@ type Tab =
   | 'schedules'
   | 'my-tickets'
   | 'shared'
-  | 'connections'
   | 'install';
 
 type SidebarItem =
@@ -55,7 +58,6 @@ function buildSidebar(): SidebarSection[] {
       label: 'More',
       items: [
         { kind: 'link', href: '/apps', label: 'Browse the store', icon: <IconCompass /> },
-        { kind: 'tab', id: 'connections', label: 'Connected tools', icon: <IconCable /> },
         { kind: 'tab', id: 'install', label: 'Install to Claude', icon: <IconDownload /> },
       ],
     },
@@ -164,7 +166,6 @@ export function MePage() {
                 testId="stub-shared"
               />
             )}
-            {tab === 'connections' && <ConnectionsTab />}
             {tab === 'install' && <InstallTab session={session} />}
           </div>
         </div>
@@ -352,13 +353,6 @@ function IconCompass() {
     </svg>
   );
 }
-function IconCable() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 9a2 2 0 0 1-2-2V5h6v2a2 2 0 0 1-2 2z" /><path d="M7 21a2 2 0 0 1-2-2V9h4v10a2 2 0 0 1-2 2z" /><path d="M20 9a2 2 0 0 1-2-2V5h-4v2a2 2 0 0 0 2 2z" /><path d="M15 9v10a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9" />
-    </svg>
-  );
-}
 function IconDownload() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -462,187 +456,6 @@ function RunsTab() {
           </span>
         </Link>
       ))}
-    </div>
-  );
-}
-
-// ---------- Connections tab ----------
-function ConnectionsTab() {
-  const [connections, setConnections] = useState<ConnectionRecord[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  async function load() {
-    try {
-      const res = await api.listConnections();
-      setConnections(res.connections);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  async function connect(provider: string) {
-    setBusy(provider);
-    try {
-      const res = await api.initiateConnection(provider);
-      window.open(res.auth_url, '_blank', 'width=560,height=720');
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function disconnect(provider: string) {
-    if (!confirm(`Disconnect ${provider}?`)) return;
-    setBusy(provider);
-    try {
-      await api.revokeConnectionApi(provider);
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (error) {
-    return <ErrorCard title="Couldn't load connections" message={error} />;
-  }
-  if (!connections) {
-    return <SkeletonList />;
-  }
-
-  const active = connections.filter((c) => c.status === 'active');
-
-  return (
-    <div data-testid="connections-list">
-      {active.length === 0 ? (
-        <EmptyState
-          icon={<ConnectIcon />}
-          title="No tools connected"
-          description="Connect Gmail, Slack, Notion, or any of 150+ tools. Connected apps show up inside Floom apps that need them."
-          cta={{ label: 'Connect Gmail', onClick: () => connect('gmail') }}
-          testId="connections-empty"
-        />
-      ) : (
-        <>
-          <div
-            style={{
-              border: '1px solid var(--line)',
-              borderRadius: 12,
-              background: 'var(--card)',
-              overflow: 'hidden',
-              marginBottom: 16,
-            }}
-          >
-            {active.map((c) => (
-              <div
-                key={c.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 14,
-                  padding: '14px 18px',
-                  borderBottom: '1px solid var(--line)',
-                }}
-                data-testid={`connection-${c.provider}`}
-              >
-                <div
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 6,
-                    background: 'var(--bg)',
-                    border: '1px solid var(--line)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: 'var(--ink)',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {c.provider.charAt(0)}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
-                    {c.provider}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    Connected {formatTime(c.created_at)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => disconnect(c.provider)}
-                  disabled={busy === c.provider}
-                  style={{
-                    padding: '6px 12px',
-                    background: 'transparent',
-                    border: '1px solid var(--line)',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    color: 'var(--muted)',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {busy === c.provider ? '...' : 'Disconnect'}
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <div style={{ marginTop: 24 }}>
-        <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)', margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Connect a new tool
-        </h3>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {['gmail', 'slack', 'notion', 'github', 'googlesheets', 'linear'].map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => connect(p)}
-              disabled={busy === p}
-              data-testid={`connect-${p}`}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: 6,
-                padding: '14px 16px',
-                background: 'var(--card)',
-                border: '1px solid var(--line)',
-                borderRadius: 10,
-                fontSize: 13,
-                color: 'var(--ink)',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{p}</span>
-              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                {busy === p ? 'Starting...' : 'Connect'}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1024,19 +837,6 @@ function RunIcon() {
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ConnectIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M10 14L4 20M14 10l6-6M6 16h2m8-10h2M7 4v4m10 8v4M4 8l3 2m14 6l-3 2"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
       />
     </svg>
   );

@@ -188,16 +188,10 @@ export interface Review {
   updated_at: string;
 }
 
-export interface ConnectionRecord {
-  id: string;
-  provider: string;
-  owner_kind: 'device' | 'user';
-  status: 'pending' | 'active' | 'revoked' | 'expired';
-  composio_connection_id: string;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-  updated_at: string;
-}
+// ConnectionRecord (Composio OAuth connection) type is deferred with the
+// connections UI. See docs/DEFERRED-UI.md and
+// feature/ui-composio-connections. Backend shape lives in
+// apps/server/src/lib/schema/connections.ts.
 
 export interface DetectedApp {
   slug: string;

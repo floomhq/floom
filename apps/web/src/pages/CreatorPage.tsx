@@ -312,7 +312,7 @@ export function CreatorPage() {
                 Delete {confirmSlug}?
               </h3>
               <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
-                This removes the app from the store. All run history and connections remain.
+                This removes the app from the store. All run history remains.
                 Type the slug <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{confirmSlug}</code> to confirm.
               </p>
               <input
