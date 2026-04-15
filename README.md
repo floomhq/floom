@@ -36,7 +36,7 @@ docker run -p 3051:3051 \
   -v $(pwd)/apps.yaml:/app/config/apps.yaml:ro \
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
   -e STRIPE_SECRET_KEY=sk_... \
-  ghcr.io/floomhq/floom-monorepo:latest
+  ghcr.io/floomhq/floom:latest
 ```
 
 Floom boots, fetches the Stripe OpenAPI spec, generates a web form + MCP server + HTTP endpoint + CLI. Point your agent at `http://localhost:3051/mcp/app/stripe`.

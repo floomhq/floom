@@ -50,7 +50,7 @@ services:
       PORT: "4112"
 
   floom:
-    image: ghcr.io/floomhq/floom-monorepo:v0.3.0
+    image: ghcr.io/floomhq/floom:v0.3.0
     depends_on:
       - blast-radius
       - claude-wrapped
