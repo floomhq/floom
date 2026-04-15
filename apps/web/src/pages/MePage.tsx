@@ -461,27 +461,60 @@ function RunsTab() {
 }
 
 // ---------- Install tab ----------
+// Shows a picker of apps the user has recently run; each selection renders
+// a dynamic Claude Desktop config + test curl with the REAL app slug.
+// No hardcoded slugs — the config follows the selected app.
 function InstallTab({ session }: { session: SessionMePayload | null }) {
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://preview.floom.dev';
-
   const mcpUrl = `${origin}/mcp`;
   const userId = session?.user.is_local ? 'local' : session?.user.id || 'local';
 
-  const claudeConfig = JSON.stringify(
-    {
-      mcpServers: {
-        floom: {
-          url: `${origin}/mcp/app/flyfast`,
-          headers: {
-            'X-Floom-User': userId,
+  const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getMyRuns(50)
+      .then((res) => setRuns(res.runs))
+      .catch((err) => setError((err as Error).message));
+  }, []);
+
+  // De-dupe run list into unique apps, preserving most-recently-run order.
+  // Runs come back newest-first from /api/me/runs, so the first occurrence
+  // of each slug is the most recent.
+  const recentApps: Array<{ slug: string; name: string }> = [];
+  if (runs) {
+    const seen = new Set<string>();
+    for (const r of runs) {
+      if (!r.app_slug || seen.has(r.app_slug)) continue;
+      seen.add(r.app_slug);
+      recentApps.push({ slug: r.app_slug, name: r.app_name || r.app_slug });
+      if (recentApps.length >= 5) break;
+    }
+  }
+
+  // Default selection: first (most recent) app once data loads.
+  const activeSlug = selectedSlug || recentApps[0]?.slug || null;
+  const activeApp = recentApps.find((a) => a.slug === activeSlug) || null;
+
+  function buildConfigFor(slug: string): string {
+    return JSON.stringify(
+      {
+        mcpServers: {
+          [`floom-${slug}`]: {
+            url: `${origin}/mcp/app/${slug}`,
+            headers: {
+              'X-Floom-User': userId,
+            },
           },
         },
       },
-    },
-    null,
-    2,
-  );
+      null,
+      2,
+    );
+  }
 
   return (
     <div data-testid="install-tab" style={{ maxWidth: 680 }}>
@@ -489,7 +522,7 @@ function InstallTab({ session }: { session: SessionMePayload | null }) {
         Install to Claude Desktop
       </h2>
       <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.6 }}>
-        Paste this into your <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>claude_desktop_config.json</code> and restart Claude Desktop.
+        Pick an app you've run, then paste its config into your <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>claude_desktop_config.json</code> and restart Claude Desktop.
       </p>
 
       <div
@@ -507,38 +540,151 @@ function InstallTab({ session }: { session: SessionMePayload | null }) {
         <CopyRow value={mcpUrl} />
       </div>
 
-      <div
-        style={{
-          background: 'var(--card)',
-          border: '1px solid var(--line)',
-          borderRadius: 12,
-          padding: '16px 20px',
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Step 2 — Paste into config
-        </div>
-        <CodeBlock code={claudeConfig} />
-      </div>
-
-      <div
-        style={{
-          background: 'var(--card)',
-          border: '1px solid var(--line)',
-          borderRadius: 12,
-          padding: '16px 20px',
-        }}
-      >
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Step 3 — Test from HTTP
-        </div>
-        <CodeBlock
-          code={`curl -X POST ${origin}/api/flyfast/run \\
-  -H "Content-Type: application/json" \\
-  -d '{"action":"search","inputs":{"prompt":"LIS to BER next week"}}'`}
+      {error && (
+        <ErrorCard
+          title="Couldn't load your apps"
+          message={error}
         />
-      </div>
+      )}
+
+      {!runs && !error && (
+        <div
+          data-testid="install-loading"
+          style={{
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
+            borderRadius: 12,
+            padding: '16px 20px',
+            marginBottom: 16,
+            fontSize: 13,
+            color: 'var(--muted)',
+          }}
+        >
+          Loading your apps…
+        </div>
+      )}
+
+      {runs && recentApps.length === 0 && (
+        <div
+          data-testid="install-empty"
+          style={{
+            background: 'var(--card)',
+            border: '1px dashed var(--line)',
+            borderRadius: 12,
+            padding: '24px 20px',
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+            No apps to install yet
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 14px', lineHeight: 1.55 }}>
+            Run an app from the store first. Each app you run unlocks its own install config here.
+          </p>
+          <Link
+            to="/apps"
+            style={{
+              display: 'inline-block',
+              padding: '8px 14px',
+              background: 'var(--ink)',
+              color: '#fff',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            Browse apps
+          </Link>
+        </div>
+      )}
+
+      {recentApps.length > 0 && activeApp && (
+        <>
+          <div
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              padding: '16px 20px',
+              marginBottom: 16,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Step 2 — Pick an app
+            </div>
+            <div
+              role="tablist"
+              aria-label="Recent apps"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
+            >
+              {recentApps.map((a) => {
+                const isActive = a.slug === activeSlug;
+                return (
+                  <button
+                    key={a.slug}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    data-testid={`install-app-${a.slug}`}
+                    onClick={() => setSelectedSlug(a.slug)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 999,
+                      border: '1px solid var(--line)',
+                      background: isActive ? 'var(--ink)' : 'var(--bg)',
+                      color: isActive ? '#fff' : 'var(--ink)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {a.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              padding: '16px 20px',
+              marginBottom: 16,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Step 3 — Paste into config
+            </div>
+            <CodeBlock
+              key={activeApp.slug}
+              code={buildConfigFor(activeApp.slug)}
+            />
+          </div>
+
+          <div
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              padding: '16px 20px',
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Step 4 — Test from HTTP
+            </div>
+            <CodeBlock
+              key={`${activeApp.slug}-curl`}
+              code={`curl -X POST ${origin}/api/${activeApp.slug}/run \\
+  -H "Content-Type: application/json" \\
+  -d '{"action":"","inputs":{}}'`}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
