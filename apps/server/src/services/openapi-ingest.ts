@@ -46,6 +46,34 @@ interface OpenApiAppSpec {
    *    FLOOM_AUTH_TOKEN env var (see apps/server/src/routes/*.ts)
    */
   visibility?: 'public' | 'auth-required';
+  // ---------- async job queue fields (v0.3.0) ----------
+  /**
+   * When true, the app runs through the Floom job queue instead of the
+   * synchronous /api/:slug/run endpoint. POST /api/:slug/jobs enqueues a
+   * job, GET /api/:slug/jobs/:id polls its state, and a creator-declared
+   * webhook_url (below) receives the completion notification.
+   */
+  async?: boolean;
+  /**
+   * POST target for job-completed webhooks. Fires when a job reaches a
+   * terminal state (succeeded / failed / cancelled) with payload
+   * { job_id, slug, status, output, error, duration_ms, attempts }.
+   */
+  webhook_url?: string;
+  /**
+   * Max runtime per job in milliseconds. Defaults to 30 minutes.
+   */
+  timeout_ms?: number;
+  /**
+   * Max retry attempts on job failure. Defaults to 0.
+   */
+  retries?: number;
+  /**
+   * Client contract for async apps. 'poll' (default) means clients poll
+   * the job endpoint. 'webhook' means clients rely on webhook delivery.
+   * 'stream' is reserved for future streaming support.
+   */
+  async_mode?: 'poll' | 'webhook' | 'stream';
 }
 
 interface AppsConfig {
@@ -669,11 +697,11 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
 
   const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility)
-     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode)
+     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const updateApp = db.prepare(
-    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, updated_at=datetime('now') WHERE slug=?`,
+    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, updated_at=datetime('now') WHERE slug=?`,
   );
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
@@ -743,6 +771,18 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       const authConfigJson =
         Object.keys(authConfig).length > 0 ? JSON.stringify(authConfig) : null;
       const visibility = appSpec.visibility || 'public';
+      // v0.3.0 async fields
+      const isAsync = appSpec.async === true ? 1 : 0;
+      const webhookUrl = appSpec.webhook_url || null;
+      const timeoutMs =
+        typeof appSpec.timeout_ms === 'number' && appSpec.timeout_ms > 0
+          ? appSpec.timeout_ms
+          : null;
+      const retries =
+        typeof appSpec.retries === 'number' && appSpec.retries >= 0
+          ? appSpec.retries
+          : 0;
+      const asyncMode = appSpec.async_mode || (isAsync ? 'poll' : null);
 
       if (existing) {
         updateApp.run(
@@ -756,6 +796,11 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           appSpec.openapi_spec_url || null,
           specCached,
           visibility,
+          isAsync,
+          webhookUrl,
+          timeoutMs,
+          retries,
+          asyncMode,
           appSpec.slug,
         );
         // Insert placeholder secrets if not already present (so the UI shows them)
@@ -780,6 +825,11 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           appSpec.openapi_spec_url || null,
           specCached,
           visibility,
+          isAsync,
+          webhookUrl,
+          timeoutMs,
+          retries,
+          asyncMode,
         );
         // Insert placeholder secrets
         for (const name of secretNames) {
