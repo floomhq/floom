@@ -195,7 +195,7 @@ export function FeedbackButton() {
                   required
                   rows={5}
                   autoFocus
-                  placeholder="Bug report, feature idea, confusion, praise — all welcome."
+                  placeholder="Bug report, feature idea, confusion, praise: all welcome."
                   data-testid="feedback-text"
                   style={{
                     width: '100%',

@@ -42,7 +42,7 @@ export function AppsDirectoryPage() {
       .catch(() => setLoading(false));
 
     return () => {
-      document.title = 'Floom: infra for agentic work';
+      document.title = 'Floom: production layer for AI apps';
     };
   }, []);
 
