@@ -29,6 +29,7 @@
     "shiki": "1.22.2"
   },
   "devDependencies": {
+    "@types/node": "22.9.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "react": "18.3.1",
