@@ -280,7 +280,7 @@ function StatusPill({ status }: { status: string }) {
     success: { bg: '#e6f4ea', fg: '#1a7f37' },
     error: { bg: '#fdecea', fg: '#c2321f' },
     timeout: { bg: '#fdecea', fg: '#c2321f' },
-    running: { bg: '#e9e6ff', fg: '#3d2bff' },
+    running: { bg: '#ecfdf5', fg: '#047857' },
     pending: { bg: '#f4f4f0', fg: '#585550' },
   };
   const c = colors[status] || colors.pending;
