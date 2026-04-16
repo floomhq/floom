@@ -144,11 +144,15 @@ export function AppPermalinkPage() {
   const githubRepo = GITHUB_REPOS[app.slug];
   const manifestUrl = `https://github.com/floomhq/floom-monorepo/tree/main/examples/${app.slug}/floom.yaml`;
 
+  // Claude Desktop's stable config format accepts stdio servers with
+  // `command`/`args`. Wrap the remote HTTP MCP URL with `mcp-remote` (the
+  // official Anthropic HTTP bridge).
   const claudeDesktopSnippet = JSON.stringify(
     {
       mcpServers: {
-        [app.slug]: {
-          url: mcpEndpoint,
+        [`floom-${app.slug}`]: {
+          command: 'npx',
+          args: ['-y', 'mcp-remote', mcpEndpoint],
         },
       },
     },

@@ -190,7 +190,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
           // Server-side persisted secrets
           const rows = db
             .prepare(
-              'SELECT name FROM secrets WHERE (app_id IS NULL OR app_id = ?) AND value != ""',
+              "SELECT name FROM secrets WHERE (app_id IS NULL OR app_id = ?) AND value != ''",
             )
             .all(fresh.id) as { name: string }[];
           for (const r of rows) available.add(r.name);

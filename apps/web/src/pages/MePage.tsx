@@ -462,13 +462,13 @@ function RunsTab() {
 
 // ---------- Install tab ----------
 // Shows a picker of apps the user has recently run; each selection renders
-// a dynamic Claude Desktop config + test curl with the REAL app slug.
-// No hardcoded slugs — the config follows the selected app.
-function InstallTab({ session }: { session: SessionMePayload | null }) {
+// a dynamic Claude Desktop config with the REAL app slug + correct shape.
+// Claude Desktop's stable config format requires stdio servers with
+// command/args — we wrap the HTTP MCP URL via the official mcp-remote bridge.
+function InstallTab({ session: _session }: { session: SessionMePayload | null }) {
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://preview.floom.dev';
   const mcpUrl = `${origin}/mcp`;
-  const userId = session?.user.is_local ? 'local' : session?.user.id || 'local';
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -504,10 +504,8 @@ function InstallTab({ session }: { session: SessionMePayload | null }) {
       {
         mcpServers: {
           [`floom-${slug}`]: {
-            url: `${origin}/mcp/app/${slug}`,
-            headers: {
-              'X-Floom-User': userId,
-            },
+            command: 'npx',
+            args: ['-y', 'mcp-remote', `${origin}/mcp/app/${slug}`],
           },
         },
       },
