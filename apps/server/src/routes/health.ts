@@ -9,7 +9,7 @@ healthRouter.get('/', (c) => {
   return c.json({
     status: 'ok',
     service: 'floom-chat',
-    version: '0.4.0-mvp',
+    version: '0.4.0-mvp.2',
     apps: appCount,
     threads: threadCount,
     timestamp: new Date().toISOString(),
