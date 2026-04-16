@@ -12,6 +12,8 @@
 // roadmap items for v0.3+; for v0.2 a single shared token is sufficient to
 // stop casual abuse when a self-hoster exposes port 3051 to the internet.
 import type { Context, MiddlewareHandler } from 'hono';
+import type { SessionContext } from '../types.js';
+import { isCloudMode } from './better-auth.js';
 
 function getExpectedToken(): string | null {
   const token = process.env.FLOOM_AUTH_TOKEN;
@@ -98,4 +100,33 @@ export function isAuthenticated(c: Context): boolean {
   if (!expected) return true; // no auth configured = everyone is "authed"
   const got = presentedToken(c);
   return got !== null && constantTimeEqual(got, expected);
+}
+
+/**
+ * Cloud-mode authentication gate for write routes.
+ *
+ * In OSS mode (FLOOM_CLOUD_MODE unset/false) every request is synthesized
+ * as the local user and this is a no-op. In Cloud mode this rejects any
+ * request whose SessionContext is not backed by a real Better Auth session,
+ * so anonymous callers cannot create/update/delete resources owned by the
+ * synthetic local user.
+ *
+ * Usage:
+ *   const ctx = await resolveUserContext(c);
+ *   const gate = requireAuthenticatedInCloud(c, ctx);
+ *   if (gate) return gate;
+ */
+export function requireAuthenticatedInCloud(
+  c: Context,
+  ctx: SessionContext,
+): Response | null {
+  if (!isCloudMode()) return null;
+  if (ctx.is_authenticated) return null;
+  return c.json(
+    {
+      error: 'Authentication required. Sign in and retry.',
+      code: 'auth_required',
+    },
+    401,
+  );
 }

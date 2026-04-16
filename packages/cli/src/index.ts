@@ -5,7 +5,7 @@ import { deployFromGithub } from '@floom/runtime';
 const program = new Command();
 program
   .name('floom')
-  .description('Infra for agentic work')
+  .description('Production layer for AI apps that do real work')
   .version('0.1.0');
 
 program

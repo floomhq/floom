@@ -509,7 +509,7 @@ export function ProtocolPage() {
   useEffect(() => {
     document.title = 'The Floom Protocol';
     return () => {
-      document.title = 'Floom: infra for agentic work';
+      document.title = 'Floom: production layer for AI apps';
     };
   }, []);
 

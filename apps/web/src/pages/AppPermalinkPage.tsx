@@ -85,7 +85,7 @@ export function AppPermalinkPage() {
     document.head.appendChild(script);
 
     return () => {
-      document.title = 'Floom: infra for agentic work';
+      document.title = 'Floom: production layer for AI apps';
       const s = document.getElementById('jsonld-app');
       if (s) s.remove();
     };

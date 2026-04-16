@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { db } from '../db.js';
 import { resolveUserContext } from '../services/session.js';
 import { detectAppFromUrl, ingestAppFromUrl } from '../services/openapi-ingest.js';
+import { requireAuthenticatedInCloud } from '../lib/auth.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const hubRouter = new Hono();
@@ -73,6 +74,8 @@ hubRouter.post('/detect', async (c) => {
 
 hubRouter.post('/ingest', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   let body: unknown;
   try {
     body = await c.req.json();
@@ -217,14 +220,20 @@ hubRouter.get('/:slug/runs', async (c) => {
 
 hubRouter.delete('/:slug', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const slug = c.req.param('slug');
 
   const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
   if (!app) return c.json({ error: 'App not found' }, 404);
 
-  // Only the author can delete. Synthetic local can delete anything in
-  // OSS mode so a self-hoster can clean up manually.
-  const isOwner = app.author === ctx.user_id || ctx.workspace_id === 'local';
+  // Only the author can delete. The OSS "local self-hoster can delete
+  // anything" escape hatch is scoped to OSS mode only; in Cloud mode the
+  // global `workspace_id === 'local'` branch would let every anonymous
+  // caller delete every app (since unauthenticated callers fall back to
+  // the synthetic local workspace).
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
+  const isOwner = app.author === ctx.user_id || isOssLocal;
   if (!isOwner) {
     return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
   }

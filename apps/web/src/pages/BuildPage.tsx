@@ -254,7 +254,7 @@ export function BuildPage() {
                     {a.description && (
                       <span style={{ color: 'var(--muted)', fontFamily: 'Inter, sans-serif' }}>
                         {' '}
-                        — {a.description}
+                        : {a.description}
                       </span>
                     )}
                   </li>

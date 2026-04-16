@@ -1,6 +1,6 @@
 # The Floom Protocol
 
-Floom is infra for agentic work. This spec defines how a tool becomes a Floom app.
+Floom is the production layer for AI apps that do real work. This spec defines how a tool becomes a Floom app.
 
 ## One spec, every surface
 

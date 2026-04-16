@@ -533,7 +533,7 @@ function InstallTab({ session: _session }: { session: SessionMePayload | null })
         }}
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Step 1 — MCP URL
+          Step 1: MCP URL
         </div>
         <CopyRow value={mcpUrl} />
       </div>
@@ -609,7 +609,7 @@ function InstallTab({ session: _session }: { session: SessionMePayload | null })
             }}
           >
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Step 2 — Pick an app
+              Step 2: Pick an app
             </div>
             <div
               role="tablist"
@@ -655,7 +655,7 @@ function InstallTab({ session: _session }: { session: SessionMePayload | null })
             }}
           >
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Step 3 — Paste into config
+              Step 3: Paste into config
             </div>
             <CodeBlock
               key={activeApp.slug}
