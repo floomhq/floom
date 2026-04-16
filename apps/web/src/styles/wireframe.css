@@ -14,6 +14,8 @@
      so preview + landing render identically. Hex: #059669 (emerald-600). */
   --accent: #059669;
   --accent-soft: #ecfdf5;
+  --accent-hover: #047857;
+  --accent-border: #d1fae5;
   --terminal-bg: #0e0e0c;
   --terminal-ink: #f1efe9;
   --success: #1a7f37;

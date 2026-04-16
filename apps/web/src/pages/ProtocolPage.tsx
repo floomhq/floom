@@ -417,7 +417,7 @@ function ProxiedVsHosted() {
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>Proxied mode</span>
               <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)' }}>Wrap any existing API</p>
             </div>
-            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', background: 'rgba(99,102,241,0.1)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Live</span>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', background: 'var(--accent-soft)', color: 'var(--accent-hover)', border: '1px solid var(--accent-border)', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Live</span>
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
@@ -462,7 +462,7 @@ function ProxiedVsHosted() {
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>Hosted mode</span>
               <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--muted)' }}>Floom builds and runs your app</p>
             </div>
-            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', background: 'rgba(99,102,241,0.1)', color: '#6366f1', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Live</span>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', background: 'var(--accent-soft)', color: 'var(--accent-hover)', border: '1px solid var(--accent-border)', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Live</span>
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
