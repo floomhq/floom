@@ -164,6 +164,31 @@ When an app declares `secrets_needed` in its manifest, the tool's `inputSchema` 
 
 Values passed via `_auth` are used for that single call only and never persisted server-side. If no `_auth` is provided and the app needs secrets, the tool returns a structured `{error: "missing_secrets", required: [...], help: "..."}` response so the MCP client can prompt the user.
 
+### MCP admin surface (v0.4.0-mvp.5)
+
+A separate admin MCP server lives at `/mcp` (no slug suffix) and exposes four
+tools for gallery management and app creation:
+
+| Tool | Auth | Purpose |
+|---|---|---|
+| `ingest_app` | Cloud mode: signed-in only. OSS: open. | Create or update an app from an OpenAPI spec. Accepts either `openapi_url` (fetched server-side) or `openapi_spec` (inline JSON object). Returns `{slug, permalink, mcp_url, created}`. |
+| `list_apps` | Public | List active apps, optionally filtered by `category` (exact match) or `keyword` (case-insensitive substring on name + description). |
+| `search_apps` | Public | Natural-language search across the hub. Uses OpenAI embeddings when `OPENAI_API_KEY` is set; keyword fallback otherwise. |
+| `get_app` | Public | Fetch one app by slug, returning the full manifest including every action's input schema, outputs, and required secrets. |
+
+Point an MCP client at `http://localhost:3051/mcp` to discover and drive these tools. Example `tools/list` call:
+
+```bash
+curl -X POST http://localhost:3051/mcp \
+  -H "content-type: application/json" \
+  -H "accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+`ingest_app` mirrors the HTTP `/api/hub/ingest` auth rules. In Cloud mode the
+caller's Better Auth session is resolved before the ingest runs; anonymous
+calls receive a structured `{error: "auth_required"}` tool response.
+
 ### Any MCP client
 
 The endpoint uses the MCP Streamable HTTP transport. Required headers:

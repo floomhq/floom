@@ -112,9 +112,9 @@ app.get('/openapi.json', (c) =>
     openapi: '3.0.0',
     info: {
       title: 'Floom self-host API',
-      version: '0.4.0-mvp.4',
+      version: '0.4.0-mvp.5',
       description:
-        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI. v0.4.0-minimal.2 adds seven deterministic fast utility apps (uuid, password, hash, base64, json-format, jwt-decode, word-count) bundled as a proxied Node sidecar, and the data-driven store sort (featured DESC, avg_run_ms ASC). v0.4.0-minimal.5 (W4M gap close) wires /auth/update-user + /auth/change-password + /auth/delete-user into /me/settings, runs Better Auth migrations on boot in cloud mode, and passes the resolved session context into dispatchRun so per-user secrets resolve for authenticated runs. v0.4.0-minimal.6 (polish pass) adds DM Serif Display to hero + section headings, adds a 9-item sidebar on /me with coming-soon stubs for Folders, Saved results, Schedules, My tickets, Shared, and adds Add-to-ChatGPT + Add-to-Notion coming-soon modals on app permalinks. v0.4.0-mvp (UI strip) defers the workspace switcher and Composio connections UI to feature branches while keeping all backend routes live; see docs/DEFERRED-UI.md for the full re-enable path.',
+        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI. v0.4.0-minimal.2 adds seven deterministic fast utility apps (uuid, password, hash, base64, json-format, jwt-decode, word-count) bundled as a proxied Node sidecar, and the data-driven store sort (featured DESC, avg_run_ms ASC). v0.4.0-minimal.5 (W4M gap close) wires /auth/update-user + /auth/change-password + /auth/delete-user into /me/settings, runs Better Auth migrations on boot in cloud mode, and passes the resolved session context into dispatchRun so per-user secrets resolve for authenticated runs. v0.4.0-minimal.6 (polish pass) adds DM Serif Display to hero + section headings, adds a 9-item sidebar on /me with coming-soon stubs for Folders, Saved results, Schedules, My tickets, Shared, and adds Add-to-ChatGPT + Add-to-Notion coming-soon modals on app permalinks. v0.4.0-mvp (UI strip) defers the workspace switcher and Composio connections UI to feature branches while keeping all backend routes live; see docs/DEFERRED-UI.md for the full re-enable path. v0.4.0-mvp.5 adds the MCP admin surface at POST /mcp root exposing four tools (ingest_app, list_apps, search_apps, get_app) so MCP clients can create apps, browse the gallery, and fetch manifests without the web UI. ingest_app honors the same Cloud-mode session gate as /api/hub/ingest and accepts either openapi_url or inline openapi_spec JSON.',
     },
     paths: {
       '/api/health': {
@@ -432,6 +432,14 @@ app.get('/openapi.json', (c) =>
             },
           },
           responses: { '200': { description: 'run_id + status' } },
+        },
+      },
+      '/mcp': {
+        post: {
+          summary: 'MCP admin surface (ingest_app, list_apps, search_apps, get_app)',
+          description:
+            'Four admin tools for gallery management and app creation. ingest_app accepts openapi_url or inline openapi_spec; list_apps supports category + keyword filters; search_apps runs semantic search (keyword fallback); get_app returns the full manifest for a slug. ingest_app requires authentication in Cloud mode; read tools are public.',
+          responses: { '200': { description: 'JSON-RPC 2.0 response' } },
         },
       },
       '/mcp/app/{slug}': {

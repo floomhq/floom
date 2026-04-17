@@ -1084,7 +1084,32 @@ export async function ingestAppFromUrl(args: {
   }
 
   const spec = await fetchSpec(openapi_url);
-  const derefed = await dereferenceSpec(spec);
+  return ingestAppFromSpec({ ...args, spec });
+}
+
+/**
+ * Persist an app from an already-fetched OpenAPI spec object. Used by the
+ * MCP admin `ingest_app` tool when callers submit inline JSON instead of a
+ * URL, and internally by `ingestAppFromUrl` after fetching. The spec is
+ * dereferenced, normalized into a Floom manifest, and upserted.
+ *
+ * `openapi_url` is optional — it's cached on the app row for the runtime
+ * proxy to resolve relative paths. When callers submit inline JSON without
+ * a URL, the spec must declare `servers[]` (OpenAPI 3) or a Swagger 2 `host`
+ * for `resolveBaseUrl` to succeed; otherwise runtime calls will fail.
+ */
+export async function ingestAppFromSpec(args: {
+  spec: OpenApiSpec;
+  openapi_url?: string;
+  name?: string;
+  description?: string;
+  slug?: string;
+  category?: string;
+  workspace_id: string;
+  author_user_id: string;
+}): Promise<{ slug: string; name: string; created: boolean }> {
+  const openapi_url = args.openapi_url || '';
+  const derefed = await dereferenceSpec(args.spec);
   const specCached = JSON.stringify(derefed);
   const info = (derefed as { info?: { title?: string; description?: string } })
     .info || {};
@@ -1104,7 +1129,7 @@ export async function ingestAppFromUrl(args: {
   const appSpec: OpenApiAppSpec = {
     slug,
     type: 'proxied',
-    openapi_spec_url: openapi_url,
+    openapi_spec_url: openapi_url || undefined,
     display_name: name,
     description,
     category: args.category,
@@ -1112,7 +1137,7 @@ export async function ingestAppFromUrl(args: {
   };
 
   const manifest = specToManifest(derefed, appSpec, deriveSecretsFromSpec(derefed));
-  const resolvedBaseUrl = resolveBaseUrl(derefed, appSpec, openapi_url);
+  const resolvedBaseUrl = resolveBaseUrl(derefed, appSpec, openapi_url || undefined);
 
   if (existing) {
     db.prepare(
@@ -1130,7 +1155,7 @@ export async function ingestAppFromUrl(args: {
       args.category || null,
       resolvedBaseUrl || null,
       'none',
-      openapi_url,
+      openapi_url || null,
       specCached,
       args.workspace_id,
       args.author_user_id,
@@ -1162,7 +1187,7 @@ export async function ingestAppFromUrl(args: {
     args.category || null,
     args.author_user_id,
     resolvedBaseUrl || null,
-    openapi_url,
+    openapi_url || null,
     specCached,
     args.workspace_id,
   );

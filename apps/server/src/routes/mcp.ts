@@ -1,5 +1,11 @@
-// MCP per-app endpoints. /mcp/app/:slug exposes that app's actions as MCP tools.
-// Trimmed port of the marketplace's mcp.ts — only the per-app path remains.
+// MCP endpoints for Floom.
+//   /mcp           — admin surface (ingest_app, list_apps, search_apps, get_app)
+//   /mcp/search    — gallery-wide semantic search
+//   /mcp/app/:slug — per-app MCP (one tool per action)
+//
+// Registration order matters: `/` (admin) is handled ahead of
+// `/app/:slug` below so Hono does not swallow the root path as a slug.
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -10,6 +16,12 @@ import { validateInputs, ManifestError } from '../services/manifest.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { createJob } from '../services/jobs.js';
 import { pickApps } from '../services/embeddings.js';
+import {
+  ingestAppFromSpec,
+  ingestAppFromUrl,
+} from '../services/openapi-ingest.js';
+import { resolveUserContext } from '../services/session.js';
+import { isCloudMode } from '../lib/better-auth.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import type {
   ActionSpec,
@@ -17,6 +29,7 @@ import type {
   InputSpec,
   NormalizedManifest,
   RunRecord,
+  SessionContext,
 } from '../types.js';
 
 export const mcpRouter = new Hono();
@@ -274,6 +287,369 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
   return server;
 }
 
+// ---------------------------------------------------------------------
+// Admin MCP server (/mcp root)
+//
+// Exposes four tools for gallery + app-creation workflows. `ingest_app`
+// is the only authenticated call — it mirrors the HTTP `/api/hub/ingest`
+// session rules so one API surface covers both MCP clients and the web
+// UI. The three read tools are public, matching `/api/hub` + `/mcp/search`.
+// ---------------------------------------------------------------------
+
+interface AdminToolContext {
+  ctx: SessionContext;
+}
+
+function serializeHubApp(row: AppRecord, manifest: NormalizedManifest | null) {
+  return {
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    category: row.category,
+    author: row.author,
+    icon: row.icon,
+    actions: manifest ? Object.keys(manifest.actions) : [],
+    runtime: manifest?.runtime ?? 'python',
+    secrets_needed: manifest?.secrets_needed ?? [],
+    featured: row.featured === 1,
+    avg_run_ms: row.avg_run_ms,
+    created_at: row.created_at,
+    permalink: `${PUBLIC_URL}/p/${row.slug}`,
+    mcp_url: `${PUBLIC_URL}/mcp/app/${row.slug}`,
+  };
+}
+
+function safeParseManifest(raw: string): NormalizedManifest | null {
+  try {
+    return JSON.parse(raw) as NormalizedManifest;
+  } catch {
+    return null;
+  }
+}
+
+function createAdminMcpServer({ ctx }: AdminToolContext): McpServer {
+  const server = new McpServer({
+    name: 'floom-admin',
+    version: '0.4.0',
+  });
+
+  // ---- ingest_app -----------------------------------------------------
+  server.registerTool(
+    'ingest_app',
+    {
+      title: 'Ingest App from OpenAPI',
+      description:
+        'Create or update a Floom app from an OpenAPI spec. Provide either `openapi_url` (fetched server-side) or `openapi_spec` (inline JSON object). Overrides: name, description, slug, category. Requires authentication in Cloud mode. Returns the persisted slug + permalink.',
+      inputSchema: {
+        openapi_url: z
+          .string()
+          .url()
+          .max(2048)
+          .optional()
+          .describe(
+            'Publicly reachable OpenAPI 3.x or Swagger 2.0 spec URL. Example: https://petstore3.swagger.io/api/v3/openapi.json',
+          ),
+        openapi_spec: z
+          .record(z.unknown())
+          .optional()
+          .describe(
+            'Inline OpenAPI spec object (alternative to openapi_url). Must declare servers[].url or swagger host for runtime calls to resolve.',
+          ),
+        name: z
+          .string()
+          .min(1)
+          .max(120)
+          .optional()
+          .describe('Display name override. Defaults to spec.info.title.'),
+        description: z
+          .string()
+          .max(5000)
+          .optional()
+          .describe('Description override. Defaults to spec.info.description.'),
+        slug: z
+          .string()
+          .min(1)
+          .max(48)
+          .regex(/^[a-z0-9][a-z0-9-]*$/)
+          .optional()
+          .describe(
+            'URL slug override. Lowercase alphanumerics and dashes only. Defaults to slugify(name).',
+          ),
+        category: z
+          .string()
+          .max(48)
+          .optional()
+          .describe('Category tag (e.g. "productivity", "data", "ai").'),
+      },
+    },
+    async (args) => {
+      // Auth gate: mirror /api/hub/ingest. In Cloud mode anonymous callers
+      // cannot create apps; in OSS mode every caller is the synthetic local
+      // user and the call always succeeds.
+      if (isCloudMode() && !ctx.is_authenticated) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: 'auth_required',
+                  message:
+                    'Authentication required. Sign in (or supply a valid session cookie / bearer token) and retry.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      const openapi_url = typeof args.openapi_url === 'string' ? args.openapi_url : undefined;
+      const openapi_spec = args.openapi_spec as Record<string, unknown> | undefined;
+      if (!openapi_url && !openapi_spec) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: 'invalid_input',
+                  message: 'Supply either openapi_url or openapi_spec.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      try {
+        const common = {
+          name: args.name as string | undefined,
+          description: args.description as string | undefined,
+          slug: args.slug as string | undefined,
+          category: args.category as string | undefined,
+          workspace_id: ctx.workspace_id,
+          author_user_id: ctx.user_id,
+        };
+        let result: { slug: string; name: string; created: boolean };
+        if (openapi_url) {
+          // Prefer URL path — ingestAppFromUrl fetches + dereferences.
+          result = await ingestAppFromUrl({ ...common, openapi_url });
+        } else {
+          // Inline spec path. Accept any JSON object and let
+          // dereferenceSpec + specToManifest validate shape downstream.
+          result = await ingestAppFromSpec({
+            ...common,
+            spec: openapi_spec as Parameters<typeof ingestAppFromSpec>[0]['spec'],
+          });
+        }
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  ok: true,
+                  slug: result.slug,
+                  name: result.name,
+                  created: result.created,
+                  permalink: `${PUBLIC_URL}/p/${result.slug}`,
+                  mcp_url: `${PUBLIC_URL}/mcp/app/${result.slug}`,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: 'ingest_failed',
+                  message: (err as Error).message || 'Ingest failed',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // ---- list_apps ------------------------------------------------------
+  server.registerTool(
+    'list_apps',
+    {
+      title: 'List Apps',
+      description:
+        'List every active app in the Floom hub. Filter by exact category, optionally filter by case-insensitive keyword (matches name + description). Returns slug, name, description, actions, permalink, and mcp_url.',
+      inputSchema: {
+        category: z
+          .string()
+          .max(48)
+          .optional()
+          .describe('Exact category filter (e.g. "productivity", "data").'),
+        keyword: z
+          .string()
+          .max(120)
+          .optional()
+          .describe('Case-insensitive substring match on name + description.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('Max results. Defaults to 50.'),
+      },
+    },
+    async ({ category, keyword, limit }) => {
+      const lim = typeof limit === 'number' ? limit : 50;
+      let sql =
+        "SELECT * FROM apps WHERE status = 'active'" +
+        (category ? ' AND category = ?' : '') +
+        ' ORDER BY featured DESC, name ASC';
+      const rows = (category
+        ? db.prepare(sql).all(category)
+        : db.prepare(sql).all()) as AppRecord[];
+      const needle = typeof keyword === 'string' ? keyword.toLowerCase() : null;
+      const filtered = needle
+        ? rows.filter((r) =>
+            `${r.name} ${r.description}`.toLowerCase().includes(needle),
+          )
+        : rows;
+      const results = filtered.slice(0, lim).map((row) =>
+        serializeHubApp(row, safeParseManifest(row.manifest)),
+      );
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              { total: filtered.length, returned: results.length, apps: results },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // ---- search_apps (admin copy) --------------------------------------
+  server.registerTool(
+    'search_apps',
+    {
+      title: 'Search Apps',
+      description:
+        'Natural-language search across the Floom hub. Uses OpenAI embeddings when OPENAI_API_KEY is set on the server; falls back to keyword scoring otherwise. Returns the top N matches with slug, name, confidence (0..1), and mcp_url.',
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe(
+            'Free-form description of what you need. Example: "summarize a YouTube video" or "generate a QR code".',
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe('Max results. Defaults to 5.'),
+      },
+    },
+    async ({ query, limit }) => {
+      const results = await pickApps(query, limit ?? 5);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              results.map((r) => ({
+                ...r,
+                permalink: `${PUBLIC_URL}/p/${r.slug}`,
+                mcp_url: `${PUBLIC_URL}/mcp/app/${r.slug}`,
+              })),
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  // ---- get_app --------------------------------------------------------
+  server.registerTool(
+    'get_app',
+    {
+      title: 'Get App',
+      description:
+        'Fetch a single app by slug. Returns the full manifest including every action with its input schema, outputs, and required secrets.',
+      inputSchema: {
+        slug: z
+          .string()
+          .min(1)
+          .max(48)
+          .regex(/^[a-z0-9][a-z0-9-]*$/)
+          .describe('The app slug (e.g. "petstore", "qr-code").'),
+      },
+    },
+    async ({ slug }) => {
+      const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
+        | AppRecord
+        | undefined;
+      if (!row) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                { error: 'not_found', slug, message: `App not found: ${slug}` },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+      const manifest = safeParseManifest(row.manifest);
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              {
+                ...serializeHubApp(row, manifest),
+                manifest,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  return server;
+}
+
 function createSearchMcpServer(): McpServer {
   const server = new McpServer({
     name: 'floom-chat-search',
@@ -319,6 +695,15 @@ async function handleMcp(server: McpServer, rawRequest: Request): Promise<Respon
   await server.connect(transport);
   return transport.handleRequest(rawRequest);
 }
+
+// /mcp — admin surface (ingest_app, list_apps, search_apps, get_app).
+// Registered ahead of /app/:slug so Hono does not route a bare /mcp to the
+// per-app handler as the empty slug "".
+mcpRouter.all('/', async (c: Context) => {
+  const ctx = await resolveUserContext(c);
+  const server = createAdminMcpServer({ ctx });
+  return handleMcp(server, c.req.raw);
+});
 
 // /mcp/search — gallery-wide search
 mcpRouter.all('/search', async (c) => {
