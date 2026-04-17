@@ -5,6 +5,7 @@ import { CreatorHeroPage } from './pages/CreatorHeroPage';
 import { AppsDirectoryPage } from './pages/AppsDirectoryPage';
 import { AppPermalinkPage } from './pages/AppPermalinkPage';
 import { ProtocolPage } from './pages/ProtocolPage';
+import { DocsPage } from './pages/DocsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { LoginPage } from './pages/LoginPage';
 import { MePage } from './pages/MePage';
@@ -65,7 +66,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/browse" element={<Navigate to="/apps" replace />} />
         <Route path="/about" element={<Navigate to="/" replace />} />
         <Route path="/deploy" element={<Navigate to="/build" replace />} />
-        <Route path="/docs" element={<Navigate to="/protocol" replace />} />
+        {/* /docs is now a real docs experience. Default to getting-started.
+            /protocol stays live as the classic protocol spec page. */}
+        <Route path="/docs" element={<DocsPage />} />
+        <Route path="/docs/:slug" element={<DocsPage />} />
         <Route path="/self-host" element={<Navigate to="/#self-host" replace />} />
         <Route path="/pricing" element={<Navigate to="/" replace />} />
         <Route path="/store" element={<Navigate to="/apps" replace />} />

@@ -398,6 +398,44 @@ body {
   }
 }
 
+/* ── /docs responsive breakpoints ────────────────────────────────── */
+@media (max-width: 1024px) {
+  .docs-grid {
+    grid-template-columns: 220px minmax(0, 1fr) !important;
+    gap: 28px !important;
+  }
+  .docs-rail {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .docs-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+    padding: 0 14px 48px !important;
+  }
+  .docs-nav {
+    position: static !important;
+    padding-top: 8px !important;
+    display: none;
+  }
+  .docs-nav.docs-nav-open {
+    display: block;
+    padding: 14px !important;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-bottom: 8px;
+  }
+  .docs-nav-toggle {
+    display: inline-flex !important;
+  }
+  .docs-content {
+    padding-top: 12px !important;
+  }
+}
+
 /* Async job queue UI (v0.3.0). Used by components/runner/JobProgress.tsx. */
 @keyframes floom-spin {
   from { transform: rotate(0deg); }
