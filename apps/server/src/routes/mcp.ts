@@ -23,6 +23,7 @@ import {
 import { resolveUserContext } from '../services/session.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { checkAppVisibility } from '../lib/auth.js';
+import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
 import type {
   ActionSpec,
   AppRecord,
@@ -298,6 +299,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
 
 interface AdminToolContext {
   ctx: SessionContext;
+  ip: string;
 }
 
 function serializeHubApp(row: AppRecord, manifest: NormalizedManifest | null) {
@@ -327,7 +329,7 @@ function safeParseManifest(raw: string): NormalizedManifest | null {
   }
 }
 
-function createAdminMcpServer({ ctx }: AdminToolContext): McpServer {
+function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
   const server = new McpServer({
     name: 'floom-admin',
     version: '0.4.0',
@@ -383,6 +385,34 @@ function createAdminMcpServer({ ctx }: AdminToolContext): McpServer {
       },
     },
     async (args) => {
+      // Per-user/IP rate limit on ingest_app. Stops an MCP client from
+      // scripting dozens of /mcp ingests per minute. Check BEFORE the
+      // auth gate so we don't leak "anonymous users get 0 runs" vs "are
+      // blocked for other reasons" through timing — 429 is a distinct
+      // failure mode.
+      const limit = checkMcpIngestLimit(ctx, ip);
+      if (!limit.allowed) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: 'rate_limit_exceeded',
+                  scope: 'mcp_ingest',
+                  retry_after_seconds: limit.retryAfterSec,
+                  message:
+                    'ingest_app is limited to 10 calls per user per day. Retry after the window resets.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
       // Auth gate: mirror /api/hub/ingest. In Cloud mode anonymous callers
       // cannot create apps; in OSS mode every caller is the synthetic local
       // user and the call always succeeds.
@@ -701,7 +731,8 @@ async function handleMcp(server: McpServer, rawRequest: Request): Promise<Respon
 // per-app handler as the empty slug "".
 mcpRouter.all('/', async (c: Context) => {
   const ctx = await resolveUserContext(c);
-  const server = createAdminMcpServer({ ctx });
+  const ip = extractIp(c);
+  const server = createAdminMcpServer({ ctx, ip });
   return handleMcp(server, c.req.raw);
 });
 
