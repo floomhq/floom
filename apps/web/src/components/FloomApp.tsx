@@ -1,8 +1,16 @@
 import { useState, useCallback } from 'react';
-import type { AppDetail, ActionSpec, InputSpec, PickResult, RunRecord } from '../lib/types';
+import type {
+  AppDetail,
+  ActionSpec,
+  InputSpec,
+  PickResult,
+  RunRecord,
+  JobRecord,
+} from '../lib/types';
 import { AppIcon } from './AppIcon';
 import { StreamingTerminal } from './runner/StreamingTerminal';
 import { OutputPanel } from './runner/OutputPanel';
+import { JobProgress } from './runner/JobProgress';
 import { Sidebar } from './Sidebar';
 import * as api from '../api/client';
 
@@ -21,16 +29,20 @@ export interface FloomAppProps {
   theme?: 'light' | 'dark';
 }
 
-type Phase = 'inputs' | 'streaming' | 'done' | 'error';
+type Phase = 'inputs' | 'streaming' | 'job' | 'done' | 'error';
 
 interface RunState {
   phase: Phase;
   inputs: Record<string, unknown>;
   action: string;
   actionSpec: ActionSpec;
-  // streaming
+  // streaming (sync runs)
   runId?: string;
   logs?: string[];
+  // job (async runs, v0.3.0 job queue)
+  jobId?: string;
+  job?: JobRecord | null;
+  cancelPoll?: () => void;
   // done
   run?: RunRecord;
   // error
@@ -98,6 +110,66 @@ export function FloomApp({
     if (state.phase !== 'inputs') return;
     const { inputs, action } = state;
 
+    // v0.3.0 async job queue: apps with `is_async = true` route through
+    // POST /api/:slug/jobs and poll GET /api/:slug/jobs/:id until terminal.
+    if (app.is_async) {
+      try {
+        const { job_id } = await api.startJob(app.slug, inputs, action);
+        let stopPoll: (() => void) | null = null;
+        setState((s) => ({
+          ...s,
+          phase: 'job',
+          jobId: job_id,
+          job: null,
+        }));
+
+        stopPoll = api.pollJob(app.slug, job_id, {
+          onUpdate: (job) => {
+            setState((s) => {
+              if (s.phase !== 'job' || s.jobId !== job_id) return s;
+              return { ...s, job };
+            });
+          },
+          onDone: (job) => {
+            const run = jobToRunRecord(job, action);
+            setState((s) => ({
+              ...s,
+              phase: 'done',
+              job,
+              run,
+            }));
+            if (typeof window !== 'undefined' && window.history?.replaceState) {
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.set('job', job.id);
+                window.history.replaceState(null, '', url.toString());
+              } catch {
+                /* ignore */
+              }
+            }
+            if (onResult) {
+              onResult({
+                runId: job.id,
+                output: job.output ? JSON.stringify(job.output) : '',
+                exitCode: job.status === 'succeeded' ? 0 : 1,
+              });
+            }
+          },
+          onError: () => {
+            // transient — pollJob keeps ticking until stopped
+          },
+        });
+
+        setState((s) => (s.phase === 'job' && s.jobId === job_id
+          ? { ...s, cancelPoll: stopPoll! }
+          : s));
+      } catch (err) {
+        const e = err as Error;
+        setState((s) => ({ ...s, phase: 'error', errorMessage: e.message || 'Could not enqueue job' }));
+      }
+      return;
+    }
+
     try {
       const { run_id } = await api.startRun(app.slug, inputs, undefined, action);
       setState((s) => ({
@@ -153,7 +225,7 @@ export function FloomApp({
         errorMessage: e.message || 'Run failed to start',
       }));
     }
-  }, [state, app.slug, onResult]);
+  }, [state, app.slug, app.is_async, onResult]);
 
   const handleCancel = useCallback(() => {
     setState((s) => ({
@@ -162,6 +234,22 @@ export function FloomApp({
       errorMessage: 'Run cancelled.',
     }));
   }, []);
+
+  const handleCancelJob = useCallback(async () => {
+    const s = state;
+    if (s.phase !== 'job' || !s.jobId) return;
+    try {
+      s.cancelPoll?.();
+      await api.cancelJob(app.slug, s.jobId);
+    } catch {
+      /* ignore — fall through to local cancelled state */
+    }
+    setState((cur) => ({
+      ...cur,
+      phase: 'error',
+      errorMessage: 'Job cancelled.',
+    }));
+  }, [state, app.slug]);
 
   const handleIterate = useCallback((prompt: string) => {
     if (!defaultEntry) return;
@@ -206,6 +294,14 @@ export function FloomApp({
           app={appAsPickResult}
           lines={state.logs ?? []}
           onCancel={handleCancel}
+        />
+      )}
+
+      {state.phase === 'job' && (
+        <JobProgress
+          app={appAsPickResult}
+          job={state.job ?? null}
+          onCancel={handleCancelJob}
         />
       )}
 
@@ -478,4 +574,45 @@ function InputField({
       />
     </div>
   );
+}
+
+// ── Async job adapter ──────────────────────────────────────────────────────
+
+/**
+ * Convert a terminal JobRecord (v0.3.0 async job queue) into a RunRecord so
+ * the existing OutputPanel can render succeeded/failed jobs without a
+ * parallel UI surface. The job queue reuses the runs table under the hood,
+ * but the job poll endpoint returns a Job shape; this adapter preserves the
+ * 5 output-card improvements (CopyButton, markdown-primary, HTML download,
+ * share-URL, error hints) without duplicating them.
+ */
+function jobToRunRecord(job: JobRecord, action: string): RunRecord {
+  const ok = job.status === 'succeeded';
+  const startedAt = job.started_at || job.created_at;
+  const finishedAt = job.finished_at;
+  const duration =
+    startedAt && finishedAt
+      ? new Date(finishedAt).getTime() - new Date(startedAt).getTime()
+      : null;
+  const errorText =
+    job.error == null
+      ? null
+      : typeof job.error === 'string'
+        ? job.error
+        : JSON.stringify(job.error);
+  return {
+    id: job.run_id || job.id,
+    app_id: job.app_id,
+    thread_id: null,
+    action,
+    inputs: job.input,
+    outputs: job.output,
+    status: ok ? 'success' : job.status === 'cancelled' ? 'error' : 'error',
+    error: errorText,
+    error_type: ok ? null : job.status === 'cancelled' ? 'cancelled' : 'runtime_error',
+    duration_ms: duration,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    logs: '',
+  };
 }
