@@ -21,5 +21,16 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     chunkSizeWarningLimit: 600,
+    // Split React/vendor into its own long-cached chunk so navigating
+    // between routes (which each become their own lazy chunk) doesn't
+    // redownload React. Landing TTI drops; cross-route navigation gets
+    // warm-cache vendor immediately.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
   },
 });

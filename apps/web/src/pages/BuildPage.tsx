@@ -533,7 +533,7 @@ export function BuildPage() {
                     color: 'var(--muted)',
                     fontFamily: 'inherit',
                     resize: 'none',
-                    opacity: 0.6,
+                    opacity: 0.85,
                     boxSizing: 'border-box',
                   }}
                 />
@@ -552,7 +552,7 @@ export function BuildPage() {
                     display: 'grid',
                     gridTemplateColumns: 'repeat(4, 1fr)',
                     gap: 6,
-                    opacity: 0.6,
+                    opacity: 0.85,
                   }}
                 >
                   {['Gmail', 'Stripe', 'Notion', 'Sheets', 'Airtable', 'Slack', 'Shopify', 'More'].map(
@@ -592,7 +592,7 @@ export function BuildPage() {
                 style={{
                   display: 'flex',
                   gap: 8,
-                  opacity: 0.6,
+                  opacity: 0.85,
                   flexWrap: 'wrap',
                 }}
               >
