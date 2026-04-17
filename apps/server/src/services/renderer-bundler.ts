@@ -81,6 +81,16 @@ export function clearBundleIndexForTests(): void {
 }
 
 /**
+ * Drop a single slug from the in-memory bundle index. Used by DELETE
+ * /api/hub/:slug/renderer so a subsequent GET /renderer/:slug/bundle.js
+ * correctly 404s instead of serving a stale cached BundleResult. The
+ * on-disk files are the source of truth; this only invalidates the cache.
+ */
+export function forgetBundle(slug: string): void {
+  bundleIndex.delete(slug);
+}
+
+/**
  * Hash the raw source bytes to enable idempotent re-builds.
  */
 export function hashSource(source: string): string {

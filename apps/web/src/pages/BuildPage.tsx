@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import { CustomRendererPanel } from '../components/CustomRendererPanel';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import type { DetectedApp } from '../lib/types';
@@ -196,7 +197,7 @@ export function BuildPage() {
     setStep('publishing');
     setError(null);
     try {
-      const result = await api.ingestApp({
+      await api.ingestApp({
         openapi_url: detected.openapi_spec_url,
         name,
         slug,
@@ -209,7 +210,9 @@ export function BuildPage() {
         /* ignore */
       }
       setStep('done');
-      setTimeout(() => navigate(`/p/${result.slug}`), 800);
+      // Redirect removed on 2026-04-17: give creators a chance to upload
+      // a custom renderer (W2.2) before heading to the permalink. The
+      // "Open app" button on the done step handles navigation manually.
     } catch (err) {
       setStep('review');
       setError((err as Error).message || 'Publish failed.');
@@ -887,22 +890,61 @@ export function BuildPage() {
         )}
 
         {step === 'done' && (
-          <div
-            data-testid="build-step-done"
-            style={{
-              padding: 32,
-              textAlign: 'center',
-              background: '#e6f4ea',
-              border: '1px solid #b5dcc4',
-              borderRadius: 12,
-            }}
-          >
-            <div style={{ color: '#1a7f37', fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-              Published
+          <div data-testid="build-step-done">
+            <div
+              style={{
+                padding: 24,
+                textAlign: 'center',
+                background: '#e6f4ea',
+                border: '1px solid #b5dcc4',
+                borderRadius: 12,
+                marginBottom: 20,
+              }}
+            >
+              <div style={{ color: '#1a7f37', fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+                Published
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 14px' }}>
+                Your app is live at <Link to={`/p/${slug}`}>/p/{slug}</Link>. You can
+                optionally ship a custom React renderer below, or skip and head straight
+                to the run surface.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/p/${slug}`)}
+                  className="btn-primary"
+                  data-testid="build-open-app"
+                  style={{ padding: '9px 16px', fontSize: 13 }}
+                >
+                  Open app
+                </button>
+                <Link
+                  to={`/creator/${slug}`}
+                  className="btn-ghost"
+                  style={{
+                    padding: '9px 14px',
+                    fontSize: 13,
+                    border: '1px solid var(--line)',
+                    borderRadius: 8,
+                    textDecoration: 'none',
+                  }}
+                >
+                  View in creator dashboard
+                </Link>
+              </div>
             </div>
-            <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
-              Redirecting to /p/{slug}...
-            </p>
+
+            <div
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 12,
+                padding: 20,
+              }}
+            >
+              <CustomRendererPanel slug={slug} />
+            </div>
           </div>
         )}
       </div>

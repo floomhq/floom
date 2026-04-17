@@ -104,6 +104,20 @@ export interface AppDetail extends HubApp {
   is_async?: boolean;
   async_mode?: 'poll' | 'webhook' | null;
   timeout_ms?: number | null;
+  /**
+   * W2.2 custom renderer. Populated when the creator has uploaded a
+   * TSX renderer (see POST /api/hub/:slug/renderer). When present, the
+   * web client lazy-loads /renderer/:slug/bundle.js and mounts its
+   * default export instead of the default OutputPanel.
+   */
+  renderer?: RendererMeta | null;
+}
+
+export interface RendererMeta {
+  source_hash: string;
+  bytes: number;
+  output_shape: string;
+  compiled_at: string;
 }
 
 // ---------- v0.3.0 async job queue ----------
