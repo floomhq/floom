@@ -28,4 +28,8 @@
   <url><loc>https://floom.dev/p/openkeyword</loc><priority>0.6</priority></url>
   <url><loc>https://floom.dev/p/openpaper</loc><priority>0.6</priority></url>
   <url><loc>https://floom.dev/p/openslides</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/imprint</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://floom.dev/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://floom.dev/terms</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://floom.dev/cookies</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
 </urlset>
