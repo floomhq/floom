@@ -1,4 +1,27 @@
+import { useState } from 'react';
 import type { PickResult, RunRecord } from '../../lib/types';
+
+function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        } catch {
+          /* clipboard blocked; noop */
+        }
+      }}
+      className="output-copy-btn"
+      aria-label={copied ? 'Copied' : label}
+    >
+      {copied ? 'Copied' : label}
+    </button>
+  );
+}
 
 interface Props {
   app: PickResult;
@@ -85,7 +108,10 @@ function OutputRenderer({ outputs }: { outputs: unknown }) {
   // Markdown field
   if (typeof o.markdown === 'string') {
     return (
-      <div className="app-expanded-card" style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>
+      <div className="app-expanded-card" style={{ position: 'relative', whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>
+        <div style={{ position: 'absolute', top: 12, right: 12 }}>
+          <CopyButton value={o.markdown as string} label="Copy markdown" />
+        </div>
         {o.markdown}
       </div>
     );
@@ -104,10 +130,12 @@ function OutputRenderer({ outputs }: { outputs: unknown }) {
   }
 
   // Fallback: pretty JSON
+  const json = JSON.stringify(outputs, null, 2);
   return (
     <div
       className="app-expanded-card"
       style={{
+        position: 'relative',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 12,
         whiteSpace: 'pre-wrap',
@@ -115,7 +143,10 @@ function OutputRenderer({ outputs }: { outputs: unknown }) {
         overflow: 'auto',
       }}
     >
-      {JSON.stringify(outputs, null, 2)}
+      <div style={{ position: 'sticky', top: 0, display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+        <CopyButton value={json} label="Copy JSON" />
+      </div>
+      {json}
     </div>
   );
 }
