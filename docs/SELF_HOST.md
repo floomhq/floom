@@ -56,6 +56,11 @@ Open `http://localhost:3051` in your browser or point an MCP client at `http://l
 | `FLOOM_MAX_ACTIONS_PER_APP` | `200` | Hard cap on how many operations one OpenAPI spec can expose. Set to `0` for unlimited (needed for Stripe, GitHub, etc.) |
 | `FLOOM_JOB_POLL_MS` | `1000` | Interval in ms at which the background worker polls the async job queue. Lower = faster pickup, more CPU |
 | `FLOOM_DISABLE_JOB_WORKER` | — | When set to `true`, the background worker does not start. Used by tests that drive the worker deterministically |
+| `FLOOM_RATE_LIMIT_DISABLED` | — | When `true`, skips all rate limits (tests, admin tooling). Otherwise every run endpoint enforces the caps below |
+| `FLOOM_RATE_LIMIT_IP_PER_HOUR` | `20` | Max runs per IP per hour for anonymous callers across all apps |
+| `FLOOM_RATE_LIMIT_USER_PER_HOUR` | `200` | Max runs per authenticated user per hour across all apps |
+| `FLOOM_RATE_LIMIT_APP_PER_HOUR` | `50` | Max runs per (IP, app) pair per hour. Prevents one hot app from draining a visitor's IP budget |
+| `FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY` | `10` | Max MCP `ingest_app` calls per user per day (anon: per IP). Stops scripted gallery spam |
 | `OPENAI_API_KEY` | — | Optional. Enables embedding-based app search. Without it, search falls back to keyword matching |
 | `COMPOSIO_API_KEY` | — | Optional. API key from [composio.dev](https://composio.dev) (free tier: 20K calls/mo). Enables the `/build` Connect-a-tool ramp via `/api/connections`. Without it, connection routes return `400 code=composio_config_missing`. See docs/connections.md |
 | `COMPOSIO_AUTH_CONFIG_<PROVIDER>` | — | Per-toolkit Composio auth config id (e.g. `COMPOSIO_AUTH_CONFIG_GMAIL=ac_xxx`). One per provider you want surfaced on `/build`. Create each in the Composio dashboard with the Floom callback URL |
@@ -217,6 +222,42 @@ Content-Type: application/json
 ```
 
 Returns `{ run_id, status }` immediately. Poll `GET /api/run/:run_id` for the result, or subscribe to `GET /api/run/:run_id/stream` for live logs via SSE.
+
+## Rate limits
+
+Floom enforces per-IP, per-user, and per-(IP, app) caps on every run endpoint
+so a single hostile caller cannot drain a creator's upstream budget:
+
+| Endpoint | Anon (per IP) | Authed (per user) | Per (IP, app) |
+|----------|---------------|-------------------|----------------|
+| `POST /api/run` | 20/hr | 200/hr | 50/hr |
+| `POST /api/:slug/run` | 20/hr | 200/hr | 50/hr |
+| `POST /api/:slug/jobs` | 20/hr | 200/hr | 50/hr |
+| `POST /mcp/app/:slug` | 20/hr | 200/hr | 50/hr |
+| `POST /mcp` — `ingest_app` tool | 10/day (per IP) | 10/day (per user) | — |
+
+When a cap is exceeded the response is HTTP `429` with a `Retry-After` header
+and a JSON body:
+
+```json
+{
+  "error": "rate_limit_exceeded",
+  "retry_after_seconds": 2831,
+  "scope": "ip"
+}
+```
+
+`scope` is one of `ip`, `user`, `app`, or `mcp_ingest`.
+
+Override defaults via `FLOOM_RATE_LIMIT_IP_PER_HOUR`,
+`FLOOM_RATE_LIMIT_USER_PER_HOUR`, `FLOOM_RATE_LIMIT_APP_PER_HOUR`, and
+`FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY`. Set `FLOOM_RATE_LIMIT_DISABLED=true`
+to skip every check (tests, admin scripts). Reads like `GET /api/hub`,
+`GET /api/health`, `GET /api/me/runs`, and `tools/list` are never throttled.
+
+Storage is in-memory per container; rolling counters reset on restart. For
+multi-replica production deployments the limiter swaps out to Redis without
+touching route handlers (see `apps/server/src/lib/rate-limit.ts`).
 
 ## Long-running apps (async job queue, v0.3.0+)
 
