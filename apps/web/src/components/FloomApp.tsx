@@ -122,6 +122,17 @@ export function FloomApp({
             run,
           }));
           close();
+          // Mirror run id into the URL so users can share / bookmark the
+          // result. replaceState keeps history clean across refine rounds.
+          if (typeof window !== 'undefined' && window.history?.replaceState) {
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('run', run.id);
+              window.history.replaceState(null, '', url.toString());
+            } catch {
+              /* progressive enhancement; ignore if URL update fails */
+            }
+          }
           if (onResult) {
             onResult({
               runId: run.id,
