@@ -10,11 +10,12 @@
   --ink: #0e0e0c;
   --muted: #585550;
   --line: #e8e6e0;
-  /* Brand accent: Floom green. Matches landing.floom.dev's --accent
-     so preview + landing render identically. Hex: #059669 (emerald-600). */
-  --accent: #059669;
+  /* Brand accent: Floom green. Shifted to emerald-700 (#047857) so white
+     text on accent hits 5.48:1 contrast (WCAG AA). emerald-600 tested at
+     3.77:1 and failed Lighthouse color-contrast. */
+  --accent: #047857;
   --accent-soft: #ecfdf5;
-  --accent-hover: #047857;
+  --accent-hover: #065f46;
   --accent-border: #d1fae5;
   --terminal-bg: #0e0e0c;
   --terminal-ink: #f1efe9;

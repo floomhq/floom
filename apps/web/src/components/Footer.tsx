@@ -20,7 +20,12 @@ export function Footer() {
           href="https://github.com/federicodeponte"
           target="_blank"
           rel="noreferrer"
-          style={{ color: 'var(--ink)', textDecoration: 'none' }}
+          style={{
+            color: 'var(--ink)',
+            textDecoration: 'underline',
+            textDecorationThickness: '1px',
+            textUnderlineOffset: '2px',
+          }}
         >
           Federico De Ponte
         </a>{' '}
