@@ -105,14 +105,19 @@ function OutputRenderer({ outputs }: { outputs: unknown }) {
     );
   }
 
-  // Markdown field
-  if (typeof o.markdown === 'string') {
+  // Markdown field (also promotes a top-level `summary` string, used by
+  // openkeyword / opencontext / openanalytics where it is the primary artefact).
+  const markdown =
+    typeof o.markdown === 'string' ? o.markdown :
+    typeof o.summary === 'string' ? o.summary :
+    typeof o.report === 'string' ? o.report : null;
+  if (markdown) {
     return (
       <div className="app-expanded-card" style={{ position: 'relative', whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>
         <div style={{ position: 'absolute', top: 12, right: 12 }}>
-          <CopyButton value={o.markdown as string} label="Copy markdown" />
+          <CopyButton value={markdown} label="Copy markdown" />
         </div>
-        {o.markdown}
+        {markdown}
       </div>
     );
   }
