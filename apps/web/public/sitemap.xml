@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://floom.dev/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://floom.dev/apps</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://floom.dev/build</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://floom.dev/protocol</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://floom.dev/login</loc><changefreq>monthly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://floom.dev/p/json-format</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/base64</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/hash</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/jwt-decode</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/password</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/word-count</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/uuid</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/session-recall</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/claude-wrapped</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/hook-stats</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/swagger-petstore-openapi-3-0</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/opengtm</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/openanalytics</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/blast-radius</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/openblog</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/dep-check</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/opencontext</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/bouncer</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/flyfast</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/opendraft</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/openkeyword</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/openpaper</loc><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/p/openslides</loc><priority>0.6</priority></url>
+</urlset>

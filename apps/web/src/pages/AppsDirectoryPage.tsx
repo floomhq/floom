@@ -71,7 +71,7 @@ export function AppsDirectoryPage() {
   const trimmedSearch = search.trim();
 
   useEffect(() => {
-    document.title = 'Store | Floom';
+    document.title = 'Apps · Floom store';
     getHub()
       .then((rows) => {
         setApps(rows);
@@ -80,7 +80,7 @@ export function AppsDirectoryPage() {
       .catch(() => setLoading(false));
 
     return () => {
-      document.title = 'Floom · Production layer for vibe-coded AI apps';
+      document.title = 'Floom · Production infrastructure for AI apps that do real work';
     };
   }, []);
 

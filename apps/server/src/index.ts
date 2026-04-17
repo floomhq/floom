@@ -514,6 +514,12 @@ if (webDist) {
             ? 'image/png'
             : ext === 'webp'
             ? 'image/webp'
+            : ext === 'ico'
+            ? 'image/x-icon'
+            : ext === 'xml'
+            ? 'application/xml; charset=utf-8'
+            : ext === 'txt'
+            ? 'text/plain; charset=utf-8'
             : 'application/octet-stream';
         const body = readFileSync(candidate);
         return new Response(body, {
