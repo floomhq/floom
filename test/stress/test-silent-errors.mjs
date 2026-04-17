@@ -4,8 +4,11 @@
 //
 // Covers `detectSilentError` in apps/server/src/services/runner.ts, which
 // inspects the outputs of a successful entrypoint run and flips the run
-// to status=error when outputs.error is a populated string
-// (blast-radius, dep-check git-clone-without-auth shape).
+// to status=error when:
+//   1. outputs.error is a populated string (blast-radius, dep-check
+//      git-clone-without-auth shape).
+//   2. outputs.raw.articles_failed > 0 and articles_successful === 0
+//      (openblog batch-processor shape).
 //
 // This test imports the compiled helper directly (no server, no DB,
 // no docker) and runs a matrix of positive + negative cases.
@@ -73,6 +76,22 @@ check(
   'outputs with errors array but no scalar error',
   detectSilentError({ errors: [], result: 'ok' }) === null,
 );
+check(
+  'openblog-shape but all succeeded',
+  detectSilentError({
+    preview: '...',
+    raw: { articles_successful: 3, articles_failed: 0, articles: [] },
+  }) === null,
+);
+check(
+  'openblog-shape partial success (ok > 0, failed > 0) still passes',
+  // Kept as success because SOME articles succeeded. If product later
+  // wants 'partial' status, that's a schema change (new RunStatus value).
+  detectSilentError({
+    preview: '...',
+    raw: { articles_successful: 2, articles_failed: 1, articles: [] },
+  }) === null,
+);
 
 console.log('\ndetectSilentError: positive cases (should return a message)');
 
@@ -100,6 +119,55 @@ check(
   'dep-check silent git clone failure',
   typeof depCheckShape === 'string' && depCheckShape.includes('git clone'),
   `got: ${depCheckShape}`,
+);
+
+const openblogShape = detectSilentError({
+  preview: '',
+  markdown: '',
+  raw: {
+    job_id: 'abc',
+    company: 'Floom',
+    articles_total: 1,
+    articles_successful: 0,
+    articles_failed: 1,
+    articles: [
+      {
+        keyword: 'test',
+        slug: 'test',
+        article: null,
+        error:
+          "403 PERMISSION_DENIED. {'error': {'code': 403, 'message': 'Your API key was reported as leaked.'}}",
+      },
+    ],
+  },
+});
+check(
+  'openblog all-articles-failed returns summarized error',
+  typeof openblogShape === 'string' &&
+    openblogShape.includes('1 articles failed') &&
+    openblogShape.includes('403'),
+  `got: ${openblogShape}`,
+);
+
+const openblogNoArticlesArr = detectSilentError({
+  raw: { articles_successful: 0, articles_failed: 2 },
+});
+check(
+  'openblog all-failed without articles[] falls back to count-only',
+  openblogNoArticlesArr === 'All 2 articles failed.',
+  `got: ${openblogNoArticlesArr}`,
+);
+
+// Edge: outputs.error precedence over raw inspection. If both signals
+// fire, return the top-level error (more specific for the caller).
+const bothShapes = detectSilentError({
+  error: 'clone failed',
+  raw: { articles_successful: 0, articles_failed: 3 },
+});
+check(
+  'top-level error wins over raw.articles_failed',
+  bothShapes === 'clone failed',
+  `got: ${bothShapes}`,
 );
 
 console.log(`\nResult: ${passed} passed, ${failed} failed`);

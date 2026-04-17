@@ -159,9 +159,13 @@ function parseEntrypointOutput(stdout: string): EntrypointResult | null {
  * error message to promote to the run's top-level `error`, or null if
  * the outputs look like a real success.
  *
- * Shape discovered by the per-app quality v3 audit (2026-04-17):
- *   `{ error: "...", ...partial payload }` — blast-radius + dep-check
- *   do this when `git clone` fails on a public repo with no creds.
+ * Two shapes are handled today — both discovered by the per-app quality
+ * v3 audit (2026-04-17):
+ *   1. `{ error: "...", ...partial payload }` — blast-radius + dep-check
+ *      do this when `git clone` fails on a public repo with no creds.
+ *   2. `{ raw: { articles_failed: N, articles_successful: 0, ... } }` —
+ *      openblog returns this when every article generator call failed
+ *      (usually a downstream Gemini key issue).
  *
  * Kept narrow and shape-based on purpose: we do NOT want to flip
  * legitimate apps that return `{ errors: [] }` or similar.
@@ -175,6 +179,30 @@ export function detectSilentError(outputs: unknown): string | null {
   // Shape 1: top-level `error` field populated with a non-empty string.
   if (typeof o.error === 'string' && o.error.trim().length > 0) {
     return o.error;
+  }
+
+  // Shape 2: batch processor (openblog) reports total failure. When every
+  // article failed and zero succeeded, the run is a failure even though the
+  // entrypoint returned ok:true. We do NOT flip runs where some succeeded —
+  // those are honest partial results and the caller can decide what to do.
+  const raw = o.raw;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const r = raw as Record<string, unknown>;
+    const failed = typeof r.articles_failed === 'number' ? r.articles_failed : 0;
+    const ok = typeof r.articles_successful === 'number' ? r.articles_successful : 0;
+    if (failed > 0 && ok === 0) {
+      const articles = Array.isArray(r.articles) ? r.articles : [];
+      const firstErr = articles
+        .map((a) =>
+          a && typeof a === 'object' && typeof (a as { error?: unknown }).error === 'string'
+            ? (a as { error: string }).error
+            : null,
+        )
+        .find((e): e is string => !!e);
+      return firstErr
+        ? `All ${failed} articles failed. First error: ${firstErr}`
+        : `All ${failed} articles failed.`;
+    }
   }
 
   return null;
@@ -375,9 +403,11 @@ async function runActionWorker(opts: {
 
     if (parsed && parsed.ok === true) {
       // Some docker apps return `{ ok: true, outputs: { error: "..." } }` when
-      // an internal step failed (e.g. git clone with no auth). Treat those as
-      // runtime errors so the UI and `/api/run/<id>` surface a real failure
-      // instead of a silent "success" with an error buried in the outputs.
+      // an internal step failed (e.g. git clone with no auth, or a downstream
+      // generator returned a non-2xx). Treat those as runtime errors so the UI
+      // and `/api/run/<id>` surface a real failure instead of a silent
+      // "success" with an error buried in the outputs. Also covers openblog's
+      // batch shape where every article failed.
       const silentErr = detectSilentError(parsed.outputs);
       if (silentErr) {
         updateRun(opts.runId, {
