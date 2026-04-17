@@ -319,6 +319,12 @@ hubRouter.get('/:slug', (c) => {
     author: row.author,
     icon: row.icon,
     manifest,
+    // Async job queue (v0.3.0). Surfaced so the web client switches to the
+    // queued/running/succeeded poll UI when the app opts in. Backend routes
+    // (POST /api/:slug/jobs + GET /api/:slug/jobs/:id) are already live.
+    is_async: row.is_async === 1,
+    async_mode: row.async_mode,
+    timeout_ms: row.timeout_ms,
     created_at: row.created_at,
   });
 });

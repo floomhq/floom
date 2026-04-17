@@ -13,6 +13,7 @@ import type {
   DetectedApp,
   CreatorApp,
   CreatorRun,
+  JobRecord,
 } from '../lib/types';
 
 const API_BASE = '';
@@ -206,6 +207,86 @@ export function streamRun(runId: string, handlers: RunStreamHandlers): () => voi
   }, 4000);
 
   return close;
+}
+
+// ---------- v0.3.0 async job queue ----------
+
+export interface StartJobResponse {
+  job_id: string;
+  status: 'queued';
+  poll_url: string;
+  cancel_url: string;
+  webhook_url_template: string;
+}
+
+export function startJob(
+  appSlug: string,
+  inputs: Record<string, unknown>,
+  action?: string,
+): Promise<StartJobResponse> {
+  return request<StartJobResponse>(`/api/${appSlug}/jobs`, {
+    method: 'POST',
+    body: JSON.stringify({ action, inputs }),
+  });
+}
+
+export function getJob(appSlug: string, jobId: string): Promise<JobRecord> {
+  return request<JobRecord>(`/api/${appSlug}/jobs/${jobId}`);
+}
+
+export function cancelJob(appSlug: string, jobId: string): Promise<JobRecord> {
+  return request<JobRecord>(`/api/${appSlug}/jobs/${jobId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+/**
+ * Poll an async job until it reaches a terminal state. Uses a gentle 1.5s
+ * interval to mirror the run-stream polling fallback. Returns a cleanup
+ * function that cancels the poll without aborting the job itself.
+ */
+export function pollJob(
+  appSlug: string,
+  jobId: string,
+  handlers: {
+    onUpdate: (job: JobRecord) => void;
+    onDone: (job: JobRecord) => void;
+    onError?: (err: Error) => void;
+  },
+  intervalMs = 1500,
+): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const stop = () => {
+    stopped = true;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const job = await getJob(appSlug, jobId);
+      if (stopped) return;
+      const terminal: JobRecord['status'][] = ['succeeded', 'failed', 'cancelled'];
+      if (terminal.includes(job.status)) {
+        handlers.onDone(job);
+        stop();
+      } else {
+        handlers.onUpdate(job);
+      }
+    } catch (err) {
+      handlers.onError?.(err as Error);
+    }
+  };
+
+  void tick();
+  timer = setInterval(tick, intervalMs);
+  return stop;
 }
 
 export function createThread(): Promise<{ id: string }> {
