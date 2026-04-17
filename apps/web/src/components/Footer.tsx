@@ -30,6 +30,10 @@ export function Footer() {
         <Link to="/apps" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>apps</Link>
         <Link to="/protocol" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>protocol</Link>
         <a href="https://github.com/floomhq/floom-monorepo" target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>github</a>
+        <Link to="/imprint" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>imprint</Link>
+        <Link to="/privacy" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>privacy</Link>
+        <Link to="/terms" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>terms</Link>
+        <Link to="/cookies" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>cookies</Link>
       </nav>
     </footer>
   );
