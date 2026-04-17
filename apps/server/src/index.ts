@@ -22,6 +22,8 @@ import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
 import { stripeRouter } from './routes/stripe.js';
 import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
+import { metricsRouter } from './routes/metrics.js';
+import { initSentry, captureServerError } from './lib/sentry.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { startFastApps } from './services/fast-apps-sidecar.js';
@@ -35,9 +37,29 @@ import { startJobWorker } from './services/worker.js';
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
+// Optional Sentry wiring. No-op when SENTRY_DSN is unset.
+initSentry();
+
 const app = new Hono();
 app.use('*', logger());
 app.use('*', cors({ origin: '*' }));
+
+// Global error handler: forward uncaught exceptions to Sentry (if wired) and
+// surface a generic 500 to the caller. Hono's onError fires for any thrown
+// error that reaches the top of the router stack.
+app.onError((err, c) => {
+  captureServerError(err, { path: new URL(c.req.url).pathname, method: c.req.method });
+  console.error('[server] unhandled error:', err);
+  return c.json({ error: 'internal_server_error' }, 500);
+});
+process.on('unhandledRejection', (reason) => {
+  captureServerError(reason);
+  console.error('[server] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  captureServerError(err);
+  console.error('[server] uncaughtException:', err);
+});
 // Global auth gate: if FLOOM_AUTH_TOKEN is set, every API/MCP/p route
 // requires a matching bearer token. /api/health is always open so health
 // probes work. If the env var is unset, this is a no-op.
@@ -66,6 +88,9 @@ app.use('/mcp/app/:slug', rateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
+// Prometheus-style metrics. Exempt from the global auth gate above; metrics
+// owns its own METRICS_TOKEN bearer auth. 404 when the env var is unset.
+app.route('/api/metrics', metricsRouter);
 app.route('/api/hub', hubRouter);
 app.route('/api/parse', parseRouter);
 app.route('/api/pick', pickRouter);
