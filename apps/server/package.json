@@ -17,6 +17,7 @@
     "@floom/renderer": "workspace:*",
     "@hono/node-server": "1.19.13",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sentry/node": "^10.49.0",
     "better-auth": "1.6.3",
     "better-sqlite3": "11.5.0",
     "dockerode": "4.0.2",

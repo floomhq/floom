@@ -784,6 +784,31 @@ for the full walkthrough.
 
 **Full reference:** `docs/monetization.md`.
 
+## Observability
+
+Optional pieces operators can wire independently. All are off by default;
+nothing leaves the box until you opt in.
+
+### Error tracking (Sentry)
+
+Free-tier Sentry (5K errors/month) is plenty for internal-tooling scale.
+
+1. Sign up at [sentry.io](https://sentry.io), create a project, copy the DSN.
+2. Set `SENTRY_DSN` (server) and `VITE_SENTRY_DSN` (web) in your `.env`.
+3. Restart the container. The server logs `[sentry] initialized` on boot.
+
+When either DSN is unset, the SDK is a no-op — safe to deploy without any
+Sentry setup. The scrubber in `apps/server/src/lib/sentry.ts` and
+`apps/web/src/main.tsx` redacts every event before send, replacing any key
+matching `/password|token|api[_-]?key|authorization|secret|cookie/i` with
+`[Scrubbed]`. If you want a different policy, fork the `scrubSecrets`
+helper; it's six lines.
+
+Source-map uploads for readable browser stack traces need Sentry's Vite
+plugin wired at build time — that's a follow-up when the DSN is actually
+set. Without it, browser errors arrive with obfuscated stacks but still
+group correctly by exception type + message.
+
 ## Version info
 
 - **v0.4.0-alpha.2** (April 2026): **Stripe Connect partner app (W3.3)** — `/api/stripe/*` routes for creator monetization. Express account onboarding (idempotent, hosted onboarding URL), direct charges with 5% `application_fee_amount`, refunds with 30-day fee window, subscriptions with `application_fee_percent=5`, webhook receiver with signature verify + event_id dedupe ledger. Two new tables (`stripe_accounts`, `stripe_webhook_events`), `user_version=6`. Auth boundary scoped by `(workspace_id, owner_id)` where `owner_id = is_authenticated ? user_id : "device:" + device_id` (W2.1 device fallback pattern). 163 new unit + integration tests. `examples/stripe-checkout/` demo app shipping a 3-operation creator surface that pulls per-user Stripe keys from `user_secrets`. See "Creator monetization" section above and `docs/monetization.md` for the full reference.
