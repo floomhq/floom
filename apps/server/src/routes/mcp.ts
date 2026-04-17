@@ -117,11 +117,13 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
     version: '0.3.0',
   });
 
-  const secretsNeeded = manifest.secrets_needed || [];
-
   for (const [actionName, actionSpec] of Object.entries(manifest.actions) as Array<
     [string, ActionSpec]
   >) {
+    const actionSecretsNeeded =
+      actionSpec.secrets_needed !== undefined
+        ? actionSpec.secrets_needed
+        : manifest.secrets_needed || [];
     const toolName =
       actionName === 'run' ? app.slug.replace(/[^a-z0-9_]/g, '_') : actionName;
     const toolDescription =
@@ -133,7 +135,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
       {
         title: actionSpec.label,
         description: toolDescription,
-        inputSchema: buildZodSchema(actionSpec.inputs, secretsNeeded),
+        inputSchema: buildZodSchema(actionSpec.inputs, actionSecretsNeeded),
       },
       async (rawInputs) => {
         const fresh = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as
@@ -185,7 +187,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
         // If the app requires secrets and none are available (neither
         // server-side persisted nor per-call _auth), return a structured
         // missing_secrets error so the MCP client can prompt the user.
-        if (secretsNeeded.length > 0) {
+        if (actionSecretsNeeded.length > 0) {
           const available = new Set<string>();
           // Server-side persisted secrets
           const rows = db
@@ -197,7 +199,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
           // Per-call secrets
           for (const k of Object.keys(perCallSecrets || {})) available.add(k);
 
-          const missing = secretsNeeded.filter((n) => !available.has(n));
+          const missing = actionSecretsNeeded.filter((n) => !available.has(n));
           if (missing.length > 0) {
             const errorPayload = {
               error: 'missing_secrets',
