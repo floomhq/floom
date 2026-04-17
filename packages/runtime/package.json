@@ -19,7 +19,7 @@
     "@floom/detect": "workspace:*",
     "@floom/manifest": "workspace:*",
     "e2b": "2.19.0",
-    "yaml": "2.5.1"
+    "yaml": "2.8.3"
   },
   "devDependencies": {
     "@types/node": "22.9.0",
