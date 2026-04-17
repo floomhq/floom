@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import type { DetectedApp } from '../lib/types';
 
@@ -21,10 +22,26 @@ type Step = 'ramp' | 'review' | 'publishing' | 'done';
 
 type GithubDetect = { attemptedUrls: string[] } | null;
 
+// localStorage key for persisting a pending detection across the
+// signup redirect so anonymous visitors don't lose their work. Cleared
+// once the publish succeeds or the user manually goes back to ramp.
+const PENDING_KEY = 'floom:pending-publish';
+
+type PendingPublish = {
+  detected: DetectedApp;
+  name: string;
+  slug: string;
+  description: string;
+  category: string;
+  source: 'github' | 'openapi';
+};
+
 export function BuildPage() {
   const [searchParams] = useSearchParams();
   const editSlug = searchParams.get('edit');
   const navigate = useNavigate();
+  const { isAuthenticated } = useSession();
+  const [signupPrompt, setSignupPrompt] = useState(false);
 
   // Inputs shared across ramps
   const [githubUrl, setGithubUrl] = useState('');
@@ -70,6 +87,28 @@ export function BuildPage() {
       .catch(() => {
         /* ignore — show the ramp step */
       });
+  }, [editSlug]);
+
+  // Restore a pending detection after signup redirect. Anonymous users can
+  // detect + review a spec, then get prompted to sign up when they click
+  // Publish — on return, we hydrate the review step from localStorage so
+  // they just click Publish again.
+  useEffect(() => {
+    if (editSlug) return;
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(PENDING_KEY) : null;
+    if (!raw) return;
+    try {
+      const p = JSON.parse(raw) as PendingPublish;
+      setDetected(p.detected);
+      setName(p.name);
+      setSlug(p.slug);
+      setDescription(p.description);
+      setCategory(p.category || '');
+      setSource(p.source);
+      setStep('review');
+    } catch {
+      window.localStorage.removeItem(PENDING_KEY);
+    }
   }, [editSlug]);
 
   /** Transforms a GitHub repo URL into candidate raw OpenAPI URLs. */
@@ -135,6 +174,25 @@ export function BuildPage() {
 
   async function handlePublish() {
     if (!detected) return;
+    // Anonymous users get prompted to sign up before publishing. We
+    // persist the review state so they can resume right after auth.
+    if (!isAuthenticated) {
+      const pending: PendingPublish = {
+        detected,
+        name,
+        slug,
+        description,
+        category,
+        source: source ?? 'openapi',
+      };
+      try {
+        window.localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+      } catch {
+        /* storage can fail in private mode; fall back to redirect without resume */
+      }
+      setSignupPrompt(true);
+      return;
+    }
     setStep('publishing');
     setError(null);
     try {
@@ -145,6 +203,11 @@ export function BuildPage() {
         description,
         category: category || undefined,
       });
+      try {
+        window.localStorage.removeItem(PENDING_KEY);
+      } catch {
+        /* ignore */
+      }
       setStep('done');
       setTimeout(() => navigate(`/p/${result.slug}`), 800);
     } catch (err) {
@@ -154,7 +217,7 @@ export function BuildPage() {
   }
 
   return (
-    <PageShell requireAuth="cloud" title="Publish an app | Floom">
+    <PageShell title="Publish an app | Floom">
       <div data-testid="build-page" style={{ maxWidth: 1040, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ marginBottom: 32 }}>
@@ -783,7 +846,14 @@ export function BuildPage() {
             <div style={{ display: 'flex', gap: 10, marginTop: 24, flexWrap: 'wrap' }}>
               <button
                 type="button"
-                onClick={() => setStep('ramp')}
+                onClick={() => {
+                  try {
+                    window.localStorage.removeItem(PENDING_KEY);
+                  } catch {
+                    /* ignore */
+                  }
+                  setStep('ramp');
+                }}
                 style={{
                   padding: '11px 18px',
                   background: 'transparent',
@@ -839,6 +909,14 @@ export function BuildPage() {
 
       {comingSoon && (
         <ComingSoonRampModal target={comingSoon} onClose={() => setComingSoon(null)} />
+      )}
+
+      {signupPrompt && (
+        <SignupToPublishModal
+          onClose={() => setSignupPrompt(false)}
+          onContinue={() => navigate('/signup?next=' + encodeURIComponent('/build'))}
+          onSignIn={() => navigate('/login?next=' + encodeURIComponent('/build'))}
+        />
       )}
     </PageShell>
   );
@@ -1079,6 +1157,102 @@ function ComingSoonRampModal({
             }}
           >
             Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SignupToPublishModal({
+  onClose,
+  onContinue,
+  onSignIn,
+}: {
+  onClose: () => void;
+  onContinue: () => void;
+  onSignIn: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      data-testid="signup-to-publish-modal"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(14, 14, 12, 0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        zIndex: 1000,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--card)',
+          border: '1px solid var(--line)',
+          borderRadius: 14,
+          padding: '28px 28px 24px',
+          maxWidth: 460,
+          width: '100%',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        }}
+      >
+        <h2 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 10px', color: 'var(--ink)' }}>
+          Sign up to publish this app
+        </h2>
+        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 20px', lineHeight: 1.55 }}>
+          Your detected spec is saved. Create a free account to publish it to the store, get a live
+          MCP endpoint, and see run logs.
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={onSignIn}
+            data-testid="signup-to-publish-signin"
+            style={{
+              padding: '10px 18px',
+              background: 'transparent',
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            I already have an account
+          </button>
+          <button
+            type="button"
+            onClick={onContinue}
+            data-testid="signup-to-publish-continue"
+            style={{
+              padding: '10px 18px',
+              background: 'var(--accent)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Create account
           </button>
         </div>
       </div>
