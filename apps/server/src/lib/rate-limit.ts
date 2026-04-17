@@ -10,6 +10,7 @@
 
 import type { Context, MiddlewareHandler } from 'hono';
 import type { SessionContext } from '../types.js';
+import { recordRateLimitHit } from './metrics-counters.js';
 
 type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
 
@@ -124,6 +125,7 @@ function rateLimitResponse(
   scope: Scope,
   retryAfterSec: number,
 ): Response {
+  recordRateLimitHit(scope);
   return c.json(
     {
       error: 'rate_limit_exceeded',
@@ -191,6 +193,7 @@ export function checkMcpIngestLimit(
     : `mcp_ingest:ip:${ip}`;
   const windowMs = 24 * 3600 * 1000;
   const r = incrementAndCheck(key, defaultMcpIngestPerDay(), windowMs, Date.now());
+  if (!r.allowed) recordRateLimitHit('mcp_ingest');
   return r.allowed
     ? { allowed: true }
     : { allowed: false, retryAfterSec: r.retryAfterSec };

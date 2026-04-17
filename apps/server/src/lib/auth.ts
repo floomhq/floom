@@ -53,8 +53,12 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   if (!expected) return next(); // no global auth configured
 
   // Always allow the health endpoint so Docker/k8s probes work.
+  // Metrics is also exempt: it owns its own METRICS_TOKEN bearer auth so
+  // an external Prometheus scraper can hit it without presenting the Floom
+  // global token.
   const path = new URL(c.req.url).pathname;
   if (path === '/api/health' || path === '/api/health/') return next();
+  if (path === '/api/metrics' || path === '/api/metrics/') return next();
 
   const got = presentedToken(c);
   if (!got || !constantTimeEqual(got, expected)) {
