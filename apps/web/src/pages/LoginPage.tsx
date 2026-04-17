@@ -25,7 +25,7 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [state, setState] = useState<'idle' | 'submitting' | 'magic-sent' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
   const nextPath = searchParams.get('next') || '/me';
@@ -70,28 +70,6 @@ export function LoginPage() {
     }
   }
 
-  async function handleMagicLink() {
-    if (!email) {
-      setErrorMsg('Enter your email first.');
-      setState('error');
-      return;
-    }
-    setState('submitting');
-    setErrorMsg('');
-    try {
-      await api.sendMagicLink(email, nextPath);
-      setState('magic-sent');
-    } catch (err) {
-      setState('error');
-      const e = err as api.ApiError;
-      if (e.status === 404) {
-        setErrorMsg('Cloud auth is not enabled on this server.');
-      } else {
-        setErrorMsg(e.message || 'Could not send magic link.');
-      }
-    }
-  }
-
   function handleSocial(provider: 'google' | 'github') {
     window.location.href = api.socialSignInUrl(provider, nextPath);
   }
@@ -119,7 +97,7 @@ export function LoginPage() {
         </h1>
         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px' }}>
           {mode === 'signin'
-            ? 'Sign in with email and password, a magic link, or Google.'
+            ? 'Sign in with email and password, or Google.'
             : 'One account. Run apps, connect tools, publish your own.'}
         </p>
 
@@ -286,19 +264,6 @@ export function LoginPage() {
               {errorMsg}
             </p>
           )}
-          {state === 'magic-sent' && (
-            <p
-              data-testid="magic-sent"
-              style={{
-                margin: '0 0 12px',
-                fontSize: 13,
-                color: 'var(--success, #1a7f37)',
-              }}
-            >
-              Magic link sent. Check your inbox at {email}.
-            </p>
-          )}
-
           <button
             type="submit"
             disabled={state === 'submitting'}
@@ -314,17 +279,6 @@ export function LoginPage() {
               : mode === 'signin'
               ? 'Sign in'
               : 'Create account'}
-          </button>
-          <button
-            type="button"
-            onClick={handleMagicLink}
-            data-testid="submit-magic"
-            style={{
-              ...secondaryButtonStyle,
-              marginTop: 8,
-            }}
-          >
-            Send magic link instead
           </button>
         </form>
 
@@ -412,18 +366,6 @@ const primaryButtonStyle: React.CSSProperties = {
   fontFamily: 'inherit',
   cursor: 'pointer',
   marginTop: 12,
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '11px 16px',
-  background: 'transparent',
-  color: 'var(--muted)',
-  border: '1px solid var(--line)',
-  borderRadius: 8,
-  fontSize: 13,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
 };
 
 const socialButtonStyle: React.CSSProperties = {
