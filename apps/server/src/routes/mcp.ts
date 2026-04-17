@@ -24,6 +24,7 @@ import { resolveUserContext } from '../services/session.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
+import { recordMcpToolCall } from '../lib/metrics-counters.js';
 import type {
   ActionSpec,
   AppRecord,
@@ -152,6 +153,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
         inputSchema: buildZodSchema(actionSpec.inputs, actionSecretsNeeded),
       },
       async (rawInputs) => {
+        recordMcpToolCall(toolName);
         const fresh = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as
           | AppRecord
           | undefined;

@@ -784,6 +784,96 @@ for the full walkthrough.
 
 **Full reference:** `docs/monetization.md`.
 
+## Observability
+
+Optional pieces operators can wire independently. All are off by default;
+nothing leaves the box until you opt in.
+
+### Error tracking (Sentry)
+
+Free-tier Sentry (5K errors/month) is plenty for internal-tooling scale.
+
+1. Sign up at [sentry.io](https://sentry.io), create a project, copy the DSN.
+2. Set `SENTRY_DSN` (server) and `VITE_SENTRY_DSN` (web) in your `.env`.
+3. Restart the container. The server logs `[sentry] initialized` on boot.
+
+When either DSN is unset, the SDK is a no-op — safe to deploy without any
+Sentry setup. The scrubber in `apps/server/src/lib/sentry.ts` and
+`apps/web/src/main.tsx` redacts every event before send, replacing any key
+matching `/password|token|api[_-]?key|authorization|secret|cookie/i` with
+`[Scrubbed]`. If you want a different policy, fork the `scrubSecrets`
+helper; it's six lines.
+
+Source-map uploads for readable browser stack traces need Sentry's Vite
+plugin wired at build time — that's a follow-up when the DSN is actually
+set. Without it, browser errors arrive with obfuscated stacks but still
+group correctly by exception type + message.
+
+### Database backup
+
+Preview data lives in the Docker volume
+`floom-chat-deploy_floom-chat-data`. Losing it wipes every ingested app,
+run history, and user secret. Daily off-volume snapshots are a one-line
+cron job.
+
+```bash
+# On the host (run once):
+sudo install -m 0755 docker/scripts/floom-backup.sh /usr/local/bin/floom-backup.sh
+sudo mkdir -p /opt/floom-backups
+
+# Test it:
+sudo /usr/local/bin/floom-backup.sh
+ls -lh /opt/floom-backups/
+
+# Cron (04:00 daily):
+sudo crontab -e
+# add:
+# 0 4 * * * /usr/local/bin/floom-backup.sh >> /var/log/floom-backup.log 2>&1
+```
+
+The script uses SQLite's online `.backup` command, so it produces a
+consistent snapshot even while the server is writing. Backups are gzipped
+and pruned after 30 days.
+
+**Restore from a backup:**
+
+```bash
+docker compose -f /opt/floom-mcp-preview/docker-compose.yml down floom-mcp-preview
+gunzip -c /opt/floom-backups/floom-YYYYMMDD-HHMM.db.gz > /var/lib/docker/volumes/floom-chat-deploy_floom-chat-data/_data/floom-chat.db
+docker compose -f /opt/floom-mcp-preview/docker-compose.yml up -d floom-mcp-preview
+```
+
+Overrides for the script: `FLOOM_BACKUP_DB`, `FLOOM_BACKUP_DIR`,
+`FLOOM_BACKUP_RETENTION_DAYS`.
+
+### Metrics endpoint
+
+Secure-by-default Prometheus endpoint at `GET /api/metrics`.
+
+- When `METRICS_TOKEN` is unset, the endpoint returns **404**. No leak.
+- When set, callers must present `Authorization: Bearer <METRICS_TOKEN>`.
+  Wrong or missing token returns 401.
+
+```bash
+METRICS_TOKEN=$(openssl rand -hex 32)
+# add to .env and restart
+curl -sH "authorization: Bearer $METRICS_TOKEN" http://localhost:3051/api/metrics
+```
+
+Exposed series:
+
+| Metric | Type | Description |
+|---|---|---|
+| `floom_apps_total` | gauge | Registered apps in the hub. |
+| `floom_runs_total{status="success\|error\|timeout"}` | counter | Total runs grouped by terminal status. |
+| `floom_active_users_last_24h` | gauge | Distinct `(user_id, device_id)` pairs in the last 24h. |
+| `floom_mcp_tool_calls_total{tool_name="..."}` | counter | Per-app MCP tool invocations since process start. |
+| `floom_process_uptime_seconds` | gauge | Seconds since the server process started. |
+| `floom_rate_limit_hits_total{scope="ip\|user\|app\|mcp_ingest"}` | counter | 429 responses emitted by the rate limiter. |
+
+The response is cached for 15s so a tight scrape doesn't hammer SQLite.
+Point Grafana, Uptime Kuma, or any Prometheus-compatible scraper at it.
+
 ## Version info
 
 - **v0.4.0-alpha.2** (April 2026): **Stripe Connect partner app (W3.3)** — `/api/stripe/*` routes for creator monetization. Express account onboarding (idempotent, hosted onboarding URL), direct charges with 5% `application_fee_amount`, refunds with 30-day fee window, subscriptions with `application_fee_percent=5`, webhook receiver with signature verify + event_id dedupe ledger. Two new tables (`stripe_accounts`, `stripe_webhook_events`), `user_version=6`. Auth boundary scoped by `(workspace_id, owner_id)` where `owner_id = is_authenticated ? user_id : "device:" + device_id` (W2.1 device fallback pattern). 163 new unit + integration tests. `examples/stripe-checkout/` demo app shipping a 3-operation creator surface that pulls per-user Stripe keys from `user_secrets`. See "Creator monetization" section above and `docs/monetization.md` for the full reference.
