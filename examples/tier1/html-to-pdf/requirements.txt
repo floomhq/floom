@@ -1,5 +1,5 @@
 fastapi==0.115.5
 uvicorn==0.32.1
 pydantic==2.10.3
-weasyprint==62.3
+weasyprint==68.0
 httpx==0.28.1
