@@ -1,5 +1,0 @@
-fastapi==0.115.5
-uvicorn==0.32.1
-pydantic==2.10.3
-qrcode[pil]==8.0
-Pillow==12.2.0

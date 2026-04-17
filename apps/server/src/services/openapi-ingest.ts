@@ -89,7 +89,7 @@ interface OpenApiAppSpec {
    * self-hosters. Surfaced in /api/hub and rendered as a warning pill on
    * the store card. Used to mark apps like `flyfast` as "hosted-mode only
    * pending internal infra". Setting this does NOT hide the app from the
-   * hub; it just annotates it. See docs/APPS-STATUS.md for the roadmap.
+   * hub; it just annotates it.
    */
   blocked_reason?: string;
   // ---------- custom renderer fields (v0.3.1 W2.2) ----------

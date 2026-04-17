@@ -1,5 +1,0 @@
-fastapi==0.115.5
-uvicorn==0.32.1
-pydantic==2.10.3
-playwright==1.49.0
-google-generativeai==0.8.3

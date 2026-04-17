@@ -320,7 +320,7 @@ hubRouter.get('/', (c) => {
         // Optional annotation for self-host blocked apps. Present only when
         // the manifest explicitly declares a blocked_reason. Surfaced on the
         // store card as a warning pill so users know the app is not
-        // runnable in this environment. See docs/APPS-STATUS.md.
+        // runnable in this environment.
         ...(manifest?.blocked_reason
           ? { blocked_reason: manifest.blocked_reason }
           : {}),

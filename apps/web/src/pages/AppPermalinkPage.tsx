@@ -18,14 +18,17 @@ import { FeedbackButton } from '../components/FeedbackButton';
 import { getApp, getAppReviews, getRun } from '../api/client';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
 
-// Map of known app slugs to GitHub repo URLs
+// Map of known app slugs to GitHub repo URLs. Only slugs whose example
+// directory lives in examples/ are linked; stub-only apps (floom.yaml with
+// no server code) were removed in the 2026-04-17 bloat cut.
 const GITHUB_REPOS: Record<string, string> = {
   flyfast: 'https://github.com/floomhq/floom-monorepo/tree/main/examples/flyfast',
-  opendraft: 'https://github.com/floomhq/floom-monorepo/tree/main/examples/opendraft',
-  openslides: 'https://github.com/floomhq/floom-monorepo/tree/main/examples/openslides',
   'blast-radius': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/blast-radius',
-  bouncer: 'https://github.com/floomhq/floom-monorepo/tree/main/examples/bouncer',
-  openanalytics: 'https://github.com/floomhq/floom-monorepo/tree/main/examples/openanalytics',
+  'claude-wrapped': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/claude-wrapped',
+  'dep-check': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/dep-check',
+  'hook-stats': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/hook-stats',
+  'session-recall': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/session-recall',
+  'ig-nano-scout': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/ig-nano-scout',
 };
 
 type ComingSoonTarget = 'chatgpt' | 'notion' | 'terminal' | 'schedule';
