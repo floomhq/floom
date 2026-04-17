@@ -335,12 +335,10 @@ export function signUpWithPassword(
   });
 }
 
-export function sendMagicLink(email: string, callbackURL?: string): Promise<unknown> {
-  return request('/auth/sign-in/magic-link', {
-    method: 'POST',
-    body: JSON.stringify({ email, callbackURL: callbackURL || '/me' }),
-  });
-}
+// Magic link sign-in was removed 2026-04-17 (PR #5 dropped the UI; this
+// branch disables the Better Auth plugin on the server so the endpoint
+// returns 404). The exported helper is gone to prevent any future caller
+// from reintroducing the surface. Use email+password or OAuth instead.
 
 export function signOut(): Promise<unknown> {
   return request('/auth/sign-out', { method: 'POST', body: JSON.stringify({}) });
