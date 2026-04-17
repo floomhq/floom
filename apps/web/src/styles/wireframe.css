@@ -121,6 +121,24 @@ input { font-family: inherit; }
   letter-spacing: -0.03em;
 }
 
+/* TopBar logo hover glow. The inner span that renders the Floom mark is
+   the first role="img" child of .brand. On hover we lift a soft green
+   drop-shadow around it. This is a pure CSS fallback (no SVG filter) so
+   it's cheap on mobile. Respects prefers-reduced-motion. */
+.brand [role="img"] {
+  transition: filter 0.2s ease;
+}
+.brand:hover [role="img"],
+.brand:focus-visible [role="img"] {
+  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.55))
+          drop-shadow(0 0 16px rgba(5, 150, 105, 0.35));
+}
+@media (prefers-reduced-motion: reduce) {
+  .brand [role="img"] {
+    transition: none;
+  }
+}
+
 .topbar-links {
   display: flex;
   align-items: center;
