@@ -22,6 +22,7 @@ import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
 import { stripeRouter } from './routes/stripe.js';
 import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
+import { metricsRouter } from './routes/metrics.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
 import { seedFromFile } from './services/seed.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
@@ -87,6 +88,9 @@ app.use('/mcp/app/:slug', rateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
+// Prometheus-style metrics. Exempt from the global auth gate above; metrics
+// owns its own METRICS_TOKEN bearer auth. 404 when the env var is unset.
+app.route('/api/metrics', metricsRouter);
 app.route('/api/hub', hubRouter);
 app.route('/api/parse', parseRouter);
 app.route('/api/pick', pickRouter);

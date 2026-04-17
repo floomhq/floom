@@ -846,6 +846,34 @@ docker compose -f /opt/floom-mcp-preview/docker-compose.yml up -d floom-mcp-prev
 Overrides for the script: `FLOOM_BACKUP_DB`, `FLOOM_BACKUP_DIR`,
 `FLOOM_BACKUP_RETENTION_DAYS`.
 
+### Metrics endpoint
+
+Secure-by-default Prometheus endpoint at `GET /api/metrics`.
+
+- When `METRICS_TOKEN` is unset, the endpoint returns **404**. No leak.
+- When set, callers must present `Authorization: Bearer <METRICS_TOKEN>`.
+  Wrong or missing token returns 401.
+
+```bash
+METRICS_TOKEN=$(openssl rand -hex 32)
+# add to .env and restart
+curl -sH "authorization: Bearer $METRICS_TOKEN" http://localhost:3051/api/metrics
+```
+
+Exposed series:
+
+| Metric | Type | Description |
+|---|---|---|
+| `floom_apps_total` | gauge | Registered apps in the hub. |
+| `floom_runs_total{status="success\|error\|timeout"}` | counter | Total runs grouped by terminal status. |
+| `floom_active_users_last_24h` | gauge | Distinct `(user_id, device_id)` pairs in the last 24h. |
+| `floom_mcp_tool_calls_total{tool_name="..."}` | counter | Per-app MCP tool invocations since process start. |
+| `floom_process_uptime_seconds` | gauge | Seconds since the server process started. |
+| `floom_rate_limit_hits_total{scope="ip\|user\|app\|mcp_ingest"}` | counter | 429 responses emitted by the rate limiter. |
+
+The response is cached for 15s so a tight scrape doesn't hammer SQLite.
+Point Grafana, Uptime Kuma, or any Prometheus-compatible scraper at it.
+
 ## Version info
 
 - **v0.4.0-alpha.2** (April 2026): **Stripe Connect partner app (W3.3)** — `/api/stripe/*` routes for creator monetization. Express account onboarding (idempotent, hosted onboarding URL), direct charges with 5% `application_fee_amount`, refunds with 30-day fee window, subscriptions with `application_fee_percent=5`, webhook receiver with signature verify + event_id dedupe ledger. Two new tables (`stripe_accounts`, `stripe_webhook_events`), `user_version=6`. Auth boundary scoped by `(workspace_id, owner_id)` where `owner_id = is_authenticated ? user_id : "device:" + device_id` (W2.1 device fallback pattern). 163 new unit + integration tests. `examples/stripe-checkout/` demo app shipping a 3-operation creator surface that pulls per-user Stripe keys from `user_secrets`. See "Creator monetization" section above and `docs/monetization.md` for the full reference.
