@@ -24,7 +24,7 @@ import type { HubApp } from '../lib/types';
 import { LAUNCH_APPS } from '../data/demoData';
 import '../components/home/home.css';
 
-const HERO_BADGE = 'MIT licensed · self-host with Docker or apps.yaml';
+const HERO_BADGE = 'Self-host with Docker or apps.yaml · open source';
 
 const BUILT_IN_CHIPS = [
   'Auth',
@@ -154,7 +154,7 @@ export function CreatorHeroPage() {
   const recentPreviewApps = previewApps.slice(0, 6);
 
   useEffect(() => {
-    document.title = 'Floom · Production layer for AI apps';
+    document.title = 'Floom · Production infrastructure for AI apps that do real work';
     getHub()
       .then((apps) => {
         if (apps.length > 0) {
