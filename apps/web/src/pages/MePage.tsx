@@ -18,6 +18,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { useSession } from '../hooks/useSession';
+import { useMyApps } from '../hooks/useMyApps';
+import { AppIcon } from '../components/AppIcon';
 import * as api from '../api/client';
 import type { MeRunSummary, SessionMePayload } from '../lib/types';
 
@@ -125,7 +127,12 @@ export function MePage() {
           </aside>
 
           <div className="me-main">
-            {tab === 'your-apps' && <RunsTab />}
+            {tab === 'your-apps' && (
+              <>
+                <YourAppsPanel />
+                <RunsTab />
+              </>
+            )}
             {tab === 'folders' && (
               <ComingSoonStub
                 title="Folders"
@@ -358,6 +365,102 @@ function IconDownload() {
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
     </svg>
+  );
+}
+
+// ---------- Your apps (v15.2 surface above the runs list) ----------
+function YourAppsPanel() {
+  const { apps } = useMyApps();
+  if (!apps || apps.length === 0) return null;
+  return (
+    <section
+      data-testid="your-apps-panel"
+      style={{ marginBottom: 28 }}
+    >
+      <h2
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--muted)',
+          margin: '0 0 10px',
+        }}
+      >
+        Your apps
+      </h2>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+          gap: 10,
+        }}
+      >
+        {apps.map((app) => (
+          <Link
+            key={app.slug}
+            to={`/me/a/${app.slug}`}
+            data-testid={`your-apps-row-${app.slug}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '10px 12px',
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 10,
+              textDecoration: 'none',
+              color: 'var(--ink)',
+            }}
+          >
+            <span
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 7,
+                background: 'var(--bg)',
+                border: '1px solid var(--line)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <AppIcon slug={app.slug} size={16} />
+            </span>
+            <span
+              style={{
+                flex: 1,
+                fontSize: 13,
+                fontWeight: 600,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {app.name}
+            </span>
+            {app.visibility === 'private' && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  background: 'var(--bg)',
+                  border: '1px solid var(--line)',
+                  color: 'var(--muted)',
+                }}
+              >
+                Private
+              </span>
+            )}
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
 

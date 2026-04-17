@@ -260,6 +260,13 @@ export interface DetectedApp {
   secrets_needed: string[];
 }
 
+export type AppVisibility =
+  | 'public'
+  | 'unlisted'
+  | 'private'
+  | 'auth-required'
+  | 'invite-only';
+
 export interface CreatorApp {
   slug: string;
   name: string;
@@ -274,6 +281,29 @@ export interface CreatorApp {
   updated_at: string;
   run_count: number;
   last_run_at: string | null;
+  /**
+   * v15.2: surfaced by /api/hub/mine so /me can render the private pill
+   * on apps the caller owns. Older server builds may not emit it; hence
+   * optional.
+   */
+  visibility?: AppVisibility;
+  /**
+   * v15.2: whether this app runs via the async job queue. Mirrors the
+   * AppDetail.is_async flag so the /me/a/:slug overview can show an
+   * "async · ~60s per run" hint without a second fetch.
+   */
+  is_async?: boolean;
+}
+
+// ---------- v15.2: per-user encrypted secrets vault ----------
+
+export interface UserSecretEntry {
+  key: string;
+  updated_at: string | null;
+}
+
+export interface UserSecretsList {
+  entries: UserSecretEntry[];
 }
 
 export interface CreatorRun {

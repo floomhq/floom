@@ -160,6 +160,11 @@ hubRouter.get('/mine', async (c) => {
       updated_at: row.updated_at,
       run_count: row.run_count || 0,
       last_run_at: row.last_run_at,
+      // v15.2: surfaced so the /me rail + /me/a/:slug header can render
+      // the private pill and async-run hint without an extra /api/hub/:slug
+      // fetch per list item. Additive — older clients ignore these fields.
+      visibility: row.visibility,
+      is_async: row.is_async === 1,
     })),
   });
 });

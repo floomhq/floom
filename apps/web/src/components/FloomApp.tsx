@@ -66,6 +66,43 @@ function getDefaultActionSpec(app: AppDetail): { action: string; spec: ActionSpe
   return { action, spec };
 }
 
+// v15.2: inputs whose name is in this allow-list are emitted as
+// string[] regardless of the manifest-declared type. The runner (see
+// ig-nano-scout /scout) rejects string payloads for array fields, so
+// the previous "textarea → string" path silently failed.
+// Start tight (hashtags only) and extend via manifest metadata when
+// more apps need it.
+const ARRAY_INPUT_NAMES = new Set<string>(['hashtags']);
+
+/**
+ * Coerce inputs before they leave the browser. Today the only
+ * transformation is comma / newline splitting for known array fields:
+ * "vienna, berlin" or "vienna\nberlin" → ["vienna","berlin"]. Values
+ * that are already arrays pass through unchanged. Empty strings
+ * become empty arrays so the server sees a consistent shape.
+ */
+function coerceInputs(
+  inputs: Record<string, unknown>,
+  spec: ActionSpec,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...inputs };
+  for (const inp of spec.inputs) {
+    if (!ARRAY_INPUT_NAMES.has(inp.name)) continue;
+    const raw = out[inp.name];
+    if (Array.isArray(raw)) continue;
+    if (typeof raw === 'string') {
+      const parts = raw
+        .split(/[,\n]/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      out[inp.name] = parts;
+    } else if (raw == null || raw === '') {
+      out[inp.name] = [];
+    }
+  }
+  return out;
+}
+
 function buildInitialInputs(spec: ActionSpec, overrides?: Record<string, unknown>): Record<string, unknown> {
   const inputs: Record<string, unknown> = {};
   for (const inp of spec.inputs) {
@@ -143,7 +180,8 @@ export function FloomApp({
 
   const handleRun = useCallback(async () => {
     if (state.phase !== 'inputs') return;
-    const { inputs, action } = state;
+    const { action, actionSpec } = state;
+    const inputs = coerceInputs(state.inputs, actionSpec);
 
     // v0.3.0 async job queue: apps with `is_async = true` route through
     // POST /api/:slug/jobs and poll GET /api/:slug/jobs/:id until terminal.
@@ -575,6 +613,7 @@ function InputField({
   const cleanLabel = (spec.label ?? '').replace(/\s*\(optional\)\s*$/i, '');
 
   if (spec.type === 'textarea') {
+    const isArray = ARRAY_INPUT_NAMES.has(spec.name);
     return (
       <div className="input-group">
         <label className="input-label" htmlFor={`floom-inp-${spec.name}`}>
@@ -587,10 +626,21 @@ function InputField({
           id={`floom-inp-${spec.name}`}
           className="input-field"
           style={{ height: 80, padding: '10px 12px', resize: 'vertical' as const }}
-          placeholder={spec.placeholder}
+          placeholder={spec.placeholder || (isArray ? 'vienna, berlin, paris' : undefined)}
           value={str}
           onChange={(e) => onChange(e.target.value)}
         />
+        {isArray && (
+          <p
+            style={{
+              fontSize: 11,
+              color: 'var(--muted)',
+              margin: '4px 0 0',
+            }}
+          >
+            Separate multiple values with a comma or a new line.
+          </p>
+        )}
       </div>
     );
   }

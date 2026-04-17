@@ -14,6 +14,7 @@ import type {
   CreatorApp,
   CreatorRun,
   JobRecord,
+  UserSecretsList,
 } from '../lib/types';
 
 const API_BASE = '';
@@ -489,6 +490,31 @@ export function uploadRenderer(
 
 export function deleteRenderer(slug: string): Promise<{ ok: true; slug: string }> {
   return request(`/api/hub/${slug}/renderer`, { method: 'DELETE' });
+}
+
+// ---------- v15.2: per-user encrypted secrets vault ----------
+//
+// Thin wrappers around /api/secrets (masked-list, upsert, delete). The
+// server never echoes plaintext back; the list endpoint returns
+// { entries: [{ key, updated_at }] } so the UI can render "set" vs
+// "not set" without exposing the value.
+
+export function listSecrets(): Promise<UserSecretsList> {
+  return request<UserSecretsList>('/api/secrets', { method: 'GET' });
+}
+
+export function setSecret(
+  key: string,
+  value: string,
+): Promise<{ ok: true; key: string }> {
+  return request('/api/secrets', {
+    method: 'POST',
+    body: JSON.stringify({ key, value }),
+  });
+}
+
+export function deleteSecret(key: string): Promise<{ ok: true; removed: boolean }> {
+  return request(`/api/secrets/${encodeURIComponent(key)}`, { method: 'DELETE' });
 }
 
 // ---------- W4-minimal: feedback ----------
