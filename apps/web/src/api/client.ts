@@ -462,6 +462,37 @@ export function deleteApp(slug: string): Promise<{ ok: true }> {
   return request(`/api/hub/${slug}`, { method: 'DELETE' });
 }
 
+// ---------- W2.2 custom renderer upload ----------
+
+export interface UploadRendererResponse {
+  slug: string;
+  bytes: number;
+  source_hash: string;
+  output_shape: string;
+  compiled_at: string;
+}
+
+/**
+ * Upload a creator's TSX renderer source. The backend writes it to a temp
+ * file, compiles via esbuild (external react/react-dom), and serves the
+ * bundle at GET /renderer/:slug/bundle.js. See
+ * apps/server/src/services/renderer-bundler.ts for the compile pipeline.
+ */
+export function uploadRenderer(
+  slug: string,
+  source: string,
+  outputShape?: string,
+): Promise<UploadRendererResponse> {
+  return request(`/api/hub/${slug}/renderer`, {
+    method: 'POST',
+    body: JSON.stringify({ source, output_shape: outputShape }),
+  });
+}
+
+export function deleteRenderer(slug: string): Promise<{ ok: true; slug: string }> {
+  return request(`/api/hub/${slug}/renderer`, { method: 'DELETE' });
+}
+
 // ---------- W4-minimal: feedback ----------
 
 export function postFeedback(body: { text: string; email?: string; url?: string }): Promise<{

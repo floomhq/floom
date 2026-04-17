@@ -1,17 +1,31 @@
 // GET /api/hub — list every runnable app in this Floom instance.
 // This is the "15 apps" grid for the apps directory page.
 // W4-minimal additions:
-//   POST   /api/hub/ingest       — one-shot URL-based publish for /build
-//   POST   /api/hub/detect       — spec preview for /build Step 2
-//   DELETE /api/hub/:slug        — creator-only delete
-//   GET    /api/hub/mine         — apps owned by the caller's workspace
+//   POST   /api/hub/ingest              — one-shot URL-based publish for /build
+//   POST   /api/hub/detect              — spec preview for /build Step 2
+//   DELETE /api/hub/:slug               — creator-only delete
+//   GET    /api/hub/mine                — apps owned by the caller's workspace
+// W2.2 custom-renderer re-enable:
+//   POST   /api/hub/:slug/renderer      — upload a creator TSX renderer
+//   DELETE /api/hub/:slug/renderer      — drop the custom renderer, fall back to default
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { mkdtempSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { db } from '../db.js';
 import { resolveUserContext } from '../services/session.js';
 import { detectAppFromUrl, ingestAppFromUrl } from '../services/openapi-ingest.js';
+import {
+  bundleRenderer,
+  forgetBundle,
+  getBundleResult,
+  MAX_BUNDLE_BYTES,
+  RENDERERS_DIR,
+} from '../services/renderer-bundler.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
+import type { OutputShape } from '@floom/renderer/contract';
 
 export const hubRouter = new Hono();
 
@@ -311,6 +325,7 @@ hubRouter.get('/:slug', (c) => {
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
   if (!row) return c.json({ error: 'App not found' }, 404);
   const manifest = safeManifest(row.manifest);
+  const bundle = getBundleResult(slug);
   return c.json({
     slug: row.slug,
     name: row.name,
@@ -325,9 +340,147 @@ hubRouter.get('/:slug', (c) => {
     is_async: row.is_async === 1,
     async_mode: row.async_mode,
     timeout_ms: row.timeout_ms,
+    // W2.2: expose renderer metadata so /p/:slug knows whether to lazy-load
+    // /renderer/:slug/bundle.js (creator-supplied) or fall back to the
+    // default OutputPanel. Null when no custom renderer is compiled.
+    renderer: bundle
+      ? {
+          source_hash: bundle.sourceHash,
+          bytes: bundle.bytes,
+          output_shape: bundle.outputShape,
+          compiled_at: bundle.compiledAt,
+        }
+      : null,
     created_at: row.created_at,
   });
 });
+
+// ---------------------------------------------------------------------
+// Custom renderer upload / delete (W2.2 re-enable)
+// ---------------------------------------------------------------------
+
+const MAX_SOURCE_BYTES = 512 * 1024;
+const OUTPUT_SHAPES: OutputShape[] = [
+  'text',
+  'markdown',
+  'code',
+  'table',
+  'object',
+  'image',
+  'pdf',
+  'audio',
+  'stream',
+  'error',
+];
+
+const RendererBody = z.object({
+  source: z.string().min(1).max(MAX_SOURCE_BYTES),
+  output_shape: z.enum(OUTPUT_SHAPES as [OutputShape, ...OutputShape[]]).optional(),
+});
+
+hubRouter.post('/:slug/renderer', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const slug = c.req.param('slug');
+  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
+  const isOwner = app.author === ctx.user_id || isOssLocal;
+  if (!isOwner) {
+    return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = RendererBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() },
+      400,
+    );
+  }
+
+  // Write source to an isolated temp dir so bundleRenderer (which reads from
+  // disk) can resolve it. The temp dir is removed on any outcome.
+  const sourceBytes = Buffer.byteLength(parsed.data.source, 'utf-8');
+  if (sourceBytes > MAX_SOURCE_BYTES) {
+    return c.json(
+      { error: `Source exceeds ${MAX_SOURCE_BYTES} bytes`, code: 'too_large' },
+      413,
+    );
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), `floom-renderer-${slug}-`));
+  const entryPath = join(dir, 'renderer.tsx');
+  try {
+    writeFileSync(entryPath, parsed.data.source, 'utf-8');
+    const result = await bundleRenderer({
+      slug,
+      entryPath,
+      outputShape: parsed.data.output_shape,
+    });
+    return c.json({
+      slug: result.slug,
+      bytes: result.bytes,
+      source_hash: result.sourceHash,
+      output_shape: result.outputShape,
+      compiled_at: result.compiledAt,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        error: (err as Error).message || 'bundle_failed',
+        code: 'bundle_failed',
+      },
+      400,
+    );
+  } finally {
+    try {
+      unlinkSync(entryPath);
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
+hubRouter.delete('/:slug/renderer', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const slug = c.req.param('slug');
+  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
+  const isOwner = app.author === ctx.user_id || isOssLocal;
+  if (!isOwner) {
+    return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
+  }
+
+  const bundlePath = join(RENDERERS_DIR, `${slug}.js`);
+  for (const p of [bundlePath, `${bundlePath}.hash`, `${bundlePath}.shape`]) {
+    if (existsSync(p)) {
+      try {
+        unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  forgetBundle(slug);
+  return c.json({ ok: true, slug });
+});
+
+// Exposed for tests that want to confirm the cap is enforced without
+// re-deriving the constant.
+export const RENDERER_MAX_SOURCE_BYTES = MAX_SOURCE_BYTES;
+export const RENDERER_MAX_BUNDLE_BYTES = MAX_BUNDLE_BYTES;
 
 function safeManifest(raw: string): NormalizedManifest | null {
   try {
