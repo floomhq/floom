@@ -351,6 +351,10 @@ hubRouter.get('/:slug', async (c) => {
     author: row.author,
     icon: row.icon,
     manifest,
+    // Visibility (public | unlisted | private). Surfaced so the web client
+    // can render visibility pills and gate private-only UI (e.g. /me/a/:slug
+    // console) without re-fetching from a separate endpoint.
+    visibility: row.visibility,
     // Async job queue (v0.3.0). Surfaced so the web client switches to the
     // queued/running/succeeded poll UI when the app opts in. Backend routes
     // (POST /api/:slug/jobs + GET /api/:slug/jobs/:id) are already live.
