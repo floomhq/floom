@@ -2,5 +2,5 @@ fastapi==0.115.5
 uvicorn==0.32.1
 pydantic==2.10.3
 Markdown==3.7
-weasyprint==62.3
+weasyprint==68.0
 Pygments==2.18.0
