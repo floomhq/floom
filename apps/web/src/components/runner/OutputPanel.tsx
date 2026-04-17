@@ -200,6 +200,7 @@ function FlightCard({ flight }: { flight: Record<string, unknown> }) {
 }
 
 function ErrorCard({ run }: { run: RunRecord }) {
+  const hint = errorHint(run.error || '');
   return (
     <div
       className="app-expanded-card"
@@ -211,6 +212,11 @@ function ErrorCard({ run }: { run: RunRecord }) {
       <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--muted)' }}>
         {run.error || 'The run failed without an error message.'}
       </p>
+      {hint && (
+        <p style={{ margin: '10px 0 0', fontSize: 13, color: '#5a2c12', fontWeight: 500 }}>
+          {hint}
+        </p>
+      )}
       {run.logs && (
         <details style={{ marginTop: 12 }}>
           <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>
@@ -236,6 +242,23 @@ function ErrorCard({ run }: { run: RunRecord }) {
       )}
     </div>
   );
+}
+
+function errorHint(error: string): string | null {
+  if (!error) return null;
+  if (/gemini-?2\.0|model.+no longer available/i.test(error)) {
+    return 'Hint: this app pins a deprecated Gemini model. Ping the app author to update to gemini-3.1-pro-preview.';
+  }
+  if (/403|unauthori[sz]ed|forbidden/i.test(error) && /api\./i.test(error)) {
+    return 'Hint: the upstream API rejected the request. Check that any required API key or bearer token secret is configured in your Floom account.';
+  }
+  if (/secret.+(not set|missing|required)/i.test(error) || /OPENPAPER_API_TOKEN|GEMINI_API_KEY|GOOGLE_API_KEY/.test(error)) {
+    return 'Hint: this app needs a secret that is not configured. Add it under Settings → Secrets, then rerun.';
+  }
+  if (/could not read Username|fatal: Authentication/i.test(error)) {
+    return 'Hint: this app needs a public repo URL, or a GITHUB_TOKEN secret for private repos.';
+  }
+  return null;
 }
 
 function IterateInput({ onSubmit }: { onSubmit?: (prompt: string) => void }) {
