@@ -176,6 +176,9 @@ export interface RunRecord {
   started_at: string;
   finished_at: string | null;
   logs: string;
+  // Populated by GET /api/run/:id so /p/:slug?run=<id> can validate the
+  // run belongs to the slug in the URL before rendering restore state.
+  app_slug?: string | null;
 }
 
 // ---------- W4-minimal: session + dashboard types ----------

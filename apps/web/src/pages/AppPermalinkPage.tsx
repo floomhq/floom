@@ -7,16 +7,16 @@
 // "coming soon" stubs (schedule needs job queue UI; the provider
 // connectors ship after v1 per project_floom_layers.md).
 
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { FloomApp } from '../components/FloomApp';
 import { AppIcon } from '../components/AppIcon';
 import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
-import { getApp, getAppReviews } from '../api/client';
-import type { ActionSpec, AppDetail, ReviewSummary } from '../lib/types';
+import { getApp, getAppReviews, getRun } from '../api/client';
+import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
 
 // Map of known app slugs to GitHub repo URLs
 const GITHUB_REPOS: Record<string, string> = {
@@ -32,6 +32,8 @@ type ComingSoonTarget = 'chatgpt' | 'notion' | 'terminal' | 'schedule';
 
 export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const runIdFromUrl = searchParams.get('run');
 
   const [app, setApp] = useState<AppDetail | null>(null);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
@@ -39,6 +41,12 @@ export function AppPermalinkPage() {
   const [notFound, setNotFound] = useState(false);
   const [comingSoon, setComingSoon] = useState<ComingSoonTarget | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  // Run prefetched from /api/run/:id when the URL contains ?run=<id>. Lets
+  // FloomApp hydrate directly into the `done` phase for shared links.
+  const [initialRun, setInitialRun] = useState<RunRecord | null>(null);
+  // initialRunLoading avoids rendering the FloomApp in `inputs` phase (which
+  // would flash the empty form) while the run is being fetched.
+  const [initialRunLoading, setInitialRunLoading] = useState<boolean>(!!runIdFromUrl);
 
   useEffect(() => {
     if (!slug) {
@@ -61,6 +69,68 @@ export function AppPermalinkPage() {
       .then((res) => setSummary(res.summary))
       .catch(() => setSummary({ count: 0, avg: 0 }));
   }, [slug]);
+
+  // /p/:slug?run=<id> — fetch the run and hydrate FloomApp read-only.
+  // Scoped to this slug so a run-id from a different app is silently
+  // ignored (prevents accidentally mounting someone else's run into an
+  // unrelated page). If the run is owned by a private (auth-required)
+  // app that this visitor can't see, GET /api/run/:id returns 401 and we
+  // just drop the initial-run state, showing the empty form instead.
+  useEffect(() => {
+    if (!slug || !runIdFromUrl) {
+      setInitialRun(null);
+      setInitialRunLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setInitialRunLoading(true);
+    getRun(runIdFromUrl)
+      .then((run) => {
+        if (cancelled) return;
+        if (run.app_slug && run.app_slug !== slug) {
+          // Mismatch: clear the ?run param and fall through to the empty form.
+          setInitialRun(null);
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete('run');
+              return next;
+            },
+            { replace: true },
+          );
+          return;
+        }
+        // Only restore finished runs. In-flight runs aren't deep-linkable
+        // yet; the FloomApp stream/poll path owns that UI surface.
+        if (['success', 'error', 'timeout'].includes(run.status)) {
+          setInitialRun(run);
+        } else {
+          setInitialRun(null);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setInitialRun(null);
+      })
+      .finally(() => {
+        if (!cancelled) setInitialRunLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, runIdFromUrl, setSearchParams]);
+
+  const handleResetInitialRun = useCallback(() => {
+    setInitialRun(null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('run');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   // SEO meta
   useEffect(() => {
@@ -629,7 +699,22 @@ export function AppPermalinkPage() {
             padding: '28px 24px',
           }}
         >
-          <FloomApp app={app} standalone={true} showSidebar={false} />
+          {initialRunLoading ? (
+            <div
+              data-testid="shared-run-loading"
+              style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}
+            >
+              Loading shared run...
+            </div>
+          ) : (
+            <FloomApp
+              app={app}
+              standalone={true}
+              showSidebar={false}
+              initialRun={initialRun}
+              onResetInitialRun={handleResetInitialRun}
+            />
+          )}
         </section>
       </main>
       <Footer />

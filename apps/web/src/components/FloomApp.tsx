@@ -24,6 +24,15 @@ export interface FloomAppResult {
 export interface FloomAppProps {
   app: AppDetail;
   initialInputs?: Record<string, unknown>;
+  /**
+   * Hydrate the runner in the `done` phase with an already-finished run.
+   * Used by /p/:slug?run=<id> so a shared link renders the run's output
+   * read-only without re-executing. The caller is expected to clear the
+   * `?run` query param via onResetInitialRun when the visitor clicks
+   * "Run this yourself".
+   */
+   initialRun?: RunRecord | null;
+   onResetInitialRun?: () => void;
   onResult?: (result: FloomAppResult) => void;
   showSidebar?: boolean;
   standalone?: boolean;
@@ -68,6 +77,8 @@ function buildInitialInputs(spec: ActionSpec, overrides?: Record<string, unknown
 export function FloomApp({
   app,
   initialInputs,
+  initialRun,
+  onResetInitialRun,
   onResult,
   showSidebar = true,
   standalone = false,
@@ -82,6 +93,25 @@ export function FloomApp({
         action: '',
         actionSpec: { label: '', inputs: [], outputs: [] },
         errorMessage: 'No actions defined for this app.',
+      };
+    }
+    // /p/:slug?run=<id> preload: if the parent fetched a finished run,
+    // hydrate straight into the `done` phase so the visitor sees the
+    // original inputs + outputs without re-running. The action used by
+    // the run is preferred over the default; fall back to default if the
+    // manifest no longer has that action.
+    if (initialRun) {
+      const actionName = initialRun.action in app.manifest.actions
+        ? initialRun.action
+        : defaultEntry.action;
+      const spec = app.manifest.actions[actionName] ?? defaultEntry.spec;
+      return {
+        phase: 'done' as Phase,
+        inputs: (initialRun.inputs as Record<string, unknown>) ?? buildInitialInputs(spec),
+        action: actionName,
+        actionSpec: spec,
+        runId: initialRun.id,
+        run: initialRun,
       };
     }
     return {
@@ -100,12 +130,16 @@ export function FloomApp({
 
   const handleReset = useCallback(() => {
     if (!defaultEntry) return;
-    setState((s) => ({
-      ...s,
+    setState({
       phase: 'inputs',
       inputs: buildInitialInputs(defaultEntry.spec, initialInputs),
-    }));
-  }, [defaultEntry, initialInputs]);
+      action: defaultEntry.action,
+      actionSpec: defaultEntry.spec,
+    });
+    // When the runner was hydrated from /p/:slug?run=<id>, also clear the
+    // query param so refreshing the page doesn't re-restore the shared run.
+    onResetInitialRun?.();
+  }, [defaultEntry, initialInputs, onResetInitialRun]);
 
   const handleRun = useCallback(async () => {
     if (state.phase !== 'inputs') return;
@@ -307,29 +341,38 @@ export function FloomApp({
       )}
 
       {state.phase === 'done' && state.run && (
-        app.renderer ? (
-          <div className={standalone ? '' : 'assistant-turn'}>
-            <CustomRendererHost
-              slug={app.slug}
-              run={state.run}
-              sourceHash={app.renderer.source_hash}
-            >
-              <OutputPanel
-                app={appAsPickResult}
+        <>
+          {initialRun && initialRun.id === state.run.id && (
+            <SharedRunBanner
+              standalone={standalone}
+              appName={app.name}
+              onRunYourself={handleReset}
+            />
+          )}
+          {app.renderer ? (
+            <div className={standalone ? '' : 'assistant-turn'}>
+              <CustomRendererHost
+                slug={app.slug}
                 run={state.run}
-                onIterate={handleIterate}
-                onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
-              />
-            </CustomRendererHost>
-          </div>
-        ) : (
-          <OutputPanel
-            app={appAsPickResult}
-            run={state.run}
-            onIterate={handleIterate}
-            onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
-          />
-        )
+                sourceHash={app.renderer.source_hash}
+              >
+                <OutputPanel
+                  app={appAsPickResult}
+                  run={state.run}
+                  onIterate={handleIterate}
+                  onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
+                />
+              </CustomRendererHost>
+            </div>
+          ) : (
+            <OutputPanel
+              app={appAsPickResult}
+              run={state.run}
+              onIterate={handleIterate}
+              onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
+            />
+          )}
+        </>
       )}
 
       {state.phase === 'error' && (
@@ -366,6 +409,44 @@ export function FloomApp({
           onClose={() => setSidebarOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+// ── Shared-run banner ──────────────────────────────────────────────────────
+
+/**
+ * Rendered above the OutputPanel when the runner was hydrated from a
+ * /p/:slug?run=<id> URL. Makes the read-only shared run explicit and
+ * gives the visitor a one-click reset to run the app themselves.
+ */
+function SharedRunBanner({
+  standalone,
+  appName,
+  onRunYourself,
+}: {
+  standalone: boolean;
+  appName: string;
+  onRunYourself: () => void;
+}) {
+  const wrapper: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, padding: '10px 14px', marginBottom: 14, flexWrap: 'wrap',
+    background: 'var(--accent-soft, #f4f4f0)',
+    border: '1px solid var(--accent-border, var(--line))',
+    borderRadius: 10, fontSize: 13, color: 'var(--ink)',
+  };
+  const btn: React.CSSProperties = {
+    padding: '6px 14px', background: 'var(--accent)', color: '#fff',
+    border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600,
+    cursor: 'pointer', fontFamily: 'inherit',
+  };
+  return (
+    <div data-testid="shared-run-banner" className={standalone ? '' : 'assistant-turn'} style={wrapper}>
+      <span>Viewing a shared run of <strong>{appName}</strong>. Outputs are read-only.</span>
+      <button type="button" data-testid="run-yourself-btn" onClick={onRunYourself} style={btn}>
+        Run this yourself
+      </button>
     </div>
   );
 }

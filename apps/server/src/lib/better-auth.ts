@@ -17,11 +17,15 @@
 //   - Okta / Entra (W5.1)
 //   - 2FA (W5.1)
 //   - Passkeys (deferred)
-// W3.1 ships with: magic link, GitHub OAuth, Google OAuth, email+password,
-// API keys, organizations.
+//   - Magic link (disabled 2026-04-17: UI removed in PR #5; disabling the
+//     Better Auth plugin closes the backend endpoint so /auth/sign-in/magic-link
+//     returns 404 instead of silently accepting POSTs from anyone who knows
+//     the path)
+// W3.1 ships with: GitHub OAuth, Google OAuth, email+password, API keys,
+// organizations.
 import { betterAuth } from 'better-auth';
 import { getMigrations } from 'better-auth/db/migration';
-import { magicLink, organization } from 'better-auth/plugins';
+import { organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import { db } from '../db.js';
 
@@ -66,7 +70,6 @@ let cachedAuth: FloomAuth | null | undefined;
  * Optional:
  *   - GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET
  *   - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET
- *   - FLOOM_MAGIC_LINK_EMAIL_FROM (defaults to noreply@floom.dev)
  */
 // Typed as `Parameters<typeof betterAuth>[0]` so the return type is always
 // structurally assignable to what `betterAuth(...)` expects. Kept local so
@@ -98,11 +101,6 @@ function buildAuthOptions(): any {
       clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
     };
   }
-
-  // Pulled into a local so closures in the magic-link sendMagicLink
-  // callback see the resolved value at config time, not later.
-  const magicLinkFrom =
-    process.env.FLOOM_MAGIC_LINK_EMAIL_FROM || 'noreply@floom.dev';
 
   return {
     appName: 'Floom',
@@ -138,20 +136,11 @@ function buildAuthOptions(): any {
     },
     socialProviders,
     plugins: [
-      magicLink({
-        // The actual delivery is owned by the Cloud control plane (an SES /
-        // Resend / SendGrid integration) — in OSS Cloud builds this hook is
-        // wired by the operator. We log the link to stdout so a self-hoster
-        // can copy-paste it during development without needing an SMTP
-        // server. Production overrides this hook via a custom sendMagicLink
-        // implementation in the Cloud monorepo.
-        async sendMagicLink({ email, url, token }) {
-          // eslint-disable-next-line no-console
-          console.log(
-            `[auth] magic link for ${email} from ${magicLinkFrom}: ${url} (token=${token.slice(0, 8)}...)`,
-          );
-        },
-      }),
+      // Magic link plugin intentionally omitted — disabled 2026-04-17.
+      // UI was removed in PR #5; leaving the plugin registered kept the
+      // /auth/sign-in/magic-link endpoint alive for anyone who knew the
+      // path. Email+password and OAuth remain as the supported sign-in
+      // methods.
       organization({
         // Floom's "workspace" is Better Auth's "organization". We expose it
         // under the workspace name in our public API while using the org

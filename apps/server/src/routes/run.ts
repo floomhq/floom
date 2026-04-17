@@ -92,12 +92,31 @@ runRouter.post('/', async (c) => {
   return c.json({ run_id: runId, status: 'pending' });
 });
 
-// GET /api/run/:id — latest snapshot
+// GET /api/run/:id — latest snapshot.
+//
+// Used by two flows:
+//   1. Live polling fallback from streamRun() while a run is in flight.
+//   2. URL-to-run state restore: /p/:slug?run=<id> renders the run
+//      read-only for anyone who opens a shared link (2026-04-17).
+//
+// Visibility rule: if the run is on an auth-required app, the caller must
+// present the bearer token (same check the POST /api/run path uses). Runs
+// on public apps stay viewable by run-id — they already were, and shared
+// run URLs rely on that. App slug is included in the payload so the
+// client can guard against opening a run-id that doesn't match the slug
+// in the URL.
 runRouter.get('/:id', (c) => {
   const id = c.req.param('id');
   const row = getRun(id);
   if (!row) return c.json({ error: 'Run not found' }, 404);
-  return c.json(formatRun(row));
+  const app = db.prepare('SELECT slug, visibility FROM apps WHERE id = ?').get(row.app_id) as
+    | { slug: string; visibility: string | null }
+    | undefined;
+  if (app) {
+    const blocked = checkAppVisibility(c, (app.visibility as 'public' | 'auth-required') || 'public');
+    if (blocked) return blocked;
+  }
+  return c.json({ ...formatRun(row), app_slug: app?.slug ?? null });
 });
 
 // GET /api/run/:id/stream — SSE stream of stdout + status transitions
