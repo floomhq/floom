@@ -153,6 +153,33 @@ function parseEntrypointOutput(stdout: string): EntrypointResult | null {
   return null;
 }
 
+/**
+ * Detect apps that returned `ok: true` from the entrypoint but whose
+ * outputs clearly signal a runtime failure. Returns a human-readable
+ * error message to promote to the run's top-level `error`, or null if
+ * the outputs look like a real success.
+ *
+ * Shape discovered by the per-app quality v3 audit (2026-04-17):
+ *   `{ error: "...", ...partial payload }` — blast-radius + dep-check
+ *   do this when `git clone` fails on a public repo with no creds.
+ *
+ * Kept narrow and shape-based on purpose: we do NOT want to flip
+ * legitimate apps that return `{ errors: [] }` or similar.
+ */
+export function detectSilentError(outputs: unknown): string | null {
+  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {
+    return null;
+  }
+  const o = outputs as Record<string, unknown>;
+
+  // Shape 1: top-level `error` field populated with a non-empty string.
+  if (typeof o.error === 'string' && o.error.trim().length > 0) {
+    return o.error;
+  }
+
+  return null;
+}
+
 function extractUserLogs(stdout: string): string {
   const marker = '__FLOOM_RESULT__';
   const idx = stdout.lastIndexOf(marker);
@@ -347,6 +374,23 @@ async function runActionWorker(opts: {
     }
 
     if (parsed && parsed.ok === true) {
+      // Some docker apps return `{ ok: true, outputs: { error: "..." } }` when
+      // an internal step failed (e.g. git clone with no auth). Treat those as
+      // runtime errors so the UI and `/api/run/<id>` surface a real failure
+      // instead of a silent "success" with an error buried in the outputs.
+      const silentErr = detectSilentError(parsed.outputs);
+      if (silentErr) {
+        updateRun(opts.runId, {
+          status: 'error',
+          outputs: parsed.outputs ?? null,
+          error: silentErr,
+          error_type: 'runtime_error',
+          logs: userLogs,
+          duration_ms: result.durationMs,
+          finished: true,
+        });
+        return;
+      }
       updateRun(opts.runId, {
         status: 'success',
         outputs: parsed.outputs ?? null,
