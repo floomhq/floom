@@ -96,6 +96,37 @@ export interface HubApp {
 
 export interface AppDetail extends HubApp {
   manifest: NormalizedManifest;
+  /**
+   * v0.3.0 async job queue. When true, runs are enqueued on the server
+   * (POST /api/:slug/jobs) and the web client polls GET /api/:slug/jobs/:id
+   * until the status flips to a terminal state.
+   */
+  is_async?: boolean;
+  async_mode?: 'poll' | 'webhook' | null;
+  timeout_ms?: number | null;
+}
+
+// ---------- v0.3.0 async job queue ----------
+
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface JobRecord {
+  id: string;
+  slug: string;
+  app_id: string;
+  action: string;
+  status: JobStatus;
+  input: Record<string, unknown> | null;
+  output: unknown;
+  error: unknown;
+  run_id: string | null;
+  webhook_url: string | null;
+  timeout_ms: number;
+  max_retries: number;
+  attempts: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface PickResult {
