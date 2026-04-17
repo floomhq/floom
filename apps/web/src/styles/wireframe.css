@@ -222,7 +222,7 @@ input { font-family: inherit; }
 .prompt-box:focus {
   border-color: var(--accent);
   border-width: 2px;
-  box-shadow: 0 0 0 3px rgba(61,43,255,0.08);
+  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
 }
 
 .prompt-box-run {
@@ -543,7 +543,7 @@ input { font-family: inherit; }
 }
 .input-field:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(61,43,255,0.08);
+  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
 }
 .input-field::placeholder { color: #b0ada6; }
 
@@ -764,7 +764,7 @@ input { font-family: inherit; }
 }
 .iterate-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(61,43,255,0.08);
+  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
 }
 .iterate-input::placeholder { color: #b0ada6; }
 
