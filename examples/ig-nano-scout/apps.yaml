@@ -11,15 +11,21 @@
 #
 # Upstream container:
 #   docker run -d --name ig-nano-scout --env-file /root/secrets/ig-nano-scout.env \
-#     -p 127.0.0.1:4320:4320 floomhq/ig-nano-scout:latest
+#     -p 127.0.0.1:18000:8000 floomhq/ig-nano-scout:latest
 #
 # Floom then proxies POST /scout through its async job queue, so from
 # the client side it's just:
 #   POST /api/ig-nano-scout/jobs  { "hashtags": ["vienna"], "per_tag": 10 }
 #
-# Secrets listed here are for UI affordance only (the vault page lists
-# them as "required" for the owner to set). The actual secret values
-# live in the container's env, not in per-request auth headers.
+# Secrets listed here are the user-provided credentials (IG cookies +
+# residential proxy URL) that the Floom vault page asks the owner to
+# fill in. Rich metadata (label / description / required / link) lives
+# under `x-floom-user-secrets` in openapi.yaml — this list is the
+# shorter internal mirror Floom uses to wire up vault slots.
+#
+# Non-sensitive config (IG_ACCOUNT_COUNTRY / IG_ACCOUNT_TZ) is baked
+# into the container at deploy time via --env, not listed as a vault
+# secret.
 
 apps:
   - slug: ig-nano-scout
@@ -36,8 +42,12 @@ apps:
     secrets:
       - IG_SESSIONID
       - IG_CSRFTOKEN
+      - IG_DS_USER_ID
+      - IG_MID
+      - IG_DID
+      - IG_RUR
+      - IG_DATR
       - EVOMI_PROXY_URL
-      - IG_ACCOUNT_TZ
     # Async because a full scrape takes ~60s — too long for a synchronous
     # HTTP request. Floom's worker picks jobs off the queue and notifies
     # the client via poll or webhook.

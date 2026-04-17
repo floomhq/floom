@@ -9,10 +9,75 @@ info:
   version: 0.1.0
 
 servers:
-  - url: http://ig-nano-scout:4320
+  - url: http://ig-nano-scout:8000
     description: Floom-internal docker network hostname
-  - url: http://127.0.0.1:4320
+  - url: http://127.0.0.1:8000
     description: Local dev
+
+# Secrets the end-user must provide in their Floom vault before the /run
+# UI un-gates. The v15.2 wireframes' "credentials-required" state on /run
+# triggers off this block.
+x-floom-user-secrets:
+  - name: IG_SESSIONID
+    label: Instagram session ID cookie
+    description: >-
+      Long-lived session cookie. Grab from browser devtools →
+      Application → Cookies → instagram.com → sessionid. Treat this like
+      a password; it grants full account access.
+    link: https://www.instagram.com
+    required: true
+  - name: IG_CSRFTOKEN
+    label: Instagram CSRF token cookie
+    description: >-
+      Paired with sessionid on every request. Devtools → Application →
+      Cookies → instagram.com → csrftoken.
+    link: https://www.instagram.com
+    required: true
+  - name: IG_DS_USER_ID
+    label: Instagram user ID cookie
+    description: >-
+      Numeric user ID tied to the session. Devtools → Application →
+      Cookies → instagram.com → ds_user_id.
+    link: https://www.instagram.com
+    required: true
+  - name: IG_MID
+    label: Instagram machine ID cookie (optional)
+    description: >-
+      Device fingerprint cookie. Not strictly required for auth but
+      significantly reduces IG's bot-detection heuristics. Devtools →
+      Application → Cookies → instagram.com → mid.
+    link: https://www.instagram.com
+    required: false
+  - name: IG_DID
+    label: Instagram ig_did cookie (optional)
+    description: >-
+      Device-install identifier. Paste from devtools if present; leave
+      blank otherwise.
+    link: https://www.instagram.com
+    required: false
+  - name: IG_RUR
+    label: Instagram rur cookie (optional)
+    description: >-
+      Region routing cookie. Helps avoid "suspicious location" challenges
+      when the residential proxy exits in a different country than the
+      account's home. Paste from devtools.
+    link: https://www.instagram.com
+    required: false
+  - name: IG_DATR
+    label: Instagram datr cookie (optional)
+    description: >-
+      Long-lived anti-abuse cookie. Paste from devtools if present.
+    link: https://www.instagram.com
+    required: false
+  - name: EVOMI_PROXY_URL
+    label: Evomi residential proxy URL
+    description: >-
+      Format `http://USER:PASS@core-residential.evomi.com:PORT`. Pin the
+      exit country to the IG account's home country (e.g. DE/AT) using
+      Evomi's country-tagged sessions. Get credentials from the Evomi
+      dashboard.
+    link: https://evomi.com
+    required: true
 
 paths:
   /scout:

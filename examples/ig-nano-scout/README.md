@@ -25,16 +25,31 @@ docker build -t floomhq/ig-nano-scout:latest .
 
 ### 2. Set secrets
 
-Drop secrets into `/root/secrets/ig-nano-scout.env`:
+Drop secrets into `/root/secrets/ig-nano-scout.env`. Required values (the
+container refuses to return results if these are missing):
 
 ```
 IG_SESSIONID=...
 IG_CSRFTOKEN=...
-IG_MID=...
 IG_DS_USER_ID=...
 EVOMI_PROXY_URL=http://USER:PASS@core-residential.evomi.com:1000
-IG_ACCOUNT_TZ=Europe/Vienna
-IG_ACCOUNT_COUNTRY=AT
+```
+
+Optional but strongly recommended — pasting the full cookie set makes
+IG's bot detection significantly happier:
+
+```
+IG_MID=...
+IG_DID=...
+IG_RUR=...
+IG_DATR=...
+```
+
+Non-secret config (don't put in the vault; set at deploy time):
+
+```
+IG_ACCOUNT_TZ=Europe/Vienna       # default: Europe/Berlin
+IG_ACCOUNT_COUNTRY=AT             # default: DE
 ```
 
 ### 3. Run the container
@@ -44,9 +59,13 @@ docker run -d \
   --name ig-nano-scout \
   --restart unless-stopped \
   --env-file /root/secrets/ig-nano-scout.env \
-  -p 127.0.0.1:4320:4320 \
+  -p 127.0.0.1:18000:8000 \
   floomhq/ig-nano-scout:latest
 ```
+
+The container listens on **8000** internally; host port 18000 is what
+Floom proxies to. Adjust the host side freely; the container side is
+fixed by `cloud/Dockerfile`.
 
 ### 4. Register in Floom
 
