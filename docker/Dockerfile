@@ -11,14 +11,13 @@ WORKDIR /app
 
 RUN npm install -g pnpm@9.0.0
 
-# Copy package manifests first (for layer caching)
+# Copy package manifests first (for layer caching).
+# packages/detect, /manifest, /runtime, /cli were removed in PR #29
+# (chore: drop runtime-deploy path, ship OpenAPI-only). Only
+# @floom/renderer remains in the workspace.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/server/package.json ./apps/server/
 COPY apps/web/package.json ./apps/web/
-COPY packages/detect/package.json ./packages/detect/
-COPY packages/manifest/package.json ./packages/manifest/
-COPY packages/runtime/package.json ./packages/runtime/
-COPY packages/cli/package.json ./packages/cli/
 COPY packages/renderer/package.json ./packages/renderer/
 COPY turbo.json tsconfig.base.json ./
 
@@ -63,14 +62,10 @@ ENV PORT=3051
 
 RUN npm install -g pnpm@9.0.0
 
-# Copy package manifests
+# Copy package manifests (see PR #29 note in the builder stage).
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/server/package.json ./apps/server/
 COPY apps/web/package.json ./apps/web/
-COPY packages/detect/package.json ./packages/detect/
-COPY packages/manifest/package.json ./packages/manifest/
-COPY packages/runtime/package.json ./packages/runtime/
-COPY packages/cli/package.json ./packages/cli/
 COPY packages/renderer/package.json ./packages/renderer/
 
 # Install only production server dependencies.
