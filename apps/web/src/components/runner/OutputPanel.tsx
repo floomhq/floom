@@ -124,8 +124,23 @@ function OutputRenderer({ outputs }: { outputs: unknown }) {
 
   if (typeof o.preview === 'string' || typeof o.html === 'string') {
     const html = (o.preview as string) || (o.html as string);
+    const downloadHtml = () => {
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `floom-output-${Date.now()}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
     return (
-      <div className="app-expanded-card">
+      <div className="app-expanded-card" style={{ position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 6, zIndex: 1 }}>
+          <button type="button" className="output-copy-btn" onClick={downloadHtml}>
+            Download HTML
+          </button>
+          <CopyButton value={html} label="Copy HTML" />
+        </div>
         <div
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: html }}
