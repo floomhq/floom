@@ -809,6 +809,43 @@ plugin wired at build time — that's a follow-up when the DSN is actually
 set. Without it, browser errors arrive with obfuscated stacks but still
 group correctly by exception type + message.
 
+### Database backup
+
+Preview data lives in the Docker volume
+`floom-chat-deploy_floom-chat-data`. Losing it wipes every ingested app,
+run history, and user secret. Daily off-volume snapshots are a one-line
+cron job.
+
+```bash
+# On the host (run once):
+sudo install -m 0755 docker/scripts/floom-backup.sh /usr/local/bin/floom-backup.sh
+sudo mkdir -p /opt/floom-backups
+
+# Test it:
+sudo /usr/local/bin/floom-backup.sh
+ls -lh /opt/floom-backups/
+
+# Cron (04:00 daily):
+sudo crontab -e
+# add:
+# 0 4 * * * /usr/local/bin/floom-backup.sh >> /var/log/floom-backup.log 2>&1
+```
+
+The script uses SQLite's online `.backup` command, so it produces a
+consistent snapshot even while the server is writing. Backups are gzipped
+and pruned after 30 days.
+
+**Restore from a backup:**
+
+```bash
+docker compose -f /opt/floom-mcp-preview/docker-compose.yml down floom-mcp-preview
+gunzip -c /opt/floom-backups/floom-YYYYMMDD-HHMM.db.gz > /var/lib/docker/volumes/floom-chat-deploy_floom-chat-data/_data/floom-chat.db
+docker compose -f /opt/floom-mcp-preview/docker-compose.yml up -d floom-mcp-preview
+```
+
+Overrides for the script: `FLOOM_BACKUP_DB`, `FLOOM_BACKUP_DIR`,
+`FLOOM_BACKUP_RETENTION_DAYS`.
+
 ## Version info
 
 - **v0.4.0-alpha.2** (April 2026): **Stripe Connect partner app (W3.3)** — `/api/stripe/*` routes for creator monetization. Express account onboarding (idempotent, hosted onboarding URL), direct charges with 5% `application_fee_amount`, refunds with 30-day fee window, subscriptions with `application_fee_percent=5`, webhook receiver with signature verify + event_id dedupe ledger. Two new tables (`stripe_accounts`, `stripe_webhook_events`), `user_version=6`. Auth boundary scoped by `(workspace_id, owner_id)` where `owner_id = is_authenticated ? user_id : "device:" + device_id` (W2.1 device fallback pattern). 163 new unit + integration tests. `examples/stripe-checkout/` demo app shipping a 3-operation creator surface that pulls per-user Stripe keys from `user_secrets`. See "Creator monetization" section above and `docs/monetization.md` for the full reference.
