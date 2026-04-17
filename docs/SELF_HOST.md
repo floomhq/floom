@@ -244,6 +244,10 @@ Returns `202 Accepted` within a few ms:
 The `webhook_url`, `timeout_ms`, and `max_retries` fields in the request body
 are per-call overrides — they win over the `apps.yaml` defaults.
 
+For proxied apps, `timeout_ms` also controls the upstream HTTP request ceiling
+inside the worker. Long-running upstream APIs must set this above the default
+30-second fetch timeout.
+
 #### GET /api/:slug/jobs/:job_id — poll
 
 ```json

@@ -463,10 +463,15 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
       requestHeaders['Cookie'] = cookieParts.join('; ');
     }
 
+    const requestTimeoutMs =
+      app.timeout_ms && app.timeout_ms > 0
+        ? Math.max(30_000, app.timeout_ms)
+        : 30_000;
+
     const fetchInit: RequestInit = {
       method,
       headers: requestHeaders,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(requestTimeoutMs),
     };
     if (body !== undefined && ['POST', 'PUT', 'PATCH'].includes(method)) {
       fetchInit.body = body as BodyInit;
