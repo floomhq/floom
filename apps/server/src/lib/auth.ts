@@ -7,6 +7,9 @@
 //   2. Per-app auth (app.visibility === 'auth-required') — on top of any
 //      global auth, the specific app can be gated even when global auth is
 //      off. Uses the same FLOOM_AUTH_TOKEN bearer check.
+//   3. Per-app privacy (app.visibility === 'private') — only the app's
+//      author (user_id) can run/list/view it. Used for user-owned apps
+//      like ig-nano-scout that should never appear in the public directory.
 //
 // This is intentionally minimal. Better Auth / SSO / per-user tokens are
 // roadmap items for v0.3+; for v0.2 a single shared token is sufficient to
@@ -67,19 +70,43 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   return next();
 };
 
+export type AppVisibility = 'public' | 'auth-required' | 'private';
+
 /**
  * Per-app auth check. Call at the top of a route handler where `app` has
  * already been loaded. Returns null if authorized, or a Response if blocked.
+ *
+ * For 'private' visibility, pass `owner` (the app's `author` column) and
+ * `ctx` (the resolved user context). Only the owner can pass the gate;
+ * everyone else gets a 404 so the app's existence isn't leaked.
  */
 export function checkAppVisibility(
   c: Context,
-  visibility: 'public' | 'auth-required',
+  visibility: AppVisibility | string | null | undefined,
+  owner?: { author?: string | null; ctx?: SessionContext | null },
 ): Response | null {
-  if (visibility === 'public') return null;
+  const v = (visibility || 'public') as AppVisibility;
+  if (v === 'public') return null;
+
+  if (v === 'private') {
+    const author = owner?.author ?? null;
+    const ctx = owner?.ctx ?? null;
+    // No author on a private app is a data bug — deny safely rather than leak.
+    if (!author) {
+      return c.json({ error: 'App not found', code: 'not_found' }, 404);
+    }
+    // OSS mode: ctx.user_id is DEFAULT_USER_ID ('local') and author is 'local'
+    // for locally-seeded apps, so this naturally passes. Cloud mode requires
+    // an authenticated session whose user_id matches the app's author.
+    if (!ctx || ctx.user_id !== author) {
+      return c.json({ error: 'App not found', code: 'not_found' }, 404);
+    }
+    return null;
+  }
+
+  // 'auth-required' — falls back to the shared FLOOM_AUTH_TOKEN bearer check.
   const expected = getExpectedToken();
   if (!expected) {
-    // App is auth-required but no token env var is set. Deny by default —
-    // better than silently allowing.
     return c.json(
       {
         error:

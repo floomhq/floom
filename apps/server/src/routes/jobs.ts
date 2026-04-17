@@ -14,6 +14,7 @@ import { newJobId } from '../lib/ids.js';
 import { createJob, formatJob, getJobBySlug, cancelJob } from '../services/jobs.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { checkAppVisibility } from '../lib/auth.js';
+import { resolveUserContext } from '../services/session.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const jobsRouter = new Hono<{ Variables: { slug: string } }>();
@@ -38,7 +39,11 @@ jobsRouter.post('/', async (c) => {
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  const ctx = await resolveUserContext(c);
+  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    author: row.author,
+    ctx,
+  });
   if (blocked) return blocked;
 
   if (!row.is_async) {
@@ -128,14 +133,18 @@ jobsRouter.post('/', async (c) => {
 /**
  * GET /api/:slug/jobs/:job_id — latest snapshot.
  */
-jobsRouter.get('/:job_id', (c) => {
+jobsRouter.get('/:job_id', async (c) => {
   const slug = c.req.param('slug') || '';
   const jobId = c.req.param('job_id') || '';
   const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
     | AppRecord
     | undefined;
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
-  const blocked = checkAppVisibility(c, app.visibility || 'public');
+  const ctx = await resolveUserContext(c);
+  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    author: app.author,
+    ctx,
+  });
   if (blocked) return blocked;
   const job = getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
@@ -145,14 +154,18 @@ jobsRouter.get('/:job_id', (c) => {
 /**
  * POST /api/:slug/jobs/:job_id/cancel — cancel a queued or running job.
  */
-jobsRouter.post('/:job_id/cancel', (c) => {
+jobsRouter.post('/:job_id/cancel', async (c) => {
   const slug = c.req.param('slug') || '';
   const jobId = c.req.param('job_id') || '';
   const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
     | AppRecord
     | undefined;
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
-  const blocked = checkAppVisibility(c, app.visibility || 'public');
+  const ctx = await resolveUserContext(c);
+  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    author: app.author,
+    ctx,
+  });
   if (blocked) return blocked;
   const job = getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);

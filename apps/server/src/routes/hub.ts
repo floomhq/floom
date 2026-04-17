@@ -283,9 +283,13 @@ hubRouter.get('/', (c) => {
   if (sort === 'newest') orderBy = 'created_at DESC';
   if (sort === 'category') orderBy = 'category, name';
 
-  const sql = `SELECT * FROM apps WHERE status = 'active' ${
-    category ? 'AND category = ?' : ''
-  } ORDER BY ${orderBy}`;
+  // Public directory: only apps with visibility='public' (or NULL for
+  // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
+  const sql = `SELECT * FROM apps
+                 WHERE status = 'active'
+                   AND (visibility = 'public' OR visibility IS NULL)
+                   ${category ? "AND category = ?" : ''}
+                 ORDER BY ${orderBy}`;
   const rows = (category
     ? db.prepare(sql).all(category)
     : db.prepare(sql).all()) as AppRecord[];
@@ -320,10 +324,18 @@ hubRouter.get('/', (c) => {
   );
 });
 
-hubRouter.get('/:slug', (c) => {
+hubRouter.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
   if (!row) return c.json({ error: 'App not found' }, 404);
+  // Private app? Only reveal to its owner. Return 404 (not 403) so we
+  // don't leak the slug's existence to strangers.
+  if (row.visibility === 'private') {
+    const ctx = await resolveUserContext(c);
+    if (!row.author || ctx.user_id !== row.author) {
+      return c.json({ error: 'App not found' }, 404);
+    }
+  }
   const manifest = safeManifest(row.manifest);
   const bundle = getBundleResult(slug);
   return c.json({

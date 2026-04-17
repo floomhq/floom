@@ -1,0 +1,156 @@
+openapi: 3.0.3
+info:
+  title: ig-nano-scout
+  description: >
+    Finds nano Instagram creators (<N followers) matching a set of hashtags.
+    Runs a stealth-patched Chromium behind a residential proxy, authenticated
+    with session cookies. Wrapped from the macOS-only ig-nano-scout project
+    into a cloud-deployable FastAPI service.
+  version: 0.1.0
+
+servers:
+  - url: http://ig-nano-scout:4320
+    description: Floom-internal docker network hostname
+  - url: http://127.0.0.1:4320
+    description: Local dev
+
+paths:
+  /scout:
+    post:
+      operationId: scout
+      summary: Scrape hashtags and return nano creators
+      description: >
+        Takes a list of hashtags, pulls top posts from each, fetches each
+        author's profile, filters to creators under `threshold` followers,
+        returns the nano list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoutRequest'
+      responses:
+        '200':
+          description: Scout completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoutResponse'
+        '500':
+          description: Scout failed (proxy error, IG block, expired cookie)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+
+components:
+  schemas:
+    ScoutRequest:
+      type: object
+      properties:
+        hashtags:
+          type: array
+          items:
+            type: string
+          description: Hashtags without the # prefix (e.g. ["vienna","cafe"])
+          example: ["vienna", "cafevienna"]
+        per_tag:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 8
+          description: How many posts to pull per hashtag
+        threshold:
+          type: integer
+          minimum: 100
+          maximum: 100000
+          default: 10000
+          description: Max followers to qualify as "nano"
+        headless:
+          type: boolean
+          default: true
+        use_proxy:
+          type: boolean
+          nullable: true
+          description: Override EVOMI_PROXY_URL env (null = use env, false = home IP)
+      required:
+        - hashtags
+
+    ScoutProfile:
+      type: object
+      properties:
+        username:
+          type: string
+        followers:
+          type: string
+          nullable: true
+        follower_count:
+          type: integer
+          nullable: true
+        following:
+          type: string
+          nullable: true
+        posts:
+          type: string
+          nullable: true
+        bio:
+          type: string
+        caption:
+          type: string
+
+    ScoutCounts:
+      type: object
+      properties:
+        users:
+          type: integer
+        results:
+          type: integer
+        nano:
+          type: integer
+
+    ScoutResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, failed]
+        started_at:
+          type: string
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+        hashtags:
+          type: array
+          items:
+            type: string
+        per_tag:
+          type: integer
+          nullable: true
+        threshold:
+          type: integer
+          nullable: true
+        proxy_enabled:
+          type: boolean
+        counts:
+          $ref: '#/components/schemas/ScoutCounts'
+        users:
+          type: object
+          additionalProperties:
+            type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoutProfile'
+        nano_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoutProfile'
+        error:
+          type: string
+          nullable: true
+      required:
+        - status

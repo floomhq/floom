@@ -11,3 +11,10 @@ data/
 apps/server/data/
 # Phase 2 workplans + stress test report (local-only)
 WORKPLAN-*.md
+
+# macOS AppleDouble metadata files (rsync from macOS)
+._*
+.DS_Store
+
+# Greenlight / audit screenshot artifacts
+screenshots-greenlight/

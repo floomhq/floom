@@ -30,7 +30,11 @@ runRouter.post('/', async (c) => {
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  const ctx = await resolveUserContext(c);
+  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    author: row.author,
+    ctx,
+  });
   if (blocked) return blocked;
 
   let manifest: NormalizedManifest;
@@ -61,11 +65,8 @@ runRouter.post('/', async (c) => {
   }
 
   // W4M.1: scope the run by the current session so /api/me/runs can filter
-  // by user_id / device_id. In OSS mode this binds the run to the local
-  // user and the device cookie; in Cloud mode (W3.1) this is the real
-  // Better Auth user + their active workspace.
-  const ctx = await resolveUserContext(c);
-
+  // by user_id / device_id. `ctx` was already resolved above for the
+  // visibility check (private apps need the caller's user_id).
   const runId = newRunId();
   const threadId = typeof body.thread_id === 'string' ? body.thread_id : null;
   db.prepare(
@@ -105,15 +106,21 @@ runRouter.post('/', async (c) => {
 // run URLs rely on that. App slug is included in the payload so the
 // client can guard against opening a run-id that doesn't match the slug
 // in the URL.
-runRouter.get('/:id', (c) => {
+runRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
   const row = getRun(id);
   if (!row) return c.json({ error: 'Run not found' }, 404);
-  const app = db.prepare('SELECT slug, visibility FROM apps WHERE id = ?').get(row.app_id) as
-    | { slug: string; visibility: string | null }
+  const app = db
+    .prepare('SELECT slug, visibility, author FROM apps WHERE id = ?')
+    .get(row.app_id) as
+    | { slug: string; visibility: string | null; author: string | null }
     | undefined;
   if (app) {
-    const blocked = checkAppVisibility(c, (app.visibility as 'public' | 'auth-required') || 'public');
+    const ctx = await resolveUserContext(c);
+    const blocked = checkAppVisibility(c, app.visibility || 'public', {
+      author: app.author,
+      ctx,
+    });
     if (blocked) return blocked;
   }
   return c.json({ ...formatRun(row), app_slug: app?.slug ?? null });
@@ -262,7 +269,11 @@ slugRunRouter.post('/', async (c) => {
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  const ctx = await resolveUserContext(c);
+  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    author: row.author,
+    ctx,
+  });
   if (blocked) return blocked;
 
   let manifest: NormalizedManifest;
@@ -297,9 +308,8 @@ slugRunRouter.post('/', async (c) => {
     return c.json({ error: e.message, field: e.field }, 400);
   }
 
-  // W4M.1: scope the run by the current session.
-  const ctx = await resolveUserContext(c);
-
+  // W4M.1: scope the run by the current session. `ctx` already resolved
+  // for the visibility check above.
   const runId = newRunId();
   db.prepare(
     `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)

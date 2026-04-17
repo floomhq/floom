@@ -111,7 +111,9 @@ export interface PickResult {
 export async function pickApps(query: string, limit = 3): Promise<PickResult[]> {
   const allApps = db
     .prepare(
-      "SELECT id, slug, name, description, category, icon FROM apps WHERE status = 'active'",
+      "SELECT id, slug, name, description, category, icon FROM apps" +
+        " WHERE status = 'active'" +
+        " AND (visibility = 'public' OR visibility IS NULL)",
     )
     .all() as Array<
     Pick<AppRecord, 'id' | 'slug' | 'name' | 'description' | 'category' | 'icon'>

@@ -125,7 +125,7 @@ export interface AppRecord {
   auth_config: string | null; // JSON-stringified AuthConfig
   openapi_spec_url: string | null;
   openapi_spec_cached: string | null; // JSON-stringified OpenAPI spec
-  visibility: 'public' | 'auth-required';
+  visibility: 'public' | 'auth-required' | 'private';
   // Async job queue fields (v0.3.0). is_async comes back from SQLite as 0/1.
   is_async: 0 | 1;
   webhook_url: string | null;

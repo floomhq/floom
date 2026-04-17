@@ -1,0 +1,47 @@
+# ig-nano-scout — first private app on Floom.
+#
+# Finds nano Instagram creators (<N followers) matching a set of hashtags
+# using a stealth-patched Chromium behind a residential proxy. Runs a
+# long-lived scrape job (~60s) per call, so it opts into Floom's async
+# job queue.
+#
+# This app is PRIVATE: only the author can run/see it. It will never
+# appear in /api/hub (the public directory) or in MCP list_apps results.
+# It's owned by the user who ingested it and runs against their secrets.
+#
+# Upstream container:
+#   docker run -d --name ig-nano-scout --env-file /root/secrets/ig-nano-scout.env \
+#     -p 127.0.0.1:4320:4320 floomhq/ig-nano-scout:latest
+#
+# Floom then proxies POST /scout through its async job queue, so from
+# the client side it's just:
+#   POST /api/ig-nano-scout/jobs  { "hashtags": ["vienna"], "per_tag": 10 }
+#
+# Secrets listed here are for UI affordance only (the vault page lists
+# them as "required" for the owner to set). The actual secret values
+# live in the container's env, not in per-request auth headers.
+
+apps:
+  - slug: ig-nano-scout
+    type: proxied
+    openapi_spec_url: ./openapi.yaml
+    display_name: ig-nano-scout
+    description: >
+      Scrape Instagram hashtags for nano creators (<10k followers).
+      Stealth Chromium + residential proxy + session cookies. ~60s per run.
+    category: research
+    icon: 📸
+    visibility: private
+    auth: none
+    secrets:
+      - IG_SESSIONID
+      - IG_CSRFTOKEN
+      - EVOMI_PROXY_URL
+      - IG_ACCOUNT_TZ
+    # Async because a full scrape takes ~60s — too long for a synchronous
+    # HTTP request. Floom's worker picks jobs off the queue and notifies
+    # the client via poll or webhook.
+    async: true
+    async_mode: poll
+    timeout_ms: 180000   # 3 min hard cap
+    retries: 0           # IG banning is a real risk; don't retry blindly

@@ -549,8 +549,11 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
     },
     async ({ category, keyword, limit }) => {
       const lim = typeof limit === 'number' ? limit : 50;
+      // MCP list_apps is a public admin surface — only expose public apps.
+      // Private apps are owner-only and never show up in gallery-wide listings.
       let sql =
         "SELECT * FROM apps WHERE status = 'active'" +
+        " AND (visibility = 'public' OR visibility IS NULL)" +
         (category ? ' AND category = ?' : '') +
         ' ORDER BY featured DESC, name ASC';
       const rows = (category
@@ -761,7 +764,11 @@ mcpRouter.all('/app/:slug', async (c) => {
       200,
     );
   }
-  const blocked = checkAppVisibility(c, row.visibility || 'public');
+  const ctx = await resolveUserContext(c);
+  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    author: row.author,
+    ctx,
+  });
   if (blocked) return blocked;
   const server = createPerAppMcpServer(row);
   return handleMcp(server, c.req.raw);

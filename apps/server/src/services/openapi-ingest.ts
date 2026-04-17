@@ -49,11 +49,13 @@ interface OpenApiAppSpec {
   icon?: string;
   /**
    * Per-app visibility. Defaults to public.
-   *  - public: anyone can run the app
+   *  - public: anyone can run the app, listed in /api/hub
    *  - auth-required: caller must present a valid bearer token matching
    *    FLOOM_AUTH_TOKEN env var (see apps/server/src/routes/*.ts)
+   *  - private: only the app's author can run/see it. Never listed in
+   *    the public directory; accessible via /api/hub/mine.
    */
-  visibility?: 'public' | 'auth-required';
+  visibility?: 'public' | 'auth-required' | 'private';
   // ---------- async job queue fields (v0.3.0) ----------
   /**
    * When true, the app runs through the Floom job queue instead of the
