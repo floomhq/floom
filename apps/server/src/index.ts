@@ -480,7 +480,7 @@ if (webDist) {
   // Hono's other route handlers or return a real 404. The order matters:
   // prefix matches first, then exact matches.
   const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/'];
-  const spaExcludedExact = new Set(['/openapi.json', '/metrics', '/docs']);
+  const spaExcludedExact = new Set(['/openapi.json', '/metrics']);
 
   app.use('/*', async (c, next) => {
     const url = new URL(c.req.url);
