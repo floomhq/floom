@@ -15,6 +15,9 @@ const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m
 const MePage = lazy(() => import('./pages/MePage').then(m => ({ default: m.MePage })));
 const MeRunDetailPage = lazy(() => import('./pages/MeRunDetailPage').then(m => ({ default: m.MeRunDetailPage })));
 const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ default: m.MeSettingsPage })));
+const MeAppPage = lazy(() => import('./pages/MeAppPage').then(m => ({ default: m.MeAppPage })));
+const MeAppSecretsPage = lazy(() => import('./pages/MeAppSecretsPage').then(m => ({ default: m.MeAppSecretsPage })));
+const MeAppRunPage = lazy(() => import('./pages/MeAppRunPage').then(m => ({ default: m.MeAppRunPage })));
 const BuildPage = lazy(() => import('./pages/BuildPage').then(m => ({ default: m.BuildPage })));
 const CreatorPage = lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
 const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ default: m.CreatorAppPage })));
@@ -96,6 +99,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/me" element={<MePage />} />
         <Route path="/me/runs/:runId" element={<MeRunDetailPage />} />
         <Route path="/me/settings" element={<MeSettingsPage />} />
+        {/* v15.2: per-app overview / secrets / run surfaces for owned apps. */}
+        <Route path="/me/a/:slug" element={<MeAppPage />} />
+        <Route path="/me/a/:slug/secrets" element={<MeAppSecretsPage />} />
+        <Route path="/me/a/:slug/run" element={<MeAppRunPage />} />
         {/* W4-minimal: creator flow */}
         <Route path="/build" element={<BuildPage />} />
         <Route path="/creator" element={<CreatorPage />} />
