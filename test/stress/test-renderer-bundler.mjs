@@ -131,9 +131,21 @@ log(
   'bundleRenderer: bundle banner present',
   bundleBody.startsWith('// Floom custom renderer bundle'),
 );
+// Sandbox mode (sec/renderer-sandbox): react + react-dom are bundled INTO
+// the output, so the raw string "react" appears in the minified body (as
+// an internal name/comment). The old contract kept react external; the new
+// contract requires it inlined so each iframe runs self-contained.
 log(
-  'bundleRenderer: externals unresolved (react import kept)',
-  bundleBody.includes('react') || bundleBody.includes('"react"'),
+  'bundleRenderer: react bundled into output (sandbox mode)',
+  bundleBody.includes('react'),
+);
+log(
+  'bundleRenderer: wrapper posts ready signal',
+  bundleBody.includes('ready'),
+);
+log(
+  'bundleRenderer: wrapper installs postMessage listener',
+  bundleBody.includes('postMessage'),
 );
 
 // ---- bundleRenderer idempotent ----

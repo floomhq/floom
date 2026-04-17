@@ -587,7 +587,7 @@ apps:
       output_shape: table     # crash fallback — default used when renderer.tsx throws
 ```
 
-At ingest time Floom compiles the renderer via `esbuild` (ESM / browser target, React + @floom/renderer marked as externals) and writes the bundle to `DATA_DIR/renderers/<slug>.js`. The size cap is 256 KB per bundle — trim or split if you hit it.
+At ingest time Floom compiles the renderer via `esbuild` (ESM / browser target). React + ReactDOM are bundled into each renderer so the compiled bundle is fully self-contained. `@floom/renderer` is marked external because it only contributes types the creator references. Output goes to `DATA_DIR/renderers/<slug>.js`. The size cap is **512 KB** per bundle — trim or split if you hit it.
 
 ### What the renderer receives
 
@@ -618,7 +618,7 @@ Three invocation states are mutually exclusive: `input-available`, `output-avail
 
 ### Serving + loading the bundle
 
-The server exposes two routes per slug:
+The server exposes three routes per slug:
 
 ```bash
 # Metadata about the compiled bundle
@@ -627,16 +627,44 @@ curl http://localhost:3051/renderer/flyfast/meta
 
 # The ESM bundle itself (served with x-floom-renderer-hash + x-floom-renderer-shape headers)
 curl http://localhost:3051/renderer/flyfast/bundle.js
+
+# The sandboxed host page that loads the bundle inside an iframe
+curl http://localhost:3051/renderer/flyfast/frame.html
 ```
 
-The web client lazy-loads the bundle with `React.lazy(() => import('/renderer/flyfast/bundle.js'))` when a run completes, wraps it in an `ErrorBoundary`, and falls back to the default shape renderer (`output_shape: table` in the example above) if the component crashes at runtime.
+The web client embeds `frame.html` inside an `<iframe sandbox="allow-scripts">` and communicates with the bundle over `postMessage` (see [Security model](#custom-renderer-security-model) below). If the bundle never sends a `ready` handshake or crashes at runtime, the host falls back to the default shape renderer (`output_shape: table` in the example above).
+
+### Custom renderer security model
+
+Custom renderers are creator-controlled code shipped to every user who runs the app. Before v0.4.0-mvp.6 they executed in the main window context, which let a malicious creator reach `document.cookie`, `/api/me`, `localStorage`, and any other same-origin Floom endpoint. That is fixed.
+
+**Every custom renderer now runs inside a sandboxed iframe:**
+
+- **Iframe sandbox**: `<iframe sandbox="allow-scripts">` with *no* `allow-same-origin`. The iframe gets an opaque origin, so it cannot read the parent's cookies, `localStorage`, `sessionStorage`, or any Floom API via same-origin fetch.
+- **Content Security Policy** on `frame.html`:
+    - `default-src 'none'` - everything denied by default
+    - `script-src 'self'` - only the compiled bundle from this origin
+    - `connect-src 'none'` - no `fetch()`, `WebSocket`, `EventSource`, or `XMLHttpRequest` anywhere
+    - `frame-ancestors 'self'` - the frame can only be embedded inside Floom itself
+    - `form-action 'none'`, `base-uri 'none'` - can't hijack navigation or form submissions
+- **postMessage contract** (`apps/web/src/lib/renderer-contract.ts`): the parent validates every incoming message (shape, slug, height bounds, URL scheme) before acting. Link clicks inside the iframe are forwarded to the parent and re-validated against a whitelist of `http`, `https`, `mailto`.
+- **X-Content-Type-Options: nosniff** on both `bundle.js` and `frame.html` blocks MIME-sniffing attacks.
+
+Creators do not need to change anything to get these protections — the bundler wraps the creator's default export with the postMessage plumbing automatically. The `RenderProps` contract (`{ state, data, status, app }`) stays identical.
+
+Quick verification on a running instance:
+
+```bash
+curl -sI https://<your-floom-host>/renderer/<slug>/frame.html | grep -i content-security-policy
+# → content-security-policy: default-src 'none'; script-src 'self'; ...
+```
 
 ### Error boundary + fallbacks
 
 Creators never have to worry about breaking a hub. If `renderer.tsx`:
 
 - fails to compile at ingest → Floom logs and keeps going (the app falls back to the default renderer for its schema)
-- exceeds 256 KB after minification → ingest throws per-app, other apps continue
+- exceeds 512 KB after minification → ingest throws per-app, other apps continue
 - crashes at render time in the user's browser → `RendererShell`'s error boundary catches it and swaps in the default for `output_shape`
 - returns an `output-error` state → Floom always uses its default `ErrorOutput` card (the custom renderer never gets a chance to re-style errors, which keeps the UX consistent across apps)
 

@@ -5,20 +5,59 @@
 // at ingest time. The bundle is written to DATA_DIR/renderers/<slug>.js and
 // served by the GET /renderer/:slug/bundle.js route.
 //
+// Security model (sec/renderer-sandbox, 2026-04-17):
+// The bundle runs inside a sandboxed iframe (/renderer/:slug/frame.html) with
+// a strict CSP (script-src 'self', connect-src 'none', no allow-same-origin).
+// The iframe receives run data via postMessage from the parent window. Because
+// each bundle runs in its own document context with an opaque origin, react
+// and react-dom are bundled INTO the creator's bundle (no longer external) so
+// the iframe is fully self-contained. The bundler wraps the creator's default
+// export with a tiny message-listener + mount stub so creators keep shipping
+// plain React components — the runtime wiring is invisible to them.
+//
 // Key decisions:
 // - esbuild in bundle mode with `format: esm` + `platform: browser`
-// - react/react-dom marked as externals so the host page owns the React
-//   instance (keeps the bundle tiny and avoids dual-React bugs)
+// - react + react-dom/client bundled into each renderer (each iframe is its
+//   own React root; dual-React is fine since they're in separate documents)
 // - subresource integrity via SHA-256 hash of the source
-// - strict size cap (256 KB) so a rogue renderer can't blow up the container
+// - size cap (512 KB) so a rogue renderer can't blow up the container
 // - idempotent: re-bundling a hash we've seen before is a no-op
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve, basename, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { DATA_DIR } from '../db.js';
 import type { BundleResult, OutputShape } from '@floom/renderer/contract';
+
+/**
+ * esbuild needs to resolve `react` and `react-dom/client` from the creator's
+ * (potentially scratch) manifest dir. The creator's tsx file lives under the
+ * user's apps.yaml dir which likely has no `node_modules`. We point esbuild
+ * at the @floom/renderer package's own `node_modules` (which has react as a
+ * direct dep) via `nodePaths`. This lets the bundler work for any creator
+ * dir without requiring the creator to install React themselves.
+ *
+ * Resolved lazily (via the `getReactNodePaths()` helper) so tests that point
+ * DATA_DIR at a tmpdir still find react via the monorepo tree.
+ */
+function getReactNodePaths(): string[] {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // Walk up to the monorepo root and try a few candidate locations where
+  // react may live in a pnpm layout. First match wins; all missing ones
+  // are silently dropped.
+  const candidates = [
+    // apps/server/src → apps/server → apps → monorepo root
+    resolve(here, '..', '..', '..', '..', 'packages', 'renderer', 'node_modules'),
+    // dist layout: apps/server/dist → apps/server → apps → monorepo root
+    resolve(here, '..', '..', '..', 'packages', 'renderer', 'node_modules'),
+    // Fallback to the monorepo root node_modules (works in flat installs)
+    resolve(here, '..', '..', '..', '..', 'node_modules'),
+    resolve(here, '..', '..', '..', 'node_modules'),
+  ];
+  return candidates.filter((p) => existsSync(p));
+}
 
 /**
  * Where bundled renderers live on disk. Lives under DATA_DIR so it persists
@@ -26,8 +65,14 @@ import type { BundleResult, OutputShape } from '@floom/renderer/contract';
  */
 export const RENDERERS_DIR = join(DATA_DIR, 'renderers');
 
-/** Size cap (bytes) per bundled renderer. Enforced post-build. */
-export const MAX_BUNDLE_BYTES = 256 * 1024;
+/**
+ * Size cap (bytes) per bundled renderer. Enforced post-build.
+ * Bumped from 256 KB to 512 KB in sec/renderer-sandbox because react +
+ * react-dom/client are now bundled in (they used to be external and loaded
+ * from the parent window; the iframe sandbox means each bundle ships its
+ * own copy, adding ~140 KB minified).
+ */
+export const MAX_BUNDLE_BYTES = 512 * 1024;
 
 /**
  * In-memory index of slug → BundleResult. Populated at ingest time and read
@@ -139,6 +184,98 @@ export interface BundleOptions {
 }
 
 /**
+ * Build the wrapper TSX that esbuild compiles alongside the creator's entry.
+ *
+ * The wrapper:
+ *   - imports React + react-dom/client (bundled into the output)
+ *   - imports the creator's default export
+ *   - listens for `{type: 'init', output, status, app_slug}` postMessages
+ *     from the parent, then renders the component into `#root`
+ *   - posts `{type: 'rendered', height}` back, and watches for resize via a
+ *     ResizeObserver so the parent can grow the iframe
+ *   - intercepts link clicks and forwards `{type: 'link_click', href}` to the
+ *     parent instead of navigating (the iframe has no origin anyway, so most
+ *     navigations would fail; this makes clicks useful)
+ *
+ * The wrapper is intentionally tiny so that (a) it doesn't dominate the bundle
+ * size cap and (b) the surface area creators see stays the same: default
+ * export + React component, props = `{ data, status, app }`.
+ */
+export function buildWrapperSource(entryPath: string, slug: string): string {
+  // JSON.stringify to produce a safely-quoted import specifier. The creator
+  // path has already been validated by resolveEntryPath so it can't escape
+  // the manifest dir; we still JSON.stringify here for defense in depth
+  // against unusual characters in file names.
+  const importSpec = JSON.stringify(entryPath);
+  const slugLit = JSON.stringify(slug);
+  return `
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import Creator from ${importSpec};
+
+const SLUG = ${slugLit};
+let root = null;
+let lastHeight = -1;
+
+function postHeight() {
+  try {
+    const h = Math.ceil(document.documentElement.getBoundingClientRect().height) || 0;
+    if (h !== lastHeight) {
+      lastHeight = h;
+      parent.postMessage({ type: 'rendered', slug: SLUG, height: h }, '*');
+    }
+  } catch (_) {}
+}
+
+function mount(payload) {
+  const el = document.getElementById('root');
+  if (!el) return;
+  if (!root) root = createRoot(el);
+  const { output, status, app_slug } = payload || {};
+  root.render(
+    React.createElement(Creator, {
+      data: output,
+      status: status || 'success',
+      state: 'output-available',
+      app: { slug: app_slug || SLUG },
+    }),
+  );
+  // Defer so React commits before we measure.
+  requestAnimationFrame(postHeight);
+}
+
+window.addEventListener('message', (ev) => {
+  const d = ev && ev.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.type === 'init') mount(d);
+});
+
+// Any link click inside the iframe: forward to parent instead of navigating.
+// Sandboxed iframe without allow-top-navigation can't navigate the top frame
+// anyway, but this gives the parent a single validated hook to open URLs.
+document.addEventListener('click', (ev) => {
+  let t = ev.target;
+  while (t && t !== document.body) {
+    if (t.tagName === 'A' && t.href) {
+      ev.preventDefault();
+      parent.postMessage({ type: 'link_click', slug: SLUG, href: t.href }, '*');
+      return;
+    }
+    t = t.parentNode;
+  }
+});
+
+// Track size changes from async data / images loading after mount.
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(postHeight).observe(document.documentElement);
+}
+
+// Signal to the parent we're ready to receive init.
+parent.postMessage({ type: 'ready', slug: SLUG }, '*');
+`;
+}
+
+/**
  * Compile a creator's renderer.tsx into a standalone ESM bundle.
  *
  * The bundle:
@@ -177,15 +314,36 @@ export async function bundleRenderer(opts: BundleOptions): Promise<BundleResult>
   }
 
   // Full rebuild.
+  // The creator writes `export default function Renderer(props) { ... }`.
+  // We wrap it with a stdin entry that bundles react + react-dom/client and
+  // hooks up postMessage-driven mounting inside the sandboxed iframe. The
+  // creator's file is imported via a JS-resolvable absolute path so esbuild
+  // walks into it for types-erased output.
+  const creatorImport = opts.entryPath.replace(/\\/g, '/');
+  const wrapperSource = buildWrapperSource(creatorImport, opts.slug);
   const result = await build({
-    entryPoints: [opts.entryPath],
+    stdin: {
+      contents: wrapperSource,
+      resolveDir: opts.entryPath.substring(
+        0,
+        opts.entryPath.length - basename(opts.entryPath).length,
+      ),
+      loader: 'tsx',
+      sourcefile: `__floom_sandbox_${opts.slug}.tsx`,
+    },
     bundle: true,
     format: 'esm',
     platform: 'browser',
     target: 'es2020',
     jsx: 'automatic',
     jsxImportSource: 'react',
-    external: ['react', 'react-dom', 'react-dom/client', '@floom/renderer'],
+    // Point esbuild at the monorepo's @floom/renderer node_modules so
+    // `react` + `react-dom/client` resolve even when the creator's manifest
+    // directory has no node_modules of its own.
+    nodePaths: getReactNodePaths(),
+    // `@floom/renderer` stays external because it only exports types the
+    // creator references (`import type { RenderProps }`); esbuild erases it.
+    external: ['@floom/renderer'],
     write: false,
     minify: true,
     sourcemap: false,
@@ -193,6 +351,9 @@ export async function bundleRenderer(opts: BundleOptions): Promise<BundleResult>
     logLevel: 'silent',
     banner: {
       js: `// Floom custom renderer bundle · slug=${opts.slug} · hash=${sourceHash}`,
+    },
+    define: {
+      'process.env.NODE_ENV': '"production"',
     },
   });
 
