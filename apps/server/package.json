@@ -20,12 +20,12 @@
     "better-auth": "1.6.3",
     "better-sqlite3": "11.5.0",
     "dockerode": "4.0.2",
-    "esbuild": "0.24.2",
+    "esbuild": "0.25.12",
     "hono": "4.12.14",
     "json-schema-merge-allof": "0.8.1",
     "nanoid": "5.0.9",
     "stripe": "17.7.0",
-    "yaml": "2.5.1",
+    "yaml": "2.8.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {

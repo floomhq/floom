@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@floom/detect": "workspace:*",
-    "yaml": "2.5.1"
+    "yaml": "2.8.3"
   },
   "devDependencies": {
     "@types/node": "22.9.0",
