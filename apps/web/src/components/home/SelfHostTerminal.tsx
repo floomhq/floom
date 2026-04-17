@@ -1,89 +1,142 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
 
-// Real docker run command (the image is published to ghcr.io/floomhq) plus a
-// simulated terminal showing what the operator sees: image pull, manifest
-// load, the four surfaces registering, server up. Everything below the prompt
-// is a static script that types itself out so it feels live.
-
-const DOCKER_CMD = `docker run -p 3051:3051 \\
-  -v $(pwd)/apps.yaml:/app/config/apps.yaml:ro \\
+const DOCKER_CMD = `docker run -d --name floom \\
+  -p 3051:3051 \\
+  -v floom_data:/data \\
+  -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \\
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \\
-  -e STRIPE_SECRET_KEY=sk_test_... \\
-  ghcr.io/floomhq/floom-monorepo:v0.1.0`;
+  ghcr.io/floomhq/floom-monorepo:v0.4.0-minimal.6`;
 
-const TERMINAL_SCRIPT: { text: string; cls?: string; delay?: number }[] = [
-  { text: '$ docker run -p 3051:3051 ghcr.io/floomhq/floom-monorepo:v0.1.0', cls: 'term-cmd', delay: 0 },
-  { text: 'Unable to find image \'ghcr.io/floomhq/floom-monorepo:v0.1.0\' locally', cls: 'term-dim', delay: 220 },
-  { text: 'v0.1.0: Pulling from floomhq/floom-monorepo', cls: 'term-dim', delay: 320 },
-  { text: 'Digest: sha256:c4f1a7…  Status: Downloaded newer image', cls: 'term-dim', delay: 460 },
-  { text: '', delay: 520 },
-  { text: '[floom] booting v0.1.0', cls: 'term-info', delay: 600 },
-  { text: '[floom] reading apps.yaml … 1 app found', cls: 'term-info', delay: 720 },
-  { text: '[floom] fetching openapi spec from docs.stripe.com … 832 KB', cls: 'term-info', delay: 880 },
-  { text: '[floom] generating MCP server     ✓  47 tools', cls: 'term-ok', delay: 1040 },
-  { text: '[floom] generating HTTP proxy     ✓  /api/stripe/*', cls: 'term-ok', delay: 1180 },
-  { text: '[floom] generating CLI commands   ✓  floom stripe …', cls: 'term-ok', delay: 1320 },
-  { text: '[floom] generating web renderer   ✓  /p/stripe', cls: 'term-ok', delay: 1460 },
-  { text: '', delay: 1520 },
-  { text: '[floom] ready  →  http://localhost:3051', cls: 'term-ready', delay: 1620 },
+const TERMINAL_LINES = [
+  '$ docker run -d --name floom ...',
+  '[floom] booting v0.4.0-minimal.6',
+  '[floom] reading /app/config/apps.yaml',
+  '[floom] ingesting proxied + hosted app specs',
+  '[floom] surfaces ready: /apps  /p/:slug  /api/:slug/run  /mcp/app/:slug',
+  '[floom] auth, feedback, reviews, secrets, and app memory online',
+  '[floom] ready -> http://localhost:3051',
 ];
-
-function useTypewriter() {
-  const [step, setStep] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    const tick = (i: number) => {
-      if (cancelled) return;
-      if (i >= TERMINAL_SCRIPT.length) return;
-      setStep(i + 1);
-      const next = TERMINAL_SCRIPT[i + 1];
-      if (next) {
-        const wait = (next.delay ?? 0) - (TERMINAL_SCRIPT[i].delay ?? 0);
-        setTimeout(() => tick(i + 1), Math.max(80, wait));
-      }
-    };
-    setTimeout(() => tick(0), 250);
-    return () => { cancelled = true; };
-  }, []);
-
-  return step;
-}
 
 export function SelfHostTerminal() {
   const [copied, setCopied] = useState(false);
-  const step = useTypewriter();
 
   const copy = () => {
-    try { navigator.clipboard.writeText(DOCKER_CMD).catch(() => {}); } catch { /* ignore */ }
+    try {
+      navigator.clipboard.writeText(DOCKER_CMD).catch(() => {});
+    } catch {
+      // ignore clipboard errors
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   };
 
   return (
-    <div className="terminal">
-      <div className="terminal-head">
-        <div className="terminal-traffic">
-          <span /><span /><span />
+    <div
+      style={{
+        background: 'var(--terminal-bg, #0e0e0c)',
+        color: 'var(--terminal-ink, #f1efe9)',
+        borderRadius: 10,
+        border: '1px solid rgba(255,255,255,0.08)',
+        overflow: 'hidden',
+        boxShadow: '0 20px 48px rgba(14,14,12,0.18)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          padding: '12px 14px',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          background: 'rgba(255,255,255,0.03)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <span style={trafficLight('#fb7185')} />
+            <span style={trafficLight('#fbbf24')} />
+            <span style={trafficLight('#4ade80')} />
+          </div>
+          <span
+            style={{
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.6)',
+            }}
+          >
+            self-host quickstart
+          </span>
         </div>
-        <span className="terminal-title">~/floom · sh</span>
-        <button type="button" className="codeblock-copy" onClick={copy}>
-          {copied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy</>}
+        <button
+          type="button"
+          onClick={copy}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 8,
+            color: copied ? '#86efac' : 'rgba(255,255,255,0.8)',
+            fontSize: 12,
+            padding: '7px 10px',
+          }}
+        >
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="terminal-body">
-        <code>
-          <span className="term-cmd">{DOCKER_CMD}</span>
-          {'\n\n'}
-          {TERMINAL_SCRIPT.slice(0, step).map((line, i) => (
-            <div key={i} className={line.cls || 'term-out'}>
-              {line.text || '\u00a0'}
+
+      <div style={{ padding: '18px 18px 20px' }}>
+        <pre
+          style={{
+            margin: '0 0 18px',
+            whiteSpace: 'pre-wrap',
+            overflowX: 'auto',
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: 12.5,
+            lineHeight: 1.7,
+            color: 'var(--terminal-ink, #f1efe9)',
+          }}
+        >
+          {DOCKER_CMD}
+        </pre>
+
+        <div
+          style={{
+            display: 'grid',
+            gap: 8,
+            paddingTop: 18,
+            borderTop: '1px solid rgba(255,255,255,0.08)',
+          }}
+        >
+          {TERMINAL_LINES.map((line, index) => (
+            <div
+              key={line}
+              style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: index === TERMINAL_LINES.length - 1 ? '#86efac' : 'rgba(241,239,233,0.8)',
+              }}
+            >
+              {line}
             </div>
           ))}
-          {step < TERMINAL_SCRIPT.length && <span className="term-cursor">▍</span>}
-        </code>
-      </pre>
+        </div>
+      </div>
     </div>
   );
+}
+
+function trafficLight(color: string) {
+  return {
+    width: 9,
+    height: 9,
+    borderRadius: '50%',
+    background: color,
+    display: 'inline-block',
+  } as const;
 }

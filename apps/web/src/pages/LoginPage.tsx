@@ -8,7 +8,7 @@
 // banner letting the user know they can use the local account.
 
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { useSession, refreshSession } from '../hooks/useSession';
 import * as api from '../api/client';
@@ -16,11 +16,12 @@ import * as api from '../api/client';
 type Mode = 'signin' | 'signup';
 
 export function LoginPage() {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data, isAuthenticated } = useSession();
-  const initialMode: Mode = searchParams.get('mode') === 'signup' ? 'signup' : 'signin';
-  const [mode, setMode] = useState<Mode>(initialMode);
+  const routeMode = getModeFromLocation(location.pathname, searchParams);
+  const [mode, setMode] = useState<Mode>(routeMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -35,6 +36,10 @@ export function LoginPage() {
       navigate(nextPath, { replace: true });
     }
   }, [isAuthenticated, navigate, nextPath]);
+
+  useEffect(() => {
+    setMode(routeMode);
+  }, [routeMode]);
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -351,6 +356,12 @@ export function LoginPage() {
       </div>
     </PageShell>
   );
+}
+
+function getModeFromLocation(pathname: string, searchParams: URLSearchParams): Mode {
+  if (searchParams.get('mode') === 'signup') return 'signup';
+  if (pathname === '/signup') return 'signup';
+  return 'signin';
 }
 
 const tabStyle = (active: boolean): React.CSSProperties => ({
