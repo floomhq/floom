@@ -8,8 +8,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import { CustomRendererPanel } from '../components/CustomRendererPanel';
 import * as api from '../api/client';
-import type { CreatorRun } from '../lib/types';
+import type { CreatorRun, RendererMeta } from '../lib/types';
 import { formatTime } from './MePage';
 
 export function CreatorAppPage() {
@@ -20,6 +21,7 @@ export function CreatorAppPage() {
     description: string;
     icon: string | null;
   } | null>(null);
+  const [renderer, setRenderer] = useState<RendererMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -32,6 +34,12 @@ export function CreatorAppPage() {
         setAppInfo(res.app);
       })
       .catch((err) => setError((err as Error).message));
+    api
+      .getApp(slug)
+      .then((detail) => setRenderer(detail.renderer ?? null))
+      .catch(() => {
+        /* non-fatal: panel falls back to "no renderer" default */
+      });
   }, [slug]);
 
   return (
@@ -102,6 +110,20 @@ export function CreatorAppPage() {
                 View store
               </Link>
             </div>
+          </div>
+        )}
+
+        {slug && (
+          <div
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              padding: 20,
+              marginBottom: 28,
+            }}
+          >
+            <CustomRendererPanel slug={slug} initial={renderer} onChange={setRenderer} />
           </div>
         )}
 

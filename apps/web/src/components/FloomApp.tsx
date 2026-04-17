@@ -11,6 +11,7 @@ import { AppIcon } from './AppIcon';
 import { StreamingTerminal } from './runner/StreamingTerminal';
 import { OutputPanel } from './runner/OutputPanel';
 import { JobProgress } from './runner/JobProgress';
+import { CustomRendererHost } from './runner/CustomRendererHost';
 import { Sidebar } from './Sidebar';
 import * as api from '../api/client';
 
@@ -306,12 +307,29 @@ export function FloomApp({
       )}
 
       {state.phase === 'done' && state.run && (
-        <OutputPanel
-          app={appAsPickResult}
-          run={state.run}
-          onIterate={handleIterate}
-          onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
-        />
+        app.renderer ? (
+          <div className={standalone ? '' : 'assistant-turn'}>
+            <CustomRendererHost
+              slug={app.slug}
+              run={state.run}
+              sourceHash={app.renderer.source_hash}
+            >
+              <OutputPanel
+                app={appAsPickResult}
+                run={state.run}
+                onIterate={handleIterate}
+                onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
+              />
+            </CustomRendererHost>
+          </div>
+        ) : (
+          <OutputPanel
+            app={appAsPickResult}
+            run={state.run}
+            onIterate={handleIterate}
+            onOpenDetails={showSidebar ? () => setSidebarOpen(true) : undefined}
+          />
+        )
       )}
 
       {state.phase === 'error' && (
