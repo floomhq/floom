@@ -13,7 +13,12 @@ import { MeSettingsPage } from './pages/MeSettingsPage';
 import { BuildPage } from './pages/BuildPage';
 import { CreatorPage } from './pages/CreatorPage';
 import { CreatorAppPage } from './pages/CreatorAppPage';
+import { ImprintPage } from './pages/ImprintPage';
+import { PrivacyPage } from './pages/PrivacyPage';
+import { TermsPage } from './pages/TermsPage';
+import { CookiesPage } from './pages/CookiesPage';
 import { IconSprite } from './components/IconSprite';
+import { CookieBanner } from './components/CookieBanner';
 import { primeSession } from './hooks/useSession';
 import './styles/globals.css';
 
@@ -65,8 +70,21 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/pricing" element={<Navigate to="/" replace />} />
         <Route path="/store" element={<Navigate to="/apps" replace />} />
         <Route path="/p/:slug/dashboard" element={<PSlugDashboardRedirect />} />
+        {/* Legal pages (DE commercial site: §5 TMG imprint is mandatory). */}
+        <Route path="/imprint" element={<ImprintPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/cookies" element={<CookiesPage />} />
+        {/* /legal/* aliases so both URL conventions work. */}
+        <Route path="/legal/imprint" element={<Navigate to="/imprint" replace />} />
+        <Route path="/legal/privacy" element={<Navigate to="/privacy" replace />} />
+        <Route path="/legal/terms" element={<Navigate to="/terms" replace />} />
+        <Route path="/legal/cookies" element={<Navigate to="/cookies" replace />} />
+        {/* German-language alias for imprint (users may type /impressum). */}
+        <Route path="/impressum" element={<Navigate to="/imprint" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      <CookieBanner />
     </BrowserRouter>
   </React.StrictMode>,
 );
