@@ -7,7 +7,10 @@ export const FAST_APP_FIXTURES: Record<string, Record<string, string>> = {
     token:
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
   },
-  // hash, base64, uuid, password, word-count: defaults suffice for a green run
+  // Server requires non-empty `text` for these; empty default fails client "required" validation.
+  hash: { text: 'hello' },
+  base64: { text: 'hello' },
+  'word-count': { text: 'hello world' },
 };
 
 const FAST_SLUGS = [
