@@ -11,6 +11,23 @@ the same `RuntimeProvider` interface so swaps are isolated.
 See [`docs/PRODUCT.md`](../../docs/PRODUCT.md) for the product framing and
 isolation model.
 
+## Where the host requirements apply
+
+End users of cloud-hosted Floom never install anything — they paste a GitHub
+URL into the web UI. The `git` and `docker` requirements below apply only to
+the machine running the Floom server process.
+
+- **Cloud-hosted Floom (default for ICP)**: requirements are satisfied once,
+  on the operator's box (the AX41). Users see only the web form / MCP / HTTP.
+- **Self-hosted Floom, running as a normal process on a host with Docker
+  installed**: supported. `git` and `docker` must be on the host and on
+  `PATH` for the user that runs the Floom server.
+- **Self-hosted Floom, running *inside* a container that wants to deploy
+  other repos**: not supported. We deliberately do not mount the host's
+  Docker socket into Floom's container (see `docs/PRODUCT.md` and
+  `AGENTS.md`); Docker-in-Docker is not configured either. Run Floom on the
+  host directly if you need the repo→hosted path on a self-hosted instance.
+
 ## Install
 
 Workspace-local package. Not published to npm.

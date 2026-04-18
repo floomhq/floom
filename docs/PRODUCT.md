@@ -26,6 +26,21 @@ Hosting is the product. "OpenAPI wrapping" is a convenience path for people who 
 
 **All three paths produce the same three surfaces**: web form (`/p/:slug`), MCP server (`/mcp/app/:slug`), HTTP endpoint (`/api/:slug/run`).
 
+## Host requirements (operator-side, never user-side)
+
+End users never install tooling. The `git` and `docker` binaries that the
+repo→hosted path shells out to are required on the **machine that runs the
+Floom server process**, not on any user's laptop.
+
+- Cloud-hosted Floom (the default that the ICP uses): satisfied once on the
+  operator's host. Users only ever see the three surfaces.
+- Self-hosted Floom, run as a normal process on a host that has `git` +
+  `docker`: supported.
+- Self-hosted Floom, run *inside* a container, attempting to deploy other
+  repos: **not supported.** We do not mount the host's Docker socket into
+  Floom's container, and Docker-in-Docker is not configured. Run Floom on
+  the host directly if a self-hoster needs path 1.
+
 ## Load-bearing paths (do not delete without explicit owner sign-off)
 
 Even if these look abandoned, broken, or unwired, they are shaped to hold a product pillar. Fix, don't remove.
