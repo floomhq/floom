@@ -13,6 +13,10 @@
 import {
   parseRendererManifest,
   pickOutputShape,
+  pickInputShape,
+  resolveAppShape,
+  INPUT_SHAPES,
+  APP_SHAPES,
 } from '../../packages/renderer/src/contract/index.ts';
 import { resolveRenderTarget } from '../../packages/renderer/src/RendererShell.tsx';
 
@@ -182,6 +186,221 @@ const r5 = resolveRenderTarget('output-error', 'table', true);
 log(
   'resolveRenderTarget: output-error even w/ custom → default error (custom never gets error)',
   r5.component === 'default' && r5.shape === 'error',
+);
+
+// ---- parseRendererManifest: new v15.3 fields (input_shape + shape) ----
+log(
+  'parseRendererManifest: input_shape propagates',
+  parseRendererManifest({ kind: 'default', input_shape: 'csv' }).input_shape === 'csv',
+);
+log(
+  'parseRendererManifest: throws on bad input_shape',
+  throws(
+    () => parseRendererManifest({ kind: 'default', input_shape: 'gif' }),
+    'input_shape',
+  ),
+);
+log(
+  'parseRendererManifest: shape: prompt propagates',
+  parseRendererManifest({ kind: 'default', shape: 'prompt' }).shape === 'prompt',
+);
+log(
+  'parseRendererManifest: shape: form propagates',
+  parseRendererManifest({ kind: 'default', shape: 'form' }).shape === 'form',
+);
+log(
+  'parseRendererManifest: shape: auto propagates',
+  parseRendererManifest({ kind: 'default', shape: 'auto' }).shape === 'auto',
+);
+log(
+  'parseRendererManifest: throws on bad shape',
+  throws(
+    () => parseRendererManifest({ kind: 'default', shape: 'whatever' }),
+    'shape',
+  ),
+);
+
+// ---- INPUT_SHAPES + APP_SHAPES constants ----
+log(
+  'INPUT_SHAPES: 14 entries, all strings',
+  INPUT_SHAPES.length === 14 && INPUT_SHAPES.every((s) => typeof s === 'string'),
+);
+log(
+  'APP_SHAPES: prompt, form, auto',
+  APP_SHAPES.length === 3 &&
+    APP_SHAPES.includes('prompt') &&
+    APP_SHAPES.includes('form') &&
+    APP_SHAPES.includes('auto'),
+);
+
+// ---- pickInputShape ----
+log('pickInputShape: undefined → text', pickInputShape(undefined) === 'text');
+log('pickInputShape: null → text', pickInputShape(null) === 'text');
+log('pickInputShape: empty → text', pickInputShape({}) === 'text');
+
+log(
+  'pickInputShape: x-floom-input-shape wins',
+  pickInputShape({ type: 'string', 'x-floom-input-shape': 'csv' }) === 'csv',
+);
+log(
+  'pickInputShape: x-floom-input-shape invalid falls through',
+  pickInputShape({ type: 'string', 'x-floom-input-shape': 'gif' }) === 'text',
+);
+
+// file family (binary)
+log(
+  'pickInputShape: string+binary+text/csv → csv',
+  pickInputShape({ type: 'string', format: 'binary', contentMediaType: 'text/csv' }) === 'csv',
+);
+log(
+  'pickInputShape: string+binary+image/png → image',
+  pickInputShape({ type: 'string', format: 'binary', contentMediaType: 'image/png' }) === 'image',
+);
+log(
+  'pickInputShape: string+binary generic → file',
+  pickInputShape({ type: 'string', format: 'binary', contentMediaType: 'application/pdf' }) === 'file',
+);
+log(
+  'pickInputShape: string+binary no contentType → file',
+  pickInputShape({ type: 'string', format: 'binary' }) === 'file',
+);
+
+// multifile
+log(
+  'pickInputShape: array of binary → multifile',
+  pickInputShape({
+    type: 'array',
+    items: { type: 'string', format: 'binary' },
+  }) === 'multifile',
+);
+log(
+  'pickInputShape: array of images → image (per-item detection)',
+  pickInputShape({
+    type: 'array',
+    items: { type: 'string', format: 'binary', contentMediaType: 'image/png' },
+  }) === 'image',
+);
+log(
+  'pickInputShape: array of CSVs → csv (per-item detection)',
+  pickInputShape({
+    type: 'array',
+    items: { type: 'string', format: 'binary', contentMediaType: 'text/csv' },
+  }) === 'csv',
+);
+
+// date / datetime / url
+log(
+  'pickInputShape: string+format:date → date',
+  pickInputShape({ type: 'string', format: 'date' }) === 'date',
+);
+log(
+  'pickInputShape: string+format:date-time → datetime',
+  pickInputShape({ type: 'string', format: 'date-time' }) === 'datetime',
+);
+log(
+  'pickInputShape: string+format:uri → url',
+  pickInputShape({ type: 'string', format: 'uri' }) === 'url',
+);
+log(
+  'pickInputShape: string+format:url → url (alias)',
+  pickInputShape({ type: 'string', format: 'url' }) === 'url',
+);
+
+// enum / json / code / textarea / text
+log(
+  'pickInputShape: string+enum → enum',
+  pickInputShape({ type: 'string', enum: ['A4', 'Letter'] }) === 'enum',
+);
+log(
+  'pickInputShape: string+empty enum → text',
+  pickInputShape({ type: 'string', enum: [] }) === 'text',
+);
+log(
+  'pickInputShape: string+contentMediaType application/json → json',
+  pickInputShape({ type: 'string', contentMediaType: 'application/json' }) === 'json',
+);
+log(
+  'pickInputShape: string+x-floom-language → code',
+  pickInputShape({ type: 'string', 'x-floom-language': 'python' }) === 'code',
+);
+log(
+  'pickInputShape: string+x-floom-multiline → textarea',
+  pickInputShape({ type: 'string', 'x-floom-multiline': true }) === 'textarea',
+);
+log(
+  'pickInputShape: string+maxLength > 200 → textarea',
+  pickInputShape({ type: 'string', maxLength: 500 }) === 'textarea',
+);
+log(
+  'pickInputShape: string+maxLength <= 200 → text',
+  pickInputShape({ type: 'string', maxLength: 80 }) === 'text',
+);
+log(
+  'pickInputShape: bare string → text',
+  pickInputShape({ type: 'string' }) === 'text',
+);
+
+// number / boolean
+log(
+  'pickInputShape: number → number',
+  pickInputShape({ type: 'number' }) === 'number',
+);
+log(
+  'pickInputShape: integer → number',
+  pickInputShape({ type: 'integer' }) === 'number',
+);
+log(
+  'pickInputShape: boolean → boolean',
+  pickInputShape({ type: 'boolean' }) === 'boolean',
+);
+
+// precedence: explicit ext beats derivation
+log(
+  'pickInputShape: x-floom-input-shape beats binary',
+  pickInputShape({
+    type: 'string',
+    format: 'binary',
+    contentMediaType: 'text/csv',
+    'x-floom-input-shape': 'file',
+  }) === 'file',
+);
+
+// resolveAppShape
+log(
+  'resolveAppShape: explicit prompt → prompt',
+  resolveAppShape('prompt', ['file']) === 'prompt',
+);
+log(
+  'resolveAppShape: explicit form → form',
+  resolveAppShape('form', ['textarea']) === 'form',
+);
+log(
+  'resolveAppShape: auto + 1 textarea → prompt',
+  resolveAppShape('auto', ['textarea']) === 'prompt',
+);
+log(
+  'resolveAppShape: auto + 1 text → prompt',
+  resolveAppShape('auto', ['text']) === 'prompt',
+);
+log(
+  'resolveAppShape: auto + 1 file → form',
+  resolveAppShape('auto', ['file']) === 'form',
+);
+log(
+  'resolveAppShape: auto + 0 inputs → form',
+  resolveAppShape('auto', []) === 'form',
+);
+log(
+  'resolveAppShape: auto + multiple inputs → form',
+  resolveAppShape('auto', ['textarea', 'enum']) === 'form',
+);
+log(
+  'resolveAppShape: undefined (nullish) → auto behavior',
+  resolveAppShape(undefined, ['textarea']) === 'prompt',
+);
+log(
+  'resolveAppShape: null → auto behavior',
+  resolveAppShape(null, ['file']) === 'form',
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

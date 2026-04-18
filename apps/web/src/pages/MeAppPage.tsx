@@ -42,7 +42,9 @@ export function MeAppPage() {
         if (cancelled) return;
         const status = (err as { status?: number }).status;
         if (status === 404) {
-          nav('/me', { replace: true });
+          const q = new URLSearchParams({ notice: 'app_not_found' });
+          if (slug) q.set('slug', slug);
+          nav(`/me?${q.toString()}`, { replace: true });
           return;
         }
         setError((err as Error).message || 'Failed to load app');
