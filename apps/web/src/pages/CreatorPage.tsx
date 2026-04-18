@@ -129,7 +129,9 @@ export function CreatorPage() {
                 width: 64,
                 height: 64,
                 borderRadius: 16,
-                background: 'var(--accent-soft, #e9e6ff)',
+                // Green tint fallback — the default #e9e6ff was purple,
+                // which violates Floom's green-only accent rule.
+                background: 'var(--accent-soft, #d7f1e0)',
                 color: 'var(--accent)',
                 margin: '0 auto 20px',
                 display: 'flex',

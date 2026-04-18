@@ -26,6 +26,12 @@ export function MeRail({ activeAppSlug }: Props) {
   return (
     <aside
       data-testid="me-rail"
+      // On narrow viewports (<720px) the 260px sidebar starves the main
+      // column of horizontal space — on /me/a/:slug this collapses the
+      // description into a vertical one-char-per-line column. Hiding the
+      // rail below this breakpoint restores mobile readability. Nav still
+      // works via the TopBar + hamburger menu.
+      className="me-rail-aside"
       style={{
         width: 260,
         flexShrink: 0,
