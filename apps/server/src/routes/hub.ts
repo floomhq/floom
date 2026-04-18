@@ -287,6 +287,21 @@ function safeParse(raw: string | null): unknown {
   }
 }
 
+// FLOOM_STORE_HIDE_SLUGS (lock-in 2026-04-18): comma-separated list of app
+// slugs that the public store feed should suppress. Default empty, no
+// filtering. Useful for creators who want to temporarily take a published
+// app out of the directory without deleting it (e.g. `flyfast` while its
+// upstream integration is being rotated). Parsed once at module load;
+// change the env var and restart the server to pick up new values. The
+// /api/hub/:slug detail endpoint still serves the record so deep links
+// keep working, only the list view hides it.
+const HIDDEN_SLUGS: Set<string> = new Set(
+  (process.env.FLOOM_STORE_HIDE_SLUGS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 hubRouter.get('/', (c) => {
   const category = c.req.query('category');
   const sort = c.req.query('sort') || 'default';
@@ -313,11 +328,20 @@ hubRouter.get('/', (c) => {
                    AND (apps.visibility = 'public' OR apps.visibility IS NULL)
                    ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
-  const rows = (category
+  const rowsAll = (category
     ? db.prepare(sql).all(category)
     : db.prepare(sql).all()) as Array<
     AppRecord & { author_name: string | null; author_email: string | null }
   >;
+
+  // Apply FLOOM_STORE_HIDE_SLUGS server-side filter. This is the canonical
+  // place to hide apps from the public directory; the client-side
+  // `isTestFixture` pass in AppsDirectoryPage stays as a defense-in-depth
+  // safety net against test fixtures accidentally ingested in dev.
+  const rows =
+    HIDDEN_SLUGS.size === 0
+      ? rowsAll
+      : rowsAll.filter((row) => !HIDDEN_SLUGS.has(row.slug.toLowerCase()));
 
   return c.json(
     rows.map((row) => {
