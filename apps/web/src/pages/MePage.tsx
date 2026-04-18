@@ -1,101 +1,142 @@
-// v15.1 /me — Claude/ChatGPT shape (anchor: /tmp/v15-local/me.html).
+// /me — consumer home. v16 shape (kills v15 chat-turn/thread UI).
 //
-// Desktop: MeRail on the left (+ New thread, Your apps, Today / Yesterday
-// / Earlier threads, profile footer) + right pane showing the active
-// thread with turn-by-turn prompt + result + inline composer.
-// Mobile (<= 640px): MeMobile with two tabs, Threads / Apps · N.
-// Empty state (no apps, no runs): slim rail + centered hero CTA to
-// /apps and /build.
+// Single-column Recent Runs list. Each row deep-links to
+// /p/:slug?run=<id> so the user opens the run read-only on the app's
+// permalink. No rail, no composer, no turn bubbles, no "New thread"
+// button, no "Message X…" placeholder — the prior v15 shape conditioned
+// users to treat /me as a chat transcript, which it is not.
 //
-// "Threads" currently 1:1 map to `me_runs` rows — the threads table
-// doesn't exist yet. The composer deep-links to /me/apps/:slug/run with a
-// ?prompt= hint which that page uses to prefill the default input.
-//
-// Legacy tabs (Folders, Saved results, Schedules, My tickets, Shared
-// with me) and the Install tab have been removed. The Install-to-Claude
-// UI now lives at /me/install.
+// Optional footer "Open Studio →" link surfaces when the user has
+// published apps of their own (creator overlap).
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import type { CSSProperties } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useSession } from '../hooks/useSession';
+import { PageShell } from '../components/PageShell';
+import { AppIcon } from '../components/AppIcon';
 import { useMyApps } from '../hooks/useMyApps';
-import { Logo } from '../components/Logo';
-import { MeRail } from '../components/me/MeRail';
-import { MeThreadPane } from '../components/me/MeThreadPane';
-import {
-  MeComposer,
-  type MeComposerHandle,
-} from '../components/me/MeComposer';
-import { MeMobile } from '../components/me/MeMobile';
 import * as api from '../api/client';
-import type { MeRunDetail, MeRunSummary } from '../lib/types';
+import { formatTime } from '../lib/time';
+import type { MeRunSummary, RunStatus } from '../lib/types';
 
-const INITIAL_THREAD_LIMIT = 20;
-const LOAD_MORE_STEP = 20;
+const INITIAL_LIMIT = 25;
+const LOAD_STEP = 25;
+const FETCH_LIMIT = 200;
 
-function useIsMobile(breakpoint = 640): boolean {
-  const getMatch = () =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia(`(max-width: ${breakpoint}px)`).matches
-      : false;
-  const [isMobile, setIsMobile] = useState<boolean>(getMatch);
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function')
-      return;
-    const mql = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, [breakpoint]);
-  return isMobile;
-}
+const s: Record<string, CSSProperties> = {
+  main: {
+    maxWidth: 820,
+    margin: '0 auto',
+    padding: '32px 24px 96px',
+    width: '100%',
+    boxSizing: 'border-box',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 16,
+    flexWrap: 'wrap',
+    marginBottom: 24,
+  },
+  h1: {
+    fontFamily: "'DM Serif Display', Georgia, serif",
+    fontSize: 28,
+    fontWeight: 500,
+    lineHeight: 1.2,
+    margin: 0,
+    color: 'var(--ink)',
+  },
+  headerLink: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: 'var(--accent)',
+    textDecoration: 'none',
+  },
+  card: {
+    border: '1px solid var(--line)',
+    borderRadius: 12,
+    background: 'var(--card)',
+    overflow: 'hidden',
+  },
+  loadMoreWrap: {
+    padding: 14,
+    textAlign: 'center' as const,
+    borderTop: '1px solid var(--line)',
+    background: 'var(--bg)',
+  },
+  loadMoreBtn: {
+    padding: '8px 16px',
+    border: '1px solid var(--line)',
+    background: 'var(--card)',
+    color: 'var(--ink)',
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  footer: {
+    marginTop: 32,
+    padding: '16px 20px',
+    border: '1px solid var(--line)',
+    borderRadius: 12,
+    background: 'var(--card)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    flexWrap: 'wrap',
+  },
+  notice: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: '12px 16px',
+    marginBottom: 20,
+    borderRadius: 10,
+    border: '1px solid #f4b7b1',
+    background: '#fdecea',
+    color: '#5c2d26',
+  },
+  noticeDismiss: {
+    flexShrink: 0,
+    padding: '4px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    color: 'var(--ink)',
+    background: 'rgba(255,255,255,0.6)',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  appIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    background: 'var(--bg)',
+    border: '1px solid var(--line)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+};
 
 export function MePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { data: session, loading: sessionLoading } = useSession();
   const { apps } = useMyApps();
-  const composerRef = useRef<MeComposerHandle | null>(null);
-  const isMobile = useIsMobile();
-
-  // App-not-found notice (ported from main): surfaced when a user lands
-  // here from a removed/inaccessible app permalink (e.g. /me/apps/:slug/run).
-  const showAppNotFoundNotice = searchParams.get('notice') === 'app_not_found';
-  const appNotFoundSlug = searchParams.get('slug');
-
-  const dismissAppNotFoundNotice = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('notice');
-    next.delete('slug');
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (typeof document !== 'undefined') document.title = 'Your workspace | Floom';
-  }, []);
-
-  useEffect(() => {
-    if (sessionLoading || !session) return;
-    if (session.cloud_mode && session.user.is_local) {
-      const next = `${window.location.pathname}${window.location.search}`;
-      navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true });
-    }
-  }, [session, sessionLoading, navigate]);
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
-  const [threadLimit, setThreadLimit] = useState(INITIAL_THREAD_LIMIT);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
 
   useEffect(() => {
     let cancelled = false;
     api
-      .getMyRuns(100)
+      .getMyRuns(FETCH_LIMIT)
       .then((res) => {
         if (!cancelled) setRuns(res.runs);
       })
@@ -107,441 +148,356 @@ export function MePage() {
     };
   }, []);
 
-  const activeThreadId = searchParams.get('thread');
-  const activeThread = useMemo<MeRunSummary | null>(() => {
-    if (!runs || runs.length === 0) return null;
-    if (activeThreadId) {
-      const found = runs.find((r) => r.id === activeThreadId);
-      if (found) return found;
-    }
-    return runs[0] ?? null;
-  }, [runs, activeThreadId]);
+  const showNotice = searchParams.get('notice') === 'app_not_found';
+  const noticeSlug = searchParams.get('slug');
 
-  const activeApp = useMemo(() => {
-    if (!activeThread || !apps) return null;
-    return apps.find((a) => a.slug === activeThread.app_slug) || null;
-  }, [activeThread, apps]);
-
-  const [detail, setDetail] = useState<MeRunDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!activeThread) {
-      setDetail(null);
-      setDetailError(null);
-      return;
-    }
-    setDetail(null);
-    setDetailError(null);
-    let cancelled = false;
-    api
-      .getMyRun(activeThread.id)
-      .then((res) => {
-        if (!cancelled) setDetail(res);
-      })
-      .catch((err) => {
-        if (!cancelled) setDetailError((err as Error).message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeThread]);
-
-  const handleNewThread = useCallback(() => {
-    if (activeThread && activeThread.app_slug) {
-      composerRef.current?.focus();
-    } else if (apps && apps.length > 0) {
-      navigate(`/me/apps/${apps[0].slug}/run`);
-    } else {
-      navigate('/apps');
-    }
-  }, [activeThread, apps, navigate]);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        handleNewThread();
-      }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [handleNewThread]);
-
-  if (sessionLoading || (!runs && !runsError)) return <LoadingPane />;
-
-  const hasApps = !!apps && apps.length > 0;
-  const hasThreads = !!runs && runs.length > 0;
-
-  if (isMobile) {
-    return (
-      <MeMobile
-        threads={runs ?? []}
-        apps={apps ?? []}
-        onNewThread={handleNewThread}
-      />
-    );
+  function dismissNotice() {
+    const next = new URLSearchParams(searchParams);
+    next.delete('notice');
+    next.delete('slug');
+    setSearchParams(next, { replace: true });
   }
 
-  if (!hasApps && !hasThreads) {
-    return (
-      <div
-        data-testid="me-page"
-        style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}
-      >
-        <MeRail onNewThread={handleNewThread} />
-        <EmptyHero />
-      </div>
-    );
-  }
+  const visibleRuns = useMemo(
+    () => (runs ? runs.slice(0, visibleCount) : []),
+    [runs, visibleCount],
+  );
+  const hasMore = runs ? runs.length > visibleCount : false;
+  const publishedAppCount = apps ? apps.length : 0;
 
-  if (!hasThreads) {
-    return (
-      <div
-        data-testid="me-page"
-        style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}
-      >
-        <MeRail
-          threads={[]}
-          onNewThread={handleNewThread}
-          threadLimit={threadLimit}
-        />
-        <NoThreadYet
-          firstAppSlug={apps?.[0]?.slug || null}
-          firstAppName={apps?.[0]?.name || null}
-          onNewThread={handleNewThread}
-        />
-      </div>
-    );
+  function openRun(run: MeRunSummary) {
+    if (!run.app_slug) return;
+    navigate(`/p/${run.app_slug}?run=${encodeURIComponent(run.id)}`);
   }
 
   return (
-    <div
-      data-testid="me-page"
-      style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}
+    <PageShell
+      requireAuth="cloud"
+      title="Your runs · Floom"
+      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
     >
-      <MeRail
-        activeAppSlug={activeThread?.app_slug ?? undefined}
-        threads={runs ?? []}
-        activeThreadId={activeThread?.id}
-        onNewThread={handleNewThread}
-        threadLimit={threadLimit}
-        onLoadMoreThreads={() => setThreadLimit((n) => n + LOAD_MORE_STEP)}
-      />
+      <main data-testid="me-page" style={s.main}>
+        <header style={s.header}>
+          <h1 style={s.h1}>Your runs</h1>
+          <Link to="/apps" data-testid="me-browse-apps" style={s.headerLink}>
+            Browse apps →
+          </Link>
+        </header>
 
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100vh',
-        }}
-      >
-        {showAppNotFoundNotice && (
-          <div
-            role="alert"
-            data-testid="me-app-not-found-notice"
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 12,
-              padding: '12px 16px',
-              margin: '16px 20px 0',
-              borderRadius: 10,
-              border: '1px solid #f4b7b1',
-              background: '#fdecea',
-              color: '#5c2d26',
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
-              <strong style={{ color: '#c2321f' }}>App not found</strong>
-              <span style={{ display: 'block', marginTop: 4 }}>
-                We couldn&rsquo;t open that app
-                {appNotFoundSlug ? (
-                  <>
-                    {' '}
-                    (<span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>{appNotFoundSlug}</span>
-                    )
-                  </>
-                ) : (
-                  ''
-                )}
-                . It may have been removed or you don&rsquo;t have access.
-              </span>
-            </div>
-            <button
-              type="button"
-              aria-label="Dismiss"
-              data-testid="me-app-not-found-dismiss"
-              onClick={dismissAppNotFoundNotice}
-              style={{
-                flexShrink: 0,
-                padding: '4px 10px',
-                fontSize: 12,
-                fontWeight: 600,
-                color: 'var(--ink)',
-                background: 'rgba(255,255,255,0.6)',
-                border: '1px solid rgba(0,0,0,0.12)',
-                borderRadius: 6,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              Dismiss
-            </button>
-          </div>
+        {showNotice && (
+          <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />
         )}
-        {activeThread ? (
-          <>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-              <MeThreadPane
-                thread={activeThread}
-                detail={detail}
-                detailError={detailError}
-                appVisibility={activeApp?.visibility}
-              />
-            </div>
-            <MeComposer
-              ref={composerRef}
-              targetSlug={activeThread.app_slug}
-              targetName={activeThread.app_name || undefined}
-            />
-          </>
+
+        {runs === null && !runsError ? (
+          <RunsSkeleton />
+        ) : runsError ? (
+          <ErrorPanel message={runsError} />
+        ) : runs && runs.length === 0 ? (
+          <EmptyRuns />
         ) : (
-          <NoThreadYet
-            firstAppSlug={apps?.[0]?.slug || null}
-            firstAppName={apps?.[0]?.name || null}
-            onNewThread={handleNewThread}
-          />
+          <section data-testid="me-runs-list" style={s.card}>
+            {visibleRuns.map((run, i) => (
+              <RunRow
+                key={run.id}
+                run={run}
+                onOpen={openRun}
+                isLast={i === visibleRuns.length - 1}
+              />
+            ))}
+            {hasMore && (
+              <div style={s.loadMoreWrap}>
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((n) => n + LOAD_STEP)}
+                  data-testid="me-load-more"
+                  style={s.loadMoreBtn}
+                >
+                  Load more
+                </button>
+              </div>
+            )}
+          </section>
         )}
-      </div>
 
-      {runsError && (
-        <div
-          data-testid="me-runs-error"
-          style={{
-            position: 'fixed',
-            bottom: 16,
-            right: 16,
-            background: '#fdecea',
-            border: '1px solid #f4b7b1',
-            color: '#c2321f',
-            padding: '10px 14px',
-            borderRadius: 8,
-            fontSize: 13,
-            maxWidth: 360,
-          }}
-        >
-          {runsError}
-        </div>
-      )}
+        {publishedAppCount > 0 && (
+          <footer style={s.footer}>
+            <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+              You have {publishedAppCount}{' '}
+              {publishedAppCount === 1 ? 'app' : 'apps'} you built.
+            </div>
+            <Link
+              to="/creator"
+              data-testid="me-open-studio"
+              style={s.headerLink}
+            >
+              Open Studio →
+            </Link>
+          </footer>
+        )}
+      </main>
+    </PageShell>
+  );
+}
+
+function AppNotFound({
+  slug,
+  onDismiss,
+}: {
+  slug: string | null;
+  onDismiss: () => void;
+}) {
+  return (
+    <div role="alert" data-testid="me-app-not-found-notice" style={s.notice}>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
+        <strong style={{ color: '#c2321f' }}>App not found</strong>
+        <span style={{ display: 'block', marginTop: 4 }}>
+          We couldn&rsquo;t open that app
+          {slug ? (
+            <>
+              {' '}
+              (
+              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>
+                {slug}
+              </span>
+              )
+            </>
+          ) : (
+            ''
+          )}
+          . It may have been removed or you don&rsquo;t have access.
+        </span>
+      </div>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        data-testid="me-app-not-found-dismiss"
+        onClick={onDismiss}
+        style={s.noticeDismiss}
+      >
+        Dismiss
+      </button>
     </div>
   );
 }
 
-function LoadingPane() {
+function RunRow({
+  run,
+  onOpen,
+  isLast,
+}: {
+  run: MeRunSummary;
+  onOpen: (run: MeRunSummary) => void;
+  isLast: boolean;
+}) {
+  const appName = run.app_name || run.app_slug || 'App';
+  const summary = runSummary(run);
+  const time = formatTime(run.started_at);
+  const disabled = !run.app_slug;
   return (
-    <div
-      data-testid="me-loading"
+    <button
+      type="button"
+      onClick={() => onOpen(run)}
+      disabled={disabled}
+      data-testid={`me-run-row-${run.id}`}
       style={{
-        minHeight: '100vh',
+        width: '100%',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--muted)',
-        fontSize: 14,
-        background: 'var(--bg)',
+        gap: 12,
+        padding: '14px 16px',
+        minHeight: 56,
+        border: 'none',
+        borderBottom: isLast ? 'none' : '1px solid var(--line)',
+        background: 'transparent',
+        textAlign: 'left',
+        cursor: disabled ? 'default' : 'pointer',
+        fontFamily: 'inherit',
+        color: 'var(--ink)',
       }}
     >
-      Loading…
-    </div>
+      <StatusDot status={run.status} />
+      {run.app_slug && (
+        <span aria-hidden style={s.appIconWrap}>
+          <AppIcon slug={run.app_slug} size={14} />
+        </span>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 8,
+            fontSize: 14,
+          }}
+        >
+          <span
+            style={{
+              fontWeight: 600,
+              color: 'var(--ink)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: 200,
+            }}
+          >
+            {appName}
+          </span>
+          {summary && (
+            <span
+              title={summary}
+              style={{
+                color: 'var(--muted)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              {summary}
+            </span>
+          )}
+        </div>
+      </div>
+      <span
+        style={{
+          fontSize: 12,
+          color: 'var(--muted)',
+          flexShrink: 0,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {time}
+      </span>
+    </button>
   );
 }
 
-function EmptyHero() {
+function StatusDot({ status }: { status: RunStatus }) {
+  const color =
+    status === 'success'
+      ? 'var(--accent)'
+      : status === 'error' || status === 'timeout'
+        ? '#c2321f'
+        : 'var(--muted)';
   return (
-    <div
-      data-testid="me-empty-hero"
+    <span
+      aria-label={`Status: ${status}`}
       style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '80px 24px',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        flexShrink: 0,
+        display: 'inline-block',
+      }}
+    />
+  );
+}
+
+function runSummary(run: MeRunSummary): string | null {
+  const inputs = run.inputs;
+  if (inputs && typeof inputs === 'object') {
+    const prompt = inputs['prompt'];
+    if (typeof prompt === 'string' && prompt.trim()) {
+      return truncate(prompt.trim(), 90);
+    }
+    for (const value of Object.values(inputs)) {
+      if (typeof value === 'string' && value.trim()) {
+        return truncate(value.trim(), 90);
+      }
+    }
+  }
+  if (run.action && run.action !== 'run') return run.action;
+  return null;
+}
+
+function truncate(str: string, max: number): string {
+  if (str.length <= max) return str;
+  return `${str.slice(0, max - 1).trimEnd()}…`;
+}
+
+function RunsSkeleton() {
+  return (
+    <section
+      data-testid="me-runs-loading"
+      style={{ ...s.card, padding: 20, color: 'var(--muted)', fontSize: 13 }}
+    >
+      Loading runs…
+    </section>
+  );
+}
+
+function ErrorPanel({ message }: { message: string }) {
+  return (
+    <section
+      data-testid="me-runs-error"
+      style={{
+        border: '1px solid #f4b7b1',
+        borderRadius: 12,
+        background: '#fdecea',
+        padding: '16px 20px',
+        color: '#5c2d26',
+        fontSize: 13,
+        lineHeight: 1.55,
+      }}
+    >
+      <strong style={{ color: '#c2321f' }}>Couldn&rsquo;t load runs.</strong>{' '}
+      {message}
+    </section>
+  );
+}
+
+function EmptyRuns() {
+  return (
+    <section
+      data-testid="me-runs-empty"
+      style={{
+        border: '1px dashed var(--line)',
+        borderRadius: 12,
+        background: 'var(--card)',
+        padding: '40px 24px',
         textAlign: 'center',
       }}
     >
       <div
         style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 64,
-          height: 64,
-          borderRadius: 16,
-          background: 'var(--card)',
-          border: '1px solid var(--line)',
-          marginBottom: 22,
-        }}
-      >
-        <Logo size={32} />
-      </div>
-      <h1
-        style={{
           fontFamily: "'DM Serif Display', Georgia, serif",
-          fontSize: 34,
-          lineHeight: 1.15,
-          margin: '0 0 10px',
+          fontSize: 20,
           color: 'var(--ink)',
-          maxWidth: 520,
+          marginBottom: 8,
         }}
       >
-        Welcome — pick or build your first app.
-      </h1>
+        No runs yet.
+      </div>
       <p
         style={{
-          fontSize: 14.5,
+          margin: '0 auto 20px',
           color: 'var(--muted)',
-          maxWidth: 440,
-          margin: '0 auto 28px',
+          fontSize: 14,
           lineHeight: 1.55,
+          maxWidth: 380,
         }}
       >
-        Floom apps live here once you save or build them. Public apps are at{' '}
-        <Link
-          to="/apps"
-          style={{ color: 'var(--accent)', textDecoration: 'underline' }}
-        >
-          /apps
-        </Link>
-        .
+        Run any Floom app and it will show up here. Try one from the public
+        directory.
       </p>
-      <div
+      <Link
+        to="/apps"
+        data-testid="me-empty-browse"
         style={{
-          display: 'flex',
-          gap: 12,
-          flexWrap: 'wrap',
-          justifyContent: 'center',
+          display: 'inline-block',
+          padding: '10px 18px',
+          background: 'var(--ink)',
+          color: '#fff',
+          borderRadius: 8,
+          fontSize: 14,
+          fontWeight: 600,
+          textDecoration: 'none',
         }}
       >
-        <Link
-          to="/apps"
-          data-testid="me-empty-browse"
-          style={{
-            padding: '10px 18px',
-            background: 'var(--ink)',
-            color: '#fff',
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 600,
-            textDecoration: 'none',
-          }}
-        >
-          Browse public apps →
-        </Link>
-        <Link
-          to="/build"
-          data-testid="me-empty-build"
-          style={{
-            padding: '10px 18px',
-            background: 'var(--card)',
-            color: 'var(--ink)',
-            border: '1px solid var(--line)',
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 600,
-            textDecoration: 'none',
-          }}
-        >
-          Build your own →
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function NoThreadYet({
-  firstAppSlug,
-  firstAppName,
-  onNewThread,
-}: {
-  firstAppSlug: string | null;
-  firstAppName: string | null;
-  onNewThread: () => void;
-}) {
-  return (
-    <div
-      data-testid="me-no-threads-pane"
-      style={{
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '40px 32px',
-        background: 'var(--bg)',
-      }}
-    >
-      <div style={{ maxWidth: 480, width: '100%', textAlign: 'center' }}>
-        <h1
-          style={{
-            fontFamily: "'DM Serif Display', Georgia, serif",
-            fontSize: 28,
-            fontWeight: 500,
-            lineHeight: 1.2,
-            margin: '0 0 10px',
-            color: 'var(--ink)',
-          }}
-        >
-          No threads yet.
-        </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: 'var(--muted)',
-            margin: '0 0 22px',
-            lineHeight: 1.6,
-          }}
-        >
-          Start your first thread by running one of your apps.
-        </p>
-        {firstAppSlug ? (
-          <Link
-            to={`/me/apps/${firstAppSlug}/run`}
-            data-testid="me-no-threads-start"
-            style={{
-              display: 'inline-block',
-              padding: '10px 18px',
-              background: 'var(--ink)',
-              color: '#fff',
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              textDecoration: 'none',
-            }}
-          >
-            Run {firstAppName || firstAppSlug} →
-          </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={onNewThread}
-            style={{
-              padding: '10px 18px',
-              background: 'var(--ink)',
-              color: '#fff',
-              border: 0,
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
-          >
-            Browse apps →
-          </button>
-        )}
-      </div>
-    </div>
+        Browse apps →
+      </Link>
+    </section>
   );
 }
