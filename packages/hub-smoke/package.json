@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
+    "test:all": "playwright test",
     "test:fast": "playwright test tests/fast-apps.spec.ts",
     "test:full": "playwright test tests/hub-full.spec.ts",
     "install:browsers": "playwright install chromium"

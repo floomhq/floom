@@ -31,6 +31,4 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install Playwright (hub-smoke)
-        run: pnpm --filter @floom/hub-smoke exec playwright install chromium --with-deps
       - run: pnpm test
