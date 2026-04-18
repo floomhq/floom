@@ -1,10 +1,14 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '../Logo';
+import { useSession } from '../../hooks/useSession';
 
 interface PublicNavProps {
   /**
    * Landing shows a single "Sign in" link on the right.
-   * Apps shows "Build" + "Your runs" ghost links on the right.
+   * Apps shows "Build" + "Your runs" ghost links on the right for signed-in
+   * users; anonymous visitors get "Build" + "Sign in" so the nav never
+   * advertises a destination ("Your runs") that can only redirect back to
+   * /login. See 2026-04-18 consumer UX audit finding #4.
    * This is the v15 public nav — deliberately bare. Signed-in
    * product surfaces keep using `TopBar`.
    */
@@ -12,6 +16,7 @@ interface PublicNavProps {
 }
 
 export function PublicNav({ variant = 'landing' }: PublicNavProps) {
+  const { isAuthenticated } = useSession();
   return (
     <nav
       data-testid="public-nav"
@@ -49,9 +54,15 @@ export function PublicNav({ variant = 'landing' }: PublicNavProps) {
             <Link to="/build" data-testid="public-nav-build" className="public-nav-link">
               Build
             </Link>
-            <Link to="/me" data-testid="public-nav-your-runs" className="public-nav-link">
-              Your runs
-            </Link>
+            {isAuthenticated ? (
+              <Link to="/me" data-testid="public-nav-your-runs" className="public-nav-link">
+                Your runs
+              </Link>
+            ) : (
+              <Link to="/login" data-testid="public-nav-signin" className="public-nav-link">
+                Sign in
+              </Link>
+            )}
           </>
         )}
       </div>
