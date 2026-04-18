@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Search } from 'lucide-react';
 import { PublicNav } from '../components/public/PublicNav';
 import { PublicFooter } from '../components/public/PublicFooter';
@@ -46,20 +46,30 @@ function useDebounced<T>(value: T, delayMs: number): T {
 export function AppsDirectoryPage() {
   const [apps, setApps] = useState<HubApp[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hubError, setHubError] = useState<string | null>(null);
   const [rawSearch, setRawSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>(ALL);
 
   const search = useDebounced(rawSearch, 150);
 
-  useEffect(() => {
-    document.title = 'Apps · Floom';
+  const loadHub = useCallback(() => {
+    setLoading(true);
+    setHubError(null);
     getHub()
       .then((rows) => {
         setApps(rows);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        setHubError("Couldn't load apps");
+        setLoading(false);
+      });
   }, []);
+
+  useEffect(() => {
+    document.title = 'Apps · Floom';
+    loadHub();
+  }, [loadHub]);
 
   const sortedApps = useMemo(() => {
     return [...apps].sort((a, b) => {
@@ -146,7 +156,8 @@ export function AppsDirectoryPage() {
                 fontWeight: 500,
               }}
             >
-              PUBLIC DIRECTORY · {loading ? '—' : `${appCount} APP${appCount === 1 ? '' : 'S'}`}
+              PUBLIC DIRECTORY ·{' '}
+              {loading || hubError ? '—' : `${appCount} APP${appCount === 1 ? '' : 'S'}`}
             </span>
 
             <h1
@@ -294,6 +305,62 @@ export function AppsDirectoryPage() {
                 }}
               >
                 Loading apps…
+              </div>
+            ) : hubError ? (
+              <div
+                data-testid="apps-hub-error"
+                style={{
+                  border: '1px solid var(--line)',
+                  borderRadius: 12,
+                  background: 'var(--card)',
+                  padding: '28px 24px',
+                  textAlign: 'center',
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: 'var(--ink)',
+                    margin: '0 0 8px',
+                  }}
+                >
+                  {hubError}
+                </p>
+                <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 18px', lineHeight: 1.55 }}>
+                  Check your connection and try again.
+                </p>
+                <button
+                  type="button"
+                  data-testid="apps-hub-retry"
+                  onClick={() => loadHub()}
+                  style={{
+                    background: 'var(--ink)',
+                    color: '#fff',
+                    border: 0,
+                    borderRadius: 999,
+                    padding: '10px 22px',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : appCount === 0 ? (
+              <div
+                data-testid="apps-directory-empty"
+                style={{
+                  textAlign: 'center',
+                  padding: '60px 0',
+                  color: 'var(--muted)',
+                }}
+              >
+                <p style={{ fontSize: 16, margin: 0 }}>
+                  No apps in the directory yet.
+                </p>
               </div>
             ) : filteredApps.length === 0 ? (
               <div
