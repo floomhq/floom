@@ -62,7 +62,14 @@ export function FileDownload({
   const sizeHint = bytes ? formatBytes(Math.floor((bytes.length * 3) / 4)) : null;
 
   return (
-    <div className="app-expanded-card" style={{ padding: 0, overflow: 'hidden' }}>
+    // data-renderer lets audits confirm the cascade mapped file outputs
+    // (e.g. openslides PDF, openblog .md) to FileDownload. Added
+    // 2026-04-18 (bug #9).
+    <div
+      data-renderer="FileDownload"
+      className="app-expanded-card"
+      style={{ padding: 0, overflow: 'hidden' }}
+    >
       {previewHtml && (
         <div
           style={{

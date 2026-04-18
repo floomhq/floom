@@ -10,7 +10,12 @@ export interface TextBigProps {
 
 export function TextBig({ value, copyable = true }: TextBigProps) {
   return (
-    <div className="app-expanded-card" style={{ position: 'relative' }}>
+    // data-renderer lets audits and DOM queries verify that the output
+    // renderer cascade actually swapped in TextBig for `text` outputs.
+    // Added 2026-04-18 (audit bug #9) after the previous audit couldn't
+    // confirm cascade claims because components applied inline styles
+    // without identity.
+    <div data-renderer="TextBig" className="app-expanded-card" style={{ position: 'relative' }}>
       {copyable && (
         <div style={{ position: 'absolute', top: 12, right: 12 }}>
           <CopyButton value={value} label="Copy" />

@@ -14,7 +14,10 @@ export interface MarkdownProps {
 
 export function Markdown({ content, copyable = true }: MarkdownProps) {
   return (
+    // data-renderer lets audits confirm the cascade mapped markdown /
+    // long-text outputs to this component. Added 2026-04-18 (bug #9).
     <div
+      data-renderer="Markdown"
       className="app-expanded-card"
       style={{
         position: 'relative',

@@ -292,9 +292,15 @@ function safeParse(raw: string | null): unknown {
 // filtering. Useful for creators who want to temporarily take a published
 // app out of the directory without deleting it (e.g. `flyfast` while its
 // upstream integration is being rotated). Parsed once at module load;
-// change the env var and restart the server to pick up new values. The
-// /api/hub/:slug detail endpoint still serves the record so deep links
-// keep working, only the list view hides it.
+// change the env var and restart the server to pick up new values.
+//
+// INVARIANT (audit 2026-04-18, bug #1): this filter applies ONLY to the
+// public directory list endpoint below (hubRouter.get('/')). It MUST NOT
+// be applied to hubRouter.get('/:slug') (app detail), because hiding an
+// app from the directory should not break its permalink at /p/:slug.
+// If you add another endpoint that surfaces the full apps list, filter
+// it here too; if you add one that serves a single-app record, leave the
+// hide list alone. Direct permalinks keep working for hidden apps.
 const HIDDEN_SLUGS: Set<string> = new Set(
   (process.env.FLOOM_STORE_HIDE_SLUGS || '')
     .split(',')
@@ -374,6 +380,13 @@ hubRouter.get('/', (c) => {
   );
 });
 
+// GET /api/hub/:slug — single-app detail.
+//
+// Note (audit 2026-04-18, bug #1): this endpoint intentionally does NOT
+// consult HIDDEN_SLUGS. A slug in FLOOM_STORE_HIDE_SLUGS is suppressed
+// from the public directory list, but its permalink /p/:slug must still
+// resolve. The only ownership-scoped 404 is for visibility='private'
+// apps (see below).
 hubRouter.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
   const row = db

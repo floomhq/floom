@@ -23,17 +23,46 @@ export function CreatorAppPage() {
   } | null>(null);
   const [renderer, setRenderer] = useState<RendererMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notOwner, setNotOwner] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug) return;
+    // Audit 2026-04-18, bug #5: only the app's author may see the editor
+    // chrome on /creator/:slug. A non-owner hitting this route used to see
+    // "Not the owner" in red AND the CustomRendererPanel + manage buttons
+    // directly below, because the panel and the header rendered on
+    // different fetch gates. We now use the /api/hub/:slug/runs 403 as the
+    // canonical "you are not the owner" signal and suppress every editor
+    // affordance in that branch.
     api
       .getAppRuns(slug, 20)
       .then((res) => {
         setRuns(res.runs);
         setAppInfo(res.app);
       })
-      .catch((err) => setError((err as Error).message));
+      .catch((err) => {
+        const msg = (err as Error).message || '';
+        if (/not_owner|not the owner|403/i.test(msg)) {
+          setNotOwner(true);
+          // Re-read the public app record so we can render a read-only
+          // "this is not yours" view with the app's public metadata.
+          api
+            .getApp(slug)
+            .then((detail) =>
+              setAppInfo({
+                name: detail.name,
+                description: detail.description,
+                icon: detail.icon ?? null,
+              }),
+            )
+            .catch(() => {
+              /* app might also be private; fall through with generic copy */
+            });
+        } else {
+          setError(msg);
+        }
+      });
     api
       .getApp(slug)
       .then((detail) => setRenderer(detail.renderer ?? null))
@@ -83,7 +112,49 @@ export function CreatorAppPage() {
           </div>
         )}
 
-        {appInfo && (
+        {notOwner && (
+          <div
+            data-testid="creator-not-owner"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              padding: 24,
+              marginBottom: 20,
+            }}
+          >
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)' }}>
+              {appInfo?.name || slug}
+            </h1>
+            {appInfo?.description && (
+              <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 16px', maxWidth: 560 }}>
+                {appInfo.description}
+              </p>
+            )}
+            <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>
+              You are not the owner of this app, so the editor, secrets, and
+              activity feed are hidden. Open the public app page to run it.
+            </p>
+            <Link
+              to={`/p/${slug}`}
+              data-testid="creator-not-owner-view"
+              style={{
+                display: 'inline-block',
+                padding: '10px 16px',
+                background: 'var(--ink)',
+                color: '#fff',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              Open app
+            </Link>
+          </div>
+        )}
+
+        {!notOwner && appInfo && (
           <div
             style={{
               display: 'flex',
@@ -108,7 +179,7 @@ export function CreatorAppPage() {
               </Link>
               {/* Bridge creator dashboard -> per-app management surface.
                   Before this fix, the v15 /me/apps/:slug shape (Overview /
-                  Secrets / Access / Settings tabs) was orphaned — a
+                  Secrets / Access / Settings tabs) was orphaned: a
                   creator could publish an app and never discover the
                   secrets policy, runs, or renderer controls hiding under
                   /me/apps/:slug. */}
@@ -125,7 +196,7 @@ export function CreatorAppPage() {
           </div>
         )}
 
-        {slug && (
+        {!notOwner && slug && (
           <div
             style={{
               background: 'var(--card)',
@@ -139,7 +210,7 @@ export function CreatorAppPage() {
           </div>
         )}
 
-        {runs && runs.length === 0 && (
+        {!notOwner && runs && runs.length === 0 && (
           <div
             data-testid="creator-activity-empty"
             style={{
@@ -159,7 +230,7 @@ export function CreatorAppPage() {
           </div>
         )}
 
-        {runs && runs.length > 0 && (
+        {!notOwner && runs && runs.length > 0 && (
           <div
             data-testid="creator-activity-list"
             style={{

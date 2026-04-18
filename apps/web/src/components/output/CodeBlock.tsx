@@ -48,7 +48,9 @@ export function CodeBlock({ code, language, filename }: CodeBlockProps) {
   };
 
   return (
-    <div className="app-expanded-card" style={{ position: 'relative' }}>
+    // data-renderer lets audits confirm the cascade mapped `code` /
+    // `json-format` outputs to CodeBlock. Added 2026-04-18 (bug #9).
+    <div data-renderer="CodeBlock" className="app-expanded-card" style={{ position: 'relative' }}>
       <div
         style={{
           position: 'sticky',

@@ -7,11 +7,80 @@
 // Empty state links to /build.
 
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import * as api from '../api/client';
 import type { CreatorApp } from '../lib/types';
 import { formatTime } from '../lib/time';
+
+// Audit 2026-04-18, bug #6: creator dashboard cards used to render the
+// app description via `{a.description}`, which meant any creator who had
+// markdown in their description (bold, links, inline code) saw raw
+// `[label](url)` / `**bold**` syntax in the card instead of clickable
+// links and bolded text. We now parse a small inline-markdown subset
+// (links, bold, inline code) into React nodes before rendering. This is
+// intentionally NOT a full markdown parser: no block elements, no raw
+// HTML, no images, no lists. The output is wrapped in line-clamp CSS
+// that expects inline text only.
+const LINK_STYLE: React.CSSProperties = {
+  color: 'var(--ink)',
+  textDecoration: 'underline',
+  textDecorationThickness: '1px',
+  textUnderlineOffset: '2px',
+};
+const CODE_STYLE: React.CSSProperties = {
+  fontFamily: 'JetBrains Mono, monospace',
+  fontSize: '0.92em',
+  background: 'var(--bg)',
+  padding: '0 4px',
+  borderRadius: 3,
+};
+// Matches [text](http[s]://...), `code`, **bold**. Order matters: links
+// first because they contain brackets that could otherwise get eaten.
+const MD_INLINE_RE = /(\[[^\]]+\]\(https?:\/\/[^\s)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)/g;
+function renderInlineMarkdown(src: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  for (const m of src.matchAll(MD_INLINE_RE)) {
+    if (m.index! > lastIndex) out.push(src.slice(lastIndex, m.index));
+    const tok = m[0];
+    if (tok.startsWith('[')) {
+      const inner = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(tok);
+      if (inner) {
+        out.push(
+          <a
+            key={`md-${key++}`}
+            href={inner[2]}
+            target="_blank"
+            rel="noreferrer"
+            style={LINK_STYLE}
+          >
+            {inner[1]}
+          </a>,
+        );
+      } else {
+        out.push(tok);
+      }
+    } else if (tok.startsWith('`')) {
+      out.push(
+        <code key={`md-${key++}`} style={CODE_STYLE}>
+          {tok.slice(1, -1)}
+        </code>,
+      );
+    } else if (tok.startsWith('**')) {
+      out.push(
+        <strong key={`md-${key++}`} style={{ color: 'var(--ink)' }}>
+          {tok.slice(2, -2)}
+        </strong>,
+      );
+    }
+    lastIndex = m.index! + tok.length;
+  }
+  if (lastIndex < src.length) out.push(src.slice(lastIndex));
+  return out;
+}
 
 export function CreatorPage() {
   const [apps, setApps] = useState<CreatorApp[] | null>(null);
@@ -212,6 +281,7 @@ export function CreatorPage() {
                   </div>
                 </div>
                 <p
+                  data-testid={`creator-desc-${a.slug}`}
                   style={{
                     fontSize: 13,
                     color: 'var(--muted)',
@@ -223,7 +293,7 @@ export function CreatorPage() {
                     overflow: 'hidden',
                   }}
                 >
-                  {a.description || '(no description)'}
+                  {a.description ? renderInlineMarkdown(a.description) : '(no description)'}
                 </p>
                 <div
                   style={{
