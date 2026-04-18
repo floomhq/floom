@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { SERVER_VERSION } from '../lib/server-version.js';
 import { db } from '../db.js';
 
 export const healthRouter = new Hono();
@@ -9,7 +10,7 @@ healthRouter.get('/', (c) => {
   return c.json({
     status: 'ok',
     service: 'floom-chat',
-    version: '0.4.0-mvp.4',
+    version: SERVER_VERSION,
     apps: appCount,
     threads: threadCount,
     timestamp: new Date().toISOString(),

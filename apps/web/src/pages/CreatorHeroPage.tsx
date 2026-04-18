@@ -16,15 +16,18 @@ interface Stripe {
   description: string;
 }
 
-const PREFERRED_SLUGS = ['flyfast', 'openpaper', 'bouncer'] as const;
+// 2026-04-17 cut-before-launch: dropped `flyfast` (internal-only, AX41-infra
+// gated) and swapped in `opendraft` so the homepage stripe doesn't tease an
+// app nobody external can actually run.
+const PREFERRED_SLUGS = ['opendraft', 'openpaper', 'bouncer'] as const;
 
 // If the hub call fails or returns too few public apps, fall back to
 // this curated trio so the homepage still looks right on a cold backend.
 const FALLBACK_STRIPES: Stripe[] = [
   {
-    slug: 'flyfast',
-    name: 'flyfast',
-    description: 'Cheap flight deals, delivered to you',
+    slug: 'opendraft',
+    name: 'opendraft',
+    description: 'Draft posts, docs, and emails from a prompt',
   },
   {
     slug: 'openpaper',
@@ -156,8 +159,8 @@ export function CreatorHeroPage() {
                 margin: '0 auto 56px',
               }}
             >
-              Build agents, workflows, and scripts with AI. Floom deploys them as MCP, API, web, or
-              CLI — production-grade, live in 30 seconds.
+              Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server,
+              HTTP API, and shareable web form — production-grade, live in 30 seconds.
             </p>
 
             <form

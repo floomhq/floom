@@ -1,5 +1,5 @@
 // GET /api/hub — list every runnable app in this Floom instance.
-// This is the "15 apps" grid for the apps directory page.
+// Backs the /apps directory page grid.
 // W4-minimal additions:
 //   POST   /api/hub/ingest              — one-shot URL-based publish for /build
 //   POST   /api/hub/detect              — spec preview for /build Step 2

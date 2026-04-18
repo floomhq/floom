@@ -58,11 +58,23 @@ function useIsMobile(breakpoint = 640): boolean {
 
 export function MePage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: session, loading: sessionLoading } = useSession();
   const { apps } = useMyApps();
   const composerRef = useRef<MeComposerHandle | null>(null);
   const isMobile = useIsMobile();
+
+  // App-not-found notice (ported from main): surfaced when a user lands
+  // here from a removed/inaccessible app permalink (e.g. /me/a/:slug/run).
+  const showAppNotFoundNotice = searchParams.get('notice') === 'app_not_found';
+  const appNotFoundSlug = searchParams.get('slug');
+
+  const dismissAppNotFoundNotice = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('notice');
+    next.delete('slug');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (typeof document !== 'undefined') document.title = 'Your workspace | Floom';
@@ -225,6 +237,60 @@ export function MePage() {
           height: '100vh',
         }}
       >
+        {showAppNotFoundNotice && (
+          <div
+            role="alert"
+            data-testid="me-app-not-found-notice"
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              padding: '12px 16px',
+              margin: '16px 20px 0',
+              borderRadius: 10,
+              border: '1px solid #f4b7b1',
+              background: '#fdecea',
+              color: '#5c2d26',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
+              <strong style={{ color: '#c2321f' }}>App not found</strong>
+              <span style={{ display: 'block', marginTop: 4 }}>
+                We couldn&rsquo;t open that app
+                {appNotFoundSlug ? (
+                  <>
+                    {' '}
+                    (<span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>{appNotFoundSlug}</span>
+                    )
+                  </>
+                ) : (
+                  ''
+                )}
+                . It may have been removed or you don&rsquo;t have access.
+              </span>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              data-testid="me-app-not-found-dismiss"
+              onClick={dismissAppNotFoundNotice}
+              style={{
+                flexShrink: 0,
+                padding: '4px 10px',
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--ink)',
+                background: 'rgba(255,255,255,0.6)',
+                border: '1px solid rgba(0,0,0,0.12)',
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {activeThread ? (
           <>
             <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>

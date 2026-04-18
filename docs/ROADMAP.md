@@ -37,6 +37,7 @@ Backends land; the UI to drive them is re-enabled incrementally.
 - Rate-limit all `/api/*/run` endpoints
 - Legal: imprint, privacy policy, terms, cookie consent
 - Landing + public-page polish (wireframes v13)
+- **Repo → hosted pipeline** (`packages/runtime` + `packages/detect` + `packages/manifest`). Paste a GitHub URL, Floom clones, detects the runtime, builds, smoke-tests, and hosts it on all three surfaces. Primary onboarding path for the non-dev AI engineer ICP — see [`PRODUCT.md`](./PRODUCT.md). Currently: packages exist after revert of #29; server wiring (`POST /api/deploy-github` with SSE build log), `/build` UI tile, smoke-test web-probe, GitHub-token scrub, per-user deploy quota, and sandbox-TTL cron still to land.
 
 ### P1 — Week one
 

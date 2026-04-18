@@ -11,16 +11,6 @@ interface PublicNavProps {
   variant?: 'landing' | 'apps';
 }
 
-const linkStyle = {
-  color: 'var(--muted)',
-  fontSize: 14,
-  fontWeight: 500,
-  textDecoration: 'none',
-  padding: '10px 14px',
-  borderRadius: 8,
-  transition: 'color 120ms ease',
-} as const;
-
 export function PublicNav({ variant = 'landing' }: PublicNavProps) {
   return (
     <nav
@@ -51,45 +41,15 @@ export function PublicNav({ variant = 'landing' }: PublicNavProps) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {variant === 'landing' ? (
-          <Link
-            to="/login"
-            data-testid="public-nav-signin"
-            style={linkStyle}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLAnchorElement).style.color = 'var(--ink)';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)';
-            }}
-          >
+          <Link to="/login" data-testid="public-nav-signin" className="public-nav-link">
             Sign in
           </Link>
         ) : (
           <>
-            <Link
-              to="/build"
-              data-testid="public-nav-build"
-              style={linkStyle}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.color = 'var(--ink)';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)';
-              }}
-            >
+            <Link to="/build" data-testid="public-nav-build" className="public-nav-link">
               Build
             </Link>
-            <Link
-              to="/me"
-              data-testid="public-nav-your-runs"
-              style={linkStyle}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.color = 'var(--ink)';
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)';
-              }}
-            >
+            <Link to="/me" data-testid="public-nav-your-runs" className="public-nav-link">
               Your runs
             </Link>
           </>

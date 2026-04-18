@@ -347,6 +347,54 @@ export interface UserSecretRecord {
   updated_at: string;
 }
 
+// =====================================================================
+// Secrets policy (per-app, per-secret: creator override vs user vault)
+// =====================================================================
+
+/**
+ * Policy for one secret key on one app.
+ *
+ *   'user_vault'       — each user supplies the value from their own
+ *                        /api/secrets vault. Default for every key that
+ *                        doesn't have an explicit row in
+ *                        app_secret_policies.
+ *   'creator_override' — the creator provides one value (encrypted with
+ *                        the creator's workspace DEK in app_creator_secrets)
+ *                        that is injected for every user's run.
+ */
+export type SecretPolicy = 'user_vault' | 'creator_override';
+
+export interface AppSecretPolicyRecord {
+  app_id: string;
+  key: string;
+  policy: SecretPolicy;
+  updated_at: string;
+}
+
+export interface AppCreatorSecretRecord {
+  app_id: string;
+  workspace_id: string;
+  key: string;
+  ciphertext: string;
+  nonce: string;
+  auth_tag: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Shape returned by the /secret-policies list endpoint. One row per key
+ * in the app's `manifest.secrets_needed`. `creator_has_value` lets the
+ * frontend render the "set / not set" state without ever reading the
+ * plaintext.
+ */
+export interface SecretPolicyEntry {
+  key: string;
+  policy: SecretPolicy;
+  creator_has_value: boolean;
+  updated_at?: string;
+}
+
 /**
  * Return shape from `rekeyDevice`. Each count tells the login handler how many
  * rows were migrated from anonymous → authenticated, for logging and tests.

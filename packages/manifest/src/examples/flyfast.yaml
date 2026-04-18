@@ -1,0 +1,29 @@
+# Example floom.yaml for FlyFast — a real Floom app used in Suite A tests.
+# Reference: /tmp/floom-e2b-full-tests/suite_a_result.json (flyfast row)
+
+name: flyfast
+displayName: FlyFast
+description: Cheapest flights by natural-language query, powered by OpenSky data.
+creator: buildingopen
+category: travel
+runtime: python3.12
+
+build: pip install -r requirements.txt
+run: python -m flyfast
+
+inputs:
+  - name: query
+    type: string
+    required: true
+    label: Flight query
+    description: Natural-language flight search, e.g. "cheapest one-way LIS to SFO next month"
+    placeholder: cheapest one-way LIS to SFO next month
+
+outputs:
+  type: markdown
+
+secrets:
+  - OPENSKY_API_KEY
+
+memoryMb: 512
+timeout: 60s

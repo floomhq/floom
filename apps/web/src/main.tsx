@@ -28,6 +28,7 @@ const TermsPage = lazy(() => import('./pages/TermsPage').then(m => ({ default: m
 const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ default: m.CookiesPage })));
 import { IconSprite } from './components/IconSprite';
 import { CookieBanner } from './components/CookieBanner';
+import { RouteLoading } from './components/RouteLoading';
 import { primeSession } from './hooks/useSession';
 import './styles/globals.css';
 
@@ -83,7 +84,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <IconSprite />
     <BrowserRouter>
-      <Suspense fallback={<div style={{ minHeight: '100vh' }} aria-hidden="true" />}>
+      <Suspense fallback={<RouteLoading variant="full" />}>
       <Routes>
         {/* Creator hero */}
         <Route path="/" element={<CreatorHeroPage />} />

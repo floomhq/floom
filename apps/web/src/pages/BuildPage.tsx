@@ -5,8 +5,7 @@
 //   2. OpenAPI URL paste (fallback, functional — the previous behavior).
 //   3. Describe it (coming soon — AI generation is deferred per
 //      project_floom_positioning.md).
-//   4. Connect a tool (coming soon — Composio-backed connectors ship with
-//      Cloud tier).
+//   4. Connect a tool (coming soon — deferred post-launch).
 //   5. Docker image (coming soon — registry pulling ships after v1).
 //
 // Once a spec is detected the existing review/publish UI runs unchanged.
@@ -505,81 +504,105 @@ export function BuildPage() {
               )}
             </form>
 
-            {/* RAMPS 2 + 3 side by side — Describe (coming soon) + Connect (coming soon) */}
-            <div
+            {/* RAMPS 2 + 3 — Describe + Connect (coming soon), de-emphasized in a closed disclosure */}
+            <details
+              data-testid="build-more-ways-disclosure"
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                gap: 16,
                 marginBottom: 16,
+                border: '1px solid var(--line)',
+                borderRadius: 14,
+                background: 'var(--bg)',
+                padding: '0 4px',
               }}
             >
-              <RampCard
-                icon={<WandIcon />}
-                title="Describe it"
-                badge="Coming soon"
-                desc="Tell us what your app should do. Works best for fresh ideas with no existing code."
-                testId="ramp-describe"
-                onClick={() => setComingSoon('describe')}
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  padding: '12px 14px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'var(--muted)',
+                  opacity: 0.92,
+                  userSelect: 'none',
+                }}
               >
-                <textarea
-                  disabled
-                  placeholder="e.g. an app that takes a cafe name and returns the 3 closest alternatives with ratings and walking time."
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    background: 'var(--bg)',
-                    fontSize: 13,
-                    color: 'var(--muted)',
-                    fontFamily: 'inherit',
-                    resize: 'none',
-                    opacity: 0.85,
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </RampCard>
-
-              <RampCard
-                icon={<CableIcon />}
-                title="Connect a tool"
-                badge="Coming soon"
-                desc="Pick a tool you already use. We handle the secure connection."
-                testId="ramp-connect"
-                onClick={() => setComingSoon('connect')}
+                More ways to add an app (coming soon)
+              </summary>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                  gap: 16,
+                  padding: '4px 12px 16px',
+                }}
               >
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr)',
-                    gap: 6,
-                    opacity: 0.85,
-                  }}
+                <RampCard
+                  icon={<WandIcon />}
+                  title="Describe it"
+                  badge="Coming soon"
+                  desc="Tell us what your app should do. Works best for fresh ideas with no existing code."
+                  testId="ramp-describe"
+                  onClick={() => setComingSoon('describe')}
                 >
-                  {['Gmail', 'Stripe', 'Notion', 'Sheets', 'Airtable', 'Slack', 'Shopify', 'More'].map(
-                    (t) => (
-                      <div
-                        key={t}
-                        style={{
-                          padding: '8px 4px',
-                          border: '1px solid var(--line)',
-                          borderRadius: 6,
-                          background: 'var(--bg)',
-                          fontSize: 10.5,
-                          color: 'var(--muted)',
-                          textAlign: 'center',
-                          fontWeight: 500,
-                        }}
-                      >
-                        {t}
-                      </div>
-                    ),
-                  )}
-                </div>
-              </RampCard>
-            </div>
+                  <textarea
+                    disabled
+                    placeholder="e.g. an app that takes a cafe name and returns the 3 closest alternatives with ratings and walking time."
+                    rows={3}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      border: '1px solid var(--line)',
+                      borderRadius: 8,
+                      background: 'var(--bg)',
+                      fontSize: 13,
+                      color: 'var(--muted)',
+                      fontFamily: 'inherit',
+                      resize: 'none',
+                      opacity: 0.85,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </RampCard>
+
+                <RampCard
+                  icon={<CableIcon />}
+                  title="Connect a tool"
+                  badge="Coming soon"
+                  desc="Pick a tool you already use. We handle the secure connection."
+                  testId="ramp-connect"
+                  onClick={() => setComingSoon('connect')}
+                >
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gap: 6,
+                      opacity: 0.85,
+                    }}
+                  >
+                    {['Gmail', 'Stripe', 'Notion', 'Sheets', 'Airtable', 'Slack', 'Shopify', 'More'].map(
+                      (t) => (
+                        <div
+                          key={t}
+                          style={{
+                            padding: '8px 4px',
+                            border: '1px solid var(--line)',
+                            borderRadius: 6,
+                            background: 'var(--bg)',
+                            fontSize: 10.5,
+                            color: 'var(--muted)',
+                            textAlign: 'center',
+                            fontWeight: 500,
+                          }}
+                        >
+                          {t}
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </RampCard>
+              </div>
+            </details>
 
             {/* RAMP 4 — Docker (coming soon) */}
             <RampCard
@@ -1123,7 +1146,7 @@ function ComingSoonRampModal({
     connect: {
       title: 'Connect a tool (coming soon)',
       copy:
-        'Pre-built connectors for Gmail, Stripe, Notion, and more ship with Cloud tier. For now, import your own OpenAPI spec.',
+        'Pre-built connectors for Gmail, Stripe, Notion, and more are on the roadmap. For now, import your own OpenAPI spec.',
     },
     docker: {
       title: 'Docker import (coming soon)',

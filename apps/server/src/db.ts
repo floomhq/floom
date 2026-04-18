@@ -620,14 +620,72 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
 `);
 
+// =====================================================================
+// ---------- Secrets policy (per-app creator-override vs user-vault) ---
+// =====================================================================
+// Every key in an app's `manifest.secrets_needed` has a resolution policy
+// that decides whose value gets injected at run time:
+//
+//   'user_vault'        — each running user supplies their own value
+//                         via /api/secrets (the existing user_secrets
+//                         table). This is the default and preserves the
+//                         pre-existing behavior.
+//
+//   'creator_override'  — the app's creator sets ONE value in
+//                         app_creator_secrets; every user's run of this
+//                         app sees that value. Used for shared infra
+//                         credentials the creator owns (residential
+//                         proxy URL, shared Gemini key, etc.) and which
+//                         users should not have to configure.
+//
+// When no row exists in app_secret_policies for a given (app_id, key),
+// the policy defaults to 'user_vault' so existing apps keep working
+// without any admin action.
+//
+// app_creator_secrets reuses the W2.1 envelope scheme: values are
+// AES-256-GCM encrypted with the creator's workspace DEK, which is
+// itself wrapped by the server-wide master KEK. See
+// services/user_secrets.ts for the crypto layer; the helpers are
+// exported and reused by services/app_creator_secrets.ts.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_secret_policies (
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    policy TEXT NOT NULL CHECK (policy IN ('user_vault', 'creator_override')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (app_id, key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_secret_policies_app
+    ON app_secret_policies(app_id);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_creator_secrets (
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    auth_tag TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (app_id, key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_creator_secrets_app
+    ON app_creator_secrets(app_id);
+  CREATE INDEX IF NOT EXISTS idx_app_creator_secrets_workspace
+    ON app_creator_secrets(workspace_id);
+`);
+
 // Bump user_version so operators can see at a glance which schema
 // revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4;
 // W2.3 lands v5; W3.3 + W3.1 land v6 (rolled into the same alpha series).
 // W4-minimal lands v7 with app_reviews + feedback tables.
 // Fast-apps wave lands v8 with apps.featured + apps.avg_run_ms columns.
 // v0.4.0 cleanup sprint lands v9: chat_threads → run_threads, chat_turns → run_turns.
+// secrets-policy lands v10: app_secret_policies + app_creator_secrets.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 9) {
-  db.pragma('user_version = 9');
+if (currentUserVersion < 10) {
+  db.pragma('user_version = 10');
 }
