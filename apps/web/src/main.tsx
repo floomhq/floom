@@ -18,6 +18,7 @@ const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ 
 const MeAppPage = lazy(() => import('./pages/MeAppPage').then(m => ({ default: m.MeAppPage })));
 const MeAppSecretsPage = lazy(() => import('./pages/MeAppSecretsPage').then(m => ({ default: m.MeAppSecretsPage })));
 const MeAppRunPage = lazy(() => import('./pages/MeAppRunPage').then(m => ({ default: m.MeAppRunPage })));
+const MeInstallPage = lazy(() => import('./pages/MeInstallPage').then(m => ({ default: m.MeInstallPage })));
 const BuildPage = lazy(() => import('./pages/BuildPage').then(m => ({ default: m.BuildPage })));
 const CreatorPage = lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
 const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ default: m.CreatorAppPage })));
@@ -97,6 +98,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/signup" element={<LoginPage />} />
         {/* W4-minimal: user dashboard */}
         <Route path="/me" element={<MePage />} />
+        <Route path="/me/install" element={<MeInstallPage />} />
         <Route path="/me/runs/:runId" element={<MeRunDetailPage />} />
         <Route path="/me/settings" element={<MeSettingsPage />} />
         {/* v15.2: per-app overview / secrets / run surfaces for owned apps. */}
