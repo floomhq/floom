@@ -1,7 +1,7 @@
 // v16 renderer cascade.
 //
 // Layer 1 — Creator custom renderer (PR #10 + PR #22 iframe sandbox) is
-// handled upstream in FloomApp.tsx and is NOT revisited here. When the
+// handled upstream in RunSurface.tsx and is NOT revisited here. When the
 // custom renderer is mounted the cascade below runs inside its children
 // as the fallback, so everything still flows to the same entry point.
 //

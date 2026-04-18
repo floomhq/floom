@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
-import { FloomApp } from '../components/FloomApp';
+import { RunSurface } from '../components/runner/RunSurface';
 import { AppIcon } from '../components/AppIcon';
 import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
@@ -48,9 +48,9 @@ export function AppPermalinkPage() {
   const [comingSoon, setComingSoon] = useState<ComingSoonTarget | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   // Run prefetched from /api/run/:id when the URL contains ?run=<id>. Lets
-  // FloomApp hydrate directly into the `done` phase for shared links.
+  // RunSurface hydrate directly into the `done` phase for shared links.
   const [initialRun, setInitialRun] = useState<RunRecord | null>(null);
-  // initialRunLoading avoids rendering the FloomApp in `inputs` phase (which
+  // initialRunLoading avoids rendering the RunSurface in `ready` phase (which
   // would flash the empty form) while the run is being fetched.
   const [initialRunLoading, setInitialRunLoading] = useState<boolean>(!!runIdFromUrl);
 
@@ -76,7 +76,7 @@ export function AppPermalinkPage() {
       .catch(() => setSummary({ count: 0, avg: 0 }));
   }, [slug]);
 
-  // /p/:slug?run=<id> — fetch the run and hydrate FloomApp read-only.
+  // /p/:slug?run=<id> — fetch the run and hydrate RunSurface read-only.
   // Scoped to this slug so a run-id from a different app is silently
   // ignored (prevents accidentally mounting someone else's run into an
   // unrelated page). If the run is owned by a private (auth-required)
@@ -107,7 +107,7 @@ export function AppPermalinkPage() {
           return;
         }
         // Only restore finished runs. In-flight runs aren't deep-linkable
-        // yet; the FloomApp stream/poll path owns that UI surface.
+        // yet; the RunSurface stream/poll path owns that UI surface.
         if (['success', 'error', 'timeout'].includes(run.status)) {
           setInitialRun(run);
         } else {
@@ -732,10 +732,8 @@ export function AppPermalinkPage() {
               Loading shared run...
             </div>
           ) : (
-            <FloomApp
+            <RunSurface
               app={app}
-              standalone={true}
-              showSidebar={false}
               initialRun={initialRun}
               onResetInitialRun={handleResetInitialRun}
             />

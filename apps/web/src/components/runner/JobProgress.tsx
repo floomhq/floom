@@ -1,7 +1,7 @@
 // JobProgress — queued / running state card for async app runs.
 //
 // Shown while an async job (v0.3.0 job queue) transitions through
-// queued -> running -> succeeded/failed/cancelled. The parent (FloomApp)
+// queued -> running -> succeeded/failed/cancelled. The parent (RunSurface)
 // polls GET /api/:slug/jobs/:id and passes each snapshot into this
 // component. On a terminal status the parent flips to the OutputPanel
 // so this component only renders pre-terminal states.

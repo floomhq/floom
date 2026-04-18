@@ -1,6 +1,6 @@
 // v15.1 inline composer pinned to the bottom of the right thread pane.
 // Submitting navigates to /me/apps/<slug>/run?prompt=<text>; MeAppRunPage reads
-// the prefill and hands it to <FloomApp initialInputs={{ prompt }} />.
+// the prefill and hands it to <RunSurface initialInputs={{ prompt }} />.
 
 import {
   forwardRef,

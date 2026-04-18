@@ -1,10 +1,10 @@
 // v15.2 /me/apps/:slug/run — single-run surface for an owned app.
 //
 // Flow: fetch app + cached secrets → compute missing required keys →
-// if any are missing, show SecretsRequiredCard; else mount FloomApp
-// inline. Whatever FloomApp does (sync run stream vs async job poll)
-// happens based on app.is_async, so the MVP doesn't need to know the
-// runtime details here.
+// if any are missing, show SecretsRequiredCard; else mount RunSurface
+// inline. Whatever the underlying runner does (sync run stream vs
+// async job poll) happens based on app.is_async, so the MVP doesn't
+// need to know the runtime details here.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -12,7 +12,7 @@ import { PageShell } from '../components/PageShell';
 import { MeRail } from '../components/me/MeRail';
 import { AppHeader, TabBar } from './MeAppPage';
 import { SecretsRequiredCard } from '../components/me/SecretsRequiredCard';
-import { FloomApp } from '../components/FloomApp';
+import { RunSurface } from '../components/runner/RunSurface';
 import { useSecrets } from '../hooks/useSecrets';
 import * as api from '../api/client';
 import type { AppDetail } from '../lib/types';
@@ -41,7 +41,7 @@ export function MeAppRunPage() {
 
   // v15.1 deep-link: /me composer navigates here with ?prompt=<text> so
   // the composer text shows up in the app's default form. Only prefill
-  // a "prompt" input — other inputs are scoped to FloomApp's defaults.
+  // a "prompt" input — other inputs are scoped to RunSurface's defaults.
   const prefillPrompt = searchParams.get('prompt');
   const initialInputs = useMemo<Record<string, unknown> | undefined>(
     () => (prefillPrompt ? { prompt: prefillPrompt } : undefined),
@@ -154,12 +154,7 @@ export function MeAppRunPage() {
               )}
 
               {missingKeys && missingKeys.length === 0 && (
-                <FloomApp
-                  app={app}
-                  standalone
-                  showSidebar={false}
-                  initialInputs={initialInputs}
-                />
+                <RunSurface app={app} initialInputs={initialInputs} />
               )}
             </>
           )}

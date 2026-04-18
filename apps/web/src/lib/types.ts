@@ -75,6 +75,20 @@ export interface NormalizedManifest {
 
 export interface RenderConfig {
   output_component?: string;
+  /**
+   * v16 RunSurface layout opt-out. Default layout is a 2-column split
+   * (input 2fr, output 3fr) on desktop. Setting this to 'stacked' forces
+   * a single-column layout even on desktop — useful for apps whose
+   * output is wide (PDF previews, dashboards).
+   */
+  render_hint?: 'split' | 'stacked';
+  /**
+   * v16 RunSurface refine-button opt-out. When false, the primary button
+   * stays "Run" after the first successful run instead of flipping to
+   * "Refine". Apps that don't take free-text iteration input (pure
+   * formatters, one-shot generators) set this to false.
+   */
+  refinable?: boolean;
   [key: string]: unknown;
 }
 

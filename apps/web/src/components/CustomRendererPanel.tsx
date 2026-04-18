@@ -6,7 +6,7 @@
 //   - /creator/:slug (edit renderer for an already published app)
 //
 // The backend compiles the pasted TSX via esbuild and serves the bundle at
-// GET /renderer/:slug/bundle.js. The FloomApp run surface lazy-loads the
+// GET /renderer/:slug/bundle.js. The RunSurface lazy-loads the
 // bundle on successful runs and mounts its default export. If compilation
 // fails the default OutputPanel is used as a fallback so a broken renderer
 // never blocks a run.

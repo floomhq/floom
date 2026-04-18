@@ -49,7 +49,7 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, appDetail }: P
   const isError = run.status !== 'success';
 
   // Layer 2 + 3 of the v16 renderer cascade. Layer 1 (custom renderer)
-  // is handled in FloomApp.tsx via CustomRendererHost. Layer 4 is the
+  // is handled in RunSurface.tsx via CustomRendererHost. Layer 4 is the
   // legacy OutputRenderer below — we fall into it when the cascade
   // returns `{ kind: 'fallback' }`.
   const cascade =
