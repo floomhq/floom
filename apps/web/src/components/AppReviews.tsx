@@ -19,8 +19,17 @@ export function AppReviews({ slug }: { slug: string }) {
   async function load() {
     try {
       const res = await api.getAppReviews(slug, 20);
-      setSummary(res.summary);
-      setReviews(res.reviews);
+      // Hide QA fixture reviews ("QA Creator B", "QA User A p3", "B review", etc.)
+      // from the public product page. See 2026-04-18 consumer UX audit finding #2.
+      const isFixture = (r: Review) =>
+        /^(QA\s|B review$)/.test(r.author_name) ||
+        /^(QA test|B thinks it is ok|Updated review content)/.test(r.title ?? '') ||
+        /^(QA test|B thinks it is ok|Updated review content)/.test(r.body ?? '');
+      const clean = res.reviews.filter((r) => !isFixture(r));
+      const cleanCount = clean.length;
+      const cleanAvg = cleanCount === 0 ? 0 : clean.reduce((s, r) => s + r.rating, 0) / cleanCount;
+      setSummary({ count: cleanCount, avg: cleanAvg });
+      setReviews(clean);
     } catch {
       // render empty state
       setSummary({ count: 0, avg: 0 });

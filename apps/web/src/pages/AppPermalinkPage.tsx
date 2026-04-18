@@ -16,6 +16,7 @@ import { AppIcon } from '../components/AppIcon';
 import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { getApp, getAppReviews, getRun } from '../api/client';
+import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
 
 // Map of known app slugs to GitHub repo URLs. Only slugs whose example
@@ -36,6 +37,9 @@ export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const runIdFromUrl = searchParams.get('run');
+  // Gate "Open creator dashboard" — anon visitors should never see it on the
+  // public product page. See 2026-04-18 consumer UX audit finding #5.
+  const { isAuthenticated } = useSession();
 
   const [app, setApp] = useState<AppDetail | null>(null);
   const [summary, setSummary] = useState<ReviewSummary | null>(null);
@@ -284,20 +288,22 @@ export function AppPermalinkPage() {
             <Chevron />
             <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{app.name}</span>
           </div>
-          <Link
-            to={`/creator/${app.slug}`}
-            data-testid="open-creator-dashboard"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              color: 'var(--muted)',
-              textDecoration: 'none',
-              fontWeight: 500,
-            }}
-          >
-            Open creator dashboard <ArrowRight />
-          </Link>
+          {isAuthenticated && (
+            <Link
+              to={`/creator/${app.slug}`}
+              data-testid="open-creator-dashboard"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                color: 'var(--muted)',
+                textDecoration: 'none',
+                fontWeight: 500,
+              }}
+            >
+              Open creator dashboard <ArrowRight />
+            </Link>
+          )}
         </div>
 
         {/* Hero */}

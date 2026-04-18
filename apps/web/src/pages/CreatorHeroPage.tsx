@@ -160,7 +160,7 @@ export function CreatorHeroPage() {
               }}
             >
               Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server,
-              HTTP API, and shareable web form — production-grade, live in 30 seconds.
+              HTTP API, and shareable web form. Production-grade, live in 30 seconds.
             </p>
 
             <form
@@ -224,6 +224,30 @@ export function CreatorHeroPage() {
                 <ArrowRight size={16} aria-hidden="true" />
               </button>
             </form>
+
+            {/* Secondary path for consumers who don't have an OpenAPI spec:
+                let them browse live apps right from the hero. Keeps the one-
+                input-one-CTA v15 feel while giving a real answer to the
+                question "what if I'm not a developer?". See 2026-04-18 audit
+                finding #3. */}
+            <p
+              style={{
+                marginTop: 18,
+                fontSize: 14,
+                color: 'var(--muted)',
+                textAlign: 'center',
+              }}
+            >
+              No API yet?{' '}
+              <a
+                href="/apps"
+                data-testid="hero-browse-apps"
+                style={{ color: 'var(--ink)', fontWeight: 500, textDecoration: 'underline' }}
+              >
+                Browse live apps
+              </a>
+              .
+            </p>
           </div>
         </section>
 
