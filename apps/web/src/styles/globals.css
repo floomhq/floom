@@ -430,7 +430,7 @@ body {
 
 /* Hide the v15 MeRail sidebar on narrow viewports — at <720px the 260px
    rail starves the main column and collapses content (especially the
-   /me/a/:slug description) into a vertical one-char column. Users can
+   /me/apps/:slug description) into a vertical one-char column. Users can
    still navigate via the TopBar on mobile. */
 @media (max-width: 720px) {
   .me-rail-aside {

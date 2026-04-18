@@ -142,12 +142,32 @@ export function CreatorHeroPage() {
                 lineHeight: 1.02,
                 letterSpacing: '-0.02em',
                 color: 'var(--ink)',
-                margin: '0 0 28px',
+                margin: '0 0 20px',
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
               The protocol + runtime for agentic work.
             </h1>
+
+            {/* Sub-tagline (locked 2026-04-18): displays immediately under the
+                primary headline, carries the pitch line. Rendered as its own
+                element so crawlers, OG tools, and wireframe audits can pick it
+                up deterministically. */}
+            <p
+              className="hero-subtagline"
+              data-testid="hero-subtagline"
+              style={{
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 22,
+                lineHeight: 1.35,
+                fontWeight: 600,
+                letterSpacing: '-0.01em',
+                color: 'var(--accent)',
+                margin: '0 0 24px',
+              }}
+            >
+              Vibe-coding speed. Production-grade safety.
+            </p>
 
             <p
               className="hero-subhead"
@@ -160,7 +180,7 @@ export function CreatorHeroPage() {
               }}
             >
               Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server,
-              HTTP API, and shareable web form. Production-grade, live in 30 seconds.
+              HTTP API, and shareable web form.
             </p>
 
             <form
@@ -352,7 +372,8 @@ export function CreatorHeroPage() {
       <style>{`
         @media (max-width: 640px) {
           [data-testid="hero"] { padding: 64px 20px 56px; }
-          .hero-headline { font-size: 44px !important; line-height: 1.05 !important; margin-bottom: 18px !important; }
+          .hero-headline { font-size: 44px !important; line-height: 1.05 !important; margin-bottom: 14px !important; }
+          .hero-subtagline { font-size: 16px !important; margin-bottom: 18px !important; }
           .hero-subhead { font-size: 16px !important; margin-bottom: 36px !important; }
           .hero-input { flex-direction: column !important; align-items: stretch !important; padding: 10px !important; }
           .hero-input input { padding: 14px !important; font-size: 13.5px !important; }

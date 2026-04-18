@@ -1,9 +1,9 @@
-// v15.2 /me/a/:slug — app overview for owned apps.
+// v15.2 /me/apps/:slug — app overview for owned apps.
 //
 // Layout (inspired by /tmp/v15-local/me-app.html): TopBar + shared
 // MeRail on the left, tabbed main column on the right. Overview shows
 // the app description, a "New run" CTA, and a recent-runs table.
-// Secrets lives on its own route /me/a/:slug/secrets (rendered by
+// Secrets lives on its own route /me/apps/:slug/secrets (rendered by
 // MeAppSecretsPage) so the overview stays read-only and the tab
 // highlight is URL-driven.
 //
@@ -188,8 +188,8 @@ export function TabBar({ slug, active }: { slug: string; active: TabId }) {
     to?: string;
     disabled?: boolean;
   }> = [
-    { id: 'overview', label: 'Overview', to: `/me/a/${slug}` },
-    { id: 'secrets', label: 'Secrets', to: `/me/a/${slug}/secrets` },
+    { id: 'overview', label: 'Overview', to: `/me/apps/${slug}` },
+    { id: 'secrets', label: 'Secrets', to: `/me/apps/${slug}/secrets` },
     { id: 'access', label: 'Access', disabled: true },
     { id: 'analytics', label: 'Analytics', disabled: true },
     { id: 'settings', label: 'Settings', disabled: true },
@@ -288,7 +288,7 @@ function OverviewPanel({
         }}
       >
         <Link
-          to={`/me/a/${app.slug}/run`}
+          to={`/me/apps/${app.slug}/run`}
           data-testid="me-app-new-run"
           style={{
             display: 'inline-flex',
@@ -306,7 +306,7 @@ function OverviewPanel({
           New run →
         </Link>
         <Link
-          to={`/me/a/${app.slug}/secrets`}
+          to={`/me/apps/${app.slug}/secrets`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',

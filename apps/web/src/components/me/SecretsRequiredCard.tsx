@@ -1,4 +1,4 @@
-// v15.2 /me/a/:slug/run pre-flight card.
+// v15.2 /me/apps/:slug/run pre-flight card.
 //
 // Rendered when the caller is about to run an app that requires
 // per-user secrets (e.g. ig-nano-scout — IG cookies + Evomi proxy) but

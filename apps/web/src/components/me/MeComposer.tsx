@@ -1,5 +1,5 @@
 // v15.1 inline composer pinned to the bottom of the right thread pane.
-// Submitting navigates to /me/a/<slug>/run?prompt=<text>; MeAppRunPage reads
+// Submitting navigates to /me/apps/<slug>/run?prompt=<text>; MeAppRunPage reads
 // the prefill and hands it to <FloomApp initialInputs={{ prompt }} />.
 
 import {
@@ -49,7 +49,7 @@ export const MeComposer = forwardRef<MeComposerHandle, Props>(function MeCompose
     if (disabled || !targetSlug) return;
     const trimmed = value.trim();
     const qs = trimmed ? `?prompt=${encodeURIComponent(trimmed)}` : '';
-    navigate(`/me/a/${targetSlug}/run${qs}`);
+    navigate(`/me/apps/${targetSlug}/run${qs}`);
   }, [disabled, targetSlug, value, navigate]);
 
   return (

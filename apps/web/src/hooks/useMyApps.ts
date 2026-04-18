@@ -1,7 +1,7 @@
 // v15.2: shared /api/hub/mine hook.
 //
 // Mirrors the shape of useSession: module-level cache + useSyncExternalStore
-// so /me, /me/a/:slug, and the MeRail all read from the same source without
+// so /me, /me/apps/:slug, and the MeRail all read from the same source without
 // refetching per route. First subscriber triggers the initial load; manual
 // `refresh()` is exposed for after create / delete actions.
 

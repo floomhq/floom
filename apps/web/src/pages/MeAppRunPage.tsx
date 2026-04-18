@@ -1,4 +1,4 @@
-// v15.2 /me/a/:slug/run — single-run surface for an owned app.
+// v15.2 /me/apps/:slug/run — single-run surface for an owned app.
 //
 // Flow: fetch app + cached secrets → compute missing required keys →
 // if any are missing, show SecretsRequiredCard; else mount FloomApp
@@ -106,7 +106,7 @@ export function MeAppRunPage() {
             <span style={{ margin: '0 6px' }}>›</span>
             {app ? (
               <Link
-                to={`/me/a/${app.slug}`}
+                to={`/me/apps/${app.slug}`}
                 style={{ color: 'var(--muted)', textDecoration: 'none' }}
               >
                 {app.name}
