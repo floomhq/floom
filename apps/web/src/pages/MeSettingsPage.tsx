@@ -19,6 +19,38 @@ import { PageShell } from '../components/PageShell';
 import { useSession, refreshSession, clearSession } from '../hooks/useSession';
 import * as api from '../api/client';
 
+/**
+ * Card wrapper: restores visual structure so /me/settings matches the Store
+ * consumer chrome (same treatment the run surface, hero tiles, and meta
+ * cards use). Prior version rendered bare forms with section rules only,
+ * leaving ~50% of the viewport empty and no visible signed-in state.
+ */
+function SettingsCard({
+  id,
+  children,
+  danger = false,
+}: {
+  id?: string;
+  children: React.ReactNode;
+  danger?: boolean;
+}) {
+  return (
+    <section
+      data-testid={id}
+      style={{
+        background: 'var(--card)',
+        border: `1px solid ${danger ? '#f4b7b1' : 'var(--line)'}`,
+        borderRadius: 14,
+        padding: '22px 24px',
+        marginBottom: 18,
+        boxSizing: 'border-box',
+      }}
+    >
+      {children}
+    </section>
+  );
+}
+
 type FieldState = 'idle' | 'saving' | 'saved' | 'error';
 
 export function MeSettingsPage() {
@@ -152,15 +184,80 @@ export function MeSettingsPage() {
     }
   }
 
+  // Round 2 polish: /me/settings previously rendered bare, unstyled forms
+  // with ~50% of the viewport empty and no visible way to sign out. The
+  // prominent "Sign out" action is also missing on the topbar for many
+  // signed-in states, so users would orphan in their account. This adds a
+  // clear Sign out button at the top of the page, wraps each section in
+  // the card chrome used across the store surface, and keeps the existing
+  // form logic intact.
+  async function handleSignOut() {
+    try {
+      await api.signOut();
+    } catch {
+      // Ignore network errors — still clear client state so the user is
+      // signed out locally even if the backend call failed.
+    }
+    clearSession();
+    await refreshSession();
+    navigate('/', { replace: true });
+  }
+
   return (
     <PageShell requireAuth="cloud" title="Settings | Floom">
-      <div data-testid="settings-page" style={{ maxWidth: 540 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, margin: '0 0 6px', color: 'var(--ink)' }}>
-          Account settings
-        </h1>
-        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 28px' }}>
-          Update your profile, change your password, or delete your account.
-        </p>
+      <div data-testid="settings-page" style={{ maxWidth: 620 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
+            marginBottom: 24,
+          }}
+        >
+          <div>
+            <h1 style={{ fontSize: 26, fontWeight: 700, margin: '0 0 6px', color: 'var(--ink)' }}>
+              Account settings
+            </h1>
+            <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0 }}>
+              Update your profile, change your password, or sign out.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={!isAuthenticated}
+            data-testid="settings-signout"
+            style={{
+              padding: '9px 16px',
+              background: 'var(--card)',
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isAuthenticated ? 'pointer' : 'not-allowed',
+              fontFamily: 'inherit',
+              opacity: isAuthenticated ? 1 : 0.5,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              flexShrink: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Sign out
+          </button>
+        </div>
 
         {!isAuthenticated && (
           <div
@@ -180,7 +277,8 @@ export function MeSettingsPage() {
           </div>
         )}
 
-        {/* ---------- Profile section ---------- */}
+        {/* ---------- Profile card ---------- */}
+        <SettingsCard id="settings-card-profile">
         <form onSubmit={handleProfileSave} data-testid="settings-profile-form">
           <SectionHeading>Profile</SectionHeading>
 
@@ -237,12 +335,13 @@ export function MeSettingsPage() {
             </button>
           </div>
         </form>
+        </SettingsCard>
 
-        {/* ---------- Password section ---------- */}
+        {/* ---------- Password card ---------- */}
+        <SettingsCard id="settings-card-password">
         <form
           onSubmit={handlePasswordSave}
           data-testid="settings-password-form"
-          style={{ marginTop: 40 }}
         >
           <SectionHeading>Change password</SectionHeading>
 
@@ -306,19 +405,12 @@ export function MeSettingsPage() {
             </button>
           </div>
         </form>
+        </SettingsCard>
 
-        {/* ---------- Delete-account section ---------- */}
-        <div
-          style={{
-            marginTop: 48,
-            padding: 24,
-            background: 'var(--card)',
-            border: '1px solid #f4b7b1',
-            borderRadius: 12,
-          }}
-        >
+        {/* ---------- Danger zone card ---------- */}
+        <SettingsCard id="settings-card-danger" danger>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c2321f', margin: '0 0 6px' }}>
-            Delete account
+            Danger zone
           </h3>
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px', lineHeight: 1.55 }}>
             Permanently delete your account and everything associated with it. This cannot be undone.
@@ -348,7 +440,7 @@ export function MeSettingsPage() {
           >
             Delete my account
           </button>
-        </div>
+        </SettingsCard>
 
         {confirm && (
           <div

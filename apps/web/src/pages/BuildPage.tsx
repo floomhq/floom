@@ -38,7 +38,22 @@ type PendingPublish = {
   source: 'github' | 'openapi';
 };
 
-export function BuildPage() {
+interface BuildPageProps {
+  /** Wrapper component used for the outer layout. Defaults to PageShell
+   *  (store surface). Studio wraps with StudioLayout. */
+  layout?: React.ComponentType<{ children: React.ReactNode; title?: string }>;
+  /** Where the "Back" breadcrumb links to. Defaults to /creator (store).
+   *  Studio passes /studio. */
+  backHref?: string;
+  /** Redirect target after publish — Studio sends to /studio/:slug. */
+  postPublishHref?: (slug: string) => string;
+}
+
+export function BuildPage({
+  layout: Layout = PageShell,
+  backHref = '/creator',
+  postPublishHref,
+}: BuildPageProps = {}) {
   const [searchParams] = useSearchParams();
   const editSlug = searchParams.get('edit');
   // v15 landing hands off the pasted OpenAPI URL via /build?openapi=<url>.
@@ -75,8 +90,10 @@ export function BuildPage() {
     'private',
   );
 
-  // Coming-soon state
-  const [comingSoon, setComingSoon] = useState<'describe' | 'connect' | 'docker' | null>(null);
+  // Coming-soon state. Round 2 polish: describe/connect ramps removed
+  // from the ramp page, so only docker remains as a coming-soon modal
+  // target.
+  const [comingSoon, setComingSoon] = useState<'docker' | null>(null);
 
   // Pre-fill if we got here via /build?edit=slug
   useEffect(() => {
@@ -230,12 +247,12 @@ export function BuildPage() {
   }
 
   return (
-    <PageShell title="Publish an app | Floom">
+    <Layout title="Publish an app | Floom">
       <div data-testid="build-page" style={{ maxWidth: 1040, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ marginBottom: 32 }}>
           <Link
-            to="/creator"
+            to={backHref}
             style={{
               fontSize: 13,
               color: 'var(--muted)',
@@ -266,7 +283,7 @@ export function BuildPage() {
               letterSpacing: '-0.02em',
             }}
           >
-            {editSlug ? `Edit ${editSlug}` : 'What do you want to ship?'}
+            {editSlug ? `Edit ${editSlug}` : 'Publish a Floom app'}
           </h1>
           <p
             style={{
@@ -512,158 +529,13 @@ export function BuildPage() {
               )}
             </form>
 
-            {/* RAMPS 2 + 3 — Describe + Connect (coming soon), de-emphasized in a closed disclosure */}
-            <details
-              data-testid="build-more-ways-disclosure"
-              style={{
-                marginBottom: 16,
-                border: '1px solid var(--line)',
-                borderRadius: 14,
-                background: 'var(--bg)',
-                padding: '0 4px',
-              }}
-            >
-              <summary
-                style={{
-                  cursor: 'pointer',
-                  padding: '12px 14px',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: 'var(--muted)',
-                  opacity: 0.92,
-                  userSelect: 'none',
-                }}
-              >
-                More ways to add an app (coming soon)
-              </summary>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: 16,
-                  padding: '4px 12px 16px',
-                }}
-              >
-                <RampCard
-                  icon={<WandIcon />}
-                  title="Describe it"
-                  badge="Coming soon"
-                  desc="Tell us what your app should do. Works best for fresh ideas with no existing code."
-                  testId="ramp-describe"
-                  onClick={() => setComingSoon('describe')}
-                >
-                  <textarea
-                    disabled
-                    placeholder="e.g. an app that takes a cafe name and returns the 3 closest alternatives with ratings and walking time."
-                    rows={3}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      border: '1px solid var(--line)',
-                      borderRadius: 8,
-                      background: 'var(--bg)',
-                      fontSize: 13,
-                      color: 'var(--muted)',
-                      fontFamily: 'inherit',
-                      resize: 'none',
-                      opacity: 0.85,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </RampCard>
-
-                <RampCard
-                  icon={<CableIcon />}
-                  title="Connect a tool"
-                  badge="Coming soon"
-                  desc="Pick a tool you already use. We handle the secure connection."
-                  testId="ramp-connect"
-                  onClick={() => setComingSoon('connect')}
-                >
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 6,
-                      opacity: 0.85,
-                    }}
-                  >
-                    {['Gmail', 'Stripe', 'Notion', 'Sheets', 'Airtable', 'Slack', 'Shopify', 'More'].map(
-                      (t) => (
-                        <div
-                          key={t}
-                          style={{
-                            padding: '8px 4px',
-                            border: '1px solid var(--line)',
-                            borderRadius: 6,
-                            background: 'var(--bg)',
-                            fontSize: 10.5,
-                            color: 'var(--muted)',
-                            textAlign: 'center',
-                            fontWeight: 500,
-                          }}
-                        >
-                          {t}
-                        </div>
-                      ),
-                    )}
-                  </div>
-                </RampCard>
-              </div>
-            </details>
-
-            {/* RAMP 4 — Docker (coming soon) */}
-            <RampCard
-              icon={<DockerIcon />}
-              title="Import from a Docker image"
-              badge="Coming soon"
-              desc="Paste an image and the OpenAPI path. Floom pulls, scans, and deploys behind the production layer."
-              testId="ramp-docker"
-              onClick={() => setComingSoon('docker')}
-              compact
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  opacity: 0.85,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <input
-                  disabled
-                  placeholder="ghcr.io/you/app:latest"
-                  style={{
-                    flex: '2 1 220px',
-                    padding: '10px 12px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    background: 'var(--bg)',
-                    fontSize: 13,
-                    color: 'var(--muted)',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <input
-                  disabled
-                  placeholder="/openapi.yaml"
-                  style={{
-                    flex: '1 1 140px',
-                    padding: '10px 12px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    background: 'var(--bg)',
-                    fontSize: 13,
-                    color: 'var(--muted)',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            </RampCard>
-
-            {/* RAMP 5 — OpenAPI URL paste (fallback, FUNCTIONAL) */}
+            {/* RAMP 2 — OpenAPI URL paste (FUNCTIONAL). Round 2 polish
+                (UI audit v2): previously hidden behind a "More ways to
+                add an app (coming soon)" accordion that made the
+                functional OpenAPI ramp invisible above the fold. Promote
+                it directly under the primary GitHub card so both working
+                ramps are side-by-side and no "coming soon" copy appears
+                above the first real input. */}
             <form
               onSubmit={handleOpenapiDetect}
               data-testid="ramp-openapi"
@@ -744,6 +616,106 @@ export function BuildPage() {
                 Detect spec
               </button>
             </form>
+
+            {/* More-ways footer — single collapsed disclosure after the
+                functional ramps. Round 2 polish (UI audit v2): Docker
+                + other non-shipping ramps must not be visible above the
+                fold at 1440x900, so they live inside a closed <details>
+                the creator can expand. This keeps "coming soon" copy
+                off the initial view while leaving the Docker ramp
+                discoverable. */}
+            <details
+              data-testid="build-more-ways-footer"
+              style={{
+                marginTop: 24,
+                border: '1px solid var(--line)',
+                borderRadius: 12,
+                background: 'var(--bg)',
+                padding: '0 4px',
+              }}
+            >
+              <summary
+                data-testid="build-more-ways-summary"
+                style={{
+                  cursor: 'pointer',
+                  padding: '12px 14px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: 'var(--muted)',
+                  userSelect: 'none',
+                }}
+              >
+                More ways to add an app
+              </summary>
+              <div style={{ padding: '4px 12px 16px' }}>
+                <RampCard
+                  icon={<DockerIcon />}
+                  title="Import from a Docker image"
+                  badge="Coming soon"
+                  desc="Paste an image and the OpenAPI path. Floom pulls, scans, and deploys behind the production layer."
+                  testId="ramp-docker"
+                  onClick={() => setComingSoon('docker')}
+                  compact
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      opacity: 0.85,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <input
+                      disabled
+                      placeholder="ghcr.io/you/app:latest"
+                      style={{
+                        flex: '2 1 220px',
+                        padding: '10px 12px',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        background: 'var(--bg)',
+                        fontSize: 13,
+                        color: 'var(--muted)',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                    <input
+                      disabled
+                      placeholder="/openapi.yaml"
+                      style={{
+                        flex: '1 1 140px',
+                        padding: '10px 12px',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        background: 'var(--bg)',
+                        fontSize: 13,
+                        color: 'var(--muted)',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                </RampCard>
+                <p
+                  style={{
+                    marginTop: 12,
+                    marginBottom: 0,
+                    fontSize: 12.5,
+                    color: 'var(--muted)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  Describe-it and tool connectors ship with v1.1.{' '}
+                  <a
+                    href="/protocol"
+                    style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}
+                  >
+                    Post to the roadmap &rarr;
+                  </a>
+                </p>
+              </div>
+            </details>
           </div>
         )}
 
@@ -984,7 +956,7 @@ export function BuildPage() {
                   Open app
                 </button>
                 <Link
-                  to={`/me/apps/${slug}`}
+                  to={postPublishHref ? postPublishHref(slug) : `/me/apps/${slug}`}
                   className="btn-ghost"
                   data-testid="build-install-claude"
                   style={{
@@ -995,21 +967,23 @@ export function BuildPage() {
                     textDecoration: 'none',
                   }}
                 >
-                  Install in Claude
+                  {postPublishHref ? 'Manage in Studio' : 'Install in Claude'}
                 </Link>
-                <Link
-                  to={`/creator/${slug}`}
-                  className="btn-ghost"
-                  style={{
-                    padding: '9px 14px',
-                    fontSize: 13,
-                    border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    textDecoration: 'none',
-                  }}
-                >
-                  View in creator dashboard
-                </Link>
+                {!postPublishHref && (
+                  <Link
+                    to={`/creator/${slug}`}
+                    className="btn-ghost"
+                    style={{
+                      padding: '9px 14px',
+                      fontSize: 13,
+                      border: '1px solid var(--line)',
+                      borderRadius: 8,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    View in creator dashboard
+                  </Link>
+                )}
               </div>
             </div>
 
@@ -1038,7 +1012,7 @@ export function BuildPage() {
           onSignIn={() => navigate('/login?next=' + encodeURIComponent('/build'))}
         />
       )}
-    </PageShell>
+    </Layout>
   );
 }
 
@@ -1178,7 +1152,7 @@ function ComingSoonRampModal({
   target,
   onClose,
 }: {
-  target: 'describe' | 'connect' | 'docker';
+  target: 'docker';
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -1190,16 +1164,6 @@ function ComingSoonRampModal({
   }, [onClose]);
 
   const config = {
-    describe: {
-      title: 'Describe it (coming soon)',
-      copy:
-        'AI-generated apps from a plain English description ship after v1. For now, use GitHub import or the OpenAPI URL ramp.',
-    },
-    connect: {
-      title: 'Connect a tool (coming soon)',
-      copy:
-        'Pre-built connectors for Gmail, Stripe, Notion, and more are on the roadmap. For now, import your own OpenAPI spec.',
-    },
     docker: {
       title: 'Docker import (coming soon)',
       copy:
@@ -1514,34 +1478,6 @@ function GithubIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <use href="#icon-github" />
-    </svg>
-  );
-}
-
-function WandIcon() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9h0M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function CableIcon() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M4 9a2 2 0 0 1 2-2h2v10H6a2 2 0 0 1-2-2zM16 7h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2zM8 9h8M8 15h8M6 5v2M10 5v2M14 17v2M18 17v2"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

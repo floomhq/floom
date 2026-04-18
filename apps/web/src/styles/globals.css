@@ -563,6 +563,34 @@ body {
   }
 }
 
+/* Studio sidebar: identical mobile pattern — hide below 900px, where the
+   240px rail + main column padding starts colliding. A floating toggle
+   opens the sidebar as a drawer on mobile (see StudioLayout.tsx). */
+@media (max-width: 900px) {
+  .studio-sidebar {
+    display: none;
+  }
+  .studio-mobile-toggle {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+  .studio-main {
+    padding: 20px 20px 120px !important;
+  }
+}
+
+/* /login value-pitch: 2-column on desktop, stack on mobile. */
+@media (max-width: 1023px) {
+  .login-grid {
+    grid-template-columns: 1fr !important;
+    max-width: 440px !important;
+  }
+  .login-right {
+    display: none;
+  }
+}
+
 /* Async job queue UI (v0.3.0). Used by components/runner/JobProgress.tsx. */
 @keyframes floom-spin {
   from { transform: rotate(0deg); }

@@ -320,11 +320,134 @@ export function IconSprite() {
           d="M8 12h8M12 8v8"
         />
       </symbol>
+
+      {/* Round 2 polish: palette of 20 Lucide-style generic glyphs used as
+          deterministic fallbacks for apps that don't have a dedicated icon
+          in the map above. Hashing the slug into this palette keeps the
+          /apps grid skimmable (round 2 audit: 22 apps were all rendering
+          app-default, so every row looked identical). Glyphs stay in the
+          single emerald tint to respect the green-only brand rule. */}
+      <symbol id="app-f-sparkles" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5zM19 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3zM5 4l.8 2.2L8 7l-2.2.8L5 10l-.8-2.2L2 7l2.2-.8L5 4z" />
+      </symbol>
+      <symbol id="app-f-zap" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" />
+      </symbol>
+      <symbol id="app-f-code" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M8 6l-6 6 6 6M16 6l6 6-6 6M14 4l-4 16" />
+      </symbol>
+      <symbol id="app-f-database" viewBox="0 0 24 24">
+        <ellipse cx="12" cy="5" rx="9" ry="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+      </symbol>
+      <symbol id="app-f-filetext" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M9 13h6M9 17h4" />
+      </symbol>
+      <symbol id="app-f-cpu" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <rect x="9" y="9" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+      </symbol>
+      <symbol id="app-f-key" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0L19 4m-3.5 3.5L19 11" />
+      </symbol>
+      <symbol id="app-f-globe" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" />
+      </symbol>
+      <symbol id="app-f-play" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M5 3v18l15-9L5 3z" />
+      </symbol>
+      <symbol id="app-f-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M20 20l-3.5-3.5" />
+      </symbol>
+      <symbol id="app-f-link" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1" />
+      </symbol>
+      <symbol id="app-f-terminal" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M7 9l3 3-3 3M13 15h4" />
+      </symbol>
+      <symbol id="app-f-pie" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M21 12A9 9 0 116 5.3" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M21 12A9 9 0 0012 3v9h9z" />
+      </symbol>
+      <symbol id="app-f-image" viewBox="0 0 24 24">
+        <rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="8.5" cy="8.5" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M21 15l-5-5L5 21" />
+      </symbol>
+      <symbol id="app-f-copy" viewBox="0 0 24 24">
+        <rect x="9" y="9" width="13" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+      </symbol>
+      <symbol id="app-f-scissors" viewBox="0 0 24 24">
+        <circle cx="6" cy="6" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="6" cy="18" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12" />
+      </symbol>
+      <symbol id="app-f-lock" viewBox="0 0 24 24">
+        <rect x="3" y="11" width="18" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M7 11V7a5 5 0 0110 0v4" />
+      </symbol>
+      <symbol id="app-f-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l3 3" />
+      </symbol>
+      <symbol id="app-f-box" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M21 8l-9-5-9 5v8l9 5 9-5V8zM3 8l9 5 9-5M12 13v8" />
+      </symbol>
+      <symbol id="app-f-layers" viewBox="0 0 24 24">
+        <path fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M12 2l10 5-10 5L2 7l10-5zM2 12l10 5 10-5M2 17l10 5 10-5" />
+      </symbol>
     </svg>
   );
 }
 
-// Map a slug to the right icon id. Falls back to app-default.
+// Round 2 polish: the 20-slot fallback palette. Keep this array stable;
+// reordering rebalances every app's fallback icon. The names mirror the
+// Lucide glyphs they render so debugging feels natural.
+const FALLBACK_ICONS = [
+  'app-f-sparkles',
+  'app-f-zap',
+  'app-f-code',
+  'app-f-database',
+  'app-f-filetext',
+  'app-f-cpu',
+  'app-f-key',
+  'app-f-globe',
+  'app-f-play',
+  'app-f-search',
+  'app-f-link',
+  'app-f-terminal',
+  'app-f-pie',
+  'app-f-image',
+  'app-f-copy',
+  'app-f-scissors',
+  'app-f-lock',
+  'app-f-clock',
+  'app-f-box',
+  'app-f-layers',
+] as const;
+
+/**
+ * djb2 string hash, deterministic, stable across reloads. Used to pick a
+ * fallback icon for apps whose slug isn't in the explicit map. Same slug
+ * always hashes to the same index so the grid doesn't shuffle on reload.
+ */
+function hashSlug(slug: string): number {
+  let h = 5381;
+  for (let i = 0; i < slug.length; i += 1) {
+    h = (h * 33) ^ slug.charCodeAt(i);
+  }
+  return Math.abs(h);
+}
+
+// Map a slug to the right icon id. Round 2 polish: falls back to a
+// deterministic Lucide-style glyph from FALLBACK_ICONS (previously every
+// unknown slug rendered app-default, making the /apps grid unskimmable).
 export function iconForSlug(slug: string): string {
   const map: Record<string, string> = {
     flyfast: 'app-flyfast',
@@ -351,5 +474,8 @@ export function iconForSlug(slug: string): string {
     'jwt-decode': 'app-jwt-decode',
     'word-count': 'app-word-count',
   };
-  return map[slug] || 'app-default';
+  const explicit = map[slug];
+  if (explicit) return explicit;
+  if (!slug) return 'app-default';
+  return FALLBACK_ICONS[hashSlug(slug) % FALLBACK_ICONS.length];
 }

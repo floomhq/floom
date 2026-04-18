@@ -1,0 +1,8 @@
+# Gitleaks false-positive allowlist.
+# Format: <commit-sha>:<path>:<rule-id>:<additional>
+
+# jwt.io classic demo token ("1234567890 / John Doe") used as test fixture for
+# hub-smoke e2e tests. Verified non-sensitive during the pre-public audit on
+# 2026-04-18. Keeps the test realistic without stuffing a synthetic token that
+# would fail decoder shape checks.
+bc9717ff4a16bdab9d725c63e00b87ff7375e0bd:packages/hub-smoke/tests/fixtures.ts:jwt:8

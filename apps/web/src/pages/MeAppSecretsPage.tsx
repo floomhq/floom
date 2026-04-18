@@ -29,6 +29,7 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { MeRail } from '../components/me/MeRail';
+import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader, TabBar } from './MeAppPage';
 import { useSecrets } from '../hooks/useSecrets';
 import { useSession } from '../hooks/useSession';
@@ -40,7 +41,19 @@ import type {
   SecretPolicyEntry,
 } from '../lib/types';
 
-export function MeAppSecretsPage() {
+interface MeAppSecretsPageProps {
+  /** Route chrome wrapper. Defaults to PageShell + MeRail. Studio
+   *  passes a StudioLayout adapter so the same body renders inside the
+   *  creator workspace (no TabBar — sidebar handles navigation). */
+  chrome?: 'me' | 'studio';
+  /** On 404 redirect to this path. Defaults to /me. */
+  notFoundPath?: string;
+}
+
+export function MeAppSecretsPage({
+  chrome = 'me',
+  notFoundPath,
+}: MeAppSecretsPageProps = {}) {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
   const [app, setApp] = useState<AppDetail | null>(null);
@@ -62,7 +75,11 @@ export function MeAppSecretsPage() {
         if (cancelled) return;
         const status = (err as { status?: number }).status;
         if (status === 404) {
-          nav('/me', { replace: true });
+          nav(notFoundPath ?? '/me', { replace: true });
+          return;
+        }
+        if (status === 403 && chrome === 'studio') {
+          nav(`/p/${slug}`, { replace: true });
           return;
         }
         setError((err as Error).message || 'Failed to load app');
@@ -70,7 +87,7 @@ export function MeAppSecretsPage() {
     return () => {
       cancelled = true;
     };
-  }, [slug, nav]);
+  }, [slug, nav, notFoundPath, chrome]);
 
   // Load policies once we know the app exists. A 403 here would mean the
   // caller can't even view the app; in practice /api/hub/:slug would have
@@ -125,45 +142,46 @@ export function MeAppSecretsPage() {
     (p) => p.policy === 'user_vault',
   );
 
-  return (
-    <PageShell
-      requireAuth="cloud"
-      title={app ? `${app.name} · Secrets · Floom` : 'Secrets · Floom'}
-      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 'calc(100vh - 56px)' }}>
-        <MeRail activeAppSlug={slug} />
-        <main
-          style={{
-            flex: 1,
-            padding: '28px 40px 120px',
-            maxWidth: 1000,
-            margin: '0 auto',
-            width: '100%',
-            minWidth: 0,
-          }}
+  const body = (
+    <>
+      {chrome === 'me' && (
+        <nav
+          aria-label="Breadcrumb"
+          style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
         >
-          <nav
-            aria-label="Breadcrumb"
-            style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
-          >
-            <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
-              /me
+          <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
+            /me
+          </Link>
+          <span style={{ margin: '0 6px' }}>›</span>
+          {app ? (
+            <Link
+              to={`/me/apps/${app.slug}`}
+              style={{ color: 'var(--muted)', textDecoration: 'none' }}
+            >
+              {app.name}
             </Link>
-            <span style={{ margin: '0 6px' }}>›</span>
-            {app ? (
-              <Link
-                to={`/me/apps/${app.slug}`}
-                style={{ color: 'var(--muted)', textDecoration: 'none' }}
-              >
-                {app.name}
-              </Link>
-            ) : (
-              <span>{slug}</span>
-            )}
-            <span style={{ margin: '0 6px' }}>›</span>
-            <span style={{ color: 'var(--ink)' }}>Secrets</span>
-          </nav>
+          ) : (
+            <span>{slug}</span>
+          )}
+          <span style={{ margin: '0 6px' }}>›</span>
+          <span style={{ color: 'var(--ink)' }}>Secrets</span>
+        </nav>
+      )}
+      {chrome === 'studio' && app && (
+        <nav
+          aria-label="Breadcrumb"
+          style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
+        >
+          <Link
+            to={`/studio/${app.slug}`}
+            style={{ color: 'var(--muted)', textDecoration: 'none' }}
+          >
+            {app.name}
+          </Link>
+          <span style={{ margin: '0 6px' }}>›</span>
+          <span style={{ color: 'var(--ink)' }}>Secrets</span>
+        </nav>
+      )}
 
           {error && (
             <div
@@ -184,14 +202,14 @@ export function MeAppSecretsPage() {
           {app && (
             <>
               <AppHeader app={app} />
-              <TabBar slug={app.slug} active="secrets" />
+              {chrome === 'me' && <TabBar slug={app.slug} active="secrets" />}
 
               <h2
                 style={{
                   fontSize: 16,
                   fontWeight: 700,
                   color: 'var(--ink)',
-                  margin: '0 0 4px',
+                  margin: chrome === 'studio' ? '20px 0 4px' : '0 0 4px',
                 }}
               >
                 Secrets for {app.name}
@@ -319,6 +337,40 @@ export function MeAppSecretsPage() {
               </p>
             </>
           )}
+    </>
+  );
+
+  if (chrome === 'studio') {
+    return (
+      <StudioLayout
+        title={app ? `${app.name} · Secrets · Studio` : 'Secrets · Studio'}
+        activeAppSlug={slug}
+        activeSubsection="secrets"
+      >
+        {body}
+      </StudioLayout>
+    );
+  }
+
+  return (
+    <PageShell
+      requireAuth="cloud"
+      title={app ? `${app.name} · Secrets · Floom` : 'Secrets · Floom'}
+      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 'calc(100vh - 56px)' }}>
+        <MeRail activeAppSlug={slug} />
+        <main
+          style={{
+            flex: 1,
+            padding: '28px 40px 120px',
+            maxWidth: 1000,
+            margin: '0 auto',
+            width: '100%',
+            minWidth: 0,
+          }}
+        >
+          {body}
         </main>
       </div>
     </PageShell>

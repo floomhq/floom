@@ -291,6 +291,7 @@ function RunRow({
 }) {
   const appName = run.app_name || run.app_slug || 'App';
   const summary = runSummary(run);
+  const tooltip = runRowTooltip(run, summary);
   const time = formatTime(run.started_at);
   const disabled = !run.app_slug;
   return (
@@ -299,6 +300,7 @@ function RunRow({
       onClick={() => onOpen(run)}
       disabled={disabled}
       data-testid={`me-run-row-${run.id}`}
+      title={tooltip}
       style={{
         width: '100%',
         display: 'flex',
@@ -344,7 +346,6 @@ function RunRow({
           </span>
           {summary && (
             <span
-              title={summary}
               style={{
                 color: 'var(--muted)',
                 overflow: 'hidden',
@@ -352,6 +353,7 @@ function RunRow({
                 whiteSpace: 'nowrap',
                 flex: 1,
                 minWidth: 0,
+                fontFamily: 'inherit',
               }}
             >
               {summary}
@@ -397,7 +399,12 @@ function StatusDot({ status }: { status: RunStatus }) {
 
 function runSummary(run: MeRunSummary): string | null {
   const inputs = run.inputs;
-  if (inputs && typeof inputs === 'object') {
+  if (inputs && typeof inputs === 'object' && !Array.isArray(inputs)) {
+    // Heuristic order: prefer the canonical prompt field, then the first
+    // non-trivial string, then a compact "key: value" pair for scalar
+    // inputs. Never fall through to a raw JSON dump — round 2 audit found
+    // rows rendering {"foo":"bar"} because apps with object-only inputs
+    // had no string field for the previous heuristic to surface.
     const prompt = inputs['prompt'];
     if (typeof prompt === 'string' && prompt.trim()) {
       return truncate(prompt.trim(), 90);
@@ -407,9 +414,42 @@ function runSummary(run: MeRunSummary): string | null {
         return truncate(value.trim(), 90);
       }
     }
+    // Scalar fallback: first primitive (number, boolean) rendered as
+    // "key: value". Covers hash/uuid/base64-style apps whose first input
+    // is "text" or "input" plus scalar options.
+    const entries = Object.entries(inputs).filter(
+      ([, v]) => v !== null && (typeof v === 'number' || typeof v === 'boolean'),
+    );
+    if (entries.length > 0) {
+      const [k, v] = entries[0];
+      return truncate(`${k}: ${v}`, 90);
+    }
+    // Last resort: count keys so the row reads "3 inputs" rather than
+    // empty or a JSON blob. Keeps the row skimmable while preserving the
+    // full payload in the hover title (renderer attaches it above).
+    const keyCount = Object.keys(inputs).length;
+    if (keyCount > 0) return `${keyCount} input${keyCount === 1 ? '' : 's'}`;
   }
   if (run.action && run.action !== 'run') return run.action;
   return null;
+}
+
+/**
+ * Round 2 polish: hover tooltip showing the full input JSON. Previously
+ * the title attr held just the truncated summary, so there was no way to
+ * see what actually ran without opening the run detail. Stringifies
+ * inputs for the title only — the visible row copy still uses the
+ * human-readable heuristic above.
+ */
+function runRowTooltip(run: MeRunSummary, summary: string | null): string {
+  if (!run.inputs || typeof run.inputs !== 'object') return summary ?? '';
+  try {
+    const raw = JSON.stringify(run.inputs, null, 2);
+    if (raw.length <= 400) return raw;
+    return `${raw.slice(0, 397)}...`;
+  } catch {
+    return summary ?? '';
+  }
 }
 
 function truncate(str: string, max: number): string {

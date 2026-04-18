@@ -86,9 +86,21 @@ export function LoginPage() {
   return (
     <PageShell title={mode === 'signin' ? 'Sign in | Floom' : 'Create account | Floom'}>
       <div
+        className="login-grid"
         style={{
-          maxWidth: 440,
+          display: 'grid',
+          gap: 48,
+          gridTemplateColumns: '440px 1fr',
+          maxWidth: 960,
           margin: '40px auto',
+          alignItems: 'start',
+        }}
+      >
+      <div
+        className="login-left"
+        style={{
+          width: '100%',
+          maxWidth: 440,
         }}
         data-testid={mode === 'signin' ? 'login-page' : 'signup-page'}
       >
@@ -294,7 +306,120 @@ export function LoginPage() {
           </button>
         </p>
       </div>
+
+      {/* Right column: value pitch. Hidden on mobile via CSS (<1024px). */}
+      <aside
+        className="login-right"
+        data-testid="login-value-pitch"
+        style={{
+          padding: '8px 0 0',
+        }}
+      >
+        <div
+          data-testid="login-right-logo"
+          data-glow="true"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            marginBottom: 20,
+          }}
+        >
+          <Logo size={32} variant="glow" />
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>floom</div>
+        </div>
+        <h2
+          style={{
+            fontSize: 20,
+            fontWeight: 700,
+            lineHeight: 1.3,
+            margin: '0 0 16px',
+            color: 'var(--ink)',
+          }}
+        >
+          Production infrastructure for AI apps that do real work.
+        </h2>
+        <ul
+          style={{
+            listStyle: 'none',
+            padding: 0,
+            margin: '0 0 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <ValueBullet
+            title="Ship AI apps in 30 seconds, not weeks."
+            desc="Paste an OpenAPI URL. Get MCP, HTTP API, store page, and docs in seconds."
+          />
+          <ValueBullet
+            title="Self-host free. Cloud for the creator tools."
+            desc="The OSS runtime is yours forever. Cloud adds the job queue, streaming, and managed secrets."
+          />
+          <ValueBullet
+            title="One spec. Five agent surfaces."
+            desc="Same app runs in Claude, ChatGPT, Notion, CLI, and the Store. Zero glue code."
+          />
+        </ul>
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--muted)',
+            padding: '12px 14px',
+            background: 'var(--bg)',
+            border: '1px solid var(--line)',
+            borderRadius: 10,
+          }}
+        >
+          Built for creators who want their apps run by agents, not polished into dashboards.
+        </div>
+      </aside>
+      </div>
     </PageShell>
+  );
+}
+
+function ValueBullet({ title, desc }: { title: string; desc: string }) {
+  return (
+    <li
+      className="value-bullet"
+      style={{
+        display: 'flex',
+        gap: 10,
+        alignItems: 'flex-start',
+        padding: '12px 14px',
+        background: 'var(--card)',
+        border: '1px solid var(--line)',
+        borderRadius: 10,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'inline-flex',
+          width: 18,
+          height: 18,
+          borderRadius: 9,
+          background: 'var(--accent)',
+          color: '#fff',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          fontSize: 11,
+          fontWeight: 700,
+          marginTop: 2,
+        }}
+      >
+        ✓
+      </span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{desc}</div>
+      </div>
+    </li>
   );
 }
 
