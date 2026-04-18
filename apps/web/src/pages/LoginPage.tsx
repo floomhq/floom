@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import { Logo } from '../components/Logo';
 import { useSession, refreshSession } from '../hooks/useSession';
 import * as api from '../api/client';
 
@@ -85,17 +86,33 @@ export function LoginPage() {
         }}
         data-testid={mode === 'signin' ? 'login-page' : 'signup-page'}
       >
+        {/* Brand mark on the auth hero. Glow + boot-in fade on mount
+            makes the page feel intentional rather than springing into
+            existence as a form. Boot-in is a one-shot so it doesn't
+            re-animate while the user switches sign-in / create-account
+            tabs. */}
+        <div
+          data-testid="login-logo"
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: 20,
+          }}
+        >
+          <Logo size={56} variant="glow" animate="boot-in" />
+        </div>
         <h1
           style={{
             fontSize: 28,
             fontWeight: 700,
             margin: '0 0 8px',
             color: 'var(--ink)',
+            textAlign: 'center',
           }}
         >
           {mode === 'signin' ? 'Sign in to Floom' : 'Create your Floom account'}
         </h1>
-        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px' }}>
+        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
           {mode === 'signin'
             ? 'Sign in with email and password, or Google.'
             : 'One account. Run apps, connect tools, publish your own.'}

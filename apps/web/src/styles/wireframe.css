@@ -139,6 +139,44 @@ input { font-family: inherit; }
   }
 }
 
+/* Logo glow animations — opt in via <Logo animate="..."> on brand
+   moments only. All three keyframes are killed by prefers-reduced-motion
+   (the global reducer at the bottom of this file plus the targeted rule
+   below, which also guards against any future relaxation of the global
+   wildcard). Keep `breathe` restricted to the landing hero — long-lived
+   ambient motion on other surfaces reads as tacky very quickly. */
+@keyframes logo-boot-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes logo-pulse-once {
+  0%   { opacity: 0.7; transform: scale(1); }
+  45%  { opacity: 1;   transform: scale(1.04); }
+  100% { opacity: 0.9; transform: scale(1); }
+}
+@keyframes logo-breathe {
+  0%, 100% { opacity: 0.88; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.01); }
+}
+.logo-animate-boot-in {
+  animation: logo-boot-in 600ms ease-out both;
+}
+.logo-animate-pulse-once {
+  animation: logo-pulse-once 1200ms ease-in-out 1 both;
+}
+.logo-animate-breathe {
+  animation: logo-breathe 6s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-animate-boot-in,
+  .logo-animate-pulse-once,
+  .logo-animate-breathe {
+    animation: none !important;
+  }
+}
+
 .topbar-links {
   display: flex;
   align-items: center;

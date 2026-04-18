@@ -16,7 +16,27 @@ interface LogoProps {
    *            previews.
    */
   variant?: 'plain' | 'glow' | 'icon';
+  /**
+   * Optional one-shot or ambient CSS animation. Pure CSS keyframes live
+   * in wireframe.css and are all gated behind prefers-reduced-motion.
+   *
+   *   none       — default. No animation ever.
+   *   boot-in    — one-shot fade + faint scale on mount (login, empty
+   *                states, 404 echo).
+   *   pulse-once — one-shot success flash. Re-runs when the consumer
+   *                changes the React `key` on this Logo.
+   *   breathe    — slow, infinite, subtle loop. ONLY on the landing
+   *                hero — using this anywhere else reads as tacky.
+   */
+  animate?: 'none' | 'boot-in' | 'pulse-once' | 'breathe';
 }
+
+const ANIMATE_CLASS: Record<NonNullable<LogoProps['animate']>, string> = {
+  none: '',
+  'boot-in': 'logo-animate-boot-in',
+  'pulse-once': 'logo-animate-pulse-once',
+  breathe: 'logo-animate-breathe',
+};
 
 /**
  * Floom mark. Shared across in-app TopBar and landing-style surfaces so
@@ -25,8 +45,7 @@ interface LogoProps {
  *   - plain (default): text "f" in a green rounded square. Crisp at any
  *     size, no filter cost, safe inside tight chrome.
  *   - glow: chevron mark with a soft green halo. Use sparingly for
- *     brand moments. Static halo, no motion — safe regardless of
- *     prefers-reduced-motion.
+ *     brand moments. Static halo unless `animate` opts in.
  *   - icon: full app-icon with dark rounded-square background + halo.
  *     Use where a single logo needs to stand alone on a neutral page
  *     (404 echo, hero splash).
@@ -40,14 +59,18 @@ export function Logo({
   className = '',
   withWordmark = false,
   variant = 'plain',
+  animate = 'none',
 }: LogoProps) {
   const wordmark = withWordmark ? (
     <span className="font-semibold">floom</span>
   ) : null;
 
+  const animClass = ANIMATE_CLASS[animate];
+  const rootClass = `inline-flex items-center gap-2 ${animClass} ${className}`.trim();
+
   if (variant === 'glow') {
     return (
-      <span className={`inline-flex items-center gap-2 ${className}`}>
+      <span className={rootClass}>
         <img
           src="/floom-mark-glow.svg"
           alt="Floom"
@@ -63,7 +86,7 @@ export function Logo({
 
   if (variant === 'icon') {
     return (
-      <span className={`inline-flex items-center gap-2 ${className}`}>
+      <span className={rootClass}>
         <img
           src="/floom-icon.svg"
           alt="Floom"
@@ -86,7 +109,7 @@ export function Logo({
   const fontSize = Math.round(size * 0.5);
   const radius = Math.max(6, Math.round(size * 0.29));
   return (
-    <span className={`inline-flex items-center gap-2 ${className}`}>
+    <span className={rootClass}>
       <span
         aria-label="Floom"
         role="img"

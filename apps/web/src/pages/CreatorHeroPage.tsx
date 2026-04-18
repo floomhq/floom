@@ -127,7 +127,7 @@ export function CreatorHeroPage() {
                 justifyContent: 'center',
               }}
             >
-              <Logo variant="glow" size={140} />
+              <Logo variant="glow" size={140} animate="breathe" />
             </div>
 
             <h1
