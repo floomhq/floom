@@ -120,7 +120,10 @@ export const secretsRouter = new Hono();
 
 const SecretSetBody = z.object({
   key: z.string().min(1).max(128),
-  value: z.string().min(1),
+  // 64 KB cap. Any real credential (API token, cookie, PEM key) is well
+  // under this; the cap exists to block accidental giant pastes from
+  // filling the SQLite row before the encryption layer even sees it.
+  value: z.string().min(1).max(65536),
 });
 
 /**

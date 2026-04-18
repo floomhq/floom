@@ -97,6 +97,12 @@ export interface HubApp {
 export interface AppDetail extends HubApp {
   manifest: NormalizedManifest;
   /**
+   * v15.2 polish: hub emits visibility so the web client can gate
+   * private-only UI (e.g. /me/a/:slug console) and render pills without
+   * a second round-trip. Optional for back-compat with older servers.
+   */
+  visibility?: AppVisibility;
+  /**
    * v0.3.0 async job queue. When true, runs are enqueued on the server
    * (POST /api/:slug/jobs) and the web client polls GET /api/:slug/jobs/:id
    * until the status flips to a terminal state.
