@@ -200,8 +200,12 @@ export function ArchitectureDiagram() {
           padding: 14px 24px;
           border-radius: 14px;
           min-width: 260px;
-          max-width: 440px;
+          max-width: min(440px, 100%);
+          box-sizing: border-box;
           text-align: center;
+        }
+        @media (max-width: 360px) {
+          .arch-node { min-width: 0; width: 100%; }
         }
         .arch-spec {
           background: var(--bg);

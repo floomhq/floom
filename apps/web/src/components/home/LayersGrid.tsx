@@ -118,6 +118,8 @@ function CodeSnippet({ children }: { children: React.ReactNode }) {
         borderRadius: 8,
         overflowX: 'auto',
         whiteSpace: 'pre',
+        maxWidth: '100%',
+        minWidth: 0,
       }}
     >
       {children}
@@ -186,6 +188,7 @@ export function LayersGrid() {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 14,
+                minWidth: 0,
               }}
             >
               <div>
@@ -219,7 +222,7 @@ export function LayersGrid() {
 
       <style>{`
         @media (max-width: 900px) {
-          .layers-grid { grid-template-columns: 1fr !important; }
+          .layers-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
     </section>

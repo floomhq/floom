@@ -116,11 +116,11 @@ export function LoginPage() {
             textAlign: 'center',
           }}
         >
-          {mode === 'signin' ? 'Sign in to Floom' : 'Create your Floom account'}
+          {mode === 'signin' ? 'Welcome to Floom' : 'Create your Floom account'}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
           {mode === 'signin'
-            ? 'Sign in with email and password.'
+            ? 'Use your email and password.'
             : 'One account. Run apps, connect tools, publish your own.'}
         </p>
 
@@ -216,11 +216,27 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={8}
-            placeholder="At least 8 characters"
+            placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
             data-testid="input-password"
             style={inputStyle}
             autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
           />
+
+          {mode === 'signin' && (
+            <div style={{ textAlign: 'right', margin: '-2px 0 12px' }}>
+              <a
+                href="mailto:team@floom.dev?subject=Password%20reset"
+                data-testid="forgot-password-link"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--muted)',
+                  textDecoration: 'underline',
+                }}
+              >
+                Forgot password?
+              </a>
+            </div>
+          )}
 
           {state === 'error' && (
             <p

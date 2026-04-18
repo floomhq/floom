@@ -275,9 +275,18 @@ function BlockView({ block }: { block: RenderedBlock }) {
 function FlowDiagram() {
   return (
     <div className="protocol-flow-diagram" style={{ marginBottom: 36 }}>
-      <p style={{ margin: '0 0 16px', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        How it works
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '0 0 16px' }}>
+        <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          How it works
+        </p>
+        <p
+          aria-hidden="true"
+          className="protocol-flow-scroll-hint"
+          style={{ margin: 0, fontSize: 10, color: 'var(--muted)', display: 'none', fontFamily: 'JetBrains Mono, monospace' }}
+        >
+          ← scroll →
+        </p>
+      </div>
       <div
         style={{
           display: 'flex',

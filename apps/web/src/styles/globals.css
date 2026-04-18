@@ -503,6 +503,9 @@ body {
   margin-bottom: 40px;
   overflow-x: auto;
 }
+@media (max-width: 640px) {
+  .protocol-flow-scroll-hint { display: block !important; }
+}
 .protocol-comparison-2col {
   display: grid;
   grid-template-columns: 1fr 1fr;
