@@ -67,6 +67,15 @@ export function FeedbackButton() {
 
   return (
     <>
+      {/* Landing visual audit 2026-04-18: on 375px viewports the floating
+          trigger overlapped the hero "Try it" button and /imprint's
+          first body section. Hide the trigger on small screens; the
+          modal itself stays reachable via ?feedback=open deep links. */}
+      <style>{`
+        @media (max-width: 640px) {
+          [data-testid="feedback-trigger"] { display: none !important; }
+        }
+      `}</style>
       <button
         type="button"
         onClick={() => setOpen(true)}

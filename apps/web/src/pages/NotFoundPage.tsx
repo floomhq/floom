@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Logo } from '../components/Logo';
+import { PublicFooter } from '../components/public/PublicFooter';
 
 export function NotFoundPage() {
   return (
-    <div className="page-root">
+    <div className="page-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <TopBar />
       <main
         className="main"
@@ -12,6 +13,7 @@ export function NotFoundPage() {
           textAlign: 'center',
           position: 'relative',
           overflow: 'hidden',
+          flex: 1,
         }}
       >
         {/* Brand echo: large glowing mark sits behind the 404, reading as
@@ -52,6 +54,11 @@ export function NotFoundPage() {
           </div>
         </div>
       </main>
+      {/* Landing visual audit 2026-04-18: 404 previously had no footer,
+          leaving a tall screen with just the glow mark echo and two
+          pills. Reuse PublicFooter so 404 exposes the same trust links
+          (Docs / GitHub / Privacy / Terms / Cookies) as the landing. */}
+      <PublicFooter />
     </div>
   );
 }

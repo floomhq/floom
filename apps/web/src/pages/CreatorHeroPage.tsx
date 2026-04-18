@@ -160,7 +160,7 @@ export function CreatorHeroPage() {
               }}
             >
               Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server,
-              HTTP API, and shareable web form — production-grade, live in 30 seconds.
+              HTTP API, and shareable web form. Production-grade, live in 30 seconds.
             </p>
 
             <form
@@ -187,7 +187,7 @@ export function CreatorHeroPage() {
                 spellCheck={false}
                 value={openapiUrl}
                 onChange={(e) => setOpenapiUrl(e.target.value)}
-                placeholder="https://your-api.com/openapi.json"
+                placeholder="github.com/you/repo  or  your-api.com/openapi.json"
                 aria-label="OpenAPI spec URL"
                 data-testid="hero-input"
                 style={{

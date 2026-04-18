@@ -12,27 +12,15 @@ interface AppStripeProps {
   variant?: 'landing' | 'apps';
 }
 
-// Deterministic color palette so every app gets a calm, readable
-// tinted icon square without hand-picking per slug. Matches the
-// warm/soft hues from the v15 wireframe (indigo, amber, pink, emerald,
-// blue, slate, red, purple, sky).
-const PALETTE = [
-  { bg: '#eef2ff', fg: '#4338ca' }, // indigo
-  { bg: '#fef3c7', fg: '#92400e' }, // amber
-  { bg: '#fce7f3', fg: '#9d174d' }, // pink
-  { bg: '#ecfdf5', fg: '#047857' }, // emerald
-  { bg: '#dbeafe', fg: '#1d4ed8' }, // blue
-  { bg: '#f1f5f9', fg: '#0f172a' }, // slate
-  { bg: '#fef2f2', fg: '#b91c1c' }, // red
-  { bg: '#f3e8ff', fg: '#7c3aed' }, // purple
-  { bg: '#f0f9ff', fg: '#0284c7' }, // sky
-  { bg: '#f5f5f4', fg: '#44403c' }, // stone
-] as const;
+// Landing visual audit 2026-04-18 finding: the previous 10-color palette
+// (indigo / purple / pink / red / amber / ...) violated the "max 1-2 accent
+// colors" design bar and reintroduced a purple (#7c3aed) after purple was
+// banned earlier. Collapsed to a single emerald tint so every app icon
+// reads as part of Floom's green accent system instead of a rainbow.
+const APP_TINT = { bg: '#ecfdf5', fg: '#047857' } as const;
 
-function paletteFor(slug: string): (typeof PALETTE)[number] {
-  let h = 0;
-  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length];
+function paletteFor(_slug: string): typeof APP_TINT {
+  return APP_TINT;
 }
 
 export function AppStripe({ slug, name, description, meta, variant = 'landing' }: AppStripeProps) {
