@@ -1,0 +1,16 @@
+{
+  "name": "@floom/hub-smoke",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:all": "playwright test",
+    "test:fast": "playwright test tests/fast-apps.spec.ts",
+    "test:full": "playwright test tests/hub-full.spec.ts",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "typescript": "^5.6.3"
+  }
+}
