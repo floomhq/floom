@@ -265,6 +265,9 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     secrets_needed,
     manifest_version: version as '1.0' | '2.0',
     ...(apt_packages.length > 0 && { apt_packages }),
+    ...(typeof raw.license === 'string' && raw.license.trim().length > 0
+      ? { license: raw.license.trim() }
+      : {}),
   };
 }
 

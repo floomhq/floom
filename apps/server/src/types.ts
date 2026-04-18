@@ -86,6 +86,11 @@ export interface NormalizedManifest {
    * the hub; it just annotates it.
    */
   blocked_reason?: string;
+  /**
+   * Copied from OpenAPI `info.license` at ingest (e.g. "MIT", "Apache-2.0").
+   * Surfaced on /p/:slug meta; omitted when the spec has no license block.
+   */
+  license?: string;
 }
 
 export type AuthType =

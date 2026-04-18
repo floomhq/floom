@@ -118,6 +118,7 @@ interface OpenApiInfo {
   title?: string;
   description?: string;
   version?: string;
+  license?: { name?: string; url?: string } | string;
 }
 
 // Post-dereference JSON schema shape (all $refs inlined).
@@ -597,6 +598,42 @@ export function resolveBaseUrl(
 const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete'] as const;
 
 /**
+ * Lower score = earlier in manifest key order (drives MCP tool order + "How it works").
+ * Deprioritizes boilerplate health/readiness endpoints so POST /jobs etc. surface first.
+ */
+export function operationSortScore(
+  method: string,
+  path: string,
+  op: OpenApiOperation,
+): number {
+  const p = path.replace(/\/$/, '') || '/';
+  const m = method.toLowerCase();
+  let score = 0;
+  if (p === '/' || p === '/health') score += 10_000;
+  const blob = `${op.summary || ''} ${op.description || ''}`.toLowerCase();
+  if (blob.includes('health check') || blob.trim() === 'health') score += 5_000;
+  const methodRank: Record<string, number> = {
+    post: 0,
+    put: 2,
+    patch: 2,
+    delete: 3,
+    get: 8,
+  };
+  score += methodRank[m] ?? 5;
+  return score;
+}
+
+function licenseNameFromSpec(spec: { info?: OpenApiInfo }): string | undefined {
+  const lic = spec.info?.license;
+  if (!lic) return undefined;
+  if (typeof lic === 'string') return lic;
+  if (typeof lic === 'object' && lic && typeof lic.name === 'string' && lic.name.trim()) {
+    return lic.name.trim();
+  }
+  return undefined;
+}
+
+/**
  * Read the max actions cap from the FLOOM_MAX_ACTIONS_PER_APP env var.
  * Defaults to 200. Set to 0 for unlimited (useful for Stripe, GitHub, etc).
  */
@@ -618,38 +655,59 @@ export function specToManifest(
   let count = 0;
   let truncatedAt: number | null = null;
 
-  outer: for (const [path, pathItem] of Object.entries(spec.paths || {})) {
+  type OpIter = {
+    method: (typeof HTTP_METHODS)[number];
+    path: string;
+    pathItem: OpenApiPath;
+    op: OpenApiOperation;
+  };
+  const opList: OpIter[] = [];
+  for (const [path, pathItem] of Object.entries(spec.paths || {})) {
     for (const method of HTTP_METHODS) {
       const op = pathItem[method as keyof OpenApiPath] as OpenApiOperation | undefined;
       if (!op) continue;
-      if (maxActions > 0 && count >= maxActions) {
-        truncatedAt = count;
-        break outer;
-      }
-      const action = operationToAction(method, path, op);
-      // Avoid collision: if we already used this name, append _2, _3, ...
-      let name = action.name;
-      let suffix = 2;
-      while (actions[name]) {
-        name = `${action.name}_${suffix++}`;
-      }
-      // Per-op strict secret requirements: operation-level `security`
-      // overrides global, alternatives are OR-combined (see
-      // requiredSecretsForOperation). This lets the proxied-runner
-      // block an action only when THAT action's required secrets are
-      // missing, unblocking public operations on specs like petstore
-      // where `getInventory` strictly requires api_key but most other
-      // operations do not. Fix for INGEST-SECRETS-GLOBAL.
-      const opSecrets = requiredSecretsForOperation(spec, op);
-      actions[name] = {
-        label: action.description,
-        description: action.description,
-        inputs: action.inputs,
-        outputs: action.outputs,
-        secrets_needed: opSecrets,
-      };
-      count++;
+      opList.push({ method, path, pathItem, op });
     }
+  }
+  opList.sort((a, b) => {
+    const da = operationSortScore(a.method, a.path, a.op);
+    const db = operationSortScore(b.method, b.path, b.op);
+    if (da !== db) return da - db;
+    const ka = `${a.method} ${a.path}`;
+    const kb = `${b.method} ${b.path}`;
+    return ka.localeCompare(kb);
+  });
+
+  outer: for (const { method, path, op } of opList) {
+    if (maxActions > 0 && count >= maxActions) {
+      truncatedAt = count;
+      break outer;
+    }
+    const action = operationToAction(method, path, op);
+    // Avoid collision: if we already used this name, append _2, _3, ...
+    let name = action.name;
+    let suffix = 2;
+    while (actions[name]) {
+      name = `${action.name}_${suffix++}`;
+    }
+    // Per-op strict secret requirements: operation-level `security`
+    // overrides global, alternatives are OR-combined (see
+    // requiredSecretsForOperation). This lets the proxied-runner
+    // block an action only when THAT action's required secrets are
+    // missing, unblocking public operations on specs like petstore
+    // where `getInventory` strictly requires api_key but most other
+    // operations do not. Fix for INGEST-SECRETS-GLOBAL.
+    const opSecrets = requiredSecretsForOperation(spec, op);
+    const label =
+      (op.summary && op.summary.trim()) || action.description;
+    actions[name] = {
+      label,
+      description: action.description,
+      inputs: action.inputs,
+      outputs: action.outputs,
+      secrets_needed: opSecrets,
+    };
+    count++;
   }
 
   if (truncatedAt !== null) {
@@ -690,6 +748,8 @@ export function specToManifest(
     };
   }
 
+  const license = licenseNameFromSpec(spec);
+
   return {
     name: appSpec.display_name || spec.info?.title || appSpec.slug,
     description:
@@ -703,6 +763,7 @@ export function specToManifest(
     secrets_needed: secretNames,
     manifest_version: '2.0',
     ...(appSpec.blocked_reason ? { blocked_reason: appSpec.blocked_reason } : {}),
+    ...(license ? { license } : {}),
   };
 }
 
@@ -1079,6 +1140,7 @@ export async function ingestAppFromUrl(args: {
   category?: string;
   workspace_id: string;
   author_user_id: string;
+  visibility?: 'public' | 'private' | 'auth-required';
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const { openapi_url } = args;
   if (!openapi_url || !/^https?:\/\//i.test(openapi_url)) {
@@ -1109,6 +1171,8 @@ export async function ingestAppFromSpec(args: {
   category?: string;
   workspace_id: string;
   author_user_id: string;
+  /** When omitted, new cloud apps default to `private`; OSS/local defaults to `public`. */
+  visibility?: 'public' | 'private' | 'auth-required';
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const openapi_url = args.openapi_url || '';
   const derefed = await dereferenceSpec(args.spec);
@@ -1122,10 +1186,20 @@ export async function ingestAppFromSpec(args: {
 
   // Refuse to silently collide with an existing app unless owned by same workspace.
   const existing = db
-    .prepare('SELECT id, workspace_id FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string } | undefined;
+    .prepare('SELECT id, workspace_id, visibility FROM apps WHERE slug = ?')
+    .get(slug) as { id: string; workspace_id: string; visibility: string } | undefined;
   if (existing && existing.workspace_id !== args.workspace_id && existing.workspace_id !== 'local') {
     throw new Error(`slug "${slug}" is already taken`);
+  }
+
+  let visibility: 'public' | 'private' | 'auth-required';
+  if (args.visibility !== undefined) {
+    visibility = args.visibility;
+  } else if (existing) {
+    visibility =
+      (existing.visibility as 'public' | 'private' | 'auth-required') || 'public';
+  } else {
+    visibility = args.workspace_id === 'local' ? 'public' : 'private';
   }
 
   const appSpec: OpenApiAppSpec = {
@@ -1146,7 +1220,7 @@ export async function ingestAppFromSpec(args: {
       `UPDATE apps SET
          name=?, description=?, manifest=?, category=?, app_type='proxied',
          base_url=?, auth_type=?, auth_config=NULL, openapi_spec_url=?,
-         openapi_spec_cached=?, visibility='public', is_async=0,
+         openapi_spec_cached=?, visibility=?, is_async=0,
          webhook_url=NULL, timeout_ms=NULL, retries=0, async_mode=NULL,
          workspace_id=?, author=?, updated_at=datetime('now')
        WHERE slug=?`,
@@ -1159,6 +1233,7 @@ export async function ingestAppFromSpec(args: {
       'none',
       openapi_url || null,
       specCached,
+      visibility,
       args.workspace_id,
       args.author_user_id,
       slug,
@@ -1176,7 +1251,7 @@ export async function ingestAppFromSpec(args: {
      ) VALUES (
        ?, ?, ?, ?, ?, 'active', NULL, ?,
        ?, ?, NULL, 'proxied', ?, 'none', NULL,
-       ?, ?, 'public', 0, NULL,
+       ?, ?, ?, 0, NULL,
        NULL, 0, NULL, ?
      )`,
   ).run(
@@ -1191,6 +1266,7 @@ export async function ingestAppFromSpec(args: {
     resolvedBaseUrl || null,
     openapi_url || null,
     specCached,
+    visibility,
     args.workspace_id,
   );
 

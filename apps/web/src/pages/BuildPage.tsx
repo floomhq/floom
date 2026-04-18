@@ -33,6 +33,8 @@ type PendingPublish = {
   slug: string;
   description: string;
   category: string;
+  /** Who can see / run the app in the directory */
+  visibility: 'public' | 'private' | 'auth-required';
   source: 'github' | 'openapi';
 };
 
@@ -69,6 +71,9 @@ export function BuildPage() {
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('');
+  const [visibility, setVisibility] = useState<'public' | 'private' | 'auth-required'>(
+    'private',
+  );
 
   // Coming-soon state
   const [comingSoon, setComingSoon] = useState<'describe' | 'connect' | 'docker' | null>(null);
@@ -107,6 +112,7 @@ export function BuildPage() {
       setSlug(p.slug);
       setDescription(p.description);
       setCategory(p.category || '');
+      setVisibility(p.visibility || 'private');
       setSource(p.source);
       setStep('review');
     } catch {
@@ -186,6 +192,7 @@ export function BuildPage() {
         slug,
         description,
         category,
+        visibility,
         source: source ?? 'openapi',
       };
       try {
@@ -205,6 +212,7 @@ export function BuildPage() {
         slug,
         description,
         category: category || undefined,
+        visibility,
       });
       try {
         window.localStorage.removeItem(PENDING_KEY);
@@ -854,6 +862,33 @@ export function BuildPage() {
               placeholder="e.g. travel, coding, productivity"
               data-testid="build-category"
             />
+
+            <Label>Visibility</Label>
+            <select
+              value={visibility}
+              onChange={(e) =>
+                setVisibility(e.target.value as 'public' | 'private' | 'auth-required')
+              }
+              data-testid="build-visibility"
+              style={{
+                width: '100%',
+                maxWidth: 420,
+                padding: '10px 12px',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                background: 'var(--card)',
+                fontSize: 14,
+                color: 'var(--ink)',
+                fontFamily: 'inherit',
+              }}
+            >
+              <option value="private">Private — only you (not listed in the public store)</option>
+              <option value="public">Public — listed in the store for everyone</option>
+              <option value="auth-required">Auth required — shared token (advanced)</option>
+            </select>
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 0' }}>
+              Default is private so you can test before going public.
+            </p>
 
             {error && (
               <p

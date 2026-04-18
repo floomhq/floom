@@ -170,7 +170,10 @@ export function AppPermalinkPage() {
       description: app.description,
       applicationCategory: app.category || 'UtilitiesApplication',
       url: `https://preview.floom.dev/p/${app.slug}`,
-      author: { '@type': 'Person', name: app.author || 'floomhq' },
+      author: {
+        '@type': 'Person',
+        name: app.author_display || app.author || 'floomhq',
+      },
     });
     document.head.appendChild(script);
 
@@ -181,18 +184,29 @@ export function AppPermalinkPage() {
     };
   }, [app]);
 
-  // First 3 manifest actions drive the "how it works" strip. Falls back
-  // to the raw `actions` list (older-format apps) if manifest is empty.
+  // First N manifest actions drive the "how it works" strip (ingest order
+  // deprioritizes /health). Falls back to the raw `actions` list for v1 apps.
+  const HOW_IT_WORKS_MAX = 6;
   const howItWorks = useMemo<Array<{ label: string; description?: string }>>(() => {
     if (!app) return [];
     const entries = Object.entries(app.manifest?.actions ?? {}) as Array<[string, ActionSpec]>;
     if (entries.length > 0) {
-      return entries.slice(0, 3).map(([, spec]) => ({
+      return entries.slice(0, HOW_IT_WORKS_MAX).map(([, spec]) => ({
         label: spec.label,
         description: spec.description,
       }));
     }
-    return (app.actions || []).slice(0, 3).map((name) => ({ label: name }));
+    return (app.actions || []).slice(0, HOW_IT_WORKS_MAX).map((name) => ({ label: name }));
+  }, [app]);
+
+  const createdByLabel = useMemo(() => {
+    if (!app) return null;
+    if (app.author_display && app.author_display.trim()) return app.author_display.trim();
+    if (app.author) {
+      const a = app.author;
+      return a.length > 22 ? `@${a.slice(0, 20)}…` : `@${a}`;
+    }
+    return null;
   }, [app]);
 
   if (loading) {
@@ -347,8 +361,8 @@ export function AppPermalinkPage() {
                 {app.name}
               </h1>
               <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
-                {app.author && <span>by @{app.author}</span>}
-                {app.author && app.category && <span> · </span>}
+                {createdByLabel && <span>by {createdByLabel}</span>}
+                {createdByLabel && app.category && <span> · </span>}
                 {app.category && <span>{app.category}</span>}
               </div>
 
@@ -490,7 +504,7 @@ export function AppPermalinkPage() {
               {summary && summary.count > 0 && (
                 <MetaRow label="Rating" value={`${summary.avg.toFixed(1)} / 5`} />
               )}
-              {app.author && <MetaRow label="Created by" value={`@${app.author}`} />}
+              {createdByLabel && <MetaRow label="Created by" value={createdByLabel} />}
               {app.category && <MetaRow label="Category" value={app.category} />}
               {app.runtime && (
                 <MetaRow
@@ -513,7 +527,10 @@ export function AppPermalinkPage() {
               >
                 For developers
               </div>
-              <MetaRow label="License" value="Apache 2.0" />
+              <MetaRow
+                label="License"
+                value={app.manifest?.license?.trim() || 'See project documentation'}
+              />
               {githubRepo && (
                 <MetaRow
                   label="Source"

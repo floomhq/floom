@@ -441,6 +441,7 @@ export function ingestApp(body: {
   slug?: string;
   description?: string;
   category?: string;
+  visibility?: 'public' | 'private' | 'auth-required';
 }): Promise<{ slug: string; name: string; created: boolean }> {
   return request('/api/hub/ingest', {
     method: 'POST',
