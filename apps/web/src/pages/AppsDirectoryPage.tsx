@@ -261,20 +261,27 @@ export function AppsDirectoryPage() {
               </button>
             </form>
 
-            {/* Category chip strip */}
-            {categories.length > 1 && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  marginTop: 28,
-                }}
-                data-testid="apps-chips"
-              >
-                {categories.map((cat) => (
+            {/* Category chip strip.
+                CLS fix (2026-04-18): reserve min-height so the strip does not
+                pop in once hub data loads. Chip buttons are ~36px tall; the
+                28px marginTop + strip height rounds to ~64px. Loading /
+                single-category states render an invisible placeholder of the
+                same height. */}
+            <div
+              style={{
+                minHeight: 64,
+                marginTop: 28,
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+              data-testid="apps-chips"
+              aria-hidden={categories.length <= 1 ? 'true' : undefined}
+            >
+              {categories.length > 1 &&
+                categories.map((cat) => (
                   <button
                     key={cat}
                     type="button"
@@ -294,13 +301,16 @@ export function AppsDirectoryPage() {
                     </span>
                   </button>
                 ))}
-              </div>
-            )}
+            </div>
           </div>
         </section>
 
-        {/* APP LIST · thin stripes, single column */}
-        <section style={{ padding: '0 24px 80px' }}>
+        {/* APP LIST · thin stripes, single column.
+            CLS fix (2026-04-18): reserve vertical space for the list area
+            so the loading-to-rendered transition does not shift subsequent
+            content. 600px fits ~6 stripes above the fold on desktop; the
+            real grid extends this naturally. */}
+        <section style={{ padding: '0 24px 80px', minHeight: 600 }}>
           <div style={{ maxWidth: 760, margin: '0 auto' }}>
             {loading ? (
               <div

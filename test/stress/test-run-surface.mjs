@@ -9,7 +9,12 @@
 //
 // Runs under tsx so the TSX import works without a build step.
 
-import { __test__, deriveRunLabel, deriveStacked } from '../../apps/web/src/components/runner/RunSurface.tsx';
+import {
+  __test__,
+  deriveRunLabel,
+  deriveSharedRunBanner,
+  deriveStacked,
+} from '../../apps/web/src/components/runner/RunSurface.tsx';
 
 let passed = 0;
 let failed = 0;
@@ -41,6 +46,31 @@ console.log('RunSurface shell tests');
   log('render_hint=split → responsive', deriveStacked('split') === false);
   log('render_hint=stacked → stacked on desktop', deriveStacked('stacked') === true);
   log('Unknown hint → responsive', deriveStacked('weird') === false);
+}
+
+// ---------- deriveSharedRunBanner (?run=<id> deep-link banner) ----------
+{
+  log(
+    'No initial run id → no banner',
+    deriveSharedRunBanner({ initialRunId: null, currentRunId: null, phase: 'ready' }) === false,
+  );
+  log(
+    'Initial run set, same id, done → banner visible',
+    deriveSharedRunBanner({ initialRunId: 'run-1', currentRunId: 'run-1', phase: 'done' }) === true,
+  );
+  log(
+    'Initial run set, state cleared → no banner',
+    deriveSharedRunBanner({ initialRunId: 'run-1', currentRunId: null, phase: 'ready' }) === false,
+  );
+  log(
+    'Initial run set, user re-ran (different id) → no banner',
+    deriveSharedRunBanner({ initialRunId: 'run-1', currentRunId: 'run-2', phase: 'done' }) === false,
+  );
+  log(
+    'Initial run set but streaming (not done) → no banner',
+    deriveSharedRunBanner({ initialRunId: 'run-1', currentRunId: 'run-1', phase: 'streaming' }) ===
+      false,
+  );
 }
 
 // ---------- jobToRunRecord adapter ----------

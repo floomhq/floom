@@ -25,6 +25,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -35,28 +36,58 @@ import type { BundleResult, OutputShape } from '@floom/renderer/contract';
  * esbuild needs to resolve `react` and `react-dom/client` from the creator's
  * (potentially scratch) manifest dir. The creator's tsx file lives under the
  * user's apps.yaml dir which likely has no `node_modules`. We point esbuild
- * at the @floom/renderer package's own `node_modules` (which has react as a
- * direct dep) via `nodePaths`. This lets the bundler work for any creator
- * dir without requiring the creator to install React themselves.
+ * at whichever dir on disk actually contains a resolvable `react` package
+ * via `nodePaths`. This lets the bundler work for any creator dir without
+ * requiring the creator to install React themselves.
+ *
+ * Resolution strategy (first match wins):
+ *   1. `require.resolve('react')` from the server's own module — walks the
+ *      normal Node resolution chain and finds react wherever npm/pnpm put
+ *      it (flat `node_modules/react`, or the `.pnpm/react@X/node_modules/react`
+ *      that pnpm's virtual store creates). The parent of that dir is what
+ *      esbuild needs in `nodePaths` so `import 'react'` resolves.
+ *   2. Hardcoded candidate paths (flat layout, monorepo layout) — kept as
+ *      backup for tests and edge cases where require.resolve throws.
+ *
+ * Why this matters: on the runtime Docker stage, `--prod` installs skip
+ * devDependencies, so `packages/renderer/node_modules/react` (react is a
+ * devDep there) is absent. But react is still present in the pnpm virtual
+ * store under `/app/node_modules/.pnpm/react@<ver>/node_modules/react` as a
+ * transitive dep. `createRequire` + `require.resolve` finds it there.
  *
  * Resolved lazily (via the `getReactNodePaths()` helper) so tests that point
  * DATA_DIR at a tmpdir still find react via the monorepo tree.
  */
 function getReactNodePaths(): string[] {
   const here = dirname(fileURLToPath(import.meta.url));
-  // Walk up to the monorepo root and try a few candidate locations where
-  // react may live in a pnpm layout. First match wins; all missing ones
-  // are silently dropped.
-  const candidates = [
-    // apps/server/src → apps/server → apps → monorepo root
-    resolve(here, '..', '..', '..', '..', 'packages', 'renderer', 'node_modules'),
-    // dist layout: apps/server/dist → apps/server → apps → monorepo root
-    resolve(here, '..', '..', '..', 'packages', 'renderer', 'node_modules'),
-    // Fallback to the monorepo root node_modules (works in flat installs)
-    resolve(here, '..', '..', '..', '..', 'node_modules'),
-    resolve(here, '..', '..', '..', 'node_modules'),
-  ];
-  return candidates.filter((p) => existsSync(p));
+  const paths = new Set<string>();
+
+  // Strategy 1: ask Node's resolver where `react` actually lives, then add
+  // the parent node_modules so esbuild can find `react`, `react-dom`,
+  // `react-dom/client` from the same virtual-store dir.
+  try {
+    const req = createRequire(import.meta.url);
+    // `react/package.json` is the most stable target — react's "main" can
+    // be ESM-only in some versions, which trips plain `require.resolve('react')`.
+    const reactPkgPath = req.resolve('react/package.json');
+    // <parent-node_modules>/react/package.json → <parent-node_modules>
+    const reactDir = dirname(reactPkgPath);
+    const reactParentNodeModules = dirname(reactDir);
+    paths.add(reactParentNodeModules);
+  } catch {
+    // createRequire can fail in some esbuild/tsx edge cases; fall through.
+  }
+
+  // Strategy 2: hardcoded candidates (backup for tests + flat installs).
+  // apps/server/src → apps/server → apps → monorepo root
+  paths.add(resolve(here, '..', '..', '..', '..', 'packages', 'renderer', 'node_modules'));
+  // dist layout: apps/server/dist → apps/server → apps → monorepo root
+  paths.add(resolve(here, '..', '..', '..', 'packages', 'renderer', 'node_modules'));
+  // Fallback to the monorepo root node_modules (works in flat installs)
+  paths.add(resolve(here, '..', '..', '..', '..', 'node_modules'));
+  paths.add(resolve(here, '..', '..', '..', 'node_modules'));
+
+  return Array.from(paths).filter((p) => existsSync(p));
 }
 
 /**

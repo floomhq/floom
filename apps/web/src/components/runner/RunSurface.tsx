@@ -376,12 +376,72 @@ export function RunSurface({
 
   const hasInputs = (state.actionSpec?.inputs?.length ?? 0) > 0;
 
+  // Shared-run banner visibility — see deriveSharedRunBanner() below for
+  // the pure decision logic + stress test hook.
+  const viewingSharedRun = deriveSharedRunBanner({
+    initialRunId: initialRun?.id ?? null,
+    currentRunId: state.runId ?? null,
+    phase: state.phase,
+  });
+
   return (
     <div
       className={`run-surface${stacked ? ' run-surface-stacked' : ''}`}
       data-testid="run-surface"
       data-phase={state.phase}
     >
+      {viewingSharedRun && (
+        <div
+          data-testid="shared-run-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+            padding: '10px 14px',
+            marginBottom: 16,
+            background: 'var(--accent-soft, #ecfdf5)',
+            border: '1px solid var(--accent-border, #86efac)',
+            borderRadius: 10,
+            fontSize: 13,
+            color: 'var(--ink)',
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <span
+              aria-hidden="true"
+              style={{
+                display: 'inline-block',
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: 'var(--accent, #10b981)',
+              }}
+            />
+            Viewing a shared run.
+          </span>
+          <button
+            type="button"
+            data-testid="shared-run-try-yourself"
+            onClick={handleReset}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 999,
+              border: '1px solid var(--accent, #10b981)',
+              background: 'var(--accent, #10b981)',
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Run this yourself &rarr;
+          </button>
+        </div>
+      )}
+
       <div className="run-surface-grid">
         <section
           className="run-surface-input"
@@ -764,9 +824,27 @@ export function deriveStacked(renderHint: string | undefined): boolean {
   return renderHint === 'stacked';
 }
 
+/**
+ * Banner visibility rule for /p/:slug?run=<id> deep-links. The banner
+ * reads "Viewing a shared run." + offers a "Run this yourself" reset,
+ * visible only while the surface is still showing the hydrated initial
+ * run. The first re-run (or explicit reset) clears ?run= in the parent,
+ * which drops initialRun back to null and takes the banner with it.
+ */
+export function deriveSharedRunBanner(args: {
+  initialRunId: string | null | undefined;
+  currentRunId: string | null | undefined;
+  phase: 'ready' | 'streaming' | 'job' | 'done' | 'error';
+}): boolean {
+  if (!args.initialRunId) return false;
+  if (args.currentRunId !== args.initialRunId) return false;
+  return args.phase === 'done';
+}
+
 export const __test__ = {
   deriveRunLabel,
   deriveStacked,
+  deriveSharedRunBanner,
   jobToRunRecord,
   coerceInputs,
   buildInitialInputs,
