@@ -1,0 +1,30 @@
+{
+  "name": "@floom/runtime",
+  "version": "0.4.0",
+  "type": "module",
+  "main": "./src/runtime/index.ts",
+  "types": "./src/runtime/index.ts",
+  "exports": {
+    ".": "./src/runtime/index.ts",
+    "./deploy": "./src/deploy/pipeline.ts",
+    "./provider": "./src/provider/types.ts",
+    "./provider/ax41-docker": "./src/provider/ax41-docker.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/detect/*.test.ts tests/provider/*.test.ts"
+  },
+  "dependencies": {
+    "@floom/detect": "workspace:*",
+    "@floom/manifest": "workspace:*",
+    "yaml": "2.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "tsx": "4.21.0",
+    "typescript": "5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
