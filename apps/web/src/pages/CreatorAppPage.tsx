@@ -107,15 +107,15 @@ export function CreatorAppPage() {
                 Edit
               </Link>
               {/* Bridge creator dashboard -> per-app management surface.
-                  Before this fix, the v15 /me/a/:slug shape (Overview /
+                  Before this fix, the v15 /me/apps/:slug shape (Overview /
                   Secrets / Access / Settings tabs) was orphaned — a
                   creator could publish an app and never discover the
                   secrets policy, runs, or renderer controls hiding under
-                  /me/a/:slug. */}
-              <Link to={`/me/a/${slug}`} style={secondaryBtn} data-testid="creator-app-manage">
+                  /me/apps/:slug. */}
+              <Link to={`/me/apps/${slug}`} style={secondaryBtn} data-testid="creator-app-manage">
                 Manage
               </Link>
-              <Link to={`/me/a/${slug}/secrets`} style={secondaryBtn} data-testid="creator-app-secrets">
+              <Link to={`/me/apps/${slug}/secrets`} style={secondaryBtn} data-testid="creator-app-secrets">
                 Secrets
               </Link>
               <Link to={`/p/${slug}`} style={secondaryBtn}>

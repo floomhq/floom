@@ -984,7 +984,7 @@ export function BuildPage() {
                   Open app
                 </button>
                 <Link
-                  to={`/me/a/${slug}`}
+                  to={`/me/apps/${slug}`}
                   className="btn-ghost"
                   data-testid="build-install-claude"
                   style={{

@@ -4,8 +4,8 @@
   <h1>Floom</h1>
 
   <p><strong>The protocol + runtime for agentic work.</strong><br/>
-  Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server, HTTP API, and shareable web form &mdash; production-grade, live in 30 seconds.<br/>
-  <sub>Vibe-coding speed. Production-grade safety. Open source.</sub></p>
+  <em>Vibe-coding speed. Production-grade safety.</em><br/>
+  Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server, HTTP API, and shareable web form. Open source.</p>
 
   <p>
     <a href="https://github.com/floomhq/floom/blob/main/LICENSE"><img src="https://img.shields.io/github/license/floomhq/floom?color=111&label=license" alt="License"/></a>

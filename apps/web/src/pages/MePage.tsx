@@ -8,7 +8,7 @@
 // /apps and /build.
 //
 // "Threads" currently 1:1 map to `me_runs` rows — the threads table
-// doesn't exist yet. The composer deep-links to /me/a/:slug/run with a
+// doesn't exist yet. The composer deep-links to /me/apps/:slug/run with a
 // ?prompt= hint which that page uses to prefill the default input.
 //
 // Legacy tabs (Folders, Saved results, Schedules, My tickets, Shared
@@ -65,7 +65,7 @@ export function MePage() {
   const isMobile = useIsMobile();
 
   // App-not-found notice (ported from main): surfaced when a user lands
-  // here from a removed/inaccessible app permalink (e.g. /me/a/:slug/run).
+  // here from a removed/inaccessible app permalink (e.g. /me/apps/:slug/run).
   const showAppNotFoundNotice = searchParams.get('notice') === 'app_not_found';
   const appNotFoundSlug = searchParams.get('slug');
 
@@ -150,7 +150,7 @@ export function MePage() {
     if (activeThread && activeThread.app_slug) {
       composerRef.current?.focus();
     } else if (apps && apps.length > 0) {
-      navigate(`/me/a/${apps[0].slug}/run`);
+      navigate(`/me/apps/${apps[0].slug}/run`);
     } else {
       navigate('/apps');
     }
@@ -507,7 +507,7 @@ function NoThreadYet({
         </p>
         {firstAppSlug ? (
           <Link
-            to={`/me/a/${firstAppSlug}/run`}
+            to={`/me/apps/${firstAppSlug}/run`}
             data-testid="me-no-threads-start"
             style={{
               display: 'inline-block',

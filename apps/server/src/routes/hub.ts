@@ -176,7 +176,7 @@ hubRouter.get('/mine', async (c) => {
       updated_at: row.updated_at,
       run_count: row.run_count || 0,
       last_run_at: row.last_run_at,
-      // v15.2: surfaced so the /me rail + /me/a/:slug header can render
+      // v15.2: surfaced so the /me rail + /me/apps/:slug header can render
       // the private pill and async-run hint without an extra /api/hub/:slug
       // fetch per list item. Additive — older clients ignore these fields.
       visibility: row.visibility,
@@ -287,6 +287,21 @@ function safeParse(raw: string | null): unknown {
   }
 }
 
+// FLOOM_STORE_HIDE_SLUGS (lock-in 2026-04-18): comma-separated list of app
+// slugs that the public store feed should suppress. Default empty, no
+// filtering. Useful for creators who want to temporarily take a published
+// app out of the directory without deleting it (e.g. `flyfast` while its
+// upstream integration is being rotated). Parsed once at module load;
+// change the env var and restart the server to pick up new values. The
+// /api/hub/:slug detail endpoint still serves the record so deep links
+// keep working, only the list view hides it.
+const HIDDEN_SLUGS: Set<string> = new Set(
+  (process.env.FLOOM_STORE_HIDE_SLUGS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 hubRouter.get('/', (c) => {
   const category = c.req.query('category');
   const sort = c.req.query('sort') || 'default';
@@ -313,11 +328,20 @@ hubRouter.get('/', (c) => {
                    AND (apps.visibility = 'public' OR apps.visibility IS NULL)
                    ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
-  const rows = (category
+  const rowsAll = (category
     ? db.prepare(sql).all(category)
     : db.prepare(sql).all()) as Array<
     AppRecord & { author_name: string | null; author_email: string | null }
   >;
+
+  // Apply FLOOM_STORE_HIDE_SLUGS server-side filter. This is the canonical
+  // place to hide apps from the public directory; the client-side
+  // `isTestFixture` pass in AppsDirectoryPage stays as a defense-in-depth
+  // safety net against test fixtures accidentally ingested in dev.
+  const rows =
+    HIDDEN_SLUGS.size === 0
+      ? rowsAll
+      : rowsAll.filter((row) => !HIDDEN_SLUGS.has(row.slug.toLowerCase()));
 
   return c.json(
     rows.map((row) => {
@@ -383,7 +407,7 @@ hubRouter.get('/:slug', async (c) => {
     icon: row.icon,
     manifest,
     // Visibility (public | unlisted | private). Surfaced so the web client
-    // can render visibility pills and gate private-only UI (e.g. /me/a/:slug
+    // can render visibility pills and gate private-only UI (e.g. /me/apps/:slug
     // console) without re-fetching from a separate endpoint.
     visibility: row.visibility,
     // Async job queue (v0.3.0). Surfaced so the web client switches to the

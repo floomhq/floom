@@ -61,6 +61,7 @@ Open `http://localhost:3051` in your browser or point an MCP client at `http://l
 | `FLOOM_RATE_LIMIT_USER_PER_HOUR` | `200` | Max runs per authenticated user per hour across all apps |
 | `FLOOM_RATE_LIMIT_APP_PER_HOUR` | `50` | Max runs per (IP, app) pair per hour. Prevents one hot app from draining a visitor's IP budget |
 | `FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY` | `10` | Max MCP `ingest_app` calls per user per day (anon: per IP). Stops scripted gallery spam |
+| `FLOOM_STORE_HIDE_SLUGS` | — | Comma-separated slugs to suppress from the public `/api/hub` (store) feed. Use to temporarily hide a published app without deleting it, e.g. while rotating upstream credentials. The `/api/hub/:slug` detail endpoint still serves the record so deep links keep working. Example: `FLOOM_STORE_HIDE_SLUGS=flyfast,legacy-app` |
 | `OPENAI_API_KEY` | — | Optional. Enables embedding-based app search. Without it, search falls back to keyword matching |
 | `COMPOSIO_API_KEY` | — | Optional. API key from [composio.dev](https://composio.dev) (free tier: 20K calls/mo). Enables the `/build` Connect-a-tool ramp via `/api/connections`. Without it, connection routes return `400 code=composio_config_missing`. See docs/connections.md |
 | `COMPOSIO_AUTH_CONFIG_<PROVIDER>` | — | Per-toolkit Composio auth config id (e.g. `COMPOSIO_AUTH_CONFIG_GMAIL=ac_xxx`). One per provider you want surfaced on `/build`. Create each in the Composio dashboard with the Floom callback URL |
