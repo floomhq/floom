@@ -223,11 +223,97 @@ export function AppPermalinkPage() {
   }, [app]);
 
   if (loading) {
+    // CLS fix (2026-04-18): previous loading state was a ~60px paragraph,
+    // which caused a ~600px layout shift when the hero + meta card + tabs +
+    // RunSurface rendered. Lighthouse recorded CLS 0.486 on /p/:slug. The
+    // skeleton below matches the real layout's above-the-fold height so the
+    // transition from loading → loaded produces near-zero CLS.
     return (
       <div className="page-root">
         <TopBar />
-        <main className="main" style={{ paddingTop: 80, textAlign: 'center' }}>
-          <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading...</p>
+        <main
+          style={{ padding: '24px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
+          data-testid="permalink-page"
+          aria-busy="true"
+        >
+          <div style={{ height: 32, marginBottom: 28 }} />
+          <section style={{ marginBottom: 40 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '96px minmax(0, 1fr) 280px',
+                gap: 28,
+                alignItems: 'start',
+              }}
+              className="permalink-hero-grid"
+            >
+              <div
+                style={{
+                  width: 96,
+                  height: 96,
+                  borderRadius: 22,
+                  background: 'var(--accent-soft, var(--bg))',
+                  border: '1px solid var(--accent-border, var(--line))',
+                }}
+              />
+              <div style={{ minHeight: 240 }}>
+                <div
+                  style={{
+                    height: 44,
+                    width: '60%',
+                    borderRadius: 6,
+                    background: 'var(--line)',
+                    opacity: 0.35,
+                    marginBottom: 12,
+                  }}
+                />
+                <div
+                  style={{
+                    height: 14,
+                    width: '30%',
+                    borderRadius: 4,
+                    background: 'var(--line)',
+                    opacity: 0.25,
+                    marginBottom: 20,
+                  }}
+                />
+                <div style={{ minHeight: 30, marginBottom: 14 }} />
+                <div
+                  style={{
+                    height: 72,
+                    borderRadius: 6,
+                    background: 'var(--line)',
+                    opacity: 0.18,
+                    marginBottom: 24,
+                  }}
+                />
+                <div style={{ height: 44 }} />
+              </div>
+              <div
+                style={{
+                  minHeight: 260,
+                  background: 'var(--card)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 14,
+                }}
+              />
+            </div>
+          </section>
+          <div style={{ height: 46, borderBottom: '1px solid var(--line)', marginBottom: 24 }} />
+          <section
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 14,
+              padding: '28px 24px',
+              minHeight: 320,
+              marginBottom: 32,
+            }}
+          >
+            <p style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}>
+              Loading...
+            </p>
+          </section>
         </main>
         <Footer />
       </div>
@@ -380,23 +466,30 @@ export function AppPermalinkPage() {
                 {app.category && <span>{app.category}</span>}
               </div>
 
-              {summary && summary.count > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    flexWrap: 'wrap',
-                    marginBottom: 14,
-                  }}
-                >
-                  <StarsRow value={summary.avg} size={16} />
-                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                    {summary.avg.toFixed(1)} · {summary.count} rating
-                    {summary.count === 1 ? '' : 's'}
-                  </span>
-                </div>
-              )}
+              {/* Rating row. CLS fix (2026-04-18): reserve min-height 30px
+                  so the CTA buttons below don't jump when getAppReviews()
+                  resolves. Apps with 0 ratings get an empty reserved slot;
+                  when summary.count > 0 the stars + text fill the same box. */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  marginBottom: 14,
+                  minHeight: 30,
+                }}
+              >
+                {summary && summary.count > 0 && (
+                  <>
+                    <StarsRow value={summary.avg} size={16} />
+                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                      {summary.avg.toFixed(1)} · {summary.count} rating
+                      {summary.count === 1 ? '' : 's'}
+                    </span>
+                  </>
+                )}
+              </div>
 
               <p
                 style={{
@@ -500,7 +593,9 @@ export function AppPermalinkPage() {
               )}
             </div>
 
-            {/* Meta card */}
+            {/* Meta card. CLS fix (2026-04-18): min-height so the hero
+                row height is stable whether or not the optional rows
+                (Rating, Runtime, Source) render. */}
             <aside
               style={{
                 background: 'var(--card)',
@@ -512,6 +607,7 @@ export function AppPermalinkPage() {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 12,
+                minHeight: 260,
               }}
               data-testid="meta-card"
             >
@@ -632,7 +728,9 @@ export function AppPermalinkPage() {
           })}
         </div>
 
-        {/* Run tab (DEFAULT) */}
+        {/* Run tab (DEFAULT). CLS fix (2026-04-18): min-height so the
+            output card's empty state → streaming → done transitions do
+            not push footer content around above the fold. */}
         {activeTab === 'run' && (
           <section
             id="run"
@@ -645,6 +743,7 @@ export function AppPermalinkPage() {
               borderRadius: 14,
               padding: '28px 24px',
               marginBottom: 32,
+              minHeight: 320,
             }}
           >
             {initialRunLoading ? (
