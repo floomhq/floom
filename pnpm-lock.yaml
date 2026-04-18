@@ -71,6 +71,12 @@ importers:
       nanoid:
         specifier: 5.0.9
         version: 5.0.9
+      react:
+        specifier: 18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: 18.3.1
+        version: 18.3.1(react@18.3.1)
       stripe:
         specifier: 17.7.0
         version: 17.7.0
