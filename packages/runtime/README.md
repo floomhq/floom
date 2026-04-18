@@ -65,8 +65,15 @@ A backend must implement five methods (see `src/provider/types.ts`):
 
 ## Ax41DockerProvider status
 
-- `clone` — implemented. Local `git clone --depth 1`, token-scrubbed.
-- `build`, `run`, `smokeTest` — throw `NotImplemented` until phase 2a-2.
-- `destroySnapshot` — implemented.
+- `clone` — local `git clone --depth 1`, token scrubbed from `.git/config`.
+- `build` — `docker build` in the manifest `workdir` (or repo root). If the
+  repo has no `Dockerfile`, Floom writes `floom-entry.sh` + `Dockerfile.floom`
+  from the detected `build` / `run` commands and sets `EXPOSE 8080` (override
+  with a `Dockerfile` + `EXPOSE` if your app uses another port).
+- `run` — `docker run -d --rm -p 127.0.0.1::<containerPort> -m … --cpus …`.
+- `smokeTest` — HTTP GET retries against `instance.url` (defaults to accepting
+  status 200–499 so JSON APIs that 404 on `/` still pass).
+- `destroySnapshot` — removes the clone working directory.
 
-See PR #50 and the linked roadmap for the remaining phases.
+Still not wired: `POST /api/deploy-github`, `/build` “host this repo” tile, and
+per-user deploy quotas — those live in `apps/server` + `apps/web`.

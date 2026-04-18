@@ -64,6 +64,11 @@ export interface BuiltArtifact {
   /** Which provider produced this artifact. Used on re-run for dispatch. */
   provider: ProviderName;
   manifest: Manifest;
+  /**
+   * TCP port the process listens on inside the container (from EXPOSE or
+   * generated image). Used for `docker run -p 127.0.0.1::<port>`.
+   */
+  containerPort?: number;
   /** Build-time metrics for telemetry / billing. */
   metrics?: { buildMs: number; imageSizeBytes?: number };
 }

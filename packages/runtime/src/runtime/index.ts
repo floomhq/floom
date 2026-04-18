@@ -34,7 +34,7 @@ export type {
   ResourceLimits,
 } from '../provider/types.ts';
 
-export { Ax41DockerProvider, NotImplemented } from '../provider/ax41-docker.ts';
+export { Ax41DockerProvider } from '../provider/ax41-docker.ts';
 export { deployFromGithub } from '../deploy/pipeline.ts';
 export type { DeployOptions } from '../deploy/pipeline.ts';
 export { buildRegistryEntry, serializeRegistryEntry } from '../deploy/register.ts';
