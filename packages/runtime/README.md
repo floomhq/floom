@@ -1,135 +1,72 @@
-# @floom/e2b-runtime
+# @floom/runtime
 
-The e2b-backed runtime for Floom v2. Wraps any GitHub repo (MCP server, CLI tool, Python library) into a runnable sandbox with auto-generated manifest.
+The repo→hosted deployment pipeline for Floom. Auto-detects a GitHub repo's
+runtime, generates a Floom manifest, and hands off to a pluggable runtime
+provider that clones, builds, runs, and smoke-tests the app.
 
-## What it does
+Day-one provider: `Ax41DockerProvider` — runs on the same Docker daemon as
+Floom itself. Future providers (Fly Machines, Firecracker, Modal) implement
+the same `RuntimeProvider` interface so swaps are isolated.
 
-- **Auto-detects** the runtime, build command, and run command for any public GitHub repo.
-- **Deploys** it to an e2b sandbox: clone, build, smoke test, pause.
-- **Runs** it on demand via a warm pause/connect cycle (~600ms cold start vs ~20-300s fresh build).
-- Returns streaming stdout so the caller (web renderer, CLI, or MCP client) can render output as it arrives.
+See [`docs/PRODUCT.md`](../../docs/PRODUCT.md) for the product framing and
+isolation model.
 
 ## Install
 
-This is a local package under `/opt/floom-e2b-runtime`. Not yet published to npm.
-
-```bash
-# From the floom repo (future integration):
-npm install /opt/floom-e2b-runtime
-```
+Workspace-local package. Not published to npm.
 
 ## Public API
 
 ```typescript
-import { deployFromGithub, runApp, buildTemplate, resumeFromSnapshot } from '@floom/e2b-runtime';
-import { generateManifest } from '@floom/e2b-runtime/manifest';
-import { detect } from '@floom/e2b-runtime/detect';
+import {
+  deployFromGithub,
+  Ax41DockerProvider,
+  type DeployResult,
+  type RuntimeProvider,
+} from '@floom/runtime';
 ```
 
-### `deployFromGithub(repoUrl, options) → DeployResult`
+### `deployFromGithub(repoUrl, options) → Promise<DeployResult>`
 
-Full pipeline: fetch GitHub snapshot, auto-detect runtime, generate manifest, spin up e2b sandbox, clone repo, build, smoke test, pause. Returns a `DeployResult` with `templateId` for warm reuse.
+Orchestrates the full repo→hosted flow:
+
+1. Fetches GitHub metadata (API-only, no clone yet).
+2. Runs auto-detect via `@floom/manifest` → draft manifest.
+3. Hands off to `options.provider`: `clone` → `build` → `run` → `smokeTest`.
+4. On success: `DeployResult { success: true, artifactId, manifest, commitSha, provider }`.
+5. On failure: `DeployResult { success: false, error, draftManifest?, ... }`.
+
+On any failure after clone, the pipeline destroys the provider's working
+directory so we don't leak state.
 
 ```typescript
-const result = await deployFromGithub('owner/repo', {
-  smokeWithHelp: true,     // append --help to smoke test (default: true)
-  onStream: (chunk) => ..., // stream build output
-  githubToken: '...',       // for private repos
+import { deployFromGithub, Ax41DockerProvider } from '@floom/runtime';
+
+const provider = new Ax41DockerProvider();
+const result = await deployFromGithub('https://github.com/owner/repo', {
+  provider,
+  ref: 'main',
+  githubToken: process.env.GITHUB_TOKEN,
+  onLog: (chunk) => process.stdout.write(chunk),
 });
-// result.templateId = paused sandbox id for runApp warm path
 ```
 
-### `runApp(manifest, inputs, secrets, onStream, options) → RunResult`
+## RuntimeProvider interface
 
-Run a Floom app. Warm path (paused sandbox) or cold path (fresh base sandbox).
+A backend must implement five methods (see `src/provider/types.ts`):
 
-```typescript
-const result = await runApp(
-  manifest,
-  { topic: 'floom' },    // input values
-  { OPENAI_API_KEY: '...' },  // injected as env vars
-  (chunk) => process.stdout.write(chunk),
-  { reuseSandboxId: templateId },  // warm path
-);
-// result.sandboxId = new paused id for next call
-```
+- `clone(source) → RepoSnapshot` — fetch source into a provider-owned dir.
+  Must scrub any GitHub token out of on-disk artifacts before returning.
+- `build(snapshot, opts) → BuiltArtifact` — turn source into a runnable
+  image/VM/whatever.
+- `run(opts) → RunningInstance` — start an instance of the artifact.
+- `smokeTest(instance, probe?) → SmokeResult` — HTTP probe the instance.
+- `destroySnapshot(snapshot)` — clean up the working directory.
 
-### `buildTemplate(sandbox, manifest) → string`
+## Ax41DockerProvider status
 
-Pre-bake a template for a manifest. Runs the build command in the given sandbox, pauses, returns the templateId.
+- `clone` — implemented. Local `git clone --depth 1`, token-scrubbed.
+- `build`, `run`, `smokeTest` — throw `NotImplemented` until phase 2a-2.
+- `destroySnapshot` — implemented.
 
-### `resumeFromSnapshot(snapshotId) → Sandbox`
-
-Resume a paused sandbox by id. Caller owns the sandbox and must pause or kill when done.
-
-## Auto-detect ruleset (5 Suite H fixes)
-
-| Fix | Rule | Trigger |
-|-----|------|---------|
-| `workdir-detect` | Deepest-manifest detection | Monorepos with Go/Python in a subdir |
-| `pnpm-detect` | `workspace:*` in package.json | BrowserMCP, any pnpm workspace |
-| `uv-detect` | `uv.lock` or PEP 723 `# /// script` | karpathy/autoresearch, uv projects |
-| `src-layout` | `[tool.setuptools.packages.find]` + `src/` dir | crewAI, FastAPI, most modern Python packages |
-| `php-ext` | `ext-*` in composer.json `require` | aimeos/ai-client-html, PHP extensions |
-
-## Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/deploy-github.ts` | CLI: deploy a GitHub repo and print the DeployResult JSON |
-| `scripts/opendraft-e2e.ts` | End-to-end proof: deploy OpenDraft + runApp warm path |
-| `scripts/rerun-suite-h.ts` | Validate Suite H 10-repo sample with 5 fixes applied |
-| `scripts/build-templates.ts` | Pre-bake templates for the top Floom apps |
-
-```bash
-# Deploy a repo
-export E2B_API_KEY=...
-npx tsx scripts/deploy-github.ts owner/repo
-
-# Run e2e proof
-npx tsx scripts/opendraft-e2e.ts
-
-# Validate Suite H
-npx tsx scripts/rerun-suite-h.ts
-```
-
-## Tests
-
-```bash
-# Unit tests (pure logic, no network, no sandbox)
-npx tsx --test tests/detect/*.test.ts   # 29 tests: detect rules
-npx tsx --test tests/runtime/*.test.ts  # 13 tests: executor + manifest parser
-
-# All tests
-npm test && npm run test:runtime
-```
-
-42 unit tests total, all passing.
-
-## Environment
-
-Requires `E2B_API_KEY` in the environment or in `/opt/floom-marketplace-deploy/.env`.
-
-```bash
-export E2B_API_KEY=e2b_...
-```
-
-## Architecture
-
-```
-deployFromGithub(repoUrl)
-  └── fetchSnapshotFromApi       GitHub API, no sandbox
-  └── generateManifest           auto-detect + YAML generation
-  └── openSandbox                e2b base template
-  └── cloneInSandbox             git clone --depth 1
-  └── runBuildStep               pip install / npm install / etc
-  └── smokeTest                  run --help or default inputs
-  └── pauseForReuse              returns templateId
-
-runApp(manifest, inputs, secrets, onStream)
-  └── resumeFromSnapshot         ~600ms warm connect
-  └── execute                    run command, stream stdout
-  └── pauseForReuse              returns new sandboxId
-```
-
-See `/opt/floom-marketplace-src/docs/architecture/` for the full design docs.
+See PR #50 and the linked roadmap for the remaining phases.

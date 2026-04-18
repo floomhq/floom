@@ -1,66 +1,49 @@
 /**
- * `deployFromGithub` — the top-level deploy orchestrator.
+ * `deployFromGithub` — the top-level orchestrator.
  *
- * Steps (from h5-h6-recursion-failure-ux.md §"What floom-deploy does"):
- *   1. Validate URL + fetch repo snapshot via GitHub API (no sandbox yet).
- *   2. Auto-detect runtime/build/run, apply the 5 Suite H fixes.
- *   3. Generate a floom.yaml. If incomplete, return a draft for the user.
- *   4. Spin up an e2b sandbox, clone the repo with git, run the build.
- *   5. Smoke test with default inputs.
- *   6. On success: pause the sandbox, return `templateId` + manifest + smoke
- *      output as a DeployResult.
- *   7. On failure: return a DeployResult with `error`, the build log, and
- *      the draft manifest so the caller can present H6-style failure UX.
+ * Shape: repo URL in, DeployResult out. Behind the scenes it runs:
+ *   1. Fetch repo metadata via GitHub API (no clone yet).
+ *   2. Auto-detect runtime + generate a manifest with @floom/manifest.
+ *   3. Hand off to the configured RuntimeProvider:
+ *        provider.clone -> provider.build -> provider.run -> provider.smokeTest
+ *   4. On success: return DeployResult with artifactId + manifest + commit.
+ *      On failure: destroySnapshot and return DeployResult with the error +
+ *      (when detect succeeded) the draft manifest for UX retries.
+ *
+ * Server wiring (`POST /api/deploy-github`) + the `/build` UI tile live in
+ * apps/server and apps/web respectively and drive this function.
  */
-import type { Manifest, DeployResult } from '../runtime/types.ts';
-import { fetchSnapshotFromApi, cloneInSandbox, parseRepoUrl, WORKSPACE_PATH } from './clone.ts';
 import { generateManifest } from '@floom/manifest';
-import { runBuildStep } from './build.ts';
-import { smokeTest } from './smoke-test.ts';
-import { openSandbox, closeSandbox, manifestMetadata } from '../runtime/sandbox.ts';
-import { Timer } from '../lib/timing.ts';
-import { logger } from '../lib/logger.ts';
 
-/**
- * Rewrite the manifest so its `workdir` points inside the sandbox's
- * workspace path. The detect pass records the workdir RELATIVE to the repo
- * root; for the actual sandbox run we need the absolute path where we
- * cloned.
- */
-function anchorManifestToWorkspace(manifest: Manifest): Manifest {
-  const subdir = manifest.workdir ? `/${manifest.workdir}` : '';
-  return { ...manifest, workdir: `${WORKSPACE_PATH}${subdir}` };
-}
+import { logger } from '../lib/logger.ts';
+import type { DeployResult } from '../runtime/types.ts';
+import { fetchSnapshotFromApi, parseRepoUrl } from './clone.ts';
+import type { RuntimeProvider } from '../provider/types.ts';
 
 export interface DeployOptions {
-  branch?: string;
-  /**
-   * Optional overrides merged into the auto-detected manifest. Used when a
-   * user has already edited the draft yaml and wants to retry with their
-   * changes.
-   */
-  override?: Partial<Manifest>;
-  /**
-   * If true (default), smoke-test with a `--help` flag appended to the run
-   * command. This is a strong "the build worked" signal without requiring
-   * real inputs or secrets. Turn off for apps whose main command produces
-   * useful output without any flags.
-   */
-  smokeWithHelp?: boolean;
+  /** Runtime provider to use (ax41-docker in MVP). */
+  provider: RuntimeProvider;
+  /** Branch, tag, or commit SHA. Defaults to repo's default branch. */
+  ref?: string;
   /** GitHub token for private repos. */
   githubToken?: string;
-  /** Stream builder output to this callback. */
-  onStream?: (chunk: string) => void;
+  /** Streams build-log chunks to caller (SSE-friendly). */
+  onLog?: (chunk: string) => void;
+  /**
+   * Manifest overrides merged on top of the auto-detected result. Used when
+   * the user edited the draft manifest and is retrying with their fix.
+   */
+  manifestOverride?: Parameters<typeof generateManifest>[1];
 }
 
 export async function deployFromGithub(
   repoUrl: string,
-  options: DeployOptions = {},
+  opts: DeployOptions,
 ): Promise<DeployResult> {
-  const timer = new Timer();
-  timer.start('total');
+  const { provider, ref, githubToken, onLog, manifestOverride } = opts;
+  const startedAt = Date.now();
 
-  // Phase 1: parse URL (throws on malformed)
+  // Phase 1: parse URL.
   let repoRef;
   try {
     repoRef = parseRepoUrl(repoUrl);
@@ -71,23 +54,21 @@ export async function deployFromGithub(
     };
   }
 
-  // Phase 2: fetch snapshot via GitHub API (no sandbox yet)
-  let snapshot;
+  // Phase 2: fetch repo metadata for auto-detect.
+  let snapshotMeta;
   try {
-    snapshot = await timer.measure('fetch', () =>
-      fetchSnapshotFromApi(repoUrl, { ref: options.branch, githubToken: options.githubToken }),
-    );
+    snapshotMeta = await fetchSnapshotFromApi(repoUrl, { ref, githubToken });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn('deploy.fetch failed', { repoUrl, error: msg });
+    logger.warn('deploy.fetch-failed', { repoUrl, error: msg });
     return {
       success: false,
       error: `Could not fetch ${repoRef.owner}/${repoRef.name} from GitHub: ${msg}`,
     };
   }
 
-  // Phase 3: auto-detect + manifest generation
-  const gen = generateManifest(snapshot, options.override);
+  // Phase 3: auto-detect + manifest generation.
+  const gen = generateManifest(snapshotMeta, manifestOverride);
   if (!gen.manifest) {
     return {
       success: false,
@@ -96,135 +77,91 @@ export async function deployFromGithub(
     };
   }
   const manifest = gen.manifest;
-  logger.info('deploy.detect ok', {
+  logger.info('deploy.detect-ok', {
     manifest: manifest.name,
     fixes: gen.detect.fixesApplied,
     warnings: gen.detect.warnings,
   });
 
-  // Phase 4: spin up sandbox and clone
-  let sandbox;
+  // Phase 4: provider.clone — clone into provider-owned working directory.
+  let snapshot;
   try {
-    sandbox = await timer.measure('create', () =>
-      openSandbox({
-        template: 'base',
-        timeoutMs: 900_000, // 15 min for build-heavy apps
-        metadata: manifestMetadata(manifest),
-      }),
-    );
+    snapshot = await provider.clone({ url: repoUrl, ref, githubToken });
   } catch (err) {
     return {
       success: false,
-      error: `Failed to create sandbox: ${err instanceof Error ? err.message : String(err)}`,
-      manifest,
-    };
-  }
-
-  try {
-    await timer.measure('clone', () =>
-      cloneInSandbox(sandbox!, repoUrl, {
-        branch: options.branch,
-        githubToken: options.githubToken,
-      }),
-    );
-
-    // Phase 5: build
-    timer.start('build');
-    const build = await runBuildStep(sandbox, manifest, options.onStream);
-    timer.end('build');
-
-    if (build.exitCode !== 0) {
-      await closeSandbox(sandbox, { pause: false });
-      return {
-        success: false,
-        error: `Build failed with exit code ${build.exitCode}`,
-        manifest,
-        draftManifest: gen.yaml,
-        buildLog: tail(build.buildLog, 4000),
-      };
-    }
-
-    // Phase 6: smoke test — anchor the manifest to the cloned workspace
-    // path so `cd workdir && run` resolves correctly.
-    const anchoredManifest = anchorManifestToWorkspace(manifest);
-    timer.start('smoke');
-    const smoke = await smokeTest(sandbox, anchoredManifest, {
-      forceHelpFlag: options.smokeWithHelp !== false,
-    });
-    timer.end('smoke');
-
-    if (!smoke.passed) {
-      // Retry without --help — some apps don't support it and exit non-zero.
-      let retry = smoke;
-      if (options.smokeWithHelp !== false) {
-        timer.start('smoke-retry');
-        retry = await smokeTest(sandbox, anchoredManifest, { forceHelpFlag: false });
-        timer.end('smoke-retry');
-      }
-      if (!retry.passed) {
-        await closeSandbox(sandbox, { pause: false });
-        return {
-          success: false,
-          error: `Smoke test failed: ${retry.reason}`,
-          manifest,
-          draftManifest: gen.yaml,
-          smokeTestOutput: retry.stdout + '\n---STDERR---\n' + retry.stderr,
-          buildLog: tail(build.buildLog, 2000),
-        };
-      }
-      // Retry succeeded — fall through with the retry's output
-      const templateId = await pauseAndReturn(sandbox);
-      timer.end('total');
-      // Return the ANCHORED manifest so subsequent runApp calls against
-      // the templateId cd into the workspace.
-      return successResult(anchoredManifest, templateId, retry.stdout, timer, build.buildLog);
-    }
-
-    // Phase 7: pause for warm reuse
-    const templateId = await pauseAndReturn(sandbox);
-    timer.end('total');
-    return successResult(anchoredManifest, templateId, smoke.stdout, timer, build.buildLog);
-  } catch (err) {
-    try {
-      await closeSandbox(sandbox, { pause: false });
-    } catch {
-      // ignore
-    }
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: `Clone failed: ${err instanceof Error ? err.message : String(err)}`,
       manifest,
       draftManifest: gen.yaml,
     };
   }
-}
 
-async function pauseAndReturn(sandbox: {
-  sandboxId: string;
-  pause: () => Promise<boolean>;
-}): Promise<string> {
-  await sandbox.pause();
-  return sandbox.sandboxId;
-}
+  // From here on, any failure destroys the snapshot before returning so we
+  // don't leak clone directories.
+  try {
+    // Phase 5: provider.build — turn snapshot into runnable artifact.
+    const artifact = await provider.build(snapshot, { manifest, onLog });
 
-function successResult(
-  manifest: Manifest,
-  templateId: string,
-  smokeOutput: string,
-  _timer: Timer,
-  buildLog: string,
-): DeployResult {
-  return {
-    success: true,
-    manifest,
-    templateId,
-    smokeTestOutput: smokeOutput,
-    buildLog: tail(buildLog, 2000),
-  };
-}
+    // Phase 6: provider.run — start an instance. Empty env for smoke test:
+    // the goal is "does the server come up?", not "does every code path work".
+    const instance = await provider.run({ artifact, env: {} });
 
-function tail(s: string, bytes: number): string {
-  if (!s) return '';
-  if (s.length <= bytes) return s;
-  return '...' + s.slice(-bytes);
+    try {
+      // Phase 7: smoke test — health probe against the running instance.
+      const smoke = await provider.smokeTest(instance);
+
+      if (!smoke.passed) {
+        return {
+          success: false,
+          error: smoke.lastError
+            ? `Smoke test failed: ${smoke.lastError}`
+            : `Smoke test failed (last status ${smoke.lastStatus ?? 'n/a'} after ${smoke.attempts} attempts)`,
+          manifest,
+          draftManifest: gen.yaml,
+          provider: provider.name,
+        };
+      }
+
+      logger.info('deploy.ok', {
+        manifest: manifest.name,
+        provider: provider.name,
+        commitSha: snapshot.commitSha,
+        totalMs: Date.now() - startedAt,
+      });
+
+      return {
+        success: true,
+        manifest,
+        artifactId: artifact.id,
+        provider: provider.name,
+        commitSha: snapshot.commitSha,
+      };
+    } finally {
+      // Always stop the smoke-test instance. The artifact lives on in the
+      // provider's registry for later re-runs.
+      await instance.stop().catch((err) => {
+        logger.warn('deploy.instance-stop-failed', {
+          instanceId: instance.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn('deploy.failed', { repoUrl, error: msg });
+    return {
+      success: false,
+      error: msg,
+      manifest,
+      draftManifest: gen.yaml,
+      provider: provider.name,
+    };
+  } finally {
+    await provider.destroySnapshot(snapshot).catch((err) => {
+      logger.warn('deploy.destroy-snapshot-failed', {
+        snapshotId: snapshot.snapshotId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 }
