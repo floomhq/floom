@@ -284,53 +284,6 @@
       }
     },
     {
-      "slug": "flyfast",
-      "name": "FlyFast",
-      "description": "Search flights like you text a friend. Live prices, 300+ airlines.",
-      "category": "productivity",
-      "icon": null,
-      "author": "federicodeponte",
-      "docker_image": "floom-app-flyfast-mkt:v3",
-      "marketplace_app_id": "app_flyfast_mkt",
-      "manifest": {
-        "name": "FlyFast",
-        "description": "Search flights like you would text a friend. Up to 100 combinations from one natural-language query.",
-        "actions": {
-          "search": {
-            "label": "Search Flights",
-            "inputs": [
-              {
-                "name": "prompt",
-                "label": "What flight do you need?",
-                "type": "textarea",
-                "required": true,
-                "placeholder": "Cheap flight from Berlin to Lisbon first week of May"
-              }
-            ],
-            "outputs": [
-              {
-                "name": "results",
-                "label": "Flight Results",
-                "type": "json"
-              }
-            ],
-            "description": "Natural-language flight search. Describe your trip in plain English and get scored flight options back."
-          }
-        },
-        "runtime": "python",
-        "python_dependencies": [
-          "httpx>=0.27"
-        ],
-        "node_dependencies": {},
-        "secrets_needed": [
-          "FLYFAST_INTERNAL_TOKEN"
-        ],
-        "manifest_version": "2.0",
-        "knowledge_enabled": false,
-        "blocked_reason": "hosted-mode only: requires Federico's internal flight-search API. Self-hosters cannot run flyfast directly."
-      }
-    },
-    {
       "slug": "hook-stats",
       "name": "Hook Stats",
       "description": "Analyze your Claude Code bash command log. Top commands, git stats, per-day activity.",
@@ -1470,9 +1423,6 @@
   "per_app_secrets": {
     "openslides": {
       "GEMINI_API_KEY": "REDACTED_GEMINI_KEY"
-    },
-    "flyfast": {
-      "FLYFAST_INTERNAL_TOKEN": "REDACTED_FLYFAST_TOKEN"
     },
     "opendraft": {
       "GOOGLE_API_KEY": "REDACTED_GEMINI_KEY"

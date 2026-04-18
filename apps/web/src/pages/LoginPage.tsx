@@ -1,7 +1,11 @@
 // W4-minimal: combined /login + /signup page.
 //
 // Two modes switched by a tab at the top: "Sign in" and "Create account".
-// Each mode supports email+password, magic link, and Google OAuth.
+// Each mode supports email+password only. Google/GitHub OAuth buttons were
+// removed 2026-04-17 pre-launch because the OAuth apps were not configured
+// on preview/prod; dead buttons are a trust-killer. Re-enable with a follow-up
+// PR that also registers the OAuth clients and sets
+// GOOGLE_OAUTH_CLIENT_ID/SECRET + GITHUB_OAUTH_CLIENT_ID/SECRET env vars.
 //
 // In OSS mode Better Auth is not mounted, so the /auth/* POSTs will 404.
 // We detect that via /api/session/me (cloud_mode: false) and render a
@@ -42,6 +46,12 @@ export function LoginPage() {
     setMode(routeMode);
   }, [routeMode]);
 
+  // OAuth social sign-in (Google/GitHub) was removed 2026-04-17. The buttons
+  // pointed at /auth/sign-in/social but Better Auth only registers a provider
+  // when both CLIENT_ID and CLIENT_SECRET are set, and we hadn't created the
+  // OAuth apps. Keep `socialSignInUrl` in the api client for when we bring it
+  // back.
+
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
     setState('submitting');
@@ -69,10 +79,6 @@ export function LoginPage() {
         setErrorMsg(e.message || 'Sign-in failed.');
       }
     }
-  }
-
-  function handleSocial(provider: 'google' | 'github') {
-    window.location.href = api.socialSignInUrl(provider, nextPath);
   }
 
   const cloudMode = data?.cloud_mode === true;
@@ -114,7 +120,7 @@ export function LoginPage() {
         </h1>
         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
           {mode === 'signin'
-            ? 'Sign in with email and password, or Google.'
+            ? 'Sign in with email and password.'
             : 'One account. Run apps, connect tools, publish your own.'}
         </p>
 
@@ -174,61 +180,8 @@ export function LoginPage() {
           </div>
         )}
 
-        {/* Social providers */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-          <button
-            type="button"
-            onClick={() => handleSocial('google')}
-            data-testid="oauth-google"
-            style={socialButtonStyle}
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.19 3.32v2.77h3.54c2.08-1.91 3.29-4.74 3.29-8.1z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.54-2.77c-.98.66-2.24 1.05-3.74 1.05-2.88 0-5.31-1.94-6.18-4.55H2.17v2.87A11 11 0 0 0 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.82 14.07a6.6 6.6 0 0 1 0-4.14V7.06H2.17a11 11 0 0 0 0 9.88l3.65-2.87z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.07.56 4.21 1.64l3.15-3.15C17.45 2.1 14.97 1 12 1 7.7 1 3.99 3.47 2.17 7.06l3.65 2.87C6.69 7.32 9.12 5.38 12 5.38z"
-              />
-            </svg>
-            Continue with Google
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSocial('github')}
-            data-testid="oauth-github"
-            style={socialButtonStyle}
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2 0 1.9 1.3 1.9 1.3 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.4.8-1.7-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.3-3.2-.2-.3-.6-1.6.1-3.3 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.3 3 .1 3.3.8.8 1.3 1.9 1.3 3.2 0 4.7-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.3v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z" />
-            </svg>
-            Continue with GitHub
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            margin: '16px 0',
-            color: 'var(--muted)',
-            fontSize: 12,
-          }}
-        >
-          <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
-          or
-          <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
-        </div>
+        {/* Google/GitHub OAuth buttons removed 2026-04-17 pre-launch. See
+            comment at top of file. */}
 
         <form onSubmit={handlePasswordSubmit}>
           {mode === 'signup' && (
@@ -385,18 +338,3 @@ const primaryButtonStyle: React.CSSProperties = {
   marginTop: 12,
 };
 
-const socialButtonStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 10,
-  padding: '11px 14px',
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 8,
-  fontSize: 13,
-  fontWeight: 500,
-  color: 'var(--ink)',
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-};

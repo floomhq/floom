@@ -382,12 +382,12 @@ base_url: https://api.stripe.com
 auth: bearer
 secrets: [STRIPE_SECRET_KEY]`;
 
-const HOSTED_YAML = `name: flyfast
+const HOSTED_YAML = `name: my-app
 type: hosted
 runtime: python3.12
 openapi_spec: ./openapi.yaml
 build: pip install .
-run: uvicorn flyfast.server:app --port 8000`;
+run: uvicorn my_app.server:app --port 8000`;
 
 function ProxiedVsHosted() {
   const [copiedLeft, setCopiedLeft] = React.useState(false);
@@ -716,7 +716,7 @@ export function ProtocolPage() {
               Example manifests
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {['flyfast', 'blast-radius', 'opendraft', 'bouncer', 'openanalytics'].map((slug) => (
+              {['blast-radius', 'opendraft', 'bouncer', 'openanalytics', 'openpaper'].map((slug) => (
                 <a
                   key={slug}
                   href={`https://github.com/floomhq/floom-monorepo/tree/main/examples/${slug}/floom.yaml`}

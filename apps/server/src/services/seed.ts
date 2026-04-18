@@ -42,7 +42,7 @@ function findSeedFile(): string | null {
 }
 
 export function seedFromFile(): { apps_added: number; secrets_added: number } {
-  // FLOOM_SEED_APPS gates the 15 bundled docker-based apps. They require
+  // FLOOM_SEED_APPS gates the bundled docker-based demo apps. They require
   // /var/run/docker.sock mounted into the container AND can connect to a
   // host Docker daemon, so we default to OFF (empty hub) and let users
   // populate via apps.yaml. Set FLOOM_SEED_APPS=true to opt in.
@@ -66,7 +66,7 @@ export function seedFromFile(): { apps_added: number; secrets_added: number } {
   const seed = JSON.parse(raw) as SeedFile;
   console.log(`[seed] loading ${seed.apps.length} apps from ${path}`);
   console.log(
-    '[seed] FLOOM_SEED_APPS is on — the 15 bundled docker apps require /var/run/docker.sock to be mounted into the container.',
+    '[seed] FLOOM_SEED_APPS is on — the bundled docker demo apps require /var/run/docker.sock to be mounted into the container.',
   );
 
   let appsAdded = 0;

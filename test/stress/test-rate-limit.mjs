@@ -145,9 +145,9 @@ process.env.FLOOM_RATE_LIMIT_APP_PER_HOUR = '2';
 const mw7 = rl.runRateLimitMiddleware(anonResolve);
 const call7 = (slug) =>
   mw7(makeCtx({ ip: '8.8.8.8', slug }), async () => undefined);
-const a1 = await call7('flyfast');
-const a2 = await call7('flyfast');
-const a3 = await call7('flyfast');
+const a1 = await call7('bouncer');
+const a2 = await call7('bouncer');
+const a3 = await call7('bouncer');
 log('first two per-(IP,app) calls pass', a1?.status !== 429 && a2?.status !== 429);
 log('third per-(IP,app) call blocks', a3?.status === 429);
 const bodyA3 = a3?.status === 429 ? await a3.json() : null;

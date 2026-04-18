@@ -5,8 +5,7 @@
 //   2. OpenAPI URL paste (fallback, functional — the previous behavior).
 //   3. Describe it (coming soon — AI generation is deferred per
 //      project_floom_positioning.md).
-//   4. Connect a tool (coming soon — Composio-backed connectors ship with
-//      Cloud tier).
+//   4. Connect a tool (coming soon — deferred post-launch).
 //   5. Docker image (coming soon — registry pulling ships after v1).
 //
 // Once a spec is detected the existing review/publish UI runs unchanged.
@@ -1123,7 +1122,7 @@ function ComingSoonRampModal({
     connect: {
       title: 'Connect a tool (coming soon)',
       copy:
-        'Pre-built connectors for Gmail, Stripe, Notion, and more ship with Cloud tier. For now, import your own OpenAPI spec.',
+        'Pre-built connectors for Gmail, Stripe, Notion, and more are on the roadmap. For now, import your own OpenAPI spec.',
     },
     docker: {
       title: 'Docker import (coming soon)',

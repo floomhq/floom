@@ -4,7 +4,7 @@
   <h1>Floom</h1>
 
   <p><strong>The protocol + runtime for agentic work.</strong><br/>
-  Build agents, workflows, and scripts with AI. Floom deploys them as MCP, API, web, or CLI &mdash; production-grade, live in 30 seconds.<br/>
+  Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server, HTTP API, and shareable web form &mdash; production-grade, live in 30 seconds.<br/>
   <sub>Vibe-coding speed. Production-grade safety. Open source.</sub></p>
 
   <p>
@@ -31,12 +31,11 @@ Point Floom at an OpenAPI spec. In seconds you get a web form, an MCP server an 
 - **One manifest, three surfaces.** Web form at `/p/:slug`, MCP server at `/mcp/app/:slug`, HTTP endpoint at `/api/:slug/run`.
 - **Two ingest modes.** Proxied (wrap an existing API) or hosted (Floom runs your Docker container).
 - **Production layer included.** Bearer/API-key auth, per-operation rate limits, secret injection, run history, shareable result URLs.
-- **Async job queue + custom renderers.** Long-running ops stream status. JSON output can be rendered with your own HTML template.
 - **Agent-native.** Every app exposes MCP tools out of the box. Four MCP admin tools (`ingest_app`, `list_apps`, `search_apps`, `get_app`) let an agent add new apps over MCP.
 
 ## Who it's for
 
-- **Vibecoder creators** shipping weekend apps (OpenDraft, FlyFast, OpenPaper shape). Paste an OpenAPI URL, publish a shareable page, get an MCP tool your friends can install.
+- **Vibecoder creators** shipping weekend apps (OpenDraft, OpenPaper shape). Paste an OpenAPI URL, publish a shareable page, get an MCP tool your friends can install.
 - **Biz users** running internal tooling and productivity apps. Wrap a Stripe-style API in a form your ops team can fill out, with runs logged and outputs rendered cleanly.
 
 Two equal ICPs. Two CTAs side by side. Two dashboards (`/me` for consumers, `/creator` for publishers).
@@ -108,15 +107,15 @@ secrets: [STRIPE_SECRET_KEY]
 
 ```yaml
 # Hosted — Floom runs your container
-name: flyfast
+name: my-app
 type: hosted
 runtime: python3.12
 openapi_spec: ./openapi.yaml
 build: pip install .
-run: uvicorn flyfast.server:app --port 8000
+run: uvicorn my_app.server:app --port 8000
 ```
 
-See real manifests under [`examples/`](./examples).
+See example manifests under [`examples/`](./examples).
 
 ## Repo layout
 
@@ -124,7 +123,7 @@ See real manifests under [`examples/`](./examples).
 - `apps/server` — backend (Hono + SQLite + Docker runner)
 - `packages/renderer` — `@floom/renderer`, default + custom output/input renderer library
 - `spec/protocol.md` — Floom Protocol spec
-- `examples/` — manifests for the launch apps
+- `examples/` — example manifests you can copy to register your own app
 
 ## Development
 
@@ -137,7 +136,9 @@ Runs the web app on `:5173` and the server on `:3051` with hot reload.
 
 ## Roadmap
 
-High level: job-queue UI, custom-renderer upload UI, workspaces, Composio connections, Stripe Connect, per-user app memory. See [docs/ROADMAP.md](./docs/ROADMAP.md) for the full list with priorities.
+See [docs/ROADMAP.md](./docs/ROADMAP.md) for priorities. The v0.4 line is
+OpenAPI ingest, secret policies, per-app rate limits, and MCP admin tools;
+everything else is parked until those are battle-tested.
 
 ## Community
 

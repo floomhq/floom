@@ -24,12 +24,12 @@ secrets: [STRIPE_SECRET_KEY]
 ### Hosted — Floom runs your app
 
 ```yaml
-name: flyfast
+name: my-app
 type: hosted
 runtime: python3.12      # optional, auto-detected from pyproject.toml/requirements.txt
 openapi_spec: ./openapi.yaml
 build: pip install .
-run: uvicorn flyfast.server:app --port 8000
+run: uvicorn my_app.server:app --port 8000
 ```
 
 ## What gets generated automatically

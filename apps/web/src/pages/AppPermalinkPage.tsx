@@ -22,7 +22,6 @@ import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/typ
 // directory lives in examples/ are linked; stub-only apps (floom.yaml with
 // no server code) were removed in the 2026-04-17 bloat cut.
 const GITHUB_REPOS: Record<string, string> = {
-  flyfast: 'https://github.com/floomhq/floom-monorepo/tree/main/examples/flyfast',
   'blast-radius': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/blast-radius',
   'claude-wrapped': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/claude-wrapped',
   'dep-check': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/dep-check',

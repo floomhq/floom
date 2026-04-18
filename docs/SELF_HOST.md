@@ -51,7 +51,7 @@ Open `http://localhost:3051` in your browser or point an MCP client at `http://l
 | `DATA_DIR` | `/data` | Where SQLite + per-app state live. Mount a volume here to persist across restarts |
 | `PUBLIC_URL` | `http://localhost:$PORT` | What the server advertises as its own URL in MCP payloads |
 | `FLOOM_APPS_CONFIG` | — | Path to an `apps.yaml` file. When set, Floom ingests it on boot |
-| `FLOOM_SEED_APPS` | `false` | Set to `true` to seed the 15 bundled docker apps (flyfast, blast-radius, etc.). Requires `/var/run/docker.sock` mounted |
+| `FLOOM_SEED_APPS` | `false` | Set to `true` to seed the bundled docker demo apps (bouncer, blast-radius, etc.). Requires `/var/run/docker.sock` mounted |
 | `FLOOM_AUTH_TOKEN` | — | When set, all `/api/*`, `/mcp/*`, `/p/*` requests require `Authorization: Bearer <token>`. `/api/health` stays open |
 | `FLOOM_MAX_ACTIONS_PER_APP` | `200` | Hard cap on how many operations one OpenAPI spec can expose. Set to `0` for unlimited (needed for Stripe, GitHub, etc.) |
 | `FLOOM_JOB_POLL_MS` | `1000` | Interval in ms at which the background worker polls the async job queue. Lower = faster pickup, more CPU |
@@ -412,7 +412,7 @@ curl -s http://localhost:3051/api/slow-echo/jobs/job_xxx | jq
 | `proxied` | Floom fetches the OpenAPI spec, walks `$refs`, auto-resolves `base_url`, and routes requests to the upstream API with secrets injected | Any public or private API with an OpenAPI 3.x spec (or Swagger 2) |
 | `hosted` | Floom runs a Docker image with the app's code. Requires `/var/run/docker.sock` mounted into the container | Custom apps that need code execution inside Floom |
 
-The 15 historic bundled apps (flyfast, bouncer, blast-radius, etc.) are hosted-mode and opt-in via `FLOOM_SEED_APPS=true`. The default v0.2 self-host path is proxied-only.
+The bundled hosted-mode demo apps (bouncer, opendraft, openpaper, etc.) are opt-in via `FLOOM_SEED_APPS=true`. The default self-host path is proxied-only — the simplest on-ramp is pointing Floom at an OpenAPI spec.
 
 ## Docker compose
 
