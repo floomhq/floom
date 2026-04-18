@@ -779,7 +779,12 @@ export function AppPermalinkPage() {
         </>
         )}
 
-        {/* Install tab: connectors (Claude, ChatGPT, Notion, Terminal) */}
+        {/* Install tab. Round 2 polish: only Claude is live on day one.
+            Previously we rendered a 4-card grid with 3 "COMING SOON"
+            tiles (ChatGPT, Notion, Terminal), which made the page feel
+            amateur. Keep one full card for Claude; below it, a single
+            thin waitlist link consolidates the upcoming connectors so
+            the live option does not compete with dead weight. */}
         {activeTab === 'install' && (
         <section id="connectors" data-testid="connectors" style={{ marginBottom: 32 }}>
           <h2
@@ -796,9 +801,11 @@ export function AppPermalinkPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+              gridTemplateColumns: 'minmax(0, 1fr)',
               gap: 16,
+              maxWidth: 560,
             }}
+            data-testid="connectors-grid"
           >
             <ConnectorCard
               label="Claude"
@@ -809,31 +816,25 @@ export function AppPermalinkPage() {
               badge="MCP"
               copyValue={mcpEndpoint}
             />
-            <ConnectorCard
-              label="ChatGPT"
-              title="Add to ChatGPT"
-              desc="Install into a custom GPT."
-              testId="connector-chatgpt"
-              onClick={() => setComingSoon('chatgpt')}
-              comingSoon
-            />
-            <ConnectorCard
-              label="Notion"
-              title="Add to Notion"
-              desc="Embed as a Notion block."
-              testId="connector-notion"
-              onClick={() => setComingSoon('notion')}
-              comingSoon
-            />
-            <ConnectorCard
-              label="Terminal"
-              title="Add to Terminal"
-              desc="Run via curl or the floom CLI."
-              testId="connector-terminal"
-              onClick={() => setComingSoon('terminal')}
-              comingSoon
-            />
           </div>
+          <p
+            data-testid="connectors-more"
+            style={{
+              marginTop: 14,
+              fontSize: 13,
+              color: 'var(--muted)',
+              lineHeight: 1.55,
+            }}
+          >
+            More clients (ChatGPT, Notion, Terminal) coming.{' '}
+            <a
+              href="/#waitlist"
+              data-testid="connectors-waitlist"
+              style={{ color: 'var(--accent)', fontWeight: 500, textDecoration: 'none' }}
+            >
+              Join the waitlist &rarr;
+            </a>
+          </p>
         </section>
         )}
 
