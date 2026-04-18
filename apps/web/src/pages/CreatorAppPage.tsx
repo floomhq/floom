@@ -102,9 +102,21 @@ export function CreatorAppPage() {
                 {appInfo.description}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Link to={`/build?edit=${slug}`} style={secondaryBtn}>
                 Edit
+              </Link>
+              {/* Bridge creator dashboard -> per-app management surface.
+                  Before this fix, the v15 /me/a/:slug shape (Overview /
+                  Secrets / Access / Settings tabs) was orphaned — a
+                  creator could publish an app and never discover the
+                  secrets policy, runs, or renderer controls hiding under
+                  /me/a/:slug. */}
+              <Link to={`/me/a/${slug}`} style={secondaryBtn} data-testid="creator-app-manage">
+                Manage
+              </Link>
+              <Link to={`/me/a/${slug}/secrets`} style={secondaryBtn} data-testid="creator-app-secrets">
+                Secrets
               </Link>
               <Link to={`/p/${slug}`} style={secondaryBtn}>
                 View store

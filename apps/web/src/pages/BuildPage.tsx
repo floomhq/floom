@@ -931,11 +931,14 @@ export function BuildPage() {
                 Published
               </div>
               <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 14px' }}>
-                Your app is live at <Link to={`/p/${slug}`}>/p/{slug}</Link>. You can
-                optionally ship a custom React renderer below, or skip and head straight
-                to the run surface.
+                Your app is live. Share the link or install it into Claude
+                Desktop to start running it.
               </p>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {/* Shareable full URL + copy button. Before this fix the
+                  banner only showed "/p/slug" relative path, which is not
+                  shareable outside the current tab. */}
+              <ShareableUrl slug={slug} />
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
                 <button
                   type="button"
                   onClick={() => navigate(`/p/${slug}`)}
@@ -945,6 +948,20 @@ export function BuildPage() {
                 >
                   Open app
                 </button>
+                <Link
+                  to={`/me/a/${slug}`}
+                  className="btn-ghost"
+                  data-testid="build-install-claude"
+                  style={{
+                    padding: '9px 14px',
+                    fontSize: 13,
+                    border: '1px solid var(--line)',
+                    borderRadius: 8,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Install in Claude
+                </Link>
                 <Link
                   to={`/creator/${slug}`}
                   className="btn-ghost"
@@ -1328,16 +1345,75 @@ function SignupToPublishModal({
   );
 }
 
+function ShareableUrl({ slug }: { slug: string }) {
+  // Publish-success shareable URL with one-click copy. Uses the live
+  // origin so the copied value is a full https:// URL, not the relative
+  // /p/slug that the old banner displayed.
+  const [copied, setCopied] = useState(false);
+  const origin =
+    typeof window !== 'undefined' ? window.location.origin : 'https://preview.floom.dev';
+  const fullUrl = `${origin}/p/${slug}`;
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard blocked in some browsers; noop */
+    }
+  }
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        background: '#fff',
+        border: '1px solid #b5dcc4',
+        borderRadius: 8,
+        padding: '8px 10px',
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 12.5,
+        color: 'var(--ink)',
+      }}
+    >
+      <span data-testid="build-done-url" style={{ userSelect: 'all' }}>{fullUrl}</span>
+      <button
+        type="button"
+        onClick={copy}
+        data-testid="build-done-copy"
+        style={{
+          padding: '4px 10px',
+          background: 'var(--accent)',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+}
+
 function StepBadge({ active, done, label }: { active: boolean; done: boolean; label: string }) {
+  // The CSS fallback on --accent-soft used to be #e9e6ff (purple), which
+  // violates Floom's "green accent only" brand rule. Fall back to a green
+  // tint so the active step reads clearly, and outline the active pill so
+  // it stands out against completed ones.
   return (
     <span
       style={{
         padding: '6px 12px',
         borderRadius: 999,
         fontWeight: 600,
-        background: done ? '#e6f4ea' : active ? 'var(--accent-soft, #e9e6ff)' : 'var(--bg)',
+        background: done ? '#e6f4ea' : active ? 'var(--accent-soft, #d7f1e0)' : 'var(--bg)',
         color: done ? '#1a7f37' : active ? 'var(--accent)' : 'var(--muted)',
-        border: '1px solid var(--line)',
+        border: active ? '1px solid var(--accent)' : '1px solid var(--line)',
       }}
     >
       {label}
