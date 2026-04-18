@@ -4,13 +4,13 @@ Floom is the production layer for AI apps that do real work. This spec defines h
 
 ## One spec, every surface
 
-A tool becomes a Floom app by providing an **OpenAPI spec** — either as a URL (proxied mode) or embedded in a repo (hosted mode). From that spec, Floom derives every agent-callable surface and wraps it in a full production layer.
+A tool becomes a Floom app by providing an **OpenAPI spec**, either as a URL (proxied mode) or embedded in a repo (hosted mode). From that spec, Floom derives every agent-callable surface and wraps it in a full production layer.
 
 ## The manifest
 
 Two modes:
 
-### Proxied — wrap an existing API
+### Proxied: wrap an existing API
 
 ```yaml
 name: stripe
@@ -21,7 +21,7 @@ auth: bearer
 secrets: [STRIPE_SECRET_KEY]
 ```
 
-### Hosted — Floom runs your app
+### Hosted: Floom runs your app
 
 ```yaml
 name: my-app
@@ -68,10 +68,10 @@ docker run -p 3000:3000 \
 
 OpenAPI is the industry-standard contract for describing an API. Every serious SaaS publishes one. Every code-generator tool reads one. Floom meeting creators at the OpenAPI layer means:
 
-1. **Zero new format to learn** — you probably already have an OpenAPI spec
-2. **Single source of truth** — the spec is the contract; every surface is derived mechanically
-3. **No drift** — when the spec changes, every surface updates
-4. **Instant ecosystem compatibility** — works with every tool that speaks OpenAPI
+1. **Zero new format to learn**: you probably already have an OpenAPI spec
+2. **Single source of truth**: the spec is the contract; every surface is derived mechanically
+3. **No drift**: when the spec changes, every surface updates
+4. **Instant ecosystem compatibility**: works with every tool that speaks OpenAPI
 
 ## API surface
 
