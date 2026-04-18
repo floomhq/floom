@@ -57,7 +57,7 @@ export function MeRail({
     <aside
       data-testid="me-rail"
       // On narrow viewports (<720px) the 260px sidebar starves the main
-      // column of horizontal space — on /me/a/:slug this collapses the
+      // column of horizontal space — on /me/apps/:slug this collapses the
       // description into a vertical one-char-per-line column. Hiding the
       // rail below this breakpoint restores mobile readability. Nav still
       // works via the TopBar + hamburger menu.
@@ -155,7 +155,7 @@ export function MeRail({
               return (
                 <Link
                   key={app.slug}
-                  to={`/me/a/${app.slug}`}
+                  to={`/me/apps/${app.slug}`}
                   data-testid={`me-rail-app-${app.slug}`}
                   style={{
                     display: 'flex',

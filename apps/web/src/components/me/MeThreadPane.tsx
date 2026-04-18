@@ -1,6 +1,6 @@
 // v15.1 right-hand pane. Given one run (treated as a single-turn
 // "thread"), render the user's prompt + the app's response with an
-// "Open in full →" deep-link to /me/a/<slug>/run and the standard
+// "Open in full →" deep-link to /me/apps/<slug>/run and the standard
 // header used across /me wireframes.
 
 import type { ReactNode } from 'react';
@@ -117,7 +117,7 @@ export function MeThreadPane({
         </div>
         {appSlug && (
           <Link
-            to={`/me/a/${appSlug}/run?run=${encodeURIComponent(thread.id)}`}
+            to={`/me/apps/${appSlug}/run?run=${encodeURIComponent(thread.id)}`}
             data-testid="me-thread-open-full"
             style={{
               fontSize: 12,

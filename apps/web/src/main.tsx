@@ -80,6 +80,22 @@ function PSlugDashboardRedirect() {
   return <Navigate to={`/creator/${slug ?? ''}`} replace />;
 }
 
+// Legacy /me/a/:slug → /me/apps/:slug (lock-in 2026-04-18). The shorter form
+// was v15.2 preview-only; wireframes and docs use /me/apps/:slug. These
+// redirects keep old bookmarks + shared links alive.
+function MeAppRedirect() {
+  const { slug } = useParams<{ slug: string }>();
+  return <Navigate to={`/me/apps/${slug ?? ''}`} replace />;
+}
+function MeAppSecretsRedirect() {
+  const { slug } = useParams<{ slug: string }>();
+  return <Navigate to={`/me/apps/${slug ?? ''}/secrets`} replace />;
+}
+function MeAppRunRedirect() {
+  const { slug } = useParams<{ slug: string }>();
+  return <Navigate to={`/me/apps/${slug ?? ''}/run`} replace />;
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <IconSprite />
@@ -102,10 +118,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/me/install" element={<MeInstallPage />} />
         <Route path="/me/runs/:runId" element={<MeRunDetailPage />} />
         <Route path="/me/settings" element={<MeSettingsPage />} />
-        {/* v15.2: per-app overview / secrets / run surfaces for owned apps. */}
-        <Route path="/me/a/:slug" element={<MeAppPage />} />
-        <Route path="/me/a/:slug/secrets" element={<MeAppSecretsPage />} />
-        <Route path="/me/a/:slug/run" element={<MeAppRunPage />} />
+        {/* v15.2 locked 2026-04-18: per-app overview / secrets / run surfaces
+            for owned apps. Canonical path is /me/apps/:slug to match the
+            wireframes and the "apps" vocabulary used everywhere else. */}
+        <Route path="/me/apps/:slug" element={<MeAppPage />} />
+        <Route path="/me/apps/:slug/secrets" element={<MeAppSecretsPage />} />
+        <Route path="/me/apps/:slug/run" element={<MeAppRunPage />} />
+        {/* Legacy /me/a/:slug redirects (preserve old bookmarks). */}
+        <Route path="/me/a/:slug" element={<MeAppRedirect />} />
+        <Route path="/me/a/:slug/secrets" element={<MeAppSecretsRedirect />} />
+        <Route path="/me/a/:slug/run" element={<MeAppRunRedirect />} />
         {/* W4-minimal: creator flow */}
         <Route path="/build" element={<BuildPage />} />
         <Route path="/creator" element={<CreatorPage />} />

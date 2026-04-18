@@ -1,4 +1,4 @@
-// /me/a/:slug/secrets — per-app, per-secret policy + vault UI.
+// /me/apps/:slug/secrets — per-app, per-secret policy + vault UI.
 //
 // Two views:
 //
@@ -153,7 +153,7 @@ export function MeAppSecretsPage() {
             <span style={{ margin: '0 6px' }}>›</span>
             {app ? (
               <Link
-                to={`/me/a/${app.slug}`}
+                to={`/me/apps/${app.slug}`}
                 style={{ color: 'var(--muted)', textDecoration: 'none' }}
               >
                 {app.name}

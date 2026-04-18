@@ -117,7 +117,7 @@ export interface AppDetail extends HubApp {
   manifest: NormalizedManifest;
   /**
    * v15.2 polish: hub emits visibility so the web client can gate
-   * private-only UI (e.g. /me/a/:slug console) and render pills without
+   * private-only UI (e.g. /me/apps/:slug console) and render pills without
    * a second round-trip. Optional for back-compat with older servers.
    */
   visibility?: AppVisibility;
@@ -321,7 +321,7 @@ export interface CreatorApp {
   visibility?: AppVisibility;
   /**
    * v15.2: whether this app runs via the async job queue. Mirrors the
-   * AppDetail.is_async flag so the /me/a/:slug overview can show an
+   * AppDetail.is_async flag so the /me/apps/:slug overview can show an
    * "async · ~60s per run" hint without a second fetch.
    */
   is_async?: boolean;

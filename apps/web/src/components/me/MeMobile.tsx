@@ -300,7 +300,7 @@ function AppsList({ apps }: { apps: CreatorApp[] }) {
         apps.map((app) => (
           <Link
             key={app.slug}
-            to={`/me/a/${app.slug}`}
+            to={`/me/apps/${app.slug}`}
             data-testid={`me-mobile-app-${app.slug}`}
             style={{
               display: 'flex',

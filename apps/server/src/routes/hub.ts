@@ -176,7 +176,7 @@ hubRouter.get('/mine', async (c) => {
       updated_at: row.updated_at,
       run_count: row.run_count || 0,
       last_run_at: row.last_run_at,
-      // v15.2: surfaced so the /me rail + /me/a/:slug header can render
+      // v15.2: surfaced so the /me rail + /me/apps/:slug header can render
       // the private pill and async-run hint without an extra /api/hub/:slug
       // fetch per list item. Additive — older clients ignore these fields.
       visibility: row.visibility,
@@ -383,7 +383,7 @@ hubRouter.get('/:slug', async (c) => {
     icon: row.icon,
     manifest,
     // Visibility (public | unlisted | private). Surfaced so the web client
-    // can render visibility pills and gate private-only UI (e.g. /me/a/:slug
+    // can render visibility pills and gate private-only UI (e.g. /me/apps/:slug
     // console) without re-fetching from a separate endpoint.
     visibility: row.visibility,
     // Async job queue (v0.3.0). Surfaced so the web client switches to the
