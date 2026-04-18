@@ -189,8 +189,11 @@ function loadWorkspaceDek(workspace_id: string): Buffer {
 /**
  * Encrypt `plaintext` under the workspace DEK. Returns the tuple that lands
  * in user_secrets (all hex strings).
+ *
+ * Exported so sibling services (e.g. app_creator_secrets) can reuse the
+ * envelope scheme without duplicating the crypto.
  */
-function encryptValue(
+export function encryptValue(
   workspace_id: string,
   plaintext: string,
 ): { ciphertext: string; nonce: string; auth_tag: string } {
@@ -208,8 +211,11 @@ function encryptValue(
 
 /**
  * Decrypt a stored row. Throws SecretDecryptError on tamper or wrong DEK.
+ *
+ * Exported alongside encryptValue so app_creator_secrets.ts can share the
+ * same envelope scheme.
  */
-function decryptValue(
+export function decryptValue(
   workspace_id: string,
   ciphertext: string,
   nonce: string,

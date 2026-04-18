@@ -22,6 +22,7 @@ import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
 import { stripeRouter } from './routes/stripe.js';
 import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
+import { meAppsRouter } from './routes/me_apps.js';
 import { metricsRouter } from './routes/metrics.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
 import { seedFromFile } from './services/seed.js';
@@ -125,6 +126,10 @@ app.route('/api/stripe', stripeRouter);
 // owns the scoped dashboard queries; /api/apps/:slug/reviews powers the
 // /p/:slug review surface; /api/feedback accepts in-app feedback.
 app.route('/api/me', meRouter);
+// Secrets-policy feature: creator + viewer surface for per-app secret
+// policies and creator-owned secret values. Mounted at /api/me/apps so
+// the URL scheme reads as "this caller's relationship to :slug".
+app.route('/api/me/apps', meAppsRouter);
 app.route('/api/apps', reviewsRouter);
 app.route('/api/feedback', feedbackRouter);
 

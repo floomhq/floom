@@ -15,6 +15,8 @@ import type {
   CreatorRun,
   JobRecord,
   UserSecretsList,
+  SecretPolicy,
+  SecretPoliciesResponse,
 } from '../lib/types';
 
 const API_BASE = '';
@@ -515,6 +517,59 @@ export function setSecret(
 
 export function deleteSecret(key: string): Promise<{ ok: true; removed: boolean }> {
   return request(`/api/secrets/${encodeURIComponent(key)}`, { method: 'DELETE' });
+}
+
+// ---------- secrets-policy: per-app creator-override vs user-vault ----------
+//
+// Thin wrappers around /api/me/apps/:slug/secret-policies and
+// /api/me/apps/:slug/creator-secrets/:key. The list endpoint is open to
+// any authenticated viewer; the mutation endpoints require the caller
+// to be the app's creator and the policy/key to be valid for the app.
+// Plaintext values never flow back from the server — the list response
+// only reports `creator_has_value: boolean`.
+
+export function getSecretPolicies(slug: string): Promise<SecretPoliciesResponse> {
+  return request<SecretPoliciesResponse>(
+    `/api/me/apps/${encodeURIComponent(slug)}/secret-policies`,
+  );
+}
+
+export function setSecretPolicy(
+  slug: string,
+  key: string,
+  policy: SecretPolicy,
+): Promise<{ ok: true; policy: SecretPolicy }> {
+  return request(
+    `/api/me/apps/${encodeURIComponent(slug)}/secret-policies/${encodeURIComponent(key)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ policy }),
+    },
+  );
+}
+
+export function setCreatorSecret(
+  slug: string,
+  key: string,
+  value: string,
+): Promise<{ ok: true; key: string }> {
+  return request(
+    `/api/me/apps/${encodeURIComponent(slug)}/creator-secrets/${encodeURIComponent(key)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    },
+  );
+}
+
+export function deleteCreatorSecret(
+  slug: string,
+  key: string,
+): Promise<{ ok: true; removed: boolean }> {
+  return request(
+    `/api/me/apps/${encodeURIComponent(slug)}/creator-secrets/${encodeURIComponent(key)}`,
+    { method: 'DELETE' },
+  );
 }
 
 // ---------- W4-minimal: feedback ----------

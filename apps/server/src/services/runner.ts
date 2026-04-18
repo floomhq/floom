@@ -5,6 +5,8 @@ import { runAppContainer } from './docker.js';
 import { runProxied } from './proxied-runner.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import * as userSecrets from './user_secrets.js';
+import * as creatorSecrets from './app_creator_secrets.js';
+import type { SecretPolicy } from '../types.js';
 import type {
   AppRecord,
   ErrorType,
@@ -222,7 +224,13 @@ function extractUserLogs(stdout: string): string {
  * Precedence (lowest → highest):
  *   1. Global admin secrets (secrets table, app_id IS NULL)
  *   2. Per-app admin secrets (secrets table, app_id = this app)
- *   3. Per-user persisted secrets (user_secrets table, W2.1)
+ *   3. Per-secret policy (app_secret_policies + app_creator_secrets, W5):
+ *        - policy='creator_override': inject the creator's stored value
+ *          (encrypted under the app's workspace DEK).
+ *        - policy='user_vault' (default): inject the running user's
+ *          value from user_secrets (W2.1), same as before.
+ *      Keys with a creator-override value do NOT fall back to the
+ *      user vault — the creator has explicitly taken ownership.
  *   4. Per-call MCP _auth override (perCallSecrets)
  *
  * `perCallSecrets` (optional) is an override passed by the MCP layer via the
@@ -254,25 +262,70 @@ export function dispatchRun(
   for (const row of globalRows) mergedSecrets[row.name] = row.value;
   for (const row of appRows) mergedSecrets[row.name] = row.value;
 
-  // W2.1: load per-user persisted secrets for the names the manifest declares.
-  // These override admin-level secrets (so a user can bring their own OpenAI
-  // key even if the operator set a workspace-wide default) but are themselves
-  // overridden by per-call MCP _auth.
+  // Per-secret policy split (secrets-policy feature).
+  //
+  // Every key in `needs` is either a 'user_vault' key (load from the
+  // running user's encrypted vault, today's behavior) or a
+  // 'creator_override' key (load from the creator-owned value wrapped
+  // under the app's workspace DEK). The two bags are disjoint: a
+  // creator-override key does NOT fall back to the user vault, which
+  // means users don't have to configure keys their creator took
+  // ownership of, and their own vault row (if any) is ignored for
+  // this app while the override is in effect.
   const runtimeCtx = ctx || defaultContext();
   const needs = manifest.secrets_needed || [];
   if (needs.length > 0) {
-    try {
-      const userLevel = userSecrets.loadForRun(runtimeCtx, needs);
-      for (const [k, v] of Object.entries(userLevel)) {
-        if (v && v.length > 0) mergedSecrets[k] = v;
+    const policies = new Map<string, SecretPolicy>(
+      creatorSecrets
+        .listPolicies(app.id)
+        .map((p) => [p.key, p.policy as SecretPolicy]),
+    );
+    const userVaultKeys = needs.filter(
+      (k) => (policies.get(k) ?? 'user_vault') === 'user_vault',
+    );
+    const creatorKeys = needs.filter(
+      (k) => policies.get(k) === 'creator_override',
+    );
+
+    // Load the creator-owned overrides first. `app.workspace_id` is the
+    // workspace that authored the app; fall back to the runtime ctx's
+    // workspace for apps inserted before the multi-tenant columns were
+    // added (those rows now default to 'local' via the migration).
+    if (creatorKeys.length > 0) {
+      try {
+        const creatorLevel = creatorSecrets.loadCreatorSecretsForRun(
+          app.id,
+          app.workspace_id || runtimeCtx.workspace_id,
+          creatorKeys,
+        );
+        for (const [k, v] of Object.entries(creatorLevel)) {
+          if (v && v.length > 0) mergedSecrets[k] = v;
+        }
+      } catch (err) {
+        console.warn(
+          `[runner] failed to load creator-override secrets for ${app.slug}: ${(err as Error).message}`,
+        );
       }
-    } catch (err) {
-      // Silent on purpose: a missing FLOOM_MASTER_KEY or a crypto error
-      // should not block runs that only use admin-level secrets. The
-      // operator will see the error at first /api/secrets POST instead.
-      console.warn(
-        `[runner] failed to load per-user secrets for ${app.slug}: ${(err as Error).message}`,
-      );
+    }
+
+    // Load per-user persisted secrets only for the keys that are still
+    // the running user's responsibility. We deliberately skip keys the
+    // creator has taken over so a user's stale vault row does not leak
+    // into a run that expects the creator's value.
+    if (userVaultKeys.length > 0) {
+      try {
+        const userLevel = userSecrets.loadForRun(runtimeCtx, userVaultKeys);
+        for (const [k, v] of Object.entries(userLevel)) {
+          if (v && v.length > 0) mergedSecrets[k] = v;
+        }
+      } catch (err) {
+        // Silent on purpose: a missing FLOOM_MASTER_KEY or a crypto error
+        // should not block runs that only use admin-level secrets. The
+        // operator will see the error at first /api/secrets POST instead.
+        console.warn(
+          `[runner] failed to load per-user secrets for ${app.slug}: ${(err as Error).message}`,
+        );
+      }
     }
   }
 

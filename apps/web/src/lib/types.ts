@@ -312,6 +312,35 @@ export interface UserSecretsList {
   entries: UserSecretEntry[];
 }
 
+// ---------- secrets-policy: per-app, per-secret resolution policy ----------
+
+/**
+ * Who supplies the value for one secret key on one app.
+ *
+ *   'user_vault'       — each running user brings their own value via the
+ *                        user vault (/api/secrets). Default.
+ *   'creator_override' — the creator sets a single value the runner
+ *                        injects for every user of this app. Used for
+ *                        shared infra credentials.
+ */
+export type SecretPolicy = 'user_vault' | 'creator_override';
+
+export interface SecretPolicyEntry {
+  key: string;
+  policy: SecretPolicy;
+  /**
+   * True when the creator has stored a value for this key. The
+   * plaintext is NEVER sent to the client — this flag lets the UI
+   * render a "value set" vs "no value yet" badge without leaking.
+   */
+  creator_has_value: boolean;
+  updated_at?: string;
+}
+
+export interface SecretPoliciesResponse {
+  policies: SecretPolicyEntry[];
+}
+
 export interface CreatorRun {
   id: string;
   action: string;
