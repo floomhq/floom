@@ -8,6 +8,7 @@
     "dev": "turbo dev",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:hub-smoke": "pnpm --filter @floom/hub-smoke test:fast",
     "lint": "turbo lint"
   },
   "devDependencies": {

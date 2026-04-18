@@ -1,0 +1,73 @@
+# Browser smoke: seven deterministic fast-apps on a live Floom URL (default preview).
+# Anonymous runs stay under per-IP rate limits (7 ≪ 20/hr).
+name: Hub smoke (Playwright)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'
+  pull_request:
+    paths:
+      - 'packages/hub-smoke/**'
+      - 'apps/web/**'
+      - '.github/workflows/hub-smoke.yml'
+
+jobs:
+  fast-apps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        working-directory: packages/hub-smoke
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Fast seven (anon)
+        working-directory: packages/hub-smoke
+        env:
+          # Override in the workflow file or via `vars.FLOOM_HUB_SMOKE_URL` if you add it to the repo
+          BASE_URL: ${{ vars.FLOOM_HUB_SMOKE_URL }}
+        run: |
+          export BASE_URL="${BASE_URL:-https://preview.floom.dev}"
+          pnpm exec playwright test tests/fast-apps.spec.ts
+
+  # Optional: set repo secrets E2E_EMAIL + E2E_PASSWORD (preview account) to run nightly.
+  full-hub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        working-directory: packages/hub-smoke
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Full hub (auth)
+        working-directory: packages/hub-smoke
+        env:
+          BASE_URL: ${{ vars.FLOOM_HUB_SMOKE_URL }}
+          E2E_EMAIL: ${{ secrets.HUB_SMOKE_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.HUB_SMOKE_E2E_PASSWORD }}
+        run: |
+          export BASE_URL="${BASE_URL:-https://preview.floom.dev}"
+          if [ -z "$E2E_EMAIL" ] || [ -z "$E2E_PASSWORD" ]; then
+            echo "Skipping full hub: set secrets HUB_SMOKE_E2E_EMAIL and HUB_SMOKE_E2E_PASSWORD"
+            exit 0
+          fi
+          pnpm exec playwright test tests/hub-full.spec.ts
