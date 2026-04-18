@@ -133,7 +133,13 @@ export function AppsDirectoryPage() {
     }
     if (trimmedSearch) {
       list = list.filter((app) =>
-        [app.name, app.description, app.category ?? '', app.author ?? '']
+        [
+          app.name,
+          app.description,
+          app.category ?? '',
+          app.author ?? '',
+          app.author_display ?? '',
+        ]
           .join(' ')
           .toLowerCase()
           .includes(trimmedSearch),

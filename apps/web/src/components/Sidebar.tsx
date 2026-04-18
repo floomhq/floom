@@ -48,7 +48,9 @@ export function Sidebar({ app, open, onClose }: Props) {
             </div>
             <div>
               <p className="sidebar-app-name">{app.name}</p>
-              <p className="sidebar-app-creator">{app.author || '@floomhq'}</p>
+              <p className="sidebar-app-creator">
+                {app.author_display || app.author || '@floomhq'}
+              </p>
               {app.category && <span className="category-pill">{app.category}</span>}
             </div>
           </div>

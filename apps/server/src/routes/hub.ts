@@ -29,6 +29,20 @@ import type { OutputShape } from '@floom/renderer/contract';
 
 export const hubRouter = new Hono();
 
+function authorDisplayFromRow(
+  row: AppRecord & { author_name?: string | null; author_email?: string | null },
+): string | null {
+  if (row.author_name && String(row.author_name).trim()) {
+    return String(row.author_name).trim();
+  }
+  const em = row.author_email;
+  if (em && em.includes('@')) {
+    const local = em.split('@')[0];
+    if (local) return local;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------
 // Detect + ingest (creator publish flow)
 // ---------------------------------------------------------------------
@@ -55,6 +69,7 @@ const IngestBody = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*$/)
     .optional(),
   category: z.string().max(48).optional(),
+  visibility: z.enum(['public', 'private', 'auth-required']).optional(),
 });
 
 hubRouter.post('/detect', async (c) => {
@@ -110,6 +125,7 @@ hubRouter.post('/ingest', async (c) => {
       description: parsed.data.description,
       slug: parsed.data.slug,
       category: parsed.data.category,
+      visibility: parsed.data.visibility,
       workspace_id: ctx.workspace_id,
       author_user_id: ctx.user_id,
     });
@@ -283,21 +299,25 @@ hubRouter.get('/', (c) => {
   // `sort=name`, `sort=newest`, `sort=category` remain supported for
   // creator views that want a predictable lexical order.
   let orderBy =
-    'featured DESC, (avg_run_ms IS NULL) ASC, avg_run_ms ASC, created_at DESC, name ASC';
-  if (sort === 'name') orderBy = 'name ASC';
-  if (sort === 'newest') orderBy = 'created_at DESC';
-  if (sort === 'category') orderBy = 'category, name';
+    'apps.featured DESC, (apps.avg_run_ms IS NULL) ASC, apps.avg_run_ms ASC, apps.created_at DESC, apps.name ASC';
+  if (sort === 'name') orderBy = 'apps.name ASC';
+  if (sort === 'newest') orderBy = 'apps.created_at DESC';
+  if (sort === 'category') orderBy = 'apps.category, apps.name';
 
   // Public directory: only apps with visibility='public' (or NULL for
   // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
-  const sql = `SELECT * FROM apps
-                 WHERE status = 'active'
-                   AND (visibility = 'public' OR visibility IS NULL)
-                   ${category ? "AND category = ?" : ''}
+  const sql = `SELECT apps.*, users.name AS author_name, users.email AS author_email
+                 FROM apps
+                 LEFT JOIN users ON apps.author = users.id
+                 WHERE apps.status = 'active'
+                   AND (apps.visibility = 'public' OR apps.visibility IS NULL)
+                   ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
   const rows = (category
     ? db.prepare(sql).all(category)
-    : db.prepare(sql).all()) as AppRecord[];
+    : db.prepare(sql).all()) as Array<
+    AppRecord & { author_name: string | null; author_email: string | null }
+  >;
 
   return c.json(
     rows.map((row) => {
@@ -308,6 +328,7 @@ hubRouter.get('/', (c) => {
         description: row.description,
         category: row.category,
         author: row.author,
+        author_display: authorDisplayFromRow(row),
         icon: row.icon,
         actions: manifest ? Object.keys(manifest.actions) : [],
         runtime: manifest?.runtime ?? 'python',
@@ -331,7 +352,16 @@ hubRouter.get('/', (c) => {
 
 hubRouter.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const row = db
+    .prepare(
+      `SELECT apps.*, users.name AS author_name, users.email AS author_email
+         FROM apps
+         LEFT JOIN users ON apps.author = users.id
+        WHERE apps.slug = ?`,
+    )
+    .get(slug) as
+    | (AppRecord & { author_name: string | null; author_email: string | null })
+    | undefined;
   if (!row) return c.json({ error: 'App not found' }, 404);
   // Private app? Only reveal to its owner. Return 404 (not 403) so we
   // don't leak the slug's existence to strangers.
@@ -349,6 +379,7 @@ hubRouter.get('/:slug', async (c) => {
     description: row.description,
     category: row.category,
     author: row.author,
+    author_display: authorDisplayFromRow(row),
     icon: row.icon,
     manifest,
     // Visibility (public | unlisted | private). Surfaced so the web client

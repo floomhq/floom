@@ -62,6 +62,8 @@ export interface NormalizedManifest {
   node_dependencies: Record<string, string>;
   secrets_needed: string[];
   manifest_version: '1.0' | '2.0';
+  /** From OpenAPI info.license at ingest */
+  license?: string;
 }
 
 export interface HubApp {
@@ -70,6 +72,11 @@ export interface HubApp {
   description: string;
   category: string | null;
   author: string | null;
+  /**
+   * Resolved from `users.name` / email when `author` matches a cloud user id.
+   * Prefer this for display over raw `author`.
+   */
+  author_display?: string | null;
   icon: string | null;
   actions: string[];
   runtime: string;
