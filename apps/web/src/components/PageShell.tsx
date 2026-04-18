@@ -15,6 +15,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { TopBar } from './TopBar';
 import { Footer } from './Footer';
 import { FeedbackButton } from './FeedbackButton';
+import { RouteLoading } from './RouteLoading';
 import { useSession } from '../hooks/useSession';
 
 interface Props {
@@ -30,9 +31,18 @@ export function PageShell({
   title,
   contentStyle,
 }: Props) {
-  const { data, loading } = useSession();
+  const { data, loading, error } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const sessionPendingForCloud =
+    requireAuth === 'cloud' && (loading || (data === null && !error));
+  const cloudNeedsLoginRedirect =
+    requireAuth === 'cloud' &&
+    !!data &&
+    data.cloud_mode &&
+    data.user.is_local;
+  const showCloudAuthLoading = sessionPendingForCloud || cloudNeedsLoginRedirect;
 
   // Only cloud mode forces a real login; in OSS mode the synthetic local
   // user can access every page so self-hosters can demo without any auth.
@@ -64,7 +74,7 @@ export function PageShell({
           ...contentStyle,
         }}
       >
-        {children}
+        {showCloudAuthLoading ? <RouteLoading variant="embed" /> : children}
       </main>
       <Footer />
       <FeedbackButton />

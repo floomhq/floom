@@ -42,7 +42,9 @@ export function MeAppPage() {
         if (cancelled) return;
         const status = (err as { status?: number }).status;
         if (status === 404) {
-          nav('/me', { replace: true });
+          const q = new URLSearchParams({ notice: 'app_not_found' });
+          if (slug) q.set('slug', slug);
+          nav(`/me?${q.toString()}`, { replace: true });
           return;
         }
         setError((err as Error).message || 'Failed to load app');
@@ -219,6 +221,12 @@ export function TabBar({ slug, active }: { slug: string; active: TabId }) {
           return (
             <span
               key={tab.id}
+              role="tab"
+              aria-selected={false}
+              aria-disabled="true"
+              aria-label={`${tab.label} (coming soon)`}
+              tabIndex={-1}
+              data-testid={`me-app-tab-${tab.id}`}
               title="Coming soon"
               style={{
                 ...base,
