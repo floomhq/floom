@@ -33,6 +33,59 @@ export type OutputShape =
   | 'error';
 
 /**
+ * The 14 canonical input shapes Floom ships default renderers for. A manifest
+ * can pin any parameter's input to one of these via
+ * `x-floom-input-shape: <shape>`, or leave it unset and Floom's
+ * schema-to-shape discriminator will pick one.
+ */
+export type InputShape =
+  | 'text'
+  | 'textarea'
+  | 'code'
+  | 'url'
+  | 'number'
+  | 'enum'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'file'
+  | 'image'
+  | 'csv'
+  | 'multifile'
+  | 'json';
+
+export const INPUT_SHAPES: readonly InputShape[] = [
+  'text',
+  'textarea',
+  'code',
+  'url',
+  'number',
+  'enum',
+  'boolean',
+  'date',
+  'datetime',
+  'file',
+  'image',
+  'csv',
+  'multifile',
+  'json',
+] as const;
+
+/**
+ * Per-operation UX shape, set by `x-floom-shape` on an OpenAPI operation.
+ *
+ *   prompt — textarea composer + Claude interprets prose into fields; thread
+ *            history with refinement (flyfast, openpaper, research agents).
+ *   form   — schema form with `<SchemaInput>` per field + Run button; run-log
+ *            history (html-to-pdf, resize-image, csv-transform).
+ *   auto   — default: if the op has exactly one field and that field resolves
+ *            to `textarea` shape, treat as prompt; else form.
+ */
+export type AppShape = 'prompt' | 'form' | 'auto';
+
+export const APP_SHAPES: readonly AppShape[] = ['prompt', 'form', 'auto'] as const;
+
+/**
  * A partial JSON Schema (post-dereference). Default renderers introspect this
  * to decide how to display the data (e.g. an `array` of objects with uniform
  * keys becomes a table). Custom renderers usually ignore it.
@@ -44,6 +97,26 @@ export interface ResponseSchema {
   items?: ResponseSchema;
   properties?: Record<string, ResponseSchema>;
   // Free-form extension fields (x-floom-*, x-display-hint, etc.).
+  [key: string]: unknown;
+}
+
+/**
+ * A partial JSON Schema for a request parameter or request-body field. The
+ * input-shape discriminator walks this plus its `x-floom-*` extensions. Same
+ * free-form extension bag as `ResponseSchema` so both sides can share code.
+ */
+export interface ParameterSchema {
+  type?: string;
+  format?: string;
+  /** Preferred OpenAPI 3.1 key; falls back to `contentType` for older specs. */
+  contentMediaType?: string;
+  contentType?: string;
+  enum?: unknown[];
+  maxLength?: number;
+  minLength?: number;
+  items?: ParameterSchema;
+  properties?: Record<string, ParameterSchema>;
+  // Free-form extension fields (x-floom-input-shape, x-floom-language, etc.).
   [key: string]: unknown;
 }
 
@@ -104,8 +177,12 @@ export interface RendererManifest {
   kind: 'default' | 'component';
   /** Source file relative to the manifest. Required when kind === 'component'. */
   entry?: string;
-  /** Optional pin: force a specific default shape even when a custom component ships (used as the error-fallback). */
+  /** Optional pin: force a specific default output shape even when a custom component ships (used as the error-fallback). */
   output_shape?: OutputShape;
+  /** Optional global pin for all request inputs on this operation. Per-parameter `x-floom-input-shape` wins over this. */
+  input_shape?: InputShape;
+  /** Optional pin for the operation-level UX mode. Parsed from `x-floom-shape` by the ingest pipeline; defaults to `auto`. */
+  shape?: AppShape;
 }
 
 /**
@@ -175,6 +252,24 @@ export function parseRendererManifest(raw: unknown): RendererManifest {
     }
     result.output_shape = shape as OutputShape;
   }
+  if (obj.input_shape !== undefined) {
+    const shape = obj.input_shape;
+    if (typeof shape !== 'string' || !INPUT_SHAPES.includes(shape as InputShape)) {
+      throw new Error(
+        `renderer.input_shape must be one of ${INPUT_SHAPES.join(', ')}, got ${JSON.stringify(shape)}`,
+      );
+    }
+    result.input_shape = shape as InputShape;
+  }
+  if (obj.shape !== undefined) {
+    const shape = obj.shape;
+    if (typeof shape !== 'string' || !APP_SHAPES.includes(shape as AppShape)) {
+      throw new Error(
+        `renderer.shape must be one of ${APP_SHAPES.join(', ')}, got ${JSON.stringify(shape)}`,
+      );
+    }
+    result.shape = shape as AppShape;
+  }
   return result;
 }
 
@@ -240,4 +335,113 @@ export function pickOutputShape(schema: ResponseSchema | undefined | null): Outp
   }
 
   return 'text';
+}
+
+/**
+ * Pure discriminator: walk a parameter schema and pick the best default input
+ * shape. Precedence (first match wins):
+ *
+ *   1. Explicit `x-floom-input-shape` vendor extension.
+ *   2. `type: string, format: binary, contentMediaType: text/csv`  → csv
+ *   3. `type: string, format: binary, contentMediaType: image/*`   → image
+ *   4. `type: string, format: binary`                               → file
+ *   5. `type: array,  items.format: binary`                         → multifile
+ *   6. `type: string, format: date`                                 → date
+ *   7. `type: string, format: date-time`                            → datetime
+ *   8. `type: string, format: uri`                                  → url
+ *   9. `type: string, enum`                                         → enum
+ *  10. `type: string, contentMediaType: application/json`           → json
+ *  11. `type: string, x-floom-language`                             → code
+ *  12. `type: string, maxLength > 200` | `x-floom-multiline: true`  → textarea
+ *  13. `type: string`                                               → text
+ *  14. `type: number | type: integer`                               → number
+ *  15. `type: boolean`                                              → boolean
+ *
+ * Never throws. Unknown schemas fall through to `text`.
+ */
+export function pickInputShape(schema: ParameterSchema | undefined | null): InputShape {
+  if (!schema || typeof schema !== 'object') return 'text';
+
+  const bag = schema as Record<string, unknown>;
+
+  // 1. explicit vendor extension wins
+  const ext = bag['x-floom-input-shape'];
+  if (typeof ext === 'string' && INPUT_SHAPES.includes(ext as InputShape)) {
+    return ext as InputShape;
+  }
+
+  const ct =
+    typeof schema.contentMediaType === 'string'
+      ? schema.contentMediaType.toLowerCase()
+      : typeof schema.contentType === 'string'
+      ? schema.contentType.toLowerCase()
+      : undefined;
+
+  // 2-4. file-family shapes (binary)
+  if (schema.type === 'string' && schema.format === 'binary') {
+    if (ct === 'text/csv') return 'csv';
+    if (ct && ct.startsWith('image/')) return 'image';
+    return 'file';
+  }
+
+  // 5. multifile
+  if (schema.type === 'array' && schema.items) {
+    const item = schema.items;
+    const itemCt =
+      typeof item.contentMediaType === 'string'
+        ? item.contentMediaType.toLowerCase()
+        : typeof item.contentType === 'string'
+        ? item.contentType.toLowerCase()
+        : undefined;
+    if (item.type === 'string' && item.format === 'binary') {
+      if (itemCt === 'text/csv') return 'csv';
+      if (itemCt && itemCt.startsWith('image/')) return 'image';
+      return 'multifile';
+    }
+  }
+
+  // 6-13. string sub-shapes
+  if (schema.type === 'string') {
+    if (schema.format === 'date') return 'date';
+    if (schema.format === 'date-time') return 'datetime';
+    if (schema.format === 'uri' || schema.format === 'url') return 'url';
+    if (Array.isArray(schema.enum) && schema.enum.length > 0) return 'enum';
+    if (ct === 'application/json') return 'json';
+    if (bag['x-floom-language']) return 'code';
+    const multiline = bag['x-floom-multiline'];
+    if (multiline === true || (typeof schema.maxLength === 'number' && schema.maxLength > 200)) {
+      return 'textarea';
+    }
+    return 'text';
+  }
+
+  // 14-15. primitives
+  if (schema.type === 'number' || schema.type === 'integer') return 'number';
+  if (schema.type === 'boolean') return 'boolean';
+
+  return 'text';
+}
+
+/**
+ * Resolve a per-operation `AppShape`. Given the op's declared shape and the
+ * list of resolved `InputShape`s (post-`pickInputShape`), compute whether this
+ * surface should render in prompt or form mode.
+ *
+ *   - `prompt`        → returns `prompt` unconditionally
+ *   - `form`          → returns `form` unconditionally
+ *   - `auto` (default)→ `prompt` if there is exactly one field AND that field
+ *                       is `textarea` or `text`; else `form`.
+ *
+ * Callers can pass `undefined` / `null` for the op shape to mean `auto`.
+ */
+export function resolveAppShape(
+  opShape: AppShape | undefined | null,
+  inputShapes: readonly InputShape[],
+): Exclude<AppShape, 'auto'> {
+  if (opShape === 'prompt' || opShape === 'form') return opShape;
+  if (inputShapes.length === 1) {
+    const only = inputShapes[0];
+    if (only === 'textarea' || only === 'text') return 'prompt';
+  }
+  return 'form';
 }
