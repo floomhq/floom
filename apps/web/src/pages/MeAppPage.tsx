@@ -18,7 +18,7 @@ import { MeRail } from '../components/me/MeRail';
 import { AppIcon } from '../components/AppIcon';
 import * as api from '../api/client';
 import type { AppDetail, CreatorRun } from '../lib/types';
-import { formatTime } from './MePage';
+import { formatTime } from '../lib/time';
 
 export function MeAppPage() {
   const { slug } = useParams<{ slug: string }>();

@@ -11,7 +11,7 @@ import { PageShell } from '../components/PageShell';
 import { CustomRendererPanel } from '../components/CustomRendererPanel';
 import * as api from '../api/client';
 import type { CreatorRun, RendererMeta } from '../lib/types';
-import { formatTime } from './MePage';
+import { formatTime } from '../lib/time';
 
 export function CreatorAppPage() {
   const { slug } = useParams<{ slug: string }>();
