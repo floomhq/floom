@@ -28,13 +28,13 @@ export function fastAppSlugs(): readonly string[] {
 }
 
 /**
- * Fill known textareas/inputs by manifest field id `floom-inp-<name>`.
+ * Fill known textareas/inputs by RunSurface field id `run-surface-inp-<name>`.
  */
 export async function applyFastFixtures(page: Page, slug: string): Promise<void> {
   const fx = FAST_APP_FIXTURES[slug];
   if (!fx) return;
   for (const [name, value] of Object.entries(fx)) {
-    const id = `floom-inp-${name}`;
+    const id = `run-surface-inp-${name}`;
     const loc = page.locator(`#${id}`);
     await loc.waitFor({ state: 'visible', timeout: 15_000 });
     await loc.fill(value);

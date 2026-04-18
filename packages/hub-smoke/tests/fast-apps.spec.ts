@@ -9,7 +9,7 @@ for (const slug of fastAppSlugs()) {
   test(`@fast ${slug}: permalink loads and run succeeds`, async ({ page }) => {
     await page.goto(`/p/${slug}`, { waitUntil: 'domcontentloaded' });
 
-    await expect(page.getByTestId('floom-app')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('run-surface')).toBeVisible({ timeout: 30_000 });
 
     const notFound = page.getByRole('heading', { name: /not found/i });
     if ((await notFound.count()) > 0) {
@@ -18,7 +18,7 @@ for (const slug of fastAppSlugs()) {
 
     await applyFastFixtures(page, slug);
 
-    await page.getByTestId('floom-app-run-btn').click();
+    await page.getByTestId('run-surface-run-btn').click();
 
     const errorBanner = page.getByText('Something went wrong');
     const successIterate = page.locator('.iterate-label');

@@ -23,9 +23,9 @@ test.describe('@full hub directory (auth)', () => {
 
     for (const { slug } of apps) {
       await page.goto(`/p/${slug}`, { waitUntil: 'domcontentloaded' });
-      const floom = page.getByTestId('floom-app');
+      const floom = page.getByTestId('run-surface');
       if ((await floom.count()) === 0) {
-        report.push({ slug, outcome: 'skip', detail: 'no floom-app (not found or blocked)' });
+        report.push({ slug, outcome: 'skip', detail: 'no run-surface (not found or blocked)' });
         continue;
       }
 
@@ -33,7 +33,7 @@ test.describe('@full hub directory (auth)', () => {
         await applyFastFixtures(page, slug);
       }
 
-      await page.getByTestId('floom-app-run-btn').click();
+      await page.getByTestId('run-surface-run-btn').click();
 
       const errorBanner = page.getByText('Something went wrong');
       const successIterate = page.locator('.iterate-label');
