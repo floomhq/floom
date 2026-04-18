@@ -40,13 +40,16 @@ type PendingPublish = {
 export function BuildPage() {
   const [searchParams] = useSearchParams();
   const editSlug = searchParams.get('edit');
+  // v15 landing hands off the pasted OpenAPI URL via /build?openapi=<url>.
+  // Pre-populate the OpenAPI ramp input so the user lands mid-flow.
+  const prefilledOpenapi = searchParams.get('openapi') ?? '';
   const navigate = useNavigate();
   const { isAuthenticated } = useSession();
   const [signupPrompt, setSignupPrompt] = useState(false);
 
   // Inputs shared across ramps
   const [githubUrl, setGithubUrl] = useState('');
-  const [openapiUrl, setOpenapiUrl] = useState('');
+  const [openapiUrl, setOpenapiUrl] = useState(prefilledOpenapi);
 
   // Which ramp submitted last — controls the review heading
   const [source, setSource] = useState<'github' | 'openapi' | null>(null);
