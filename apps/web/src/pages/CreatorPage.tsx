@@ -11,7 +11,7 @@ import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import * as api from '../api/client';
 import type { CreatorApp } from '../lib/types';
-import { formatTime } from './MePage';
+import { formatTime } from '../lib/time';
 
 export function CreatorPage() {
   const [apps, setApps] = useState<CreatorApp[] | null>(null);

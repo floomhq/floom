@@ -356,6 +356,7 @@ meRouter.get('/runs', async (c) => {
     .prepare(
       `SELECT runs.id, runs.action, runs.status, runs.duration_ms,
               runs.started_at, runs.finished_at, runs.error, runs.error_type,
+              runs.inputs,
               apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
          FROM runs
          LEFT JOIN apps ON apps.id = runs.app_id
@@ -372,25 +373,44 @@ meRouter.get('/runs', async (c) => {
     finished_at: string | null;
     error: string | null;
     error_type: string | null;
+    inputs: string | null;
     app_slug: string | null;
     app_name: string | null;
     app_icon: string | null;
   }>;
 
   return c.json({
-    runs: rows.map((r) => ({
-      id: r.id,
-      action: r.action,
-      status: r.status,
-      duration_ms: r.duration_ms,
-      started_at: r.started_at,
-      finished_at: r.finished_at,
-      error: r.error,
-      error_type: r.error_type,
-      app_slug: r.app_slug,
-      app_name: r.app_name,
-      app_icon: r.app_icon,
-    })),
+    runs: rows.map((r) => {
+      // v15.1 /me uses inputs to derive a human-readable thread title
+      // without a per-row detail fetch. Parse defensively — older rows
+      // may have malformed or missing JSON.
+      let inputs: Record<string, unknown> | null = null;
+      if (r.inputs) {
+        try {
+          const parsed = JSON.parse(r.inputs);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            inputs = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // Swallow parse errors: a bad inputs blob shouldn't break the
+          // whole /runs list. UI will fall back to "Run #<id>".
+        }
+      }
+      return {
+        id: r.id,
+        action: r.action,
+        status: r.status,
+        duration_ms: r.duration_ms,
+        started_at: r.started_at,
+        finished_at: r.finished_at,
+        error: r.error,
+        error_type: r.error_type,
+        app_slug: r.app_slug,
+        app_name: r.app_name,
+        app_icon: r.app_icon,
+        inputs,
+      };
+    }),
   });
 });
 

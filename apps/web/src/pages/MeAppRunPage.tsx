@@ -7,7 +7,7 @@
 // runtime details here.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { MeRail } from '../components/me/MeRail';
 import { AppHeader, TabBar } from './MeAppPage';
@@ -34,9 +34,19 @@ const REQUIRED_SECRETS_OVERRIDE: Record<string, string[]> = {
 export function MeAppRunPage() {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const [app, setApp] = useState<AppDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const secrets = useSecrets();
+
+  // v15.1 deep-link: /me composer navigates here with ?prompt=<text> so
+  // the composer text shows up in the app's default form. Only prefill
+  // a "prompt" input — other inputs are scoped to FloomApp's defaults.
+  const prefillPrompt = searchParams.get('prompt');
+  const initialInputs = useMemo<Record<string, unknown> | undefined>(
+    () => (prefillPrompt ? { prompt: prefillPrompt } : undefined),
+    [prefillPrompt],
+  );
 
   useEffect(() => {
     if (!slug) return;
@@ -144,7 +154,12 @@ export function MeAppRunPage() {
               )}
 
               {missingKeys && missingKeys.length === 0 && (
-                <FloomApp app={app} standalone showSidebar={false} />
+                <FloomApp
+                  app={app}
+                  standalone
+                  showSidebar={false}
+                  initialInputs={initialInputs}
+                />
               )}
             </>
           )}

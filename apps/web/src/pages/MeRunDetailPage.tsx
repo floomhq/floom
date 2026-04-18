@@ -9,7 +9,7 @@ import { Link, useParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import * as api from '../api/client';
 import type { MeRunDetail } from '../lib/types';
-import { formatTime } from './MePage';
+import { formatTime } from '../lib/time';
 
 export function MeRunDetailPage() {
   const { runId } = useParams<{ runId: string }>();

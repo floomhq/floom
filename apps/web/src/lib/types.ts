@@ -223,6 +223,13 @@ export interface MeRunSummary {
   app_slug: string | null;
   app_name: string | null;
   app_icon: string | null;
+  /**
+   * v15.1 /me: the run's input payload, surfaced on the summary response
+   * so the threads rail can derive a human-readable title (inputs.prompt
+   * or the first string input) without a per-row detail fetch. Optional
+   * for back-compat with older servers.
+   */
+  inputs?: Record<string, unknown> | null;
 }
 
 export interface MeRunDetail extends MeRunSummary {
