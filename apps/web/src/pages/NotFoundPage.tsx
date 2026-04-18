@@ -18,28 +18,28 @@ export function NotFoundPage() {
           paddingBottom: 72,
         }}
       >
-        {/* Brand echo: large glowing mark sits behind the headline.
+        {/* Brand echo: small glowing mark sits behind the headline.
             Round 2 polish: previously the mark was centered on the main
             axis (top: 50%, translate -64%), which pulled it over the
-            pills row. Raise it above the headline so it reads as a
-            watermark for the "404" text, not as an overlap on the CTA
-            buttons. pointerEvents: none keeps it non-interactive. */}
+            pills row. Shrink it to 240px and anchor it at the top so
+            its bounding box clears the CTA row at 1440x900. Geometry
+            gate: pills top must exceed the mark's bottom. */}
         <div
           aria-hidden="true"
           data-testid="not-found-glow"
           style={{
             position: 'absolute',
-            top: 72,
+            top: 40,
             left: '50%',
             transform: 'translateX(-50%)',
-            width: 320,
-            height: 320,
+            width: 240,
+            height: 240,
             pointerEvents: 'none',
             opacity: 0.14,
             zIndex: 0,
           }}
         >
-          <Logo size={320} variant="glow" />
+          <Logo size={240} variant="glow" />
         </div>
 
         <div
@@ -48,7 +48,7 @@ export function NotFoundPage() {
             zIndex: 1,
             maxWidth: 560,
             margin: '0 auto',
-            padding: '120px 24px 40px',
+            padding: '300px 24px 40px',
           }}
         >
           <h1 className="headline" style={{ fontSize: 48, margin: '0 0 14px' }}>

@@ -617,83 +617,105 @@ export function BuildPage({
               </button>
             </form>
 
-            {/* Secondary ramp — Docker. Round 2 polish: single compact
-                card below the functional ramps so "coming soon" never
-                appears above the fold. Clicking opens the coming-soon
-                modal with context. */}
-            <RampCard
-              icon={<DockerIcon />}
-              title="Import from a Docker image"
-              badge="Coming soon"
-              desc="Paste an image and the OpenAPI path. Floom pulls, scans, and deploys behind the production layer."
-              testId="ramp-docker"
-              onClick={() => setComingSoon('docker')}
-              compact
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  opacity: 0.85,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <input
-                  disabled
-                  placeholder="ghcr.io/you/app:latest"
-                  style={{
-                    flex: '2 1 220px',
-                    padding: '10px 12px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    background: 'var(--bg)',
-                    fontSize: 13,
-                    color: 'var(--muted)',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <input
-                  disabled
-                  placeholder="/openapi.yaml"
-                  style={{
-                    flex: '1 1 140px',
-                    padding: '10px 12px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    background: 'var(--bg)',
-                    fontSize: 13,
-                    color: 'var(--muted)',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            </RampCard>
-
-            {/* More-ways footer — one line, below everything, replaces
-                the prior closed "More ways (coming soon)" accordion that
-                was positioned above the functional Docker + OpenAPI
-                ramps (UI audit v2). */}
-            <p
+            {/* More-ways footer — single collapsed disclosure after the
+                functional ramps. Round 2 polish (UI audit v2): Docker
+                + other non-shipping ramps must not be visible above the
+                fold at 1440x900, so they live inside a closed <details>
+                the creator can expand. This keeps "coming soon" copy
+                off the initial view while leaving the Docker ramp
+                discoverable. */}
+            <details
               data-testid="build-more-ways-footer"
               style={{
-                marginTop: 16,
-                fontSize: 13,
-                color: 'var(--muted)',
-                lineHeight: 1.55,
-                textAlign: 'center',
+                marginTop: 24,
+                border: '1px solid var(--line)',
+                borderRadius: 12,
+                background: 'var(--bg)',
+                padding: '0 4px',
               }}
             >
-              Describe-it and tool connectors are coming with v1.1. Post to the{' '}
-              <a
-                href="/protocol"
-                style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}
+              <summary
+                data-testid="build-more-ways-summary"
+                style={{
+                  cursor: 'pointer',
+                  padding: '12px 14px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: 'var(--muted)',
+                  userSelect: 'none',
+                }}
               >
-                roadmap
-              </a>{' '}
-              to request yours.
-            </p>
+                More ways to add an app
+              </summary>
+              <div style={{ padding: '4px 12px 16px' }}>
+                <RampCard
+                  icon={<DockerIcon />}
+                  title="Import from a Docker image"
+                  badge="Coming soon"
+                  desc="Paste an image and the OpenAPI path. Floom pulls, scans, and deploys behind the production layer."
+                  testId="ramp-docker"
+                  onClick={() => setComingSoon('docker')}
+                  compact
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      opacity: 0.85,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <input
+                      disabled
+                      placeholder="ghcr.io/you/app:latest"
+                      style={{
+                        flex: '2 1 220px',
+                        padding: '10px 12px',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        background: 'var(--bg)',
+                        fontSize: 13,
+                        color: 'var(--muted)',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                    <input
+                      disabled
+                      placeholder="/openapi.yaml"
+                      style={{
+                        flex: '1 1 140px',
+                        padding: '10px 12px',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        background: 'var(--bg)',
+                        fontSize: 13,
+                        color: 'var(--muted)',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                </RampCard>
+                <p
+                  style={{
+                    marginTop: 12,
+                    marginBottom: 0,
+                    fontSize: 12.5,
+                    color: 'var(--muted)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  Describe-it and tool connectors ship with v1.1.{' '}
+                  <a
+                    href="/protocol"
+                    style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}
+                  >
+                    Post to the roadmap &rarr;
+                  </a>
+                </p>
+              </div>
+            </details>
           </div>
         )}
 
