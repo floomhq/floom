@@ -1,0 +1,22 @@
+{
+  "name": "@floom/cli",
+  "version": "0.3.0",
+  "type": "module",
+  "bin": {
+    "floom": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "echo 'CLI build requires compiled deps — skipping for monorepo build. Use pnpm publish flow.'",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@floom/runtime": "workspace:*",
+    "commander": "12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "tsx": "4.21.0",
+    "typescript": "5.6.3"
+  }
+}
