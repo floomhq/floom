@@ -105,33 +105,19 @@ export function Logo({
     );
   }
 
-  // plain (default) — unchanged layout to preserve existing surfaces.
-  const fontSize = Math.round(size * 0.5);
-  const radius = Math.max(6, Math.round(size * 0.29));
+  // plain (default) — flat pennant SVG, no halo. Crisp at every size and
+  // matches the landing `glow` mark in silhouette so the brand reads the
+  // same across in-app chrome and marketing surfaces.
   return (
     <span className={rootClass}>
-      <span
-        aria-label="Floom"
-        role="img"
-        style={{
-          width: size,
-          height: size,
-          borderRadius: radius,
-          background: 'linear-gradient(135deg, #059669, #10b981)',
-          color: '#fff',
-          fontWeight: 700,
-          fontSize,
-          fontFamily: 'Inter, system-ui, sans-serif',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow:
-            '0 1px 2px rgba(5, 150, 105, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25)',
-          lineHeight: 1,
-        }}
-      >
-        f
-      </span>
+      <img
+        src="/floom-mark.svg"
+        alt="Floom"
+        width={size}
+        height={size}
+        style={{ width: size, height: size, display: 'inline-block' }}
+        draggable={false}
+      />
       {wordmark}
     </span>
   );

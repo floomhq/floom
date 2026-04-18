@@ -15,6 +15,7 @@ import { McpSnippet } from '../components/home/McpSnippet';
 import { BuiltBy } from '../components/home/BuiltBy';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
+import { publicHubApps } from '../lib/hub-filter';
 import { LAUNCH_APPS } from '../data/demoData';
 
 interface Stripe {
@@ -84,8 +85,12 @@ export function CreatorHeroPage() {
       'Floom · Production infrastructure for AI apps that do real work';
     getHub()
       .then((apps) => {
-        setHubCount(apps.length);
-        if (apps.length > 0) setStripes(pickStripes(apps));
+        // Filter QA/test fixtures so the landing "N apps running right
+        // now" matches the /apps directory header count. Single source
+        // of truth: lib/hub-filter.ts.
+        const visible = publicHubApps(apps);
+        setHubCount(visible.length);
+        if (visible.length > 0) setStripes(pickStripes(visible));
       })
       .catch(() => {
         // Keep the static roster on failure.

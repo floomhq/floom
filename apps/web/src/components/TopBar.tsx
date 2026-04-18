@@ -88,6 +88,8 @@ export function TopBar(_props: Props = {}) {
   const isStore = location.pathname.startsWith('/apps') || location.pathname.startsWith('/p/');
   const isDeploy =
     location.pathname.startsWith('/build') || location.pathname.startsWith('/creator');
+  const isLoginPage =
+    location.pathname === '/login' || location.pathname === '/signup';
   const deployHref = isAuthenticated ? '/build' : '/signup?next=%2Fbuild';
 
   useEffect(() => {
@@ -192,7 +194,7 @@ export function TopBar(_props: Props = {}) {
             marginLeft: 'auto',
           }}
         >
-          {!isAuthenticated && (
+          {!isAuthenticated && !isLoginPage && (
             <Link
               to="/login"
               data-testid="topbar-signin"
@@ -432,14 +434,16 @@ export function TopBar(_props: Props = {}) {
               </button>
             </>
           ) : (
-            <Link
-              to="/login"
-              className="topbar-mobile-link"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-            >
-              Sign in
-            </Link>
+            !isLoginPage && (
+              <Link
+                to="/login"
+                className="topbar-mobile-link"
+                role="menuitem"
+                onClick={() => setMenuOpen(false)}
+              >
+                Sign in
+              </Link>
+            )
           )}
         </div>
       )}
