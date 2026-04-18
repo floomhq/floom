@@ -22,10 +22,10 @@ const LAYERS: Layer[] = [
     desc: 'OpenAPI spec or GitHub repo in. Typed manifest out. No hand-writing tool schemas.',
     artifact: (
       <CodeSnippet>
-        <span style={{ color: '#64748b' }}>$</span> floom publish{' '}
+        <span style={{ color: '#8b9ba9' }}>$</span> floom publish{' '}
         <span style={{ color: '#6ee7b7' }}>openapi.json</span>
         {'\n'}
-        <span style={{ color: '#64748b' }}>
+        <span style={{ color: '#8b9ba9' }}>
           → 7 operations · manifest v1 · ready
         </span>
       </CodeSnippet>
@@ -36,7 +36,7 @@ const LAYERS: Layer[] = [
     desc: 'Every app runs in its own Docker sandbox. Proxied or native. Zero shared state.',
     artifact: (
       <CodeSnippet>
-        <span style={{ color: '#64748b' }}>#</span> isolated, per-request
+        <span style={{ color: '#8b9ba9' }}>#</span> isolated, per-request
         {'\n'}docker run{' '}
         <span style={{ color: '#6ee7b7' }}>floom/runner:app-xxx</span>
       </CodeSnippet>
@@ -47,10 +47,10 @@ const LAYERS: Layer[] = [
     desc: 'Per-user vault with creator overrides. Keys never touch the client, never log in plain text.',
     artifact: (
       <CodeSnippet>
-        <span style={{ color: '#64748b' }}>$</span> floom secrets set{' '}
+        <span style={{ color: '#8b9ba9' }}>$</span> floom secrets set{' '}
         <span style={{ color: '#6ee7b7' }}>OPENAI_API_KEY</span>
         {'\n'}
-        <span style={{ color: '#64748b' }}>→ stored (user scope)</span>
+        <span style={{ color: '#8b9ba9' }}>→ stored (user scope)</span>
       </CodeSnippet>
     ),
   },
@@ -95,7 +95,7 @@ const LAYERS: Layer[] = [
     desc: 'Upload a custom TSX renderer. Sandboxed at build and runtime. Your brand on every run page.',
     artifact: (
       <CodeSnippet>
-        <span style={{ color: '#64748b' }}>//</span> renderer.tsx
+        <span style={{ color: '#8b9ba9' }}>//</span> renderer.tsx
         {'\n'}export default{' '}
         <span style={{ color: '#6ee7b7' }}>{'({ output }) =>'}</span>{' '}
         {'<Card />'}

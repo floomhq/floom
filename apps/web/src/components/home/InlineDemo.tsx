@@ -266,7 +266,7 @@ export function InlineDemo() {
             }}
           >
             {prettyOutput ?? (
-              <span style={{ color: '#64748b' }}>
+              <span style={{ color: '#8b9ba9' }}>
                 {'// Output appears here after Run.'}
               </span>
             )}

@@ -13,8 +13,11 @@ interface LogoProps {
 }
 
 function LogoChip({ title, children }: LogoProps) {
+  // role="img" makes aria-label valid on this non-interactive container.
+  // Without the role, axe-core flags aria-label on a span as prohibited.
   return (
     <span
+      role="img"
       title={title}
       aria-label={title}
       style={{

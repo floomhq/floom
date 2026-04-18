@@ -89,13 +89,15 @@ export function ArchitectureDiagram() {
 
           <Connector />
 
-          {/* Floom runtime node — brand color */}
+          {/* Floom runtime node — brand color. Text colors bumped from
+              0.7/0.8 to solid white so Lighthouse color-contrast passes
+              on the small-text thresholds (4.5:1 AA). */}
           <div className="arch-node arch-runtime" aria-label="Floom runtime">
             <span
               style={{
                 fontSize: 11,
                 fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                color: 'rgba(255,255,255,0.7)',
+                color: '#ffffff',
                 textTransform: 'uppercase',
                 letterSpacing: '0.08em',
               }}
@@ -107,7 +109,7 @@ export function ArchitectureDiagram() {
               style={{
                 marginTop: 4,
                 fontSize: 12,
-                color: 'rgba(255,255,255,0.8)',
+                color: '#ffffff',
                 lineHeight: 1.4,
                 maxWidth: 240,
                 textAlign: 'center',

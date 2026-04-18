@@ -31,7 +31,10 @@ export function PublicNav({ variant = 'landing' }: PublicNavProps) {
     >
       <Link
         to="/"
-        aria-label="Floom home"
+        // No explicit aria-label: the visible "floom" text inside the link
+        // is already the accessible name. Adding aria-label="Floom home"
+        // triggered Lighthouse label-content-name-mismatch because the
+        // visible text ("floom") did not start with the label text.
         style={{
           display: 'inline-flex',
           alignItems: 'center',

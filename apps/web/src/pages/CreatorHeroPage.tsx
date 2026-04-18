@@ -416,7 +416,7 @@ export function CreatorHeroPage() {
               }}
             >
               <div>
-                <span style={{ color: '#64748b' }}>$</span>{' '}
+                <span style={{ color: '#8b9ba9' }}>$</span>{' '}
                 <span style={{ color: '#6ee7b7' }}>docker run -p 3010:3010 floomhq/floom</span>
               </div>
               <div style={{ color: '#94a3b8', marginTop: 6 }}>
