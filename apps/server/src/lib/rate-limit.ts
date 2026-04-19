@@ -38,6 +38,16 @@ export const defaultPerAppPerHour = (): number =>
 export const defaultMcpIngestPerDay = (): number =>
   envNumber('FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY', 10);
 
+// Number of trusted proxy hops between the server and the internet. Nginx
+// (or any reverse proxy) appends the real client IP at the END of
+// X-Forwarded-For via `$proxy_add_x_forwarded_for`. Anything the attacker
+// put in XFF is prefix; the last N entries are trusted hops we added. Strip
+// N from the back and take the next-to-last entry — that's the real caller.
+// Default 1 = one nginx hop. Set to 2 if you're behind nginx + CDN that
+// also appends. See issue #142 (XFF spoofing).
+export const defaultTrustedProxyHopCount = (): number =>
+  envNumber('FLOOM_TRUSTED_PROXY_HOP_COUNT', 1);
+
 // ---------- sliding-window store ----------
 
 interface WindowEntry {
@@ -140,17 +150,61 @@ function incrementAndCheck(
 
 // ---------- key extraction ----------
 
-/** Caller IP: cf-connecting-ip > first x-forwarded-for entry > x-real-ip. */
+/**
+ * Caller IP.
+ *
+ * SECURITY (issue #142, 2026-04-20): attackers can set any `X-Forwarded-For`
+ * they want on the inbound request. nginx's `proxy_add_x_forwarded_for`
+ * APPENDS the real remote_addr at the END of the chain. So the FIRST entry
+ * is attacker-controlled; the LAST N entries (N = trusted proxy hops) are
+ * trustworthy, with the real caller sitting at `xff[len - N]`.
+ *
+ * Precedence:
+ *   1. cf-connecting-ip      — Cloudflare injects this; not attacker-settable
+ *                              because Cloudflare rewrites it on the edge.
+ *   2. x-real-ip             — nginx sets this to `$remote_addr`; also not
+ *                              attacker-settable when nginx is configured
+ *                              to override-rather-than-append (our preview
+ *                              + prod configs both do this).
+ *   3. x-forwarded-for chain — strip FLOOM_TRUSTED_PROXY_HOP_COUNT (default 1)
+ *                              trusted hops from the back, take the last
+ *                              remaining entry. NEVER take xff[0] — that's
+ *                              whatever the attacker wrote.
+ *   4. 'unknown' fallback.
+ */
 export function extractIp(c: Context): string {
+  // 1. Cloudflare (edge-owned header).
   const cf = c.req.header('cf-connecting-ip');
-  if (cf?.length) return cf.trim();
+  if (cf?.length) {
+    const v = cf.trim();
+    if (v) return v;
+  }
+
+  // 2. nginx-set real IP. Our nginx configs set this to $remote_addr, which
+  // is the TCP peer — not client-controllable.
+  const real = c.req.header('x-real-ip');
+  if (real?.length) {
+    const v = real.trim();
+    if (v) return v;
+  }
+
+  // 3. X-Forwarded-For chain. Parse from the back, strip trusted hops.
   const xff = c.req.header('x-forwarded-for');
   if (xff?.length) {
-    const first = xff.split(',')[0]?.trim();
-    if (first) return first;
+    const entries = xff
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (entries.length > 0) {
+      const hops = Math.max(1, defaultTrustedProxyHopCount());
+      // Real client sits at index `len - hops`. If the attacker sent a
+      // shorter chain than the trusted-hop count, fall through to unknown
+      // rather than returning an attacker-controlled prefix.
+      const idx = entries.length - hops;
+      if (idx >= 0 && entries[idx]) return entries[idx];
+    }
   }
-  const real = c.req.header('x-real-ip');
-  if (real?.length) return real.trim();
+
   return 'unknown';
 }
 

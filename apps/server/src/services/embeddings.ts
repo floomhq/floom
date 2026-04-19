@@ -1,6 +1,7 @@
 // Embeddings service. Used by the app picker.
 // Falls back to keyword scoring when OPENAI_API_KEY is missing.
 import { db } from '../db.js';
+import { isTestFixture } from '../lib/hub-filter.js';
 import type { AppRecord } from '../types.js';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -109,7 +110,7 @@ export interface PickResult {
  * Vector search when OPENAI_API_KEY is set, keyword fallback otherwise.
  */
 export async function pickApps(query: string, limit = 3): Promise<PickResult[]> {
-  const allApps = db
+  const allAppsRaw = db
     .prepare(
       "SELECT id, slug, name, description, category, icon FROM apps" +
         " WHERE status = 'active'" +
@@ -118,6 +119,12 @@ export async function pickApps(query: string, limit = 3): Promise<PickResult[]> 
     .all() as Array<
     Pick<AppRecord, 'id' | 'slug' | 'name' | 'description' | 'category' | 'icon'>
   >;
+
+  // Issue #144: strip E2E / PRR / audit fixtures from semantic search
+  // results so MCP clients (Claude Desktop, Cursor, /mcp/search) never
+  // recommend a "Swagger Petstore" fixture when a user asks for a real
+  // capability.
+  const allApps = allAppsRaw.filter((a) => !isTestFixture(a));
 
   if (allApps.length === 0) return [];
 

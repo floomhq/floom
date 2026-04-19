@@ -24,6 +24,7 @@ import { resolveUserContext } from '../services/session.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
+import { filterTestFixtures } from '../lib/hub-filter.js';
 import { recordMcpToolCall } from '../lib/metrics-counters.js';
 import type {
   ActionSpec,
@@ -559,12 +560,17 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
       const rows = (category
         ? db.prepare(sql).all(category)
         : db.prepare(sql).all()) as AppRecord[];
+      // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
+      // listings so Claude Desktop + Cursor clients don't surface them in
+      // discovery. Same regex as server /api/hub. Fixtures are still
+      // accessible via `get_app` with the explicit slug.
+      const rowsNoFixtures = filterTestFixtures(rows);
       const needle = typeof keyword === 'string' ? keyword.toLowerCase() : null;
       const filtered = needle
-        ? rows.filter((r) =>
+        ? rowsNoFixtures.filter((r) =>
             `${r.name} ${r.description}`.toLowerCase().includes(needle),
           )
-        : rows;
+        : rowsNoFixtures;
       const results = filtered.slice(0, lim).map((row) =>
         serializeHubApp(row, safeParseManifest(row.manifest)),
       );

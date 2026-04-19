@@ -24,6 +24,7 @@ import {
   RENDERERS_DIR,
 } from '../services/renderer-bundler.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
+import { filterTestFixtures } from '../lib/hub-filter.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -405,6 +406,11 @@ const HIDDEN_SLUGS: Set<string> = new Set(
 hubRouter.get('/', (c) => {
   const category = c.req.query('category');
   const sort = c.req.query('sort') || 'default';
+  // Issue #144: `?include_fixtures=true` bypasses the E2E/PRR fixture
+  // filter. Admin-only use (we don't currently auth-gate it because the
+  // fixtures themselves aren't sensitive — just noisy). Any truthy value
+  // disables the filter.
+  const includeFixtures = c.req.query('include_fixtures') === 'true';
   // Default store sort (fast-apps wave):
   //   1. featured desc   — pinned apps always first
   //   2. avg_run_ms asc  — fastest apps next (NULLs last so unmeasured
@@ -434,14 +440,22 @@ hubRouter.get('/', (c) => {
     AppRecord & { author_name: string | null; author_email: string | null }
   >;
 
-  // Apply FLOOM_STORE_HIDE_SLUGS server-side filter. This is the canonical
-  // place to hide apps from the public directory; the client-side
-  // `isTestFixture` pass in AppsDirectoryPage stays as a defense-in-depth
-  // safety net against test fixtures accidentally ingested in dev.
-  const rows =
+  // Apply FLOOM_STORE_HIDE_SLUGS server-side filter first. This is the
+  // canonical place to hide apps from the public directory; the
+  // client-side `isTestFixture` pass in AppsDirectoryPage stays as a
+  // defense-in-depth safety net against test fixtures accidentally
+  // ingested in dev.
+  const rowsHidden =
     HIDDEN_SLUGS.size === 0
       ? rowsAll
       : rowsAll.filter((row) => !HIDDEN_SLUGS.has(row.slug.toLowerCase()));
+
+  // Issue #144: strip E2E / PRR / audit test fixtures unless the caller
+  // explicitly opted in via `?include_fixtures=true`. Previously this
+  // filter lived client-side only (apps/web/src/lib/hub-filter.ts), which
+  // meant raw `curl /api/hub` + MCP `list_apps` callers saw 13+ fixture
+  // slugs like `e2e-stopwatch-*`, `my-renderer-test`, `swagger-petstore`.
+  const rows = includeFixtures ? rowsHidden : filterTestFixtures(rowsHidden);
 
   return c.json(
     rows.map((row) => {
