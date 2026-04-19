@@ -1,28 +1,35 @@
 /**
- * WhyFloom — short, sharp problem / solution / proof block.
+ * WhyFloom — speaks to creators + biz users, not devs.
  *
- * Copy intentionally short (~40 words each), no em dashes, no
- * ai-slop. Reads as a blog intro, not a marketing paragraph.
+ * ICP is locked (see memory/project_floom_positioning.md):
+ *   1. Vibecoder creators (Cursor / Lovable / v0 / ChatGPT users)
+ *   2. Non-technical biz users
+ *
+ * NOT devs, NOT platform engineers. So no "auth / rate limits /
+ * renderers / Python script / Docker / OpenAPI" dev-speak. Frame
+ * around the human outcome: you built something useful, now your
+ * coworkers need to actually use it.
+ *
+ * Total visible text under 70 words (verified via DOM).
  */
 
 const BLOCKS = [
   {
     label: 'The problem',
-    title: 'AI apps are toys because they have no infra.',
+    title: 'You built it. Now what?',
     body:
-      'Every team re-invents auth, rate limits, logs, secrets, renderers. Then their "agent" is a Python script stuck on someone\u2019s laptop, or a demo that dies when the founder goes to bed.',
+      'You vibe-coded a useful tool. A coworker wants it. You don\u2019t want to teach them a CLI.',
   },
   {
     label: 'What Floom does',
-    title: 'Floom is the missing layer.',
+    title: 'We keep it alive.',
     body:
-      'Ship an OpenAPI spec or a GitHub repo. Get MCP, HTTP, a shareable web form, a CLI, and a chat surface. Production-grade secrets, rate limits, and logging are built in, not bolted on.',
+      'One link. Teammates open it like any website. Keys and limits handled.',
   },
   {
     label: 'How it ships',
-    title: 'Open source, Docker-first.',
-    body:
-      'Six real layers ship today: ingest, runtime, secrets, memory, runs, renderer. Self-host in 30 seconds. Or use the hosted version when you want the creator tools without babysitting a box.',
+    title: 'No engineer required.',
+    body: 'Self-host it, or use the hosted version. No babysitting.',
   },
 ];
 
@@ -51,23 +58,14 @@ export function WhyFloom() {
           >
             AI apps need infrastructure.
           </h2>
-          <p
-            style={{
-              fontSize: 15,
-              color: 'var(--muted)',
-              lineHeight: 1.55,
-              maxWidth: 520,
-              margin: '0 auto',
-            }}
-          >
-            Why we built Floom, and what it does for the agents you already
-            have.
-          </p>
         </header>
 
         {/* 2026-04-19 UX pass: removed the green uppercase eyebrow on
             each card. Redundant with the card heading and introduced a
-            third color accent the page did not need. */}
+            third color accent the page did not need. Sub-header removed
+            the same day — the H2 carries enough context on its own and
+            the body copy was pushing the section past the 70-word
+            scannable limit. */}
         <div
           className="why-grid"
           style={{
