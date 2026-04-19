@@ -405,10 +405,21 @@ const existingLocalUser = db
   .prepare(`SELECT id FROM users WHERE id = ?`)
   .get(DEFAULT_USER_ID) as { id: string } | undefined;
 if (!existingLocalUser) {
+  // Intentionally empty name (not 'Local User'): the web greeting derives
+  // from user.name → email local-part → 'there'. Storing a literal name here
+  // caused MePage to render "Hey Local User" for signed-out/OSS sessions,
+  // which leaked the implementation detail. Leaving name empty keeps the
+  // greeting neutral ("Hey there") across all modes.
   db.prepare(
     `INSERT INTO users (id, workspace_id, email, name, auth_provider)
-     VALUES (?, ?, NULL, 'Local User', 'local')`,
+     VALUES (?, ?, NULL, '', 'local')`,
   ).run(DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID);
+} else {
+  // Backfill for DBs seeded before 2026-04-20: strip the legacy 'Local User'
+  // name so existing deployments stop showing "Hey Local User" too.
+  db.prepare(
+    `UPDATE users SET name = '' WHERE id = ? AND name = 'Local User'`,
+  ).run(DEFAULT_USER_ID);
 }
 const existingLocalMember = db
   .prepare(

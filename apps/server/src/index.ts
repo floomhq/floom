@@ -572,6 +572,18 @@ if (webDist) {
     return html.replace(/<title>[^<]*<\/title>/, `<title>${escapeTitle(title)}</title>`);
   }
 
+  // 2026-04-20 (PRR #172): every SSR page needs a per-route canonical so
+  // crawlers don't index duplicate landing-canonicalised pages. Replaces
+  // whatever canonical was baked into index.html at build time.
+  function rewriteCanonical(html: string, pathname: string): string {
+    if (!publicOrigin) return html;
+    const canonical = `${publicOrigin}${pathname === '/index.html' ? '/' : pathname}`;
+    return html.replace(
+      /<link rel="canonical" href="[^"]*"/,
+      `<link rel="canonical" href="${canonical}"`,
+    );
+  }
+
   // Map a non-slug pathname to its title. Returns null to fall through to
   // the landing title (kept for anything we haven't explicitly claimed —
   // better to reuse a known-good title than to invent a bad one).
@@ -579,10 +591,24 @@ if (webDist) {
     if (pathname === '/' || pathname === '/index.html') return LANDING_TITLE;
     if (pathname === '/apps' || pathname === '/apps/') return 'Apps · Floom';
     if (pathname === '/login') return 'Sign in · Floom';
-    if (pathname === '/signup') return 'Sign up · Floom';
+    if (pathname === '/signup') return 'Create account · Floom';
+    // 2026-04-20 (PRR tail cleanup): /install is a public stub that links
+    // to CLI install steps. Kept distinct from /me/install (dashboard).
+    if (pathname === '/install' || pathname === '/install/') return 'Install the Floom CLI · Floom';
+    // /onboarding is a redirect to /me?welcome=1 but the title the server
+    // returns before the 302 hops still matters for preview bots.
+    if (pathname === '/onboarding' || pathname === '/onboarding/') return 'Welcome to Floom · Floom';
     if (pathname === '/me' || pathname.startsWith('/me/')) return 'Me · Floom';
     if (pathname.startsWith('/studio')) return 'Studio · Floom';
     if (pathname.startsWith('/docs')) return 'Docs · Floom';
+    if (pathname === '/protocol' || pathname.startsWith('/protocol/') || pathname.startsWith('/protocol#')) {
+      return 'The Floom Protocol · Floom';
+    }
+    if (pathname.startsWith('/r/')) return 'Run · Floom';
+    if (pathname === '/imprint') return 'Imprint · Floom';
+    if (pathname === '/privacy') return 'Privacy · Floom';
+    if (pathname === '/terms') return 'Terms · Floom';
+    if (pathname === '/cookies') return 'Cookies · Floom';
     return null;
   }
 
@@ -613,9 +639,10 @@ if (webDist) {
   }
 
   function rewriteHeadForPath(html: string, pathname: string): string {
+    let out = rewriteCanonical(html, pathname);
     const title = titleForPath(pathname);
-    if (!title) return html;
-    return rewriteTitle(html, title);
+    if (title) out = rewriteTitle(out, title);
+    return out;
   }
 
   function rewriteHeadForSlug(html: string, slug: string): string {
@@ -623,7 +650,9 @@ if (webDist) {
       .prepare('SELECT name, description FROM apps WHERE slug = ?')
       .get(slug) as { name: string | null; description: string | null } | undefined;
     const ogImage = `${publicOrigin}/og/${slug}.svg`;
-    let out = html;
+    // 2026-04-20 (PRR #172): canonical per-slug so indexers don't fold
+    // every /p/:slug back to the landing canonical.
+    let out = rewriteCanonical(html, `/p/${slug}`);
     out = out.replace(
       /<meta property="og:image" content="[^"]*"/,
       `<meta property="og:image" content="${ogImage}"`,
@@ -691,6 +720,22 @@ if (webDist) {
       });
     }
 
+    // 2026-04-20 (PRR tail cleanup): /spec and /spec/* were linked from the
+    // wireframes/sitemap but returned 404 because the real route is /protocol.
+    // Redirect every /spec/* (including /spec/protocol.md) to /protocol so
+    // old deep links and drafts stop breaking.
+    if (pathname === '/spec' || pathname === '/spec/' || pathname.startsWith('/spec/')) {
+      const suffix = pathname.replace(/^\/spec\/?/, '');
+      // Strip a trailing `.md` so /spec/protocol.md lands on /protocol (not
+      // /protocol.md which would 404 again).
+      const cleaned = suffix.replace(/\.md$/i, '');
+      const target = cleaned ? `/protocol#${cleaned}` : '/protocol';
+      return new Response(null, {
+        status: 308,
+        headers: { location: target, 'cache-control': 'public, max-age=3600' },
+      });
+    }
+
     // Attempt to serve the file from disk.
     const candidate = join(webDist, pathname === '/' ? 'index.html' : pathname.replace(/^\//, ''));
     try {
@@ -735,10 +780,23 @@ if (webDist) {
     // we rewrite the OG meta tags so crawlers see the per-app card.
     // 2026-04-20 (P2 #149): for everything else, rewrite the <title> so
     // non-JS crawlers see the right per-route title instead of the
-    // landing title on every page.
+    // landing title on every page. Also rewrite canonical per-route
+    // (PRR #172).
     const slugMatch = pathname.match(pSlugPattern);
     if (slugMatch && slugMatch[1]) {
       return c.html(rewriteHeadForSlug(indexHtml, slugMatch[1]));
+    }
+    // 2026-04-20 (PRR tail cleanup): explicit /404 path returns 404 status
+    // (the React Router wildcard renders NotFoundPage at 200 for all other
+    // unknown routes — a deeper fix but out of scope for this PR).
+    if (pathname === '/404' || pathname === '/404.html') {
+      return new Response(
+        rewriteTitle(rewriteCanonical(indexHtml, pathname), 'Page not found · Floom'),
+        {
+          status: 404,
+          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+        },
+      );
     }
     return c.html(rewriteHeadForPath(indexHtml, pathname));
   });

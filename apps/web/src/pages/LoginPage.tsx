@@ -97,7 +97,7 @@ export function LoginPage() {
   const cloudMode = data?.cloud_mode === true;
 
   return (
-    <PageShell title={mode === 'signin' ? 'Sign in | Floom' : 'Create account | Floom'}>
+    <PageShell title={mode === 'signin' ? 'Sign in · Floom' : 'Create account · Floom'}>
       <div
         className="login-grid"
         style={{

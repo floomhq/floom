@@ -21,6 +21,9 @@ const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ 
 // mounted them directly now redirect into /studio/*.
 const MeAppRunPage = lazy(() => import('./pages/MeAppRunPage').then(m => ({ default: m.MeAppRunPage })));
 const MeInstallPage = lazy(() => import('./pages/MeInstallPage').then(m => ({ default: m.MeInstallPage })));
+// 2026-04-20 (PRR tail cleanup): public /install stub — separate from
+// /me/install which is the authenticated "Install to Claude" flow.
+const InstallPage = lazy(() => import('./pages/InstallPage').then(m => ({ default: m.InstallPage })));
 const BuildPage = lazy(() => import('./pages/BuildPage').then(m => ({ default: m.BuildPage })));
 const CreatorPage = lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
 const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ default: m.CreatorAppPage })));
@@ -145,6 +148,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/r/:runId" element={<PublicRunPermalinkPage />} />
         {/* Protocol spec page */}
         <Route path="/protocol" element={<ProtocolPage />} />
+        {/* 2026-04-20 (PRR tail cleanup): /install public stub */}
+        <Route path="/install" element={<InstallPage />} />
+        {/* /spec and /spec/* are server-side 308 redirects to /protocol
+            (wired in apps/server/src/index.ts). No client route needed
+            because crawlers/users never reach the SPA for those paths. */}
         {/* W4-minimal: auth pages */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<LoginPage />} />
