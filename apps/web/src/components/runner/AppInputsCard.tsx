@@ -25,7 +25,11 @@ export function AppInputsCard({
       <p className="assistant-preamble">
         <strong>{app.name}</strong> is the best fit. Want me to run it?
       </p>
-      <div className="app-expanded-card">
+      {/* data-testid hook (2026-04-20): OutputPanel's error classifier
+          focuses the first input inside this card when a
+          user_input_error (4xx from upstream) comes back, so retrying
+          means fixing the input, not clicking Run again. */}
+      <div className="app-expanded-card" data-testid="app-inputs-card">
         <div className="app-expanded-header">
           <div
             style={{

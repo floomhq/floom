@@ -23,10 +23,35 @@ export interface ProxiedRunInput {
   secrets: Record<string, string>;
 }
 
+export type ProxiedErrorType =
+  | 'user_input_error'
+  | 'auth_error'
+  | 'upstream_outage'
+  | 'network_unreachable'
+  | 'timeout'
+  | 'missing_secret'
+  | 'floom_internal_error'
+  | 'runtime_error';
+
 export interface ProxiedRunResult {
   status: 'success' | 'error';
   outputs: unknown;
   error?: string;
+  /**
+   * HTTP status returned by the upstream API, when one was received.
+   * Absent for pre-response failures (DNS / TCP / TLS / timeout before
+   * headers) and for MissingSecretsError. The client runner surface uses
+   * this to pick the exact error-taxonomy class, and the persisted
+   * `runs.upstream_status` column carries it back on GET /api/run/:id.
+   */
+  upstream_status?: number;
+  /**
+   * Taxonomy class the runner is confident about at the source. Lets the
+   * control-plane persist a precise `runs.error_type` instead of the
+   * generic 'runtime_error' catch-all — the /p/:slug runner then picks
+   * the matching headline without re-parsing the raw error string.
+   */
+  error_type?: ProxiedErrorType;
   duration_ms: number;
   logs: string;
 }
@@ -554,10 +579,24 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
       };
     }
 
+    // Error taxonomy (2026-04-20): split by root cause so the runner
+    // surface can show "The app didn't accept your input." for 4xx
+    // instead of "Can't reach this app right now" (which was both wrong
+    // and trained users to retry identical bad input). Surface a
+    // one-line upstream body message when the response had a JSON
+    // envelope with `message` / `error` / `detail` — that's usually the
+    // single most useful breadcrumb for debugging. Stack traces and
+    // long blobs still live in the full `logs`.
+    const upstreamMessage = extractUpstreamMessage(parsed, responseText);
+    const errorType: ProxiedErrorType = classifyHttpStatus(res.status);
     return {
       status: 'error',
       outputs: parsed,
-      error: `HTTP ${res.status}: ${res.statusText}`,
+      error: upstreamMessage
+        ? `HTTP ${res.status}: ${upstreamMessage}`
+        : `HTTP ${res.status}: ${res.statusText || 'error'}`,
+      upstream_status: res.status,
+      error_type: errorType,
       duration_ms,
       logs: logs.join('\n'),
     };
@@ -575,16 +614,97 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
           help: e.help,
         },
         error: e.message,
+        error_type: 'missing_secret',
         duration_ms,
         logs: logs.join('\n'),
       };
     }
+    // Classify pre-response failures. `AbortSignal.timeout` raises a
+    // DOMException with name 'TimeoutError' before any status arrives.
+    // DNS / TCP / TLS failures surface as AggregateError / TypeError
+    // with messages like "fetch failed" / "ENOTFOUND" / "ECONNREFUSED".
+    // Neither has a status, so we route them to distinct taxonomy
+    // classes the client shows as "took too long" vs. "can't reach".
+    const preResponse = classifyPreResponseError(e);
     return {
       status: 'error',
       outputs: null,
       error: e.message || 'Unknown error',
+      error_type: preResponse,
       duration_ms,
       logs: logs.join('\n'),
     };
   }
+}
+
+// ---------- error taxonomy helpers ----------
+
+function classifyHttpStatus(status: number): ProxiedErrorType {
+  if (status === 401 || status === 403) return 'auth_error';
+  if (status >= 400 && status < 500) return 'user_input_error';
+  if (status >= 500 && status < 600) return 'upstream_outage';
+  return 'runtime_error';
+}
+
+function classifyPreResponseError(e: Error): ProxiedErrorType {
+  const name = (e as { name?: string }).name || '';
+  const msg = (e.message || '').toLowerCase();
+  if (name === 'TimeoutError' || /timed? ?out|timeout|aborted/.test(msg)) {
+    return 'timeout';
+  }
+  // node's fetch undici error shape: "fetch failed" with a nested cause
+  // carrying code ENOTFOUND / ECONNREFUSED / ECONNRESET / EAI_AGAIN /
+  // UND_ERR_CONNECT_TIMEOUT / UND_ERR_SOCKET.
+  const cause = (e as { cause?: { code?: string; message?: string } }).cause;
+  const causeCode = cause?.code || '';
+  if (
+    /fetch failed|enotfound|econnrefused|econnreset|eai_again|und_err_connect|und_err_socket|getaddrinfo/.test(
+      msg,
+    ) ||
+    /ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|UND_ERR_CONNECT/.test(causeCode)
+  ) {
+    return 'network_unreachable';
+  }
+  // Anything else thrown before we got a response: unknown runtime.
+  // Leave as `runtime_error` so the UI keeps its "something broke"
+  // fallback instead of claiming a network failure.
+  return 'runtime_error';
+}
+
+/**
+ * Extract a short, safe one-liner from the upstream response body.
+ * Typical payloads: `{ "message": "..." }`, `{ "error": "..." }`,
+ * `{ "detail": "..." }`, FastAPI validation arrays. We cap at 140 chars
+ * so a 50KB stack trace never leaks into the headline, and we never
+ * return if the field is empty / not a plain string.
+ */
+function extractUpstreamMessage(parsed: unknown, raw: string): string | null {
+  const pick = (v: unknown): string | null => {
+    if (typeof v !== 'string') return null;
+    const trimmed = v.trim();
+    if (!trimmed) return null;
+    return trimmed.length > 140 ? trimmed.slice(0, 137) + '...' : trimmed;
+  };
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const p = parsed as Record<string, unknown>;
+    const fromMsg = pick(p.message) || pick(p.error) || pick(p.detail);
+    if (fromMsg) return fromMsg;
+    // FastAPI validation: detail = [{ msg, loc, type }]
+    if (Array.isArray(p.detail) && p.detail.length > 0) {
+      const first = p.detail[0];
+      if (first && typeof first === 'object') {
+        const msg = pick((first as Record<string, unknown>).msg);
+        if (msg) return msg;
+      }
+    }
+  }
+  // Last resort: surface a short snippet of the raw text if it's not
+  // JSON at all (many APIs return `text/plain` error pages).
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed && !trimmed.startsWith('<') && trimmed.length < 200) {
+      return trimmed.length > 140 ? trimmed.slice(0, 137) + '...' : trimmed;
+    }
+  }
+  return null;
 }

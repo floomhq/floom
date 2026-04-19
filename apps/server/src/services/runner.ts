@@ -35,6 +35,13 @@ interface UpdateRunArgs {
   outputs?: unknown;
   error?: string | null;
   error_type?: ErrorType | null;
+  /**
+   * HTTP status from the upstream API, for proxied-app errors. Null
+   * when no status was received (DNS / timeout / pre-response failure)
+   * or for docker-entrypoint runs. Persisted on `runs.upstream_status`
+   * so the /p/:slug client can pick the exact taxonomy class.
+   */
+  upstream_status?: number | null;
   logs?: string;
   duration_ms?: number | null;
   finished?: boolean;
@@ -58,6 +65,10 @@ export function updateRun(runId: string, patch: UpdateRunArgs): void {
   if (patch.error_type !== undefined) {
     cols.push('error_type = ?');
     values.push(patch.error_type);
+  }
+  if (patch.upstream_status !== undefined) {
+    cols.push('upstream_status = ?');
+    values.push(patch.upstream_status);
   }
   if (patch.logs !== undefined) {
     cols.push('logs = ?');
@@ -377,21 +388,36 @@ async function runProxiedWorker(opts: {
     for (const line of result.logs.split('\n')) {
       if (line) logStream.append(line, 'stdout');
     }
+    // Error taxonomy (2026-04-20): proxied-runner classifies the
+    // failure at source (auth_error / user_input_error / upstream_outage
+    // / network_unreachable / timeout / missing_secret). We persist its
+    // verdict verbatim so the client can render the matching headline
+    // without re-parsing the raw error string. Fall back to
+    // runtime_error only when the runner couldn't pick a class.
     updateRun(opts.runId, {
       status: result.status,
       outputs: result.outputs,
       error: result.error || null,
-      error_type: result.status === 'error' ? 'runtime_error' : null,
+      error_type:
+        result.status === 'error'
+          ? ((result.error_type as ErrorType | undefined) ?? 'runtime_error')
+          : null,
+      upstream_status: result.upstream_status ?? null,
       logs: result.logs,
       duration_ms: result.duration_ms,
       finished: true,
     });
   } catch (err) {
+    // An exception here (as opposed to a returned error result) means
+    // runProxied itself crashed — that's a Floom-side bug, not an
+    // upstream issue. Classify as floom_internal_error so the runner
+    // surface shows the "Something broke inside Floom" headline with
+    // a "Report this" link, not the misleading "Can't reach this app".
     const e = err as Error;
     updateRun(opts.runId, {
       status: 'error',
       error: e.message || 'Proxied runner crashed',
-      error_type: 'runtime_error',
+      error_type: 'floom_internal_error',
       logs: e.stack || '',
       finished: true,
     });
@@ -502,17 +528,21 @@ async function runActionWorker(opts: {
         result.exitCode === 0
           ? 'Container exited cleanly but emitted no result'
           : `Container exited with code ${result.exitCode}`,
-      error_type: 'runtime_error',
+      error_type: 'floom_internal_error',
       logs: result.stdout + '\n' + result.stderr,
       duration_ms: result.durationMs,
       finished: true,
     });
   } catch (err) {
+    // The runner itself crashed — not an upstream problem, not the
+    // user's input. Classify as floom_internal_error so the UI doesn't
+    // tell the caller to "try again in a minute" when the fix is on
+    // our side.
     const e = err as Error;
     updateRun(opts.runId, {
       status: 'error',
       error: e.message || 'Runner crashed',
-      error_type: 'runtime_error',
+      error_type: 'floom_internal_error',
       logs: e.stack || '',
       finished: true,
     });
