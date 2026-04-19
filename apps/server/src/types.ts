@@ -202,12 +202,31 @@ export interface JobRecord {
 
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'timeout';
 
+/**
+ * Error taxonomy (2026-04-20).
+ *
+ * Five root-cause classes carry clear UI action (fix input / add auth /
+ * retry / check URL / report bug). The legacy values
+ * (`runtime_error`, `missing_secret`, `build_error`) still exist so old
+ * run rows keep classifying — the client falls back when it sees them.
+ *
+ *   user_input_error   — upstream 4xx (non-auth). App rejected inputs.
+ *   auth_error         — upstream 401/403. Credentials needed / invalid.
+ *   upstream_outage    — upstream 5xx OR timeout at the upstream hop.
+ *   network_unreachable — fetch failed before any status arrived.
+ *   floom_internal_error — our own bug (runner crash, build fail, OOM).
+ */
 export type ErrorType =
   | 'timeout'
   | 'runtime_error'
   | 'missing_secret'
   | 'oom'
-  | 'build_error';
+  | 'build_error'
+  | 'user_input_error'
+  | 'auth_error'
+  | 'upstream_outage'
+  | 'network_unreachable'
+  | 'floom_internal_error';
 
 export interface RunRecord {
   id: string;
@@ -220,6 +239,14 @@ export interface RunRecord {
   status: RunStatus;
   error: string | null;
   error_type: ErrorType | null;
+  /**
+   * The HTTP status the upstream API returned, when classifying a
+   * proxied-runner failure. NULL for non-proxied apps, for pre-response
+   * failures (DNS / TCP / TLS / timeout before headers), and for
+   * successful runs. Populated by runProxied so the client can pick the
+   * exact error-taxonomy class without re-parsing the raw error string.
+   */
+  upstream_status: number | null;
   duration_ms: number | null;
   started_at: string;
   finished_at: string | null;

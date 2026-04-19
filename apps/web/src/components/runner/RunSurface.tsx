@@ -632,6 +632,7 @@ export function RunSurface({
               }));
               onResetInitialRun?.();
             }}
+            onRetry={handleRun}
           />
         </section>
       </div>
@@ -825,6 +826,12 @@ interface OutputSlotProps {
   onCancelJob: () => void;
   onCancelStream: () => void;
   onIterate: (prompt: string) => void;
+  /**
+   * Error taxonomy (2026-04-20): called when the error card renders a
+   * "Try again" button (upstream_outage class). Resubmits the same
+   * inputs. RunSurface wires this to its top-level handleRun.
+   */
+  onRetry: () => void;
 }
 
 function OutputSlot({
@@ -835,6 +842,7 @@ function OutputSlot({
   onCancelJob,
   onCancelStream,
   onIterate,
+  onRetry,
 }: OutputSlotProps) {
   if (state.phase === 'ready') {
     return <EmptyOutputCard appName={app.name} />;
@@ -891,6 +899,7 @@ function OutputSlot({
           appDetail={app}
           run={state.run}
           onIterate={iterateHandler}
+          onRetry={onRetry}
         />
       </CustomRendererHost>
     );
@@ -902,6 +911,7 @@ function OutputSlot({
       appDetail={app}
       run={state.run}
       onIterate={iterateHandler}
+      onRetry={onRetry}
     />
   );
 }

@@ -30,6 +30,23 @@ import type { OutputShape } from '@floom/renderer/contract';
 
 export const hubRouter = new Hono();
 
+/**
+ * Pull just the host out of a proxied app's base_url, for the
+ * `/api/hub/:slug` response. Used by the /p/:slug runner surface to
+ * render "Can't reach {host}" on a network_unreachable error. Host only
+ * — not path, not query, not creds — so there's nothing sensitive to
+ * leak even for private apps. Returns null for docker apps (no
+ * base_url) or malformed URLs.
+ */
+function deriveUpstreamHost(baseUrl: string | null | undefined): string | null {
+  if (!baseUrl) return null;
+  try {
+    return new URL(baseUrl).host || null;
+  } catch {
+    return null;
+  }
+}
+
 function authorDisplayFromRow(
   row: AppRecord & { author_name?: string | null; author_email?: string | null },
 ): string | null {
@@ -548,6 +565,14 @@ hubRouter.get('/:slug', async (c) => {
     // can render visibility pills and gate private-only UI (e.g. /me/apps/:slug
     // console) without re-fetching from a separate endpoint.
     visibility: row.visibility,
+    // Error taxonomy (2026-04-20): expose the upstream host so the
+    // /p/:slug runner surface can render "Can't reach {host}" on a
+    // network_unreachable failure instead of a generic "its backend"
+    // fallback. Only populated for proxied apps (OpenAPI-ingested);
+    // docker apps don't have a base_url. We surface the bare host
+    // (not the full URL with creds) so there's nothing sensitive to
+    // leak even on private apps.
+    upstream_host: deriveUpstreamHost(row.base_url),
     // Async job queue (v0.3.0). Surfaced so the web client switches to the
     // queued/running/succeeded poll UI when the app opts in. Backend routes
     // (POST /api/:slug/jobs + GET /api/:slug/jobs/:id) are already live.
