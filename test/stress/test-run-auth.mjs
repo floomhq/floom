@@ -306,13 +306,18 @@ r = await fetchRoute(runRouter, 'POST', `/${bobRunId}/share`, {}, {});
 log('bob share of own run: 200', r.status === 200, `got ${r.status}`);
 
 // =====================================================================
-// 8. OSS mode · device-scoped access
+// 8. OSS mode · single-user self-host box back-compat
 // =====================================================================
-console.log('\n[8] OSS mode · device-scoped anon access');
+// In OSS mode (no FLOOM_CLOUD_MODE) the server is assumed to be a
+// single-user self-host. Node `fetch`-based clients (curl, CI scripts,
+// the test-fast-apps poll) don't carry the device cookie across calls,
+// so enforcing per-device ownership would 404 every legit poll. OSS
+// therefore allows unauthenticated reads on the 'local' workspace.
+// Cloud deployments (preview.floom.dev) never hit this branch.
+console.log('\n[8] OSS mode · single-user self-host back-compat');
 delete process.env.FLOOM_CLOUD_MODE;
 auth._resetAuthForTests();
 
-// Seed an OSS-mode run on the 'local' workspace with a specific device_id
 const localAppId = insertApp({
   slug: 'local-app',
   workspace_id: 'local',
@@ -328,19 +333,12 @@ const ossRunId = insertRun({
   logs: 'SELFHOST-LOG',
 });
 
-// Same device sees their own run
-r = await fetchRoute(runRouter, 'GET', `/${ossRunId}`, {
-  cookie: 'floom_device=dev-selfhost-42',
-});
-log('OSS same device: 200', r.status === 200, `got ${r.status}`);
-log('OSS same device: sees outputs', r.text.indexOf('SELFHOST-OUTPUT') !== -1);
-
-// Different device: 404
-r = await fetchRoute(runRouter, 'GET', `/${ossRunId}`, {
-  cookie: 'floom_device=dev-someone-else',
-});
-log('OSS different device: 404', r.status === 404, `got ${r.status}`);
-log('OSS different device: no leak', r.text.indexOf('SELFHOST-OUTPUT') === -1);
+// OSS self-host: anon caller (no cookie) still reads their own run,
+// same as the pre-lockdown behavior. The risk surface this lockdown
+// closes is cross-user reads on Cloud, not single-user self-host.
+r = await fetchRoute(runRouter, 'GET', `/${ossRunId}`);
+log('OSS anon same box: 200', r.status === 200, `got ${r.status}`);
+log('OSS anon same box: sees outputs', r.text.indexOf('SELFHOST-OUTPUT') !== -1);
 
 // ---- summary ----
 console.log(`\n${passed + failed} checks, ${passed} passed, ${failed} failed`);

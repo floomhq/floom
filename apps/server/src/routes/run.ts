@@ -11,6 +11,7 @@ import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { checkAppVisibility, hasValidAdminBearer } from '../lib/auth.js';
+import { isCloudMode } from '../lib/better-auth.js';
 import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
 import type {
@@ -73,6 +74,17 @@ function checkRunAccess(
   // Treat missing as the synthetic default — they always belonged to the
   // local workspace.
   const runWorkspace = run.workspace_id || DEFAULT_WORKSPACE_ID;
+
+  // OSS single-user box back-compat: when Floom boots without
+  // FLOOM_CLOUD_MODE the whole environment is one user. `fetch`-based
+  // clients (curl, CI scripts, node tests) don't carry the device cookie
+  // across calls, so enforcing device_id parity would 404 every legit
+  // poll on the self-host flow. Unauthenticated reads on the synthetic
+  // 'local' workspace are allowed; Cloud deployments never hit this
+  // branch because isCloudMode() is true.
+  if (!isCloudMode() && runWorkspace === DEFAULT_WORKSPACE_ID) {
+    return 'owner';
+  }
 
   // Owner match path. In cloud mode we require authenticated user_id
   // equality; in OSS / anon we require device_id equality and a run that
