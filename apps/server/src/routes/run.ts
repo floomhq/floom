@@ -241,6 +241,10 @@ function formatRun(row: {
   status: string;
   error: string | null;
   error_type: string | null;
+  // Optional so older sqlite snapshots that predate the upstream_status
+  // migration still satisfy the type — SELECT * will surface it as
+  // undefined and we fall through to null below.
+  upstream_status?: number | null;
   duration_ms: number | null;
   started_at: string;
   finished_at: string | null;
@@ -255,6 +259,11 @@ function formatRun(row: {
     status: row.status,
     error: row.error,
     error_type: row.error_type,
+    // Error taxonomy (2026-04-20): the HTTP status the upstream API
+    // returned, when one was received. The /p/:slug runner surface uses
+    // this to pick between user_input_error / auth_error /
+    // upstream_outage without re-parsing the raw error string.
+    upstream_status: row.upstream_status ?? null,
     duration_ms: row.duration_ms,
     started_at: row.started_at,
     finished_at: row.finished_at,
@@ -473,6 +482,7 @@ meRouter.get('/runs/:id', async (c) => {
         status: string;
         error: string | null;
         error_type: string | null;
+        upstream_status: number | null;
         duration_ms: number | null;
         started_at: string;
         finished_at: string | null;
@@ -497,6 +507,7 @@ meRouter.get('/runs/:id', async (c) => {
     status: row.status,
     error: row.error,
     error_type: row.error_type,
+    upstream_status: row.upstream_status ?? null,
     duration_ms: row.duration_ms,
     started_at: row.started_at,
     finished_at: row.finished_at,

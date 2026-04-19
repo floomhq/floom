@@ -172,6 +172,15 @@ export interface AppDetail extends HubApp {
    * default export instead of the default OutputPanel.
    */
   renderer?: RendererMeta | null;
+  /**
+   * Error taxonomy (2026-04-20): bare host of the proxied app's
+   * base_url (e.g. "api.petstore.example"). Surfaced by
+   * GET /api/hub/:slug so the /p/:slug error card can name the
+   * upstream on a network_unreachable failure. Null for docker apps
+   * (no base_url) and for malformed URLs. Never contains path, query,
+   * or credentials.
+   */
+  upstream_host?: string | null;
 }
 
 export interface RendererMeta {
@@ -223,6 +232,26 @@ export interface ParseResult {
 
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'timeout';
 
+/**
+ * Error taxonomy (2026-04-20).
+ *
+ * Five root-cause classes drive the /p/:slug runner surface headline.
+ * Legacy values (`runtime_error`, `missing_secret`, `build_error`) still
+ * appear on older runs — the client falls back to heuristics when it
+ * sees them. `oom` now maps to `floom_internal_error` on display.
+ */
+export type RunErrorType =
+  | 'timeout'
+  | 'runtime_error'
+  | 'missing_secret'
+  | 'oom'
+  | 'build_error'
+  | 'user_input_error'
+  | 'auth_error'
+  | 'upstream_outage'
+  | 'network_unreachable'
+  | 'floom_internal_error';
+
 export interface RunRecord {
   id: string;
   app_id: string;
@@ -232,7 +261,20 @@ export interface RunRecord {
   outputs: unknown;
   status: RunStatus;
   error: string | null;
-  error_type: string | null;
+  /**
+   * Widened to `string` for back-compat: older server builds still emit
+   * the legacy values, and a future server could add a class the client
+   * doesn't know about yet. classifyRunError falls through safely.
+   */
+  error_type: RunErrorType | string | null;
+  /**
+   * HTTP status returned by the upstream API on a proxied-app error.
+   * Null when the fetch failed before a response arrived (DNS /
+   * timeout / TCP / TLS), for docker-entrypoint runs, and for
+   * successful runs. Drives the user_input_error vs auth_error vs
+   * upstream_outage split in the client classifier.
+   */
+  upstream_status?: number | null;
   duration_ms: number | null;
   started_at: string;
   finished_at: string | null;
@@ -274,7 +316,9 @@ export interface MeRunSummary {
   started_at: string;
   finished_at: string | null;
   error: string | null;
-  error_type: string | null;
+  error_type: RunErrorType | string | null;
+  /** See RunRecord.upstream_status. */
+  upstream_status?: number | null;
   app_slug: string | null;
   app_name: string | null;
   app_icon: string | null;
@@ -419,7 +463,9 @@ export interface CreatorRun {
   started_at: string;
   finished_at: string | null;
   error: string | null;
-  error_type: string | null;
+  error_type: RunErrorType | string | null;
+  /** See RunRecord.upstream_status. */
+  upstream_status?: number | null;
   caller_hash: string;
   is_self: boolean;
 }

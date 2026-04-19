@@ -128,6 +128,21 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_runs_app ON runs(app_id);
 `);
 
+// Error taxonomy (2026-04-20): add upstream_status so the client can
+// classify user_input_error (4xx non-auth) vs auth_error (401/403) vs
+// upstream_outage (5xx) vs network_unreachable (no status) without
+// re-parsing the raw error string. Idempotent.
+//
+// NB: the later "// runs: workspace_id + user_id + device_id" block
+// reads PRAGMA table_info(runs) under the name `runCols` too; we use a
+// distinct local to keep both migrations block-scoped and ordered.
+const runErrCols = (db.prepare(`PRAGMA table_info(runs)`).all() as { name: string }[]).map(
+  (r) => r.name,
+);
+if (!runErrCols.includes('upstream_status')) {
+  db.exec(`ALTER TABLE runs ADD COLUMN upstream_status INTEGER`);
+}
+
 // ---------- jobs (async job queue for long-running apps, v0.3.0) ----------
 // A job wraps a `dispatchRun` invocation with queue + timeout + retry + webhook
 // semantics. Jobs are claimed by the background worker and run to completion

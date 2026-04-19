@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { AppDetail, PickResult, RunRecord } from '../../lib/types';
 import { pickRenderer } from '../output/rendererCascade';
 import { sanitizeHtml } from '../../lib/sanitize';
+import { useSession } from '../../hooks/useSession';
 
 function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -31,6 +33,13 @@ interface Props {
   onIterate?: (prompt: string) => void;
   onOpenDetails?: () => void;
   /**
+   * Error-taxonomy (2026-04-20): resubmit the same inputs. Passed by
+   * RunSurface as a reference to its `handleRun` so the "Try again"
+   * button on an upstream-outage error can retry without the user
+   * having to click Run again. Absent → no retry button is rendered.
+   */
+  onRetry?: () => void;
+  /**
    * v16 renderer cascade: when provided, the manifest is consulted to
    * pick a stock library component (Layer 2) or auto-pick from declared
    * outputs (Layer 3) before falling back to the legacy inline renderer
@@ -40,7 +49,7 @@ interface Props {
   appDetail?: AppDetail;
 }
 
-export function OutputPanel({ app, run, onIterate, onOpenDetails, appDetail }: Props) {
+export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDetail }: Props) {
   const duration = run.duration_ms
     ? run.duration_ms < 1000
       ? `${run.duration_ms}ms`
@@ -79,14 +88,21 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, appDetail }: P
                 fontSize: 12,
               }}
             >
-              {run.error_type || run.status}
+              {/*
+                Before (PR #135): always "runtime_error" for proxied-app
+                4xx, which was misleading — a 400 from the upstream is
+                user input, not a Floom runtime crash. Now we surface
+                the taxonomy class that matches the headline, so the
+                meta line, the headline, and any bug report all agree.
+              */}
+              {metaLabelFor(run)}
             </span>
           </>
         )}
       </div>
 
       {isError ? (
-        <ErrorCard run={run} />
+        <ErrorCard run={run} appDetail={appDetail} onRetry={onRetry} />
       ) : cascade && cascade.element ? (
         cascade.element
       ) : (
@@ -251,40 +267,132 @@ function FlightCard({ flight }: { flight: Record<string, unknown> }) {
 }
 
 /**
- * v16 ErrorCard redesign (2026-04-19).
+ * Run error taxonomy (2026-04-20).
  *
- * Old design showed a red block with the raw error_type ("runtime_error")
- * and the verbatim server message ("HTTP 403: Forbidden"). That was
- * scary, technically misleading (a 403 from an upstream is often
- * rate-limit / geoblock / expired key, not a permission issue), and
- * conflated expected upstream failures with Floom platform bugs.
+ * Replaces the older "severity + one headline per HTTP-status bucket"
+ * scheme (PR #135) that collapsed too many root causes into the same
+ * "Can't reach this app right now" message — including 400s where the
+ * upstream had responded in ~400ms with a crisp "bad input" reason.
+ * That version trained users to retry identical bad input instead of
+ * fixing it, which the product audit flagged as the single worst
+ * moment for both personas.
  *
- * New behavior:
- *  - Most errors use a warm amber palette (not red). Red is reserved for
- *    the severity === 'platform' branch (future: OOM, build errors, our
- *    own server crashing). Today the classifier only returns 'upstream'
- *    or 'user' which both render amber.
- *  - Classify the error via `classifyRunError` into a small set of
- *    categories, each with a human headline + sub-line.
- *  - Never render "Forbidden" verbatim. The raw message moves into a
- *    collapsed "Show details" disclosure alongside logs.
- *  - Icon: warning triangle (not an X), muted tone.
+ * Five classes, each with its own headline, sub, meta label, palette,
+ * and action:
+ *
+ *   user_input_error     — 4xx non-auth. App rejected inputs. Focus the
+ *                          first input. No retry button (won't help).
+ *   auth_error           — 401/403. Missing/invalid credentials. If the
+ *                          caller owns the app, link to Secrets.
+ *   upstream_outage      — 5xx or timeout. Show "Try again" so retrying
+ *                          identical inputs is one click away.
+ *   network_unreachable  — No response at all (DNS/TLS/TCP). If owner,
+ *                          link to Studio → edit base_url.
+ *   floom_internal_error — Our bug. Red tint, "Report this" → GH
+ *                          Issues prefilled with the run_id.
+ *
+ * The classifier consults `run.error_type` and `run.upstream_status`
+ * first — both set by the control plane at source (see
+ * services/proxied-runner.ts + services/runner.ts). When those aren't
+ * populated (older runs, docker-entrypoint apps, MCP-proxied calls
+ * that go through a different path), it falls through to heuristic
+ * string matching on `run.error` so no run is misclassified as
+ * "Can't reach this app right now" when we actually know better.
  */
+type ErrorClass =
+  | 'user_input_error'
+  | 'auth_error'
+  | 'upstream_outage'
+  | 'network_unreachable'
+  | 'floom_internal_error'
+  | 'missing_secret_prompt'
+  | 'repo_auth'
+  | 'deprecated_model'
+  | 'unknown';
+
 interface ErrorCopy {
+  /** Stable taxonomy slug. Persisted to a data-attribute for DOM tests. */
+  klass: ErrorClass;
+  /** What to render on the monospace meta line next to the duration. */
+  meta: string;
+  /** Big headline in the error card. */
   headline: string;
+  /** Explanatory single-line sub, already interpolated with context. */
   sub: string;
+  /** Severity → palette. 'platform' = red tint; everything else amber. */
   severity: 'upstream' | 'user' | 'platform';
 }
 
-function ErrorCard({ run }: { run: RunRecord }) {
-  const copy = classifyRunError(run);
+interface ClassifyContext {
+  /** Human display name, e.g. "base64". */
+  appName: string;
+  /** Host extracted from app.base_url, e.g. "api.petstore.example". */
+  upstreamHost: string | null;
+}
+
+function ErrorCard({
+  run,
+  appDetail,
+  onRetry,
+}: {
+  run: RunRecord;
+  appDetail?: AppDetail;
+  onRetry?: () => void;
+}) {
+  const { isAuthenticated, data: session } = useSession();
+  const isOwner =
+    !!(isAuthenticated && session?.user?.id && appDetail?.author) &&
+    session.user.id === appDetail.author;
+
+  const ctx = useMemo<ClassifyContext>(() => {
+    return {
+      appName: appDetail?.name || run.app_slug || 'this app',
+      // upstream_host is populated by GET /api/hub/:slug only for
+      // proxied (OpenAPI-ingested) apps — docker apps have no base_url
+      // so the network_unreachable sub-line falls back to "its
+      // backend" instead of leaking the literal string "null".
+      upstreamHost: appDetail?.upstream_host ?? null,
+    };
+  }, [appDetail, run.app_slug]);
+
+  const copy = classifyRunError(run, ctx);
   const palette = palettForSeverity(copy.severity);
   const rawError = run.error || '';
-  const hasDetails = Boolean(rawError) || Boolean(run.logs);
+  const hasDetails =
+    Boolean(rawError) ||
+    Boolean(run.logs) ||
+    run.upstream_status != null;
+
+  // Focus the first input field on user_input_error. The inputs card
+  // is a sibling in the run surface layout, so we reach across via a
+  // data-testid selector rather than threading a ref prop through
+  // three components. Scoped to the inputs card to avoid grabbing
+  // unrelated focusables (Try again buttons, Iterate composer).
+  useEffect(() => {
+    if (copy.klass !== 'user_input_error') return;
+    const inputsCard = document.querySelector<HTMLElement>(
+      '[data-testid="app-inputs-card"]',
+    );
+    if (!inputsCard) return;
+    const first = inputsCard.querySelector<HTMLElement>(
+      'input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled])',
+    );
+    first?.focus({ preventScroll: true });
+  }, [copy.klass, run.id]);
+
+  const reportUrl = buildReportIssueUrl(run);
+  const secretsUrl = appDetail?.slug
+    ? `/me/apps/${appDetail.slug}/secrets`
+    : null;
+  const studioUrl = appDetail?.slug
+    ? `/me/apps/${appDetail.slug}`
+    : null;
+
   return (
     <div
       data-testid="run-error-card"
       data-error-severity={copy.severity}
+      data-error-class={copy.klass}
       className="app-expanded-card"
       style={{
         borderColor: palette.border,
@@ -318,6 +426,20 @@ function ErrorCard({ run }: { run: RunRecord }) {
           >
             {copy.sub}
           </p>
+
+          {/* Per-class action row. Rendered only when an action applies
+              to this class — user_input_error intentionally has none
+              (retrying identical bad input won't help; we already
+              focused the first field). */}
+          <ErrorActions
+            copy={copy}
+            palette={palette}
+            onRetry={onRetry}
+            reportUrl={reportUrl}
+            secretsUrl={isOwner ? secretsUrl : null}
+            studioUrl={isOwner ? studioUrl : null}
+          />
+
           {hasDetails && (
             <details style={{ marginTop: 14 }} data-testid="run-error-details">
               <summary
@@ -330,6 +452,19 @@ function ErrorCard({ run }: { run: RunRecord }) {
               >
                 Show details
               </summary>
+              {run.upstream_status != null && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 11,
+                    color: palette.sub,
+                  }}
+                  data-testid="run-error-upstream-status"
+                >
+                  Upstream HTTP status: {run.upstream_status}
+                </div>
+              )}
               {rawError && (
                 <div
                   style={{
@@ -375,6 +510,153 @@ function ErrorCard({ run }: { run: RunRecord }) {
   );
 }
 
+function ErrorActions({
+  copy,
+  palette,
+  onRetry,
+  reportUrl,
+  secretsUrl,
+  studioUrl,
+}: {
+  copy: ErrorCopy;
+  palette: ReturnType<typeof palettForSeverity>;
+  onRetry?: () => void;
+  reportUrl: string;
+  secretsUrl: string | null;
+  studioUrl: string | null;
+}) {
+  const buttons: JSX.Element[] = [];
+
+  // upstream_outage → Try again. Resubmits identical inputs.
+  if (copy.klass === 'upstream_outage' && onRetry) {
+    buttons.push(
+      <button
+        key="retry"
+        type="button"
+        onClick={onRetry}
+        data-testid="run-error-action-retry"
+        style={actionButtonStyle(palette)}
+      >
+        Try again
+      </button>,
+    );
+  }
+
+  // auth_error / missing_secret → link to Secrets (owner only).
+  if (
+    (copy.klass === 'auth_error' || copy.klass === 'missing_secret_prompt') &&
+    secretsUrl
+  ) {
+    buttons.push(
+      <Link
+        key="secrets"
+        to={secretsUrl}
+        data-testid="run-error-action-secrets"
+        style={actionLinkStyle(palette)}
+      >
+        Open Secrets
+      </Link>,
+    );
+  }
+
+  // network_unreachable → link to Studio (owner only) to edit base_url.
+  if (copy.klass === 'network_unreachable' && studioUrl) {
+    buttons.push(
+      <Link
+        key="edit-url"
+        to={studioUrl}
+        data-testid="run-error-action-edit-url"
+        style={actionLinkStyle(palette)}
+      >
+        Edit app URL
+      </Link>,
+    );
+  }
+
+  // floom_internal_error → Report this. Prefills a GH Issue with the
+  // run id so we can trace the exact failure.
+  if (copy.klass === 'floom_internal_error') {
+    buttons.push(
+      <a
+        key="report"
+        href={reportUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-testid="run-error-action-report"
+        style={actionLinkStyle(palette)}
+      >
+        Report this
+      </a>,
+    );
+  }
+
+  if (buttons.length === 0) return null;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 12,
+      }}
+    >
+      {buttons}
+    </div>
+  );
+}
+
+function actionButtonStyle(palette: ReturnType<typeof palettForSeverity>) {
+  return {
+    fontSize: 12,
+    fontWeight: 500,
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: `1px solid ${palette.border}`,
+    background: 'white',
+    color: palette.headline,
+    cursor: 'pointer',
+  } as const;
+}
+
+function actionLinkStyle(palette: ReturnType<typeof palettForSeverity>) {
+  return {
+    fontSize: 12,
+    fontWeight: 500,
+    padding: '6px 12px',
+    borderRadius: 8,
+    border: `1px solid ${palette.border}`,
+    background: 'white',
+    color: palette.headline,
+    textDecoration: 'none',
+    display: 'inline-block',
+  } as const;
+}
+
+function buildReportIssueUrl(run: RunRecord): string {
+  const runId = run.id || '(unknown)';
+  const title = encodeURIComponent(`Floom internal error — run ${runId}`);
+  const body = encodeURIComponent(
+    [
+      '**Run id:** ' + runId,
+      '**App slug:** ' + (run.app_slug || 'unknown'),
+      '**Error type:** ' + (run.error_type || 'unknown'),
+      '',
+      '**What I was doing:**',
+      '',
+      '',
+      '**What I expected:**',
+      '',
+      '',
+      '**What happened (paste Show details here):**',
+      '',
+      '```',
+      (run.error || '').slice(0, 500),
+      '```',
+    ].join('\n'),
+  );
+  return `https://github.com/floomhq/floom/issues/new?title=${title}&body=${body}&labels=bug,internal-error`;
+}
+
 function WarnIcon({ color }: { color: string }) {
   return (
     <svg
@@ -398,8 +680,8 @@ function WarnIcon({ color }: { color: string }) {
 
 function palettForSeverity(severity: ErrorCopy['severity']) {
   if (severity === 'platform') {
-    // Reserved for Floom-side platform bugs. Slight red tint, but still
-    // softer than the old #dc2626 block.
+    // Reserved for Floom-side platform bugs (floom_internal_error).
+    // Slight red tint, still softer than the old #dc2626 block.
     return {
       bg: '#fef2f2',
       border: '#f1c9c9',
@@ -408,8 +690,8 @@ function palettForSeverity(severity: ErrorCopy['severity']) {
       icon: '#c2321f',
     };
   }
-  // Upstream / user errors — warm amber. Matches the "this usually
-  // clears up" framing: informational, not alarming.
+  // Upstream / user errors — warm amber. Not red: these are expected
+  // failure modes, not alarms.
   return {
     bg: '#fffaf0',
     border: '#f5d8a4',
@@ -420,141 +702,140 @@ function palettForSeverity(severity: ErrorCopy['severity']) {
 }
 
 /**
- * Maps a RunRecord to a user-facing headline + sub-line. Never surfaces
- * the raw HTTP verb ("Forbidden", "Unauthorized"): those are scary and
- * often technically wrong (upstreams return 403 for rate-limit, geo
- * blocks, expired API keys, etc.).
- *
- * Exported (via module-local scope) primarily so the tree-shaken output
- * still carries the strings; DOM tests assert on the headlines.
+ * Meta label shown in the monospace run-header line. Kept in sync with
+ * the taxonomy so the meta, the headline, and the data-error-class
+ * attribute all agree (previously the meta always said
+ * "runtime_error", which was confusing for 4xx cases).
  */
-export function classifyRunError(run: RunRecord): ErrorCopy {
-  const error = run.error || '';
-  const type = run.error_type || '';
-  const status = run.status;
+function metaLabelFor(run: RunRecord): string {
+  const copy = classifyRunError(run, {
+    appName: run.app_slug || 'this app',
+    upstreamHost: null,
+  });
+  return copy.meta;
+}
 
-  // Timeout — both the status and the dedicated error_type.
-  if (status === 'timeout' || type === 'timeout' || /timed? ?out|timeout/i.test(error)) {
-    return {
-      severity: 'upstream',
-      headline: 'This run took too long',
-      sub:
-        'The app didn’t finish in the allowed time. Try again, or check if the inputs are larger than usual.',
-    };
+/**
+ * Maps a RunRecord to one of the five error-taxonomy classes plus a
+ * ready-to-render copy block. Never surfaces the raw HTTP verb
+ * ("Forbidden", "Unauthorized") and never claims "can't reach" for a
+ * 4xx response — those are the two failure modes the product audit
+ * flagged as the #1 worst moment on /p/:slug.
+ */
+export function classifyRunError(
+  run: RunRecord,
+  ctx: ClassifyContext,
+): ErrorCopy {
+  const error = run.error || '';
+  const type = (run.error_type || '') as string;
+  const status = run.status;
+  const upstream = typeof run.upstream_status === 'number' ? run.upstream_status : null;
+  const appName = ctx.appName || 'this app';
+  const host = ctx.upstreamHost;
+
+  // --- 1. Control-plane verdict wins. The proxied-runner already knows
+  //        whether this was auth / 4xx / 5xx / network / timeout, so
+  //        trust it and skip heuristics.
+
+  if (type === 'user_input_error') {
+    return buildUserInputError(run, appName, upstream, error);
+  }
+  if (type === 'auth_error') {
+    return buildAuthError(appName, upstream);
+  }
+  if (type === 'upstream_outage') {
+    return buildUpstreamOutage(appName, upstream, /*isTimeout*/ false);
+  }
+  if (type === 'network_unreachable') {
+    return buildNetworkUnreachable(appName, host);
+  }
+  if (type === 'floom_internal_error') {
+    return buildFloomInternalError(run, upstream);
   }
 
-  // Missing secret — explicit error_type from the server classifier, or
-  // text heuristic. Treated as "user": the caller can fix by adding a
-  // secret, so we guide them to Settings.
+  // --- 2. Legacy taxonomy values from older runs or docker-entrypoint
+  //        apps. Fall through to the nearest new class so UI copy
+  //        stays consistent.
+
+  // Timeout — from docker entrypoint or legacy proxied runs.
+  if (
+    status === 'timeout' ||
+    type === 'timeout' ||
+    /timed? ?out|timeout/i.test(error)
+  ) {
+    return buildUpstreamOutage(appName, upstream, /*isTimeout*/ true);
+  }
+
+  // Missing secret — the runner short-circuited before calling the upstream.
   if (
     type === 'missing_secret' ||
     /secret.+(not set|missing|required)/i.test(error) ||
     /OPENPAPER_API_TOKEN|GEMINI_API_KEY|GOOGLE_API_KEY/.test(error)
   ) {
     return {
+      klass: 'missing_secret_prompt',
+      meta: 'missing_secret',
       severity: 'user',
       headline: 'This app needs a secret',
-      sub:
-        'Add the missing API key under Settings → Secrets, then rerun. The app couldn’t reach its backend without it.',
+      sub: `Add the missing API key under Settings → Secrets, then rerun ${appName}.`,
     };
   }
 
-  // Build errors — Floom side failed to prepare the app image.
+  // Build errors + OOM — both are Floom-side. Red tint.
   if (type === 'build_error') {
-    return {
-      severity: 'platform',
-      headline: 'We couldn’t build this app',
-      sub:
-        'Floom failed to prepare the app image. This is on our side — try again shortly, or report it if it persists.',
-    };
+    return buildFloomInternalError(
+      run,
+      upstream,
+      'We couldn’t build this app.',
+      'Floom failed to prepare the app image. This is on our side.',
+    );
   }
-
-  // OOM — the app ran out of memory. Borderline platform vs upstream;
-  // render amber so callers retrying smaller inputs get a fix path.
   if (type === 'oom' || /out of memory|oom|killed.*memory/i.test(error)) {
-    return {
-      severity: 'upstream',
-      headline: 'The app ran out of memory',
-      sub:
-        'The run exceeded the available memory. Try smaller inputs, or ping the app author if this keeps happening.',
-    };
+    return buildFloomInternalError(
+      run,
+      upstream,
+      `${appName} ran out of memory.`,
+      'The run exceeded available memory. This is a Floom-side limit we can raise — report it.',
+    );
   }
 
-  // Validation — inputs didn't match the schema. Try to pull the
-  // field name from the message ("field 'foo': required").
-  if (
-    type === 'validation_error' ||
-    /validation[_ ]error|invalid (input|value|parameter)|required field|missing field/i.test(
-      error,
-    )
-  ) {
-    const field = extractField(error);
-    return {
-      severity: 'user',
-      headline: 'Those inputs aren’t accepted',
-      sub: field
-        ? `The input "${field}" didn’t match what the app expected. Adjust it and try again.`
-        : 'One or more inputs didn’t match what the app expected. Adjust them and try again.',
-    };
-  }
+  // --- 3. String heuristics for legacy proxied-runner output that pre-dates
+  //        the taxonomy classifier. Only runs reach here; treat as a
+  //        last line of defense so we don't fall through to the
+  //        "can't reach" catch-all when we can tell what happened.
 
-  // HTTP-specific headlines. Pulled from the raw error body, which is
-  // typically shaped like "HTTP 403: Forbidden" or "status 502 from
-  // upstream". We never show the verb to the user.
-  const http = extractHttpStatus(error);
+  const httpFromString = extractHttpStatus(error);
+  const http = upstream ?? httpFromString;
   if (http !== null) {
-    if (http === 401) {
-      return {
-        severity: 'user',
-        headline: 'This app needs authentication',
-        sub:
-          'The upstream API rejected the request without credentials. Add the required key under Settings → Secrets and try again.',
-      };
-    }
-    if (http === 403) {
-      // 403 is frequently rate-limit / geoblock / expired key. Do NOT
-      // say "Forbidden" — it's misleading and alarming.
-      return {
-        severity: 'upstream',
-        headline: 'Can’t reach this app right now',
-        sub:
-          'The app returned 403. This is usually a temporary block or rate limit on the upstream service and clears up in a few minutes.',
-      };
-    }
+    if (http === 401 || http === 403) return buildAuthError(appName, http);
     if (http === 404) {
-      return {
-        severity: 'upstream',
-        headline: 'The app couldn’t find that',
-        sub: 'The upstream returned 404. The resource the app was looking for may have moved or been removed.',
-      };
+      // 404 is user_input_error: the app rejected this particular
+      // path/resource the user asked for. Generic "Can't reach" was the
+      // specific regression the product audit flagged.
+      return buildUserInputError(run, appName, http, error);
     }
     if (http === 429) {
       return {
+        klass: 'upstream_outage',
+        meta: 'upstream_outage',
         severity: 'upstream',
-        headline: 'The app is being rate-limited',
-        sub:
-          'The upstream returned 429. Wait a minute and retry — this usually clears up on its own.',
+        headline: `${appName} is being rate-limited.`,
+        sub: `The upstream returned 429. Wait a minute and try again — this usually clears up on its own.`,
       };
     }
     if (http >= 400 && http < 500) {
-      return {
-        severity: 'upstream',
-        headline: 'Can’t reach this app right now',
-        sub: `The app returned ${http}. This usually clears up in a few minutes.`,
-      };
+      return buildUserInputError(run, appName, http, error);
     }
     if (http >= 500 && http < 600) {
-      return {
-        severity: 'upstream',
-        headline: 'The app had a server error',
-        sub: `The upstream service returned ${http}. Try again shortly — this is on the app’s side, not yours.`,
-      };
+      return buildUpstreamOutage(appName, http, /*isTimeout*/ false);
     }
   }
 
   // Deprecated Gemini model — actionable hint for creators.
   if (/gemini-?2\.0|model.+no longer available/i.test(error)) {
     return {
+      klass: 'deprecated_model',
+      meta: 'deprecated_model',
       severity: 'user',
       headline: 'This app pins a deprecated model',
       sub:
@@ -566,6 +847,8 @@ export function classifyRunError(run: RunRecord): ErrorCopy {
   // a GITHUB_TOKEN.
   if (/could not read Username|fatal: Authentication/i.test(error)) {
     return {
+      klass: 'repo_auth',
+      meta: 'repo_auth',
       severity: 'user',
       headline: 'Couldn’t access the app repository',
       sub:
@@ -573,24 +856,125 @@ export function classifyRunError(run: RunRecord): ErrorCopy {
     };
   }
 
-  // Generic runtime_error without a more specific classification. Today
-  // these are overwhelmingly upstream app failures, so stay amber.
+  // Network-ish errors that never carried a status in the message.
+  if (/fetch failed|enotfound|econnrefused|econnreset|eai_again|getaddrinfo/i.test(error)) {
+    return buildNetworkUnreachable(appName, host);
+  }
+
+  // --- 4. Fallbacks.
+
+  // Legacy runtime_error / generic `status: 'error'` with no shape we
+  // recognize: DO NOT claim a specific root cause (that's the bug we
+  // fixed). Surface as upstream_outage with an honest sub: "we don't
+  // know, try again". Still better than pretending it's a network
+  // issue or a user-input issue.
   if (type === 'runtime_error' || status === 'error') {
     return {
+      klass: 'upstream_outage',
+      meta: 'upstream_outage',
       severity: 'upstream',
-      headline: 'Something went wrong running this app',
+      headline: `${appName} didn’t finish.`,
       sub:
-        'The app didn’t finish. This is usually a hiccup on the app’s side — try again, or open details below.',
+        'The run ended without a clear reason. Try again, or open details below.',
     };
   }
 
-  // Last-resort fallback — unknown status.
   return {
+    klass: 'unknown',
+    meta: 'unknown',
     severity: 'upstream',
     headline: 'The run didn’t complete',
     sub: 'Open details below to see what happened.',
   };
 }
+
+// ---------- per-class builders ----------
+
+function buildUserInputError(
+  run: RunRecord,
+  appName: string,
+  upstream: number | null,
+  error: string,
+): ErrorCopy {
+  const statusStr = upstream != null ? String(upstream) : 'a 4xx';
+  const msg = extractMessageFromError(error) || 'bad request';
+  return {
+    klass: 'user_input_error',
+    meta: 'user_input_error',
+    severity: 'user',
+    headline: 'The app didn’t accept your input.',
+    sub: `${appName} returned ${statusStr}: ${msg}. Review your input and try again.`,
+  };
+  // run param kept for symmetry with other builders (future: field name).
+  void run;
+}
+
+function buildAuthError(appName: string, upstream: number | null): ErrorCopy {
+  const statusNote = upstream === 401 || upstream === 403 ? ` (${upstream})` : '';
+  return {
+    klass: 'auth_error',
+    meta: 'auth_error',
+    severity: 'user',
+    headline: 'This app needs authentication.',
+    sub: `Floom has no credentials set for ${appName}${statusNote}. If you own this app, add a secret in Studio → Secrets.`,
+  };
+}
+
+function buildUpstreamOutage(
+  appName: string,
+  upstream: number | null,
+  isTimeout: boolean,
+): ErrorCopy {
+  if (isTimeout) {
+    return {
+      klass: 'upstream_outage',
+      meta: 'timeout',
+      severity: 'upstream',
+      headline: `${appName} took too long.`,
+      sub: `The app didn’t respond in time. This isn’t a problem with your input. Try again in a minute.`,
+    };
+  }
+  const statusStr = upstream != null ? String(upstream) : 'a server error';
+  return {
+    klass: 'upstream_outage',
+    meta: 'upstream_outage',
+    severity: 'upstream',
+    headline: `${appName} had a server error.`,
+    sub: `The app’s server returned ${statusStr}. This isn’t a problem with your input. Try again in a minute.`,
+  };
+}
+
+function buildNetworkUnreachable(
+  appName: string,
+  host: string | null,
+): ErrorCopy {
+  const hostStr = host ? host : 'its backend';
+  return {
+    klass: 'network_unreachable',
+    meta: 'network_unreachable',
+    severity: 'upstream',
+    headline: `Can’t reach ${appName}.`,
+    sub: `Floom couldn’t connect to ${hostStr}. The app may be offline, the URL may be wrong, or a firewall is blocking.`,
+  };
+}
+
+function buildFloomInternalError(
+  run: RunRecord,
+  upstream: number | null,
+  headline = 'Something broke inside Floom.',
+  subBody = 'This isn’t your fault.',
+): ErrorCopy {
+  const statusMarker = upstream != null ? ` Upstream status ${upstream}.` : '';
+  return {
+    klass: 'floom_internal_error',
+    meta: 'floom_internal_error',
+    severity: 'platform',
+    headline,
+    sub: `${subBody} Error ref: ${run.id || 'unknown'}.${statusMarker}`,
+  };
+}
+
+// ---------- string heuristics ----------
 
 function extractHttpStatus(error: string): number | null {
   if (!error) return null;
@@ -603,14 +987,21 @@ function extractHttpStatus(error: string): number | null {
   return n;
 }
 
-function extractField(error: string): string | null {
-  // "field 'foo'", "field \"foo\"", "'foo' is required", "property foo",
-  // "input: foo" — first capture wins.
-  const quoted = error.match(/['"`]([a-zA-Z_][\w.-]{0,40})['"`]/);
-  if (quoted) return quoted[1];
-  const bare = error.match(/\b(?:field|property|input|parameter)s?\s+([a-zA-Z_][\w.-]{0,40})/i);
-  if (bare) return bare[1];
-  return null;
+/**
+ * Pull the upstream's own message out of an error like
+ * `HTTP 400: bad base64 input` (the server-side
+ * extractUpstreamMessage emits this shape). Falls back to null if the
+ * error is just the naked status line.
+ */
+function extractMessageFromError(error: string): string | null {
+  if (!error) return null;
+  const m = error.match(/^HTTP\s+\d{3}:\s*(.+)$/s);
+  if (!m) return null;
+  const msg = m[1].trim();
+  if (!msg) return null;
+  // Cap in the UI layer too — the server already trims to 140 chars,
+  // but legacy runs predating the taxonomy might carry longer blobs.
+  return msg.length > 140 ? msg.slice(0, 137) + '...' : msg;
 }
 
 function IterateInput({ onSubmit }: { onSubmit?: (prompt: string) => void }) {
