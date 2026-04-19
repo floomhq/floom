@@ -101,27 +101,27 @@ export function McpSnippet() {
       data-section="mcp-snippet"
       style={{
         background: 'var(--bg)',
-        padding: '96px 24px',
+        padding: '72px 24px',
       }}
     >
       <div style={{ maxWidth: 820, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 32 }}>
+        <header style={{ textAlign: 'center', marginBottom: 28 }}>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
               fontWeight: 400,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.1,
               letterSpacing: '-0.02em',
               color: 'var(--ink)',
-              margin: '0 0 14px',
+              margin: '0 0 12px',
             }}
           >
             Add any app to Claude in 3 lines.
           </h2>
           <p
             style={{
-              fontSize: 17,
+              fontSize: 15,
               color: 'var(--muted)',
               lineHeight: 1.55,
               maxWidth: 520,
