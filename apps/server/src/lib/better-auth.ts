@@ -29,6 +29,11 @@ import { organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import { db } from '../db.js';
 import { cleanupUserOrphans } from '../services/cleanup.js';
+import {
+  renderResetPasswordEmail,
+  renderWelcomeEmail,
+  sendEmail,
+} from './email.js';
 
 // Better Auth's `Auth` type is generic over its options. Inferring the exact
 // concrete type would couple every consumer to the full plugin tuple shape,
@@ -126,6 +131,38 @@ function buildAuthOptions(): any {
       enabled: true,
       requireEmailVerification: false,
       autoSignIn: true,
+      // SMTP via Resend (2026-04-20). When RESEND_API_KEY is unset the
+      // handler in ./email.ts falls back to stdout — Better Auth won't
+      // crash, the reset URL just appears in the server log instead of
+      // the user's inbox. `url` is built by Better Auth from
+      // `${baseURL}/auth/reset-password/${token}?callbackURL=...`; it
+      // redirects through the built-in verification endpoint to the
+      // frontend's /reset-password page, which is the canonical pattern
+      // from the Better Auth docs.
+      sendResetPassword: async ({
+        user,
+        url,
+      }: {
+        user: { email: string; name?: string | null };
+        url: string;
+        token: string;
+      }): Promise<void> => {
+        const { subject, html, text } = renderResetPasswordEmail({
+          name: user.name ?? null,
+          resetUrl: url,
+        });
+        const res = await sendEmail({ to: user.email, subject, html, text });
+        if (!res.ok) {
+          // Log and swallow: Better Auth returns a generic success to the
+          // client regardless (anti-enumeration), so failing here would
+          // only muddy the server log without improving UX.
+          // eslint-disable-next-line no-console
+          console.error(
+            `[auth] sendResetPassword delivery failed for ${user.email}: ${res.reason}`,
+          );
+        }
+      },
+      resetPasswordTokenExpiresIn: 60 * 60, // 1 hour — matches email copy
     },
     // 30-day sessions with sliding renewal on activity, per spec.
     session: {
@@ -172,6 +209,40 @@ function buildAuthOptions(): any {
         rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 100 },
       }),
     ],
+    databaseHooks: {
+      user: {
+        create: {
+          // Fires after a new user row is committed (email+password signup
+          // or social OAuth). Sends a minimal welcome email. Best-effort:
+          // a delivery failure MUST NOT roll back the user, so we swallow
+          // errors and only log. Also a no-op in stdout-fallback mode —
+          // the sendEmail helper handles that transparently.
+          after: async (user: {
+            id: string;
+            email: string;
+            name?: string | null;
+          }): Promise<void> => {
+            try {
+              const publicUrl =
+                process.env.PUBLIC_URL ||
+                process.env.BETTER_AUTH_URL ||
+                'https://floom.dev';
+              const { subject, html, text } = renderWelcomeEmail({
+                name: user.name ?? null,
+                publicUrl,
+              });
+              await sendEmail({ to: user.email, subject, html, text });
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[auth] welcome email failed for ${user.email}:`,
+                err,
+              );
+            }
+          },
+        },
+      },
+    },
     user: {
       // W4-minimal gap close: enable the POST /auth/delete-user endpoint so
       // /me/settings can delete an account without operator intervention.
