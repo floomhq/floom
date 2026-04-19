@@ -37,11 +37,19 @@ const PURIFY_CONFIG: Config = {
 
 // Install a hook once to harden <a target="_blank">. DOMPurify keeps a
 // singleton so this is idempotent under HMR.
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
-    node.setAttribute('rel', 'noopener noreferrer');
-  }
-});
+//
+// Guard the hook install with a `window` check: when RunSurface.tsx
+// (which transitively imports this module) is imported under tsx for
+// the stress tests, Node has no DOM and `DOMPurify.addHook` is
+// undefined on the factory. We only need the hook in the browser
+// anyway. See `apps/server/package.json` test script for the importers.
+if (typeof window !== 'undefined' && typeof DOMPurify.addHook === 'function') {
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+}
 
 /**
  * Sanitize an HTML string for safe inline rendering. Returns a string
