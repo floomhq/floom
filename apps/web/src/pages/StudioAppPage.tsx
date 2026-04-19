@@ -23,6 +23,10 @@ export function StudioAppPage() {
   const [confirmInput, setConfirmInput] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Issue #129: visibility toggle. Keep local state for optimistic update so
+  // the pill flips before the round-trip lands. Failure reverts it.
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [visibilityError, setVisibilityError] = useState<string | null>(null);
 
   async function handleDelete() {
     if (!app) return;
@@ -36,6 +40,24 @@ export function StudioAppPage() {
     } catch (err) {
       setDeleteError((err as Error).message || 'Delete failed');
       setDeleting(false);
+    }
+  }
+
+  async function handleVisibilityChange(next: 'public' | 'private') {
+    if (!app || visibilityBusy || app.visibility === next) return;
+    const previous = app.visibility;
+    setVisibilityBusy(true);
+    setVisibilityError(null);
+    // Optimistic flip — revert on error.
+    setApp({ ...app, visibility: next });
+    try {
+      await api.updateAppVisibility(app.slug, next);
+      await refreshMyApps();
+    } catch (err) {
+      setApp({ ...app, visibility: previous });
+      setVisibilityError((err as Error).message || 'Could not update visibility');
+    } finally {
+      setVisibilityBusy(false);
     }
   }
 
@@ -135,6 +157,55 @@ export function StudioAppPage() {
               View runs
             </Link>
           </div>
+
+          {/* Issue #129 (2026-04-19): visibility toggle. Lives above Recent
+              runs so creators see the pill alongside their app health, and
+              can flip between Public (listed in Store) and Private (owner-
+              only) without re-ingesting. `auth-required` is kept available
+              through the server API for advanced users but not exposed
+              here — the 95% case is the public/private binary. */}
+          <h2 style={sectionHeader}>Visibility</h2>
+          <section
+            data-testid="studio-app-visibility"
+            style={{
+              marginBottom: 32,
+              border: '1px solid var(--line)',
+              borderRadius: 10,
+              background: 'var(--card)',
+              padding: 20,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                marginBottom: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>Who can run this app?</span>
+              <VisibilityPill
+                value={
+                  app.visibility === 'private' ? 'private' : app.visibility === 'auth-required' ? 'auth-required' : 'public'
+                }
+              />
+            </div>
+            <StudioVisibilityChooser
+              value={app.visibility === 'private' ? 'private' : 'public'}
+              onChange={handleVisibilityChange}
+              busy={visibilityBusy}
+              authRequired={app.visibility === 'auth-required'}
+            />
+            {visibilityError && (
+              <p
+                data-testid="studio-app-visibility-error"
+                style={{ margin: '12px 0 0', fontSize: 12, color: '#c2321f' }}
+              >
+                {visibilityError}
+              </p>
+            )}
+          </section>
 
           <h2 style={sectionHeader}>Recent runs</h2>
           {!runs && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
@@ -406,6 +477,135 @@ function RunTable({ runs }: { runs: CreatorRun[] }) {
           </span>
         </Link>
       ))}
+    </div>
+  );
+}
+
+function VisibilityPill({
+  value,
+}: {
+  value: 'public' | 'private' | 'auth-required';
+}) {
+  const tones = {
+    public: { bg: '#e6f4ea', fg: '#1a7f37', label: 'Public' },
+    private: { bg: '#fef3c7', fg: '#b45309', label: 'Private' },
+    'auth-required': { bg: '#e0e7ff', fg: '#3730a3', label: 'Auth required' },
+  }[value];
+  return (
+    <span
+      data-testid={`studio-app-visibility-pill-${value}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '3px 10px',
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        background: tones.bg,
+        color: tones.fg,
+      }}
+    >
+      {tones.label}
+    </span>
+  );
+}
+
+function StudioVisibilityChooser({
+  value,
+  onChange,
+  busy,
+  authRequired,
+}: {
+  value: 'public' | 'private';
+  onChange: (next: 'public' | 'private') => void;
+  busy: boolean;
+  authRequired: boolean;
+}) {
+  const options: Array<{ id: 'public' | 'private'; label: string; explainer: string }> = [
+    {
+      id: 'public',
+      label: 'Public',
+      explainer: 'Appears in the Store. Anyone can run this app.',
+    },
+    {
+      id: 'private',
+      label: 'Private',
+      explainer: 'Hidden from the Store. Only your signed-in sessions can run it.',
+    },
+  ];
+  return (
+    <div>
+      <div
+        role="radiogroup"
+        aria-label="App visibility"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+          gap: 10,
+        }}
+      >
+        {options.map((opt) => {
+          const selected = value === opt.id;
+          return (
+            <label
+              key={opt.id}
+              data-testid={`studio-app-visibility-${opt.id}`}
+              data-selected={selected ? 'true' : 'false'}
+              style={{
+                border: selected ? '1.5px solid var(--accent)' : '1px solid var(--line)',
+                background: selected ? 'var(--accent-soft, #e6f4ea)' : 'var(--card)',
+                borderRadius: 10,
+                padding: '12px 14px',
+                cursor: busy ? 'wait' : 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                opacity: busy ? 0.6 : 1,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="radio"
+                  name="studio-app-visibility"
+                  value={opt.id}
+                  checked={selected}
+                  disabled={busy}
+                  onChange={() => onChange(opt.id)}
+                  data-testid={`studio-app-visibility-${opt.id}-input`}
+                  style={{ accentColor: 'var(--accent)', margin: 0 }}
+                />
+                <span
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: selected ? 'var(--accent)' : 'var(--ink)',
+                  }}
+                >
+                  {opt.label}
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+                {opt.explainer}
+              </p>
+            </label>
+          );
+        })}
+      </div>
+      {authRequired && (
+        <p
+          style={{
+            margin: '12px 0 0',
+            fontSize: 12,
+            color: 'var(--muted)',
+            lineHeight: 1.5,
+          }}
+        >
+          This app is currently set to <strong>Auth required</strong> (shared bearer token). Picking
+          Public or Private above will replace that mode.
+        </p>
+      )}
     </div>
   );
 }

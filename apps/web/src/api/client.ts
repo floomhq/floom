@@ -464,6 +464,18 @@ export function deleteApp(slug: string): Promise<{ ok: true }> {
   return request(`/api/hub/${slug}`, { method: 'DELETE' });
 }
 
+// Issue #129 (2026-04-19): owner can flip visibility between public and
+// private after publish without re-ingesting. Used by /studio/:slug toggle.
+export function updateAppVisibility(
+  slug: string,
+  visibility: 'public' | 'private' | 'auth-required',
+): Promise<{ ok: true; slug: string; visibility: string }> {
+  return request(`/api/hub/${slug}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ visibility }),
+  });
+}
+
 // ---------- W2.2 custom renderer upload ----------
 
 export interface UploadRendererResponse {

@@ -307,6 +307,71 @@ hubRouter.delete('/:slug', async (c) => {
   return c.json({ ok: true, slug });
 });
 
+// PATCH /api/hub/:slug — owner-only update of mutable app fields.
+//
+// Issue #129 (2026-04-19): creators need to flip an app between public and
+// private after publish. Previously the only way to change visibility was
+// re-ingesting the spec, which is destructive (loses runs). This endpoint
+// lets the Studio UI toggle visibility without touching the manifest.
+//
+// Only `visibility` is supported today. Name/description/category edits
+// still go through re-ingest so the `updated_at` bookkeeping stays tight;
+// they can be added here later when the Studio grows an inline-edit UI.
+const PatchBody = z.object({
+  visibility: z.enum(['public', 'private', 'auth-required']).optional(),
+});
+
+hubRouter.patch('/:slug', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const slug = c.req.param('slug');
+
+  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!app) return c.json({ error: 'App not found' }, 404);
+
+  // Ownership: same rule as DELETE. OSS local self-hoster bypass is scoped
+  // to OSS mode only (see DELETE handler above for why).
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
+  const isOwner = app.author === ctx.user_id || isOssLocal;
+  if (!isOwner) {
+    return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = PatchBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() },
+      400,
+    );
+  }
+
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  if (parsed.data.visibility) {
+    updates.push('visibility = ?');
+    values.push(parsed.data.visibility);
+  }
+  if (updates.length === 0) {
+    return c.json({ error: 'No updatable fields in body', code: 'empty_patch' }, 400);
+  }
+  updates.push("updated_at = datetime('now')");
+  values.push(app.id);
+
+  db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  return c.json({
+    ok: true,
+    slug,
+    visibility: parsed.data.visibility ?? app.visibility,
+  });
+});
+
 function safeParse(raw: string | null): unknown {
   if (!raw) return null;
   try {

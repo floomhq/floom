@@ -86,8 +86,13 @@ export function BuildPage({
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('');
+  // Issue #129 (2026-04-19): default to Public so the post-publish "share
+  // the link" copy matches reality. Creators can still pick Private on the
+  // Review step, and can flip it later from /studio/:slug. The old default
+  // ('private') contradicted the success banner's "anyone with the link can
+  // run this" language.
   const [visibility, setVisibility] = useState<'public' | 'private' | 'auth-required'>(
-    'private',
+    'public',
   );
 
   // Coming-soon state. Round 2 polish: describe/connect ramps removed
@@ -129,7 +134,7 @@ export function BuildPage({
       setSlug(p.slug);
       setDescription(p.description);
       setCategory(p.category || '');
-      setVisibility(p.visibility || 'private');
+      setVisibility(p.visibility || 'public');
       setSource(p.source);
       setStep('review');
     } catch {
@@ -836,30 +841,13 @@ export function BuildPage({
             />
 
             <Label>Visibility</Label>
-            <select
-              value={visibility}
-              onChange={(e) =>
-                setVisibility(e.target.value as 'public' | 'private' | 'auth-required')
-              }
-              data-testid="build-visibility"
-              style={{
-                width: '100%',
-                maxWidth: 420,
-                padding: '10px 12px',
-                border: '1px solid var(--line)',
-                borderRadius: 8,
-                background: 'var(--card)',
-                fontSize: 14,
-                color: 'var(--ink)',
-                fontFamily: 'inherit',
-              }}
-            >
-              <option value="private">Private — only you (not listed in the public store)</option>
-              <option value="public">Public — listed in the store for everyone</option>
-              <option value="auth-required">Auth required — shared token (advanced)</option>
-            </select>
-            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 0' }}>
-              Default is private so you can test before going public.
+            <VisibilityChooser
+              value={visibility === 'auth-required' ? 'public' : visibility}
+              onChange={(next) => setVisibility(next)}
+            />
+            <p style={{ fontSize: 12, color: 'var(--muted)', margin: '10px 0 0' }}>
+              You can flip this later from{' '}
+              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>/studio/{slug || '…'}</span>.
             </p>
 
             {error && (
@@ -938,8 +926,9 @@ export function BuildPage({
                 Published
               </div>
               <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 14px' }}>
-                Your app is live. Share the link or install it into Claude
-                Desktop to start running it.
+                {visibility === 'private'
+                  ? 'Your app is live. Only your signed-in sessions can run it — flip visibility to Public later if you want to share.'
+                  : 'Your app is live. Share the link or install it into Claude Desktop to start running it.'}
               </p>
               {/* Shareable full URL + copy button. Before this fix the
                   banner only showed "/p/slug" relative path, which is not
@@ -1454,6 +1443,98 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
         ...(props.style || {}),
       }}
     />
+  );
+}
+
+/**
+ * Segmented Public / Private control with one-line explainers.
+ * Issue #129: replaces the old <select> that silently defaulted to Private
+ * and had no inline copy explaining what each option meant. Keeps
+ * `auth-required` out of the visible surface — it's an advanced mode; when
+ * a creator wants it, they set it in the manifest. Exposing it here would
+ * confuse the 95% case.
+ */
+function VisibilityChooser({
+  value,
+  onChange,
+}: {
+  value: 'public' | 'private';
+  onChange: (next: 'public' | 'private') => void;
+}) {
+  const options: Array<{
+    id: 'public' | 'private';
+    label: string;
+    explainer: string;
+  }> = [
+    {
+      id: 'public',
+      label: 'Public',
+      explainer: 'Appears in the Store. Anyone can run this app.',
+    },
+    {
+      id: 'private',
+      label: 'Private',
+      explainer: 'Hidden from the Store. Only your signed-in sessions can run it.',
+    },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Visibility"
+      data-testid="build-visibility"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: 10,
+        marginTop: 4,
+      }}
+    >
+      {options.map((opt) => {
+        const selected = value === opt.id;
+        return (
+          <label
+            key={opt.id}
+            data-testid={`build-visibility-${opt.id}`}
+            data-selected={selected ? 'true' : 'false'}
+            style={{
+              border: selected ? '1.5px solid var(--accent)' : '1px solid var(--line)',
+              background: selected ? 'var(--accent-soft, #e6f4ea)' : 'var(--card)',
+              borderRadius: 10,
+              padding: '12px 14px',
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              transition: 'border-color 0.12s ease, background 0.12s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="radio"
+                name="build-visibility"
+                value={opt.id}
+                checked={selected}
+                onChange={() => onChange(opt.id)}
+                data-testid={`build-visibility-${opt.id}-input`}
+                style={{ accentColor: 'var(--accent)', margin: 0 }}
+              />
+              <span
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: selected ? 'var(--accent)' : 'var(--ink)',
+                }}
+              >
+                {opt.label}
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+              {opt.explainer}
+            </p>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 
