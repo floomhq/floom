@@ -4,6 +4,7 @@ import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { runAppContainer } from './docker.js';
 import { runProxied } from './proxied-runner.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
+import { invalidateHubCache } from '../lib/hub-cache.js';
 import * as userSecrets from './user_secrets.js';
 import * as creatorSecrets from './app_creator_secrets.js';
 import type { SecretPolicy } from '../types.js';
@@ -124,6 +125,12 @@ function refreshAppAvgRunMs(runId: string): void {
         Math.round(avg),
         row.app_id,
       );
+      // Perf fix (2026-04-20): bust the /api/hub 5s cache so the freshly
+      // computed avg_run_ms drives the store sort order on the next
+      // directory read. Without this, the test suite's "hub: avg_run_ms
+      // populated after runs" assertion sees stale null values for up
+      // to 5s after each run completes.
+      invalidateHubCache();
     }
   } catch (err) {
     // Avg tracking is best-effort. A missing column (on an old DB),

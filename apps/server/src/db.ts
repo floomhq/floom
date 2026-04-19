@@ -11,6 +11,13 @@ mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
+// Perf launch-blocker fix (2026-04-20): without busy_timeout, concurrent
+// writers against the same SQLite DB (runs, run_turns, jobs, connections,
+// app_memory) surface `SQLITE_BUSY` errors to the caller when two
+// transactions collide. Setting a 5s busy timeout lets the engine block
+// and retry internally, which is what every production SQLite deployment
+// does. WAL + busy_timeout is the canonical high-concurrency pairing.
+db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
 
 /**
