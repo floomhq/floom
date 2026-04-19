@@ -89,6 +89,10 @@ export function TopBar({ compact = false }: Props = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const dropRef = useRef<HTMLDivElement>(null);
+  // a11y 2026-04-20: ref on the hamburger so we can return focus to it
+  // when the mobile menu closes via Escape. Without this, SR/keyboard
+  // users lose focus context after dismissing the menu.
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
 
   const isDocs = location.pathname.startsWith('/protocol') || location.pathname === '/docs';
   const isStore = location.pathname.startsWith('/apps') || location.pathname.startsWith('/p/');
@@ -114,6 +118,21 @@ export function TopBar({ compact = false }: Props = {}) {
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname, location.hash]);
+
+  // a11y 2026-04-20: Escape closes the mobile menu and returns focus to
+  // the hamburger button. Without this, keyboard users had no way to
+  // dismiss the overlay once open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        hamburgerRef.current?.focus();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   async function handleLogout() {
     try {
@@ -397,6 +416,7 @@ export function TopBar({ compact = false }: Props = {}) {
         </div>
 
         <button
+          ref={hamburgerRef}
           type="button"
           className="hamburger topbar-hamburger"
           data-testid="hamburger"

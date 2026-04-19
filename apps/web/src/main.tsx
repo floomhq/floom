@@ -137,6 +137,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <IconSprite />
     <BrowserRouter>
+      {/* a11y 2026-04-20: WCAG 2.4.1 skip link. Hidden until keyboard
+          focus lands on it (first Tab press from the URL bar). Target
+          is the #main landmark set on PageShell's <main>. Styling
+          lives in .skip-to-content in globals.css so we can toggle
+          the visual offset on :focus without inline pseudo-classes. */}
+      <a href="#main" className="skip-to-content">
+        Skip to main content
+      </a>
       <Suspense fallback={<RouteLoading variant="full" />}>
       <Routes>
         {/* Creator hero */}

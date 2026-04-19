@@ -70,6 +70,7 @@ export function PageShell({
     <div className="page-root">
       <TopBar />
       <main
+        id="main"
         className="main"
         style={{
           padding: '32px 24px 120px',

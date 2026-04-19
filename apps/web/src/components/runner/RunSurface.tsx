@@ -810,15 +810,29 @@ function InputCard({
             </>
           )}
           <div className="run-surface-actions">
+            {/* a11y 2026-04-20: aria-busy + aria-disabled announce "busy"
+                during an active run. Spinner icon is aria-hidden so the
+                label ("Running…" / "Run") is the only thing SRs read. */}
             <button
               type="submit"
               className="btn-primary"
               data-testid="run-surface-run-btn"
+              aria-busy={running}
+              aria-disabled={running}
               disabled={running}
               style={{ height: 44, minHeight: 44, padding: '0 24px', fontSize: 15 }}
             >
-              {runLabel}
-              <RunArrow />
+              {running ? (
+                <>
+                  <RunSpinner />
+                  <span>Running…</span>
+                </>
+              ) : (
+                <>
+                  {runLabel}
+                  <RunArrow />
+                </>
+              )}
             </button>
             <button
               type="button"
@@ -840,12 +854,23 @@ function InputCard({
               type="button"
               className="btn-primary"
               data-testid="run-surface-run-btn"
+              aria-busy={running}
+              aria-disabled={running}
               onClick={onRun}
               disabled={running}
               style={{ height: 44, minHeight: 44, padding: '0 28px', fontSize: 15 }}
             >
-              {runLabel}
-              <RunArrow />
+              {running ? (
+                <>
+                  <RunSpinner />
+                  <span>Running…</span>
+                </>
+              ) : (
+                <>
+                  {runLabel}
+                  <RunArrow />
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -864,6 +889,33 @@ function RunArrow() {
       aria-hidden="true"
     >
       <path d="M5 3l6 5-6 5V3z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * Loading spinner rendered inline in the Run button during an active run.
+ * aria-hidden so SRs don't see "image"; the sibling "Running…" span is
+ * the announced label. Animated via inline @keyframes injected into
+ * .run-spinner — see globals.css for the rotation keyframes.
+ */
+function RunSpinner() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ width: 14, height: 14, marginRight: 8 }}
+      className="run-spinner"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+      <path
+        d="M14 8a6 6 0 0 0-6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

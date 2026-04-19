@@ -248,7 +248,7 @@ export function CreatorHeroPage() {
     >
       <TopBar />
 
-      <main style={{ display: 'block' }}>
+      <main id="main" style={{ display: 'block' }}>
         {/* HERO v4 (2026-04-20 deep audit):
             - Integration logos moved ABOVE H1 as a tight "WORKS WITH" strip.
               Gives the hero a visual anchor instead of opening with a

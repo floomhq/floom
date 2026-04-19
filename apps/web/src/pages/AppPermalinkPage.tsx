@@ -470,6 +470,7 @@ export function AppPermalinkPage() {
       <TopBar compact={topBarCompact} />
 
       <main
+        id="main"
         style={{ padding: '24px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
         data-testid="permalink-page"
       >
@@ -560,7 +561,11 @@ export function AppPermalinkPage() {
               <AppIcon slug={app.slug} size={20} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div
+              {/* a11y 2026-04-20: collapsed hero dropped the <h1>, so
+                  /p/:slug?run=<id> shipped without a page heading. Promote
+                  the app-name element to <h1> with compact visual styling
+                  so screen readers still announce a clear page title. */}
+              <h1
                 style={{
                   fontSize: 15,
                   fontWeight: 700,
@@ -568,10 +573,12 @@ export function AppPermalinkPage() {
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  margin: 0,
+                  lineHeight: 1.2,
                 }}
               >
                 {app.name}
-              </div>
+              </h1>
               <div
                 style={{
                   fontSize: 12,

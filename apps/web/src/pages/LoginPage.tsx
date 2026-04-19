@@ -229,8 +229,9 @@ export function LoginPage() {
         <form onSubmit={handlePasswordSubmit}>
           {mode === 'signup' && (
             <>
-              <label style={labelStyle}>Display name</label>
+              <label htmlFor="login-name" style={labelStyle}>Display name</label>
               <input
+                id="login-name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -241,8 +242,9 @@ export function LoginPage() {
               />
             </>
           )}
-          <label style={labelStyle}>Email</label>
+          <label htmlFor="login-email" style={labelStyle}>Email</label>
           <input
+            id="login-email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -252,8 +254,9 @@ export function LoginPage() {
             style={inputStyle}
             autoComplete="email"
           />
-          <label style={labelStyle}>Password</label>
+          <label htmlFor="login-password" style={labelStyle}>Password</label>
           <input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

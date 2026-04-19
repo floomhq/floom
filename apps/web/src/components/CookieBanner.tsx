@@ -128,8 +128,8 @@ export function CookieBanner() {
   return (
     <div
       role="dialog"
-      aria-live="polite"
-      aria-label="Cookie consent"
+      aria-modal="true"
+      aria-labelledby="cookie-banner-title"
       data-testid="cookie-banner"
       style={{
         position: 'fixed',
@@ -152,7 +152,10 @@ export function CookieBanner() {
         color: 'var(--ink)',
       }}
     >
-      <p style={{ margin: 0, flex: '1 1 240px', lineHeight: 1.45 }}>
+      {/* a11y 2026-04-20: labelledby target for the dialog. Was
+          aria-label="Cookie consent" with no visible title; SRs now
+          announce the actual banner text. */}
+      <p id="cookie-banner-title" style={{ margin: 0, flex: '1 1 240px', lineHeight: 1.45 }}>
         Floom uses essential cookies for sign-in and preferences. See the{' '}
         <Link to="/cookies" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
           cookie policy

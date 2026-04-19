@@ -27,6 +27,48 @@ body {
   overflow-y: visible !important;
 }
 
+/* a11y 2026-04-20: WCAG 2.4.1 skip-to-content link. Hidden off-screen
+   until keyboard focus lands on it, then slides into view at the top
+   left. Target is #main on the landing/PageShell/AppPermalink main
+   element. */
+.skip-to-content {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  padding: 10px 14px;
+  background: #047857;
+  color: #ffffff;
+  z-index: 9999;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 0 0 8px 0;
+  transition: top 0.15s ease;
+}
+.skip-to-content:focus,
+.skip-to-content:focus-visible {
+  top: 0;
+  outline: 2px solid #ffffff;
+  outline-offset: -4px;
+}
+
+/* a11y 2026-04-20: run button loading spinner. Paired with
+   aria-busy="true" on the button so SR users also hear the busy
+   state. prefers-reduced-motion falls back to no rotation. */
+@keyframes run-spinner-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.run-spinner {
+  animation: run-spinner-rotate 0.9s linear infinite;
+  transform-origin: 50% 50%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-spinner {
+    animation: none;
+  }
+}
+
 /* React-specific adjustments: remove the wireframe dev nav offset so the
    topbar sits flush against the top. */
 .page-root {
@@ -87,14 +129,18 @@ body {
 }
 
 /* ── Mobile hamburger ────────────────────────────────────────────────── */
+/* a11y 2026-04-20: WCAG 2.5.5 target size. Was 40x40, now 44x44 so the
+   hamburger meets the minimum tap target for touch users. */
 .topbar-hamburger {
   display: none;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   gap: 5px;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   background: none;
   border: none;
   padding: 0;
@@ -207,6 +253,25 @@ body {
   }
   .topbar-mobile-menu {
     display: none !important;
+  }
+}
+
+/* a11y 2026-04-20: WCAG 2.5.5 touch target (44x44) for small footer
+   links and cookie banner on mobile. Uses invisible padding +
+   negative margin so the layout (row flow, wrap, spacing) is
+   unchanged but the tap area grows to 44px minimum. */
+@media (max-width: 640px) {
+  [data-testid="public-footer"] a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 12px 4px;
+    margin: -12px 0;
+  }
+  [data-testid="cookie-banner"] button,
+  [data-testid="cookie-banner-pill"] {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 

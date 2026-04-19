@@ -104,6 +104,10 @@ const s: Record<string, CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     maxWidth: 440,
+    // a11y 2026-04-20: element promoted from <span> to <h1>. Reset the
+    // browser default h1 margins so visual rhythm stays identical to
+    // the prior span render.
+    margin: 0,
   },
   sectionH2: {
     fontFamily: "'DM Serif Display', Georgia, serif",
@@ -366,7 +370,7 @@ export function MePage() {
       contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
       allowSignedOutShell={signedOutPreview}
     >
-      <main data-testid="me-page" style={s.main}>
+      <div data-testid="me-page" style={s.main}>
         <header style={s.header}>
           <div style={s.greetingWrap}>
             <GreetingAvatar
@@ -377,9 +381,13 @@ export function MePage() {
               <span data-testid="me-greeting-hello" style={s.greetingHello}>
                 Hey
               </span>
-              <span data-testid="me-greeting-name" style={s.greetingName}>
+              {/* a11y 2026-04-20: /me had no <h1> (audit flagged
+                  WCAG 1.3.1 + 2.4.6). Render the greeting name as
+                  the page's h1 so screen readers announce a clear
+                  page title. Visual size matches the previous span. */}
+              <h1 data-testid="me-greeting-name" style={s.greetingName}>
                 {greeting.displayName}
-              </span>
+              </h1>
             </div>
           </div>
           {/* v6-align 2026-04-20: removed the duplicate "Browse apps →"
@@ -601,7 +609,7 @@ export function MePage() {
             </div>
           )}
         </section>
-      </main>
+      </div>
     </PageShell>
   );
 }
