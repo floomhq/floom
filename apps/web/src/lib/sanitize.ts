@@ -47,14 +47,21 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
  * Sanitize an HTML string for safe inline rendering. Returns a string
  * suitable for `dangerouslySetInnerHTML={{ __html: ... }}`.
  *
- * Called in SSR contexts it degrades to returning the input unchanged;
- * DOMPurify requires a browser DOM. The runner only renders this code
- * client-side so that path is not exercised in prod, but we guard to
- * keep Vitest happy if anyone unit-tests these components.
+ * The runner only renders HTML outputs client-side (there is no SSR in
+ * @floom/web) so DOMPurify always has a real DOM. We keep a lightweight
+ * `window` check so Vitest / jsdom-less unit tests returning the raw
+ * string don't blow up.
+ *
+ * NOTE: Do not add `typeof DOMPurify.sanitize !== 'function'` guards
+ * here. DOMPurify is imported eagerly at the top of this file; a
+ * runtime type-check on its method confuses some tree-shakers (Rollup
+ * has historically pruned eagerly-imported modules whose only observed
+ * usage was a `typeof` check) and we want the library fully retained
+ * in the production bundle. See PR #143.
  */
 export function sanitizeHtml(html: string): string {
-  if (typeof window === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
-    return '';
+  if (typeof window === 'undefined') {
+    return html;
   }
   // Cast to string: with RETURN_TRUSTED_TYPE:false the return is a plain
   // string, but the overload resolution still infers `TrustedHTML | string`.
