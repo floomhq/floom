@@ -29,54 +29,16 @@ import {
 } from '../services/renderer-bundler.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
 import { filterTestFixtures } from '../lib/hub-filter.js';
+import {
+  getHubCache,
+  hubCacheKey,
+  invalidateHubCache,
+  setHubCache,
+} from '../lib/hub-cache.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
 export const hubRouter = new Hono();
-
-// ---------------------------------------------------------------------
-// Perf launch-blocker fix (2026-04-20): in-memory cache for GET /api/hub.
-//
-// Root cause: every request re-runs the SELECT + parses up to 448KB of
-// manifest JSON across 46 apps (manifests live in the `apps.manifest`
-// TEXT column). At c=10 concurrency the handler pegged at ~2.5 req/s
-// with p95=15s — blocking launch.
-//
-// Fix: cache the serialized JSON body for 5s per (category, sort,
-// includeFixtures) tuple. Apps don't mutate often enough for stale-
-// by-5s to matter; every mutation path (POST /ingest, DELETE /:slug,
-// PATCH /:slug) also calls `invalidateHubCache()` below so creator
-// edits land immediately in the public directory.
-//
-// Cache key MUST include every query param that changes the response,
-// otherwise `?category=productivity` would serve the uncategorized
-// list. `include_fixtures` is a boolean, stored explicitly so a
-// `?include_fixtures=false` request (explicit false) hits the same
-// bucket as an omitted param.
-// ---------------------------------------------------------------------
-type HubCacheEntry = { body: unknown; expiresAt: number };
-const hubCache = new Map<string, HubCacheEntry>();
-const HUB_CACHE_TTL_MS = 5_000;
-
-function hubCacheKey(
-  category: string | null,
-  sort: string,
-  includeFixtures: boolean,
-): string {
-  return `${category ?? ''}|${sort}|${includeFixtures ? '1' : '0'}`;
-}
-
-/**
- * Invalidate the hub directory cache. Called by every mutation path
- * (ingest, delete, patch) so creator edits land immediately in the
- * /api/hub directory feed without waiting for the 5s TTL.
- *
- * Exported so non-hub routes that mutate the apps table (e.g. the
- * seed-apps bootstrapper) can invalidate too.
- */
-export function invalidateHubCache(): void {
-  hubCache.clear();
-}
 
 /**
  * Pull just the host out of a proxied app's base_url, for the
@@ -547,13 +509,11 @@ hubRouter.get('/', (c) => {
 
   // Perf launch-blocker fix (2026-04-20): serve from the 5s in-memory
   // cache when we have a fresh entry for this (category, sort,
-  // includeFixtures) tuple. See the `hubCache` block near the top of
-  // this file for the full rationale.
+  // includeFixtures) tuple. See lib/hub-cache.ts for the full rationale.
   const cacheKey = hubCacheKey(category ?? null, sort, includeFixtures);
-  const cached = hubCache.get(cacheKey);
-  const nowMs = Date.now();
-  if (cached && cached.expiresAt > nowMs) {
-    return c.json(cached.body);
+  const cached = getHubCache(cacheKey);
+  if (cached !== null) {
+    return c.json(cached);
   }
   // Default store sort (fast-apps wave):
   //   1. featured desc   — pinned apps always first
@@ -632,7 +592,7 @@ hubRouter.get('/', (c) => {
   // Perf launch-blocker fix (2026-04-20): park the body in the 5s
   // cache so subsequent requests for this (category, sort,
   // includeFixtures) tuple skip the SELECT + manifest parse entirely.
-  hubCache.set(cacheKey, { body, expiresAt: nowMs + HUB_CACHE_TTL_MS });
+  setHubCache(cacheKey, body);
 
   return c.json(body);
 });
