@@ -6,6 +6,30 @@ import type { InputSpec } from '../../lib/types';
 
 export const ARRAY_INPUT_NAMES = new Set<string>(['hashtags']);
 
+/**
+ * Fix 6 (2026-04-19): URL inputs auto-prepend `https://` when the user
+ * types a bare domain (e.g. `github.com/owner/repo`). Skips prepending
+ * when the value already carries a known scheme or is empty. Exported
+ * for stress tests.
+ */
+export function maybePrependHttps(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return value;
+  // Already has a scheme? Leave it alone. (Covers http:, https:, ftp:,
+  // file:, mailto:, and anything else — URL schemes end in `:`.)
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return value;
+  // Protocol-relative URL? Leave as-is; the browser will resolve it.
+  if (trimmed.startsWith('//')) return value;
+  // Looks like a bare domain or path (contains a `.` before the first `/`
+  // or starts with a known TLD-shaped token). Prepend https://.
+  const firstSlash = trimmed.indexOf('/');
+  const host = firstSlash === -1 ? trimmed : trimmed.slice(0, firstSlash);
+  if (host.includes('.') && !host.includes(' ')) {
+    return `https://${trimmed}`;
+  }
+  return value;
+}
+
 interface Props {
   spec: InputSpec;
   value: unknown;
@@ -111,6 +135,35 @@ export function InputField({ spec, value, onChange, idPrefix = 'floom-inp' }: Pr
     );
   }
 
+  // Fix 6 (2026-04-19): URL inputs auto-prepend https:// on blur if the
+  // user typed a bare domain. Placeholder swaps to a no-https example so
+  // users aren't cued to type the scheme.
+  if (spec.type === 'url') {
+    const urlPlaceholder = spec.placeholder || 'github.com/owner/repo';
+    return (
+      <div className="input-group">
+        <label className="input-label" htmlFor={id}>
+          {cleanLabel}
+          {!spec.required && (
+            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
+          )}
+        </label>
+        <input
+          id={id}
+          className="input-field"
+          type="url"
+          placeholder={urlPlaceholder}
+          value={str}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={(e) => {
+            const next = maybePrependHttps(e.target.value);
+            if (next !== e.target.value) onChange(next);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="input-group">
       <label className="input-label" htmlFor={id}>
@@ -122,7 +175,7 @@ export function InputField({ spec, value, onChange, idPrefix = 'floom-inp' }: Pr
       <input
         id={id}
         className="input-field"
-        type={spec.type === 'url' ? 'url' : 'text'}
+        type="text"
         placeholder={spec.placeholder}
         value={str}
         onChange={(e) => onChange(e.target.value)}

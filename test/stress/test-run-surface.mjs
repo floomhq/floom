@@ -15,6 +15,7 @@ import {
   deriveSharedRunBanner,
   deriveStacked,
 } from '../../apps/web/src/components/runner/RunSurface.tsx';
+import { maybePrependHttps } from '../../apps/web/src/components/runner/InputField.tsx';
 
 let passed = 0;
 let failed = 0;
@@ -73,6 +74,72 @@ console.log('RunSurface shell tests');
     'Initial run set but streaming (not done) → no banner',
     deriveSharedRunBanner({ initialRunId: 'run-1', currentRunId: 'run-1', phase: 'streaming' }) ===
       false,
+  );
+}
+
+// ---------- maybePrependHttps (Fix 6 — URL friction) ----------
+// Users pasting a bare domain should not see a browser validation error.
+// Values with an existing scheme are left alone.
+{
+  log('Empty stays empty', maybePrependHttps('') === '');
+  log('Whitespace stays as-is', maybePrependHttps('   ') === '   ');
+  log(
+    'Bare domain prepends https',
+    maybePrependHttps('github.com/owner/repo') === 'https://github.com/owner/repo',
+  );
+  log(
+    'Petstore example prepends https',
+    maybePrependHttps('petstore3.swagger.io/api/v3/openapi.json') ===
+      'https://petstore3.swagger.io/api/v3/openapi.json',
+  );
+  log(
+    'Scheme https: left alone',
+    maybePrependHttps('https://floom.dev') === 'https://floom.dev',
+  );
+  log(
+    'Scheme http: left alone',
+    maybePrependHttps('http://localhost:3000') === 'http://localhost:3000',
+  );
+  log('Scheme ftp: left alone', maybePrependHttps('ftp://example.com') === 'ftp://example.com');
+  log('Scheme file: left alone', maybePrependHttps('file:///etc/hosts') === 'file:///etc/hosts');
+  log(
+    'Protocol-relative left alone',
+    maybePrependHttps('//cdn.example.com/x') === '//cdn.example.com/x',
+  );
+  log('Single word without dot left alone', maybePrependHttps('localhost') === 'localhost');
+}
+
+// ---------- summarizeOutputs (Fix 3 — earlier-runs preview) ----------
+{
+  const { summarizeOutputs } = __test__;
+  log('null outputs → empty', summarizeOutputs(null, 'success', null) === '');
+  log(
+    'error row shows error message',
+    summarizeOutputs(null, 'error', 'boom happened') === 'boom happened',
+  );
+  log(
+    'error row falls back to status when no message',
+    summarizeOutputs(null, 'error', null) === 'error',
+  );
+  log(
+    'string output passes through',
+    summarizeOutputs('abc123', 'success', null) === 'abc123',
+  );
+  log(
+    'long string truncates at 40 chars',
+    summarizeOutputs('x'.repeat(60), 'success', null).length === 38,
+  );
+  log(
+    'prefers `uuid` field over generic',
+    summarizeOutputs({ uuid: 'abc-123', misc: 'other' }, 'success', null) === 'abc-123',
+  );
+  log(
+    'falls back to first string field',
+    summarizeOutputs({ unknown_field: 'hello' }, 'success', null) === 'hello',
+  );
+  log(
+    'number fallback',
+    summarizeOutputs({ count: 7 }, 'success', null) === '7',
   );
 }
 

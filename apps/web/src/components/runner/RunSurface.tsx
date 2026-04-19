@@ -37,7 +37,7 @@ import { OutputPanel } from './OutputPanel';
 import { JobProgress } from './JobProgress';
 import { CustomRendererHost } from './CustomRendererHost';
 import { StreamingTerminal } from './StreamingTerminal';
-import { ARRAY_INPUT_NAMES, InputField } from './InputField';
+import { ARRAY_INPUT_NAMES, InputField, maybePrependHttps } from './InputField';
 import { useSession } from '../../hooks/useSession';
 import * as api from '../../api/client';
 
@@ -103,6 +103,14 @@ function coerceInputs(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...inputs };
   for (const inp of spec.inputs) {
+    // Fix 6 (2026-04-19): last-chance https:// prepend for URL fields at
+    // submit time (in case the user pressed Enter before the field blurred).
+    if (inp.type === 'url') {
+      const raw = out[inp.name];
+      if (typeof raw === 'string' && raw.length > 0) {
+        out[inp.name] = maybePrependHttps(raw);
+      }
+    }
     if (!ARRAY_INPUT_NAMES.has(inp.name)) continue;
     const raw = out[inp.name];
     if (Array.isArray(raw)) continue;
@@ -524,6 +532,21 @@ function InputCard({
   onRun,
   onReset,
 }: InputCardProps) {
+  // Fix 5 (2026-04-19): progressive disclosure of optional inputs.
+  // Required fields render inline, optional fields stay collapsed behind
+  // a "Show N optional fields" toggle. Reduces form length on apps like
+  // OpenSlides that have 1 required + 3 optional inputs.
+  const [showOptional, setShowOptional] = useState(false);
+  const { required, optional } = useMemo(() => {
+    const req: typeof actionSpec.inputs = [];
+    const opt: typeof actionSpec.inputs = [];
+    for (const inp of actionSpec.inputs) {
+      if (inp.required) req.push(inp);
+      else opt.push(inp);
+    }
+    return { required: req, optional: opt };
+  }, [actionSpec.inputs]);
+
   return (
     <div className="run-surface-card" data-testid="run-surface-input-card">
       <header className="run-surface-card-header">
@@ -543,8 +566,8 @@ function InputCard({
             if (!running) onRun();
           }}
         >
-          <div className="run-surface-fields">
-            {actionSpec.inputs.map((inp) => (
+          <div className="run-surface-fields" data-testid="run-surface-fields-required">
+            {required.map((inp) => (
               <InputField
                 key={inp.name}
                 spec={inp}
@@ -554,6 +577,51 @@ function InputCard({
               />
             ))}
           </div>
+          {optional.length > 0 && (
+            <>
+              {!showOptional && (
+                <button
+                  type="button"
+                  data-testid="run-surface-show-optional"
+                  onClick={() => setShowOptional(true)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    marginTop: 8,
+                    padding: '6px 2px',
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--muted)',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Show {optional.length} optional field
+                  {optional.length === 1 ? '' : 's'} &rarr;
+                </button>
+              )}
+              {showOptional && (
+                <div
+                  className="run-surface-fields"
+                  data-testid="run-surface-fields-optional"
+                  style={{ marginTop: 8 }}
+                >
+                  {optional.map((inp) => (
+                    <InputField
+                      key={inp.name}
+                      spec={inp}
+                      value={inputs[inp.name]}
+                      onChange={(v) => onChange(inp.name, v)}
+                      idPrefix="run-surface-inp"
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
           <div className="run-surface-actions">
             <button
               type="submit"
