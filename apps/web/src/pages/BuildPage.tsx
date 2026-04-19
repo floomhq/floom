@@ -92,7 +92,7 @@ export function BuildPage({
 
   // State machine
   const [step, setStep] = useState<Step>('ramp');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; details?: string } | null>(null);
   const [githubError, setGithubError] = useState<'private' | 'no-openapi' | 'unreachable' | null>(
     null,
   );
@@ -242,11 +242,15 @@ export function BuildPage({
       return true;
     } catch (err) {
       const apiErr = err instanceof api.ApiError ? err : null;
+      const is404 = apiErr?.status === 404;
+
       // Map the raw error to taxonomy-aware copy. The detect endpoint
       // returns 400 with a code when the URL is reachable but the body
       // isn't a valid spec; 0/5xx means the network hop itself failed.
       let message: string;
-      if (!apiErr || apiErr.status === 0) {
+      if (is404) {
+        message = "We couldn't find that spec. Check the URL or try the GitHub ramp.";
+      } else if (!apiErr || apiErr.status === 0) {
         message =
           "We couldn't reach that URL. Check the link and try again, or paste your openapi.json directly.";
       } else if (apiErr.status >= 400 && apiErr.status < 500) {
@@ -256,7 +260,11 @@ export function BuildPage({
       } else {
         message = 'The server returned an error. Try again in a moment.';
       }
-      setError(message);
+
+      setError({
+        message,
+        details: (err as Error).message || undefined,
+      });
       return false;
     }
   }
@@ -361,12 +369,16 @@ export function BuildPage({
           ? payload!.suggestions.slice(0, 3)
           : [];
         setSlugSuggestions(suggestions.length > 0 ? suggestions : null);
-        setError(
-          `That slug is already taken. Pick one of the suggestions below, or edit the slug field above.`,
-        );
+        setError({
+          message: `That slug is already taken. Pick one of the suggestions below, or edit the slug field above.`,
+          details: err.message,
+        });
         return;
       }
-      setError((err as Error).message || 'Publish failed.');
+      setError({
+        message: 'Publish failed.',
+        details: (err as Error).message || undefined,
+      });
     }
   }
 
@@ -408,12 +420,16 @@ export function BuildPage({
           ? payload!.suggestions.slice(0, 3)
           : [];
         setSlugSuggestions(suggestions.length > 0 ? suggestions : null);
-        setError(
-          `That slug is also taken. Pick another suggestion or edit manually.`,
-        );
+        setError({
+          message: `That slug is also taken. Pick another suggestion or edit manually.`,
+          details: err.message,
+        });
         return;
       }
-      setError((err as Error).message || 'Publish failed.');
+      setError({
+        message: 'Publish failed.',
+        details: (err as Error).message || undefined,
+      });
     }
   }
 
@@ -762,7 +778,7 @@ export function BuildPage({
                 }}
               />
               {error && (
-                <p
+                <div
                   data-testid="build-error"
                   style={{
                     margin: '0 0 12px',
@@ -774,8 +790,26 @@ export function BuildPage({
                     fontSize: 13,
                   }}
                 >
-                  {error}
-                </p>
+                  <div style={{ fontWeight: 500 }}>{error.message}</div>
+                  {error.details && (
+                    <details
+                      data-testid="build-error-details"
+                      style={{ marginTop: 6, fontSize: 11, opacity: 0.8 }}
+                    >
+                      <summary style={{ cursor: 'pointer' }}>Technical details</summary>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontFamily: 'JetBrains Mono, monospace',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {error.details}
+                      </div>
+                    </details>
+                  )}
+                </div>
               )}
               <button
                 type="submit"
@@ -1021,7 +1055,7 @@ export function BuildPage({
             </p>
 
             {error && (
-              <p
+              <div
                 data-testid="build-error"
                 style={{
                   margin: '16px 0 0',
@@ -1033,8 +1067,26 @@ export function BuildPage({
                   fontSize: 13,
                 }}
               >
-                {error}
-              </p>
+                <div style={{ fontWeight: 500 }}>{error.message}</div>
+                {error.details && (
+                  <details
+                    data-testid="build-error-details"
+                    style={{ marginTop: 6, fontSize: 11, opacity: 0.8 }}
+                  >
+                    <summary style={{ cursor: 'pointer' }}>Technical details</summary>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontFamily: 'JetBrains Mono, monospace',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {error.details}
+                    </div>
+                  </details>
+                )}
+              </div>
             )}
 
             {/* Slug-taken recovery pills (audit 2026-04-20, Fix 2).
