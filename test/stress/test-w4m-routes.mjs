@@ -287,10 +287,18 @@ log(
 );
 
 // ---- 9. DELETE /api/hub/:slug works for the owner ----
+// Unknown slug → 404 (guards the 2026-04-19 Danger-Zone addition).
+const delMissing = await fetchRoute(hubRouter, 'DELETE', '/does-not-exist', undefined, cookieA);
+log('DELETE /api/hub/:slug 404 for missing slug', delMissing.status === 404);
+
 const del = await fetchRoute(hubRouter, 'DELETE', '/mine-test', undefined, cookieA);
 log('DELETE /api/hub/:slug 200', del.status === 200);
 const postDelete = db.prepare('SELECT id FROM apps WHERE slug = ?').get('mine-test');
 log('DELETE /api/hub/:slug removed the row', !postDelete);
+// Second delete of an already-gone slug → 404 (idempotent-ish; API is not
+// tombstoning, so the second call sees "not found" rather than "not owner").
+const delAgain = await fetchRoute(hubRouter, 'DELETE', '/mine-test', undefined, cookieA);
+log('DELETE /api/hub/:slug 404 after row already dropped', delAgain.status === 404);
 
 // ---- 10. GET /api/hub/:slug/runs returns activity for the owner ----
 // hello was authored by 'alice' so local user cannot view it — 403 expected
