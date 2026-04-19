@@ -1,0 +1,243 @@
+# Floom adapter interfaces
+
+Version: 0.1-draft · Last updated: 2026-04-20
+
+This doc formalizes [§10 of protocol.md](./protocol.md) — the five pluggable concerns any Floom server is built out of.
+
+The reference server in this repo pins one concrete implementation for each of runtime, storage, auth, secrets, and observability. This doc publishes the interface contracts for those five concerns so an alternate server (Kubernetes runtime, Postgres storage, Auth0 identity, Vault secrets, OpenTelemetry observability, etc.) can see exactly what to implement.
+
+TypeScript declarations: [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts).
+
+> **Status.** The five interfaces are *declarations only* today. The reference services (`runner.ts`, `db.ts`, `better-auth.ts`, `user_secrets.ts`, `sentry.ts`) don't implement them explicitly yet — that refactor is deferred for launch-risk reasons. The shapes are stable; a future PR will make the existing services formally conform to these interfaces and expose a single adapter-registration point.
+
+> Of the five, only the **renderer** is currently swappable *at runtime* via the per-app bundle upload (see [§3.3](./protocol.md#33-renderconfig) and `POST /api/hub/:slug/renderer`). The other five are *compile-time swappable* — change the adapter import in the server bootstrap and rebuild.
+
+---
+
+## RuntimeAdapter
+
+**Purpose.** Executes one action of a Floom app and returns a normalized result.
+
+The reference server ships two impls that are selected by `app.app_type`:
+1. **Docker runtime** (`services/docker.ts` + `services/runner.ts`) — spawns a container per run, injects secrets as env vars, streams stdout/stderr, enforces a timeout + memory cap, and parses the `__FLOOM_RESULT__` marker line from stdout.
+2. **Proxy runtime** (`services/proxied-runner.ts`) — forwards an HTTP request to an upstream API (for apps registered via OpenAPI spec URL), injects declared secrets into the auth header / cookie / query param, and classifies HTTP statuses into the `ErrorType` taxonomy.
+
+### Signature
+
+```ts
+interface RuntimeAdapter {
+  execute(
+    app: AppRecord,
+    manifest: NormalizedManifest,
+    action: string,
+    inputs: Record<string, unknown>,
+    secrets: Record<string, string>,
+    ctx: SessionContext,
+    onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+  ): Promise<RuntimeResult>;
+}
+
+interface RuntimeResult {
+  status: 'success' | 'error' | 'timeout';
+  outputs: unknown;
+  error?: string;
+  error_type?: ErrorType; // timeout | user_input_error | auth_error | ...
+  upstream_status?: number;
+  duration_ms: number;
+  logs: string;
+}
+```
+
+### Invariants
+
+- **Timeout enforcement.** The adapter MUST kill the run after `app.timeout_ms` (default 300s, see `docker.ts` `RUNNER_TIMEOUT`) and return `{ status: 'timeout', error_type: 'timeout' }`. The job worker relies on this upper bound to make progress — an adapter that silently runs longer will starve the queue.
+- **Secret injection.** Values in `secrets` are injected into the execution environment (env vars for containers, auth headers for proxy). Secrets MUST NOT appear in `logs` or `outputs`.
+- **Output shape.** `outputs` is the app's successful return payload, verbatim. Errors go to `error` / `error_type`, not to `outputs`.
+- **Log capture.** stdout + stderr (or request/response trace) is captured to `logs` for display on `/p/:slug` and `GET /api/run/:id`.
+- **Async safety.** `execute` may be called concurrently for different runs of the same app. No shared mutable state outside the per-run container / request.
+
+### Interaction with the job queue
+
+Long-running apps (`is_async = 1`) are invoked via `POST /api/:slug/jobs`, which inserts into the `jobs` table. A background worker (`services/worker.ts`) claims jobs one at a time and calls the runtime adapter synchronously. The timeout invariant above is what the worker relies on to free the slot. If the adapter cannot enforce a timeout (e.g. fire-and-forget serverless), wrap it in a watchdog at the control-plane layer.
+
+### How to write one
+
+Pick your execution substrate (Firecracker, K8s Job, Cloud Run, WASM), implement `execute`, map your native error shape onto the `ErrorType` taxonomy, and pass the resulting `RuntimeResult` back. Start by implementing the docker path only; `app_type: 'proxied'` can reuse the reference proxy runner unchanged.
+
+**Worked example.** The default Floom server implements `RuntimeAdapter` using `dockerode`. See `apps/server/src/services/runner.ts` (`dispatchRun` + `runActionWorker`) for the dispatch path; the actual container spawn lives in `apps/server/src/services/docker.ts` (`runAppContainer`).
+
+---
+
+## StorageAdapter
+
+**Purpose.** Persists Floom's durable state: apps, runs, jobs, workspaces, users, and admin secret pointers. (Per-user / per-creator secret ciphertext is owned by `SecretsAdapter`, not this one.)
+
+The reference impl uses `better-sqlite3` against a local file (`data/floom-chat.db`); see `apps/server/src/db.ts` for the schema and migrations.
+
+### Signature
+
+```ts
+interface StorageAdapter {
+  // apps
+  getApp(slug: string): AppRecord | undefined;
+  getAppById(id: string): AppRecord | undefined;
+  listApps(filter?: AppListFilter): AppRecord[];
+  createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): AppRecord;
+  updateApp(slug: string, patch: Partial<AppRecord>): AppRecord | undefined;
+  deleteApp(slug: string): boolean;
+
+  // runs
+  createRun(input: { id, app_id, thread_id?, action, inputs }): RunRecord;
+  getRun(id: string): RunRecord | undefined;
+  listRuns(filter?: RunListFilter): RunRecord[];
+  updateRun(id: string, patch: RunPatch): void;
+
+  // jobs
+  createJob(input): JobRecord;
+  getJob(id: string): JobRecord | undefined;
+  claimNextJob(): JobRecord | undefined; // atomic dequeue
+  updateJob(id: string, patch: Partial<JobRecord>): void;
+
+  // workspaces + users
+  getWorkspace(id: string): WorkspaceRecord | undefined;
+  listWorkspacesForUser(user_id: string): Array<WorkspaceRecord & { role }>;
+  getUser(id: string): UserRecord | undefined;
+  getUserByEmail(email: string): UserRecord | undefined;
+  createUser(input): UserRecord;
+
+  // admin secret pointers (global + per-app)
+  listAdminSecrets(app_id?: string | null): SecretRecord[];
+  upsertAdminSecret(name, value, app_id?): void;
+  deleteAdminSecret(name, app_id?): boolean;
+}
+```
+
+### Invariants
+
+- **FK ordering on delete.** Deleting an app MUST cascade to its runs, jobs, secret-policy rows, and creator-secret rows. The SQLite impl uses `ON DELETE CASCADE`; adapters without FK cascades MUST emulate it.
+- **Transaction boundaries.** `createRun` + `updateRun` across the lifecycle of one run MUST be serializable wrt reads. The job worker poll MUST be atomic with `claimJob` — two workers picking the same job is a correctness bug.
+- **Tenant scoping.** Every tenant-addressable table filters on `workspace_id`. OSS adapters MAY hardcode `workspace_id = 'local'` but MUST keep the column so the same queries work in Cloud mode.
+- **Idempotency.** `createApp` / `createRun` with a pre-existing id MUST either upsert or throw a deterministic error. Callers retry on network failure.
+
+### How to write one
+
+Map each method to your backend's native primitives. For Postgres, most methods are one-line queries and the `claimNextJob` method is a `SELECT ... FOR UPDATE SKIP LOCKED`. For a K/V store, you'll need secondary indexes on slug, workspace_id, and job status. Keep the method surface minimal — add new methods only when a route actually calls them; do not pre-build a "full ORM" surface.
+
+---
+
+## AuthAdapter
+
+**Purpose.** Resolves a request into a `SessionContext` and handles sign-in / sign-up / sign-out.
+
+The reference impl is `apps/server/src/lib/better-auth.ts`, which wraps Better Auth 1.6.3 with email+password + GitHub/Google OAuth + API keys + organizations. In OSS mode the adapter is effectively a no-op: every request resolves to the synthetic local workspace + user.
+
+### Signature
+
+```ts
+interface AuthAdapter {
+  getSession(request: Request): Promise<SessionContext | null>;
+  signIn(input: { email; password }): Promise<{ session, set_cookie?, token? }>;
+  signUp(input: { email; password; name? }): Promise<{ session, set_cookie?, token? }>;
+  signOut(session: SessionContext): Promise<void>;
+  onUserDelete(cb: (user_id: string) => void | Promise<void>): void;
+}
+```
+
+### Invariants
+
+- `getSession` returns `null` (not a fake SessionContext) for unauthenticated requests in cloud mode so the middleware can return 401. In OSS mode it MAY always return the local context.
+- A successful sign-in MUST emit a cookie or token that `getSession` can later resolve. The adapter owns the cookie name / header format; callers never inspect it directly.
+- `onUserDelete` runs AFTER the account row is gone, not before — callers use it to cascade-delete per-user rows (`app_memory`, `user_secrets`, `connections`).
+
+### What Floom actually needs
+
+Only three things:
+
+1. `{ user_id, workspace_id, email? }` on every authenticated request.
+2. Sign in / up / out.
+3. An account-deletion hook.
+
+The adapter does NOT need to expose MFA, magic link, passkeys, OAuth provider enumeration, session rotation policies, or rate limits. Those are adapter-internal details. An Auth0 / Clerk / Supabase Auth / custom JWT adapter all fit.
+
+---
+
+## SecretsAdapter
+
+**Purpose.** Stores per-workspace, per-user encrypted secrets and resolves them into plaintext env vars for a run.
+
+The reference impl is split across `apps/server/src/services/user_secrets.ts` (per-user vault) and `apps/server/src/services/app_creator_secrets.ts` (creator override with per-app policy). Both back to AES-256-GCM encrypted columns on SQLite; master key is `FLOOM_MASTER_KEY`, per-workspace DEK is wrapped by it.
+
+### Signature
+
+```ts
+interface SecretsAdapter {
+  get(ctx: SessionContext, key: string): string | null;
+  set(ctx: SessionContext, key: string, plaintext: string): void;
+  delete(ctx: SessionContext, key: string): boolean;
+  list(ctx: SessionContext): Array<{ key: string; updated_at: string }>;
+  loadUserVaultForRun(ctx: SessionContext, keys: string[]): Record<string, string>;
+  loadCreatorOverrideForRun(app_id: string, workspace_id: string, keys: string[]): Record<string, string>;
+}
+```
+
+### Invariants
+
+- **Plaintext is never returned by `list()`** — only key names + timestamps. `get()` is the only unmasking path.
+- `loadForRun` methods MUST filter to the caller's `keys` list, never return extras. Callers pass `manifest.secrets_needed` verbatim so unrelated creds never leak into apps that don't need them.
+- **Deletion is idempotent** — deleting a missing key returns false, not an error.
+- **Creator-override keys MUST NOT fall back to the user vault.** Precedence is control-plane's concern, but the adapter keeps the two namespaces distinct.
+
+### How to write one
+
+Adapters are free to use HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager, Bitwarden, or env vars on a single-user box. Floom never reads the plaintext outside the moment of injection — that's what lets the store be fully opaque.
+
+---
+
+## ObservabilityAdapter
+
+**Purpose.** Captures errors and emits counter / timing / gauge metrics. Optional — a Floom server with neither wired up still runs; callers get a default no-op adapter.
+
+The reference impl is split: `apps/server/src/lib/sentry.ts` for error capture (no-op when `SENTRY_DSN` is unset), and `apps/server/src/lib/metrics-counters.ts` for in-process counters surfaced at `GET /api/metrics` as Prometheus text.
+
+### Signature
+
+```ts
+interface ObservabilityAdapter {
+  captureError(err: unknown, context?: Record<string, unknown>): void;
+  increment(metric: string, amount?: number, tags?: Record<string, string>): void;
+  timing(metric: string, ms: number, tags?: Record<string, string>): void;
+  gauge(metric: string, value: number, tags?: Record<string, string>): void;
+}
+```
+
+### Invariants
+
+- **Never throw.** An observability bug MUST NOT break the request. The reference Sentry impl wraps `captureException` in try/catch; adapters MUST do the same.
+- **Scrub secrets.** `captureError` context MUST NOT leak tokens, passwords, API keys, or cookie values. The reference impl's `scrubSecrets` in `lib/sentry.ts` is a minimal reference.
+- **Tags.** Adapters use tag keys verbatim as backend labels (Prom labels, DD tags, OTEL attributes). Callers pick the keys; the adapter does not rename them.
+
+### How to write one
+
+Forward the four methods to your backend of choice. OpenTelemetry, Datadog, StatsD, New Relic, Honeycomb all fit cleanly. The no-op default is literally four empty function bodies — useful as a fallback when no DSN / endpoint is configured.
+
+---
+
+## Worked example — the default `RuntimeAdapter`
+
+Floom's Docker runtime is implemented in two files:
+
+- `apps/server/src/services/runner.ts` — the dispatch path. `dispatchRun(app, manifest, runId, action, inputs, perCallSecrets?, ctx?)` resolves secret precedence (global → per-app → user vault / creator override → per-call `_auth`), writes the initial `runs` row, and forks to `runActionWorker` (docker) or `runProxiedWorker` (proxy) by `app.app_type`.
+- `apps/server/src/services/docker.ts` — the container spawn. `runAppContainer({ appId, runId, action, inputs, secrets, image, onOutput })` builds a Dockerfile (Python or Node) if the image isn't cached, spawns the container with the provided secrets as env, streams stdout + stderr to `onOutput`, enforces `RUNNER_TIMEOUT`, and returns `{ stdout, stderr, exitCode, timedOut, oomKilled, durationMs }`.
+
+The runner parses the container's stdout for the `__FLOOM_RESULT__` marker (see `parseEntrypointOutput`), classifies the result into the 10-class `ErrorType` taxonomy, and writes the final row via `updateRun`. That's the whole contract — an alternate runtime adapter would replace `runAppContainer` with its own spawn path and return a structurally-identical result.
+
+---
+
+## Source references
+
+- Interface declarations: [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts)
+- Runtime: [`apps/server/src/services/runner.ts`](../apps/server/src/services/runner.ts), [`services/docker.ts`](../apps/server/src/services/docker.ts), [`services/proxied-runner.ts`](../apps/server/src/services/proxied-runner.ts)
+- Storage: [`apps/server/src/db.ts`](../apps/server/src/db.ts), [`services/jobs.ts`](../apps/server/src/services/jobs.ts)
+- Auth: [`apps/server/src/lib/better-auth.ts`](../apps/server/src/lib/better-auth.ts), [`lib/auth.ts`](../apps/server/src/lib/auth.ts), [`routes/workspaces.ts`](../apps/server/src/routes/workspaces.ts)
+- Secrets: [`apps/server/src/services/user_secrets.ts`](../apps/server/src/services/user_secrets.ts), [`services/app_creator_secrets.ts`](../apps/server/src/services/app_creator_secrets.ts)
+- Observability: [`apps/server/src/lib/sentry.ts`](../apps/server/src/lib/sentry.ts), [`lib/metrics-counters.ts`](../apps/server/src/lib/metrics-counters.ts)

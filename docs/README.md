@@ -3,6 +3,7 @@
 ## Reference
 
 - [Protocol spec](../spec/protocol.md) — the on-the-wire contracts a Floom server speaks (manifest, run, jobs, share, MCP, hub).
+- [Adapter interfaces](../spec/adapters.md) — the five pluggable concerns (runtime, storage, auth, secrets, observability) a Floom server is built out of.
 - [Self-host](./SELF_HOST.md) — running a full Floom instance via Docker.
 - [Roadmap](./ROADMAP.md) — pre-1.0 priorities and what's shipped.
 - [Rollback](./ROLLBACK.md) — rolling a deploy back to a previous tag.
