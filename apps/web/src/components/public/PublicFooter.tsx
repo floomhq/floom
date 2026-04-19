@@ -47,7 +47,7 @@ export function PublicFooter() {
           flexWrap: 'wrap',
         }}
       >
-        <span>Built in Hamburg</span>
+        <span>Built in SF</span>
         <span aria-hidden="true">·</span>
         <FootLink to="/docs">Docs</FootLink>
         <span aria-hidden="true">·</span>

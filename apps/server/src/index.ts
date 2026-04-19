@@ -24,6 +24,8 @@ import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
 import { meAppsRouter } from './routes/me_apps.js';
 import { metricsRouter } from './routes/metrics.js';
+import { ogRouter } from './routes/og.js';
+import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
 import { seedFromFile } from './services/seed.js';
@@ -108,6 +110,9 @@ app.route('/api/:slug/jobs', jobsRouter);
 // Public by default; no auth gate because bundles contain no secrets (they
 // run in the user's browser and fetch data via the already-authed /api routes).
 app.route('/renderer', rendererRouter);
+// Dynamic social preview images for /p/:slug and the main landing.
+// Public, no auth. See routes/og.ts for format details.
+app.route('/og', ogRouter);
 app.route('/api/deploy-waitlist', deployWaitlistRouter);
 // W2.1: per-user state
 app.route('/api/memory', memoryRouter);
@@ -536,8 +541,57 @@ if (webDist) {
   // Paths that must never be swallowed by the SPA wildcard. These reach
   // Hono's other route handlers or return a real 404. The order matters:
   // prefix matches first, then exact matches.
-  const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/'];
+  const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/', '/og/'];
   const spaExcludedExact = new Set(['/openapi.json', '/metrics']);
+
+  // Crawlers don't run JS, so client-side meta updates in AppPermalinkPage
+  // never reach them. For /p/:slug we rewrite the og:image, og:title,
+  // og:description (+ twitter equivalents) in the served HTML so previewers
+  // see the per-app card.
+  const pSlugPattern = /^\/p\/([a-z0-9][a-z0-9-]*)\/?$/;
+  const publicOrigin = process.env.PUBLIC_ORIGIN || PUBLIC_URL || '';
+  function rewriteHeadForSlug(html: string, slug: string): string {
+    const row = db
+      .prepare('SELECT name, description FROM apps WHERE slug = ?')
+      .get(slug) as { name: string | null; description: string | null } | undefined;
+    const ogImage = `${publicOrigin}/og/${slug}.svg`;
+    let out = html;
+    out = out.replace(
+      /<meta property="og:image" content="[^"]*"/,
+      `<meta property="og:image" content="${ogImage}"`,
+    );
+    out = out.replace(
+      /<meta name="twitter:image" content="[^"]*"/,
+      `<meta name="twitter:image" content="${ogImage}"`,
+    );
+    if (row?.name) {
+      const title = `${row.name} | Floom`;
+      out = out.replace(
+        /<meta property="og:title" content="[^"]*"/,
+        `<meta property="og:title" content="${title.replace(/"/g, '&quot;')}"`,
+      );
+      out = out.replace(
+        /<meta name="twitter:title" content="[^"]*"/,
+        `<meta name="twitter:title" content="${title.replace(/"/g, '&quot;')}"`,
+      );
+    }
+    if (row?.description) {
+      const desc = row.description.replace(/"/g, '&quot;').slice(0, 300);
+      out = out.replace(
+        /<meta property="og:description" content="[^"]*"/,
+        `<meta property="og:description" content="${desc}"`,
+      );
+      out = out.replace(
+        /<meta name="twitter:description" content="[^"]*"/,
+        `<meta name="twitter:description" content="${desc}"`,
+      );
+    }
+    out = out.replace(
+      /<meta property="og:url" content="[^"]*"/,
+      `<meta property="og:url" content="${publicOrigin}/p/${slug}"`,
+    );
+    return out;
+  }
 
   app.use('/*', async (c, next) => {
     const url = new URL(c.req.url);
@@ -591,7 +645,12 @@ if (webDist) {
       // fall through
     }
 
-    // SPA fallback — return index.html for non-file routes.
+    // SPA fallback — return index.html for non-file routes. For /p/:slug
+    // we rewrite the OG meta tags so crawlers see the per-app card.
+    const slugMatch = pathname.match(pSlugPattern);
+    if (slugMatch && slugMatch[1]) {
+      return c.html(rewriteHeadForSlug(indexHtml, slugMatch[1]));
+    }
     return c.html(indexHtml);
   });
 } else {

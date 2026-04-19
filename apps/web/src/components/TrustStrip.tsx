@@ -36,7 +36,7 @@ export function TrustStrip() {
           marginTop: 32,
         }}
       >
-        Built in Hamburg by Federico De Ponte and contributors.{' '}
+        Built in SF by Federico De Ponte and contributors.{' '}
         <a
           href="https://github.com/floomhq/floom-monorepo"
           target="_blank"
