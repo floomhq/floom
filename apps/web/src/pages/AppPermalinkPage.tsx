@@ -16,7 +16,7 @@ import { AppIcon } from '../components/AppIcon';
 import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
-import { getApp, getAppReviews, getRun } from '../api/client';
+import { getApp, getAppReviews, getRun, ApiError } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
 import {
@@ -75,6 +75,11 @@ export function AppPermalinkPage() {
   // initialRunLoading avoids rendering the RunSurface in `ready` phase (which
   // would flash the empty form) while the run is being fetched.
   const [initialRunLoading, setInitialRunLoading] = useState<boolean>(!!runIdFromUrl);
+  // 2026-04-20 (P2 #147): a shared link with a dead run-id used to silently
+  // fall through to the empty form, making the page look broken ("I clicked
+  // a link and got a blank form"). Surface a gentle amber "Run not found"
+  // card with a CTA to open the app fresh instead.
+  const [runNotFound, setRunNotFound] = useState(false);
 
   useEffect(() => {
     if (!slug) {
@@ -114,10 +119,12 @@ export function AppPermalinkPage() {
     if (!slug || !runIdFromUrl) {
       setInitialRun(null);
       setInitialRunLoading(false);
+      setRunNotFound(false);
       return;
     }
     let cancelled = false;
     setInitialRunLoading(true);
+    setRunNotFound(false);
     getRun(runIdFromUrl)
       .then((run) => {
         if (cancelled) return;
@@ -142,9 +149,16 @@ export function AppPermalinkPage() {
           setInitialRun(null);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
         setInitialRun(null);
+        // 2026-04-20 (P2 #147): 404 → show "Run not found" inline card.
+        // Everything else (401 on a private app, network blip) still falls
+        // through to the empty form — those aren't a user-visible bug the
+        // way a dead run-id in a shared link is.
+        if (err instanceof ApiError && err.status === 404) {
+          setRunNotFound(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setInitialRunLoading(false);
@@ -156,6 +170,7 @@ export function AppPermalinkPage() {
 
   const handleResetInitialRun = useCallback(() => {
     setInitialRun(null);
+    setRunNotFound(false);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -620,11 +635,14 @@ export function AppPermalinkPage() {
                 >
                   Run {app.name}
                 </a>
-                {/* Fix 4 (2026-04-19): wire the 3 previously-dead CTAs.
+                {/* Fix 4 (2026-04-19): wire the 2 previously-dead CTAs.
                     "Add to your tools" switches to the Install tab (where
-                    the MCP connector card lives). Schedule opens the
-                    shared ComingSoonModal. Share copies the URL and pops
-                    a toast instead of a silent write. */}
+                    the MCP connector card lives). Share copies the URL
+                    and pops a toast instead of a silent write.
+                    2026-04-20 (P2 #148): Schedule was removed entirely.
+                    Don't dangle dead affordances — it used to open a
+                    ComingSoonModal which users read as broken UI. It'll
+                    come back when the job-queue UI lands (P2 v1.1). */}
                 <button
                   type="button"
                   data-testid="cta-add-to-tools"
@@ -660,27 +678,6 @@ export function AppPermalinkPage() {
                   }}
                 >
                   Add to your tools <ChevronDown />
-                </button>
-                <button
-                  type="button"
-                  data-testid="cta-schedule"
-                  onClick={() => setComingSoon('schedule')}
-                  style={{
-                    padding: '11px 18px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    color: 'var(--ink)',
-                    background: 'var(--card)',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  <CalendarClock /> Schedule
                 </button>
                 <button
                   type="button"
@@ -883,11 +880,67 @@ export function AppPermalinkPage() {
                 Loading shared run...
               </div>
             ) : (
-              <RunSurface
-                app={app}
-                initialRun={initialRun}
-                onResetInitialRun={handleResetInitialRun}
-              />
+              <>
+                {/* 2026-04-20 (P2 #147): gentle amber "Run not found" card
+                    when /p/:slug?run=<bad-id> hits a 404. Amber, not red —
+                    matches the new error-taxonomy cards from PR #167 for
+                    recoverable / expected states. Renders above the empty
+                    form so the user gets a fresh starting point without
+                    having to edit the URL. */}
+                {runNotFound && (
+                  <div
+                    data-testid="shared-run-not-found"
+                    role="status"
+                    style={{
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      borderRadius: 12,
+                      padding: '16px 20px',
+                      marginBottom: 20,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 16,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+                        This run isn't available
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+                        The link may have expired or the run was deleted. You
+                        can still run {app.name} with fresh inputs below.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="shared-run-not-found-reset"
+                      onClick={handleResetInitialRun}
+                      style={{
+                        padding: '8px 14px',
+                        background: 'var(--card)',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: 'var(--ink)',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        textDecoration: 'none',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Try this app →
+                    </button>
+                  </div>
+                )}
+                <RunSurface
+                  app={app}
+                  initialRun={initialRun}
+                  onResetInitialRun={handleResetInitialRun}
+                />
+              </>
             )}
           </section>
         )}
@@ -1196,28 +1249,6 @@ function ChevronDown() {
   return (
     <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function CalendarClock() {
-  return (
-    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6M16 2v4M8 2v4M3 10h18"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx={18} cy={17} r={4} stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M18 15v2l1.5 1"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

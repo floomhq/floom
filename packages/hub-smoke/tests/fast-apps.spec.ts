@@ -21,10 +21,17 @@ for (const slug of fastAppSlugs()) {
     await page.getByTestId('run-surface-run-btn').click();
 
     const errorBanner = page.getByText('Something went wrong');
-    const successIterate = page.locator('.iterate-label');
+    // 2026-04-20 (P2 fix 5): previously waited on `.iterate-label`, which
+    // only renders for `refinable: true` apps. None of the fast-apps are
+    // refinable, so the selector never appeared and every PR's `fast-apps`
+    // job timed out at 120s. Wait for `[data-renderer]` instead — every
+    // output renderer in packages/renderer attaches it after mount, so
+    // this is a proven post-render signal that's resilient to manifest
+    // changes (refinable flips, iterate UI reshuffles).
+    const successOutput = page.locator('[data-renderer]').first();
 
     try {
-      await successIterate.waitFor({ state: 'visible', timeout: 120_000 });
+      await successOutput.waitFor({ state: 'visible', timeout: 120_000 });
     } catch {
       if (await errorBanner.isVisible().catch(() => false)) {
         const msg = await page
@@ -36,6 +43,6 @@ for (const slug of fastAppSlugs()) {
       throw new Error(`Timeout waiting for run output (slug=${slug})`);
     }
 
-    await expect(successIterate).toBeVisible();
+    await expect(successOutput).toBeVisible();
   });
 }

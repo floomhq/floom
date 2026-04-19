@@ -557,8 +557,38 @@ if (webDist) {
   const publicOrigin = process.env.PUBLIC_ORIGIN || PUBLIC_URL || '';
   const defaultOgImage = `${publicOrigin}/og-image.png`;
 
+  // 2026-04-20 (P2 #149): SSR title drift. Previously every route returned
+  // the same landing <title> at SSR because client-side `document.title`
+  // updates don't reach non-JS crawlers (social previewers, SEO bots,
+  // curl/wget). Rewrite the <title> tag per-route in the same middleware
+  // that already handles /p/:slug OG rewriting.
+  const LANDING_TITLE = 'Floom · Production infrastructure for AI apps that do real work';
+  function escapeTitle(t: string): string {
+    // <title> is #PCDATA so only < & > really matter. We also strip newlines
+    // defensively so a row with a stray \n doesn't break the document.
+    return t.replace(/[\r\n]+/g, ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function rewriteTitle(html: string, title: string): string {
+    return html.replace(/<title>[^<]*<\/title>/, `<title>${escapeTitle(title)}</title>`);
+  }
+
+  // Map a non-slug pathname to its title. Returns null to fall through to
+  // the landing title (kept for anything we haven't explicitly claimed —
+  // better to reuse a known-good title than to invent a bad one).
+  function titleForPath(pathname: string): string | null {
+    if (pathname === '/' || pathname === '/index.html') return LANDING_TITLE;
+    if (pathname === '/apps' || pathname === '/apps/') return 'Apps · Floom';
+    if (pathname === '/login') return 'Sign in · Floom';
+    if (pathname === '/signup') return 'Sign up · Floom';
+    if (pathname === '/me' || pathname.startsWith('/me/')) return 'Me · Floom';
+    if (pathname.startsWith('/studio')) return 'Studio · Floom';
+    if (pathname.startsWith('/docs')) return 'Docs · Floom';
+    return null;
+  }
+
   function rewriteHeadForLanding(html: string): string {
     let out = html;
+    out = rewriteTitle(out, LANDING_TITLE);
     out = out.replace(
       /<link rel="canonical" href="[^"]*"/,
       `<link rel="canonical" href="${publicOrigin}/"`,
@@ -582,6 +612,12 @@ if (webDist) {
     return out;
   }
 
+  function rewriteHeadForPath(html: string, pathname: string): string {
+    const title = titleForPath(pathname);
+    if (!title) return html;
+    return rewriteTitle(html, title);
+  }
+
   function rewriteHeadForSlug(html: string, slug: string): string {
     const row = db
       .prepare('SELECT name, description FROM apps WHERE slug = ?')
@@ -597,6 +633,10 @@ if (webDist) {
       `<meta name="twitter:image" content="${ogImage}"`,
     );
     if (row?.name) {
+      // 2026-04-20 (P2 #149): also rewrite the document <title> so
+      // non-JS crawlers see `{app_name} · Floom` for /p/:slug.
+      const documentTitle = `${row.name} · Floom`;
+      out = rewriteTitle(out, documentTitle);
       const title = `${row.name} | Floom`;
       out = out.replace(
         /<meta property="og:title" content="[^"]*"/,
@@ -606,6 +646,10 @@ if (webDist) {
         /<meta name="twitter:title" content="[^"]*"/,
         `<meta name="twitter:title" content="${title.replace(/"/g, '&quot;')}"`,
       );
+    } else {
+      // Slug didn't resolve in the DB; don't dangle the landing title on
+      // what is effectively a 404-ish page. Use a generic app title.
+      out = rewriteTitle(out, 'App · Floom');
     }
     if (row?.description) {
       const desc = row.description.replace(/"/g, '&quot;').slice(0, 300);
@@ -689,11 +733,14 @@ if (webDist) {
 
     // SPA fallback — return index.html for non-file routes. For /p/:slug
     // we rewrite the OG meta tags so crawlers see the per-app card.
+    // 2026-04-20 (P2 #149): for everything else, rewrite the <title> so
+    // non-JS crawlers see the right per-route title instead of the
+    // landing title on every page.
     const slugMatch = pathname.match(pSlugPattern);
     if (slugMatch && slugMatch[1]) {
       return c.html(rewriteHeadForSlug(indexHtml, slugMatch[1]));
     }
-    return c.html(indexHtml);
+    return c.html(rewriteHeadForPath(indexHtml, pathname));
   });
 } else {
   console.log('[web] no built web bundle found — backend-only mode');

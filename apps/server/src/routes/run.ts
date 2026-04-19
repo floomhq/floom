@@ -12,6 +12,7 @@ import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { resolveUserContext } from '../services/session.js';
+import { parseJsonBody, bodyParseError } from '../lib/body.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const runRouter = new Hono();
@@ -39,7 +40,15 @@ async function loadAuthorizedRunApp(
 }
 
 runRouter.post('/', async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
+  // 2026-04-20 (P2 #146): malformed JSON used to fall through to
+  // `catch(() => ({}))` and silently become an empty body — which, for actions
+  // with no required inputs, resulted in a 200 + run_id on junk input.
+  // parseJsonBody distinguishes "no body" (OK, treat as {}) from "truncated
+  // or otherwise invalid JSON" (error, must 400). We keep the empty-body
+  // fallback for ergonomic `curl -X POST` calls on zero-input actions.
+  const parsed = await parseJsonBody(c);
+  if (parsed.kind === 'error') return bodyParseError(c, parsed);
+  const body = parsed.value as {
     app_slug?: unknown;
     inputs?: unknown;
     action?: unknown;
@@ -306,7 +315,11 @@ slugRunRouter.post('/', async (c) => {
     return c.json({ error: 'App manifest is corrupted' }, 500);
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as {
+  // 2026-04-20 (P2 #146): reject malformed JSON at the edge instead of
+  // silently coercing to {}. See the same rationale on POST /api/run above.
+  const parsed = await parseJsonBody(c);
+  if (parsed.kind === 'error') return bodyParseError(c, parsed);
+  const body = parsed.value as {
     action?: unknown;
     inputs?: unknown;
   };

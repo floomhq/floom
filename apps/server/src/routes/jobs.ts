@@ -15,6 +15,7 @@ import { createJob, formatJob, getJobBySlug, cancelJob } from '../services/jobs.
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { resolveUserContext } from '../services/session.js';
+import { parseJsonBody, bodyParseError } from '../lib/body.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const jobsRouter = new Hono<{ Variables: { slug: string } }>();
@@ -62,7 +63,12 @@ jobsRouter.post('/', async (c) => {
     return c.json({ error: 'App manifest is corrupted' }, 500);
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as {
+  // 2026-04-20 (P2 #146): reject malformed JSON before touching the queue.
+  // Same rationale as POST /api/:slug/run — truncated bodies would previously
+  // fall through to `{}` and enqueue a job on empty inputs.
+  const parsed = await parseJsonBody(c);
+  if (parsed.kind === 'error') return bodyParseError(c, parsed);
+  const body = parsed.value as {
     action?: unknown;
     inputs?: unknown;
     webhook_url?: unknown;
