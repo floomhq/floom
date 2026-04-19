@@ -23,14 +23,27 @@ export function cleanupUserOrphans(userId: string): void {
       .all(userId) as { workspace_id: string }[];
 
     // 2. Clear global user state
-    // a. Delete private apps authored by this user across ALL workspaces
+    // a. Delete per-app secrets for the private apps we're about to drop.
+    //    `secrets.app_id` has no FK CASCADE on apps, so without this the
+    //    secret rows would survive as orphans after the app row is gone
+    //    (observable as "ghost" entries via /api/secrets).
+    db.prepare(`
+      DELETE FROM secrets
+      WHERE app_id IN (
+        SELECT id FROM apps
+        WHERE author = ?
+          AND (visibility != 'public' OR visibility IS NULL)
+      )
+    `).run(userId);
+
+    // b. Delete private apps authored by this user across ALL workspaces
     db.prepare(`
       DELETE FROM apps
       WHERE author = ?
         AND (visibility != 'public' OR visibility IS NULL)
     `).run(userId);
 
-    // b. Migrate public apps authored by this user
+    // c. Migrate public apps authored by this user
     db.prepare(`
       UPDATE apps
       SET author = NULL,
@@ -40,13 +53,13 @@ export function cleanupUserOrphans(userId: string): void {
         AND visibility = 'public'
     `).run(userId);
 
-    // c. Clear active workspace pointer
+    // d. Clear active workspace pointer
     db.prepare('DELETE FROM user_active_workspace WHERE user_id = ?').run(userId);
 
-    // d. Clear orphaned connections (Composio, etc.)
+    // e. Clear orphaned connections (Composio, etc.)
     db.prepare("DELETE FROM connections WHERE owner_id = ? AND owner_kind = 'user'").run(userId);
 
-    // e. Finally, delete user from Floom's mirror table
+    // f. Finally, delete user from Floom's mirror table
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
     // 3. Process workspaces where user was a member

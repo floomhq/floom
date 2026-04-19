@@ -103,11 +103,18 @@ function buildAuthOptions(): any {
     };
   }
 
+  // 2026-04-20: trust the vite dev server origin only when we're not
+  // running in production. In prod the baseURL is the public origin and
+  // there is no vite dev server; allowing localhost:5173 unconditionally
+  // was a minor security smell (CSRF surface).
+  const isDev = process.env.NODE_ENV !== 'production';
+  const trustedOrigins = isDev ? ['http://localhost:5173'] : [];
+
   return {
     appName: 'Floom',
     secret,
     baseURL,
-    trustedOrigins: ['http://localhost:5173'],
+    trustedOrigins,
     // Better Auth owns its own /auth/* prefix when mounted via Hono. The
     // `basePath` here matches the mount point in apps/server/src/index.ts.
     basePath: '/auth',
@@ -171,9 +178,21 @@ function buildAuthOptions(): any {
       // `password` kwarg on the body verifies the caller owns the credentials.
       deleteUser: {
         enabled: true,
+        // 2026-04-20: Better Auth fires afterDelete after it's already
+        // committed the user row. Wrap the Floom cleanup in try/catch so a
+        // failure here doesn't leave the user in an inconsistent Better
+        // Auth state. We log loudly and keep going; the cleanup is
+        // idempotent, so an operator can re-run it manually if needed.
         afterDelete: async ({ user }: { user: { id: string } }) => {
-          if (user?.id) {
+          if (!user?.id) return;
+          try {
             cleanupUserOrphans(user.id);
+          } catch (err) {
+            console.error(
+              '[auth] cleanupUserOrphans failed for user',
+              user.id,
+              err,
+            );
           }
         },
       },
