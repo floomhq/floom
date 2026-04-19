@@ -1,131 +1,47 @@
 /**
  * LayersGrid — "What's in the box."
  *
- * Six real shipped layers pulled from docs/ROADMAP.md and
- * memory/project_floom_layers.md. Each card gets a title, a one-sentence
- * description, and a tiny code-or-diagram artifact that proves it's real.
+ * ICP is locked (creators + biz users, NOT devs). Previous version
+ * exposed implementation details (typed manifest, docker runner,
+ * OpenAPI spec, TSX renderer) that only platform engineers read
+ * without confusion. Rewritten 2026-04-19 into plain-English
+ * benefits, one short line per card, no code snippets.
  *
- * No fake SaaS screenshots, no hero illustrations. Monospace snippets do
- * the talking.
+ * Reframed from 6 implementation layers into 5 user benefits. The
+ * underlying engine layers (ingest, runtime, secrets, runs,
+ * surfaces, renderer) still ship and still live in /docs for the
+ * engineers who want them.
+ *
+ * Total visible body text under 100 words (verified via DOM).
  */
 
 interface Layer {
   name: string;
   desc: string;
-  /** Compact proof artifact rendered inside the card. */
-  artifact: React.ReactNode;
 }
 
 const LAYERS: Layer[] = [
   {
-    name: 'Ingest',
-    desc: 'OpenAPI spec or GitHub repo in. Typed manifest out. No hand-writing tool schemas.',
-    artifact: (
-      <CodeSnippet>
-        <span style={{ color: '#8b9ba9' }}>$</span> floom publish{' '}
-        <span style={{ color: '#6ee7b7' }}>openapi.json</span>
-        {'\n'}
-        <span style={{ color: '#8b9ba9' }}>
-          → 7 operations · manifest v1 · ready
-        </span>
-      </CodeSnippet>
-    ),
+    name: 'Paste a link',
+    desc: 'A GitHub repo or an API URL. That\u2019s the whole setup.',
   },
   {
-    name: 'Runtime',
-    desc: 'Every app runs in its own Docker sandbox. Proxied or native. Zero shared state.',
-    artifact: (
-      <CodeSnippet>
-        <span style={{ color: '#8b9ba9' }}>#</span> isolated, per-request
-        {'\n'}docker run{' '}
-        <span style={{ color: '#6ee7b7' }}>floom/runner:app-xxx</span>
-      </CodeSnippet>
-    ),
+    name: 'Runs on its own',
+    desc: 'No laptop to keep open. No babysitting. It\u2019s up when you are.',
   },
   {
-    name: 'Secrets',
-    desc: 'Per-user vault with creator overrides. Keys never touch the client, never log in plain text.',
-    artifact: (
-      <CodeSnippet>
-        <span style={{ color: '#8b9ba9' }}>$</span> floom secrets set{' '}
-        <span style={{ color: '#6ee7b7' }}>OPENAI_API_KEY</span>
-        {'\n'}
-        <span style={{ color: '#8b9ba9' }}>→ stored (user scope)</span>
-      </CodeSnippet>
-    ),
+    name: 'Looks like a real app',
+    desc: 'A clean page your teammates can use. Not raw JSON.',
   },
   {
-    name: 'Runs',
-    desc: 'Every execution is logged, addressable, and shareable. Replay any run, any time.',
-    artifact: (
-      <CodeSnippet>
-        GET /api/runs/<span style={{ color: '#6ee7b7' }}>r_Q3k...9p</span>
-        {'\n'}200 · status:ok · dur:1.8s
-      </CodeSnippet>
-    ),
+    name: 'See every run',
+    desc: 'Who ran what, when. Share a link to any result.',
   },
   {
-    name: 'Surfaces',
-    desc: 'MCP tool, HTTP API, CLI, chat UI, shareable web form. Five clients, one backend.',
-    artifact: (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {['MCP', 'HTTP', 'CLI', 'Chat', 'Share'].map((s) => (
-          <span
-            key={s}
-            style={{
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-              fontSize: 11,
-              fontWeight: 600,
-              color: 'var(--accent)',
-              background: '#ecfdf5',
-              border: '1px solid #d1fae5',
-              padding: '4px 9px',
-              borderRadius: 999,
-              letterSpacing: '0.02em',
-            }}
-          >
-            {s}
-          </span>
-        ))}
-      </div>
-    ),
-  },
-  {
-    name: 'Renderer',
-    desc: 'Upload a custom TSX renderer. Sandboxed at build and runtime. Your brand on every run page.',
-    artifact: (
-      <CodeSnippet>
-        <span style={{ color: '#8b9ba9' }}>//</span> renderer.tsx
-        {'\n'}export default{' '}
-        <span style={{ color: '#6ee7b7' }}>{'({ output }) =>'}</span>{' '}
-        {'<Card />'}
-      </CodeSnippet>
-    ),
+    name: 'Share on your terms',
+    desc: 'Public, private, or invite-only. You decide who gets in.',
   },
 ];
-
-function CodeSnippet({ children }: { children: React.ReactNode }) {
-  return (
-    <pre
-      style={{
-        margin: 0,
-        padding: '12px 14px',
-        background: '#0b1220',
-        color: '#e2e8f0',
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 12,
-        lineHeight: 1.55,
-        borderRadius: 8,
-        overflowX: 'auto',
-        whiteSpace: 'pre',
-        maxWidth: '100%',
-        minWidth: 0,
-      }}
-    >
-      {children}
-    </pre>
-  );
-}
 
 export function LayersGrid() {
   return (
@@ -163,8 +79,7 @@ export function LayersGrid() {
               margin: '0 auto',
             }}
           >
-            Six production layers ship today. Open source, self-hostable
-            in one container.
+            Everything your app needs to behave like a real tool.
           </p>
         </header>
 
@@ -172,56 +87,60 @@ export function LayersGrid() {
           className="layers-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 16,
+            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+            gap: 14,
           }}
         >
           {LAYERS.map((layer) => (
             <article
               key={layer.name}
-              data-testid={`layer-${layer.name.toLowerCase()}`}
+              data-testid={`layer-${layer.name
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '')}`}
               style={{
                 background: 'var(--bg)',
                 border: '1px solid var(--line)',
                 borderRadius: 14,
-                padding: 22,
+                padding: 20,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 14,
+                gap: 8,
                 minWidth: 0,
               }}
             >
-              <div>
-                <h3
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: 'var(--ink)',
-                    margin: '0 0 6px',
-                    letterSpacing: '-0.01em',
-                  }}
-                >
-                  {layer.name}
-                </h3>
-                <p
-                  style={{
-                    fontSize: 14,
-                    color: 'var(--muted)',
-                    lineHeight: 1.55,
-                    margin: 0,
-                  }}
-                >
-                  {layer.desc}
-                </p>
-              </div>
-              <div style={{ marginTop: 'auto' }}>{layer.artifact}</div>
+              <h3
+                style={{
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: 'var(--ink)',
+                  margin: 0,
+                  letterSpacing: '-0.01em',
+                  lineHeight: 1.25,
+                }}
+              >
+                {layer.name}
+              </h3>
+              <p
+                style={{
+                  fontSize: 13.5,
+                  color: 'var(--muted)',
+                  lineHeight: 1.5,
+                  margin: 0,
+                }}
+              >
+                {layer.desc}
+              </p>
             </article>
           ))}
         </div>
       </div>
 
       <style>{`
-        @media (max-width: 900px) {
+        @media (max-width: 1040px) {
+          .layers-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+        }
+        @media (max-width: 640px) {
           .layers-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
