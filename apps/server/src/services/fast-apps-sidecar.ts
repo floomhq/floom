@@ -98,6 +98,14 @@ interface FastAppDescriptor {
    * instead of raw JSON. See apps/web/src/components/output/.
    */
   render?: { output_component: string; [key: string]: unknown };
+  /**
+   * Fix 1 (2026-04-19): per-input label overrides. Keys are input names
+   * (matching the OpenAPI body schema property names), values replace
+   * the auto-generated UI label. Used by uuid to rename the `version`
+   * field to "UUID format" so the form label doesn't collide with the
+   * app release version shown in the /p/:slug hero meta row.
+   */
+  input_labels?: Record<string, string>;
 }
 
 const FAST_APP_DESCRIPTORS: FastAppDescriptor[] = [
@@ -112,6 +120,12 @@ const FAST_APP_DESCRIPTORS: FastAppDescriptor[] = [
       output_component: 'TextBig',
       value_field: 'uuids',
       copyable: true,
+    },
+    // Rename the `version` enum selector so the form field label doesn't
+    // collide with the app release version ("v0.1.0") in the hero meta row.
+    // The body key stays `version` (OpenAPI schema).
+    input_labels: {
+      version: 'UUID format',
     },
   },
   {
@@ -193,6 +207,14 @@ function writeRuntimeAppsYaml(host: string, port: number): string {
       // special characters survive the parser without escaping gymnastics.
       lines.push('    render:');
       for (const [key, value] of Object.entries(d.render)) {
+        lines.push(`      ${key}: ${JSON.stringify(value)}`);
+      }
+    }
+    if (d.input_labels) {
+      // Fix 1 (2026-04-19): per-input label overrides. Same JSON-stringify
+      // trick as render/ to survive the YAML parser.
+      lines.push('    input_labels:');
+      for (const [key, value] of Object.entries(d.input_labels)) {
         lines.push(`      ${key}: ${JSON.stringify(value)}`);
       }
     }
