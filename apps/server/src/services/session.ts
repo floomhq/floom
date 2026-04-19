@@ -46,13 +46,30 @@ function readDeviceCookie(c: Context): string | null {
 }
 
 /**
- * Set the floom_device cookie on the response. Idempotent — safe to call
+ * Decide whether the Set-Cookie should carry the `Secure` attribute. True
+ * when we're running in production, or when PUBLIC_URL is https. Kept off
+ * for local HTTP dev (otherwise browsers silently drop the cookie).
+ */
+function shouldUseSecureCookie(): boolean {
+  if (process.env.NODE_ENV === 'production') return true;
+  const publicUrl = process.env.PUBLIC_URL;
+  if (publicUrl && publicUrl.startsWith('https://')) return true;
+  return false;
+}
+
+/**
+ * Set the floom_device cookie on the response. Idempotent: safe to call
  * multiple times per request; the last Set-Cookie wins.
+ *
+ * Attributes: HttpOnly + SameSite=Lax always; Secure when served over
+ * HTTPS (prod, preview, or any PUBLIC_URL=https://...). Local HTTP dev
+ * skips Secure so the browser still accepts the cookie.
  */
 function writeDeviceCookie(c: Context, value: string): void {
+  const secure = shouldUseSecureCookie() ? '; Secure' : '';
   const cookie =
     `${COOKIE_NAME}=${value}; Max-Age=${COOKIE_MAX_AGE_SECONDS}; ` +
-    `Path=/; HttpOnly; SameSite=Lax`;
+    `Path=/; HttpOnly; SameSite=Lax${secure}`;
   c.header('set-cookie', cookie, { append: true });
 }
 

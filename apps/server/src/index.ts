@@ -47,7 +47,72 @@ initSentry();
 
 const app = new Hono();
 app.use('*', logger());
-app.use('*', cors({ origin: '*' }));
+
+// CORS (2026-04-20 security audit P2): split policy.
+//
+// Restricted routes (auth/cookie-bearing): /auth/*, /api/me/*, /api/session/*,
+// /api/workspaces/*, /api/connections/*, /api/memory/*, /api/secrets/*,
+// /api/hub admin mutations (POST/PATCH/DELETE on /api/hub). These get an
+// allow-listed origin + credentials.
+//
+// Open routes (public, credential-less server-to-server calls from MCP
+// clients, Zapier, Make, user scripts): /api/:slug/run, /api/:slug/jobs,
+// GET /api/hub, GET /api/hub/:slug, /mcp/*, /og/*, /renderer/*. These get
+// `origin: '*'` but NO credentials so a cookie can't ride along.
+//
+// We build a single allow-list up front and pick the right CORS config per
+// route group below.
+const trustedOrigins = [
+  process.env.PUBLIC_URL, // https://preview.floom.dev or https://floom.dev
+  'https://preview.floom.dev',
+  'https://floom.dev',
+  'https://app.floom.dev', // future prod alias
+  ...(process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:5173', 'http://localhost:3051']
+    : []),
+].filter((o): o is string => Boolean(o));
+
+const restrictedCors = cors({
+  origin: (origin) => {
+    if (!origin) return ''; // same-origin, no CORS header needed
+    return trustedOrigins.includes(origin) ? origin : '';
+  },
+  credentials: true,
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+});
+
+// Open CORS for public run/hub/MCP surfaces. No credentials so cookies don't
+// ride along — server-to-server callers should use bearer tokens.
+const openCors = cors({
+  origin: '*',
+  allowHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  allowMethods: ['GET', 'POST', 'OPTIONS'],
+});
+
+// Restricted paths first (auth/cookie surfaces).
+app.use('/auth/*', restrictedCors);
+app.use('/api/me/*', restrictedCors);
+app.use('/api/session/*', restrictedCors);
+app.use('/api/workspaces/*', restrictedCors);
+app.use('/api/connections/*', restrictedCors);
+app.use('/api/memory/*', restrictedCors);
+app.use('/api/secrets/*', restrictedCors);
+app.use('/api/stripe/*', restrictedCors);
+app.use('/api/feedback/*', restrictedCors);
+
+// Open surfaces (public read/run, MCP, OG, renderer bundles).
+app.use('/api/hub/*', openCors);
+app.use('/api/hub', openCors);
+app.use('/api/health/*', openCors);
+app.use('/api/run', openCors);
+app.use('/api/:slug/run', openCors);
+app.use('/api/:slug/jobs', openCors);
+app.use('/mcp/*', openCors);
+app.use('/mcp', openCors);
+app.use('/og/*', openCors);
+app.use('/renderer/*', openCors);
+
 // P1 security headers: CSP + HSTS + nosniff + Referrer-Policy.
 // Mounted before routes so it wraps every response. Routes that own a
 // tighter CSP (renderer frame) are exempted inside the middleware.
