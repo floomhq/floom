@@ -158,7 +158,13 @@ export function TopBar({ compact = false }: Props = {}) {
           }}
           aria-label={isStudio ? 'Floom Studio' : 'Floom home'}
         >
-          <Logo size={compact ? 20 : 26} withWordmark={!compact} />
+          {/* v6-align 2026-04-20: use the `glow` variant so the pennant
+              carries the subtle SVG halo (per PR #35) even in chrome.
+              Shrunk pennant 26 -> 20 (compact 20 -> 18) and wordmark to
+              14px (see Logo.tsx) so the mark stops dominating the TopBar.
+              Federico's audit: "logo top left is very big and not halo
+              glow". */}
+          <Logo size={compact ? 18 : 20} withWordmark={!compact} variant="glow" />
           {isStudio && (
             <span
               data-testid="topbar-studio-breadcrumb"

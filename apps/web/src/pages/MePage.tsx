@@ -382,9 +382,11 @@ export function MePage() {
               </span>
             </div>
           </div>
-          <Link to="/apps" data-testid="me-browse-apps" style={s.headerLink}>
-            Browse apps →
-          </Link>
+          {/* v6-align 2026-04-20: removed the duplicate "Browse apps →"
+              link from the greeting row. The same link lives next to the
+              "Your apps" H2 below, where it reads as a direct affordance
+              for the apps section. Federico flagged the double render in
+              the visual audit — one canonical Browse-apps link, not two. */}
         </header>
 
         {showWelcome && <WelcomeBanner onDismiss={dismissWelcome} />}

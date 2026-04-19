@@ -81,6 +81,13 @@ export function AppPermalinkPage() {
   // card with a CTA to open the app fresh instead.
   const [runNotFound, setRunNotFound] = useState(false);
 
+  // v6-align 2026-04-20: when a run is active (?run=<id> in URL or
+  // initialRun resolved), collapse the hero to a thin strip so the run
+  // output gets ~60% more vertical room. Federico flagged the hero as
+  // visual bloat during active runs. User can click "View details" to
+  // re-expand in place; the tab bar stays rendered below in both states.
+  const [heroExpanded, setHeroExpanded] = useState(false);
+
   useEffect(() => {
     if (!slug) {
       setNotFound(true);
@@ -517,7 +524,93 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-        {/* Hero */}
+        {/* v6-align 2026-04-20: collapsed hero strip when a run is active.
+            Shows a compact app-identity row with a "View details" toggle so
+            the full hero is one click away. The tab bar below still renders
+            and carries the primary nav during an active run. Federico
+            flagged the full hero as visual bloat during runs. */}
+        {topBarCompact && !heroExpanded && (
+          <section
+            data-testid="permalink-hero-collapsed"
+            style={{
+              marginBottom: 20,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 14,
+              padding: '10px 14px',
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              background: 'var(--card)',
+              boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                border: '1px solid var(--accent-border, var(--line))',
+                background: 'var(--accent-soft, var(--bg))',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <AppIcon slug={app.slug} size={20} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: 'var(--ink)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {app.name}
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--muted)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}
+              >
+                v{app.version ?? '0.1.0'}
+                {heroHandle && ` · by @${heroHandle}`}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHeroExpanded(true)}
+              data-testid="permalink-hero-expand"
+              style={{
+                padding: '7px 12px',
+                border: '1px solid var(--line)',
+                background: 'var(--card)',
+                color: 'var(--muted)',
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              View details <ChevronDown />
+            </button>
+          </section>
+        )}
+
+        {/* Hero — full form. Hidden in collapsed state; shown by default
+            otherwise, or when the user has clicked "View details". */}
+        {(!topBarCompact || heroExpanded) && (
         <section data-testid="permalink-hero" style={{ marginBottom: 40 }}>
           <div
             style={{
@@ -624,13 +717,24 @@ export function AppPermalinkPage() {
                   href="#run"
                   data-testid="cta-run"
                   style={{
+                    /* v6-align 2026-04-20: inset highlight + soft outer
+                       shadow per v6 .btn-accent (wireframes-floom/v6.html
+                       L168-174). Separates the primary Run CTA from the
+                       neutral "Add to your tools" and ghost "Share". */
                     padding: '11px 22px',
                     background: 'var(--accent)',
                     color: '#fff',
+                    border: '1px solid var(--accent)',
                     borderRadius: 10,
                     fontSize: 14,
                     fontWeight: 600,
                     textDecoration: 'none',
+                    boxShadow:
+                      '0 1px 2px rgba(5, 150, 105, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+                    transition: 'background 0.15s ease, box-shadow 0.15s ease',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
                   Run {app.name}
@@ -791,7 +895,36 @@ export function AppPermalinkPage() {
               )}
             </aside>
           </div>
+          {/* v6-align 2026-04-20: collapse affordance when the hero is
+              expanded during a run. Puts the control in the same visual
+              lane the user just clicked to expand from. */}
+          {topBarCompact && heroExpanded && (
+            <div style={{ marginTop: 18, textAlign: 'right' }}>
+              <button
+                type="button"
+                onClick={() => setHeroExpanded(false)}
+                data-testid="permalink-hero-collapse"
+                style={{
+                  padding: '7px 12px',
+                  border: '1px solid var(--line)',
+                  background: 'var(--card)',
+                  color: 'var(--muted)',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                Hide details
+              </button>
+            </div>
+          )}
         </section>
+        )}
 
         {/* v16 tab bar: Run is default, everything else is opt-in. This
             replaces the previous "scroll past marketing to reach the run

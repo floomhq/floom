@@ -61,8 +61,22 @@ export function Logo({
   variant = 'plain',
   animate = 'none',
 }: LogoProps) {
+  // v6-align 2026-04-20: explicit font-size so TopBar instances read as a
+  // compact mark (14px wordmark beside a 20px pennant). Prior Tailwind
+  // `font-semibold` inherited the parent 18px .brand style and drowned the
+  // pennant. Federico flagged the wordmark as visually dominant; the
+  // pennant should lead.
   const wordmark = withWordmark ? (
-    <span className="font-semibold">floom</span>
+    <span
+      style={{
+        fontSize: 14,
+        fontWeight: 600,
+        letterSpacing: '-0.01em',
+        color: 'var(--ink)',
+      }}
+    >
+      floom
+    </span>
   ) : null;
 
   const animClass = ANIMATE_CLASS[animate];
