@@ -32,16 +32,25 @@ const log = (label, ok, detail) => {
 };
 
 // Fake Hono Context: header+param+json enough to drive the middleware.
+// `header(name, value)` writes a response header too, matching Hono's own
+// dual-purpose API so applyLimitHeaders (issue #128) can attach
+// X-RateLimit-* on the success path.
 function makeCtx({ ip = '1.2.3.4', slug = null, headers = {} } = {}) {
   const hdrs = new Headers(
     ip === null ? headers : { 'x-forwarded-for': ip, ...headers },
   );
+  const responseHeaders = new Headers();
   return {
+    _responseHeaders: responseHeaders,
     req: {
       header: (n) => hdrs.get(n.toLowerCase()) || hdrs.get(n) || null,
       param: (n) => (n === 'slug' ? slug : null),
       query: () => null,
       raw: { headers: hdrs },
+    },
+    header: (name, value) => {
+      if (value === undefined) return responseHeaders.get(name);
+      responseHeaders.set(name, String(value));
     },
     json: (body, status, extra) =>
       new Response(JSON.stringify(body), {
@@ -62,10 +71,10 @@ const anonResolve = async () => anonCtx;
 
 console.log('Rate limit library');
 
-// 1. defaults
-log('anon default is 20/hr', rl.defaultAnonPerHour() === 20);
-log('user default is 200/hr', rl.defaultUserPerHour() === 200);
-log('per-app default is 50/hr', rl.defaultPerAppPerHour() === 50);
+// 1. defaults (bumped 2026-04-19, issue #128: 20/200/50 → 60/300/500)
+log('anon default is 60/hr', rl.defaultAnonPerHour() === 60);
+log('user default is 300/hr', rl.defaultUserPerHour() === 300);
+log('per-app default is 500/hr', rl.defaultPerAppPerHour() === 500);
 log('mcp ingest default is 10/day', rl.defaultMcpIngestPerDay() === 10);
 
 // 2. env override
@@ -199,7 +208,41 @@ log(
 );
 log('mcp ingest anon: different IP not affected', differentIp.allowed);
 
-// 11. Store reset drains bucket
+// 11. X-RateLimit-* headers on success + 429 (issue #128)
+rl.__resetStoreForTests();
+process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '3';
+delete process.env.FLOOM_RATE_LIMIT_APP_PER_HOUR;
+const mwHdr = rl.runRateLimitMiddleware(anonResolve);
+const ctxHdr = makeCtx({ ip: '12.12.12.12' });
+await mwHdr(ctxHdr, async () => undefined);
+log(
+  'X-RateLimit-Limit header set on success',
+  ctxHdr._responseHeaders.get('X-RateLimit-Limit') === '3',
+);
+log(
+  'X-RateLimit-Remaining decrements on success',
+  ctxHdr._responseHeaders.get('X-RateLimit-Remaining') === '2',
+);
+log(
+  'X-RateLimit-Scope is ip for anon',
+  ctxHdr._responseHeaders.get('X-RateLimit-Scope') === 'ip',
+);
+log(
+  'X-RateLimit-Reset is epoch-seconds',
+  Number(ctxHdr._responseHeaders.get('X-RateLimit-Reset')) > 1_700_000_000,
+);
+// Burn to 429 and confirm header still set on block response.
+await mwHdr(makeCtx({ ip: '12.12.12.12' }), async () => undefined);
+await mwHdr(makeCtx({ ip: '12.12.12.12' }), async () => undefined);
+const blockRes = await mwHdr(
+  makeCtx({ ip: '12.12.12.12' }),
+  async () => undefined,
+);
+log('429 has X-RateLimit-Limit=3', blockRes.headers.get('X-RateLimit-Limit') === '3');
+log('429 has X-RateLimit-Remaining=0', blockRes.headers.get('X-RateLimit-Remaining') === '0');
+log('429 has X-RateLimit-Scope=ip', blockRes.headers.get('X-RateLimit-Scope') === 'ip');
+
+// 12. Store reset drains bucket
 rl.__resetStoreForTests();
 process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '1';
 const mw11 = rl.runRateLimitMiddleware(anonResolve);
