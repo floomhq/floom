@@ -1,7 +1,7 @@
 // Audit 2026-04-18, bug #7: unified footer.
 //
 // Before: two different footers shipped side by side. The landing +
-// /apps + /404 used PublicFooter (capitalized, Built in Hamburg,
+// /apps + /404 used PublicFooter (capitalized, Built in SF,
 // GitHub, Imprint, Privacy, Terms, Cookies). The signed-in shell
 // (PageShell -> Footer) used a lowercase variant with `apps · protocol
 // · github · imprint · privacy · terms · cookies`, and pointed "protocol"

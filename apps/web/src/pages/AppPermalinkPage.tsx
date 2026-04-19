@@ -169,8 +169,13 @@ export function AppPermalinkPage() {
     setMeta('description', app.description);
     setMeta('og:title', `${app.name} | Floom`, true);
     setMeta('og:description', app.description, true);
-    setMeta('og:url', `https://preview.floom.dev/p/${app.slug}`, true);
+    setMeta('og:url', `${window.location.origin}/p/${app.slug}`, true);
     setMeta('og:type', 'website', true);
+    // Per-app dynamic OG card (served by /og/:slug.svg on the same origin).
+    setMeta('og:image', `${window.location.origin}/og/${app.slug}.svg`, true);
+    setMeta('twitter:image', `${window.location.origin}/og/${app.slug}.svg`);
+    setMeta('twitter:title', `${app.name} | Floom`);
+    setMeta('twitter:description', app.description);
 
     const existing = document.getElementById('jsonld-app');
     if (existing) existing.remove();

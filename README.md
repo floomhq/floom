@@ -146,7 +146,7 @@ everything else is parked until those are battle-tested.
 - Security reports: see [SECURITY.md](./SECURITY.md)
 - Contribute: see [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-Built in Hamburg by [@federicodeponte](https://github.com/federicodeponte).
+Built in SF by [@federicodeponte](https://github.com/federicodeponte).
 
 ## License
 
