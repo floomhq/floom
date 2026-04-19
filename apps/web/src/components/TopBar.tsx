@@ -194,6 +194,14 @@ export function TopBar({ compact = false }: Props = {}) {
           >
             Apps
           </Link>
+          <Link
+            to="/protocol"
+            data-testid="topbar-protocol"
+            aria-current={isDocs ? 'page' : undefined}
+            style={navStyle(isDocs)}
+          >
+            Docs
+          </Link>
           {isAuthenticated && (
             <Link
               to="/me"
@@ -204,14 +212,14 @@ export function TopBar({ compact = false }: Props = {}) {
               Me
             </Link>
           )}
-          {isDocs && (
+          {isAuthenticated && ownedAppCount > 0 && (
             <Link
-              to="/protocol"
-              data-testid="topbar-protocol"
-              aria-current="page"
-              style={navStyle(true)}
+              to="/studio"
+              data-testid="topbar-studio"
+              aria-current={isStudio ? 'page' : undefined}
+              style={navStyle(isStudio)}
             >
-              Docs
+              Studio ({ownedAppCount})
             </Link>
           )}
         </nav>
@@ -406,16 +414,14 @@ export function TopBar({ compact = false }: Props = {}) {
           >
             Apps
           </Link>
-          {isDocs && (
-            <Link
-              to="/protocol"
-              className="topbar-mobile-link"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-            >
-              Docs
-            </Link>
-          )}
+          <Link
+            to="/protocol"
+            className="topbar-mobile-link"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+          >
+            Docs
+          </Link>
           {!isAuthenticated && (
             <Link
               to={deployHref}

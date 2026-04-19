@@ -338,7 +338,7 @@ export function CreatorHeroPage() {
                 margin: '0 0 26px',
               }}
             >
-              Paste a repo or OpenAPI link. Floom gives you a live app page, share links, auth, and a Claude-ready tool.
+              The protocol + runtime for agentic work.
             </p>
 
             <form
@@ -454,6 +454,22 @@ export function CreatorHeroPage() {
               >
                 Browse{hubCount !== null ? ` ${hubCount}` : ''} live apps
                 <ArrowRight size={14} aria-hidden="true" />
+              </Link>
+              <Link
+                to="/docs/self-host"
+                data-testid="hero-self-host"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  color: 'var(--muted)',
+                  fontWeight: 500,
+                  textDecoration: 'underline',
+                  textUnderlineOffset: 3,
+                  padding: '12px 8px',
+                  fontSize: 13.5,
+                }}
+              >
+                Self-host in one command
               </Link>
             </div>
 
