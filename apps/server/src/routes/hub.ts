@@ -188,30 +188,59 @@ hubRouter.get('/mine', async (c) => {
 // GET /api/hub/:slug/runs — creator activity feed for a single app. Returns
 // the most recent runs across every caller that has run this app. Scoped
 // to the caller's workspace so one creator can't peek at another's runs.
+//
+// SECURITY (issue #124, 2026-04-19): in Cloud mode an unauthenticated caller
+// falls back to the synthetic ('local', 'local') context, which used to
+// match the OSS-mode escape hatch below and expose every other caller's
+// run inputs + outputs. The fix is two-fold:
+//   1. Require an authenticated session in Cloud mode (401 on anon).
+//   2. Drop the 'local'+'local' escape hatch in Cloud mode; only strict
+//      `app.author === ctx.user_id` ownership grants access.
+// OSS mode (self-host, single-user, unauth) keeps the legacy behavior so
+// a local self-hoster can still see their own runs without logging in.
 hubRouter.get('/:slug/runs', async (c) => {
   const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const slug = c.req.param('slug');
   const limit = Math.max(1, Math.min(100, Number(c.req.query('limit') || 20)));
 
   const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
   if (!app) return c.json({ error: 'App not found' }, 404);
 
-  // Ownership check: only the author (or synthetic local in OSS) may view.
-  const isOwner = app.author === ctx.user_id || (ctx.workspace_id === 'local' && app.workspace_id === 'local');
+  // Ownership check:
+  //   - Cloud mode: strict author match. The OSS 'local'+'local' escape
+  //     hatch is unsafe here because every anon fallback context is
+  //     (workspace_id='local', user_id='local') and seed apps carry
+  //     workspace_id='local' too (see issue #124).
+  //   - OSS mode: synthetic local user can see their own local-seeded
+  //     apps without signing in.
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
+  const isOwner =
+    (!!app.author && app.author === ctx.user_id) ||
+    (isOssLocal && app.workspace_id === 'local');
   if (!isOwner) {
     return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
   }
 
+  // SECURITY (issue #124, 2026-04-19): scope runs to the caller's own
+  // rows. Even the app author must not see other callers' raw inputs +
+  // outputs — those can contain secrets (passwords, API keys, PII).
+  // Authed callers scope by user_id; OSS anon falls back to device_id.
+  const scopeClause = ctx.is_authenticated
+    ? 'AND user_id = ?'
+    : 'AND device_id = ?';
+  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
   const rows = db
     .prepare(
       `SELECT id, action, status, inputs, outputs, duration_ms,
               started_at, finished_at, error, error_type, user_id, device_id
          FROM runs
-        WHERE app_id = ?
+        WHERE app_id = ? ${scopeClause}
         ORDER BY started_at DESC
         LIMIT ?`,
     )
-    .all(app.id, limit) as Array<{
+    .all(app.id, scopeParam, limit) as Array<{
     id: string;
     action: string;
     status: string;
