@@ -298,18 +298,18 @@ Source: [`services/runner.ts`](../apps/server/src/services/runner.ts), [`service
 
 ## 10. Extensibility — what's replaceable
 
-Floom is a protocol, not a single implementation. Today the reference server hardcodes one implementation for five concerns. Only the renderer is formally pluggable per-app; the others are **not yet formalized** as adapter interfaces.
+Floom is a protocol, not a single implementation. Adapter interfaces for the five pluggable concerns are formalized in [adapters.md](./adapters.md). The reference implementation ships in this repo (Docker + HTTP proxy runtime, SQLite storage, Better Auth, encrypted-column secrets, in-process metrics + Sentry). Alternate implementations welcome via PRs that conform to the interface contracts.
 
-| Concern | Reference impl | Status |
+| Concern | Reference impl | Interface |
 |---|---|---|
-| Runtime | Docker (Python/Node images) for hosted apps; HTTP proxy for `app_type: "proxied"` | Not yet formalized. See [`services/runner.ts`](../apps/server/src/services/runner.ts), [`services/proxied-runner.ts`](../apps/server/src/services/proxied-runner.ts). |
-| Storage | SQLite via `better-sqlite3` | Not yet formalized. |
-| Auth | Bearer token (`FLOOM_AUTH_TOKEN`), optional Better Auth for Cloud mode | Not yet formalized. `SessionContext` is the internal shape. |
-| Secrets | Encrypted SQLite rows (per-workspace DEK) | Not yet formalized — see §9. |
-| Observability | In-process counters + `/api/metrics` Prometheus text | Not yet formalized. |
-| **Renderer** | Default cascade of stock components + opt-in per-app TSX bundle | **Pluggable**. `POST /api/hub/:slug/renderer` uploads a creator bundle; served sandboxed at `/renderer/:slug/bundle.js` (iframe `sandbox="allow-scripts"`, no `allow-same-origin`, strict CSP). |
+| Runtime | Docker (Python/Node images) for hosted apps; HTTP proxy for `app_type: "proxied"` | [`RuntimeAdapter`](./adapters.md#runtimeadapter) · [`services/runner.ts`](../apps/server/src/services/runner.ts), [`services/proxied-runner.ts`](../apps/server/src/services/proxied-runner.ts) |
+| Storage | SQLite via `better-sqlite3` | [`StorageAdapter`](./adapters.md#storageadapter) · [`db.ts`](../apps/server/src/db.ts) |
+| Auth | Synthetic local user in OSS mode; Better Auth (email+password, GitHub/Google, API keys, organizations) in Cloud mode | [`AuthAdapter`](./adapters.md#authadapter) · [`lib/better-auth.ts`](../apps/server/src/lib/better-auth.ts) |
+| Secrets | Encrypted SQLite rows (per-workspace DEK, AES-256-GCM) | [`SecretsAdapter`](./adapters.md#secretsadapter) · [`services/user_secrets.ts`](../apps/server/src/services/user_secrets.ts) |
+| Observability | In-process counters + `/api/metrics` Prometheus text; optional Sentry | [`ObservabilityAdapter`](./adapters.md#observabilityadapter) · [`lib/sentry.ts`](../apps/server/src/lib/sentry.ts), [`lib/metrics-counters.ts`](../apps/server/src/lib/metrics-counters.ts) |
+| **Renderer** | Default cascade of stock components + opt-in per-app TSX bundle | **Runtime-swappable per app.** `POST /api/hub/:slug/renderer` uploads a creator bundle; served sandboxed at `/renderer/:slug/bundle.js` (iframe `sandbox="allow-scripts"`, no `allow-same-origin`, strict CSP). |
 
-The protocol does not require Docker, SQLite, Better Auth, or any specific observability backend. An alternative server MAY implement each concern differently as long as the HTTP and MCP contracts in sections 4-8 hold.
+The renderer is the only concern that is currently swappable *at runtime* (per-app bundle upload). The other five are *compile-time swappable*: change the adapter import at the server bootstrap and rebuild. The protocol does not require Docker, SQLite, Better Auth, or any specific observability backend — any alternate server MAY implement each concern differently as long as the HTTP and MCP contracts in sections 4-8 hold.
 
 ---
 
