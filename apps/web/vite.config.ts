@@ -1,9 +1,34 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
+
+// Sentry source-map upload: only wires when SENTRY_AUTH_TOKEN is set at build
+// time. Without it, the plugin is a no-op. Source maps stay generated (see
+// `build.sourcemap: true` below) so self-hosters who wire Sentry later still
+// have readable stacks locally. With the token set, the plugin uploads maps
+// to Sentry and deletes them from dist/ so the runtime image doesn't ship
+// them.
+const SENTRY_AUTH_TOKEN = process.env.SENTRY_AUTH_TOKEN;
+const SENTRY_ORG = process.env.SENTRY_ORG;
+const SENTRY_PROJECT = process.env.SENTRY_PROJECT;
+
+const sentryPlugins = SENTRY_AUTH_TOKEN
+  ? [
+      sentryVitePlugin({
+        authToken: SENTRY_AUTH_TOKEN,
+        org: SENTRY_ORG,
+        project: SENTRY_PROJECT,
+        silent: true,
+        sourcemaps: {
+          filesToDeleteAfterUpload: ['**/*.map'],
+        },
+      }),
+    ]
+  : [];
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), ...sentryPlugins],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

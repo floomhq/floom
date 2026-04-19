@@ -21,6 +21,7 @@
     "zustand": "5.0.2"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "5.2.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.4",

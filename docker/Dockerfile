@@ -38,6 +38,23 @@ COPY examples/fast-apps ./examples/fast-apps
 # fails to resolve '@floom/renderer' etc and hits the fallback stub below.
 RUN pnpm install --frozen-lockfile
 
+# Sentry build-time args. All optional:
+#   - VITE_SENTRY_DSN is baked into the web bundle so the browser knows where
+#     to POST errors. Unset = Sentry stays dark on the client.
+#   - SENTRY_AUTH_TOKEN/ORG/PROJECT wire @sentry/vite-plugin to upload source
+#     maps during the Vite build, then delete .map files from dist/ so the
+#     runtime image doesn't ship them. All three unset = plugin no-ops and
+#     maps are generated but not uploaded.
+# Pass at build time: docker build --build-arg VITE_SENTRY_DSN=... ...
+ARG VITE_SENTRY_DSN
+ARG SENTRY_AUTH_TOKEN
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
+ENV SENTRY_ORG=${SENTRY_ORG}
+ENV SENTRY_PROJECT=${SENTRY_PROJECT}
+
 # Build server (TypeScript → dist/)
 RUN cd apps/server && pnpm run build
 
