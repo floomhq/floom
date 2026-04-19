@@ -138,9 +138,7 @@ export function CustomRendererPanel({ slug, initial, onChange }: Props) {
             Custom renderer
           </p>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-            Upload a React renderer so your app's output isn't a raw JSON dump. Compiled
-            with esbuild on the server, capped at 256 KB. Imports are limited to React and
-            <code style={{ fontFamily: 'JetBrains Mono, monospace' }}> @floom/renderer</code>.
+            Upload a React component to style your app's output. We'll compile and sandbox it.
           </p>
         </div>
         {meta ? (
