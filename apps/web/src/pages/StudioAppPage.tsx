@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader } from './MeAppPage';
 import * as api from '../api/client';
+import { refreshMyApps } from '../hooks/useMyApps';
 import type { AppDetail, CreatorRun } from '../lib/types';
 import { formatTime } from '../lib/time';
 
@@ -18,6 +19,25 @@ export function StudioAppPage() {
   const [app, setApp] = useState<AppDetail | null>(null);
   const [runs, setRuns] = useState<CreatorRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmInput, setConfirmInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (!app) return;
+    if (confirmInput !== app.slug) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteApp(app.slug);
+      await refreshMyApps();
+      nav('/studio', { replace: true });
+    } catch (err) {
+      setDeleteError((err as Error).message || 'Delete failed');
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     if (!slug) return;
@@ -141,6 +161,182 @@ export function StudioAppPage() {
               </Link>
             </div>
           )}
+
+          {/* Danger zone · delete app. Typed-slug confirm prevents fat-finger
+              deletes. DELETE /api/hub/:slug cascades runs via FK. */}
+          <section
+            data-testid="studio-app-danger-zone"
+            style={{
+              marginTop: 48,
+              border: '1px solid var(--line)',
+              borderRadius: 10,
+              background: 'var(--card)',
+              padding: 20,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                color: 'var(--muted)',
+                margin: '0 0 12px',
+              }}
+            >
+              Danger zone
+            </h2>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 240 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
+                  Delete this app
+                </div>
+                <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>
+                  Removes <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>/p/{app.slug}</code> from the store and drops all run history. Cannot be undone.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmOpen(true);
+                  setConfirmInput('');
+                  setDeleteError(null);
+                }}
+                data-testid="studio-app-delete-trigger"
+                style={{
+                  padding: '9px 16px',
+                  background: 'transparent',
+                  color: '#c2321f',
+                  border: '1px solid #c2321f',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Delete this app
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {confirmOpen && app && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          data-testid="studio-app-delete-modal"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => !deleting && setConfirmOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--card)',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 440,
+              width: '100%',
+            }}
+          >
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, color: 'var(--ink)' }}>
+              Delete {app.slug}?
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
+              This removes the app from the store and drops run history. Cannot be undone.
+              Type <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{app.slug}</code> to confirm.
+            </p>
+            <input
+              value={confirmInput}
+              onChange={(e) => setConfirmInput(e.target.value)}
+              autoFocus
+              data-testid="studio-app-delete-confirm-input"
+              aria-label="Type app slug to confirm"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                background: 'var(--card)',
+                fontSize: 14,
+                fontFamily: 'JetBrains Mono, monospace',
+                color: 'var(--ink)',
+                boxSizing: 'border-box',
+              }}
+            />
+            {deleteError && (
+              <div
+                data-testid="studio-app-delete-error"
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: '#c2321f',
+                }}
+              >
+                {deleteError}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  setConfirmInput('');
+                }}
+                disabled={deleting}
+                style={{
+                  padding: '8px 16px',
+                  background: 'transparent',
+                  border: '1px solid var(--line)',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={confirmInput !== app.slug || deleting}
+                data-testid="studio-app-delete-submit"
+                style={{
+                  padding: '8px 16px',
+                  background: '#c2321f',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: confirmInput === app.slug && !deleting ? 'pointer' : 'not-allowed',
+                  fontFamily: 'inherit',
+                  opacity: confirmInput === app.slug && !deleting ? 1 : 0.6,
+                }}
+              >
+                {deleting ? 'Deleting...' : 'Delete forever'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </StudioLayout>

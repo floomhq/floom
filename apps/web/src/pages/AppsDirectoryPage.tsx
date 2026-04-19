@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Search } from 'lucide-react';
-import { PublicNav } from '../components/public/PublicNav';
+import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
@@ -141,7 +141,7 @@ export function AppsDirectoryPage() {
       data-testid="apps-directory"
       style={{ minHeight: '100vh', background: 'var(--bg)' }}
     >
-      <PublicNav variant="apps" />
+      <TopBar />
 
       <main>
         {/* HEADER · mono-tag + serif H1 + subhead */}

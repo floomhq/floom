@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { Logo } from '../components/Logo';
-import { PublicNav } from '../components/public/PublicNav';
+import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
@@ -122,7 +122,7 @@ export function CreatorHeroPage() {
       data-testid="creator-hero"
       style={{ minHeight: '100vh', background: 'var(--bg)' }}
     >
-      <PublicNav variant="landing" />
+      <TopBar />
 
       <main style={{ display: 'block' }}>
         {/* HERO · glow logo, 3-layer headline, paste-URL input, integration logos */}
