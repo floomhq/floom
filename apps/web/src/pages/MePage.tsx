@@ -47,6 +47,14 @@ const s: Record<string, CSSProperties> = {
     margin: 0,
     color: 'var(--ink)',
   },
+  sectionH2: {
+    fontFamily: "'DM Serif Display', Georgia, serif",
+    fontSize: 20,
+    fontWeight: 500,
+    lineHeight: 1.2,
+    margin: 0,
+    color: 'var(--ink)',
+  },
   headerLink: {
     fontSize: 13,
     fontWeight: 600,
@@ -196,15 +204,31 @@ export function MePage() {
     navigate(`/p/${run.app_slug}?run=${encodeURIComponent(run.id)}`);
   }
 
+  // v16 /me restructure (2026-04-19): apps-first. Federico feedback on
+  // PR #127: "this is confusing and this page should be about running
+  // apps that i have". The page is now a dashboard, not a runs feed —
+  // apps are the inventory, runs are history underneath.
+  //
+  // Structure (top to bottom):
+  //   1. H1 "Me" (was "Your runs" — that framing was the bug)
+  //   2. Welcome / AppNotFound notices
+  //   3. "Apps you've published" section
+  //        - If hasApps: list of AppRows
+  //        - If zero apps: "Publish your first app" CTA inline
+  //        - Skeleton while loading (apps === null)
+  //   4. "Runs history" section underneath
+  //   5. Optional footer (studio link) only when the user has apps
+  const appsLoading = apps === null;
+
   return (
     <PageShell
       requireAuth="cloud"
-      title="Your runs · Floom"
+      title="Me · Floom"
       contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
     >
       <main data-testid="me-page" style={s.main}>
         <header style={s.header}>
-          <h1 style={s.h1}>Your runs</h1>
+          <h1 style={s.h1}>Me</h1>
           <Link to="/apps" data-testid="me-browse-apps" style={s.headerLink}>
             Browse apps →
           </Link>
@@ -216,37 +240,24 @@ export function MePage() {
           <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />
         )}
 
-        {/* Upgrade 1 (2026-04-19): "Your apps" section. Lives above the
-            runs feed so creators see their published apps on /me instead
-            of bouncing to /studio. Empty state (zero apps) renders a
-            "Publish your first app" CTA below the runs feed. */}
-        {hasApps && apps && (
-          <section
-            data-testid="me-apps-list"
-            style={{ marginBottom: 28 }}
-            aria-label="Your apps"
+        {/* Apps section — FIRST on /me as of 2026-04-19. The page is
+            about the apps you have; runs are history. */}
+        <section
+          data-testid="me-apps-section"
+          style={{ marginBottom: 36 }}
+          aria-label="Apps you've published"
+        >
+          <header
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 12,
+            }}
           >
-            <header
-              style={{
-                display: 'flex',
-                alignItems: 'baseline',
-                justifyContent: 'space-between',
-                gap: 12,
-                marginBottom: 12,
-              }}
-            >
-              <h2
-                style={{
-                  fontFamily: "'DM Serif Display', Georgia, serif",
-                  fontSize: 20,
-                  fontWeight: 500,
-                  lineHeight: 1.2,
-                  margin: 0,
-                  color: 'var(--ink)',
-                }}
-              >
-                Your apps
-              </h2>
+            <h2 style={s.sectionH2}>Apps you’ve published</h2>
+            {hasApps && (
               <Link
                 to="/studio/build"
                 data-testid="me-publish-another"
@@ -254,8 +265,18 @@ export function MePage() {
               >
                 Publish another →
               </Link>
-            </header>
-            <div style={s.card}>
+            )}
+          </header>
+
+          {appsLoading ? (
+            <div
+              data-testid="me-apps-loading"
+              style={{ ...s.card, padding: 20, color: 'var(--muted)', fontSize: 13 }}
+            >
+              Loading apps…
+            </div>
+          ) : hasApps && apps ? (
+            <div data-testid="me-apps-list" style={s.card}>
               {apps.map((app, i) => (
                 <AppRow
                   key={app.slug}
@@ -264,39 +285,94 @@ export function MePage() {
                 />
               ))}
             </div>
-          </section>
-        )}
-
-        {runs === null && !runsError ? (
-          <RunsSkeleton />
-        ) : runsError ? (
-          <ErrorPanel message={runsError} />
-        ) : runs && runs.length === 0 ? (
-          <EmptyRuns />
-        ) : (
-          <section data-testid="me-runs-list" style={s.card}>
-            {visibleRuns.map((run, i) => (
-              <RunRow
-                key={run.id}
-                run={run}
-                onOpen={openRun}
-                isLast={i === visibleRuns.length - 1}
-              />
-            ))}
-            {hasMore && (
-              <div style={s.loadMoreWrap}>
-                <button
-                  type="button"
-                  onClick={() => setVisibleCount((n) => n + LOAD_STEP)}
-                  data-testid="me-load-more"
-                  style={s.loadMoreBtn}
-                >
-                  Load more
-                </button>
+          ) : (
+            <section
+              data-testid="me-apps-empty"
+              style={{
+                border: '1px dashed var(--line)',
+                borderRadius: 12,
+                background: 'var(--card)',
+                padding: '24px 20px',
+                textAlign: 'center',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 14,
+                  color: 'var(--muted)',
+                  marginBottom: 12,
+                  lineHeight: 1.55,
+                }}
+              >
+                You haven’t published any apps yet. Build one in minutes.
               </div>
-            )}
-          </section>
-        )}
+              <Link
+                to="/studio/build"
+                data-testid="me-empty-publish"
+                style={{
+                  display: 'inline-block',
+                  padding: '10px 18px',
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Publish your first app →
+              </Link>
+            </section>
+          )}
+        </section>
+
+        {/* Runs history — underneath apps. Renamed from "Your runs" to
+            make the relationship clear: apps are the inventory, runs are
+            what happened when you ran them. */}
+        <section data-testid="me-runs-section" aria-label="Runs history">
+          <header
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <h2 style={s.sectionH2}>Runs history</h2>
+          </header>
+
+          {runs === null && !runsError ? (
+            <RunsSkeleton />
+          ) : runsError ? (
+            <ErrorPanel message={runsError} />
+          ) : runs && runs.length === 0 ? (
+            <EmptyRuns />
+          ) : (
+            <div data-testid="me-runs-list" style={s.card}>
+              {visibleRuns.map((run, i) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  onOpen={openRun}
+                  isLast={i === visibleRuns.length - 1}
+                />
+              ))}
+              {hasMore && (
+                <div style={s.loadMoreWrap}>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((n) => n + LOAD_STEP)}
+                    data-testid="me-load-more"
+                    style={s.loadMoreBtn}
+                  >
+                    Load more
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
 
         {publishedAppCount > 0 && (
           <footer style={s.footer}>
@@ -312,50 +388,6 @@ export function MePage() {
               Open Studio →
             </Link>
           </footer>
-        )}
-
-        {/* Upgrade 1 (2026-04-19): empty state for creators with zero
-            published apps. Gated on apps !== null so we don't flash it
-            while the hook is still fetching. */}
-        {apps !== null && apps.length === 0 && (
-          <section
-            data-testid="me-apps-empty"
-            style={{
-              marginTop: 28,
-              border: '1px dashed var(--line)',
-              borderRadius: 12,
-              background: 'var(--card)',
-              padding: '24px 20px',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: 14,
-                color: 'var(--muted)',
-                marginBottom: 12,
-                lineHeight: 1.55,
-              }}
-            >
-              Build your own Floom app in minutes.
-            </div>
-            <Link
-              to="/studio/build"
-              data-testid="me-empty-publish"
-              style={{
-                display: 'inline-block',
-                padding: '10px 18px',
-                background: 'var(--ink)',
-                color: '#fff',
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Publish your first app →
-            </Link>
-          </section>
         )}
       </main>
     </PageShell>
