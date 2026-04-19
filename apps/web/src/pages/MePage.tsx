@@ -1,23 +1,30 @@
-// /me — consumer home. v16 shape (kills v15 chat-turn/thread UI).
+// /me — consumer home.
 //
-// Single-column Recent Runs list. Each row deep-links to
-// /p/:slug?run=<id> so the user opens the run read-only on the app's
-// permalink. No rail, no composer, no turn bubbles, no "New thread"
-// button, no "Message X…" placeholder — the prior v15 shape conditioned
-// users to treat /me as a chat transcript, which it is not.
+// v17 shape (2026-04-19): "run apps" is the primary job on /me. Sections
+// are ordered so that non-dev users (Federico's ICP) land on a grid of
+// their recent tools with one-tap Run CTAs. Creator inventory ("Your
+// apps") is secondary; runs history is tertiary.
 //
-// Optional footer "Open Studio →" link surfaces when the user has
-// published apps of their own (creator overlap).
+// Sections top to bottom:
+//   1. "Me" greeting header
+//   2. "Your tools"    — grid of up to 8 recent tools (from run history);
+//                        empty-state is a curated row of public apps.
+//   3. "Your apps"     — creator inventory (was "Apps you've published").
+//   4. "Recent runs"   — full run history (was "Runs history").
+//
+// Prior v16 put creator inventory first, which hid the primary action
+// (running) behind an empty section for users with no published apps.
 
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { AppIcon } from '../components/AppIcon';
+import { ToolTile } from '../components/me/ToolTile';
 import { useMyApps } from '../hooks/useMyApps';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
-import type { CreatorApp, MeRunSummary, RunStatus } from '../lib/types';
+import type { CreatorApp, HubApp, MeRunSummary, RunStatus } from '../lib/types';
 
 const INITIAL_LIMIT = 25;
 const LOAD_STEP = 25;
@@ -143,6 +150,26 @@ const s: Record<string, CSSProperties> = {
   },
 };
 
+// Tools grid: 2 cols on narrow (375px), 3-4 cols on tablet, 4 cols on
+// desktop at 820px max. Uses auto-fit with a minmax so the layout stays
+// sane at any width without media queries.
+const gridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+  gap: 12,
+};
+
+const TOOLS_LIMIT = 8;
+const CURATED_LIMIT = 6;
+
+type Tool = {
+  slug: string;
+  name: string;
+  lastUsedAt: string | null;
+  /** True when the tile came from the curated fallback (no run history). */
+  curated: boolean;
+};
+
 export function MePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -150,6 +177,7 @@ export function MePage() {
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [curated, setCurated] = useState<HubApp[] | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
 
   useEffect(() => {
@@ -166,6 +194,47 @@ export function MePage() {
       cancelled = true;
     };
   }, []);
+
+  // Derive "Your tools" from runs: group by slug, take N most-recent
+  // distinct slugs. Runs arrive started_at DESC from the backend, so a
+  // simple first-hit-wins pass yields the correct order without sorting.
+  const tools: Tool[] | null = useMemo(() => {
+    if (runs === null) return null;
+    const seen = new Map<string, Tool>();
+    for (const run of runs) {
+      if (!run.app_slug) continue;
+      if (seen.has(run.app_slug)) continue;
+      seen.set(run.app_slug, {
+        slug: run.app_slug,
+        name: run.app_name || run.app_slug,
+        lastUsedAt: run.started_at,
+        curated: false,
+      });
+      if (seen.size >= TOOLS_LIMIT) break;
+    }
+    return Array.from(seen.values());
+  }, [runs]);
+
+  // If the user has no runs yet, fetch the public directory and surface a
+  // curated row. /api/hub returns sorted by featured DESC, avg_run_ms ASC,
+  // created_at DESC, name ASC — already the order we want.
+  const needsCurated = tools !== null && tools.length === 0;
+  useEffect(() => {
+    if (!needsCurated || curated !== null) return;
+    let cancelled = false;
+    api
+      .getHub()
+      .then((hub) => {
+        if (cancelled) return;
+        setCurated(hub.slice(0, CURATED_LIMIT));
+      })
+      .catch(() => {
+        if (!cancelled) setCurated([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsCurated, curated]);
 
   const showNotice = searchParams.get('notice') === 'app_not_found';
   const noticeSlug = searchParams.get('slug');
@@ -193,10 +262,6 @@ export function MePage() {
   );
   const hasMore = runs ? runs.length > visibleCount : false;
   const publishedAppCount = apps ? apps.length : 0;
-  // Upgrade 1 (2026-04-19): surface the caller's published apps on /me
-  // above the runs feed. Previously /me only showed runs, so creators had
-  // to bounce to /studio to see what they published. Apps are sorted by
-  // updated_at DESC by the /api/hub/mine endpoint already.
   const hasApps = apps !== null && apps.length > 0;
 
   function openRun(run: MeRunSummary) {
@@ -204,21 +269,8 @@ export function MePage() {
     navigate(`/p/${run.app_slug}?run=${encodeURIComponent(run.id)}`);
   }
 
-  // v16 /me restructure (2026-04-19): apps-first. Federico feedback on
-  // PR #127: "this is confusing and this page should be about running
-  // apps that i have". The page is now a dashboard, not a runs feed —
-  // apps are the inventory, runs are history underneath.
-  //
-  // Structure (top to bottom):
-  //   1. H1 "Me" (was "Your runs" — that framing was the bug)
-  //   2. Welcome / AppNotFound notices
-  //   3. "Apps you've published" section
-  //        - If hasApps: list of AppRows
-  //        - If zero apps: "Publish your first app" CTA inline
-  //        - Skeleton while loading (apps === null)
-  //   4. "Runs history" section underneath
-  //   5. Optional footer (studio link) only when the user has apps
   const appsLoading = apps === null;
+  const toolsLoading = tools === null;
 
   return (
     <PageShell
@@ -240,12 +292,14 @@ export function MePage() {
           <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />
         )}
 
-        {/* Apps section — FIRST on /me as of 2026-04-19. The page is
-            about the apps you have; runs are history. */}
+        {/* Your tools — FIRST on /me as of 2026-04-19. Primary job on /me
+            is "run an app", so the top surface is a grid of tiles with
+            Run CTAs. Tiles come from the user's past runs (grouped by
+            slug); empty state falls back to a curated row. */}
         <section
-          data-testid="me-apps-section"
+          data-testid="me-tools-section"
           style={{ marginBottom: 36 }}
-          aria-label="Apps you've published"
+          aria-label="Your tools"
         >
           <header
             style={{
@@ -256,7 +310,147 @@ export function MePage() {
               marginBottom: 12,
             }}
           >
-            <h2 style={s.sectionH2}>Apps you’ve published</h2>
+            <h2 style={s.sectionH2}>Your tools</h2>
+            <Link to="/apps" data-testid="me-tools-browse" style={s.headerLink}>
+              Browse apps →
+            </Link>
+          </header>
+
+          {toolsLoading ? (
+            <div
+              data-testid="me-tools-loading"
+              style={{
+                ...s.card,
+                padding: 20,
+                color: 'var(--muted)',
+                fontSize: 13,
+              }}
+            >
+              Loading your tools…
+            </div>
+          ) : tools && tools.length > 0 ? (
+            <div data-testid="me-tools-grid" style={gridStyle}>
+              {tools.map((t) => (
+                <ToolTile
+                  key={t.slug}
+                  slug={t.slug}
+                  name={t.name}
+                  lastUsedAt={t.lastUsedAt}
+                />
+              ))}
+            </div>
+          ) : curated === null ? (
+            <div
+              data-testid="me-tools-loading"
+              style={{
+                ...s.card,
+                padding: 20,
+                color: 'var(--muted)',
+                fontSize: 13,
+              }}
+            >
+              Loading suggestions…
+            </div>
+          ) : curated.length > 0 ? (
+            <div data-testid="me-tools-empty">
+              <div
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  marginBottom: 10,
+                  lineHeight: 1.55,
+                }}
+              >
+                Try these →
+              </div>
+              <div data-testid="me-tools-grid" style={gridStyle}>
+                {curated.map((a) => (
+                  <ToolTile
+                    key={a.slug}
+                    slug={a.slug}
+                    name={a.name}
+                    lastUsedAt={null}
+                    badge="New"
+                  />
+                ))}
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <Link
+                  to="/apps"
+                  data-testid="me-tools-empty-cta"
+                  style={{
+                    display: 'inline-block',
+                    padding: '10px 18px',
+                    background: 'var(--ink)',
+                    color: '#fff',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Try an app →
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <section
+              data-testid="me-tools-empty"
+              style={{
+                border: '1px dashed var(--line)',
+                borderRadius: 12,
+                background: 'var(--card)',
+                padding: '24px 20px',
+                textAlign: 'center',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 14,
+                  color: 'var(--muted)',
+                  marginBottom: 12,
+                  lineHeight: 1.55,
+                }}
+              >
+                You haven’t run any Floom apps yet.
+              </div>
+              <Link
+                to="/apps"
+                data-testid="me-tools-empty-cta"
+                style={{
+                  display: 'inline-block',
+                  padding: '10px 18px',
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Try an app →
+              </Link>
+            </section>
+          )}
+        </section>
+
+        {/* Your apps — creator inventory. Was "Apps you've published";
+            the sub line keeps the original meaning for creators. */}
+        <section
+          data-testid="me-apps-section"
+          style={{ marginBottom: 36 }}
+          aria-label="Your apps"
+        >
+          <header
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 4,
+            }}
+          >
+            <h2 style={s.sectionH2}>Your apps</h2>
             {hasApps && (
               <Link
                 to="/studio/build"
@@ -267,6 +461,16 @@ export function MePage() {
               </Link>
             )}
           </header>
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--muted)',
+              marginBottom: 12,
+              lineHeight: 1.55,
+            }}
+          >
+            Apps you’ve built on Floom
+          </div>
 
           {appsLoading ? (
             <div
@@ -292,30 +496,31 @@ export function MePage() {
                 border: '1px dashed var(--line)',
                 borderRadius: 12,
                 background: 'var(--card)',
-                padding: '24px 20px',
+                padding: '18px 20px',
                 textAlign: 'center',
               }}
             >
               <div
                 style={{
-                  fontSize: 14,
+                  fontSize: 13,
                   color: 'var(--muted)',
-                  marginBottom: 12,
+                  marginBottom: 10,
                   lineHeight: 1.55,
                 }}
               >
-                You haven’t published any apps yet. Build one in minutes.
+                You haven’t published any apps yet.
               </div>
               <Link
                 to="/studio/build"
                 data-testid="me-empty-publish"
                 style={{
                   display: 'inline-block',
-                  padding: '10px 18px',
-                  background: 'var(--ink)',
-                  color: '#fff',
-                  borderRadius: 8,
-                  fontSize: 14,
+                  padding: '8px 14px',
+                  background: 'var(--card)',
+                  color: 'var(--ink)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 6,
+                  fontSize: 13,
                   fontWeight: 600,
                   textDecoration: 'none',
                 }}
@@ -326,10 +531,9 @@ export function MePage() {
           )}
         </section>
 
-        {/* Runs history — underneath apps. Renamed from "Your runs" to
-            make the relationship clear: apps are the inventory, runs are
-            what happened when you ran them. */}
-        <section data-testid="me-runs-section" aria-label="Runs history">
+        {/* Recent runs — tertiary. Renamed from "Runs history" (too
+            archival) to match the "latest activity" mental model. */}
+        <section data-testid="me-runs-section" aria-label="Recent runs">
           <header
             style={{
               display: 'flex',
@@ -339,7 +543,7 @@ export function MePage() {
               marginBottom: 12,
             }}
           >
-            <h2 style={s.sectionH2}>Runs history</h2>
+            <h2 style={s.sectionH2}>Recent runs</h2>
           </header>
 
           {runs === null && !runsError ? (
