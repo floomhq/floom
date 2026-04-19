@@ -38,23 +38,32 @@ function LogoChip({ title, children }: LogoProps) {
   );
 }
 
-export function IntegrationLogos() {
+interface IntegrationLogosProps {
+  /**
+   * Suppress the outer block spacing + "Works with" caption when the
+   * parent already provides the label (e.g. the hero "WORKS WITH" row).
+   */
+  variant?: 'block' | 'inline';
+}
+
+export function IntegrationLogos({ variant = 'block' }: IntegrationLogosProps = {}) {
+  const inline = variant === 'inline';
   return (
     <div
       data-testid="integration-logos"
       className="integration-logos"
       style={{
-        marginTop: 28,
+        marginTop: inline ? 0 : 28,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 18,
+        gap: inline ? 12 : 18,
         flexWrap: 'wrap',
         color: 'var(--muted)',
         fontSize: 13,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: inline ? 10 : 14 }}>
         {/* Claude — simpleicons `anthropic` path */}
         <LogoChip title="Claude (Anthropic)">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
@@ -85,9 +94,11 @@ export function IntegrationLogos() {
           </svg>
         </LogoChip>
       </div>
-      <span style={{ color: 'var(--muted)', fontSize: 13 }}>
-        Works with Claude, ChatGPT, Cursor, and more.
-      </span>
+      {!inline && (
+        <span style={{ color: 'var(--muted)', fontSize: 13 }}>
+          Works with Claude, ChatGPT, Cursor, and more.
+        </span>
+      )}
     </div>
   );
 }

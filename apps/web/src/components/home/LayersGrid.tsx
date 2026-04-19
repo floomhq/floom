@@ -7,39 +7,46 @@
  * without confusion. Rewritten 2026-04-19 into plain-English
  * benefits, one short line per card, no code snippets.
  *
- * Reframed from 6 implementation layers into 5 user benefits. The
- * underlying engine layers (ingest, runtime, secrets, runs,
- * surfaces, renderer) still ship and still live in /docs for the
- * engineers who want them.
+ * v4 (2026-04-20): added icon-badges per card + section eyebrow.
+ * Matches the v16 feature-card pattern.
  *
  * Total visible body text under 100 words (verified via DOM).
  */
+import { Link2, Zap, Layout, History, Lock } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { SectionEyebrow } from './SectionEyebrow';
 
 interface Layer {
   name: string;
   desc: string;
+  Icon: LucideIcon;
 }
 
 const LAYERS: Layer[] = [
   {
     name: 'Paste a link',
     desc: 'A GitHub repo or an API URL. That\u2019s the whole setup.',
+    Icon: Link2,
   },
   {
     name: 'Runs on its own',
     desc: 'No laptop to keep open. No babysitting. It\u2019s up when you are.',
+    Icon: Zap,
   },
   {
     name: 'Looks like a real app',
     desc: 'A clean page your teammates can use. Not raw JSON.',
+    Icon: Layout,
   },
   {
     name: 'See every run',
     desc: 'Who ran what, when. Share a link to any result.',
+    Icon: History,
   },
   {
     name: 'Share on your terms',
     desc: 'Public, private, or invite-only. You decide who gets in.',
+    Icon: Lock,
   },
 ];
 
@@ -57,6 +64,9 @@ export function LayersGrid() {
     >
       <div style={{ maxWidth: 1040, margin: '0 auto' }}>
         <header style={{ textAlign: 'center', marginBottom: 36 }}>
+          <SectionEyebrow testid="layers-eyebrow">
+            What you get, out of the box
+          </SectionEyebrow>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
@@ -105,10 +115,25 @@ export function LayersGrid() {
                 padding: 20,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 8,
+                gap: 10,
                 minWidth: 0,
               }}
             >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: '#ecfdf5',
+                  color: 'var(--accent)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <layer.Icon size={18} strokeWidth={1.8} aria-hidden="true" />
+              </span>
               <h3
                 style={{
                   fontSize: 16,

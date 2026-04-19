@@ -11,6 +11,7 @@
  * at any viewport because it's inline SVG with text-based labels.
  */
 import { Link } from 'react-router-dom';
+import { SectionEyebrow } from './SectionEyebrow';
 
 interface Surface {
   label: string;
@@ -18,12 +19,15 @@ interface Surface {
   href: string;
 }
 
+// v4 (2026-04-20): labels stay dev-leaning because this section is
+// explicitly tagged FOR BUILDERS by the eyebrow. Owning the audience
+// lets us keep the technical names without misleading biz users.
 const SURFACES: Surface[] = [
-  { label: 'MCP', hint: 'tool', href: '/docs#mcp' },
-  { label: 'HTTP', hint: 'API', href: '/docs#http' },
-  { label: 'CLI', hint: '', href: '/docs#cli' },
-  { label: 'Chat', hint: 'UI', href: '/docs#chat' },
-  { label: 'Share', hint: 'URL', href: '/docs#permalink' },
+  { label: 'MCP', hint: 'Claude, Cursor', href: '/docs#mcp' },
+  { label: 'HTTP', hint: 'POST /run', href: '/docs#http' },
+  { label: 'CLI', hint: 'terminal', href: '/docs#cli' },
+  { label: 'Chat', hint: 'in-browser', href: '/docs#chat' },
+  { label: 'Link', hint: 'one URL', href: '/docs#permalink' },
 ];
 
 export function ArchitectureDiagram() {
@@ -39,11 +43,12 @@ export function ArchitectureDiagram() {
       }}
     >
       <div style={{ maxWidth: 960, margin: '0 auto' }}>
-        {/* 2026-04-19 UX pass: header paragraph removed. Diagram is
-            already self-narrating; the sub was restating it. Title
-            size stepped down from 44 to 40 to match cross-section
-            rhythm. */}
+        {/* v4: own the audience. This section is for builders, label it
+            as such so biz readers can skip it without feeling lost. */}
         <header style={{ textAlign: 'center', marginBottom: 40 }}>
+          <SectionEyebrow testid="architecture-eyebrow">
+            For builders · how it works under the hood
+          </SectionEyebrow>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
@@ -61,7 +66,7 @@ export function ArchitectureDiagram() {
 
         <div className="arch-wrap">
           {/* Spec pill at the top */}
-          <div className="arch-node arch-spec" aria-label="Input: OpenAPI spec or GitHub repo">
+          <div className="arch-node arch-spec" aria-label="Input: your app's API or GitHub repo">
             <span
               style={{
                 fontSize: 11,
@@ -71,10 +76,10 @@ export function ArchitectureDiagram() {
                 letterSpacing: '0.08em',
               }}
             >
-              Input
+              Your app
             </span>
             <span style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 15 }}>
-              Your OpenAPI spec <span style={{ color: 'var(--muted)' }}>/</span> GitHub repo
+              An API URL <span style={{ color: 'var(--muted)' }}>or</span> a GitHub repo
             </span>
           </div>
 
@@ -106,7 +111,7 @@ export function ArchitectureDiagram() {
                 textAlign: 'center',
               }}
             >
-              Ingest + execute + render, with secrets, rate limits, and logs.
+              Runs it with auth, rate limits, logs, and versions baked in.
             </span>
           </div>
 

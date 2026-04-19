@@ -12,6 +12,7 @@
  *
  * Total visible text under 70 words (verified via DOM).
  */
+import { SectionEyebrow } from './SectionEyebrow';
 
 const BLOCKS = [
   {
@@ -45,6 +46,11 @@ export function WhyFloom() {
     >
       <div style={{ maxWidth: 960, margin: '0 auto' }}>
         <header style={{ textAlign: 'center', marginBottom: 36 }}>
+          {/* v4: add the v11 "For vibecoders" eyebrow so the reader
+              knows WHO this section is for in one glance. */}
+          <SectionEyebrow testid="why-floom-eyebrow">
+            For vibecoders shipping past the weekend
+          </SectionEyebrow>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",

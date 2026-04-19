@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Play } from 'lucide-react';
 import { startRun, getRun } from '../../api/client';
 import type { RunRecord } from '../../lib/types';
+import { SectionEyebrow } from './SectionEyebrow';
 
 interface DemoState {
   status: 'idle' | 'running' | 'done' | 'error';
@@ -120,6 +121,9 @@ export function InlineDemo() {
     >
       <div style={{ maxWidth: 820, margin: '0 auto' }}>
         <header style={{ textAlign: 'center', marginBottom: 32 }}>
+          <SectionEyebrow tone="accent" testid="inline-demo-eyebrow">
+            Try it live · right here, right now
+          </SectionEyebrow>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",

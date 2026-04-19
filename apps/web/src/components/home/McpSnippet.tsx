@@ -7,6 +7,7 @@
  */
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
+import { SectionEyebrow } from './SectionEyebrow';
 
 const SNIPPET = `{
   "mcpServers": {
@@ -106,6 +107,9 @@ export function McpSnippet() {
     >
       <div style={{ maxWidth: 820, margin: '0 auto' }}>
         <header style={{ textAlign: 'center', marginBottom: 28 }}>
+          <SectionEyebrow testid="mcp-snippet-eyebrow">
+            For Claude, Cursor, Zed · any MCP client
+          </SectionEyebrow>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
