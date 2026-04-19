@@ -15,6 +15,10 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3051',
       '/mcp': 'http://localhost:3051',
+      '/auth': 'http://localhost:3051',
+      '/renderer': 'http://localhost:3051',
+      '/og': 'http://localhost:3051',
+      '/openapi.json': 'http://localhost:3051',
     },
   },
   build: {
