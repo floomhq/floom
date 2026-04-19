@@ -398,39 +398,12 @@ export function getMyRun(runId: string): Promise<MeRunDetail> {
   return request<MeRunDetail>(`/api/me/runs/${runId}`);
 }
 
-/**
- * Derive the user's "tools" inventory from their run history: group runs by
- * app_slug, take the N most-recent distinct slugs. Each tool row carries the
- * slug + last-used run metadata so /me can render "Your tools" tiles without
- * a second per-slug fetch. MeRunSummary already includes app_name and
- * app_icon, so no /api/hub/:slug lookup is needed.
- */
-export interface MeToolSummary {
-  slug: string;
-  name: string;
-  icon: string | null;
-  last_used_at: string;
-  last_run_id: string;
-}
-
-export async function getMyTools(limit = 8): Promise<{ tools: MeToolSummary[] }> {
-  const { runs } = await getMyRuns(200);
-  const bySlug = new Map<string, MeToolSummary>();
-  // Runs are returned started_at DESC; first hit per slug = most recent.
-  for (const run of runs) {
-    if (!run.app_slug) continue;
-    if (bySlug.has(run.app_slug)) continue;
-    bySlug.set(run.app_slug, {
-      slug: run.app_slug,
-      name: run.app_name || run.app_slug,
-      icon: run.app_icon,
-      last_used_at: run.started_at,
-      last_run_id: run.id,
-    });
-    if (bySlug.size >= limit) break;
-  }
-  return { tools: Array.from(bySlug.values()) };
-}
+// Note: the previous `getMyTools` / `MeToolSummary` helper (v17) was
+// removed when /me dropped the "Your tools" label. The MePage component
+// now derives its "Your apps" list (apps the user has run) directly from
+// `getMyRuns`, so this extra layer was dead code — and its "tools"
+// vocabulary conflicted with the new IA where /me only speaks about
+// "apps".
 
 // ---------- W4-minimal: reviews ----------
 

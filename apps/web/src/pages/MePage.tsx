@@ -1,19 +1,26 @@
-// /me — consumer home.
+// /me — user surface. Answers: "What can I run, and what have I run?"
 //
-// v17 shape (2026-04-19): "run apps" is the primary job on /me. Sections
-// are ordered so that non-dev users (Federico's ICP) land on a grid of
-// their recent tools with one-tap Run CTAs. Creator inventory ("Your
-// apps") is secondary; runs history is tertiary.
+// v18 shape (2026-04-20): /me is strictly the USER surface. Creator
+// inventory ("apps you've published") has moved out entirely and lives on
+// /studio, which is the creator surface. The two pages no longer overlap.
 //
 // Sections top to bottom:
-//   1. "Me" greeting header
-//   2. "Your tools"    — grid of up to 8 recent tools (from run history);
-//                        empty-state is a curated row of public apps.
-//   3. "Your apps"     — creator inventory (was "Apps you've published").
-//   4. "Recent runs"   — full run history (was "Runs history").
+//   1. Greeting header — "Hey {name}" + avatar, then an "Me" H1 is dropped
+//      in favour of the greeting carrying the identity. A single "Browse
+//      apps" link sits in the header.
+//   2. "Your apps" — tiles for the apps the user has actually run before
+//      (distinct slugs from run history, most-recent first, top 8).
+//      Empty state = one "Try an app →" CTA pointing at /apps. No
+//      "Publish your first app" CTA on /me (that's a creator action and
+//      belongs in /studio).
+//   3. "Recent runs" — full run history. Rows carry the first 8 chars of
+//      the run id so two runs of the same slug within the same relative
+//      minute render as visually distinct events.
 //
-// Prior v16 put creator inventory first, which hid the primary action
-// (running) behind an empty section for users with no published apps.
+// Prior v17 kept a second "apps you've published" block here which
+// duplicated /studio and muddied the IA — users asked "why do I have my
+// own apps here AND in studio?". Fix: remove the creator block from /me
+// entirely. The TopBar "Studio" link covers that job.
 
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
@@ -21,10 +28,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { AppIcon } from '../components/AppIcon';
 import { ToolTile } from '../components/me/ToolTile';
-import { useMyApps } from '../hooks/useMyApps';
+import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
-import type { CreatorApp, HubApp, MeRunSummary, RunStatus } from '../lib/types';
+import type { HubApp, MeRunSummary, RunStatus } from '../lib/types';
 
 const INITIAL_LIMIT = 25;
 const LOAD_STEP = 25;
@@ -40,19 +47,63 @@ const s: Record<string, CSSProperties> = {
   },
   header: {
     display: 'flex',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 16,
     flexWrap: 'wrap',
-    marginBottom: 24,
+    marginBottom: 28,
   },
-  h1: {
+  greetingWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    minWidth: 0,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: '50%',
+    objectFit: 'cover' as const,
+    border: '1px solid var(--line)',
+    flexShrink: 0,
+    background: 'var(--bg)',
+  },
+  avatarInitials: {
+    width: 32,
+    height: 32,
+    borderRadius: '50%',
+    border: '1px solid var(--line)',
+    background: 'var(--bg)',
+    color: 'var(--ink)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+    flexShrink: 0,
+  },
+  greetingText: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 2,
+    minWidth: 0,
+  },
+  greetingHello: {
+    fontSize: 13,
+    color: 'var(--muted)',
+    lineHeight: 1.2,
+  },
+  greetingName: {
     fontFamily: "'DM Serif Display', Georgia, serif",
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: 500,
     lineHeight: 1.2,
-    margin: 0,
     color: 'var(--ink)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: 440,
   },
   sectionH2: {
     fontFamily: "'DM Serif Display', Georgia, serif",
@@ -90,18 +141,6 @@ const s: Record<string, CSSProperties> = {
     fontWeight: 600,
     cursor: 'pointer',
     fontFamily: 'inherit',
-  },
-  footer: {
-    marginTop: 32,
-    padding: '16px 20px',
-    border: '1px solid var(--line)',
-    borderRadius: 12,
-    background: 'var(--card)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    flexWrap: 'wrap',
   },
   notice: {
     display: 'flex',
@@ -150,7 +189,7 @@ const s: Record<string, CSSProperties> = {
   },
 };
 
-// Tools grid: 2 cols on narrow (375px), 3-4 cols on tablet, 4 cols on
+// Apps grid: 2 cols on narrow (375px), 3-4 cols on tablet, 4 cols on
 // desktop at 820px max. Uses auto-fit with a minmax so the layout stays
 // sane at any width without media queries.
 const gridStyle: CSSProperties = {
@@ -159,21 +198,19 @@ const gridStyle: CSSProperties = {
   gap: 12,
 };
 
-const TOOLS_LIMIT = 8;
+const USED_APPS_LIMIT = 8;
 const CURATED_LIMIT = 6;
 
-type Tool = {
+type UsedApp = {
   slug: string;
   name: string;
   lastUsedAt: string | null;
-  /** True when the tile came from the curated fallback (no run history). */
-  curated: boolean;
 };
 
 export function MePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { apps } = useMyApps();
+  const { data: sessionData } = useSession();
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
@@ -195,12 +232,12 @@ export function MePage() {
     };
   }, []);
 
-  // Derive "Your tools" from runs: group by slug, take N most-recent
+  // Derive "Your apps" from runs: group by slug, take N most-recent
   // distinct slugs. Runs arrive started_at DESC from the backend, so a
   // simple first-hit-wins pass yields the correct order without sorting.
-  const tools: Tool[] | null = useMemo(() => {
+  const usedApps: UsedApp[] | null = useMemo(() => {
     if (runs === null) return null;
-    const seen = new Map<string, Tool>();
+    const seen = new Map<string, UsedApp>();
     for (const run of runs) {
       if (!run.app_slug) continue;
       if (seen.has(run.app_slug)) continue;
@@ -208,9 +245,8 @@ export function MePage() {
         slug: run.app_slug,
         name: run.app_name || run.app_slug,
         lastUsedAt: run.started_at,
-        curated: false,
       });
-      if (seen.size >= TOOLS_LIMIT) break;
+      if (seen.size >= USED_APPS_LIMIT) break;
     }
     return Array.from(seen.values());
   }, [runs]);
@@ -218,7 +254,7 @@ export function MePage() {
   // If the user has no runs yet, fetch the public directory and surface a
   // curated row. /api/hub returns sorted by featured DESC, avg_run_ms ASC,
   // created_at DESC, name ASC — already the order we want.
-  const needsCurated = tools !== null && tools.length === 0;
+  const needsCurated = usedApps !== null && usedApps.length === 0;
   useEffect(() => {
     if (!needsCurated || curated !== null) return;
     let cancelled = false;
@@ -261,16 +297,19 @@ export function MePage() {
     [runs, visibleCount],
   );
   const hasMore = runs ? runs.length > visibleCount : false;
-  const publishedAppCount = apps ? apps.length : 0;
-  const hasApps = apps !== null && apps.length > 0;
 
   function openRun(run: MeRunSummary) {
     if (!run.app_slug) return;
     navigate(`/p/${run.app_slug}?run=${encodeURIComponent(run.id)}`);
   }
 
-  const appsLoading = apps === null;
-  const toolsLoading = tools === null;
+  const appsLoading = usedApps === null;
+
+  // Greeting derivation: prefer display name, fall back to the local
+  // part of the email, then a neutral "there". Avatar uses the Better
+  // Auth session `image` field when present; otherwise we render an
+  // initials circle derived from the same display name.
+  const greeting = deriveGreeting(sessionData?.user);
 
   return (
     <PageShell
@@ -280,7 +319,20 @@ export function MePage() {
     >
       <main data-testid="me-page" style={s.main}>
         <header style={s.header}>
-          <h1 style={s.h1}>Me</h1>
+          <div style={s.greetingWrap}>
+            <GreetingAvatar
+              image={greeting.image}
+              initials={greeting.initials}
+            />
+            <div style={s.greetingText}>
+              <span data-testid="me-greeting-hello" style={s.greetingHello}>
+                Hey
+              </span>
+              <span data-testid="me-greeting-name" style={s.greetingName}>
+                {greeting.displayName}
+              </span>
+            </div>
+          </div>
           <Link to="/apps" data-testid="me-browse-apps" style={s.headerLink}>
             Browse apps →
           </Link>
@@ -292,14 +344,13 @@ export function MePage() {
           <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />
         )}
 
-        {/* Your tools — FIRST on /me as of 2026-04-19. Primary job on /me
-            is "run an app", so the top surface is a grid of tiles with
-            Run CTAs. Tiles come from the user's past runs (grouped by
-            slug); empty state falls back to a curated row. */}
+        {/* Your apps — the only apps section on /me. These are the apps
+            the user has actually RUN (distinct slugs from run history).
+            Creator inventory lives in /studio and does not appear here. */}
         <section
-          data-testid="me-tools-section"
+          data-testid="me-apps-section"
           style={{ marginBottom: 36 }}
-          aria-label="Your tools"
+          aria-label="Your apps"
         >
           <header
             style={{
@@ -310,15 +361,15 @@ export function MePage() {
               marginBottom: 12,
             }}
           >
-            <h2 style={s.sectionH2}>Your tools</h2>
-            <Link to="/apps" data-testid="me-tools-browse" style={s.headerLink}>
+            <h2 style={s.sectionH2}>Your apps</h2>
+            <Link to="/apps" data-testid="me-apps-browse" style={s.headerLink}>
               Browse apps →
             </Link>
           </header>
 
-          {toolsLoading ? (
+          {appsLoading ? (
             <div
-              data-testid="me-tools-loading"
+              data-testid="me-apps-loading"
               style={{
                 ...s.card,
                 padding: 20,
@@ -326,22 +377,22 @@ export function MePage() {
                 fontSize: 13,
               }}
             >
-              Loading your tools…
+              Loading your apps…
             </div>
-          ) : tools && tools.length > 0 ? (
-            <div data-testid="me-tools-grid" style={gridStyle}>
-              {tools.map((t) => (
+          ) : usedApps && usedApps.length > 0 ? (
+            <div data-testid="me-apps-grid" style={gridStyle}>
+              {usedApps.map((a) => (
                 <ToolTile
-                  key={t.slug}
-                  slug={t.slug}
-                  name={t.name}
-                  lastUsedAt={t.lastUsedAt}
+                  key={a.slug}
+                  slug={a.slug}
+                  name={a.name}
+                  lastUsedAt={a.lastUsedAt}
                 />
               ))}
             </div>
           ) : curated === null ? (
             <div
-              data-testid="me-tools-loading"
+              data-testid="me-apps-loading"
               style={{
                 ...s.card,
                 padding: 20,
@@ -352,7 +403,7 @@ export function MePage() {
               Loading suggestions…
             </div>
           ) : curated.length > 0 ? (
-            <div data-testid="me-tools-empty">
+            <div data-testid="me-apps-empty">
               <div
                 style={{
                   fontSize: 13,
@@ -361,9 +412,9 @@ export function MePage() {
                   lineHeight: 1.55,
                 }}
               >
-                Try these →
+                Try one →
               </div>
-              <div data-testid="me-tools-grid" style={gridStyle}>
+              <div data-testid="me-apps-grid" style={gridStyle}>
                 {curated.map((a) => (
                   <ToolTile
                     key={a.slug}
@@ -377,7 +428,7 @@ export function MePage() {
               <div style={{ marginTop: 14 }}>
                 <Link
                   to="/apps"
-                  data-testid="me-tools-empty-cta"
+                  data-testid="me-apps-empty-cta"
                   style={{
                     display: 'inline-block',
                     padding: '10px 18px',
@@ -395,7 +446,7 @@ export function MePage() {
             </div>
           ) : (
             <section
-              data-testid="me-tools-empty"
+              data-testid="me-apps-empty"
               style={{
                 border: '1px dashed var(--line)',
                 borderRadius: 12,
@@ -412,11 +463,11 @@ export function MePage() {
                   lineHeight: 1.55,
                 }}
               >
-                You haven’t run any Floom apps yet.
+                You haven&rsquo;t run any Floom apps yet.
               </div>
               <Link
                 to="/apps"
-                data-testid="me-tools-empty-cta"
+                data-testid="me-apps-empty-cta"
                 style={{
                   display: 'inline-block',
                   padding: '10px 18px',
@@ -434,105 +485,10 @@ export function MePage() {
           )}
         </section>
 
-        {/* Your apps — creator inventory. Was "Apps you've published";
-            the sub line keeps the original meaning for creators. */}
-        <section
-          data-testid="me-apps-section"
-          style={{ marginBottom: 36 }}
-          aria-label="Your apps"
-        >
-          <header
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: 4,
-            }}
-          >
-            <h2 style={s.sectionH2}>Your apps</h2>
-            {hasApps && (
-              <Link
-                to="/studio/build"
-                data-testid="me-publish-another"
-                style={s.headerLink}
-              >
-                Publish another →
-              </Link>
-            )}
-          </header>
-          <div
-            style={{
-              fontSize: 12,
-              color: 'var(--muted)',
-              marginBottom: 12,
-              lineHeight: 1.55,
-            }}
-          >
-            Apps you’ve built on Floom
-          </div>
-
-          {appsLoading ? (
-            <div
-              data-testid="me-apps-loading"
-              style={{ ...s.card, padding: 20, color: 'var(--muted)', fontSize: 13 }}
-            >
-              Loading apps…
-            </div>
-          ) : hasApps && apps ? (
-            <div data-testid="me-apps-list" style={s.card}>
-              {apps.map((app, i) => (
-                <AppRow
-                  key={app.slug}
-                  app={app}
-                  isLast={i === apps.length - 1}
-                />
-              ))}
-            </div>
-          ) : (
-            <section
-              data-testid="me-apps-empty"
-              style={{
-                border: '1px dashed var(--line)',
-                borderRadius: 12,
-                background: 'var(--card)',
-                padding: '18px 20px',
-                textAlign: 'center',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 13,
-                  color: 'var(--muted)',
-                  marginBottom: 10,
-                  lineHeight: 1.55,
-                }}
-              >
-                You haven’t published any apps yet.
-              </div>
-              <Link
-                to="/studio/build"
-                data-testid="me-empty-publish"
-                style={{
-                  display: 'inline-block',
-                  padding: '8px 14px',
-                  background: 'var(--card)',
-                  color: 'var(--ink)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 6,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                }}
-              >
-                Publish your first app →
-              </Link>
-            </section>
-          )}
-        </section>
-
-        {/* Recent runs — tertiary. Renamed from "Runs history" (too
-            archival) to match the "latest activity" mental model. */}
+        {/* Recent runs — full history of past runs. Rows include a short
+            run-id tag so two runs of the same app within the same relative
+            window read as distinct events (fixes the "UUID Generator · v4 ·
+            3h ago" duplication Federico flagged). */}
         <section data-testid="me-runs-section" aria-label="Recent runs">
           <header
             style={{
@@ -577,24 +533,71 @@ export function MePage() {
             </div>
           )}
         </section>
-
-        {publishedAppCount > 0 && (
-          <footer style={s.footer}>
-            <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
-              You have {publishedAppCount}{' '}
-              {publishedAppCount === 1 ? 'app' : 'apps'} you built.
-            </div>
-            <Link
-              to="/creator"
-              data-testid="me-open-studio"
-              style={s.headerLink}
-            >
-              Open Studio →
-            </Link>
-          </footer>
-        )}
       </main>
     </PageShell>
+  );
+}
+
+/**
+ * Greeting derivation: Better Auth session carries `name`, `email`, and
+ * `image`. Pick the best human-readable handle in that order; fall back
+ * to the email local part, then a neutral "there". Initials are derived
+ * from whichever string we end up using so the avatar never looks wrong.
+ */
+function deriveGreeting(user: {
+  email: string | null;
+  name: string | null;
+  image: string | null;
+} | undefined): {
+  displayName: string;
+  initials: string;
+  image: string | null;
+} {
+  const nameRaw = (user?.name ?? '').trim();
+  const email = (user?.email ?? '').trim();
+  const emailLocal = email.includes('@') ? email.split('@')[0] : email;
+  const displayName = nameRaw || emailLocal || 'there';
+  const initials = initialsFrom(displayName);
+  return { displayName, initials, image: user?.image ?? null };
+}
+
+function initialsFrom(s: string): string {
+  const parts = s
+    .split(/[\s._-]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return '·';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function GreetingAvatar({
+  image,
+  initials,
+}: {
+  image: string | null;
+  initials: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  if (image && !broken) {
+    return (
+      <img
+        data-testid="me-greeting-avatar"
+        src={image}
+        alt=""
+        style={s.avatar}
+        onError={() => setBroken(true)}
+      />
+    );
+  }
+  return (
+    <span
+      data-testid="me-greeting-avatar-initials"
+      aria-hidden="true"
+      style={s.avatarInitials}
+    >
+      {initials}
+    </span>
   );
 }
 
@@ -678,6 +681,7 @@ function RunRow({
   const summary = runSummary(run);
   const tooltip = runRowTooltip(run, summary);
   const time = formatTime(run.started_at);
+  const runTag = runIdShort(run.id);
   const disabled = !run.app_slug;
   return (
     <button
@@ -747,6 +751,21 @@ function RunRow({
         </div>
       </div>
       <span
+        data-testid={`me-run-tag-${run.id}`}
+        aria-hidden="true"
+        style={{
+          fontSize: 11,
+          color: 'var(--muted)',
+          flexShrink: 0,
+          fontFamily: 'JetBrains Mono, monospace',
+          fontVariantNumeric: 'tabular-nums',
+          marginRight: 8,
+          opacity: 0.75,
+        }}
+      >
+        {runTag}
+      </span>
+      <span
         style={{
           fontSize: 12,
           color: 'var(--muted)',
@@ -760,142 +779,16 @@ function RunRow({
   );
 }
 
-// Upgrade 1 (2026-04-19): AppRow — one row per owned app. Shows icon +
-// name + version + visibility pill + updated-at + "Open in Studio" CTA.
-// Clicking anywhere on the row opens /studio/:slug. Matches RunRow
-// visual weight so /me reads as one unified dashboard.
-function AppRow({ app, isLast }: { app: CreatorApp; isLast: boolean }) {
-  const navigate = useNavigate();
-  const version = appVersion(app);
-  const updated = formatTime(app.updated_at);
-  const visibility = app.visibility ?? 'public';
-  return (
-    <button
-      type="button"
-      onClick={() => navigate(`/studio/${app.slug}`)}
-      data-testid={`me-app-row-${app.slug}`}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '14px 16px',
-        minHeight: 56,
-        border: 'none',
-        borderBottom: isLast ? 'none' : '1px solid var(--line)',
-        background: 'transparent',
-        textAlign: 'left',
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        color: 'var(--ink)',
-      }}
-    >
-      <span aria-hidden style={s.appIconWrap}>
-        <AppIcon slug={app.slug} size={14} />
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 8,
-            fontSize: 14,
-            flexWrap: 'wrap',
-          }}
-        >
-          <span
-            style={{
-              fontWeight: 600,
-              color: 'var(--ink)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: 240,
-            }}
-          >
-            {app.name}
-          </span>
-          <span
-            data-testid={`me-app-version-${app.slug}`}
-            style={{
-              fontSize: 12,
-              color: 'var(--muted)',
-              fontFamily: 'JetBrains Mono, monospace',
-            }}
-          >
-            {version}
-          </span>
-          <VisibilityPill visibility={visibility} />
-        </div>
-      </div>
-      <span
-        style={{
-          fontSize: 12,
-          color: 'var(--muted)',
-          flexShrink: 0,
-          fontVariantNumeric: 'tabular-nums',
-          marginRight: 12,
-        }}
-      >
-        {updated}
-      </span>
-      <span
-        data-testid={`me-app-open-${app.slug}`}
-        aria-hidden="true"
-        style={{
-          fontSize: 12,
-          color: 'var(--accent)',
-          fontWeight: 600,
-          flexShrink: 0,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        Open in Studio →
-      </span>
-    </button>
-  );
-}
-
-function appVersion(app: CreatorApp): string {
-  // CreatorApp doesn't carry a version field today; AppDetail does. For
-  // /me we fall back to the app.status when non-active (e.g. "draft")
-  // and a canonical "v0.1.0" otherwise. When a real version pipeline
-  // lands on CreatorApp, swap this for app.version.
-  const status = (app.status || '').trim();
-  if (status && status !== 'active') return status;
-  return 'v0.1.0';
-}
-
-function VisibilityPill({ visibility }: { visibility: string }) {
-  const label =
-    visibility === 'private'
-      ? 'private'
-      : visibility === 'auth-required'
-        ? 'auth only'
-        : visibility === 'invite-only'
-          ? 'invite only'
-          : visibility === 'public'
-            ? 'public'
-            : visibility;
-  const isPrivate = visibility !== 'public';
-  return (
-    <span
-      data-testid={`me-app-visibility-${visibility}`}
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        padding: '2px 6px',
-        borderRadius: 4,
-        background: isPrivate ? 'var(--bg)' : 'var(--accent-soft, rgba(16,185,129,0.08))',
-        color: isPrivate ? 'var(--muted)' : 'var(--accent)',
-        border: isPrivate ? '1px solid var(--line)' : '1px solid transparent',
-      }}
-    >
-      {label}
-    </span>
-  );
+/**
+ * First 8 chars of the run id so rows of the same slug render as distinct
+ * events even when their relative time ("3h ago") collapses to the same
+ * bucket. Falls back to empty string if the id is missing, which lets the
+ * row degrade gracefully instead of showing a literal "undefined".
+ */
+function runIdShort(id: string | null | undefined): string {
+  if (!id) return '';
+  const trimmed = id.replace(/^run_/, '');
+  return trimmed.slice(0, 8);
 }
 
 function StatusDot({ status }: { status: RunStatus }) {

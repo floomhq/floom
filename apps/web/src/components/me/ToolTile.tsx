@@ -1,8 +1,13 @@
-// ToolTile — used on /me "Your tools" grid. One tile per distinct app the
+// ToolTile — used on /me "Your apps" grid. One tile per distinct app the
 // user has previously run, sorted by last-used desc. Tile body is a Link to
 // /p/:slug so clicking anywhere opens the run surface; the visible "Run"
 // pill is a visual affordance, not a separate target (it shares the same
 // navigation as the card to avoid nested <a> / double-click confusion).
+//
+// Kept the "ToolTile" component name for file-level stability — it ships
+// the same visual primitive the curated apps row also uses. The v18 IA
+// rename ("tools" → "apps") applies to user-facing copy only; internal
+// filenames stay put so git history stays legible.
 //
 // Empty / curated variant lives in MePage directly — this component is just
 // the tile.
