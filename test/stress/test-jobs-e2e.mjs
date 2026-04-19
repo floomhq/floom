@@ -59,12 +59,21 @@ writeFileSync(
 );
 
 const processes = [];
+let cleanedUp = false;
 function cleanup() {
+  if (cleanedUp) return;
+  cleanedUp = true;
+  // Kill the whole process group (SIGTERM → short wait → SIGKILL) so any
+  // grandchildren spawned by the floom server (runners, bundler workers) also
+  // die. spawn() uses detached:true + setsid so `-pid` targets the group.
   for (const p of processes) {
-    try {
-      p.kill('SIGTERM');
-    } catch {
-      // ignore
+    if (!p.pid || p.exitCode !== null) continue;
+    for (const sig of ['SIGTERM', 'SIGKILL']) {
+      try {
+        process.kill(-p.pid, sig);
+      } catch {
+        try { p.kill(sig); } catch { /* already dead */ }
+      }
     }
   }
   try {
@@ -74,9 +83,21 @@ function cleanup() {
   }
 }
 process.on('exit', cleanup);
-process.on('SIGINT', () => {
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => {
+    cleanup();
+    process.exit(sig === 'SIGINT' ? 130 : 1);
+  });
+}
+process.on('uncaughtException', (err) => {
+  console.error('[e2e] uncaughtException:', err);
   cleanup();
-  process.exit(130);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[e2e] unhandledRejection:', err);
+  cleanup();
+  process.exit(1);
 });
 
 // ---- 1. webhook collector ----
@@ -114,6 +135,7 @@ const slowEcho = spawn(
       ECHO_DELAY_MS: '1000', // 1s instead of default 5s to keep tests fast
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true, // own process group so cleanup can SIGKILL it
   },
 );
 processes.push(slowEcho);
@@ -136,6 +158,7 @@ const floom = spawn(
       FLOOM_JOB_POLL_MS: '250', // speed up worker polling in tests
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true, // own process group so cleanup can SIGKILL it
   },
 );
 processes.push(floom);
