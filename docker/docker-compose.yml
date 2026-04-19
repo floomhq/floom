@@ -46,11 +46,18 @@ services:
       # Set to 0 for unlimited.
       # FLOOM_MAX_ACTIONS_PER_APP: "500"
       #
+      #
+      # Transactional email (password reset, welcome). Without it, emails
+      # are logged to stdout instead of delivered. Floom's own auth flows
+      # look for RESEND_API_KEY at the application level; it's also
+      # forwarded to any app whose apps.yaml 'secrets:' list includes it.
+      # RESEND_API_KEY: "re_..."
+      # RESEND_FROM: "Floom <noreply@send.floom.dev>"
+      #
       # Secrets for your apps (add as many as needed — any env var matching
       # a name in apps.yaml 'secrets:' list is picked up as a per-app secret).
       # OPENAI_API_KEY: "sk-..."
       # STRIPE_SECRET_KEY: "sk_..."
-      # RESEND_API_KEY: "re_..."
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3051/api/health"]
