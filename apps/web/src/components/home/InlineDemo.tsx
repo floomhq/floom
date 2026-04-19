@@ -115,41 +115,41 @@ export function InlineDemo() {
       data-section="inline-demo"
       style={{
         background: 'var(--bg)',
-        padding: '96px 24px',
+        padding: '72px 24px',
       }}
     >
       <div style={{ maxWidth: 820, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 40 }}>
+        <header style={{ textAlign: 'center', marginBottom: 32 }}>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
               fontWeight: 400,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.1,
               letterSpacing: '-0.02em',
               color: 'var(--ink)',
-              margin: '0 0 14px',
+              margin: '0 0 12px',
             }}
           >
             Try it with a real app.
           </h2>
           <p
             style={{
-              fontSize: 17,
+              fontSize: 16,
               color: 'var(--muted)',
               lineHeight: 1.55,
               maxWidth: 520,
               margin: '0 auto',
             }}
           >
-            This isn&apos;t a screenshot. Hit Run and you&apos;re executing{' '}
+            Not a screenshot. Hit Run and you are executing{' '}
             <Link
               to="/p/uuid"
               style={{ color: 'var(--ink)', textDecoration: 'underline' }}
             >
               the uuid app
             </Link>{' '}
-            through the same runtime every other Floom app uses.
+            through the same runtime every Floom app uses.
           </p>
         </header>
 

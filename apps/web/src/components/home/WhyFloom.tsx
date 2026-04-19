@@ -33,27 +33,27 @@ export function WhyFloom() {
       data-section="why-floom"
       style={{
         background: 'var(--bg)',
-        padding: '96px 24px',
+        padding: '72px 24px',
       }}
     >
       <div style={{ maxWidth: 960, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 48 }}>
+        <header style={{ textAlign: 'center', marginBottom: 36 }}>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
               fontWeight: 400,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.1,
               letterSpacing: '-0.02em',
               color: 'var(--ink)',
-              margin: '0 0 14px',
+              margin: '0 0 10px',
             }}
           >
             AI apps need infrastructure.
           </h2>
           <p
             style={{
-              fontSize: 17,
+              fontSize: 15,
               color: 'var(--muted)',
               lineHeight: 1.55,
               maxWidth: 520,
@@ -65,12 +65,15 @@ export function WhyFloom() {
           </p>
         </header>
 
+        {/* 2026-04-19 UX pass: removed the green uppercase eyebrow on
+            each card. Redundant with the card heading and introduced a
+            third color accent the page did not need. */}
         <div
           className="why-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 20,
+            gap: 18,
           }}
         >
           {BLOCKS.map((b) => (
@@ -80,25 +83,14 @@ export function WhyFloom() {
                 background: 'var(--card)',
                 border: '1px solid var(--line)',
                 borderRadius: 14,
-                padding: 24,
+                padding: 22,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 10,
+                gap: 8,
               }}
             >
-              <span
-                style={{
-                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                  fontSize: 11,
-                  color: 'var(--accent)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  fontWeight: 600,
-                }}
-              >
-                {b.label}
-              </span>
               <h3
+                data-label={b.label}
                 style={{
                   fontSize: 19,
                   fontWeight: 700,

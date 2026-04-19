@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { Logo } from '../components/Logo';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
@@ -125,44 +124,39 @@ export function CreatorHeroPage() {
       <TopBar />
 
       <main style={{ display: 'block' }}>
-        {/* HERO · glow logo, 3-layer headline, paste-URL input, integration logos */}
+        {/* HERO (2026-04-19 UX pass):
+            - Removed centered pennant: nav logo already carries the brand.
+            - Single serif display layer (H1). Sub downgraded to Inter muted
+              so hierarchy is H1 > accent > sub > input.
+            - Dual CTA (Publish spec / Browse apps) so both ICPs land.
+            - Radial glow softened from 0.08 to 0.05 opacity.
+            - Section padding shortened so the form clears the fold at
+              1279x712. */}
         <section
           data-testid="hero"
           style={{
             position: 'relative',
-            padding: '120px 24px 96px',
+            padding: '72px 24px 64px',
             background:
-              'radial-gradient(ellipse 900px 500px at 50% 30%, rgba(5,150,105,0.08), transparent 70%)',
+              'radial-gradient(ellipse 720px 380px at 50% 30%, rgba(5,150,105,0.05), transparent 70%)',
           }}
         >
           <div
             style={{
-              maxWidth: 920,
+              maxWidth: 880,
               margin: '0 auto',
               textAlign: 'center',
             }}
           >
-            <div
-              aria-hidden="true"
-              style={{
-                margin: '0 auto 28px',
-                display: 'flex',
-                justifyContent: 'center',
-              }}
-            >
-              <Logo variant="glow" size={112} animate="breathe" />
-            </div>
-
-            {/* H1 (locked 2026-04-18): benefit-forward, replaces the
-                prior "protocol + runtime" line which now lives as a
-                secondary sub below. */}
+            {/* H1 (locked 2026-04-18). Kept copy verbatim. Sized down to
+                68px so it fits two lines at 1279px. */}
             <h1
               className="hero-headline"
               style={{
                 fontFamily: "'DM Serif Display', Georgia, serif",
                 fontWeight: 400,
-                fontSize: 76,
-                lineHeight: 1.03,
+                fontSize: 68,
+                lineHeight: 1.04,
                 letterSpacing: '-0.025em',
                 color: 'var(--ink)',
                 margin: '0 0 16px',
@@ -172,38 +166,40 @@ export function CreatorHeroPage() {
               Production infrastructure for AI apps that do real work.
             </h1>
 
-            {/* Sub-positioning (locked 2026-04-18). */}
-            <p
-              className="hero-sub-positioning"
-              data-testid="hero-sub-positioning"
-              style={{
-                fontFamily: "'DM Serif Display', Georgia, serif",
-                fontSize: 26,
-                lineHeight: 1.3,
-                fontWeight: 400,
-                letterSpacing: '-0.01em',
-                color: 'var(--ink)',
-                margin: '0 0 12px',
-              }}
-            >
-              The protocol + runtime for agentic work.
-            </p>
-
-            {/* Accent line, green value prop. */}
+            {/* Accent line, green value prop (locked). Promoted above
+                the sub so the user sees the benefit before the
+                positioning. */}
             <p
               className="hero-accent"
               data-testid="hero-accent"
               style={{
                 fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 18,
+                fontSize: 17,
                 lineHeight: 1.4,
                 fontWeight: 600,
                 letterSpacing: '-0.005em',
                 color: 'var(--accent)',
-                margin: '0 0 40px',
+                margin: '0 0 8px',
               }}
             >
               Vibe-coding speed. Production-grade safety.
+            </p>
+
+            {/* Sub-positioning (locked copy). Downgraded from serif 26px
+                to Inter muted 16px: positioning line, not a headline. */}
+            <p
+              className="hero-sub-positioning"
+              data-testid="hero-sub-positioning"
+              style={{
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 16,
+                lineHeight: 1.5,
+                fontWeight: 400,
+                color: 'var(--muted)',
+                margin: '0 0 32px',
+              }}
+            >
+              The protocol + runtime for agentic work.
             </p>
 
             <form
@@ -238,7 +234,7 @@ export function CreatorHeroPage() {
                   minWidth: 0,
                   border: 0,
                   outline: 'none',
-                  padding: '18px 18px',
+                  padding: '16px 16px',
                   fontSize: 15,
                   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
                   background: 'transparent',
@@ -256,38 +252,88 @@ export function CreatorHeroPage() {
                   color: '#fff',
                   border: '1px solid var(--accent)',
                   borderRadius: 10,
-                  padding: '16px 24px',
+                  padding: '14px 22px',
                   fontSize: 15,
                   fontWeight: 600,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
               >
-                Try it
+                Publish spec
                 <ArrowRight size={16} aria-hidden="true" />
               </button>
             </form>
 
-            <p
+            {/* Secondary CTA: always-visible "Browse apps" so the biz
+                ICP has a lane without having to parse the input. Linear
+                / Vercel pattern: two CTAs side-by-side, one primary
+                (green) one secondary (outline). */}
+            <div
+              className="hero-cta-row"
               style={{
-                marginTop: 18,
+                marginTop: 14,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 14,
                 fontSize: 14,
                 color: 'var(--muted)',
-                textAlign: 'center',
+                flexWrap: 'wrap',
               }}
             >
-              No API yet?{' '}
-              <a
-                href="/apps"
+              <span>No API yet?</span>
+              <Link
+                to="/apps"
                 data-testid="hero-browse-apps"
-                style={{ color: 'var(--ink)', fontWeight: 500, textDecoration: 'underline' }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: 'var(--ink)',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  padding: '8px 14px',
+                  borderRadius: 10,
+                  border: '1px solid var(--line)',
+                  background: 'var(--card)',
+                }}
               >
                 Browse live apps
-              </a>
-              .
-            </p>
+                <ArrowRight size={14} aria-hidden="true" />
+              </Link>
+            </div>
 
             <IntegrationLogos />
+
+            {/* Compact trust row (new 2026-04-19): the only quantified
+                proof above the fold. Live hub count from /api/hub, plus
+                two static truths ("6 layers", "5 surfaces") that match
+                the rest of the page. No fabricated metrics. */}
+            <div
+              className="hero-stats"
+              data-testid="hero-stats"
+              style={{
+                marginTop: 28,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 36,
+                color: 'var(--muted)',
+                fontSize: 13,
+                flexWrap: 'wrap',
+              }}
+            >
+              <Stat
+                value={hubCount !== null ? String(hubCount) : '—'}
+                label="apps live"
+              />
+              <StatDivider />
+              <Stat value="6" label="layers shipped" />
+              <StatDivider />
+              <Stat value="5" label="surfaces" />
+              <StatDivider />
+              <Stat value="OSS" label="Docker-first" />
+            </div>
           </div>
         </section>
 
@@ -303,42 +349,73 @@ export function CreatorHeroPage() {
         {/* LAYERS · what ships today */}
         <LayersGrid />
 
-        {/* FEATURED APPS · polished 5-stripe list, live count from /api/hub */}
+        {/* FEATURED APPS · polished 5-stripe list, live count from /api/hub
+            2026-04-19 pass: compressed from a 40px serif header block
+            to an inline header row that matches Linear / Vercel's live-
+            feed patterns. The stripes do the talking. */}
         <section
           data-testid="try-now-section"
           data-section="featured-apps"
           style={{
             background: 'var(--bg)',
-            padding: '96px 24px',
+            padding: '72px 24px',
           }}
         >
           <div style={{ maxWidth: 760, margin: '0 auto' }}>
-            <header style={{ textAlign: 'center', marginBottom: 36 }}>
-              <h2
+            <header
+              className="live-apps-header"
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 16,
+                marginBottom: 22,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+                <h2
+                  style={{
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                    fontWeight: 700,
+                    fontSize: 22,
+                    lineHeight: 1.2,
+                    letterSpacing: '-0.015em',
+                    color: 'var(--ink)',
+                    margin: 0,
+                  }}
+                >
+                  Live apps now
+                </h2>
+                {hubCount !== null && (
+                  <span
+                    style={{
+                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: 'var(--accent)',
+                      background: '#ecfdf5',
+                      border: '1px solid #d1fae5',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {hubCount} running
+                  </span>
+                )}
+              </div>
+              <a
+                href="/apps"
                 style={{
-                  fontFamily: "'DM Serif Display', Georgia, serif",
-                  fontWeight: 400,
-                  fontSize: 40,
-                  lineHeight: 1.1,
-                  letterSpacing: '-0.02em',
-                  color: 'var(--ink)',
-                  margin: '0 0 12px',
-                }}
-              >
-                Live apps.
-              </h2>
-              <p
-                style={{
-                  fontSize: 16,
+                  fontSize: 13,
                   color: 'var(--muted)',
-                  lineHeight: 1.55,
-                  margin: 0,
+                  textDecoration: 'none',
+                  fontWeight: 500,
                 }}
               >
-                {hubCount !== null
-                  ? `${hubCount} apps running right now. Tap one to try it.`
-                  : 'Apps running right now. Tap one to try it.'}
-              </p>
+                See every live app →
+              </a>
             </header>
 
             <div style={{ display: 'grid', gap: 12 }}>
@@ -352,14 +429,6 @@ export function CreatorHeroPage() {
                 />
               ))}
             </div>
-            <p style={{ marginTop: 24, textAlign: 'center', fontSize: 14 }}>
-              <a
-                href="/apps"
-                style={{ color: 'var(--muted)', textDecoration: 'underline' }}
-              >
-                See every live app →
-              </a>
-            </p>
           </div>
         </section>
 
@@ -368,12 +437,13 @@ export function CreatorHeroPage() {
 
         {/* SELF-HOST · one docker line + boot output */}
         <section
+          id="self-host"
           data-testid="self-host-section"
           data-section="self-host"
           style={{
             background: 'var(--card)',
             borderTop: '1px solid var(--line)',
-            padding: '96px 24px',
+            padding: '72px 24px',
           }}
         >
           <div style={{ maxWidth: 620, margin: '0 auto', textAlign: 'center' }}>
@@ -392,13 +462,14 @@ export function CreatorHeroPage() {
             </h2>
             <p
               style={{
-                fontSize: 16,
+                fontSize: 15,
                 color: 'var(--muted)',
-                margin: '0 0 32px',
-                lineHeight: 1.6,
+                margin: '0 0 28px',
+                lineHeight: 1.55,
               }}
             >
-              One command. Everything Floom runs on, open source, self-hostable.
+              One command. Every Floom layer is open source and runs in
+              one container.
             </p>
             <div
               style={{
@@ -443,26 +514,69 @@ export function CreatorHeroPage() {
       <PublicFooter />
       <FeedbackButton />
 
-      {/* Inline responsive tweaks — mobile column stacks everything and
-         shrinks the typography so the three-layer headline stays legible
-         at 375px without horizontal overflow. */}
+      {/* Inline responsive tweaks (2026-04-19): typography shrinks so
+         the single-serif headline fits two lines at every viewport. */}
       <style>{`
         @media (max-width: 900px) {
-          .hero-headline { font-size: 56px !important; }
-          .hero-sub-positioning { font-size: 22px !important; }
-          .hero-accent { font-size: 16px !important; margin-bottom: 28px !important; }
+          .hero-headline { font-size: 52px !important; }
+          .hero-accent { font-size: 16px !important; }
+          .hero-stats { gap: 24px !important; }
         }
         @media (max-width: 640px) {
-          [data-testid="hero"] { padding: 64px 20px 56px; }
-          .hero-headline { font-size: 40px !important; line-height: 1.07 !important; margin-bottom: 12px !important; }
-          .hero-sub-positioning { font-size: 18px !important; margin-bottom: 10px !important; }
-          .hero-accent { font-size: 14px !important; margin-bottom: 24px !important; }
+          [data-testid="hero"] { padding: 48px 20px 48px; }
+          .hero-headline { font-size: 36px !important; line-height: 1.07 !important; margin-bottom: 14px !important; }
+          .hero-accent { font-size: 14px !important; margin-bottom: 6px !important; }
+          .hero-sub-positioning { font-size: 15px !important; margin-bottom: 22px !important; }
           .hero-input { flex-direction: column !important; align-items: stretch !important; padding: 10px !important; }
           .hero-input input { padding: 14px !important; font-size: 13.5px !important; }
           .hero-input button { width: 100% !important; padding: 14px !important; justify-content: center !important; }
+          .hero-cta-row { gap: 10px !important; }
+          .hero-stats { gap: 18px !important; font-size: 12px !important; }
           .integration-logos { flex-direction: column !important; gap: 12px !important; }
+          .live-apps-header { flex-direction: column !important; align-items: flex-start !important; }
         }
       `}</style>
     </div>
+  );
+}
+
+/** Single quantified stat for the compact trust row under the hero. */
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        gap: 6,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span
+        style={{
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 15,
+          fontWeight: 700,
+          color: 'var(--ink)',
+          letterSpacing: '-0.01em',
+        }}
+      >
+        {value}
+      </span>
+      <span style={{ fontSize: 13, color: 'var(--muted)' }}>{label}</span>
+    </span>
+  );
+}
+
+function StatDivider() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        width: 1,
+        height: 14,
+        background: 'var(--line)',
+      }}
+    />
   );
 }

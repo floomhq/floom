@@ -35,37 +35,28 @@ export function ArchitectureDiagram() {
         background: 'var(--card)',
         borderTop: '1px solid var(--line)',
         borderBottom: '1px solid var(--line)',
-        padding: '96px 24px',
+        padding: '72px 24px',
       }}
     >
       <div style={{ maxWidth: 960, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 56 }}>
+        {/* 2026-04-19 UX pass: header paragraph removed. Diagram is
+            already self-narrating; the sub was restating it. Title
+            size stepped down from 44 to 40 to match cross-section
+            rhythm. */}
+        <header style={{ textAlign: 'center', marginBottom: 40 }}>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
               fontWeight: 400,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.1,
               letterSpacing: '-0.02em',
               color: 'var(--ink)',
-              margin: '0 0 14px',
+              margin: 0,
             }}
           >
             One spec. Five surfaces.
           </h2>
-          <p
-            style={{
-              fontSize: 17,
-              color: 'var(--muted)',
-              lineHeight: 1.55,
-              maxWidth: 560,
-              margin: '0 auto',
-            }}
-          >
-            Ship an OpenAPI spec or a GitHub repo. Floom exposes it as a
-            Claude-callable MCP tool, an HTTP API, a CLI, a chat surface,
-            and a shareable run page. One runtime. One source of truth.
-          </p>
         </header>
 
         <div className="arch-wrap">

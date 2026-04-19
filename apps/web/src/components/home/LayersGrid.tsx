@@ -136,35 +136,35 @@ export function LayersGrid() {
         background: 'var(--card)',
         borderTop: '1px solid var(--line)',
         borderBottom: '1px solid var(--line)',
-        padding: '96px 24px',
+        padding: '72px 24px',
       }}
     >
       <div style={{ maxWidth: 1040, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 48 }}>
+        <header style={{ textAlign: 'center', marginBottom: 36 }}>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
               fontWeight: 400,
-              fontSize: 44,
+              fontSize: 40,
               lineHeight: 1.1,
               letterSpacing: '-0.02em',
               color: 'var(--ink)',
-              margin: '0 0 14px',
+              margin: '0 0 10px',
             }}
           >
             What&apos;s in the box.
           </h2>
           <p
             style={{
-              fontSize: 17,
+              fontSize: 15,
               color: 'var(--muted)',
               lineHeight: 1.55,
               maxWidth: 520,
               margin: '0 auto',
             }}
           >
-            Six production layers ship today. Every one of them is open
-            source and self-hostable in a single container.
+            Six production layers ship today. Open source, self-hostable
+            in one container.
           </p>
         </header>
 
