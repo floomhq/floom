@@ -37,24 +37,39 @@ const PURIFY_CONFIG: Config = {
 
 // Install a hook once to harden <a target="_blank">. DOMPurify keeps a
 // singleton so this is idempotent under HMR.
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
-    node.setAttribute('rel', 'noopener noreferrer');
-  }
-});
+//
+// Guard the hook install with a `window` check: when RunSurface.tsx
+// (which transitively imports this module) is imported under tsx for
+// the stress tests, Node has no DOM and `DOMPurify.addHook` is
+// undefined on the factory. We only need the hook in the browser
+// anyway. See `apps/server/package.json` test script for the importers.
+if (typeof window !== 'undefined' && typeof DOMPurify.addHook === 'function') {
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+}
 
 /**
  * Sanitize an HTML string for safe inline rendering. Returns a string
  * suitable for `dangerouslySetInnerHTML={{ __html: ... }}`.
  *
- * Called in SSR contexts it degrades to returning the input unchanged;
- * DOMPurify requires a browser DOM. The runner only renders this code
- * client-side so that path is not exercised in prod, but we guard to
- * keep Vitest happy if anyone unit-tests these components.
+ * The runner only renders HTML outputs client-side (there is no SSR in
+ * @floom/web) so DOMPurify always has a real DOM. We keep a lightweight
+ * `window` check so Vitest / jsdom-less unit tests returning the raw
+ * string don't blow up.
+ *
+ * NOTE: Do not add `typeof DOMPurify.sanitize !== 'function'` guards
+ * here. DOMPurify is imported eagerly at the top of this file; a
+ * runtime type-check on its method confuses some tree-shakers (Rollup
+ * has historically pruned eagerly-imported modules whose only observed
+ * usage was a `typeof` check) and we want the library fully retained
+ * in the production bundle. See PR #143.
  */
 export function sanitizeHtml(html: string): string {
-  if (typeof window === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
-    return '';
+  if (typeof window === 'undefined') {
+    return html;
   }
   // Cast to string: with RETURN_TRUSTED_TYPE:false the return is a plain
   // string, but the overload resolution still infers `TrustedHTML | string`.
