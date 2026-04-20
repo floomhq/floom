@@ -17,11 +17,12 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BaseLayout } from '../BaseLayout';
 import { StudioSidebar } from './StudioSidebar';
-import { useSession } from '../../hooks/useSession';
+import { useSession, clearSession } from '../../hooks/useSession';
 import { colors } from '../../lib/design-tokens';
+import * as api from '../../api/client';
 
 interface Props {
   children: ReactNode;
@@ -40,8 +41,9 @@ export function StudioLayout({
   contentStyle,
   allowSignedOutShell = false,
 }: Props) {
-  const { data } = useSession();
+  const { data, isAuthenticated, refresh } = useSession();
   const location = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const signedOutCloud = !!data && data.cloud_mode && data.user.is_local;
@@ -51,6 +53,18 @@ export function StudioLayout({
   useEffect(() => {
     setMenuOpen(false);
   }, [location.pathname]);
+
+  async function handleMobileLogout() {
+    try {
+      await api.signOut();
+    } catch {
+      // ignore network errors, still clear client state
+    }
+    clearSession();
+    await refresh();
+    setMenuOpen(false);
+    navigate('/');
+  }
 
   return (
     <BaseLayout
@@ -78,10 +92,16 @@ export function StudioLayout({
         ...contentStyle,
       }}
     >
-      {/* Mobile drawer (<768px). Backdrop catches tap-outside-to-close;
-          inner sidebar stops propagation so taps on it don't dismiss.
+      {/* Unified mobile drawer (<768px). Backdrop catches tap-outside-to-close;
+          inner panel stops propagation so taps on it don't dismiss.
           Opens via the TopBar's studio hamburger (onStudioMenuOpen).
-          Closes on route change (useEffect above) or backdrop tap. */}
+          Closes on route change (useEffect above) or backdrop tap.
+
+          Mobile /studio/* has ONE menu entry point (the left studio
+          toggle). This drawer therefore needs to carry both the studio
+          nav (sidebar) AND the global items a mobile user otherwise
+          lost when we hid the TopBar's right hamburger on studio
+          routes: Docs, Me, Sign in / Sign out. */}
       {menuOpen && (
         <div
           className="studio-mobile-drawer-backdrop"
@@ -97,6 +117,48 @@ export function StudioLayout({
               activeSubsection={activeSubsection}
               signedOutPreview={showSignedOutPreview}
             />
+            <nav
+              aria-label="Global navigation"
+              data-testid="studio-mobile-global-nav"
+              className="studio-mobile-global-nav"
+            >
+              <Link
+                to="/protocol"
+                className="studio-mobile-global-link"
+                onClick={() => setMenuOpen(false)}
+              >
+                Docs
+              </Link>
+              {isAuthenticated && (
+                <Link
+                  to="/me"
+                  className="studio-mobile-global-link"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Me
+                </Link>
+              )}
+              {!isAuthenticated && (
+                <Link
+                  to="/login"
+                  className="studio-mobile-global-link"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Sign in
+                </Link>
+              )}
+              {isAuthenticated && (
+                <button
+                  type="button"
+                  className="studio-mobile-global-link studio-mobile-global-signout"
+                  onClick={() => {
+                    void handleMobileLogout();
+                  }}
+                >
+                  Sign out
+                </button>
+              )}
+            </nav>
           </div>
         </div>
       )}

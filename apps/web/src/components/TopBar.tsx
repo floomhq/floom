@@ -432,19 +432,29 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           )}
         </div>
 
-        <button
-          ref={hamburgerRef}
-          type="button"
-          className="hamburger topbar-hamburger"
-          data-testid="hamburger"
-          aria-label="Open menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
+        {/* Global mobile hamburger. Hidden on /studio/* because the
+            studio-toggle on the left becomes the single mobile menu
+            entry there — tapping it opens one unified drawer with
+            studio nav + global items (see StudioLayout). Without this
+            gate we'd render two side-by-side hamburgers on mobile
+            /studio, which Federico's audit flagged as cluttered.
+            CSS hook: `.topbar` with `data-context="studio"` hides the
+            right hamburger on mobile. */}
+        {!onStudioMenuOpen && (
+          <button
+            ref={hamburgerRef}
+            type="button"
+            className="hamburger topbar-hamburger"
+            data-testid="hamburger"
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+        )}
       </div>
 
       {menuOpen && (
