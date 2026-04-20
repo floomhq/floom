@@ -812,6 +812,46 @@ body:has(.topbar-mobile-menu) {
   border-right: none !important;
 }
 
+/* Global nav section rendered below the StudioSidebar inside the
+   mobile drawer. This is the chunk that lived in the TopBar's right
+   hamburger before the mobile /studio unification (2026-04-21) —
+   hiding that hamburger on /studio/* meant we had to give these
+   links a home. Kept minimal: Docs + Me (or Sign in) + Sign out. */
+.studio-mobile-global-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px 18px;
+  border-top: 1px solid var(--line);
+  gap: 2px;
+  background: var(--card);
+}
+.studio-mobile-global-link {
+  display: flex;
+  align-items: center;
+  padding: 12px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: 8px;
+  min-height: 44px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.studio-mobile-global-link:hover {
+  background: var(--bg);
+}
+.studio-mobile-global-signout {
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 14px;
+  border-radius: 0;
+}
+
 /* /login value-pitch: 2-column on desktop, stack on mobile. */
 @media (max-width: 1023px) {
   .login-grid {
