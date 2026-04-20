@@ -407,6 +407,15 @@ export interface SessionMePayload {
     role: WorkspaceRole;
   }>;
   cloud_mode: boolean;
+  // Which OAuth social providers are wired on this server. The UI reads
+  // this to show/hide "Continue with X" buttons without a second round
+  // trip. A provider is "enabled" iff both its OAUTH_CLIENT_ID and
+  // OAUTH_CLIENT_SECRET env vars are set (see lib/better-auth.ts).
+  // In OSS mode, both are always false.
+  auth_providers: {
+    google: boolean;
+    github: boolean;
+  };
 }
 
 export interface AppMemoryRecord {
