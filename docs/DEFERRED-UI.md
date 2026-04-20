@@ -2,47 +2,39 @@
 
 The MVP surface on `main` exposes 5 pages (`/login`, `/me`, `/build`,
 `/creator`, `/p/:slug`) plus the creator hero, apps directory, and
-protocol page. The six features below are fully shipped on the backend
-(routes, services, schema, tests) but their UI has been stripped from
-`main` so the MVP stays tight. Every feature has its own git branch
-with the last known working UI; re-enabling is a branch merge plus the
+protocol page. Of the six features tracked here, §1 (async job queue)
+and §2 (custom React renderer upload) now ship their UI on `main`. The
+remaining four are fully shipped on the backend (routes, services,
+schema, tests) but their UI has been stripped from `main` so the MVP
+stays tight. Each still-deferred feature has its own git branch with
+the last known working UI; re-enabling is a branch merge plus the
 checklist noted per feature.
 
-## 1. Async job queue
+## 1. Async job queue — shipped
 
-- **Branch:** `feature/ui-async-jobs`
-- **Backend kept:** `apps/server/src/services/jobs.ts`,
+- **Status:** UI shipped on `main`.
+- **Backend:** `apps/server/src/services/jobs.ts`,
   `apps/server/src/routes/jobs.ts`, 77+ unit tests.
-- **UI removed on `main`:** None. The MVP UI on `main` never exposed
-  async jobs — no progress bars, no `/jobs` route, no async toggle in
-  `/build`. The feature branch holds the original jobs UI for a later
-  re-enable.
-- **Re-enable checklist:**
-  1. Merge `feature/ui-async-jobs`.
-  2. Wire a progress-bar component into `FloomApp` when `run.status ===
-     'pending'` and the app manifest declares `async: true`.
-  3. Surface a Jobs tab on `/me` alongside Your apps.
-  4. Confirm the async toggle on `/build` maps to
-     `manifest.actions[x].async`.
+- **UI on `main`:**
+  - `apps/web/src/components/runner/RunSurface.tsx` branches on
+    `app.is_async` and calls `api.startJob` / `pollJob`.
+  - `apps/web/src/components/runner/JobProgress.tsx` renders the
+    progress surface during polling.
 
-## 2. Custom React renderer upload
+## 2. Custom React renderer upload — shipped
 
-- **Branch:** `feature/ui-custom-renderers`
-- **Backend kept:** `packages/renderer/` default exports,
+- **Status:** UI shipped on `main`.
+- **Backend:** `packages/renderer/` default exports,
   `apps/server/src/services/renderer-bundler.ts`,
   `/renderer/:slug/bundle.js`.
-- **UI removed on `main`:** None. The creator "upload your renderer
-  bundle" UI never landed on the `main` build path. The feature branch
-  holds the upload form.
+- **UI on `main`:** `apps/web/src/components/CustomRendererPanel.tsx`,
+  imported and rendered from `apps/web/src/pages/BuildPage.tsx`,
+  `apps/web/src/pages/StudioAppRendererPage.tsx`, and
+  `apps/web/src/pages/CreatorAppPage.tsx`.
 - **Note:** The default `@floom/renderer` package (text / JSON / table /
   markdown / image / file / url / 13 input types — file uploads are
-  Floom's differentiator) is KEPT on `main`. This deferral is only
-  about the creator-uploaded custom React bundle surface.
-- **Re-enable checklist:**
-  1. Merge `feature/ui-custom-renderers`.
-  2. Add a renderer-bundle upload step to `/build`.
-  3. Gate FloomApp on the per-app bundle URL and fall back to the
-     default renderer when missing.
+  Floom's differentiator) stays on `main` as the fallback when an app
+  has no custom bundle uploaded.
 
 ## 3. Stripe Connect monetization
 
@@ -133,8 +125,8 @@ checklist noted per feature.
 
 | # | Feature | Files touched on strip | LOC removed |
 |---|---|---|---|
-| 1 | Async jobs | None (no prior UI on main) | 0 |
-| 2 | Custom renderer upload | None (no prior UI on main) | 0 |
+| 1 | Async jobs | Shipped on `main` (`RunSurface.tsx`, `JobProgress.tsx`) | n/a |
+| 2 | Custom renderer upload | Shipped on `main` (`CustomRendererPanel.tsx`) | n/a |
 | 3 | Stripe Connect | None (no prior UI on main) | 0 |
 | 4 | Composio connections | `MePage.tsx`, `types.ts`, `api/client.ts`, `CreatorPage.tsx` | ~220 |
 | 5 | App memory | None (no prior UI on main) | 0 |
@@ -143,4 +135,5 @@ checklist noted per feature.
 Five of six features had zero UI on `main` at the time of the strip.
 The two features with actual UI (Composio, Workspaces) were the
 previous agent's focus before rate-limit death and are now fully
-stripped on `cleanup/mvp-ui-strip-v2`.
+stripped on `cleanup/mvp-ui-strip-v2`. §1 and §2 have since shipped
+their UI on `main` and are tracked here only as a historical record.
