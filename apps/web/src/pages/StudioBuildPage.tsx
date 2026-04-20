@@ -1,7 +1,9 @@
 // /studio/build — thin wrapper around BuildPage rendered inside
 // StudioLayout. Keeps the paste-first / detect / publish flow intact
-// (PR #5) while reusing the same code path. Back breadcrumb points
-// to /studio, post-publish links send the creator to /studio/:slug.
+// (PR #5) while reusing the same code path. Post-publish links send
+// the creator to /studio/:slug. The in-page back breadcrumb was killed
+// in the 2026-04-20 nav unification; the TopBar pill is now the only
+// mode-switch affordance.
 
 import type { ReactNode } from 'react';
 import { BuildPage } from './BuildPage';
@@ -15,7 +17,6 @@ export function StudioBuildPage() {
   return (
     <BuildPage
       layout={StudioLayoutAdapter}
-      backHref="/studio"
       postPublishHref={(slug) => `/studio/${slug}`}
     />
   );

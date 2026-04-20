@@ -154,8 +154,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Routes>
         {/* Creator hero */}
         <Route path="/" element={<CreatorHeroPage />} />
-        {/* Apps directory */}
+        {/* Apps directory. Mounted at both /apps (legacy canonical) and
+            /store (matches the "Store" pill label Federico sees on screen).
+            Nav-polish 2026-04-20: URL no longer drifts from the label. */}
         <Route path="/apps" element={<AppsDirectoryPage />} />
+        <Route path="/store" element={<AppsDirectoryPage />} />
         {/* Standalone app permalink */}
         <Route path="/p/:slug" element={<AppPermalinkPage />} />
         <Route path="/r/:runId" element={<PublicRunPermalinkPage />} />
@@ -237,7 +240,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             banner ("Welcome to Floom — try an app ↓"). */}
         <Route path="/onboarding" element={<Navigate to="/me?welcome=1" replace />} />
         <Route path="/pricing" element={<Navigate to="/" replace />} />
-        <Route path="/store" element={<Navigate to="/apps" replace />} />
         <Route path="/p/:slug/dashboard" element={<PSlugDashboardRedirect />} />
         {/* Legal pages. Floom, Inc. is a Delaware C-Corp. /legal is the
             canonical company-info route; /imprint is kept as a back-compat

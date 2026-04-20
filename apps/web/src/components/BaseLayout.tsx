@@ -43,6 +43,11 @@ interface Props {
    *  inline. Used by pages that need the full chrome but own their
    *  own main layout (e.g. AppPermalinkPage). */
   bareMain?: boolean;
+  /** Studio-only: callback fired when the user taps the Studio
+   *  hamburger in the TopBar (<768px). When undefined, the button
+   *  doesn't render. StudioLayout passes this to open its sidebar
+   *  drawer. */
+  onStudioMenuOpen?: () => void;
 }
 
 export function BaseLayout({
@@ -55,6 +60,7 @@ export function BaseLayout({
   allowSignedOutShell = false,
   rootBackground,
   bareMain = false,
+  onStudioMenuOpen,
 }: Props) {
   const { data, loading, error } = useSession();
   const navigate = useNavigate();
@@ -92,7 +98,7 @@ export function BaseLayout({
   if (sidebar) {
     return (
       <div className="page-root studio-root" style={rootStyle}>
-        <TopBar />
+        <TopBar onStudioMenuOpen={onStudioMenuOpen} />
         {showCloudAuthLoading ? (
           <RouteLoading variant="embed" />
         ) : (
