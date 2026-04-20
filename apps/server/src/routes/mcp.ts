@@ -126,7 +126,10 @@ function buildZodSchema(
   return schema;
 }
 
-function createPerAppMcpServer(app: AppRecord): McpServer {
+function createPerAppMcpServer(
+  app: AppRecord,
+  ctx?: SessionContext,
+): McpServer {
   const manifest = JSON.parse(app.manifest) as NormalizedManifest;
   const server = new McpServer({
     name: `floom-chat-${app.slug}`,
@@ -271,6 +274,12 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
         db.prepare(
           `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
         ).run(runId, fresh.id, actionName, JSON.stringify(validated));
+        // Parity with POST /api/run + POST /api/:slug/run: pass the
+        // resolved SessionContext so dispatchRun can merge the caller's
+        // user-vault secrets. Without this every authed MCP consumer
+        // falls back to defaultContext() (the synthetic 'local' user)
+        // and loses access to their own vault. See
+        // docs/product-audit/deep/pd-05-three-surface-parity.md.
         dispatchRun(
           fresh,
           freshManifest,
@@ -278,6 +287,7 @@ function createPerAppMcpServer(app: AppRecord): McpServer {
           actionName,
           validated,
           perCallSecrets,
+          ctx,
         );
         const done = await waitForRun(runId);
         return {
@@ -776,6 +786,9 @@ mcpRouter.all('/app/:slug', async (c) => {
     ctx,
   });
   if (blocked) return blocked;
-  const server = createPerAppMcpServer(row);
+  // Reuse the ctx we already resolved for the visibility check. The MCP
+  // tool handler forwards it to dispatchRun so per-user vault secrets
+  // reach the runner, matching POST /api/run + POST /api/:slug/run.
+  const server = createPerAppMcpServer(row, ctx);
   return handleMcp(server, c.req.raw);
 });
