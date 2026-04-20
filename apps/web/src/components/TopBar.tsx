@@ -431,51 +431,91 @@ export function TopBar({ compact = false }: Props = {}) {
       </div>
 
       {menuOpen && (
-        <div className="topbar-mobile-menu" role="menu" aria-label="Mobile navigation">
-          <Link
-            to="/apps"
-            className="topbar-mobile-link"
-            role="menuitem"
+        <>
+          {/* Scrim: tap-outside-to-close + lock body scroll when open.
+              Rendered before the drawer so the drawer sits on top. The
+              scrim itself is what catches the backdrop click. */}
+          <div
+            className="topbar-mobile-scrim"
+            role="presentation"
+            aria-hidden="true"
             onClick={() => setMenuOpen(false)}
+          />
+          <div
+            className="topbar-mobile-menu"
+            role="menu"
+            aria-label="Mobile navigation"
+            data-testid="topbar-mobile-menu"
           >
-            Apps
-          </Link>
-          <Link
-            to="/protocol"
-            className="topbar-mobile-link"
-            role="menuitem"
-            onClick={() => setMenuOpen(false)}
-          >
-            Docs
-          </Link>
-          {!isAuthenticated && (
+            <div className="topbar-mobile-menu-head">
+              <button
+                type="button"
+                className="topbar-mobile-close"
+                aria-label="Close menu"
+                onClick={() => setMenuOpen(false)}
+                data-testid="topbar-mobile-close"
+              >
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Rescue 2026-04-21 (Fix 2): Apps is the primary destination on
+                mobile. Make it the first item, biggest font, with a leading
+                icon so the eye locks onto it immediately. Federico's audit:
+                "mobile menu is broken, don't find app store on mobile fast". */}
             <Link
-              to={deployHref}
+              to="/apps"
+              className="topbar-mobile-link topbar-mobile-link-primary"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+              data-testid="topbar-mobile-apps"
+            >
+              <MobileAppsIcon />
+              <span>Apps</span>
+            </Link>
+
+            <Link
+              to="/protocol"
               className="topbar-mobile-link"
               role="menuitem"
               onClick={() => setMenuOpen(false)}
             >
-              Publish an app
+              Docs
             </Link>
-          )}
-          {isAuthenticated ? (
-            <>
+            {isAuthenticated && (
               <Link
                 to="/me"
                 className="topbar-mobile-link"
                 role="menuitem"
                 onClick={() => setMenuOpen(false)}
               >
-                My dashboard
+                Me
               </Link>
+            )}
+            {isAuthenticated && ownedAppCount > 0 && (
               <Link
                 to="/studio"
                 className="topbar-mobile-link"
                 role="menuitem"
                 onClick={() => setMenuOpen(false)}
               >
-                {ownedAppCount > 0 ? `Studio (${ownedAppCount})` : 'Open Studio →'}
+                Studio ({ownedAppCount})
               </Link>
+            )}
+            {isAuthenticated && (
               <Link
                 to="/me/settings"
                 className="topbar-mobile-link"
@@ -484,29 +524,9 @@ export function TopBar({ compact = false }: Props = {}) {
               >
                 Settings
               </Link>
-              <button
-                type="button"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  void handleLogout();
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  width: '100%',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  color: 'var(--ink)',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Sign out
-              </button>
-            </>
-          ) : (
-            !isLoginPage && (
+            )}
+
+            {!isAuthenticated && !isLoginPage && (
               <Link
                 to="/login"
                 className="topbar-mobile-link"
@@ -515,10 +535,64 @@ export function TopBar({ compact = false }: Props = {}) {
               >
                 Sign in
               </Link>
-            )
-          )}
-        </div>
+            )}
+
+            {/* Publish an app — green primary CTA, NOT a text link. Shown
+                to both authed + anon (deployHref routes unauthed users
+                through /signup first). Authed users get the full Studio
+                link above instead of the CTA if they already own apps. */}
+            {(!isAuthenticated || ownedAppCount === 0) && (
+              <Link
+                to={deployHref}
+                className="topbar-mobile-cta"
+                role="menuitem"
+                onClick={() => setMenuOpen(false)}
+                data-testid="topbar-mobile-publish"
+              >
+                Publish an app
+              </Link>
+            )}
+
+            {isAuthenticated && (
+              <button
+                type="button"
+                className="topbar-mobile-link topbar-mobile-link-signout"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void handleLogout();
+                }}
+              >
+                Sign out
+              </button>
+            )}
+          </div>
+        </>
       )}
     </header>
+  );
+}
+
+// Grid-of-squares glyph leading the primary Apps row in the mobile menu.
+// Kept inline so we don't have to thread a new icon id through IconSprite.
+function MobileAppsIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
   );
 }

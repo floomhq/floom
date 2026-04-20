@@ -13,6 +13,7 @@
 //
 // Backend route: apps/server/src/routes/jobs.ts (live on main since v0.3.0).
 
+import { useEffect, useState } from 'react';
 import type { PickResult } from '../../lib/types';
 import type { JobRecord } from '../../lib/types';
 
@@ -25,10 +26,23 @@ interface Props {
 export function JobProgress({ app, job, onCancel }: Props) {
   const status = job?.status ?? 'queued';
   const label = status === 'queued' ? 'Queued' : status === 'running' ? 'Running' : status;
+
+  // Rescue 2026-04-21 (Fix 3): tick once per second so the elapsed
+  // counter in the footer visibly ticks instead of freezing at the
+  // value it had when the last poll returned. Prefers job.started_at
+  // (truthful server-side clock) but falls back to the component
+  // mount time so users always see motion, even while queued.
+  const [componentMountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const startedAt = job?.started_at ? new Date(job.started_at) : null;
-  const elapsed = startedAt
-    ? Math.max(0, Date.now() - startedAt.getTime())
-    : null;
+  const elapsedBase = startedAt ? startedAt.getTime() : componentMountedAt;
+  const elapsed = Math.max(0, now - elapsedBase);
+  const showSlowHint = elapsed > 5000;
 
   return (
     <div className="assistant-turn" data-testid="job-progress">
@@ -66,6 +80,7 @@ export function JobProgress({ app, job, onCancel }: Props) {
               {status === 'queued'
                 ? 'A worker will pick this up in a moment. You can leave this page; the job keeps running.'
                 : 'Polling for completion. This page updates when the run finishes.'}
+              {showSlowHint && ' Some apps take 20–40 seconds.'}
             </p>
           </div>
         </div>
@@ -86,7 +101,15 @@ export function JobProgress({ app, job, onCancel }: Props) {
             {job?.id ? `job ${job.id.slice(0, 12)}…` : 'creating job…'}
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {elapsed != null && <span>{formatElapsed(elapsed)}</span>}
+            <span
+              data-testid="job-elapsed"
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {formatElapsed(elapsed)}
+            </span>
             {onCancel && job && status !== 'cancelled' && (
               <button
                 type="button"
@@ -106,12 +129,13 @@ export function JobProgress({ app, job, onCancel }: Props) {
 }
 
 function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}m ${rem}s`;
+  // Rescue 2026-04-21 (Fix 3): switch to mm:ss format so the counter
+  // ticks visibly at 1s granularity and reads like a stopwatch
+  // (matches StreamingTerminal's elapsed format for consistency).
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 function Spinner({ active }: { active: boolean }) {

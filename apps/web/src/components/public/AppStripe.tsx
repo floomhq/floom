@@ -10,21 +10,78 @@ interface AppStripeProps {
   meta?: string;
   /** Variant changes spacing & font sizes. Default = landing (roomier). */
   variant?: 'landing' | 'apps';
+  /**
+   * Rescue 2026-04-21 (Fix 4): category hint for the icon-tile tint.
+   * When present, AppStripe picks a category-appropriate palette so
+   * the /apps grid has rhythm instead of 55 identical emerald squares.
+   * Still restrained: three soft tints total (emerald / amber / slate)
+   * mapped from manifest categories. Falls back to emerald when
+   * missing (landing page hero tiles stay green by default).
+   */
+  category?: string;
 }
 
-// Landing visual audit 2026-04-18 finding: the previous 10-color palette
-// (indigo / purple / pink / red / amber / ...) violated the "max 1-2 accent
-// colors" design bar and reintroduced a purple (#7c3aed) after purple was
-// banned earlier. Collapsed to a single emerald tint so every app icon
-// reads as part of Floom's green accent system instead of a rainbow.
-const APP_TINT = { bg: '#ecfdf5', fg: '#047857' } as const;
+/**
+ * Rescue 2026-04-21 (Fix 4): category-based icon tile tints.
+ *
+ * Why: when every app icon is the same glyph style on the same
+ * emerald tile, visually they read as AI-slop fill. Federico's audit:
+ * "when every icon is an identical-style glyph on an identical
+ * emerald-tint tile at identical size, visually they read as
+ * AI-generated fill. Zero identity per app."
+ *
+ * Why not per-slug: we'd be back to the banned 10-color palette that
+ * violated "max 1-2 accent colors" (2026-04-18 audit). Category
+ * gives three stable buckets that carry semantic weight too — a
+ * creator browsing "developer" sees green, an analyst scanning
+ * "data" sees slate. Still restrained.
+ *
+ * Mapping:
+ *   emerald  — Floom native (dev-utility, productivity, writing, AI apps we built)
+ *   amber    — "make / create / generate" AI apps (research, marketing, design, text)
+ *   slate    — third-party data & API integrations (open_data, financial, location, etc.)
+ */
+interface Tint {
+  bg: string;
+  fg: string;
+}
+const TINT_EMERALD: Tint = { bg: '#ecfdf5', fg: '#047857' };
+const TINT_AMBER: Tint = { bg: '#fffaf0', fg: '#b45309' };
+const TINT_SLATE: Tint = { bg: '#f1f5f9', fg: '#475569' };
 
-function paletteFor(_slug: string): typeof APP_TINT {
-  return APP_TINT;
+const CATEGORY_TINT: Record<string, Tint> = {
+  // Floom-native / creator-tools -> emerald (stays with the brand accent)
+  'developer-tools': TINT_EMERALD,
+  'developer_tools': TINT_EMERALD,
+  developer: TINT_EMERALD,
+  productivity: TINT_EMERALD,
+  // AI generation / creative output -> warm amber
+  ai: TINT_AMBER,
+  research: TINT_AMBER,
+  marketing: TINT_AMBER,
+  design: TINT_AMBER,
+  writing: TINT_AMBER,
+  text: TINT_AMBER,
+  seo: TINT_AMBER,
+  analytics: TINT_AMBER,
+  // Data / third-party APIs -> cool slate
+  open_data: TINT_SLATE,
+  'open-data': TINT_SLATE,
+  location: TINT_SLATE,
+  financial: TINT_SLATE,
+  media: TINT_SLATE,
+  ecommerce: TINT_SLATE,
+  messaging: TINT_SLATE,
+  travel: TINT_SLATE,
+};
+
+function paletteFor(category?: string): Tint {
+  if (!category) return TINT_EMERALD;
+  return CATEGORY_TINT[category] || TINT_EMERALD;
 }
 
-export function AppStripe({ slug, name, description, meta, variant = 'landing' }: AppStripeProps) {
-  const color = paletteFor(slug);
+export function AppStripe({ slug, name, description, meta, variant = 'landing', category }: AppStripeProps) {
+  const color = paletteFor(category);
   const iconSize = variant === 'landing' ? 44 : 42;
   const innerIcon = variant === 'landing' ? 22 : 20;
 

@@ -155,16 +155,77 @@ body {
   transition: transform 0.2s, opacity 0.2s;
 }
 
+/* Rescue 2026-04-21 (Fix 2): mobile drawer redesign.
+   - Slide-in panel anchored to the top of the viewport (was: a flyout
+     directly below the TopBar, which made "Apps" the 4th thing you
+     scanned instead of the 1st).
+   - Scrim under the drawer darkens the page + catches backdrop clicks.
+   - Drawer width capped at 320px so a tap-outside on the right-hand
+     gutter closes it predictably at 375w.
+   - Body scroll lock is handled via :has() below. Avoids a useEffect
+     that would race with the menu close animation. */
+.topbar-mobile-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.38);
+  z-index: 80;
+  animation: topbar-scrim-in 140ms ease-out;
+}
+@keyframes topbar-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 .topbar-mobile-menu {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, calc(100vw - 40px));
   background: var(--card);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
+  padding: 8px 0 24px;
+  overflow-y: auto;
+  z-index: 81;
+  animation: topbar-menu-in 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+@keyframes topbar-menu-in {
+  from { transform: translateX(12px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+/* Body scroll lock while drawer is open. No JS needed — the drawer is
+   a sibling of the rest of the page, so `body:has(.topbar-mobile-menu)`
+   matches only when it is rendered. */
+body:has(.topbar-mobile-menu) {
+  overflow: hidden;
+}
+.topbar-mobile-menu-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px 2px;
+}
+.topbar-mobile-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 8px;
+}
+.topbar-mobile-close:hover {
+  background: var(--bg);
 }
 .topbar-mobile-link {
-  display: block;
-  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
   font-size: 15px;
   color: var(--ink);
   border: none;
@@ -172,14 +233,48 @@ body {
   text-align: left;
   cursor: pointer;
   font-family: inherit;
-  border-bottom: 1px solid var(--line);
   text-decoration: none;
-}
-.topbar-mobile-link:last-child {
-  border-bottom: none;
+  min-height: 48px;
 }
 .topbar-mobile-link:hover {
   background: var(--bg);
+}
+/* Apps: primary destination. Biggest font, leading icon, emerald accent
+   on the glyph so the eye locks on before scanning past. */
+.topbar-mobile-link-primary {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 18px 20px;
+  min-height: 56px;
+}
+.topbar-mobile-link-primary svg {
+  color: var(--accent);
+}
+.topbar-mobile-link-signout {
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+/* Publish CTA: green pill, treated as a primary action, not a link. */
+.topbar-mobile-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 20px 4px;
+  padding: 13px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  min-height: 48px;
+}
+.topbar-mobile-cta:hover {
+  filter: brightness(1.05);
 }
 
 /* ── Mobile responsive ───────────────────────────────────────────────── */
@@ -251,7 +346,8 @@ body {
   .topbar-hamburger {
     display: none !important;
   }
-  .topbar-mobile-menu {
+  .topbar-mobile-menu,
+  .topbar-mobile-scrim {
     display: none !important;
   }
 }
