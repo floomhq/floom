@@ -112,8 +112,23 @@ function buildAuthOptions(): any {
   // running in production. In prod the baseURL is the public origin and
   // there is no vite dev server; allowing localhost:5173 unconditionally
   // was a minor security smell (CSRF surface).
+  //
+  // 2026-04-20 (round 2): Better Auth rejects cookie-bearing POSTs when
+  // the request Origin doesn't match baseURL OR any trustedOrigin — it
+  // returns 403 INVALID_ORIGIN. Our prod cluster serves the same container
+  // on both floom.dev (canonical) AND preview.floom.dev (staging); the
+  // baseURL points at floom.dev, so sign-out from preview.floom.dev was
+  // 403ing and the session cookie never cleared. Always trust the three
+  // Floom production hosts so cookie-bearing auth POSTs work from any of
+  // them regardless of which one the BETTER_AUTH_URL env var points at.
   const isDev = process.env.NODE_ENV !== 'production';
-  const trustedOrigins = isDev ? ['http://localhost:5173'] : [];
+  const trustedOrigins = [
+    'https://floom.dev',
+    'https://preview.floom.dev',
+    'https://app.floom.dev',
+    ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : []),
+    ...(isDev ? ['http://localhost:5173'] : []),
+  ];
 
   return {
     appName: 'Floom',
