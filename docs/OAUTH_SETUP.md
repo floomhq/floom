@@ -19,7 +19,7 @@ Auth, so there's no OAuth.
    - `<BETTER_AUTH_URL>/auth/callback/google`
    - e.g. `https://floom.dev/auth/callback/google`
    - For local dev: `http://localhost:3051/auth/callback/google`
-6. Copy the **Client ID** and **Client secret**
+6. Copy the **Client ID** and **Client secret** (these map to `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`).
 
 ### GitHub
 
@@ -28,7 +28,7 @@ Auth, so there's no OAuth.
 3. Homepage URL: `<BETTER_AUTH_URL>` (e.g. `https://floom.dev`)
 4. Authorization callback URL: `<BETTER_AUTH_URL>/auth/callback/github`
    - e.g. `https://floom.dev/auth/callback/github`
-5. Register and generate a **Client secret**. Copy both.
+5. Register and generate a **Client secret**. Copy both (these map to `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`).
 
 ## 2. Set the env vars
 
@@ -66,12 +66,11 @@ or equivalently `docker restart <container>`.
    the email/password form, with a `— or continue with email —` divider.
 2. Click "Continue with GitHub" or "Continue with Google".
 3. Approve the scope on the provider's consent screen.
-4. You get redirected back to Floom, land on `/me`, and the top bar shows
-   your account.
+4. You get redirected back to Floom, land on `/studio/build` (new account)
+   or `/me` (returning user), and the top bar shows your name and avatar.
 
 If a button is missing: check the env vars on the host (`docker compose
-exec <svc> env | grep OAUTH`). Both `CLIENT_ID` and `CLIENT_SECRET` have
-to be non-empty for the button to show.
+exec <svc> env | grep OAUTH`). Both `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` have to be non-empty for the button to show.
 
 If the redirect fails with "redirect_uri_mismatch": the URL you pasted
 in the provider console doesn't match `<BETTER_AUTH_URL>/auth/callback/<provider>`.

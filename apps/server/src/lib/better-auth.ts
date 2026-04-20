@@ -35,6 +35,7 @@ import {
   renderWelcomeEmail,
   sendEmail,
 } from './email.js';
+import { provisionPersonalWorkspace } from '../services/workspaces.js';
 
 // Better Auth's `Auth` type is generic over its options. Inferring the exact
 // concrete type would couple every consumer to the full plugin tuple shape,
@@ -293,7 +294,15 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       cookiePrefix: 'floom',
       defaultCookieAttributes: {
         sameSite: 'strict',
-        secure: true,
+        // Secure only on HTTPS. Hard-coding `true` in dev causes browsers
+        // without the localhost exemption (non-Chrome, older Chromium,
+        // automated test runners) to silently drop the state/code-verifier
+        // cookie, producing `state_mismatch` during OAuth sign-in.
+        // In production this evaluates to `true`.
+        secure:
+          process.env.NODE_ENV === 'production' ||
+          (process.env.PUBLIC_URL || '').startsWith('https://') ||
+          (process.env.BETTER_AUTH_URL || '').startsWith('https://'),
         httpOnly: true,
       },
       cookies: {
@@ -369,6 +378,69 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
         rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 100 },
       }),
     ],
+    databaseHooks: {
+      user: {
+        create: {
+          // Fires after a new user row is committed (email+password signup
+          // or social OAuth). Sends a minimal welcome email. Best-effort:
+          // a delivery failure MUST NOT roll back the user, so we swallow
+          // errors and only log. Also a no-op in stdout-fallback mode —
+          // the sendEmail helper handles that transparently.
+          after: async (user: {
+            id: string;
+            email: string;
+            name?: string | null;
+          }): Promise<void> => {
+            // W3.1 cleanup: provision the Floom-side user row and a default
+            // workspace immediately on creation. This ensures following
+            // requests (or hooks like welcome email) can rely on the user
+            // record existing in the Floom tables.
+            try {
+              // Priority 1: Mirror user into Floom's users table.
+              // auth_provider 'better-auth' identifies these as cloud-managed accounts.
+              db.prepare(
+                `INSERT INTO users (id, email, name, auth_provider, auth_subject)
+                 VALUES (?, ?, ?, 'better-auth', ?)
+                 ON CONFLICT (id) DO UPDATE SET
+                   email = excluded.email,
+                   name = excluded.name`,
+              ).run(user.id, user.email, user.name || null, user.id);
+
+              // Priority 2: Provision the personal workspace.
+              // provisionPersonalWorkspace is idempotent: if the user somehow
+              // already has a workspace membership, it just returns it.
+              provisionPersonalWorkspace(user.id, user.email, user.name);
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[auth] critical: failed to provision user/workspace for ${user.email}:`,
+                err,
+              );
+              // We don't throw here — we want the user to land on the UI where
+              // session.ts resolveUserContext has a second-chance bootstrap.
+            }
+
+            try {
+              const publicUrl =
+                process.env.PUBLIC_URL ||
+                process.env.BETTER_AUTH_URL ||
+                'https://floom.dev';
+              const { subject, html, text } = renderWelcomeEmail({
+                name: user.name ?? null,
+                publicUrl,
+              });
+              await sendEmail({ to: user.email, subject, html, text });
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[auth] welcome email failed for ${user.email}:`,
+                err,
+              );
+            }
+          },
+        },
+      },
+    },
     user: {
       // W4-minimal gap close: enable the POST /auth/delete-user endpoint so
       // /me/settings can delete an account without operator intervention.

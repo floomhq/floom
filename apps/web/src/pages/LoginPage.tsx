@@ -42,9 +42,21 @@ export function LoginPage() {
   const [state, setState] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [errorCopy, setErrorCopy] = useState<AuthErrorCopy | null>(null);
   const [noticeCopy, setNoticeCopy] = useState<AuthErrorCopy | null>(null);
+  const oauthErrorParam = searchParams.get('error');
+
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
 
-  const nextPath = searchParams.get('next') || '/me';
+  useEffect(() => {
+    if (oauthErrorParam) {
+      setState('error');
+    }
+  }, []);
+  const rawNext = searchParams.get('next');
+  const safeNext =
+    rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
+      ? rawNext
+      : null;
+  const nextPath = safeNext || (mode === 'signup' ? '/studio/build' : '/me');
 
   // If the user is already logged in (cloud mode) redirect away.
   useEffect(() => {
@@ -647,6 +659,7 @@ const oauthButtonStyle: React.CSSProperties = {
   fontWeight: 600,
   fontFamily: 'inherit',
   cursor: 'pointer',
+  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
 };
 
 // Real brand logos (SimpleIcons-licensed SVG paths). No text-in-circles

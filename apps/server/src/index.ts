@@ -249,7 +249,82 @@ app.route('/api/feedback', feedbackRouter);
 // `baseURL` matches the caller's origin (floom.dev vs preview.floom.dev)
 // so verify-email and OAuth callbacks stay on the origin host.
 if (isCloudMode()) {
-  if (getAuth()) {
+  const auth = getAuth();
+  if (auth) {
+    // OAuth error bridge: when the user denies the OAuth consent screen or
+    // the provider returns an error, Better Auth redirects to
+    // <baseURL>/auth/error?error=<code>. Without this handler the user sees
+    // the raw backend response (plain text / Better Auth's built-in page),
+    // not Floom's branded UI. Bridge it to the frontend login page.
+    app.get('/auth/error', (c) => {
+      const error = c.req.query('error') || 'unknown';
+      const isDev = process.env.NODE_ENV !== 'production';
+      const frontendOrigin =
+        process.env.FLOOM_APP_URL ||
+        (isDev ? 'http://localhost:5173' : '');
+      if (frontendOrigin) {
+        return c.redirect(
+          `${frontendOrigin}/login?error=${encodeURIComponent(error)}`,
+        );
+      }
+      return c.json({ error: 'auth_failed', code: error }, 400);
+    });
+
+    // GET bridge for social sign-in. Better Auth's standard SDK uses POST
+    // for login, but browser-side redirects (window.location.assign) need
+    // a GET endpoint. This bridge performs the API call and redirects to
+    // the provider.
+    app.get('/auth/login/social/:provider', async (c) => {
+      const provider = c.req.param('provider');
+      const callbackURL = c.req.query('callbackURL') || '/me';
+
+      // We need to bridge this GET request to Better Auth's POST /sign-in/social
+      // endpoint. Crucially, we must return the Response from auth.handler
+      // so that `Set-Cookie` headers (state, code_verifier) are passed to
+      // the browser. Without these, you get `state_mismatch`.
+      const url = new URL(c.req.url);
+      url.pathname = '/auth/sign-in/social';
+
+      const newHeaders = new Headers(c.req.raw.headers);
+      newHeaders.set('Content-Type', 'application/json');
+
+      const redirectedRequest = new Request(url.toString(), {
+        method: 'POST',
+        headers: newHeaders,
+        body: JSON.stringify({
+          provider,
+          callbackURL,
+        }),
+      });
+
+      const res = await auth.handler(redirectedRequest);
+
+      // If Better Auth returns a 200 with a JSON URL (common when it detects
+      // an AJAX-like request), we manually convert it to a 302 redirect
+      // while preserving the all-important `Set-Cookie` headers.
+      if (
+        res.status === 200 &&
+        res.headers.get('Content-Type')?.includes('application/json')
+      ) {
+        const data = (await res.json()) as { url?: string };
+        if (data.url) {
+          // Hono's c.redirect returns a new Response. We must append
+          // the cookies from the original Better Auth response to it.
+          const redirectRes = c.redirect(data.url);
+          const cookies = res.headers.get('set-cookie');
+          if (cookies) {
+            // Note: headers.get joins with comma, but for Set-Cookie we
+            // usually need to be careful. Better Auth typically sets
+            // one or two cookies here.
+            redirectRes.headers.set('Set-Cookie', cookies);
+          }
+          return redirectRes;
+        }
+      }
+
+      return res;
+    });
+
     // Hono `app.on(...)` accepts a method list + path. Better Auth's
     // `handler` consumes the raw `Request` and returns a `Response`, which
     // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
