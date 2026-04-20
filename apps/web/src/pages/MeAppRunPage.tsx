@@ -137,7 +137,7 @@ export function MeAppRunPage() {
           {app && (
             <>
               <AppHeader app={app} />
-              <TabBar slug={app.slug} active="overview" />
+              <TabBar slug={app.slug} active="run" />
 
               {missingKeys === null && secrets.error && !secrets.entries && (
                 <SecretsFetchError

@@ -179,9 +179,14 @@ export function AppHeader({ app }: { app: AppDetail }) {
   );
 }
 
-type TabId = 'overview' | 'secrets' | 'access' | 'analytics' | 'settings';
+type TabId = 'overview' | 'run' | 'secrets' | 'access' | 'analytics' | 'settings';
 
 export function TabBar({ slug, active }: { slug: string; active: TabId }) {
+  // Keeping Run between Overview and Secrets so the order matches the
+  // user's mental flow: "here's my app → let me use it → manage keys".
+  // `/me/apps/:slug/run` is the exception to the v16 Studio redirect
+  // rule (see `main.tsx`), so a TabBar link to it stays inside the
+  // `/me` consumer shell instead of bouncing into Studio.
   const tabs: Array<{
     id: TabId;
     label: string;
@@ -189,6 +194,7 @@ export function TabBar({ slug, active }: { slug: string; active: TabId }) {
     disabled?: boolean;
   }> = [
     { id: 'overview', label: 'Overview', to: `/me/apps/${slug}` },
+    { id: 'run', label: 'Run', to: `/me/apps/${slug}/run` },
     { id: 'secrets', label: 'Secrets', to: `/me/apps/${slug}/secrets` },
     { id: 'access', label: 'Access', disabled: true },
     { id: 'analytics', label: 'Analytics', disabled: true },

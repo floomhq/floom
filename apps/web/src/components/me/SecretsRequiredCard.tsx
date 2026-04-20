@@ -78,15 +78,24 @@ interface Props {
 export function SecretsRequiredCard({ app, missingKeys, onSaved }: Props) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Separate form-level error (e.g. "fill at least one field") so per-field
+  // errors from a later save attempt don't clobber it and vice versa.
+  const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setErrors({});
+    setFormError(null);
     const filled = Object.entries(values).filter(([, v]) => v.trim().length > 0);
     if (filled.length === 0) {
       setSubmitting(false);
+      // Pre-fix this branch returned silently — the Save button just
+      // flashed "Saving…" and reset, with no indication of what the user
+      // should do. UX audit R12-5 (2026-04-20) calls this out as a dead
+      // end for non-developers who expect form validation feedback.
+      setFormError('Enter at least one value to continue.');
       return;
     }
     const results = await Promise.allSettled(
@@ -257,6 +266,25 @@ export function SecretsRequiredCard({ app, missingKeys, onSaved }: Props) {
           );
         })}
       </div>
+
+      {formError && (
+        <div
+          data-testid="secrets-form-error"
+          role="alert"
+          style={{
+            marginTop: 16,
+            padding: '8px 12px',
+            background: '#fdecea',
+            border: '1px solid #c2321f',
+            borderRadius: 8,
+            color: '#8a1f10',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          {formError}
+        </div>
+      )}
 
       <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
         <button

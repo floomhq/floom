@@ -295,7 +295,35 @@ export function validateInputs(
       }
       cleaned[spec.name] = n;
     } else if (spec.type === 'boolean') {
-      cleaned[spec.name] = Boolean(value);
+      // Plain `Boolean(value)` treats the *string* 'false' as truthy,
+      // which is wrong for HTML forms, query params, and any HTTP client
+      // that serializes booleans as strings. Audit fn-16 (2026-04-20)
+      // flagged this as a silent correctness bug. Accept: actual
+      // booleans, the strings 'true'/'false' (case-insensitive), and
+      // numeric 0/1. Anything else throws so callers can't quietly
+      // get the wrong answer.
+      if (typeof value === 'boolean') {
+        cleaned[spec.name] = value;
+      } else if (typeof value === 'number' && (value === 0 || value === 1)) {
+        cleaned[spec.name] = value === 1;
+      } else if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1') {
+          cleaned[spec.name] = true;
+        } else if (normalized === 'false' || normalized === '0') {
+          cleaned[spec.name] = false;
+        } else {
+          throw new ManifestError(
+            `Input ${spec.name} must be a boolean (true/false)`,
+            spec.name,
+          );
+        }
+      } else {
+        throw new ManifestError(
+          `Input ${spec.name} must be a boolean (true/false)`,
+          spec.name,
+        );
+      }
     } else if (spec.type === 'enum') {
       if (typeof value !== 'string' || !spec.options?.includes(value)) {
         throw new ManifestError(

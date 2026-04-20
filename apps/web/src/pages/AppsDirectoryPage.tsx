@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { Search } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
@@ -59,6 +66,22 @@ export function AppsDirectoryPage() {
   const [activeCategory, setActiveCategory] = useState<string>(ALL);
 
   const search = useDebounced(rawSearch, 150);
+
+  // Refs for the search-submit wiring. Filtering already happens on each
+  // keystroke via `search`, but users reasonably expect the Search button
+  // to *do* something. Pre-fix it was `preventDefault()` only, which felt
+  // broken on mobile where the keyboard obscured the results (route-02
+  // audit A2, 2026-04-20). We keep the debounced filter as the behavior
+  // and make submit scroll to the results + blur the input so the
+  // keyboard collapses.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLElement>(null);
+
+  const handleSearchSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    searchInputRef.current?.blur();
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   const loadHub = useCallback(() => {
     setLoading(true);
@@ -202,7 +225,7 @@ export function AppsDirectoryPage() {
             {/* Google-style search pill */}
             <form
               role="search"
-              onSubmit={(e) => e.preventDefault()}
+              onSubmit={handleSearchSubmit}
               style={{
                 background: 'var(--card)',
                 border: '1.5px solid var(--line)',
@@ -232,6 +255,7 @@ export function AppsDirectoryPage() {
                 style={{ color: 'var(--muted)', flexShrink: 0 }}
               />
               <input
+                ref={searchInputRef}
                 type="text"
                 value={rawSearch}
                 onChange={(e) => setRawSearch(e.target.value)}
@@ -317,7 +341,7 @@ export function AppsDirectoryPage() {
             so the loading-to-rendered transition does not shift subsequent
             content. 600px fits ~6 stripes above the fold on desktop; the
             real grid extends this naturally. */}
-        <section style={{ padding: '0 24px 80px', minHeight: 600 }}>
+        <section ref={resultsRef} style={{ padding: '0 24px 80px', minHeight: 600 }}>
           <div style={{ maxWidth: 760, margin: '0 auto' }}>
             {loading ? (
               <div
