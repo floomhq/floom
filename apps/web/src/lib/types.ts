@@ -390,7 +390,7 @@ export interface DetectedApp {
   slug: string;
   name: string;
   description: string;
-  actions: Array<{ name: string; label: string; description?: string }>;
+  actions: Array<ActionSpec & { name: string }>;
   auth_type: string | null;
   category: string | null;
   openapi_spec_url: string;

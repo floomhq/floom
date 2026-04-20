@@ -1189,9 +1189,8 @@ export async function detectAppFromUrl(
   };
   const manifest = specToManifest(derefed, appSpec, deriveSecretsFromSpec(derefed));
   const actions = Object.entries(manifest.actions).map(([k, v]) => ({
+    ...v,
     name: k,
-    label: v.label,
-    description: v.description,
   }));
 
   // Auth-type detection: read securitySchemes from the spec components.

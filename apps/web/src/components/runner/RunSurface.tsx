@@ -60,6 +60,7 @@ export interface RunSurfaceProps {
   initialRun?: RunRecord | null;
   onResetInitialRun?: () => void;
   onResult?: (result: RunSurfaceResult) => void;
+  preview?: boolean;
 }
 
 type Phase = 'ready' | 'streaming' | 'job' | 'done' | 'error';
@@ -201,6 +202,7 @@ export function RunSurface({
   initialRun,
   onResetInitialRun,
   onResult,
+  preview,
 }: RunSurfaceProps) {
   // Upgrade 2 (2026-04-19): honor ?action=<name> on mount so multi-action
   // apps can be linked directly to a specific tab. Only the initial
@@ -660,6 +662,7 @@ export function RunSurface({
             onRun={handleRun}
             onReset={handleReset}
             hasInputs={hasInputs}
+            preview={preview}
           />
         </section>
 
@@ -706,6 +709,7 @@ interface InputCardProps {
   onChange: (name: string, value: unknown) => void;
   onRun: () => void;
   onReset: () => void;
+  preview?: boolean;
 }
 
 function InputCard({
@@ -718,6 +722,7 @@ function InputCard({
   onChange,
   onRun,
   onReset,
+  preview,
 }: InputCardProps) {
   // Fix 5 (2026-04-19): progressive disclosure of optional inputs.
   // Required fields render inline, optional fields stay collapsed behind
@@ -727,12 +732,13 @@ function InputCard({
   const { required, optional } = useMemo(() => {
     const req: typeof actionSpec.inputs = [];
     const opt: typeof actionSpec.inputs = [];
+    if (!actionSpec?.inputs) return { required: [], optional: [] };
     for (const inp of actionSpec.inputs) {
       if (inp.required) req.push(inp);
       else opt.push(inp);
     }
     return { required: req, optional: opt };
-  }, [actionSpec.inputs]);
+  }, [actionSpec?.inputs]);
 
   return (
     <div className="run-surface-card" data-testid="run-surface-input-card">
@@ -819,7 +825,7 @@ function InputCard({
               data-testid="run-surface-run-btn"
               aria-busy={running}
               aria-disabled={running}
-              disabled={running}
+              disabled={running || preview}
               style={{ height: 44, minHeight: 44, padding: '0 24px', fontSize: 15 }}
             >
               {running ? (
@@ -838,11 +844,16 @@ function InputCard({
               type="button"
               className="btn-ghost"
               onClick={onReset}
-              disabled={running}
+              disabled={running || preview}
             >
               Reset
             </button>
           </div>
+          {preview && (
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+              Preview only — Run works after publish.
+            </div>
+          )}
         </form>
       ) : (
         <div className="run-surface-empty-input">
@@ -857,7 +868,7 @@ function InputCard({
               aria-busy={running}
               aria-disabled={running}
               onClick={onRun}
-              disabled={running}
+              disabled={running || preview}
               style={{ height: 44, minHeight: 44, padding: '0 28px', fontSize: 15 }}
             >
               {running ? (
@@ -873,6 +884,11 @@ function InputCard({
               )}
             </button>
           </div>
+          {preview && (
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+              Preview only — Run works after publish.
+            </div>
+          )}
         </div>
       )}
     </div>
