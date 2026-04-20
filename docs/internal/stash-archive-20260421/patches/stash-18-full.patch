@@ -1,0 +1,1551 @@
+diff --git a/apps/web/src/pages/CreatorHeroPage.tsx b/apps/web/src/pages/CreatorHeroPage.tsx
+index ca4d9cf..cb400fd 100644
+--- a/apps/web/src/pages/CreatorHeroPage.tsx
++++ b/apps/web/src/pages/CreatorHeroPage.tsx
+@@ -1,373 +1,206 @@
+-import { useEffect, useState } from 'react';
++import { useEffect } from 'react';
+ import { Link } from 'react-router-dom';
++import { ArrowRight, Play } from 'lucide-react';
+ import { TopBar } from '../components/TopBar';
+-import { FloomApp } from '../components/FloomApp';
+-import {
+-  Server,
+-  Globe,
+-  Terminal,
+-  MessageSquare,
+-} from 'lucide-react';
+-import type { AppDetail } from '../lib/types';
+-import { getApp } from '../api/client';
+-
+-// FlyFast stub so the demo renders immediately before the API responds
+-const FLYFAST_STUB: AppDetail = {
+-  slug: 'flyfast',
+-  name: 'FlyFast',
+-  description: 'Search flights like you would text a friend. Up to 100 combinations from one natural-language query.',
+-  category: 'travel',
+-  author: 'buildingopen',
+-  icon: null,
+-  actions: ['search'],
+-  runtime: 'python',
+-  created_at: '',
+-  manifest: {
+-    name: 'FlyFast',
+-    description: 'Search flights like you would text a friend.',
+-    actions: {
+-      search: {
+-        label: 'Search Flights',
+-        description: 'Natural-language flight search.',
+-        inputs: [
+-          {
+-            name: 'prompt',
+-            label: 'What flight do you need?',
+-            type: 'textarea',
+-            required: true,
+-            placeholder: 'Cheap flight from Berlin to Lisbon first week of May',
+-          },
+-        ],
+-        outputs: [
+-          { name: 'results', label: 'Flight Results', type: 'json' },
+-        ],
+-      },
+-    },
+-    runtime: 'python',
+-    python_dependencies: ['httpx>=0.27'],
+-    node_dependencies: {},
+-    secrets_needed: ['FLYFAST_INTERNAL_TOKEN'],
+-    manifest_version: '2.0',
+-  },
+-};
+-
+-const DOCKER_CMD = `docker run -p 3051:3051 \\
+-  ghcr.io/floomhq/floom-monorepo:latest`;
+-
+-const FOUR_THINGS = [
+-  { Icon: Server, label: 'MCP server', desc: 'Auto-generated from OpenAPI operations.' },
+-  { Icon: Globe, label: 'HTTP API', desc: 'Pass-through proxy with secrets injection.' },
+-  { Icon: Terminal, label: 'CLI', desc: '@floom/cli. Every operation is a command.' },
+-  { Icon: MessageSquare, label: 'Chat UI', desc: 'Describe what you want, Floom routes it.' },
+-];
++import { SurfacesDiagram } from '../components/home/SurfacesDiagram';
++import { InlineAppDemo } from '../components/home/InlineAppDemo';
++import { ClaudeDesktopConfig } from '../components/home/ClaudeDesktopConfig';
++import { SelfHostTerminal } from '../components/home/SelfHostTerminal';
++import { RoadmapGrid } from '../components/home/RoadmapGrid';
++import { LaunchAppsStrip } from '../components/home/LaunchAppsStrip';
++
++// Floom homepage: 5 dense beats.
++//   1. Hero + the "what is this" eyebrow + live launch strip (15 real apps).
++//   2. Surfaces diagram: one OpenAPI spec, four agent surfaces.
++//   3. Inline app demos: real captured outputs from the live API.
++//   4. Plug it into your agent: copyable Claude Desktop / Cursor / curl.
++//   5. Self-host: real docker run + simulated terminal showing Floom booting.
++//   6. Roadmap grid + the single email waitlist.
+ 
+ export function CreatorHeroPage() {
+-  const [demoApp, setDemoApp] = useState<AppDetail>(FLYFAST_STUB);
+-  const [dockerCopied, setDockerCopied] = useState(false);
+-  const [waitlistEmail, setWaitlistEmail] = useState('');
+-  const [waitlistState, setWaitlistState] = useState<'idle' | 'submitted' | 'error'>('idle');
+-  const [waitlistError, setWaitlistError] = useState('');
+-
+   useEffect(() => {
+     document.title = 'Floom: infra for agentic work';
+-    getApp('flyfast').then((a) => setDemoApp(a)).catch(() => {});
+   }, []);
+ 
+-  const copyDocker = () => {
+-    try { navigator.clipboard.writeText(DOCKER_CMD).catch(() => {}); } catch { /* ignore */ }
+-    setDockerCopied(true);
+-    setTimeout(() => setDockerCopied(false), 2000);
+-  };
+-
+-  const handleWaitlist = async (e: React.FormEvent) => {
+-    e.preventDefault();
+-    const email = waitlistEmail.trim();
+-    if (!email || !email.includes('@')) {
+-      setWaitlistError('Please enter a valid email.');
+-      return;
+-    }
+-    try {
+-      const res = await fetch('/api/deploy-waitlist', {
+-        method: 'POST',
+-        headers: { 'content-type': 'application/json' },
+-        body: JSON.stringify({ email }),
+-      });
+-      if (!res.ok) throw new Error('server error');
+-      setWaitlistState('submitted');
+-    } catch {
+-      setWaitlistError('Something went wrong. Try again.');
+-    }
+-  };
+-
+   return (
+     <div className="page-root" data-testid="creator-hero">
+       <TopBar />
+ 
+-      {/* Hero */}
+-      <section
+-        style={{
+-          borderBottom: '1px solid var(--line)',
+-          padding: '80px 24px 72px',
+-          textAlign: 'center',
+-        }}
+-      >
+-        <div style={{ maxWidth: 640, margin: '0 auto' }}>
+-          <h1 className="headline" style={{ marginBottom: 16 }}>
+-            Infra for<span className="headline-dim"> agentic work.</span>
++      {/* ───────── Hero ───────── */}
++      <section className="home-hero">
++        <div className="home-hero-inner">
++          <span className="home-hero-eyebrow">
++            <span className="dot" />
++            v0.1.0 · 15 apps live · self-host or use floom.dev
++          </span>
++          <h1 className="home-hero-title">
++            One spec.<br />
++            <span className="dim">Every agent surface.</span>
+           </h1>
+-          <p style={{ fontSize: 17, color: 'var(--muted)', margin: '0 auto 36px', maxWidth: 480, lineHeight: 1.6 }}>
+-            OpenAPI in. Production product out.
++          <p className="home-hero-sub">
++            Drop an OpenAPI spec, a CLI, or a Python module into Floom. Get a hosted chat UI,
++            an MCP server, an HTTP proxy, and a CLI in 10 seconds. Self-host with one docker run.
+           </p>
+-
+-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+-            <Link
+-              to="/apps"
+-              className="btn-primary"
+-              style={{ padding: '11px 24px', fontSize: 15, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+-            >
+-              Browse live apps
+-            </Link>
+-            <a
+-              href="#self-host"
+-              style={{
+-                display: 'inline-flex',
+-                alignItems: 'center',
+-                padding: '11px 24px',
+-                background: 'var(--card)',
+-                border: '1px solid var(--line)',
+-                color: 'var(--ink)',
+-                borderRadius: 9,
+-                fontSize: 15,
+-                fontWeight: 500,
+-                textDecoration: 'none',
+-              }}
+-            >
+-              Self-host via Docker
++          <div className="home-hero-actions">
++            <a href="#demo" className="home-btn home-btn-primary">
++              <Play size={13} /> Try a live app
+             </a>
+-            <Link
+-              to="/protocol"
+-              style={{
+-                display: 'inline-flex',
+-                alignItems: 'center',
+-                padding: '11px 24px',
+-                background: 'none',
+-                color: 'var(--muted)',
+-                borderRadius: 9,
+-                fontSize: 15,
+-                fontWeight: 500,
+-                textDecoration: 'none',
+-              }}
+-            >
+-              Read the protocol
++            <a href="#self-host" className="home-btn home-btn-secondary">
++              Self-host in 60s
++            </a>
++            <Link to="/protocol" className="home-btn home-btn-ghost">
++              Read the protocol <ArrowRight size={12} />
+             </Link>
+           </div>
+-        </div>
+-      </section>
+ 
+-      {/* Live demo */}
+-      <section
+-        data-testid="hero-demo"
+-        style={{ borderBottom: '1px solid var(--line)', padding: '64px 24px' }}
+-      >
+-        <div style={{ maxWidth: 700, margin: '0 auto' }}>
+-          <p className="label-mono" style={{ marginBottom: 8, textAlign: 'center' }}>Try it live</p>
+-          <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)', textAlign: 'center' }}>
+-            Run FlyFast. No signup.
+-          </h2>
+-          <p style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 32, textAlign: 'center', maxWidth: 400, margin: '0 auto 32px' }}>
+-            Type a flight request. Click Run. See real results.
+-          </p>
+-          <FloomApp
+-            app={demoApp}
+-            standalone={true}
+-            showSidebar={false}
+-            initialInputs={{ prompt: 'Cheap flight from Berlin to Lisbon first week of May' }}
+-          />
++          <div className="home-hero-stats">
++            <div className="home-hero-stat">
++              <span className="home-hero-stat-num">15</span>
++              <span className="home-hero-stat-label">apps live</span>
++            </div>
++            <div className="home-hero-stat">
++              <span className="home-hero-stat-num">4</span>
++              <span className="home-hero-stat-label">surfaces per app</span>
++            </div>
++            <div className="home-hero-stat">
++              <span className="home-hero-stat-num">1</span>
++              <span className="home-hero-stat-label">manifest file</span>
++            </div>
++            <div className="home-hero-stat">
++              <span className="home-hero-stat-num">~10s</span>
++              <span className="home-hero-stat-label">spec to product</span>
++            </div>
++          </div>
+         </div>
+       </section>
+ 
+-      {/* Every Floom app gets */}
+-      <section style={{ borderBottom: '1px solid var(--line)', padding: '64px 24px' }}>
+-        <div style={{ maxWidth: 900, margin: '0 auto' }}>
+-          <p className="label-mono" style={{ marginBottom: 8, textAlign: 'center' }}>Every Floom app gets</p>
+-          <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 32px', color: 'var(--ink)', textAlign: 'center' }}>
+-            Four surfaces. One spec.
+-          </h2>
+-          <div
+-            style={{
+-              display: 'grid',
+-              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+-              gap: 16,
+-            }}
+-          >
+-            {FOUR_THINGS.map(({ Icon, label, desc }) => (
+-              <div
+-                key={label}
+-                style={{
+-                  background: 'var(--card)',
+-                  border: '1px solid var(--line)',
+-                  borderRadius: 10,
+-                  padding: '18px 20px',
+-                  display: 'flex',
+-                  flexDirection: 'column',
+-                  gap: 10,
+-                }}
+-              >
+-                <div style={{ color: 'var(--accent)' }}>
+-                  <Icon size={20} />
+-                </div>
+-                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{label}</p>
+-                <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{desc}</p>
+-              </div>
+-            ))}
++      {/* Launch apps strip — dense product evidence under the fold */}
++      <LaunchAppsStrip />
++
++      {/* ───────── Beat 1: Surfaces diagram ───────── */}
++      <section className="home-section" id="surfaces">
++        <div className="home-section-inner">
++          <div className="home-twocol">
++            <div className="home-section-head">
++              <p className="home-section-eyebrow">01 · One spec, four surfaces</p>
++              <h2 className="home-section-title">
++                OpenAPI in.<br />Every agent surface out.
++              </h2>
++              <p className="home-section-sub">
++                Floom reads one OpenAPI spec and generates an MCP server, an HTTP pass-through,
++                a CLI, and a hosted chat UI. The same auth, the same secrets, the same routes.
++                No SDK to wire up, no glue code to maintain.
++              </p>
++            </div>
++            <SurfacesDiagram />
+           </div>
+         </div>
+       </section>
+ 
+-      {/* Self-host */}
+-      <section
+-        id="self-host"
+-        data-testid="self-host-section"
+-        style={{ borderBottom: '1px solid var(--line)', padding: '64px 24px' }}
+-      >
+-        <div style={{ maxWidth: 700, margin: '0 auto' }}>
+-          <p className="label-mono" style={{ marginBottom: 8 }}>Open source</p>
+-          <h2 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)' }}>
+-            Run Floom on your own infra.
+-          </h2>
+-          <p style={{ fontSize: 15, color: 'var(--muted)', marginBottom: 28, maxWidth: 480 }}>
+-            One command, one image, your data.
+-          </p>
+-
+-          <div style={{ position: 'relative', marginBottom: 20 }}>
+-            <pre
+-              style={{
+-                background: 'var(--terminal-bg, #0e0e0c)',
+-                color: 'var(--terminal-ink, #d4d4c8)',
+-                fontFamily: 'JetBrains Mono, monospace',
+-                fontSize: 13,
+-                padding: '20px 18px',
+-                borderRadius: 10,
+-                overflowX: 'auto',
+-                lineHeight: 1.7,
+-                margin: 0,
+-              }}
+-            >
+-              {DOCKER_CMD}
+-            </pre>
+-            <button
+-              type="button"
+-              onClick={copyDocker}
+-              style={{
+-                position: 'absolute', top: 12, right: 12,
+-                fontSize: 11, padding: '3px 10px',
+-                background: 'rgba(255,255,255,0.1)',
+-                border: '1px solid rgba(255,255,255,0.15)',
+-                borderRadius: 6,
+-                color: dockerCopied ? '#7bffc0' : 'rgba(255,255,255,0.6)',
+-                cursor: 'pointer', fontFamily: 'inherit', transition: 'color 0.15s',
+-              }}
+-            >
+-              {dockerCopied ? 'Copied!' : 'Copy'}
+-            </button>
++      {/* ───────── Beat 2: Inline app demo ───────── */}
++      <section className="home-section" id="demo">
++        <div className="home-section-narrow">
++          <div className="home-section-head is-center">
++            <p className="home-section-eyebrow">02 · Apps work right now</p>
++            <h2 className="home-section-title">Real outputs, embedded.</h2>
++            <p className="home-section-sub">
++              These are responses from the live preview.floom.dev API, not screenshots.
++              Click any card to open the full app and run your own input.
++            </p>
+           </div>
+-
+-          <a
+-            href="https://github.com/floomhq/floom-monorepo"
+-            target="_blank"
+-            rel="noreferrer"
+-            style={{
+-              display: 'inline-flex',
+-              alignItems: 'center',
+-              gap: 6,
+-              padding: '9px 20px',
+-              background: 'var(--card)',
+-              border: '1px solid var(--line)',
+-              color: 'var(--ink)',
+-              borderRadius: 8,
+-              fontSize: 13,
+-              fontWeight: 500,
+-              textDecoration: 'none',
+-            }}
+-          >
+-            <svg width={14} height={14} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+-              <use href="#icon-github" />
+-            </svg>
+-            View on GitHub
+-          </a>
++          <InlineAppDemo />
+         </div>
+       </section>
+ 
+-      {/* Single honest waitlist */}
+-      <section style={{ padding: '64px 24px 80px' }}>
+-        <div
+-          style={{
+-            maxWidth: 520,
+-            margin: '0 auto',
+-            background: 'var(--card)',
+-            border: '1px solid var(--line)',
+-            borderRadius: 14,
+-            padding: '32px',
+-          }}
+-        >
+-          {waitlistState === 'submitted' ? (
+-            <div data-testid="waitlist-success">
+-              <p style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: 'var(--ink)' }}>
+-                You're on the list.
+-              </p>
+-              <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>
+-                We'll email you at <strong>{waitlistEmail}</strong> when creator accounts ship.
++      {/* ───────── Beat 3: Plug into your agent ───────── */}
++      <section className="home-section is-dark" id="plug-in">
++        <div className="home-section-inner">
++          <div className="home-twocol">
++            <div className="home-section-head">
++              <p className="home-section-eyebrow">03 · Plug into any agent</p>
++              <h2 className="home-section-title">
++                Claude Desktop, Cursor, or curl.<br />Same Floom URL.
++              </h2>
++              <p className="home-section-sub">
++                Every Floom app exposes an MCP endpoint at <code style={{ color: '#9f96ff', fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>/mcp/app/&lt;slug&gt;</code>{' '}
++                and an HTTP endpoint at <code style={{ color: '#9f96ff', fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>/api/&lt;slug&gt;/run</code>.
++                Drop the snippet into your agent config. Your agent picks it up on next launch.
+               </p>
+             </div>
+-          ) : (
+-            <>
+-              <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+-                Coming v1.1
+-              </p>
+-              <p style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>
+-                Cloud deploys.
+-              </p>
+-              <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--muted)', lineHeight: 1.6 }}>
+-                Want creator accounts to deploy your own apps to floom.dev? Join the list.
++            <ClaudeDesktopConfig />
++          </div>
++        </div>
++      </section>
++
++      {/* ───────── Beat 4: Self-host ───────── */}
++      <section className="home-section is-dark" id="self-host">
++        <div className="home-section-inner">
++          <div className="home-twocol" style={{ gridTemplateColumns: '1fr 1.5fr' }}>
++            <div className="home-section-head">
++              <p className="home-section-eyebrow">04 · Self-host</p>
++              <h2 className="home-section-title">
++                One image. One command.<br />Your data, your infra.
++              </h2>
++              <p className="home-section-sub">
++                The full Floom runtime ships as <code style={{ color: '#9f96ff', fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>ghcr.io/floomhq/floom-monorepo:v0.1.0</code>.
++                Mount your apps.yaml, pass your secrets as env vars, point your agent at localhost. MIT licensed.
+               </p>
+-              <form
+-                onSubmit={handleWaitlist}
+-                data-testid="waitlist-form"
+-                style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}
+-              >
+-                <input
+-                  type="email"
+-                  required
+-                  className="input-field"
+-                  placeholder="your@email.com"
+-                  value={waitlistEmail}
+-                  onChange={(e) => { setWaitlistEmail(e.target.value); setWaitlistError(''); }}
+-                  style={{ flex: 1, minWidth: 200 }}
+-                  data-testid="waitlist-email-input"
+-                />
+-                <button
+-                  type="submit"
+-                  className="btn-primary"
+-                  style={{ height: 40, padding: '0 22px', fontSize: 14 }}
+-                  data-testid="waitlist-notify-btn"
++              <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
++                <a
++                  href="https://github.com/floomhq/floom-monorepo"
++                  target="_blank"
++                  rel="noreferrer"
++                  className="home-btn home-btn-secondary"
++                  style={{
++                    background: 'rgba(255,255,255,0.06)',
++                    color: '#f1efe9',
++                    borderColor: '#2a2a22',
++                  }}
+                 >
+-                  Join waitlist
+-                </button>
+-                {waitlistError && (
+-                  <p style={{ width: '100%', margin: '4px 0 0', fontSize: 12, color: '#ef4444' }}>{waitlistError}</p>
+-                )}
+-              </form>
+-            </>
+-          )}
++                  <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
++                    <use href="#icon-github" />
++                  </svg>
++                  View on GitHub
++                </a>
++                <a
++                  href="https://github.com/floomhq/floom-monorepo/blob/main/docs/SELF_HOST.md"
++                  target="_blank"
++                  rel="noreferrer"
++                  className="home-btn home-btn-ghost"
++                  style={{ color: 'rgba(247,245,238,0.6)' }}
++                >
++                  Read the self-host guide <ArrowRight size={12} />
++                </a>
++              </div>
++            </div>
++            <SelfHostTerminal />
++          </div>
++        </div>
++      </section>
++
++      {/* ───────── Beat 5: Roadmap + waitlist ───────── */}
++      <section className="home-section" id="roadmap" style={{ borderBottom: 'none' }}>
++        <div className="home-section-inner">
++          <div className="home-section-head">
++            <p className="home-section-eyebrow">05 · Where it's going</p>
++            <h2 className="home-section-title">
++              Twelve things shipping next.
++            </h2>
++            <p className="home-section-sub">
++              Floom is v0.1.0 today. Each item below is scoped, on the roadmap, and shipping in
++              order. One email when the next one lands. No drip campaign.
++            </p>
++          </div>
++          <RoadmapGrid />
+         </div>
+       </section>
+ 
+       {/* Footer */}
+       <footer
+         style={{
+-          maxWidth: 1200,
++          maxWidth: 1080,
+           margin: '0 auto',
+-          padding: '24px 24px 40px',
++          padding: '32px 24px 48px',
+           display: 'flex',
+           flexWrap: 'wrap',
+           gap: 16,
+@@ -386,12 +219,19 @@ export function CreatorHeroPage() {
+           >
+             Federico De Ponte
+           </a>{' '}
+-          and contributors. MIT licensed.
++          and contributors.
+         </p>
+-        <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
++        <nav style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+           <Link to="/apps" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>apps</Link>
+           <Link to="/protocol" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>protocol</Link>
+-          <a href="https://github.com/floomhq/floom-monorepo" target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>github</a>
++          <a
++            href="https://github.com/floomhq/floom-monorepo"
++            target="_blank"
++            rel="noreferrer"
++            style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}
++          >
++            github
++          </a>
+         </nav>
+       </footer>
+     </div>
+diff --git a/apps/web/src/styles/globals.css b/apps/web/src/styles/globals.css
+index 1d7ce62..e4a153f 100644
+--- a/apps/web/src/styles/globals.css
++++ b/apps/web/src/styles/globals.css
+@@ -393,3 +393,982 @@ body {
+     gap: 16px;
+   }
+ }
++
++/* ═══════════════════════════════════════════════════════════════════════
++   Home page rebuild — dense, product-first, supabase-density.
++   All classes scoped under .home-* or component-specific roots so they
++   don't bleed into the rest of the app. Uses the existing CSS variables
++   (--bg, --ink, --muted, --line, --card, --accent, --terminal-bg).
++   ═══════════════════════════════════════════════════════════════════════ */
++
++.home-section {
++  border-bottom: 1px solid var(--line);
++  padding: 72px 24px;
++}
++.home-section.is-dark {
++  background: linear-gradient(180deg, #0c0c0a 0%, #14140f 100%);
++  color: #f1efe9;
++  border-top: 1px solid #1f1f1a;
++  border-bottom: 1px solid #1f1f1a;
++}
++.home-section-inner {
++  max-width: 1080px;
++  margin: 0 auto;
++}
++.home-section-narrow {
++  max-width: 760px;
++  margin: 0 auto;
++}
++.home-section-head {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  margin-bottom: 36px;
++  max-width: 640px;
++}
++.home-section-head.is-center {
++  margin-left: auto;
++  margin-right: auto;
++  text-align: center;
++  align-items: center;
++}
++.home-section-eyebrow {
++  font-size: 11px;
++  font-weight: 600;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--accent);
++  margin: 0;
++  font-family: 'JetBrains Mono', monospace;
++}
++.is-dark .home-section-eyebrow {
++  color: #9f96ff;
++}
++.home-section-title {
++  font-size: 32px;
++  font-weight: 700;
++  line-height: 1.15;
++  letter-spacing: -0.02em;
++  color: var(--ink);
++  margin: 0;
++}
++.is-dark .home-section-title {
++  color: #f7f5ee;
++}
++.home-section-sub {
++  font-size: 16px;
++  line-height: 1.55;
++  color: var(--muted);
++  margin: 0;
++  max-width: 540px;
++}
++.is-dark .home-section-sub {
++  color: #9c978d;
++}
++
++/* ── Hero ───────────────────────────────────────────────────────────── */
++.home-hero {
++  position: relative;
++  border-bottom: 1px solid var(--line);
++  padding: 96px 24px 80px;
++  overflow: hidden;
++}
++.home-hero::before {
++  content: '';
++  position: absolute;
++  inset: 0;
++  background:
++    radial-gradient(circle at 20% 20%, rgba(61, 43, 255, 0.07) 0%, transparent 45%),
++    radial-gradient(circle at 80% 30%, rgba(61, 43, 255, 0.04) 0%, transparent 45%);
++  pointer-events: none;
++}
++.home-hero-inner {
++  position: relative;
++  max-width: 880px;
++  margin: 0 auto;
++  text-align: center;
++}
++.home-hero-eyebrow {
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++  padding: 5px 11px;
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: 999px;
++  font-size: 12px;
++  color: var(--muted);
++  margin-bottom: 24px;
++  font-family: 'JetBrains Mono', monospace;
++}
++.home-hero-eyebrow .dot {
++  width: 6px;
++  height: 6px;
++  border-radius: 50%;
++  background: #1a7f37;
++  box-shadow: 0 0 0 3px rgba(26, 127, 55, 0.18);
++  animation: pulse-dot 2s ease-in-out infinite;
++}
++@keyframes pulse-dot {
++  0%, 100% { box-shadow: 0 0 0 3px rgba(26, 127, 55, 0.18); }
++  50%      { box-shadow: 0 0 0 6px rgba(26, 127, 55, 0.10); }
++}
++.home-hero-title {
++  font-size: 64px;
++  font-weight: 700;
++  line-height: 1.02;
++  letter-spacing: -0.035em;
++  color: var(--ink);
++  margin: 0 0 20px;
++}
++.home-hero-title .dim {
++  color: var(--muted);
++}
++.home-hero-sub {
++  font-size: 18px;
++  line-height: 1.55;
++  color: var(--muted);
++  max-width: 600px;
++  margin: 0 auto 36px;
++}
++.home-hero-actions {
++  display: flex;
++  gap: 12px;
++  justify-content: center;
++  flex-wrap: wrap;
++  margin-bottom: 56px;
++}
++.home-btn {
++  display: inline-flex;
++  align-items: center;
++  gap: 7px;
++  padding: 12px 22px;
++  border-radius: 10px;
++  font-size: 14px;
++  font-weight: 600;
++  text-decoration: none;
++  border: 1px solid transparent;
++  cursor: pointer;
++  font-family: inherit;
++  transition: transform 0.1s, background 0.15s;
++}
++.home-btn-primary {
++  background: var(--ink);
++  color: #fafaf8;
++  border-color: var(--ink);
++}
++.home-btn-primary:hover {
++  transform: translateY(-1px);
++  background: #25241f;
++}
++.home-btn-secondary {
++  background: var(--card);
++  color: var(--ink);
++  border-color: var(--line);
++}
++.home-btn-secondary:hover {
++  border-color: var(--ink);
++}
++.home-btn-ghost {
++  background: none;
++  color: var(--muted);
++}
++.home-btn-ghost:hover {
++  color: var(--ink);
++}
++
++/* hero stats row */
++.home-hero-stats {
++  display: flex;
++  justify-content: center;
++  gap: 48px;
++  flex-wrap: wrap;
++  padding-top: 28px;
++  border-top: 1px solid var(--line);
++}
++.home-hero-stat {
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++}
++.home-hero-stat-num {
++  font-size: 22px;
++  font-weight: 700;
++  color: var(--ink);
++  font-feature-settings: 'tnum';
++}
++.home-hero-stat-label {
++  font-size: 12px;
++  color: var(--muted);
++  font-family: 'JetBrains Mono', monospace;
++}
++
++/* ── Launch apps strip ─────────────────────────────────────────────── */
++.launch-strip {
++  padding: 36px 24px;
++  border-bottom: 1px solid var(--line);
++  background: var(--card);
++}
++.launch-strip-head {
++  max-width: 1080px;
++  margin: 0 auto 16px;
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++}
++.launch-strip-all {
++  display: inline-flex;
++  align-items: center;
++  gap: 4px;
++  font-size: 12px;
++  color: var(--muted);
++  text-decoration: none;
++}
++.launch-strip-all:hover {
++  color: var(--ink);
++}
++.launch-strip-grid {
++  max-width: 1080px;
++  margin: 0 auto;
++  display: grid;
++  grid-template-columns: repeat(5, 1fr);
++  gap: 1px;
++  background: var(--line);
++  border: 1px solid var(--line);
++  border-radius: 12px;
++  overflow: hidden;
++}
++.launch-cell {
++  background: var(--card);
++  padding: 14px 16px;
++  text-decoration: none;
++  display: flex;
++  flex-direction: column;
++  gap: 4px;
++  transition: background 0.12s;
++  min-height: 84px;
++}
++.launch-cell:hover {
++  background: #f6f5ef;
++}
++.launch-cell-name {
++  font-size: 13px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.launch-cell-tagline {
++  font-size: 11px;
++  color: var(--muted);
++  line-height: 1.4;
++  flex: 1;
++}
++.launch-cell-tag {
++  font-size: 10px;
++  color: var(--muted);
++  font-family: 'JetBrains Mono', monospace;
++  text-transform: lowercase;
++}
++
++/* ── Surfaces diagram (beat 1) ─────────────────────────────────────── */
++.surfaces-wrap {
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: 14px;
++  padding: 40px;
++  position: relative;
++  overflow: hidden;
++}
++.surfaces-wrap::after {
++  content: '';
++  position: absolute;
++  inset: 0;
++  background: radial-gradient(circle at 50% 0%, rgba(61, 43, 255, 0.04), transparent 60%);
++  pointer-events: none;
++}
++.surfaces-diagram {
++  position: relative;
++  display: grid;
++  grid-template-columns: 220px 1fr;
++  gap: 0;
++  align-items: center;
++  min-height: 320px;
++}
++.surfaces-spec {
++  position: relative;
++  z-index: 2;
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 16px 18px;
++  background: var(--ink);
++  border-radius: 12px;
++  color: #f7f5ee;
++  box-shadow: 0 8px 24px -12px rgba(14, 14, 12, 0.35);
++  width: fit-content;
++}
++.surfaces-spec-icon {
++  width: 32px;
++  height: 32px;
++  border-radius: 8px;
++  background: rgba(255, 255, 255, 0.08);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  color: #d4cefa;
++}
++.surfaces-spec-label {
++  margin: 0;
++  font-size: 13px;
++  font-weight: 700;
++  font-family: 'JetBrains Mono', monospace;
++}
++.surfaces-spec-meta {
++  margin: 0;
++  font-size: 11px;
++  color: rgba(255, 255, 255, 0.55);
++  font-family: 'JetBrains Mono', monospace;
++}
++.surfaces-lines {
++  position: absolute;
++  left: 200px;
++  top: 50%;
++  transform: translateY(-50%);
++  width: calc(100% - 200px);
++  height: 240px;
++  z-index: 0;
++  pointer-events: none;
++}
++.surfaces-nodes {
++  position: relative;
++  z-index: 1;
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 16px;
++  margin-left: auto;
++  max-width: 480px;
++}
++.surface-node {
++  background: #fafaf8;
++  border: 1px solid var(--line);
++  border-radius: 10px;
++  padding: 14px 16px;
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++  transition: border-color 0.15s, transform 0.15s;
++}
++.surface-node:hover {
++  border-color: var(--accent);
++  transform: translateY(-1px);
++}
++.surface-node-head {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++.surface-node-icon {
++  width: 22px;
++  height: 22px;
++  border-radius: 6px;
++  background: var(--accent-soft);
++  color: var(--accent);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++}
++.surface-node-label {
++  font-size: 13px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.surface-node-desc {
++  margin: 0;
++  font-size: 11.5px;
++  line-height: 1.5;
++  color: var(--muted);
++}
++
++@media (max-width: 760px) {
++  .surfaces-wrap { padding: 24px; }
++  .surfaces-diagram {
++    grid-template-columns: 1fr;
++    gap: 24px;
++    min-height: auto;
++  }
++  .surfaces-lines { display: none; }
++  .surfaces-nodes { margin-left: 0; max-width: 100%; }
++}
++
++/* ── Inline app demo (beat 2) ──────────────────────────────────────── */
++.demo-wrap {
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: 14px;
++  overflow: hidden;
++  box-shadow: 0 4px 20px -16px rgba(14, 14, 12, 0.3);
++}
++.demo-tabs {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  padding: 10px 12px;
++  border-bottom: 1px solid var(--line);
++  background: #fafaf8;
++}
++.demo-tabs-spacer { flex: 1; }
++.demo-tab {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 7px 12px;
++  font-size: 12.5px;
++  font-weight: 600;
++  color: var(--muted);
++  background: none;
++  border: 1px solid transparent;
++  border-radius: 7px;
++  cursor: pointer;
++  font-family: inherit;
++}
++.demo-tab.is-active {
++  background: var(--card);
++  border-color: var(--line);
++  color: var(--ink);
++}
++.demo-tab:hover:not(.is-active) {
++  color: var(--ink);
++}
++.demo-replay {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  padding: 6px 10px;
++  font-size: 11px;
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: 7px;
++  color: var(--muted);
++  cursor: pointer;
++  font-family: inherit;
++}
++.demo-replay:hover {
++  color: var(--ink);
++}
++.demo-body {
++  padding: 20px 22px 22px;
++}
++.demo-prompt {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++  padding: 10px 12px;
++  background: #fafaf8;
++  border: 1px solid var(--line);
++  border-radius: 8px;
++  margin-bottom: 12px;
++}
++.demo-prompt-label {
++  font-size: 10px;
++  font-family: 'JetBrains Mono', monospace;
++  text-transform: uppercase;
++  color: var(--muted);
++  letter-spacing: 0.06em;
++}
++.demo-prompt code {
++  font-size: 12.5px;
++  color: var(--ink);
++  font-family: 'JetBrains Mono', monospace;
++}
++.demo-status {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  font-size: 11.5px;
++  color: var(--muted);
++  margin-bottom: 14px;
++  font-family: 'JetBrains Mono', monospace;
++}
++.demo-status .status-dot {
++  width: 6px;
++  height: 6px;
++  border-radius: 50%;
++  background: #1a7f37;
++}
++.demo-results {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  margin-bottom: 16px;
++}
++.demo-results.is-replaying {
++  animation: replay-fade 0.7s ease;
++}
++@keyframes replay-fade {
++  0%   { opacity: 0.2; transform: translateY(4px); }
++  100% { opacity: 1;   transform: translateY(0); }
++}
++
++.flight-card {
++  display: block;
++  text-decoration: none;
++  padding: 12px 14px;
++  background: #fafaf8;
++  border: 1px solid var(--line);
++  border-radius: 9px;
++  transition: border-color 0.12s, background 0.12s;
++}
++.flight-card:hover {
++  border-color: var(--ink);
++  background: var(--card);
++}
++.flight-card-row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++}
++.flight-card-row + .flight-card-row {
++  margin-top: 4px;
++}
++.flight-card-times {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++}
++.flight-card-time {
++  font-size: 15px;
++  font-weight: 700;
++  color: var(--ink);
++  font-feature-settings: 'tnum';
++}
++.flight-card-arrow {
++  color: var(--muted);
++  display: inline-flex;
++}
++.flight-card-price {
++  font-size: 16px;
++  font-weight: 700;
++  color: var(--ink);
++  font-feature-settings: 'tnum';
++}
++.flight-card-meta {
++  font-size: 11.5px;
++  color: var(--muted);
++  font-family: 'JetBrains Mono', monospace;
++}
++.flight-card-date {
++  font-size: 11.5px;
++  color: var(--muted);
++  font-family: 'JetBrains Mono', monospace;
++}
++
++.blast-output {
++  padding: 12px 14px;
++  background: #fafaf8;
++  border: 1px solid var(--line);
++  border-radius: 9px;
++}
++.blast-summary {
++  display: flex;
++  align-items: center;
++  gap: 7px;
++  padding-bottom: 10px;
++  margin-bottom: 10px;
++  border-bottom: 1px solid var(--line);
++  font-size: 12px;
++  color: var(--ink);
++  font-weight: 600;
++  font-family: 'JetBrains Mono', monospace;
++}
++.blast-summary svg { color: #1a7f37; }
++.blast-cols {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 16px;
++}
++.blast-col-label {
++  font-size: 10px;
++  font-family: 'JetBrains Mono', monospace;
++  text-transform: uppercase;
++  letter-spacing: 0.06em;
++  color: var(--muted);
++  margin: 0 0 6px;
++}
++.blast-list {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++}
++.blast-list li {
++  font-size: 11px;
++  color: var(--ink);
++  font-family: 'JetBrains Mono', monospace;
++  display: flex;
++  align-items: center;
++  gap: 5px;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++.blast-list svg { color: var(--muted); flex-shrink: 0; }
++.blast-list .blast-more {
++  color: var(--muted);
++  margin-top: 2px;
++}
++
++@media (max-width: 640px) {
++  .blast-cols { grid-template-columns: 1fr; }
++}
++
++.demo-actions {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding-top: 12px;
++  border-top: 1px solid var(--line);
++}
++.demo-cta {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  padding: 8px 14px;
++  background: var(--ink);
++  color: #fafaf8;
++  border-radius: 7px;
++  font-size: 12px;
++  font-weight: 600;
++  text-decoration: none;
++}
++.demo-cta:hover {
++  background: #25241f;
++}
++.demo-curl {
++  font-size: 11px;
++  color: var(--muted);
++  font-family: 'JetBrains Mono', monospace;
++}
++
++/* ── Code block (beat 3: plug into your agent) ─────────────────────── */
++.codeblock {
++  background: #0e0e0c;
++  border: 1px solid #1f1f1a;
++  border-radius: 12px;
++  overflow: hidden;
++}
++.codeblock-head {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  padding: 8px 10px;
++  border-bottom: 1px solid #1f1f1a;
++  background: #141410;
++}
++.codeblock-tabs {
++  display: flex;
++  gap: 2px;
++}
++.codeblock-tab {
++  padding: 6px 12px;
++  font-size: 12px;
++  background: none;
++  border: 1px solid transparent;
++  border-radius: 7px;
++  color: rgba(241, 239, 233, 0.55);
++  cursor: pointer;
++  font-family: inherit;
++  font-weight: 500;
++}
++.codeblock-tab.is-active {
++  background: rgba(255, 255, 255, 0.05);
++  color: #f1efe9;
++  border-color: #2a2a22;
++}
++.codeblock-tab:hover:not(.is-active) {
++  color: #d4d2c8;
++}
++.codeblock-copy {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  padding: 6px 10px;
++  font-size: 11px;
++  background: rgba(255, 255, 255, 0.05);
++  border: 1px solid #2a2a22;
++  border-radius: 7px;
++  color: rgba(241, 239, 233, 0.7);
++  cursor: pointer;
++  font-family: inherit;
++}
++.codeblock-copy:hover {
++  color: #f1efe9;
++}
++.codeblock-body {
++  margin: 0;
++  padding: 18px 20px;
++  font-family: 'JetBrains Mono', monospace;
++  font-size: 13px;
++  line-height: 1.7;
++  color: #d4d2c8;
++  overflow-x: auto;
++}
++.codeblock-body code {
++  font-family: inherit;
++}
++.tk-key { color: #9f96ff; }
++.tk-str { color: #c5e898; }
++.tk-num { color: #ffcb8b; }
++.tk-bool { color: #ff9a8b; }
++.tk-punc { color: #6e6c64; }
++.tk-comment { color: #6e6c64; font-style: italic; }
++.tk-fn { color: #9f96ff; }
++.tk-flag { color: #ffcb8b; }
++
++/* ── Self-host terminal (beat 4) ───────────────────────────────────── */
++.terminal {
++  background: #0e0e0c;
++  border: 1px solid #1f1f1a;
++  border-radius: 12px;
++  overflow: hidden;
++  box-shadow: 0 12px 40px -20px rgba(0, 0, 0, 0.6);
++}
++.terminal-head {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 9px 12px;
++  background: #141410;
++  border-bottom: 1px solid #1f1f1a;
++}
++.terminal-traffic {
++  display: flex;
++  gap: 6px;
++}
++.terminal-traffic span {
++  width: 11px;
++  height: 11px;
++  border-radius: 50%;
++  background: #2a2a22;
++}
++.terminal-traffic span:nth-child(1) { background: #ff5f57; }
++.terminal-traffic span:nth-child(2) { background: #febc2e; }
++.terminal-traffic span:nth-child(3) { background: #28c840; }
++.terminal-title {
++  flex: 1;
++  text-align: center;
++  font-size: 11px;
++  color: rgba(241, 239, 233, 0.5);
++  font-family: 'JetBrains Mono', monospace;
++}
++.terminal-body {
++  margin: 0;
++  padding: 18px 20px 22px;
++  font-family: 'JetBrains Mono', monospace;
++  font-size: 12.5px;
++  line-height: 1.65;
++  color: #d4d2c8;
++  overflow-x: auto;
++  min-height: 360px;
++}
++.terminal-body .term-cmd { color: #f1efe9; font-weight: 600; }
++.terminal-body .term-out { color: #d4d2c8; }
++.terminal-body .term-dim { color: #6e6c64; }
++.terminal-body .term-info { color: #9f96ff; }
++.terminal-body .term-ok { color: #c5e898; }
++.terminal-body .term-ready {
++  color: #28c840;
++  font-weight: 700;
++  margin-top: 4px;
++}
++.term-cursor {
++  display: inline-block;
++  color: #c5e898;
++  animation: term-blink 1s steps(2) infinite;
++}
++@keyframes term-blink {
++  50% { opacity: 0; }
++}
++
++/* ── Roadmap grid (beat 5) ─────────────────────────────────────────── */
++.roadmap {
++  display: flex;
++  flex-direction: column;
++  gap: 32px;
++}
++.roadmap-grid {
++  display: grid;
++  grid-template-columns: repeat(4, 1fr);
++  gap: 1px;
++  background: var(--line);
++  border: 1px solid var(--line);
++  border-radius: 12px;
++  overflow: hidden;
++}
++.roadmap-cell {
++  background: var(--card);
++  padding: 18px 18px;
++  display: flex;
++  align-items: flex-start;
++  gap: 12px;
++  min-height: 96px;
++}
++.roadmap-cell-icon {
++  width: 28px;
++  height: 28px;
++  border-radius: 7px;
++  background: var(--accent-soft);
++  color: var(--accent);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  flex-shrink: 0;
++}
++.roadmap-cell-text { display: flex; flex-direction: column; gap: 3px; }
++.roadmap-cell-label {
++  margin: 0;
++  font-size: 13px;
++  font-weight: 700;
++  color: var(--ink);
++}
++.roadmap-cell-desc {
++  margin: 0;
++  font-size: 12px;
++  color: var(--muted);
++  line-height: 1.5;
++}
++
++@media (max-width: 1000px) {
++  .roadmap-grid { grid-template-columns: repeat(3, 1fr); }
++  .launch-strip-grid { grid-template-columns: repeat(3, 1fr); }
++}
++@media (max-width: 720px) {
++  .roadmap-grid { grid-template-columns: repeat(2, 1fr); }
++  .launch-strip-grid { grid-template-columns: repeat(2, 1fr); }
++}
++@media (max-width: 480px) {
++  .roadmap-grid { grid-template-columns: 1fr; }
++  .launch-strip-grid { grid-template-columns: 1fr; }
++}
++
++.roadmap-cta {
++  display: grid;
++  grid-template-columns: 1.1fr 1fr;
++  gap: 32px;
++  align-items: center;
++  padding: 32px;
++  background: var(--ink);
++  border-radius: 14px;
++  color: #f7f5ee;
++}
++.roadmap-cta-text { display: flex; flex-direction: column; gap: 8px; }
++.roadmap-cta-eyebrow {
++  margin: 0;
++  font-size: 11px;
++  font-family: 'JetBrains Mono', monospace;
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  color: #9f96ff;
++}
++.roadmap-cta-title {
++  margin: 0;
++  font-size: 22px;
++  font-weight: 700;
++  letter-spacing: -0.015em;
++}
++.roadmap-cta-sub {
++  margin: 0;
++  font-size: 13.5px;
++  color: rgba(247, 245, 238, 0.65);
++  line-height: 1.55;
++}
++.roadmap-cta-form {
++  display: flex;
++  gap: 8px;
++  flex-wrap: wrap;
++}
++.roadmap-cta-form input {
++  flex: 1;
++  min-width: 200px;
++  padding: 12px 14px;
++  font-size: 14px;
++  background: rgba(255, 255, 255, 0.06);
++  border: 1px solid rgba(255, 255, 255, 0.12);
++  border-radius: 9px;
++  color: #f7f5ee;
++  font-family: inherit;
++  outline: none;
++  transition: border-color 0.15s;
++}
++.roadmap-cta-form input:focus {
++  border-color: #9f96ff;
++}
++.roadmap-cta-form input::placeholder {
++  color: rgba(247, 245, 238, 0.4);
++}
++.roadmap-cta-form button {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  padding: 12px 18px;
++  font-size: 13px;
++  font-weight: 600;
++  background: #f7f5ee;
++  color: var(--ink);
++  border: none;
++  border-radius: 9px;
++  cursor: pointer;
++  font-family: inherit;
++}
++.roadmap-cta-form button:hover {
++  background: #fff;
++}
++.roadmap-cta-form button:disabled {
++  opacity: 0.6;
++  cursor: not-allowed;
++}
++.roadmap-cta-form.is-success {
++  font-size: 14px;
++  color: #c5e898;
++  padding: 12px 0;
++}
++.roadmap-cta-error {
++  width: 100%;
++  margin: 4px 0 0;
++  font-size: 12px;
++  color: #ff9a8b;
++}
++
++@media (max-width: 760px) {
++  .roadmap-cta { grid-template-columns: 1fr; padding: 24px; }
++}
++
++/* ── Two-column grid for surfaces section ──────────────────────────── */
++.home-twocol {
++  display: grid;
++  grid-template-columns: 1fr 1.4fr;
++  gap: 48px;
++  align-items: start;
++}
++.home-twocol .home-section-head {
++  margin-bottom: 0;
++}
++@media (max-width: 900px) {
++  .home-twocol { grid-template-columns: 1fr; gap: 28px; }
++}
++
++/* ── Hero responsive ───────────────────────────────────────────────── */
++@media (max-width: 760px) {
++  .home-hero { padding: 64px 20px 56px; }
++  .home-hero-title { font-size: 44px; }
++  .home-hero-sub { font-size: 16px; }
++  .home-section { padding: 56px 20px; }
++  .home-section-title { font-size: 26px; }
++}
++@media (max-width: 480px) {
++  .home-hero-title { font-size: 36px; }
++  .home-hero-stats { gap: 24px; }
++}
++

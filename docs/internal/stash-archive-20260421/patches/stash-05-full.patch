@@ -1,0 +1,33 @@
+diff --git a/apps/web/src/pages/MeAppRunPage.tsx b/apps/web/src/pages/MeAppRunPage.tsx
+index 1ec9fab..66d8cc3 100644
+--- a/apps/web/src/pages/MeAppRunPage.tsx
++++ b/apps/web/src/pages/MeAppRunPage.tsx
+@@ -34,6 +34,14 @@ const REQUIRED_SECRETS_OVERRIDE: Record<string, string[]> = {
+ export function MeAppRunPage() {
+   const { slug } = useParams<{ slug: string }>();
+   const nav = useNavigate();
++  const [searchParams] = useSearchParams();
++  // v15.1: the /me composer deep-links to this page with ?prompt=<text>
++  // so follow-ups typed on /me land here with the prompt input pre-filled.
++  const prefillPrompt = searchParams.get('prompt');
++  const initialInputs = useMemo<Record<string, unknown> | undefined>(
++    () => (prefillPrompt ? { prompt: prefillPrompt } : undefined),
++    [prefillPrompt],
++  );
+   const [app, setApp] = useState<AppDetail | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const secrets = useSecrets();
+@@ -144,7 +152,12 @@ export function MeAppRunPage() {
+               )}
+ 
+               {missingKeys && missingKeys.length === 0 && (
+-                <FloomApp app={app} standalone showSidebar={false} />
++                <FloomApp
++                  app={app}
++                  standalone
++                  showSidebar={false}
++                  initialInputs={initialInputs}
++                />
+               )}
+             </>
+           )}

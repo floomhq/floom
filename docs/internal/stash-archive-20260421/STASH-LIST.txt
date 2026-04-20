@@ -1,0 +1,19 @@
+stash@{0}: On feat/hub-smoke-e2e: journal-wip-before-hub-smoke-rebase
+stash@{1}: On fix/ux-loading-auth-2026-04-18: wip other files
+stash@{2}: On fix/ux-hub-me-notice-2026-04-18: wip unrelated before ux-a11y branch
+stash@{3}: On fix/ux-loading-auth-2026-04-18: wip before ux-hub-me-notice
+stash@{4}: WIP on feat/me-v15.1-claude-shape: 38dd71a feat(web): logo glow polish - animate prop + login + hero breathe (#48)
+stash@{5}: On feat/revive-runtime-deploy: more me-v15.1 inflight: MeAppRunPage prompt prefill
+stash@{6}: On feat/revive-runtime-deploy: unrelated inflight changes from concurrent feat/me-v15.1 session
+stash@{7}: On feat/logo-glow-expansion-2026-04-17: W1-inflight-changes-before-v15public-work
+stash@{8}: On main: pre-v15.2-uncommitted-rate-limit-work
+stash@{9}: On fix/rate-limits-hardening-2026-04-17: consent-sentry-lane-WIP
+stash@{10}: On fix/rate-limits-hardening-2026-04-17: lane-d-stash-1776457619
+stash@{11}: WIP on main: d129ab8 Merge pull request #25 from floomhq/docs/go-public-checklist
+stash@{12}: On main: in-flight other lanes work (visibility, etc) - not for rate-limit PR
+stash@{13}: On polish/logo-glow-2026-04-17: logo-glow-wip
+stash@{14}: On main: W4M.gap-close WIP: better-auth migrations + /me/settings + run ctx
+stash@{15}: On wave/W2.1-per-user-state: W2.1 landed changes - stashed by W2.2 for branch switch
+stash@{16}: On wave/W2.1-per-user-state: W2.2 openapi-ingest renderer integration
+stash@{17}: On wave/W2.1-per-user-state: W2.2 uncommitted work preserved by W2.1 agent
+stash@{18}: On main: W1.3 landing polish WIP - stashed by W2.2 agent before branch switch

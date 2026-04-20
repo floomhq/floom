@@ -1,0 +1,420 @@
+diff --git a/apps/server/src/services/manifest.ts b/apps/server/src/services/manifest.ts
+index cabc54b..2421d6e 100644
+--- a/apps/server/src/services/manifest.ts
++++ b/apps/server/src/services/manifest.ts
+@@ -7,6 +7,7 @@ import type {
+   NormalizedManifest,
+   OutputSpec,
+   OutputType,
++  UserSecretSpec,
+ } from '../types.js';
+ 
+ const VALID_RUNTIMES = ['python', 'node'] as const;
+@@ -90,6 +91,13 @@ function validateInput(raw: unknown, prefix: string): InputSpec {
+   if (raw.description !== undefined && typeof raw.description === 'string') {
+     spec.description = raw.description;
+   }
++  // v15.2 polish: carry through the `multi` flag when the ingest tagged
++  // this input as a string[]-valued field. Validation is loose — any
++  // boolean passes; non-booleans are silently dropped so old manifests
++  // that never set this field continue to validate.
++  if (typeof raw.multi === 'boolean') {
++    spec.multi = raw.multi;
++  }
+   if (spec.type === 'enum') {
+     if (!Array.isArray(raw.options) || raw.options.some((o) => typeof o !== 'string')) {
+       throw new ManifestError(
+@@ -215,6 +223,29 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
+     secrets_needed.push(...raw.secrets_needed);
+   }
+ 
++  // v15.2 polish: optional rich user-secret metadata. Sourced from the
++  // OpenAPI extension `x-floom-user-secrets` via openapi-ingest. When
++  // absent we leave it undefined; consumers (web runner, MCP bridge)
++  // then treat every entry in secrets_needed as required. Validation
++  // is defensive — malformed entries are dropped rather than throwing
++  // so older seeded manifests don't fail validation.
++  let user_secrets: UserSecretSpec[] | undefined;
++  if (Array.isArray(raw.user_secrets)) {
++    const parsed: UserSecretSpec[] = [];
++    for (const entry of raw.user_secrets) {
++      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
++      const e = entry as Record<string, unknown>;
++      if (typeof e.name !== 'string' || e.name.length === 0) continue;
++      const spec: UserSecretSpec = { name: e.name };
++      if (typeof e.required === 'boolean') spec.required = e.required;
++      if (typeof e.label === 'string') spec.label = e.label;
++      if (typeof e.description === 'string') spec.description = e.description;
++      if (typeof e.link === 'string') spec.link = e.link;
++      parsed.push(spec);
++    }
++    if (parsed.length > 0) user_secrets = parsed;
++  }
++
+   let actions: Record<string, ActionSpec>;
+   if (version === '1.0') {
+     if (!Array.isArray(raw.inputs)) {
+@@ -264,6 +295,7 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
+     node_dependencies,
+     secrets_needed,
+     manifest_version: version as '1.0' | '2.0',
++    ...(user_secrets ? { user_secrets } : {}),
+     ...(apt_packages.length > 0 && { apt_packages }),
+   };
+ }
+diff --git a/apps/server/src/services/openapi-ingest.ts b/apps/server/src/services/openapi-ingest.ts
+index 3c3976d..59c1fc4 100644
+--- a/apps/server/src/services/openapi-ingest.ts
++++ b/apps/server/src/services/openapi-ingest.ts
+@@ -17,7 +17,12 @@ import type { RendererManifest } from '@floom/renderer/contract';
+ import { db } from '../db.js';
+ import { newAppId, newSecretId } from '../lib/ids.js';
+ import { bundleRendererFromManifest } from './renderer-bundler.js';
+-import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
++import type {
++  NormalizedManifest,
++  InputSpec,
++  OutputSpec,
++  UserSecretSpec,
++} from '../types.js';
+ 
+ // ---------- config schema ----------
+ 
+@@ -228,6 +233,22 @@ interface OpenApiSpec {
+       }
+     >;
+   };
++  /**
++   * v15.2 polish: creators declare the per-user credentials their app
++   * needs at the root of the OpenAPI doc via the `x-floom-user-secrets`
++   * extension. Each entry can mark `required: false` to denote that the
++   * credential is optional (e.g. Instagram's `mid` / `ig_did` cookies).
++   * Copied onto `NormalizedManifest.user_secrets` by `specToManifest`.
++   * Untyped in the OpenAPI types package, so we surface it here as a
++   * plain list. The shape is validated defensively when copied.
++   */
++  'x-floom-user-secrets'?: Array<{
++    name?: string;
++    required?: boolean;
++    label?: string;
++    description?: string;
++    link?: string;
++  }>;
+ }
+ 
+ // ---------- helpers ----------
+@@ -348,6 +369,26 @@ function schemaToInputType(schema: JsonSchema): InputSpec['type'] {
+   return 'text';
+ }
+ 
++/**
++ * Returns true if this schema describes an array whose items are strings.
++ * The proxied-runner expects such fields to arrive as `string[]` on the
++ * wire; the browser splits the textarea value on comma/newline. We tag
++ * the manifest InputSpec with `multi: true` so the web client no longer
++ * needs an app-specific allow-list (the old ARRAY_INPUT_NAMES hack).
++ */
++function isStringArraySchema(schema: JsonSchema): boolean {
++  const t = Array.isArray(schema.type)
++    ? schema.type.find((x) => x !== 'null')
++    : schema.type;
++  if (t !== 'array') return false;
++  const items = schema.items;
++  if (!items || typeof items !== 'object') return false;
++  const itemType = Array.isArray(items.type)
++    ? items.type.find((x) => x !== 'null')
++    : items.type;
++  return itemType === 'string';
++}
++
+ function formatLabel(name: string): string {
+   return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+ }
+@@ -355,6 +396,7 @@ function formatLabel(name: string): string {
+ function openApiParamToInput(param: OpenApiParameter): InputSpec {
+   const schema = flattenComposition(param.schema || {});
+   const type = schemaToInputType(schema);
++  const multi = isStringArraySchema(schema);
+ 
+   return {
+     name: param.name,
+@@ -364,6 +406,7 @@ function openApiParamToInput(param: OpenApiParameter): InputSpec {
+     description: param.description,
+     options: type === 'enum' ? (schema.enum as string[]) : undefined,
+     default: schema.default,
++    ...(multi ? { multi: true } : {}),
+   };
+ }
+ 
+@@ -415,6 +458,7 @@ function bodySchemaToInputs(
+   for (const [propName, rawProp] of Object.entries(schema.properties)) {
+     const propSchema = flattenComposition(rawProp);
+     const type = schemaToInputType(propSchema);
++    const multi = isStringArraySchema(propSchema);
+ 
+     inputs.push({
+       name: propName,
+@@ -427,6 +471,7 @@ function bodySchemaToInputs(
+           : undefined,
+       options: type === 'enum' ? (propSchema.enum as string[]) : undefined,
+       default: propSchema.default,
++      ...(multi ? { multi: true } : {}),
+     });
+   }
+   return inputs;
+@@ -690,6 +735,12 @@ export function specToManifest(
+     };
+   }
+ 
++  // v15.2 polish: carry the `x-floom-user-secrets` block from the
++  // OpenAPI spec onto the manifest. Only entries with a non-empty name
++  // are kept; malformed entries are silently dropped so a typo in the
++  // spec doesn't fail ingest.
++  const userSecrets = extractUserSecrets(spec);
++
+   return {
+     name: appSpec.display_name || spec.info?.title || appSpec.slug,
+     description:
+@@ -702,10 +753,33 @@ export function specToManifest(
+     node_dependencies: {},
+     secrets_needed: secretNames,
+     manifest_version: '2.0',
++    ...(userSecrets.length > 0 ? { user_secrets: userSecrets } : {}),
+     ...(appSpec.blocked_reason ? { blocked_reason: appSpec.blocked_reason } : {}),
+   };
+ }
+ 
++/**
++ * Read the `x-floom-user-secrets` extension off the root of an OpenAPI
++ * spec and normalize it into `UserSecretSpec[]`. Defensive: accepts
++ * missing/malformed entries and drops them rather than throwing.
++ */
++function extractUserSecrets(spec: OpenApiSpec): UserSecretSpec[] {
++  const raw = spec['x-floom-user-secrets'];
++  if (!Array.isArray(raw)) return [];
++  const out: UserSecretSpec[] = [];
++  for (const entry of raw) {
++    if (!entry || typeof entry !== 'object') continue;
++    if (typeof entry.name !== 'string' || entry.name.length === 0) continue;
++    const spec: UserSecretSpec = { name: entry.name };
++    if (typeof entry.required === 'boolean') spec.required = entry.required;
++    if (typeof entry.label === 'string') spec.label = entry.label;
++    if (typeof entry.description === 'string') spec.description = entry.description;
++    if (typeof entry.link === 'string') spec.link = entry.link;
++    out.push(spec);
++  }
++  return out;
++}
++
+ export async function fetchSpec(url: string): Promise<OpenApiSpec> {
+   const res = await fetch(url, {
+     headers: { Accept: 'application/json, application/yaml, text/plain' },
+diff --git a/apps/server/src/types.ts b/apps/server/src/types.ts
+index 9b3df3c..f3c188b 100644
+--- a/apps/server/src/types.ts
++++ b/apps/server/src/types.ts
+@@ -32,6 +32,15 @@ export interface InputSpec {
+   options?: string[];
+   placeholder?: string;
+   description?: string;
++  /**
++   * Set by the OpenAPI ingest when the upstream schema says
++   * `type: array` with `items.type: string`. Consumers (the web runner,
++   * the MCP bridge) render the field as a textarea but emit a `string[]`
++   * payload — splitting on comma/newline — instead of a bare string.
++   * Undefined means "single-value" (default). Lives here so the browser
++   * no longer has to hardcode per-app allow-lists of array fields.
++   */
++  multi?: boolean;
+ }
+ 
+ export interface OutputSpec {
+@@ -61,6 +70,24 @@ export interface ActionSpec {
+   secrets_needed?: string[];
+ }
+ 
++/**
++ * Rich user-secret descriptor, populated from the OpenAPI extension
++ * `x-floom-user-secrets`. `secrets_needed` still carries the flat string[]
++ * list (unchanged, for back-compat with runner.ts / proxied-runner.ts /
++ * mcp.ts), but this field carries the per-secret metadata — crucially the
++ * `required` flag — that the web runner needs to decide which secrets
++ * actually gate the /run UI. When this field is absent, consumers should
++ * treat every entry in `secrets_needed` as required (preserves existing
++ * behavior for older manifests).
++ */
++export interface UserSecretSpec {
++  name: string;
++  required?: boolean;
++  label?: string;
++  description?: string;
++  link?: string;
++}
++
+ export interface NormalizedManifest {
+   name: string;
+   description: string;
+@@ -69,6 +96,13 @@ export interface NormalizedManifest {
+   python_dependencies: string[];
+   node_dependencies: Record<string, string>;
+   secrets_needed: string[];
++  /**
++   * v15.2 polish: rich user-secret metadata (see `UserSecretSpec`). Set
++   * by the OpenAPI ingest when the spec declares `x-floom-user-secrets`.
++   * Optional — when absent, every entry in `secrets_needed` is treated
++   * as required (back-compat with older manifests).
++   */
++  user_secrets?: UserSecretSpec[];
+   manifest_version: '1.0' | '2.0';
+   apt_packages?: string[];
+   /**
+diff --git a/apps/web/src/lib/types.ts b/apps/web/src/lib/types.ts
+index 9a9fb2c..5c474d9 100644
+--- a/apps/web/src/lib/types.ts
++++ b/apps/web/src/lib/types.ts
+@@ -30,6 +30,14 @@ export interface InputSpec {
+   options?: string[];
+   placeholder?: string;
+   description?: string;
++  /**
++   * v15.2 polish: when true, the input accepts multiple string values
++   * (comma/newline-separated on the wire, emitted as string[] to the
++   * server). Populated by the OpenAPI ingest when the upstream schema
++   * said `type: array`; eliminates the need for the hardcoded
++   * ARRAY_INPUT_NAMES allow-list that used to live in FloomApp.tsx.
++   */
++  multi?: boolean;
+ }
+ 
+ export interface OutputSpec {
+@@ -53,6 +61,22 @@ export interface ActionSpec {
+   secrets_needed?: string[];
+ }
+ 
++/**
++ * Rich user-secret descriptor, populated from the OpenAPI extension
++ * `x-floom-user-secrets`. `secrets_needed` still carries the flat string[]
++ * list (unchanged for back-compat); this field carries the per-secret
++ * `required` flag that the /me/a/:slug runner uses to decide which keys
++ * actually gate the UI. When the field is absent, consumers treat every
++ * entry in `secrets_needed` as required (back-compat with older manifests).
++ */
++export interface UserSecretSpec {
++  name: string;
++  required?: boolean;
++  label?: string;
++  description?: string;
++  link?: string;
++}
++
+ export interface NormalizedManifest {
+   name: string;
+   description: string;
+@@ -61,6 +85,11 @@ export interface NormalizedManifest {
+   python_dependencies: string[];
+   node_dependencies: Record<string, string>;
+   secrets_needed: string[];
++  /**
++   * v15.2 polish: see `UserSecretSpec`. Optional; when absent, every entry
++   * in `secrets_needed` is treated as required.
++   */
++  user_secrets?: UserSecretSpec[];
+   manifest_version: '1.0' | '2.0';
+ }
+ 
+diff --git a/apps/web/src/pages/MePage.tsx b/apps/web/src/pages/MePage.tsx
+index 08f9302..5216ba3 100644
+--- a/apps/web/src/pages/MePage.tsx
++++ b/apps/web/src/pages/MePage.tsx
+@@ -17,6 +17,7 @@
+ import { useEffect, useState, type ReactNode } from 'react';
+ import { Link } from 'react-router-dom';
+ import { PageShell } from '../components/PageShell';
++import { Logo } from '../components/Logo';
+ import { useSession } from '../hooks/useSession';
+ import { useMyApps } from '../hooks/useMyApps';
+ import { AppIcon } from '../components/AppIcon';
+@@ -371,7 +372,8 @@ function IconDownload() {
+ // ---------- Your apps (v15.2 surface above the runs list) ----------
+ function YourAppsPanel() {
+   const { apps } = useMyApps();
+-  if (!apps || apps.length === 0) return null;
++  if (apps === null) return null;
++  if (apps.length === 0) return <YourAppsEmpty />;
+   return (
+     <section
+       data-testid="your-apps-panel"
+@@ -464,6 +466,73 @@ function YourAppsPanel() {
+   );
+ }
+ 
++/**
++ * Empty state for the "Your apps" section on /me. Shown when the user
++ * has no personal apps yet (apps.length === 0, not loading). The
++ * glowing Floom mark makes this feel like a brand moment rather than
++ * an error — first thing a new user sees after signup.
++ */
++function YourAppsEmpty() {
++  return (
++    <section
++      data-testid="your-apps-empty"
++      style={{ marginBottom: 28 }}
++    >
++      <div
++        style={{
++          textAlign: 'center',
++          padding: '48px 24px 40px',
++          background: 'var(--card)',
++          border: '1px dashed var(--line)',
++          borderRadius: 14,
++        }}
++      >
++        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
++          <Logo size={56} variant="glow" animate="boot-in" />
++        </div>
++        <h3
++          style={{
++            fontSize: 18,
++            fontWeight: 700,
++            color: 'var(--ink)',
++            margin: '0 0 8px',
++          }}
++        >
++          Install your first app
++        </h3>
++        <p
++          style={{
++            fontSize: 13,
++            color: 'var(--muted)',
++            margin: '0 auto 20px',
++            maxWidth: 380,
++            lineHeight: 1.55,
++          }}
++        >
++          Browse the store to add an app to your workspace. It'll show up here
++          and you can run it over web, HTTP, or MCP.
++        </p>
++        <Link
++          to="/apps"
++          data-testid="your-apps-empty-cta"
++          style={{
++            display: 'inline-block',
++            padding: '10px 20px',
++            background: 'var(--ink)',
++            color: '#fff',
++            borderRadius: 8,
++            fontSize: 13,
++            fontWeight: 600,
++            textDecoration: 'none',
++          }}
++        >
++          Browse apps
++        </Link>
++      </div>
++    </section>
++  );
++}
++
+ // ---------- Runs tab ----------
+ function RunsTab() {
+   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);

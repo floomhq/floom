@@ -1,0 +1,557 @@
+diff --git a/apps/server/package.json b/apps/server/package.json
+index f177087..cb3b1aa 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -8,7 +8,7 @@
+     "build": "tsc && node scripts/copy-assets.mjs",
+     "start": "node dist/index.js",
+     "typecheck": "tsc --noEmit",
+-    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-ingest-security.mjs && node ../../test/stress/test-mcp-action-secrets.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs && node ../../test/stress/test-proxied-timeout.mjs && node ../../test/stress/test-w21-schema.mjs && node ../../test/stress/test-w21-session.mjs && node ../../test/stress/test-w21-app-memory.mjs && node ../../test/stress/test-w21-user-secrets.mjs && node ../../test/stress/test-w21-routes.mjs && tsx ../../test/stress/test-renderer-contract.mjs && tsx ../../test/stress/test-renderer-defaults.mjs && tsx ../../test/stress/test-renderer-bundler.mjs && tsx ../../test/stress/test-renderer-e2e.mjs && tsx ../../test/stress/test-renderer-sandbox.mjs && node ../../test/stress/test-w23-schema.mjs && node ../../test/stress/test-w23-composio-service.mjs && node ../../test/stress/test-w23-rekey.mjs && node ../../test/stress/test-w23-routes.mjs && node ../../test/stress/test-w23-integration.mjs && node ../../test/stress/test-w33-schema.mjs && node ../../test/stress/test-w33-stripe-service.mjs && node ../../test/stress/test-w33-stripe-routes.mjs && node ../../test/stress/test-w33-webhook.mjs && node ../../test/stress/test-w31-schema.mjs && node ../../test/stress/test-w31-better-auth-init.mjs && node ../../test/stress/test-w31-workspaces-service.mjs && node ../../test/stress/test-w31-workspaces-routes.mjs && node ../../test/stress/test-w31-auth-boundary.mjs && node ../../test/stress/test-w31-rekey-on-login.mjs && node ../../test/stress/test-w31-security-gates.mjs && node ../../test/stress/test-w4m-routes.mjs && node ../../test/stress/test-fast-apps.mjs && node ../../test/stress/test-silent-errors.mjs && node ../../test/stress/test-mcp-admin.mjs && node ../../test/stress/test-rate-limit.mjs && node ../../test/stress/test-metrics.mjs"
++    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-ingest-security.mjs && node ../../test/stress/test-mcp-action-secrets.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs && node ../../test/stress/test-proxied-timeout.mjs && node ../../test/stress/test-w21-schema.mjs && node ../../test/stress/test-w21-session.mjs && node ../../test/stress/test-w21-app-memory.mjs && node ../../test/stress/test-w21-user-secrets.mjs && node ../../test/stress/test-w21-routes.mjs && tsx ../../test/stress/test-renderer-contract.mjs && tsx ../../test/stress/test-renderer-defaults.mjs && tsx ../../test/stress/test-renderer-bundler.mjs && tsx ../../test/stress/test-renderer-e2e.mjs && tsx ../../test/stress/test-renderer-sandbox.mjs && node ../../test/stress/test-w23-schema.mjs && node ../../test/stress/test-w23-composio-service.mjs && node ../../test/stress/test-w23-rekey.mjs && node ../../test/stress/test-w23-routes.mjs && node ../../test/stress/test-w23-integration.mjs && node ../../test/stress/test-w33-schema.mjs && node ../../test/stress/test-w33-stripe-service.mjs && node ../../test/stress/test-w33-stripe-routes.mjs && node ../../test/stress/test-w33-webhook.mjs && node ../../test/stress/test-w31-schema.mjs && node ../../test/stress/test-w31-better-auth-init.mjs && node ../../test/stress/test-w31-workspaces-service.mjs && node ../../test/stress/test-w31-workspaces-routes.mjs && node ../../test/stress/test-w31-auth-boundary.mjs && node ../../test/stress/test-w31-rekey-on-login.mjs && node ../../test/stress/test-w31-security-gates.mjs && node ../../test/stress/test-w4m-routes.mjs && node ../../test/stress/test-visibility-private.mjs && node ../../test/stress/test-fast-apps.mjs && node ../../test/stress/test-silent-errors.mjs && node ../../test/stress/test-mcp-admin.mjs && node ../../test/stress/test-rate-limit.mjs && node ../../test/stress/test-metrics.mjs"
+   },
+   "dependencies": {
+     "@apidevtools/json-schema-ref-parser": "15.3.5",
+diff --git a/apps/server/src/lib/auth.ts b/apps/server/src/lib/auth.ts
+index 05f6194..cff4188 100644
+--- a/apps/server/src/lib/auth.ts
++++ b/apps/server/src/lib/auth.ts
+@@ -7,6 +7,9 @@
+ //   2. Per-app auth (app.visibility === 'auth-required') — on top of any
+ //      global auth, the specific app can be gated even when global auth is
+ //      off. Uses the same FLOOM_AUTH_TOKEN bearer check.
++//   3. Per-app privacy (app.visibility === 'private') — only the app's
++//      author (user_id) can run/list/view it. Used for user-owned apps
++//      like ig-nano-scout that should never appear in the public directory.
+ //
+ // This is intentionally minimal. Better Auth / SSO / per-user tokens are
+ // roadmap items for v0.3+; for v0.2 a single shared token is sufficient to
+@@ -67,19 +70,43 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
+   return next();
+ };
+ 
++export type AppVisibility = 'public' | 'auth-required' | 'private';
++
+ /**
+  * Per-app auth check. Call at the top of a route handler where `app` has
+  * already been loaded. Returns null if authorized, or a Response if blocked.
++ *
++ * For 'private' visibility, pass `owner` (the app's `author` column) and
++ * `ctx` (the resolved user context). Only the owner can pass the gate;
++ * everyone else gets a 404 so the app's existence isn't leaked.
+  */
+ export function checkAppVisibility(
+   c: Context,
+-  visibility: 'public' | 'auth-required',
++  visibility: AppVisibility | string | null | undefined,
++  owner?: { author?: string | null; ctx?: SessionContext | null },
+ ): Response | null {
+-  if (visibility === 'public') return null;
++  const v = (visibility || 'public') as AppVisibility;
++  if (v === 'public') return null;
++
++  if (v === 'private') {
++    const author = owner?.author ?? null;
++    const ctx = owner?.ctx ?? null;
++    // No author on a private app is a data bug — deny safely rather than leak.
++    if (!author) {
++      return c.json({ error: 'App not found', code: 'not_found' }, 404);
++    }
++    // OSS mode: ctx.user_id is DEFAULT_USER_ID ('local') and author is 'local'
++    // for locally-seeded apps, so this naturally passes. Cloud mode requires
++    // an authenticated session whose user_id matches the app's author.
++    if (!ctx || ctx.user_id !== author) {
++      return c.json({ error: 'App not found', code: 'not_found' }, 404);
++    }
++    return null;
++  }
++
++  // 'auth-required' — falls back to the shared FLOOM_AUTH_TOKEN bearer check.
+   const expected = getExpectedToken();
+   if (!expected) {
+-    // App is auth-required but no token env var is set. Deny by default —
+-    // better than silently allowing.
+     return c.json(
+       {
+         error:
+diff --git a/apps/server/src/routes/hub.ts b/apps/server/src/routes/hub.ts
+index 6a3f977..f4012d3 100644
+--- a/apps/server/src/routes/hub.ts
++++ b/apps/server/src/routes/hub.ts
+@@ -283,9 +283,13 @@ hubRouter.get('/', (c) => {
+   if (sort === 'newest') orderBy = 'created_at DESC';
+   if (sort === 'category') orderBy = 'category, name';
+ 
+-  const sql = `SELECT * FROM apps WHERE status = 'active' ${
+-    category ? 'AND category = ?' : ''
+-  } ORDER BY ${orderBy}`;
++  // Public directory: only apps with visibility='public' (or NULL for
++  // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
++  const sql = `SELECT * FROM apps
++                 WHERE status = 'active'
++                   AND (visibility = 'public' OR visibility IS NULL)
++                   ${category ? "AND category = ?" : ''}
++                 ORDER BY ${orderBy}`;
+   const rows = (category
+     ? db.prepare(sql).all(category)
+     : db.prepare(sql).all()) as AppRecord[];
+@@ -320,10 +324,18 @@ hubRouter.get('/', (c) => {
+   );
+ });
+ 
+-hubRouter.get('/:slug', (c) => {
++hubRouter.get('/:slug', async (c) => {
+   const slug = c.req.param('slug');
+   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+   if (!row) return c.json({ error: 'App not found' }, 404);
++  // Private app? Only reveal to its owner. Return 404 (not 403) so we
++  // don't leak the slug's existence to strangers.
++  if (row.visibility === 'private') {
++    const ctx = await resolveUserContext(c);
++    if (!row.author || ctx.user_id !== row.author) {
++      return c.json({ error: 'App not found' }, 404);
++    }
++  }
+   const manifest = safeManifest(row.manifest);
+   const bundle = getBundleResult(slug);
+   return c.json({
+diff --git a/apps/server/src/routes/jobs.ts b/apps/server/src/routes/jobs.ts
+index 3e31cdb..90a9d84 100644
+--- a/apps/server/src/routes/jobs.ts
++++ b/apps/server/src/routes/jobs.ts
+@@ -14,6 +14,7 @@ import { newJobId } from '../lib/ids.js';
+ import { createJob, formatJob, getJobBySlug, cancelJob } from '../services/jobs.js';
+ import { validateInputs, ManifestError } from '../services/manifest.js';
+ import { checkAppVisibility } from '../lib/auth.js';
++import { resolveUserContext } from '../services/session.js';
+ import type { AppRecord, NormalizedManifest } from '../types.js';
+ 
+ export const jobsRouter = new Hono<{ Variables: { slug: string } }>();
+@@ -38,7 +39,11 @@ jobsRouter.post('/', async (c) => {
+   if (row.status !== 'active') {
+     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
+   }
+-  const blocked = checkAppVisibility(c, row.visibility || 'public');
++  const ctx = await resolveUserContext(c);
++  const blocked = checkAppVisibility(c, row.visibility || 'public', {
++    author: row.author,
++    ctx,
++  });
+   if (blocked) return blocked;
+ 
+   if (!row.is_async) {
+@@ -128,14 +133,18 @@ jobsRouter.post('/', async (c) => {
+ /**
+  * GET /api/:slug/jobs/:job_id — latest snapshot.
+  */
+-jobsRouter.get('/:job_id', (c) => {
++jobsRouter.get('/:job_id', async (c) => {
+   const slug = c.req.param('slug') || '';
+   const jobId = c.req.param('job_id') || '';
+   const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
+     | AppRecord
+     | undefined;
+   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
+-  const blocked = checkAppVisibility(c, app.visibility || 'public');
++  const ctx = await resolveUserContext(c);
++  const blocked = checkAppVisibility(c, app.visibility || 'public', {
++    author: app.author,
++    ctx,
++  });
+   if (blocked) return blocked;
+   const job = getJobBySlug(slug, jobId);
+   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
+@@ -145,14 +154,18 @@ jobsRouter.get('/:job_id', (c) => {
+ /**
+  * POST /api/:slug/jobs/:job_id/cancel — cancel a queued or running job.
+  */
+-jobsRouter.post('/:job_id/cancel', (c) => {
++jobsRouter.post('/:job_id/cancel', async (c) => {
+   const slug = c.req.param('slug') || '';
+   const jobId = c.req.param('job_id') || '';
+   const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
+     | AppRecord
+     | undefined;
+   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
+-  const blocked = checkAppVisibility(c, app.visibility || 'public');
++  const ctx = await resolveUserContext(c);
++  const blocked = checkAppVisibility(c, app.visibility || 'public', {
++    author: app.author,
++    ctx,
++  });
+   if (blocked) return blocked;
+   const job = getJobBySlug(slug, jobId);
+   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
+diff --git a/apps/server/src/routes/mcp.ts b/apps/server/src/routes/mcp.ts
+index d3accc7..67c3eef 100644
+--- a/apps/server/src/routes/mcp.ts
++++ b/apps/server/src/routes/mcp.ts
+@@ -549,8 +549,11 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
+     },
+     async ({ category, keyword, limit }) => {
+       const lim = typeof limit === 'number' ? limit : 50;
++      // MCP list_apps is a public admin surface — only expose public apps.
++      // Private apps are owner-only and never show up in gallery-wide listings.
+       let sql =
+         "SELECT * FROM apps WHERE status = 'active'" +
++        " AND (visibility = 'public' OR visibility IS NULL)" +
+         (category ? ' AND category = ?' : '') +
+         ' ORDER BY featured DESC, name ASC';
+       const rows = (category
+@@ -761,7 +764,11 @@ mcpRouter.all('/app/:slug', async (c) => {
+       200,
+     );
+   }
+-  const blocked = checkAppVisibility(c, row.visibility || 'public');
++  const ctx = await resolveUserContext(c);
++  const blocked = checkAppVisibility(c, row.visibility || 'public', {
++    author: row.author,
++    ctx,
++  });
+   if (blocked) return blocked;
+   const server = createPerAppMcpServer(row);
+   return handleMcp(server, c.req.raw);
+diff --git a/apps/server/src/routes/run.ts b/apps/server/src/routes/run.ts
+index e79a0c5..33b6242 100644
+--- a/apps/server/src/routes/run.ts
++++ b/apps/server/src/routes/run.ts
+@@ -30,7 +30,11 @@ runRouter.post('/', async (c) => {
+   if (row.status !== 'active') {
+     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
+   }
+-  const blocked = checkAppVisibility(c, row.visibility || 'public');
++  const ctx = await resolveUserContext(c);
++  const blocked = checkAppVisibility(c, row.visibility || 'public', {
++    author: row.author,
++    ctx,
++  });
+   if (blocked) return blocked;
+ 
+   let manifest: NormalizedManifest;
+@@ -61,11 +65,8 @@ runRouter.post('/', async (c) => {
+   }
+ 
+   // W4M.1: scope the run by the current session so /api/me/runs can filter
+-  // by user_id / device_id. In OSS mode this binds the run to the local
+-  // user and the device cookie; in Cloud mode (W3.1) this is the real
+-  // Better Auth user + their active workspace.
+-  const ctx = await resolveUserContext(c);
+-
++  // by user_id / device_id. `ctx` was already resolved above for the
++  // visibility check (private apps need the caller's user_id).
+   const runId = newRunId();
+   const threadId = typeof body.thread_id === 'string' ? body.thread_id : null;
+   db.prepare(
+@@ -105,15 +106,21 @@ runRouter.post('/', async (c) => {
+ // run URLs rely on that. App slug is included in the payload so the
+ // client can guard against opening a run-id that doesn't match the slug
+ // in the URL.
+-runRouter.get('/:id', (c) => {
++runRouter.get('/:id', async (c) => {
+   const id = c.req.param('id');
+   const row = getRun(id);
+   if (!row) return c.json({ error: 'Run not found' }, 404);
+-  const app = db.prepare('SELECT slug, visibility FROM apps WHERE id = ?').get(row.app_id) as
+-    | { slug: string; visibility: string | null }
++  const app = db
++    .prepare('SELECT slug, visibility, author FROM apps WHERE id = ?')
++    .get(row.app_id) as
++    | { slug: string; visibility: string | null; author: string | null }
+     | undefined;
+   if (app) {
+-    const blocked = checkAppVisibility(c, (app.visibility as 'public' | 'auth-required') || 'public');
++    const ctx = await resolveUserContext(c);
++    const blocked = checkAppVisibility(c, app.visibility || 'public', {
++      author: app.author,
++      ctx,
++    });
+     if (blocked) return blocked;
+   }
+   return c.json({ ...formatRun(row), app_slug: app?.slug ?? null });
+@@ -262,7 +269,11 @@ slugRunRouter.post('/', async (c) => {
+   if (row.status !== 'active') {
+     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
+   }
+-  const blocked = checkAppVisibility(c, row.visibility || 'public');
++  const ctx = await resolveUserContext(c);
++  const blocked = checkAppVisibility(c, row.visibility || 'public', {
++    author: row.author,
++    ctx,
++  });
+   if (blocked) return blocked;
+ 
+   let manifest: NormalizedManifest;
+@@ -297,9 +308,8 @@ slugRunRouter.post('/', async (c) => {
+     return c.json({ error: e.message, field: e.field }, 400);
+   }
+ 
+-  // W4M.1: scope the run by the current session.
+-  const ctx = await resolveUserContext(c);
+-
++  // W4M.1: scope the run by the current session. `ctx` already resolved
++  // for the visibility check above.
+   const runId = newRunId();
+   db.prepare(
+     `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)
+diff --git a/apps/server/src/services/embeddings.ts b/apps/server/src/services/embeddings.ts
+index 84c6647..eb91d6e 100644
+--- a/apps/server/src/services/embeddings.ts
++++ b/apps/server/src/services/embeddings.ts
+@@ -111,7 +111,9 @@ export interface PickResult {
+ export async function pickApps(query: string, limit = 3): Promise<PickResult[]> {
+   const allApps = db
+     .prepare(
+-      "SELECT id, slug, name, description, category, icon FROM apps WHERE status = 'active'",
++      "SELECT id, slug, name, description, category, icon FROM apps" +
++        " WHERE status = 'active'" +
++        " AND (visibility = 'public' OR visibility IS NULL)",
+     )
+     .all() as Array<
+     Pick<AppRecord, 'id' | 'slug' | 'name' | 'description' | 'category' | 'icon'>
+diff --git a/apps/server/src/services/openapi-ingest.ts b/apps/server/src/services/openapi-ingest.ts
+index da6b704..3c3976d 100644
+--- a/apps/server/src/services/openapi-ingest.ts
++++ b/apps/server/src/services/openapi-ingest.ts
+@@ -49,11 +49,13 @@ interface OpenApiAppSpec {
+   icon?: string;
+   /**
+    * Per-app visibility. Defaults to public.
+-   *  - public: anyone can run the app
++   *  - public: anyone can run the app, listed in /api/hub
+    *  - auth-required: caller must present a valid bearer token matching
+    *    FLOOM_AUTH_TOKEN env var (see apps/server/src/routes/*.ts)
++   *  - private: only the app's author can run/see it. Never listed in
++   *    the public directory; accessible via /api/hub/mine.
+    */
+-  visibility?: 'public' | 'auth-required';
++  visibility?: 'public' | 'auth-required' | 'private';
+   // ---------- async job queue fields (v0.3.0) ----------
+   /**
+    * When true, the app runs through the Floom job queue instead of the
+diff --git a/apps/server/src/types.ts b/apps/server/src/types.ts
+index c7222e0..9b3df3c 100644
+--- a/apps/server/src/types.ts
++++ b/apps/server/src/types.ts
+@@ -125,7 +125,7 @@ export interface AppRecord {
+   auth_config: string | null; // JSON-stringified AuthConfig
+   openapi_spec_url: string | null;
+   openapi_spec_cached: string | null; // JSON-stringified OpenAPI spec
+-  visibility: 'public' | 'auth-required';
++  visibility: 'public' | 'auth-required' | 'private';
+   // Async job queue fields (v0.3.0). is_async comes back from SQLite as 0/1.
+   is_async: 0 | 1;
+   webhook_url: string | null;
+diff --git a/apps/web/src/components/._TopBar.tsx b/apps/web/src/components/._TopBar.tsx
+new file mode 100644
+index 0000000..5bdb446
+Binary files /dev/null and b/apps/web/src/components/._TopBar.tsx differ
+diff --git a/apps/web/src/data/demoData.ts b/apps/web/src/data/demoData.ts
+deleted file mode 100644
+index 74ffd82..0000000
+--- a/apps/web/src/data/demoData.ts
++++ /dev/null
+@@ -1,193 +0,0 @@
+-// Real outputs captured from the live preview.floom.dev API on 2026-04-14.
+-// These are NOT mocks. They are the actual response shapes the apps return,
+-// frozen so the homepage renders evidence without making a paid API call on
+-// every page load. Re-capture by running the curl commands below.
+-//
+-//   curl -s -X POST https://preview.floom.dev/api/run \
+-//     -H 'content-type: application/json' \
+-//     -d '{"app_slug":"flyfast","inputs":{"prompt":"Cheap flight from Berlin to Lisbon first week of May"}}'
+-//
+-//   curl -s -X POST https://preview.floom.dev/api/run \
+-//     -H 'content-type: application/json' \
+-//     -d '{"app_slug":"blast-radius","action":"analyze","inputs":{"repo_url":"https://github.com/floomhq/floom-monorepo"}}'
+-
+-export interface FlightLeg {
+-  airline: string;
+-  flight_number: string;
+-  from: string;
+-  to: string;
+-  departs: string;
+-  arrives: string;
+-  duration_minutes: number;
+-}
+-
+-export interface FlightResult {
+-  price: number;
+-  currency: string;
+-  duration_minutes: number;
+-  stops: number;
+-  route: string;
+-  legs: FlightLeg[];
+-  origin: string;
+-  destination: string;
+-  date: string;
+-  booking_url: string;
+-  booking_label: string;
+-}
+-
+-export const FLYFAST_DEMO = {
+-  app_slug: 'flyfast',
+-  prompt: 'Cheap flight from Berlin to Lisbon first week of May',
+-  duration_ms: 8200,
+-  flights: [
+-    {
+-      price: 117,
+-      currency: 'EUR',
+-      duration_minutes: 225,
+-      stops: 0,
+-      route: 'BER -> LIS',
+-      legs: [
+-        {
+-          airline: 'FR',
+-          flight_number: '1142',
+-          from: 'BER',
+-          to: 'LIS',
+-          departs: '2026-05-07T06:45:00',
+-          arrives: '2026-05-07T09:30:00',
+-          duration_minutes: 225,
+-        },
+-      ],
+-      origin: 'BER',
+-      destination: 'LIS',
+-      date: '2026-05-07',
+-      booking_url:
+-        'https://www.skyscanner.net/transport/flights/ber/lis/260507/?adultsv2=1&cabinclass=economy&currency=EUR&sortby=cheapest&preferDirects=false',
+-      booking_label: 'Search on Skyscanner',
+-    },
+-    {
+-      price: 133,
+-      currency: 'EUR',
+-      duration_minutes: 690,
+-      stops: 1,
+-      route: 'BER -> BCN -> LIS',
+-      legs: [
+-        {
+-          airline: 'VY',
+-          flight_number: '1887',
+-          from: 'BER',
+-          to: 'BCN',
+-          departs: '2026-05-05T22:00:00',
+-          arrives: '2026-05-06T00:45:00',
+-          duration_minutes: 165,
+-        },
+-        {
+-          airline: 'VY',
+-          flight_number: '8460',
+-          from: 'BCN',
+-          to: 'LIS',
+-          departs: '2026-05-06T07:20:00',
+-          arrives: '2026-05-06T08:30:00',
+-          duration_minutes: 130,
+-        },
+-      ],
+-      origin: 'BER',
+-      destination: 'LIS',
+-      date: '2026-05-05',
+-      booking_url:
+-        'https://www.skyscanner.net/transport/flights/ber/lis/260505/?adultsv2=1&cabinclass=economy&currency=EUR&sortby=cheapest&preferDirects=false',
+-      booking_label: 'Search on Skyscanner',
+-    },
+-    {
+-      price: 142,
+-      currency: 'EUR',
+-      duration_minutes: 240,
+-      stops: 0,
+-      route: 'BER -> LIS',
+-      legs: [
+-        {
+-          airline: 'TP',
+-          flight_number: '533',
+-          from: 'BER',
+-          to: 'LIS',
+-          departs: '2026-05-04T11:25:00',
+-          arrives: '2026-05-04T14:25:00',
+-          duration_minutes: 240,
+-        },
+-      ],
+-      origin: 'BER',
+-      destination: 'LIS',
+-      date: '2026-05-04',
+-      booking_url:
+-        'https://www.skyscanner.net/transport/flights/ber/lis/260504/?adultsv2=1&cabinclass=economy&currency=EUR&sortby=cheapest&preferDirects=false',
+-      booking_label: 'Search on Skyscanner',
+-    },
+-  ] as FlightResult[],
+-  total_results: 20,
+-};
+-
+-export interface BlastRadiusOutput {
+-  summary: string;
+-  changed: string[];
+-  affected: string[];
+-  tests: string[];
+-}
+-
+-export const BLAST_RADIUS_DEMO = {
+-  app_slug: 'blast-radius',
+-  repo_url: 'https://github.com/floomhq/floom-monorepo',
+-  base_branch: 'HEAD~5',
+-  duration_ms: 4100,
+-  output: {
+-    summary: '15 changed, 7 affected, 2 test files',
+-    changed: [
+-      'apps/server/src/routes/run.ts',
+-      'apps/server/src/services/proxied-runner.ts',
+-      'apps/server/src/services/runner.ts',
+-      'apps/web/src/components/IconSprite.tsx',
+-      'apps/web/src/components/Logo.tsx',
+-      'apps/web/src/components/TopBar.tsx',
+-      'apps/web/src/components/chat/OutputPanel.tsx',
+-      'apps/web/src/lib/detectImageFormat.ts',
+-      'apps/web/src/lib/output-downloads.ts',
+-      'apps/web/src/pages/AboutPage.tsx',
+-      'apps/web/src/pages/AppPermalinkPage.tsx',
+-      'apps/web/src/pages/AppsDirectoryPage.tsx',
+-      'apps/web/src/pages/CreatorHeroPage.tsx',
+-      'apps/web/src/pages/ProtocolPage.tsx',
+-      'examples/tier4/ui-audit/app.py',
+-    ],
+-    affected: [
+-      'apps/server/src/index.ts',
+-      'apps/server/src/routes/mcp.ts',
+-      'apps/web/src/components/AppIcon.tsx',
+-      'apps/web/src/components/FloomApp.tsx',
+-      'apps/web/src/main.tsx',
+-      'apps/web/src/pages/BrowsePage.tsx',
+-      'apps/web/src/pages/NotFoundPage.tsx',
+-    ],
+-    tests: [
+-      'packages/runtime/tests/runtime/executor.test.ts',
+-      'packages/runtime/tests/runtime/manifest.test.ts',
+-    ],
+-  } as BlastRadiusOutput,
+-};
+-
+-// The 15 launch apps shown live at preview.floom.dev/api/hub on 2026-04-14.
+-// Used to populate the "what's running right now" strip without an API call.
+-export const LAUNCH_APPS = [
+-  { slug: 'flyfast', name: 'FlyFast', category: 'travel', tagline: 'Search 100 flight combinations from one prompt.' },
+-  { slug: 'openpaper', name: 'OpenPaper', category: 'research', tagline: 'Generate fully cited academic papers.' },
+-  { slug: 'opendraft', name: 'OpenDraft', category: 'writing', tagline: 'Draft posts in your voice with citations.' },
+-  { slug: 'openblog', name: 'OpenBlog', category: 'writing', tagline: 'Long-form blog posts from a topic and outline.' },
+-  { slug: 'openslides', name: 'OpenSlides', category: 'design', tagline: 'Pitch decks from a single brief.' },
+-  { slug: 'opengtm', name: 'OpenGTM', category: 'marketing', tagline: 'Go-to-market plan generator.' },
+-  { slug: 'opencontext', name: 'OpenContext', category: 'marketing', tagline: 'Pull buyer context from public signals.' },
+-  { slug: 'openkeyword', name: 'OpenKeyword', category: 'seo', tagline: 'SEO keyword discovery without a SaaS.' },
+-  { slug: 'openanalytics', name: 'OpenAnalytics', category: 'analytics', tagline: 'Drop-in analytics for any site.' },
+-  { slug: 'session-recall', name: 'Session Recall', category: 'productivity', tagline: 'Search every Claude session ever.' },
+-  { slug: 'claude-wrapped', name: 'Claude Wrapped', category: 'productivity', tagline: 'Spotify Wrapped for Claude Code.' },
+-  { slug: 'hook-stats', name: 'Hook Stats', category: 'productivity', tagline: 'Stats on your Claude Code hook usage.' },
+-  { slug: 'bouncer', name: 'Bouncer', category: 'productivity', tagline: 'Independent quality gate for AI output.' },
+-  { slug: 'blast-radius', name: 'Blast Radius', category: 'developer-tools', tagline: 'Find every file affected by a diff.' },
+-  { slug: 'dep-check', name: 'Dep Check', category: 'developer-tools', tagline: 'Audit dependencies for known issues.' },
+-];
+diff --git a/apps/web/src/pages/._AppsDirectoryPage.tsx b/apps/web/src/pages/._AppsDirectoryPage.tsx
+new file mode 100644
+index 0000000..5bdb446
+Binary files /dev/null and b/apps/web/src/pages/._AppsDirectoryPage.tsx differ
+diff --git a/apps/web/src/pages/._CreatorHeroPage.tsx b/apps/web/src/pages/._CreatorHeroPage.tsx
+new file mode 100644
+index 0000000..5bdb446
+Binary files /dev/null and b/apps/web/src/pages/._CreatorHeroPage.tsx differ
+diff --git a/apps/web/src/pages/._LoginPage.tsx b/apps/web/src/pages/._LoginPage.tsx
+new file mode 100644
+index 0000000..5bdb446
+Binary files /dev/null and b/apps/web/src/pages/._LoginPage.tsx differ

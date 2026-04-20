@@ -1,0 +1,3679 @@
+diff --git a/apps/server/src/routes/run.ts b/apps/server/src/routes/run.ts
+index 33b6242..07698eb 100644
+--- a/apps/server/src/routes/run.ts
++++ b/apps/server/src/routes/run.ts
+@@ -356,6 +356,7 @@ meRouter.get('/runs', async (c) => {
+     .prepare(
+       `SELECT runs.id, runs.action, runs.status, runs.duration_ms,
+               runs.started_at, runs.finished_at, runs.error, runs.error_type,
++              runs.inputs,
+               apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
+          FROM runs
+          LEFT JOIN apps ON apps.id = runs.app_id
+@@ -372,25 +373,44 @@ meRouter.get('/runs', async (c) => {
+     finished_at: string | null;
+     error: string | null;
+     error_type: string | null;
++    inputs: string | null;
+     app_slug: string | null;
+     app_name: string | null;
+     app_icon: string | null;
+   }>;
+ 
++  // v15.1 /me renders each run as a single-turn "thread" and derives the
++  // thread title from inputs.prompt (or the first string input). Including
++  // inputs on the summary response avoids an N+1 detail fetch for the
++  // sidebar list. Rows store inputs as a JSON string; parse defensively.
+   return c.json({
+-    runs: rows.map((r) => ({
+-      id: r.id,
+-      action: r.action,
+-      status: r.status,
+-      duration_ms: r.duration_ms,
+-      started_at: r.started_at,
+-      finished_at: r.finished_at,
+-      error: r.error,
+-      error_type: r.error_type,
+-      app_slug: r.app_slug,
+-      app_name: r.app_name,
+-      app_icon: r.app_icon,
+-    })),
++    runs: rows.map((r) => {
++      let inputs: Record<string, unknown> | null = null;
++      if (r.inputs) {
++        try {
++          const parsed = JSON.parse(r.inputs);
++          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
++            inputs = parsed as Record<string, unknown>;
++          }
++        } catch {
++          inputs = null;
++        }
++      }
++      return {
++        id: r.id,
++        action: r.action,
++        status: r.status,
++        duration_ms: r.duration_ms,
++        started_at: r.started_at,
++        finished_at: r.finished_at,
++        error: r.error,
++        error_type: r.error_type,
++        app_slug: r.app_slug,
++        app_name: r.app_name,
++        app_icon: r.app_icon,
++        inputs,
++      };
++    }),
+   });
+ });
+ 
+diff --git a/apps/web/src/components/me/MeComposer.tsx b/apps/web/src/components/me/MeComposer.tsx
+new file mode 100644
+index 0000000..f0effbc
+--- /dev/null
++++ b/apps/web/src/components/me/MeComposer.tsx
+@@ -0,0 +1,147 @@
++// v15.1 /me composer. Renders the inline textarea + send button that
++// sits at the bottom of the right pane. We don't have a real threads
++// schema yet, so "sending" a follow-up just deep-links to the existing
++// run page for the target app with `?prompt=<text>` — the run page
++// (MeAppRunPage) reads the query param and prefills the first input.
++//
++// When there's no target app (the user has no apps installed), the
++// composer renders disabled with a hint that points to /apps or /build.
++
++import { useCallback, useEffect, useImperativeHandle, useRef, forwardRef, useState } from 'react';
++import { useNavigate } from 'react-router-dom';
++
++export interface MeComposerHandle {
++  focus: () => void;
++}
++
++interface Props {
++  /**
++   * The app slug the composer should route to. When null/undefined, the
++   * composer renders in a disabled "pick or build an app" state.
++   */
++  targetSlug: string | null;
++  /** Display name of the target app — used in the placeholder copy. */
++  targetName?: string | null;
++}
++
++export const MeComposer = forwardRef<MeComposerHandle, Props>(function MeComposer(
++  { targetSlug, targetName },
++  ref,
++) {
++  const navigate = useNavigate();
++  const textareaRef = useRef<HTMLTextAreaElement>(null);
++  const [value, setValue] = useState('');
++
++  useImperativeHandle(ref, () => ({
++    focus: () => textareaRef.current?.focus(),
++  }));
++
++  useEffect(() => {
++    // Autosize: cap at 140px to match the wireframe composer.
++    const el = textareaRef.current;
++    if (!el) return;
++    el.style.height = 'auto';
++    el.style.height = Math.min(140, el.scrollHeight) + 'px';
++  }, [value]);
++
++  const disabled = !targetSlug;
++
++  const submit = useCallback(() => {
++    if (disabled || !targetSlug) return;
++    const trimmed = value.trim();
++    const qs = trimmed ? `?prompt=${encodeURIComponent(trimmed)}` : '';
++    navigate(`/me/a/${targetSlug}/run${qs}`);
++  }, [disabled, targetSlug, value, navigate]);
++
++  return (
++    <form
++      data-testid="me-composer"
++      onSubmit={(e) => {
++        e.preventDefault();
++        submit();
++      }}
++      style={{
++        margin: '14px 24px 22px',
++        background: disabled ? 'var(--bg)' : 'var(--card)',
++        border: '1px solid var(--line)',
++        borderRadius: 14,
++        padding: '4px 4px 4px 16px',
++        display: 'flex',
++        alignItems: 'flex-end',
++        gap: 8,
++        boxShadow: disabled ? 'none' : '0 4px 14px rgba(15,23,42,.04)',
++      }}
++    >
++      <textarea
++        ref={textareaRef}
++        data-testid="me-composer-input"
++        rows={1}
++        value={value}
++        onChange={(e) => setValue(e.target.value)}
++        onKeyDown={(e) => {
++          if (e.key === 'Enter' && !e.shiftKey) {
++            e.preventDefault();
++            submit();
++          }
++        }}
++        disabled={disabled}
++        placeholder={
++          disabled
++            ? 'Pick or build an app to start a thread…'
++            : targetName
++              ? `Ask ${targetName} a follow-up…`
++              : 'Ask a follow-up…'
++        }
++        style={{
++          flex: 1,
++          border: 0,
++          outline: 'none',
++          resize: 'none',
++          background: 'transparent',
++          fontFamily: 'inherit',
++          fontSize: 14,
++          lineHeight: 1.5,
++          color: 'var(--ink)',
++          padding: '11px 0',
++          minHeight: 22,
++          maxHeight: 140,
++        }}
++      />
++      <button
++        type="submit"
++        data-testid="me-composer-send"
++        disabled={disabled || value.trim().length === 0}
++        aria-label="Send"
++        style={{
++          width: 32,
++          height: 32,
++          borderRadius: 9,
++          background: disabled || value.trim().length === 0 ? 'var(--line)' : 'var(--ink)',
++          color: '#fff',
++          display: 'flex',
++          alignItems: 'center',
++          justifyContent: 'center',
++          border: 0,
++          cursor: disabled || value.trim().length === 0 ? 'not-allowed' : 'pointer',
++          flexShrink: 0,
++          marginBottom: 5,
++          marginRight: 5,
++        }}
++      >
++        <svg
++          width="16"
++          height="16"
++          viewBox="0 0 24 24"
++          fill="none"
++          stroke="currentColor"
++          strokeWidth="1.75"
++          strokeLinecap="round"
++          strokeLinejoin="round"
++          aria-hidden="true"
++        >
++          <path d="M5 12h14M12 5l7 7-7 7" />
++        </svg>
++      </button>
++    </form>
++  );
++});
+diff --git a/apps/web/src/components/me/MeMobile.tsx b/apps/web/src/components/me/MeMobile.tsx
+new file mode 100644
+index 0000000..cb08009
+--- /dev/null
++++ b/apps/web/src/components/me/MeMobile.tsx
+@@ -0,0 +1,424 @@
++// v15.1 /me mobile layout. Two tabs: Threads (flat chronological feed
++// grouped by Today / Yesterday / Earlier) and Apps · N (list of the
++// user's apps + a Browse public apps row). Top-right "+" button starts
++// a new thread (routes to the app run surface or /apps if the user has
++// no apps yet).
++
++import { useState } from 'react';
++import { Link, useNavigate } from 'react-router-dom';
++import { Logo } from '../Logo';
++import { AppIcon } from '../AppIcon';
++import type { CreatorApp, MeRunSummary } from '../../lib/types';
++import { groupThreads, threadTitle, threadTimeLabel } from '../../lib/thread';
++
++interface Props {
++  threads: MeRunSummary[];
++  apps: CreatorApp[];
++  onNewThread?: () => void;
++}
++
++type Tab = 'threads' | 'apps';
++
++export function MeMobile({ threads, apps, onNewThread }: Props) {
++  const [tab, setTab] = useState<Tab>('threads');
++  const navigate = useNavigate();
++
++  const handleNewThread = () => {
++    if (onNewThread) {
++      onNewThread();
++      return;
++    }
++    if (apps.length === 0) {
++      navigate('/apps');
++    }
++  };
++
++  return (
++    <div data-testid="me-mobile" style={{ background: 'var(--card)' }}>
++      <div
++        style={{
++          display: 'flex',
++          alignItems: 'center',
++          justifyContent: 'space-between',
++          padding: '12px 16px',
++          borderBottom: '1px solid var(--line)',
++        }}
++      >
++        <Link
++          to="/"
++          style={{
++            display: 'flex',
++            alignItems: 'center',
++            gap: 8,
++            textDecoration: 'none',
++            color: 'var(--ink)',
++          }}
++        >
++          <Logo size={22} />
++          <span style={{ fontWeight: 600, fontSize: 15 }}>floom</span>
++        </Link>
++        <button
++          type="button"
++          data-testid="me-mobile-new-thread"
++          onClick={handleNewThread}
++          aria-label="New thread"
++          style={{
++            width: 32,
++            height: 32,
++            borderRadius: 8,
++            background: 'var(--ink)',
++            color: '#fff',
++            display: 'flex',
++            alignItems: 'center',
++            justifyContent: 'center',
++            border: 0,
++            cursor: 'pointer',
++          }}
++        >
++          <svg
++            width="16"
++            height="16"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="1.75"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++            aria-hidden="true"
++          >
++            <line x1="12" y1="5" x2="12" y2="19" />
++            <line x1="5" y1="12" x2="19" y2="12" />
++          </svg>
++        </button>
++      </div>
++
++      <div
++        role="tablist"
++        style={{ display: 'flex', borderBottom: '1px solid var(--line)' }}
++      >
++        <TabButton
++          tab="threads"
++          active={tab === 'threads'}
++          onClick={() => setTab('threads')}
++        >
++          Threads
++        </TabButton>
++        <TabButton
++          tab="apps"
++          active={tab === 'apps'}
++          onClick={() => setTab('apps')}
++        >
++          Apps · {apps.length}
++        </TabButton>
++      </div>
++
++      {tab === 'threads' ? (
++        <ThreadsList threads={threads} />
++      ) : (
++        <AppsList apps={apps} />
++      )}
++    </div>
++  );
++}
++
++function TabButton({
++  tab,
++  active,
++  onClick,
++  children,
++}: {
++  tab: Tab;
++  active: boolean;
++  onClick: () => void;
++  children: React.ReactNode;
++}) {
++  return (
++    <button
++      type="button"
++      role="tab"
++      aria-selected={active}
++      data-testid={`me-mobile-tab-${tab}`}
++      onClick={onClick}
++      style={{
++        flex: 1,
++        textAlign: 'center',
++        padding: '10px 0',
++        fontSize: 12.5,
++        fontWeight: 600,
++        color: active ? 'var(--ink)' : 'var(--muted)',
++        borderBottom: `2px solid ${active ? 'var(--ink)' : 'transparent'}`,
++        background: 'transparent',
++        border: 'none',
++        cursor: 'pointer',
++        fontFamily: 'inherit',
++      }}
++    >
++      {children}
++    </button>
++  );
++}
++
++function ThreadsList({ threads }: { threads: MeRunSummary[] }) {
++  if (threads.length === 0) {
++    return (
++      <div
++        style={{
++          padding: '32px 24px',
++          textAlign: 'center',
++          color: 'var(--muted)',
++          fontSize: 14,
++        }}
++      >
++        No threads yet. Pick an app to start one.
++      </div>
++    );
++  }
++  const groups = groupThreads(threads);
++  return (
++    <div>
++      {groups.today.length > 0 && (
++        <>
++          <GroupLabel>Today</GroupLabel>
++          {groups.today.map((r) => (
++            <ThreadRow key={r.id} run={r} />
++          ))}
++        </>
++      )}
++      {groups.yesterday.length > 0 && (
++        <>
++          <GroupLabel>Yesterday</GroupLabel>
++          {groups.yesterday.map((r) => (
++            <ThreadRow key={r.id} run={r} />
++          ))}
++        </>
++      )}
++      {groups.earlier.length > 0 && (
++        <>
++          <GroupLabel>Earlier</GroupLabel>
++          {groups.earlier.map((r) => (
++            <ThreadRow key={r.id} run={r} />
++          ))}
++        </>
++      )}
++    </div>
++  );
++}
++
++function ThreadRow({ run }: { run: MeRunSummary }) {
++  const title = threadTitle(run);
++  const sub = [run.app_name || run.app_slug, run.status]
++    .filter(Boolean)
++    .join(' · ');
++  return (
++    <Link
++      to={`/me/runs/${run.id}`}
++      data-testid={`me-mobile-thread-${run.id}`}
++      style={{
++        display: 'flex',
++        alignItems: 'center',
++        gap: 11,
++        padding: '12px 16px',
++        borderBottom: '1px solid var(--line)',
++        color: 'inherit',
++        textDecoration: 'none',
++      }}
++    >
++      <span
++        style={{
++          width: 30,
++          height: 30,
++          borderRadius: 7,
++          background: 'var(--bg)',
++          border: '1px solid var(--line)',
++          display: 'inline-flex',
++          alignItems: 'center',
++          justifyContent: 'center',
++          flexShrink: 0,
++        }}
++      >
++        {run.app_slug ? <AppIcon slug={run.app_slug} size={13} /> : null}
++      </span>
++      <div style={{ flex: 1, minWidth: 0 }}>
++        <div
++          style={{
++            fontSize: 14,
++            fontWeight: 600,
++            color: 'var(--ink)',
++            lineHeight: 1.3,
++            overflow: 'hidden',
++            textOverflow: 'ellipsis',
++            whiteSpace: 'nowrap',
++          }}
++        >
++          {title}
++        </div>
++        <div
++          style={{
++            fontSize: 12,
++            color: 'var(--muted)',
++            marginTop: 1,
++            overflow: 'hidden',
++            textOverflow: 'ellipsis',
++            whiteSpace: 'nowrap',
++          }}
++        >
++          {sub}
++        </div>
++      </div>
++      <span
++        style={{
++          fontSize: 11,
++          color: 'var(--muted)',
++          fontFamily: 'JetBrains Mono, monospace',
++          marginLeft: 'auto',
++          flexShrink: 0,
++        }}
++      >
++        {threadTimeLabel(run.started_at)}
++      </span>
++    </Link>
++  );
++}
++
++function AppsList({ apps }: { apps: CreatorApp[] }) {
++  return (
++    <div>
++      {apps.map((app) => (
++        <Link
++          key={app.slug}
++          to={`/me/a/${app.slug}`}
++          data-testid={`me-mobile-app-${app.slug}`}
++          style={{
++            display: 'flex',
++            alignItems: 'center',
++            gap: 11,
++            padding: '12px 16px',
++            borderBottom: '1px solid var(--line)',
++            color: 'inherit',
++            textDecoration: 'none',
++          }}
++        >
++          <span
++            style={{
++              width: 34,
++              height: 34,
++              borderRadius: 7,
++              background: 'var(--bg)',
++              border: '1px solid var(--line)',
++              display: 'inline-flex',
++              alignItems: 'center',
++              justifyContent: 'center',
++              flexShrink: 0,
++            }}
++          >
++            <AppIcon slug={app.slug} size={14} />
++          </span>
++          <div style={{ flex: 1, minWidth: 0 }}>
++            <div
++              style={{
++                fontSize: 14,
++                fontWeight: 600,
++                color: 'var(--ink)',
++                lineHeight: 1.3,
++              }}
++            >
++              {app.name}
++            </div>
++            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
++              {app.run_count || 0} run{app.run_count === 1 ? '' : 's'}
++            </div>
++          </div>
++          <span
++            style={{
++              fontSize: 10,
++              padding: '2px 8px',
++              borderRadius: 999,
++              background: 'var(--bg)',
++              border: '1px solid var(--line)',
++              color: 'var(--muted)',
++              fontWeight: 600,
++            }}
++          >
++            {app.visibility === 'private' ? 'private' : 'saved'}
++          </span>
++        </Link>
++      ))}
++      <Link
++        to="/apps"
++        data-testid="me-mobile-browse-public"
++        style={{
++          display: 'flex',
++          alignItems: 'center',
++          gap: 11,
++          padding: '12px 16px',
++          background: 'var(--bg)',
++          color: 'inherit',
++          textDecoration: 'none',
++        }}
++      >
++        <span
++          style={{
++            width: 34,
++            height: 34,
++            borderRadius: 7,
++            background: 'var(--card)',
++            border: '1px dashed var(--line)',
++            display: 'inline-flex',
++            alignItems: 'center',
++            justifyContent: 'center',
++            color: 'var(--muted)',
++            flexShrink: 0,
++          }}
++        >
++          <svg
++            width="14"
++            height="14"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="1.75"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++            aria-hidden="true"
++          >
++            <line x1="12" y1="5" x2="12" y2="19" />
++            <line x1="5" y1="12" x2="19" y2="12" />
++          </svg>
++        </span>
++        <div style={{ flex: 1, minWidth: 0 }}>
++          <div
++            style={{
++              fontSize: 14,
++              fontWeight: 600,
++              color: 'var(--ink)',
++              lineHeight: 1.3,
++            }}
++          >
++            Browse public apps
++          </div>
++          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>
++            Discover ready-to-run apps in the directory
++          </div>
++        </div>
++      </Link>
++    </div>
++  );
++}
++
++function GroupLabel({ children }: { children: React.ReactNode }) {
++  return (
++    <div
++      style={{
++        padding: '10px 16px 6px',
++        fontFamily: 'JetBrains Mono, monospace',
++        fontSize: 10,
++        fontWeight: 600,
++        color: 'var(--muted)',
++        letterSpacing: '0.08em',
++        textTransform: 'uppercase',
++      }}
++    >
++      {children}
++    </div>
++  );
++}
+diff --git a/apps/web/src/components/me/MeRail.tsx b/apps/web/src/components/me/MeRail.tsx
+index 2e6c56b..df8544e 100644
+--- a/apps/web/src/components/me/MeRail.tsx
++++ b/apps/web/src/components/me/MeRail.tsx
+@@ -1,239 +1,259 @@
+-// v15.2 shared left rail used across /me/a/:slug, /me/a/:slug/secrets,
++// v15.2 shared left rail. Used across /me, /me/a/:slug, /me/a/:slug/secrets,
+ // /me/a/:slug/run.
+ //
+-// Visual direction comes from /tmp/v15-local/me-app.html: brand → two
+-// primary CTAs ("New app", "New thread") → "Your apps" list with a
+-// private pill on owned private apps → footer with avatar + email. We
+-// use the in-repo design tokens (wireframe.css custom props) instead of
+-// the Tailwind CDN classes from the wireframe so the rail visually
+-// matches every other page in the app.
++// v15.1 extension: when `threads` is provided (the /me Claude-shape page)
++// the rail renders the user's recent runs grouped into Today / Yesterday
++// / Earlier below the "Your apps" block. Other pages (/me/a/:slug/*)
++// call MeRail without threads and get the original app-only rail.
++//
++// Visual direction comes from /tmp/v15-local/me.html + me-app.html: a
++// slim sidebar on the mutted surface-2 background, brand at the top,
++// primary action button, "Your apps" group, then threads (on /me only),
++// with the profile card pinned to the bottom. We map to the in-repo
++// design tokens (wireframe.css) instead of the Tailwind CDN classes.
+ 
+ import { Link } from 'react-router-dom';
+ import { Logo } from '../Logo';
+ import { AppIcon } from '../AppIcon';
+ import { useMyApps } from '../../hooks/useMyApps';
+ import { useSession } from '../../hooks/useSession';
++import type { MeRunSummary } from '../../lib/types';
++import { groupThreads, threadTitle, threadTimeLabel } from '../../lib/thread';
+ 
+ interface Props {
+   activeAppSlug?: string;
++  /**
++   * v15.1: recent runs rendered as single-turn threads. When omitted
++   * (non-/me pages) the threads section is hidden entirely.
++   */
++  threads?: MeRunSummary[];
++  activeThreadId?: string;
++  /**
++   * v15.1: primary "New thread" action. Called when the user clicks the
++   * + New thread button. On /me this scrolls to / focuses the composer
++   * or navigates to /apps when the user has no apps yet. Defaults to a
++   * link to /me so the existing /me/a/:slug callers keep working.
++   */
++  onNewThread?: () => void;
++  /**
++   * Cap on how many threads to render in the rail (default 40). When the
++   * source list is longer, a "Load more" link is rendered.
++   */
++  threadLimit?: number;
++  onLoadMoreThreads?: () => void;
+ }
+ 
+-export function MeRail({ activeAppSlug }: Props) {
++const RAIL_WIDTH = 280;
++
++export function MeRail({
++  activeAppSlug,
++  threads,
++  activeThreadId,
++  onNewThread,
++  threadLimit = 40,
++  onLoadMoreThreads,
++}: Props) {
+   const { apps, loading } = useMyApps();
+   const { data: session } = useSession();
+   const user = session?.user;
+ 
++  const groups = threads ? groupThreads(threads.slice(0, threadLimit)) : null;
++  const showLoadMore = threads && threads.length > threadLimit && onLoadMoreThreads;
++
+   return (
+     <aside
+       data-testid="me-rail"
++      className="me-rail"
+       style={{
+-        width: 260,
++        width: RAIL_WIDTH,
+         flexShrink: 0,
+         borderRight: '1px solid var(--line)',
+-        background: 'var(--card)',
+-        padding: '20px 16px',
++        background: 'var(--bg)',
++        padding: '14px 10px',
+         display: 'flex',
+         flexDirection: 'column',
+-        gap: 20,
++        gap: 4,
+         position: 'sticky',
+-        top: 56,
++        top: 0,
+         alignSelf: 'flex-start',
+-        maxHeight: 'calc(100vh - 56px)',
++        height: '100vh',
+         overflowY: 'auto',
+       }}
+     >
+-      {/* Brand */}
+       <Link
+         to="/"
++        data-testid="me-rail-brand"
+         style={{
+           display: 'flex',
+           alignItems: 'center',
+           gap: 8,
+           textDecoration: 'none',
+           color: 'var(--ink)',
+-          fontWeight: 700,
+-          fontSize: 15,
+-          padding: '0 6px',
++          fontWeight: 600,
++          fontSize: 14.5,
++          padding: '6px 12px',
++          marginBottom: 8,
+         }}
+       >
+         <Logo size={22} />
+         <span>floom</span>
+       </Link>
+ 
+-      {/* Primary CTAs */}
+-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+-        <Link
+-          to="/build"
+-          data-testid="me-rail-new-app"
+-          style={{
+-            display: 'inline-flex',
+-            alignItems: 'center',
+-            justifyContent: 'center',
+-            gap: 6,
+-            padding: '9px 12px',
+-            background: 'var(--card)',
+-            border: '1px solid var(--line)',
+-            borderRadius: 8,
+-            fontSize: 13,
+-            fontWeight: 600,
+-            color: 'var(--ink)',
+-            textDecoration: 'none',
+-          }}
++      {onNewThread ? (
++        <button
++          type="button"
++          onClick={onNewThread}
++          data-testid="me-rail-new-thread"
++          style={newThreadStyle}
+         >
+-          + New app
+-        </Link>
++          <PlusIcon />
++          <span>New thread</span>
++          <span
++            style={{
++              marginLeft: 'auto',
++              fontFamily: 'JetBrains Mono, monospace',
++              fontSize: 10.5,
++              color: 'var(--muted)',
++              fontWeight: 500,
++            }}
++          >
++            ⌘N
++          </span>
++        </button>
++      ) : (
+         <Link
+           to="/me"
+           data-testid="me-rail-new-thread"
+-          style={{
+-            display: 'inline-flex',
+-            alignItems: 'center',
+-            justifyContent: 'center',
+-            gap: 6,
+-            padding: '9px 12px',
+-            background: 'var(--ink)',
+-            border: '1px solid var(--ink)',
+-            borderRadius: 8,
+-            fontSize: 13,
+-            fontWeight: 600,
+-            color: '#fff',
+-            textDecoration: 'none',
+-          }}
++          style={{ ...newThreadStyle, textDecoration: 'none' }}
+         >
+-          + New thread
++          <PlusIcon />
++          <span>New thread</span>
+         </Link>
+-      </div>
++      )}
+ 
+-      {/* Your apps */}
+-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+-        <div
+-          style={{
+-            fontSize: 11,
+-            fontWeight: 700,
+-            textTransform: 'uppercase',
+-            letterSpacing: '0.06em',
+-            color: 'var(--muted)',
+-            padding: '0 10px 4px',
+-          }}
++      <SectionLabel>
++        <span>Your apps</span>
++        <Link
++          to="/build"
++          title="New app"
++          data-testid="me-rail-new-app"
++          style={{ color: 'var(--muted)', display: 'inline-flex' }}
+         >
+-          Your apps
+-        </div>
+-        {loading && !apps && (
+-          <div
+-            style={{
+-              fontSize: 12,
+-              color: 'var(--muted)',
+-              padding: '8px 10px',
+-            }}
+-          >
+-            Loading…
+-          </div>
+-        )}
+-        {apps && apps.length === 0 && (
+-          <div
+-            style={{
+-              fontSize: 12,
+-              color: 'var(--muted)',
+-              padding: '8px 10px',
+-              lineHeight: 1.5,
+-            }}
++          <PlusIcon size={13} />
++        </Link>
++      </SectionLabel>
++
++      {loading && !apps && <RailHint>Loading…</RailHint>}
++      {apps && apps.length === 0 && (
++        <RailHint>No apps yet — pick one from the directory or build your own.</RailHint>
++      )}
++      {apps?.map((app) => {
++        const isActive = app.slug === activeAppSlug;
++        const isPrivate = app.visibility === 'private';
++        return (
++          <Link
++            key={app.slug}
++            to={`/me/a/${app.slug}`}
++            data-testid={`me-rail-app-${app.slug}`}
++            style={railItemStyle(isActive)}
+           >
+-            No apps yet. Click “New app” above to publish one.
+-          </div>
+-        )}
+-        {apps?.map((app) => {
+-          const isActive = app.slug === activeAppSlug;
+-          const isPrivate = app.visibility === 'private';
+-          return (
+-            <Link
+-              key={app.slug}
+-              to={`/me/a/${app.slug}`}
+-              data-testid={`me-rail-app-${app.slug}`}
++            <span style={railIconStyle}>
++              <AppIcon slug={app.slug} size={14} />
++            </span>
++            <span style={railLabelStyle}>{app.name}</span>
++            {isPrivate && <PrivatePill />}
++          </Link>
++        );
++      })}
++
++      {groups && (
++        <>
++          {groups.today.length > 0 && (
++            <>
++              <SectionLabel style={{ marginTop: 14 }}>Today</SectionLabel>
++              {groups.today.map((r) => (
++                <ThreadRow
++                  key={r.id}
++                  run={r}
++                  isActive={r.id === activeThreadId}
++                />
++              ))}
++            </>
++          )}
++          {groups.yesterday.length > 0 && (
++            <>
++              <SectionLabel style={{ marginTop: 14 }}>Yesterday</SectionLabel>
++              {groups.yesterday.map((r) => (
++                <ThreadRow
++                  key={r.id}
++                  run={r}
++                  isActive={r.id === activeThreadId}
++                />
++              ))}
++            </>
++          )}
++          {groups.earlier.length > 0 && (
++            <>
++              <SectionLabel style={{ marginTop: 14 }}>Earlier</SectionLabel>
++              {groups.earlier.map((r) => (
++                <ThreadRow
++                  key={r.id}
++                  run={r}
++                  isActive={r.id === activeThreadId}
++                />
++              ))}
++            </>
++          )}
++          {showLoadMore && (
++            <button
++              type="button"
++              onClick={onLoadMoreThreads}
++              data-testid="me-rail-load-more"
+               style={{
+-                display: 'flex',
+-                alignItems: 'center',
+-                gap: 10,
+-                padding: '8px 10px',
+-                borderRadius: 8,
+-                background: isActive ? 'var(--accent-soft)' : 'transparent',
+-                color: isActive ? 'var(--accent)' : 'var(--ink)',
+-                textDecoration: 'none',
+-                fontSize: 13,
+-                fontWeight: isActive ? 600 : 500,
++                ...railItemStyle(false),
++                color: 'var(--muted)',
++                fontSize: 12,
++                cursor: 'pointer',
+               }}
+             >
+-              <span
+-                style={{
+-                  width: 22,
+-                  height: 22,
+-                  borderRadius: 6,
+-                  background: 'var(--bg)',
+-                  border: '1px solid var(--line)',
+-                  display: 'inline-flex',
+-                  alignItems: 'center',
+-                  justifyContent: 'center',
+-                  color: 'var(--ink)',
+-                  flexShrink: 0,
+-                }}
+-              >
+-                <AppIcon slug={app.slug} size={14} />
+-              </span>
+-              <span
+-                style={{
+-                  flex: 1,
+-                  overflow: 'hidden',
+-                  textOverflow: 'ellipsis',
+-                  whiteSpace: 'nowrap',
+-                }}
+-              >
+-                {app.name}
+-              </span>
+-              {isPrivate && (
+-                <span
+-                  title="Private app — visible only to you"
+-                  style={{
+-                    fontSize: 10,
+-                    fontWeight: 600,
+-                    textTransform: 'uppercase',
+-                    letterSpacing: '0.04em',
+-                    padding: '2px 6px',
+-                    borderRadius: 4,
+-                    background: 'var(--bg)',
+-                    border: '1px solid var(--line)',
+-                    color: 'var(--muted)',
+-                    flexShrink: 0,
+-                  }}
+-                >
+-                  Private
+-                </span>
+-              )}
+-            </Link>
+-          );
+-        })}
+-      </div>
++              Load more…
++            </button>
++          )}
++        </>
++      )}
+ 
+-      {/* Footer — user */}
+-      <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid var(--line)' }}>
++      <div
++        style={{
++          marginTop: 'auto',
++          paddingTop: 10,
++          borderTop: '1px solid var(--line)',
++        }}
++      >
+         {user ? (
+-          <div
++          <Link
++            to="/me/settings"
++            data-testid="me-rail-profile"
+             style={{
+               display: 'flex',
+               alignItems: 'center',
+               gap: 10,
+-              padding: '4px 6px',
++              padding: '8px 10px',
++              borderRadius: 8,
++              textDecoration: 'none',
++              color: 'var(--ink)',
+             }}
+           >
+             <div
+               style={{
+-                width: 30,
+-                height: 30,
+-                borderRadius: 999,
+-                background: 'var(--accent)',
++                width: 22,
++                height: 22,
++                borderRadius: 6,
++                background: 'var(--ink)',
+                 color: '#fff',
+                 display: 'inline-flex',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+-                fontSize: 12,
++                fontSize: 10,
+                 fontWeight: 700,
+                 flexShrink: 0,
+                 overflow: 'hidden',
+@@ -276,7 +296,7 @@ export function MeRail({ activeAppSlug }: Props) {
+                 </div>
+               )}
+             </div>
+-          </div>
++          </Link>
+         ) : (
+           <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 6px' }}>
+             Not signed in
+@@ -287,6 +307,208 @@ export function MeRail({ activeAppSlug }: Props) {
+   );
+ }
+ 
++// ---------- internals ----------
++
++const newThreadStyle: React.CSSProperties = {
++  display: 'flex',
++  alignItems: 'center',
++  gap: 8,
++  padding: '10px 12px',
++  background: 'var(--card)',
++  border: '1px solid var(--line)',
++  borderRadius: 10,
++  fontSize: 13,
++  fontWeight: 600,
++  color: 'var(--ink)',
++  width: '100%',
++  cursor: 'pointer',
++  marginBottom: 8,
++  fontFamily: 'inherit',
++  textAlign: 'left',
++};
++
++const railIconStyle: React.CSSProperties = {
++  width: 22,
++  height: 22,
++  borderRadius: 6,
++  background: 'var(--card)',
++  border: '1px solid var(--line)',
++  display: 'inline-flex',
++  alignItems: 'center',
++  justifyContent: 'center',
++  color: 'var(--ink)',
++  flexShrink: 0,
++};
++
++const railLabelStyle: React.CSSProperties = {
++  flex: 1,
++  minWidth: 0,
++  fontSize: 13,
++  overflow: 'hidden',
++  textOverflow: 'ellipsis',
++  whiteSpace: 'nowrap',
++};
++
++function railItemStyle(isActive: boolean): React.CSSProperties {
++  return {
++    display: 'flex',
++    alignItems: 'center',
++    gap: 9,
++    padding: '7px 10px',
++    borderRadius: 8,
++    background: isActive ? 'var(--card)' : 'transparent',
++    color: isActive ? 'var(--ink)' : 'var(--muted)',
++    fontWeight: isActive ? 600 : 500,
++    textDecoration: 'none',
++    fontSize: 13,
++    border: 0,
++    width: '100%',
++    textAlign: 'left',
++    cursor: 'pointer',
++    fontFamily: 'inherit',
++    boxShadow: isActive ? '0 1px 0 rgba(15,23,42,.04)' : 'none',
++    lineHeight: 1.3,
++  };
++}
++
++function SectionLabel({
++  children,
++  style,
++}: {
++  children: React.ReactNode;
++  style?: React.CSSProperties;
++}) {
++  return (
++    <div
++      style={{
++        fontFamily: 'JetBrains Mono, monospace',
++        fontSize: 10,
++        fontWeight: 600,
++        color: 'var(--muted)',
++        letterSpacing: '0.08em',
++        textTransform: 'uppercase',
++        padding: '10px 12px 6px',
++        display: 'flex',
++        alignItems: 'center',
++        justifyContent: 'space-between',
++        ...style,
++      }}
++    >
++      {children}
++    </div>
++  );
++}
++
++function RailHint({ children }: { children: React.ReactNode }) {
++  return (
++    <p
++      style={{
++        fontSize: 12,
++        color: 'var(--muted)',
++        margin: 0,
++        padding: '4px 12px 6px',
++        lineHeight: 1.5,
++      }}
++    >
++      {children}
++    </p>
++  );
++}
++
++function ThreadRow({ run, isActive }: { run: MeRunSummary; isActive: boolean }) {
++  const title = threadTitle(run);
++  const timeLabel = threadTimeLabel(run.started_at);
++  return (
++    <Link
++      to={`/me?thread=${encodeURIComponent(run.id)}`}
++      data-testid={`me-rail-thread-${run.id}`}
++      aria-current={isActive ? 'page' : undefined}
++      style={railItemStyle(isActive)}
++    >
++      <span
++        style={{
++          flex: 1,
++          minWidth: 0,
++          whiteSpace: 'nowrap',
++          overflow: 'hidden',
++          textOverflow: 'ellipsis',
++          fontSize: 13,
++        }}
++      >
++        {title}
++      </span>
++      {timeLabel && (
++        <span
++          style={{
++            fontFamily: 'JetBrains Mono, monospace',
++            fontSize: 10.5,
++            color: 'var(--muted)',
++            flexShrink: 0,
++          }}
++        >
++          {timeLabel}
++        </span>
++      )}
++    </Link>
++  );
++}
++
++function PlusIcon({ size = 16 }: { size?: number }) {
++  return (
++    <svg
++      width={size}
++      height={size}
++      viewBox="0 0 24 24"
++      fill="none"
++      stroke="currentColor"
++      strokeWidth="1.75"
++      strokeLinecap="round"
++      strokeLinejoin="round"
++      aria-hidden="true"
++      style={{ flexShrink: 0 }}
++    >
++      <line x1="12" y1="5" x2="12" y2="19" />
++      <line x1="5" y1="12" x2="19" y2="12" />
++    </svg>
++  );
++}
++
++function PrivatePill() {
++  return (
++    <span
++      title="Private app — visible only to you"
++      style={{
++        fontSize: 9.5,
++        padding: '1px 6px',
++        borderRadius: 999,
++        background: '#f1f5f9',
++        color: 'var(--muted)',
++        border: '1px solid var(--line)',
++        fontWeight: 600,
++        display: 'inline-flex',
++        alignItems: 'center',
++        gap: 4,
++        flexShrink: 0,
++      }}
++    >
++      <svg
++        width="8"
++        height="8"
++        viewBox="0 0 24 24"
++        fill="none"
++        stroke="currentColor"
++        strokeWidth="1.75"
++        strokeLinecap="round"
++        strokeLinejoin="round"
++        aria-hidden="true"
++      >
++        <rect x="3" y="11" width="18" height="11" rx="2" />
++        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
++      </svg>
++    </span>
++  );
++}
++
+ function initials(name: string): string {
+   const parts = name.trim().split(/\s+/).slice(0, 2);
+   if (parts.length === 0) return '?';
+diff --git a/apps/web/src/components/me/MeThreadPane.tsx b/apps/web/src/components/me/MeThreadPane.tsx
+new file mode 100644
+index 0000000..7229962
+--- /dev/null
++++ b/apps/web/src/components/me/MeThreadPane.tsx
+@@ -0,0 +1,354 @@
++// v15.1 /me right pane. Renders the "latest thread" (really: a single
++// run) in a Claude/ChatGPT turn-by-turn shape — a user turn with the
++// prompt followed by an app turn with the run's result summary. A
++// composer is mounted below via MeComposer (rendered by MePage so the
++// pane can stay presentational).
++//
++// Scope: single-turn only. Real multi-turn chat requires a threads
++// schema; for now the "Open in full →" link drops the user into the
++// existing run detail page where they can iterate.
++
++import { Link } from 'react-router-dom';
++import { AppIcon } from '../AppIcon';
++import { threadTitle } from '../../lib/thread';
++import type { MeRunDetail, MeRunSummary, RunStatus } from '../../lib/types';
++
++interface Props {
++  /** Thread summary used for the pane header / title. */
++  thread: MeRunSummary;
++  /**
++   * Full run record. Optional: while the detail is loading we still render
++   * the header from the summary and show a light-weight placeholder in the
++   * turn body. When null, the fetch failed and we surface an error.
++   */
++  detail: MeRunDetail | null;
++  detailError?: string | null;
++  appVisibility?: 'private' | 'public' | 'unlisted' | 'auth-required' | 'invite-only' | null;
++}
++
++export function MeThreadPane({ thread, detail, detailError, appVisibility }: Props) {
++  const slug = thread.app_slug;
++  const appName = thread.app_name || slug || 'App';
++  const title = threadTitle(thread);
++
++  return (
++    <section
++      data-testid="me-thread-pane"
++      style={{
++        background: 'var(--card)',
++        display: 'flex',
++        flexDirection: 'column',
++        height: '100vh',
++        minHeight: 560,
++        flex: 1,
++        minWidth: 0,
++      }}
++    >
++      <header
++        style={{
++          display: 'flex',
++          alignItems: 'center',
++          gap: 14,
++          padding: '14px 24px',
++          borderBottom: '1px solid var(--line)',
++        }}
++      >
++        <span
++          style={{
++            width: 26,
++            height: 26,
++            borderRadius: 7,
++            background: 'var(--bg)',
++            border: '1px solid var(--line)',
++            display: 'inline-flex',
++            alignItems: 'center',
++            justifyContent: 'center',
++            flexShrink: 0,
++          }}
++        >
++          {slug ? <AppIcon slug={slug} size={14} /> : null}
++        </span>
++        <span style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--ink)' }}>
++          {appName}
++        </span>
++        {appVisibility === 'private' && (
++          <span
++            style={{
++              fontSize: 10.5,
++              padding: '2px 8px',
++              borderRadius: 999,
++              background: '#f1f5f9',
++              color: 'var(--muted)',
++              border: '1px solid var(--line)',
++              fontWeight: 600,
++              display: 'inline-flex',
++              alignItems: 'center',
++              gap: 4,
++            }}
++          >
++            <svg
++              width="10"
++              height="10"
++              viewBox="0 0 24 24"
++              fill="none"
++              stroke="currentColor"
++              strokeWidth="1.75"
++              aria-hidden="true"
++            >
++              <rect x="3" y="11" width="18" height="11" rx="2" />
++              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
++            </svg>
++            private
++          </span>
++        )}
++        <span
++          style={{
++            fontSize: 12.5,
++            color: 'var(--muted)',
++            marginLeft: 8,
++            overflow: 'hidden',
++            textOverflow: 'ellipsis',
++            whiteSpace: 'nowrap',
++            flex: 1,
++            minWidth: 0,
++          }}
++        >
++          {title}
++        </span>
++        <Link
++          to={slug ? `/me/runs/${thread.id}` : '#'}
++          data-testid="me-thread-open-full"
++          style={{
++            fontSize: 12.5,
++            color: 'var(--muted)',
++            textDecoration: 'none',
++            fontWeight: 500,
++            flexShrink: 0,
++            padding: '4px 8px',
++          }}
++        >
++          Open in full →
++        </Link>
++      </header>
++
++      <div style={{ flex: 1, overflowY: 'auto' }} data-testid="me-thread-body">
++        <div style={{ padding: '18px 24px' }}>
++          <TurnRow
++            role="user"
++            content={<span>{title}</span>}
++          />
++          <div style={{ height: 14 }} />
++          {detailError ? (
++            <ErrorBanner message={detailError} />
++          ) : detail ? (
++            <TurnRow
++              role="app"
++              content={<AppTurnBody run={detail} />}
++            />
++          ) : (
++            <TurnRow
++              role="app"
++              content={<span style={{ color: 'var(--muted)' }}>Loading run…</span>}
++            />
++          )}
++        </div>
++      </div>
++    </section>
++  );
++}
++
++// ---------- internals ----------
++
++function TurnRow({
++  role,
++  content,
++}: {
++  role: 'user' | 'app';
++  content: React.ReactNode;
++}) {
++  return (
++    <div
++      style={{
++        display: 'flex',
++        gap: 12,
++        alignItems: 'flex-start',
++        maxWidth: 720,
++      }}
++    >
++      <div
++        style={{
++          width: 26,
++          height: 26,
++          borderRadius: 7,
++          flexShrink: 0,
++          display: 'flex',
++          alignItems: 'center',
++          justifyContent: 'center',
++          fontSize: 11.5,
++          fontWeight: 700,
++          background: role === 'user' ? 'var(--ink)' : 'var(--accent-soft)',
++          color: role === 'user' ? '#fff' : 'var(--accent)',
++          border: role === 'app' ? '1px solid var(--accent-border)' : 'none',
++        }}
++      >
++        {role === 'user' ? (
++          'F'
++        ) : (
++          <svg
++            width="13"
++            height="13"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="1.75"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++            aria-hidden="true"
++          >
++            <rect x="2" y="2" width="20" height="20" rx="5" />
++          </svg>
++        )}
++      </div>
++      <div
++        style={{
++          flex: 1,
++          minWidth: 0,
++          fontSize: 14.5,
++          color: 'var(--ink)',
++          paddingTop: 3,
++          lineHeight: 1.55,
++        }}
++      >
++        {content}
++      </div>
++    </div>
++  );
++}
++
++function AppTurnBody({ run }: { run: MeRunDetail }) {
++  const summary = buildSummaryText(run);
++  const statusColor = statusToColor(run.status);
++  const durationLabel =
++    typeof run.duration_ms === 'number' && run.duration_ms > 0
++      ? formatDuration(run.duration_ms)
++      : null;
++
++  return (
++    <>
++      <div
++        style={{
++          display: 'flex',
++          alignItems: 'center',
++          gap: 8,
++          marginBottom: 8,
++          fontSize: 11,
++          color: 'var(--muted)',
++          fontFamily: 'JetBrains Mono, monospace',
++          letterSpacing: '0.04em',
++        }}
++      >
++        <span
++          style={{
++            display: 'inline-block',
++            width: 5,
++            height: 5,
++            borderRadius: 999,
++            background: statusColor,
++          }}
++        />
++        <span>
++          {run.status}
++          {durationLabel ? ` · ${durationLabel}` : ''}
++          {run.action && run.action !== 'run' ? ` · ${run.action}` : ''}
++          {` · ${run.id.slice(0, 8)}`}
++        </span>
++      </div>
++      {summary ? (
++        <p
++          style={{
++            fontSize: 14,
++            color: 'var(--muted)',
++            margin: '0 0 10px',
++            lineHeight: 1.55,
++            whiteSpace: 'pre-wrap',
++            wordBreak: 'break-word',
++          }}
++        >
++          {summary}
++        </p>
++      ) : null}
++      {run.status === 'error' && run.error && (
++        <ErrorBanner message={run.error} />
++      )}
++    </>
++  );
++}
++
++function ErrorBanner({ message }: { message: string }) {
++  return (
++    <div
++      style={{
++        background: '#fdecea',
++        border: '1px solid #f4b7b1',
++        color: '#c2321f',
++        padding: '10px 14px',
++        borderRadius: 8,
++        fontSize: 13,
++      }}
++    >
++      {message}
++    </div>
++  );
++}
++
++function statusToColor(status: RunStatus | string): string {
++  switch (status) {
++    case 'success':
++      return 'var(--accent)';
++    case 'error':
++    case 'timeout':
++      return '#c2321f';
++    case 'running':
++    case 'pending':
++    default:
++      return 'var(--muted)';
++  }
++}
++
++function formatDuration(ms: number): string {
++  if (ms < 1000) return `${Math.round(ms)}ms`;
++  const seconds = ms / 1000;
++  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
++  const mins = Math.floor(seconds / 60);
++  const remSec = Math.round(seconds - mins * 60);
++  return `${mins}m ${remSec}s`;
++}
++
++function buildSummaryText(run: MeRunDetail): string {
++  const outputs = run.outputs;
++  if (outputs && typeof outputs === 'object') {
++    const record = outputs as Record<string, unknown>;
++    for (const key of ['summary', 'text', 'result', 'output', 'message']) {
++      const v = record[key];
++      if (typeof v === 'string' && v.trim()) {
++        return truncate(v.trim(), 600);
++      }
++    }
++    try {
++      const preview = JSON.stringify(outputs, null, 2);
++      return truncate(preview, 600);
++    } catch {
++      // fall through
++    }
++  } else if (typeof outputs === 'string' && outputs.trim()) {
++    return truncate(outputs.trim(), 600);
++  }
++  if (run.status === 'running' || run.status === 'pending') {
++    return 'Run in progress…';
++  }
++  return '';
++}
++
++function truncate(text: string, max: number): string {
++  return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + '…';
++}
+diff --git a/apps/web/src/lib/thread.ts b/apps/web/src/lib/thread.ts
+new file mode 100644
+index 0000000..0d17aa5
+--- /dev/null
++++ b/apps/web/src/lib/thread.ts
+@@ -0,0 +1,73 @@
++// v15.1 /me treats each row in me_runs as a single-turn "thread" while a
++// real threads schema doesn't exist. The helpers here derive a human
++// readable title from the run's inputs and group a flat list of runs
++// into Today / Yesterday / Earlier buckets for the left rail.
++
++import type { MeRunSummary } from './types';
++
++export interface ThreadGroups {
++  today: MeRunSummary[];
++  yesterday: MeRunSummary[];
++  earlier: MeRunSummary[];
++}
++
++export function groupThreads(runs: MeRunSummary[]): ThreadGroups {
++  const now = new Date();
++  const startOfToday = new Date(
++    now.getFullYear(),
++    now.getMonth(),
++    now.getDate(),
++  ).getTime();
++  const startOfYesterday = startOfToday - 86400000;
++  const groups: ThreadGroups = { today: [], yesterday: [], earlier: [] };
++  for (const r of runs) {
++    const t = new Date(r.started_at).getTime();
++    if (Number.isNaN(t)) {
++      groups.earlier.push(r);
++      continue;
++    }
++    if (t >= startOfToday) groups.today.push(r);
++    else if (t >= startOfYesterday) groups.yesterday.push(r);
++    else groups.earlier.push(r);
++  }
++  return groups;
++}
++
++export function threadTitle(run: MeRunSummary): string {
++  const inputs = run.inputs;
++  if (inputs && typeof inputs === 'object') {
++    const prompt = inputs['prompt'];
++    if (typeof prompt === 'string' && prompt.trim()) return prompt.trim();
++    for (const value of Object.values(inputs)) {
++      if (typeof value === 'string' && value.trim()) return value.trim();
++    }
++  }
++  if (run.action && run.action !== 'run') return run.action;
++  return `Run #${run.id.slice(0, 6)}`;
++}
++
++export function threadTimeLabel(iso: string, now: Date = new Date()): string {
++  const d = new Date(iso);
++  if (Number.isNaN(d.getTime())) return '';
++  const diffMs = now.getTime() - d.getTime();
++  const diffSec = Math.floor(diffMs / 1000);
++  const startOfToday = new Date(
++    now.getFullYear(),
++    now.getMonth(),
++    now.getDate(),
++  ).getTime();
++  const startOfYesterday = startOfToday - 86400000;
++  const startOfLastWeek = startOfToday - 6 * 86400000;
++  const t = d.getTime();
++
++  if (t >= startOfToday) {
++    if (diffSec < 60) return `${Math.max(1, diffSec)}s`;
++    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
++    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
++  }
++  if (t >= startOfYesterday) return 'Yesterday';
++  if (t >= startOfLastWeek) {
++    return d.toLocaleDateString([], { weekday: 'short' });
++  }
++  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
++}
+diff --git a/apps/web/src/lib/types.ts b/apps/web/src/lib/types.ts
+index a8ff333..da57a5e 100644
+--- a/apps/web/src/lib/types.ts
++++ b/apps/web/src/lib/types.ts
+@@ -223,6 +223,13 @@ export interface MeRunSummary {
+   app_slug: string | null;
+   app_name: string | null;
+   app_icon: string | null;
++  /**
++   * v15.1 /me: the run's input payload, surfaced on the summary response
++   * so the threads rail can derive a human-readable title (inputs.prompt
++   * or the first string input) without a per-row detail fetch. Optional
++   * for back-compat with older servers.
++   */
++  inputs?: Record<string, unknown> | null;
+ }
+ 
+ export interface MeRunDetail extends MeRunSummary {
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index 402c16e..8b725df 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -13,6 +13,7 @@ const AppPermalinkPage = lazy(() => import('./pages/AppPermalinkPage').then(m =>
+ const ProtocolPage = lazy(() => import('./pages/ProtocolPage').then(m => ({ default: m.ProtocolPage })));
+ const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+ const MePage = lazy(() => import('./pages/MePage').then(m => ({ default: m.MePage })));
++const MeInstallPage = lazy(() => import('./pages/MeInstallPage').then(m => ({ default: m.MeInstallPage })));
+ const MeRunDetailPage = lazy(() => import('./pages/MeRunDetailPage').then(m => ({ default: m.MeRunDetailPage })));
+ const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ default: m.MeSettingsPage })));
+ const MeAppPage = lazy(() => import('./pages/MeAppPage').then(m => ({ default: m.MeAppPage })));
+@@ -97,6 +98,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
+         <Route path="/signup" element={<LoginPage />} />
+         {/* W4-minimal: user dashboard */}
+         <Route path="/me" element={<MePage />} />
++        {/* v15.1: Install-to-Claude is a deep-link surface (moved off /me). */}
++        <Route path="/me/install" element={<MeInstallPage />} />
+         <Route path="/me/runs/:runId" element={<MeRunDetailPage />} />
+         <Route path="/me/settings" element={<MeSettingsPage />} />
+         {/* v15.2: per-app overview / secrets / run surfaces for owned apps. */}
+diff --git a/apps/web/src/pages/MeAppRunPage.tsx b/apps/web/src/pages/MeAppRunPage.tsx
+index 1ec9fab..4589b74 100644
+--- a/apps/web/src/pages/MeAppRunPage.tsx
++++ b/apps/web/src/pages/MeAppRunPage.tsx
+@@ -7,7 +7,7 @@
+ // runtime details here.
+ 
+ import { useEffect, useMemo, useState } from 'react';
+-import { Link, useNavigate, useParams } from 'react-router-dom';
++import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+ import { PageShell } from '../components/PageShell';
+ import { MeRail } from '../components/me/MeRail';
+ import { AppHeader, TabBar } from './MeAppPage';
+diff --git a/apps/web/src/pages/MeInstallPage.tsx b/apps/web/src/pages/MeInstallPage.tsx
+new file mode 100644
+index 0000000..0d65696
+--- /dev/null
++++ b/apps/web/src/pages/MeInstallPage.tsx
+@@ -0,0 +1,419 @@
++// /me/install — Install to Claude Desktop.
++//
++// Moved off the old /me tabbed dashboard in v15.1 so /me can own the
++// Claude-shape threads surface. The UI itself is preserved verbatim
++// from the pre-v15.1 InstallTab: pick an app you've run, paste the
++// generated config into claude_desktop_config.json, optionally test
++// over HTTP. See commit history for the original rationale.
++
++import { useEffect, useState } from 'react';
++import { Link } from 'react-router-dom';
++import { PageShell } from '../components/PageShell';
++import * as api from '../api/client';
++import type { MeRunSummary } from '../lib/types';
++
++export function MeInstallPage() {
++  const origin =
++    typeof window !== 'undefined' ? window.location.origin : 'https://preview.floom.dev';
++  const mcpUrl = `${origin}/mcp`;
++
++  const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
++
++  useEffect(() => {
++    api
++      .getMyRuns(50)
++      .then((res) => setRuns(res.runs))
++      .catch((err) => setError((err as Error).message));
++  }, []);
++
++  // De-dupe run list into unique apps, preserving most-recently-run order.
++  const recentApps: Array<{ slug: string; name: string }> = [];
++  if (runs) {
++    const seen = new Set<string>();
++    for (const r of runs) {
++      if (!r.app_slug || seen.has(r.app_slug)) continue;
++      seen.add(r.app_slug);
++      recentApps.push({ slug: r.app_slug, name: r.app_name || r.app_slug });
++      if (recentApps.length >= 5) break;
++    }
++  }
++
++  const activeSlug = selectedSlug || recentApps[0]?.slug || null;
++  const activeApp = recentApps.find((a) => a.slug === activeSlug) || null;
++
++  function buildConfigFor(slug: string): string {
++    return JSON.stringify(
++      {
++        mcpServers: {
++          [`floom-${slug}`]: {
++            command: 'npx',
++            args: ['-y', 'mcp-remote', `${origin}/mcp/app/${slug}`],
++          },
++        },
++      },
++      null,
++      2,
++    );
++  }
++
++  return (
++    <PageShell requireAuth="cloud" title="Install to Claude | Floom">
++      <div data-testid="install-page" style={{ maxWidth: 680 }}>
++        <nav
++          aria-label="Breadcrumb"
++          style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
++        >
++          <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
++            /me
++          </Link>
++          <span style={{ margin: '0 6px' }}>›</span>
++          <span style={{ color: 'var(--ink)' }}>Install to Claude</span>
++        </nav>
++
++        <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)' }}>
++          Install to Claude Desktop
++        </h1>
++        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.6 }}>
++          Pick an app you've run, then paste its config into your{' '}
++          <code
++            style={{
++              fontFamily: 'JetBrains Mono, monospace',
++              fontSize: 12,
++              background: 'var(--bg)',
++              padding: '2px 6px',
++              borderRadius: 4,
++            }}
++          >
++            claude_desktop_config.json
++          </code>{' '}
++          and restart Claude Desktop.
++        </p>
++
++        <div
++          style={{
++            background: 'var(--card)',
++            border: '1px solid var(--line)',
++            borderRadius: 12,
++            padding: '16px 20px',
++            marginBottom: 16,
++          }}
++        >
++          <div
++            style={{
++              fontSize: 12,
++              fontWeight: 700,
++              color: 'var(--muted)',
++              marginBottom: 8,
++              textTransform: 'uppercase',
++              letterSpacing: '0.05em',
++            }}
++          >
++            Step 1: MCP URL
++          </div>
++          <CopyRow value={mcpUrl} />
++        </div>
++
++        {error && <ErrorCard title="Couldn't load your apps" message={error} />}
++
++        {!runs && !error && (
++          <div
++            data-testid="install-loading"
++            style={{
++              background: 'var(--card)',
++              border: '1px solid var(--line)',
++              borderRadius: 12,
++              padding: '16px 20px',
++              marginBottom: 16,
++              fontSize: 13,
++              color: 'var(--muted)',
++            }}
++          >
++            Loading your apps…
++          </div>
++        )}
++
++        {runs && recentApps.length === 0 && (
++          <div
++            data-testid="install-empty"
++            style={{
++              background: 'var(--card)',
++              border: '1px dashed var(--line)',
++              borderRadius: 12,
++              padding: '24px 20px',
++              marginBottom: 16,
++            }}
++          >
++            <div
++              style={{
++                fontSize: 14,
++                fontWeight: 600,
++                color: 'var(--ink)',
++                marginBottom: 6,
++              }}
++            >
++              No apps to install yet
++            </div>
++            <p
++              style={{
++                fontSize: 13,
++                color: 'var(--muted)',
++                margin: '0 0 14px',
++                lineHeight: 1.55,
++              }}
++            >
++              Run an app from the store first. Each app you run unlocks its own install config here.
++            </p>
++            <Link
++              to="/apps"
++              style={{
++                display: 'inline-block',
++                padding: '8px 14px',
++                background: 'var(--ink)',
++                color: '#fff',
++                borderRadius: 8,
++                fontSize: 13,
++                fontWeight: 600,
++                textDecoration: 'none',
++              }}
++            >
++              Browse apps
++            </Link>
++          </div>
++        )}
++
++        {recentApps.length > 0 && activeApp && (
++          <>
++            <div
++              style={{
++                background: 'var(--card)',
++                border: '1px solid var(--line)',
++                borderRadius: 12,
++                padding: '16px 20px',
++                marginBottom: 16,
++              }}
++            >
++              <div
++                style={{
++                  fontSize: 12,
++                  fontWeight: 700,
++                  color: 'var(--muted)',
++                  marginBottom: 10,
++                  textTransform: 'uppercase',
++                  letterSpacing: '0.05em',
++                }}
++              >
++                Step 2: Pick an app
++              </div>
++              <div
++                role="tablist"
++                aria-label="Recent apps"
++                style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
++              >
++                {recentApps.map((a) => {
++                  const isActive = a.slug === activeSlug;
++                  return (
++                    <button
++                      key={a.slug}
++                      type="button"
++                      role="tab"
++                      aria-selected={isActive}
++                      data-testid={`install-app-${a.slug}`}
++                      onClick={() => setSelectedSlug(a.slug)}
++                      style={{
++                        padding: '6px 12px',
++                        fontSize: 12,
++                        fontWeight: 600,
++                        borderRadius: 999,
++                        border: '1px solid var(--line)',
++                        background: isActive ? 'var(--ink)' : 'var(--bg)',
++                        color: isActive ? '#fff' : 'var(--ink)',
++                        cursor: 'pointer',
++                        fontFamily: 'inherit',
++                      }}
++                    >
++                      {a.name}
++                    </button>
++                  );
++                })}
++              </div>
++            </div>
++
++            <div
++              style={{
++                background: 'var(--card)',
++                border: '1px solid var(--line)',
++                borderRadius: 12,
++                padding: '16px 20px',
++                marginBottom: 16,
++              }}
++            >
++              <div
++                style={{
++                  fontSize: 12,
++                  fontWeight: 700,
++                  color: 'var(--muted)',
++                  marginBottom: 8,
++                  textTransform: 'uppercase',
++                  letterSpacing: '0.05em',
++                }}
++              >
++                Step 3: Paste into config
++              </div>
++              <CodeBlock key={activeApp.slug} code={buildConfigFor(activeApp.slug)} />
++            </div>
++
++            <div
++              style={{
++                background: 'var(--card)',
++                border: '1px solid var(--line)',
++                borderRadius: 12,
++                padding: '16px 20px',
++              }}
++            >
++              <div
++                style={{
++                  fontSize: 12,
++                  fontWeight: 700,
++                  color: 'var(--muted)',
++                  marginBottom: 8,
++                  textTransform: 'uppercase',
++                  letterSpacing: '0.05em',
++                }}
++              >
++                Step 4 — Test from HTTP
++              </div>
++              <CodeBlock
++                key={`${activeApp.slug}-curl`}
++                code={`curl -X POST ${origin}/api/${activeApp.slug}/run \\
++  -H "Content-Type: application/json" \\
++  -d '{"action":"","inputs":{}}'`}
++              />
++            </div>
++          </>
++        )}
++      </div>
++    </PageShell>
++  );
++}
++
++function CopyRow({ value }: { value: string }) {
++  const [copied, setCopied] = useState(false);
++  function copy() {
++    try {
++      void navigator.clipboard.writeText(value);
++      setCopied(true);
++      setTimeout(() => setCopied(false), 1500);
++    } catch {
++      /* no-op */
++    }
++  }
++  return (
++    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++      <code
++        style={{
++          flex: 1,
++          fontSize: 12,
++          fontFamily: 'JetBrains Mono, monospace',
++          color: 'var(--ink)',
++          background: 'var(--bg)',
++          border: '1px solid var(--line)',
++          borderRadius: 6,
++          padding: '8px 12px',
++          whiteSpace: 'nowrap',
++          overflow: 'hidden',
++          textOverflow: 'ellipsis',
++        }}
++      >
++        {value}
++      </code>
++      <button
++        type="button"
++        onClick={copy}
++        style={{
++          padding: '6px 12px',
++          background: 'var(--bg)',
++          border: '1px solid var(--line)',
++          borderRadius: 6,
++          fontSize: 11,
++          color: copied ? '#1a7f37' : 'var(--muted)',
++          cursor: 'pointer',
++          fontFamily: 'inherit',
++        }}
++      >
++        {copied ? 'Copied' : 'Copy'}
++      </button>
++    </div>
++  );
++}
++
++function CodeBlock({ code }: { code: string }) {
++  const [copied, setCopied] = useState(false);
++  function copy() {
++    try {
++      void navigator.clipboard.writeText(code);
++      setCopied(true);
++      setTimeout(() => setCopied(false), 1500);
++    } catch {
++      /* no-op */
++    }
++  }
++  return (
++    <div style={{ position: 'relative' }}>
++      <pre
++        style={{
++          background: '#0e0e0c',
++          color: '#d4d4c8',
++          fontFamily: 'JetBrains Mono, monospace',
++          fontSize: 12,
++          padding: 16,
++          borderRadius: 8,
++          overflowX: 'auto',
++          lineHeight: 1.7,
++          margin: 0,
++          whiteSpace: 'pre',
++        }}
++      >
++        {code}
++      </pre>
++      <button
++        type="button"
++        onClick={copy}
++        style={{
++          position: 'absolute',
++          top: 8,
++          right: 8,
++          fontSize: 10,
++          padding: '3px 8px',
++          background: 'rgba(255,255,255,0.1)',
++          border: '1px solid rgba(255,255,255,0.15)',
++          borderRadius: 4,
++          color: copied ? '#7bffc0' : 'rgba(255,255,255,0.5)',
++          cursor: 'pointer',
++          fontFamily: 'inherit',
++        }}
++      >
++        {copied ? 'Copied' : 'Copy'}
++      </button>
++    </div>
++  );
++}
++
++function ErrorCard({ title, message }: { title: string; message: string }) {
++  return (
++    <div
++      style={{
++        background: '#fff8e6',
++        border: '1px solid #f4e0a5',
++        borderRadius: 10,
++        padding: '14px 18px',
++        color: '#755a00',
++        marginBottom: 16,
++      }}
++    >
++      <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
++      <div style={{ fontSize: 13, fontFamily: 'JetBrains Mono, monospace' }}>{message}</div>
++    </div>
++  );
++}
+diff --git a/apps/web/src/pages/MePage.tsx b/apps/web/src/pages/MePage.tsx
+index 08f9302..52715e1 100644
+--- a/apps/web/src/pages/MePage.tsx
++++ b/apps/web/src/pages/MePage.tsx
+@@ -1,1090 +1,463 @@
+-// MVP: /me — user dashboard.
++// v15.1 /me — Claude/ChatGPT-shape dashboard.
+ //
+-// v11-faithful sidebar shell with 8 items across 3 sections:
+-//   Personal:  Your apps (real → runs), Folders*, Saved results*,
+-//              Schedules*, My tickets*
+-//   Workspace: Shared with me*
+-//   More:      Browse the store (link → /apps), Install to Claude (real)
++// Layout:
++//   Desktop (>640px): slim left rail (280px) with brand, "+ New thread",
++//     Your apps, threads grouped Today / Yesterday / Earlier, profile
++//     pinned bottom. Right pane shows the latest thread (single run) with
++//     turn-by-turn prompt + result. Inline composer at the bottom.
++//   Mobile (≤640px): two-tab layout (Threads / Apps) rendered by MeMobile.
+ //
+-// Items marked * render a ComingSoonStub. Every real tab reads from a real
+-// endpoint, no mocks. Empty states have real icons + CTAs.
+-//
+-// The Connected tools tab (Composio OAuth to 150+ tools) is deferred and
+-// is NOT listed as coming-soon per the MVP scope — see docs/DEFERRED-UI.md
+-// and feature/ui-composio-connections. Backend /api/connections routes
+-// stay live on main.
+-
+-import { useEffect, useState, type ReactNode } from 'react';
+-import { Link } from 'react-router-dom';
+-import { PageShell } from '../components/PageShell';
++// Scope notes: We don't have a real `threads` table yet, so each row in
++// `me_runs` is treated as a single-turn thread. The pane's composer
++// deep-links to /me/a/<slug>/run?prompt=… rather than chaining runs in
++// place. The right pane drives off ?thread=<run_id>; absent/invalid
++// param falls back to the latest run.
++
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import { Link, useNavigate, useSearchParams } from 'react-router-dom';
++import { MeRail } from '../components/me/MeRail';
++import { MeThreadPane } from '../components/me/MeThreadPane';
++import { MeComposer, type MeComposerHandle } from '../components/me/MeComposer';
++import { MeMobile } from '../components/me/MeMobile';
++import { Logo } from '../components/Logo';
+ import { useSession } from '../hooks/useSession';
+ import { useMyApps } from '../hooks/useMyApps';
+-import { AppIcon } from '../components/AppIcon';
+ import * as api from '../api/client';
+-import type { MeRunSummary, SessionMePayload } from '../lib/types';
++import type { MeRunDetail, MeRunSummary } from '../lib/types';
+ 
+-type Tab =
+-  | 'your-apps'
+-  | 'folders'
+-  | 'saved-results'
+-  | 'schedules'
+-  | 'my-tickets'
+-  | 'shared'
+-  | 'install';
++const MOBILE_BREAKPOINT = 640;
++const RUN_FETCH_LIMIT = 50;
+ 
+-type SidebarItem =
+-  | { kind: 'tab'; id: Tab; label: string; icon: ReactNode }
+-  | { kind: 'link'; href: string; label: string; icon: ReactNode };
++export function MePage() {
++  const { data: session, loading: sessionLoading } = useSession();
++  const { apps, loading: appsLoading } = useMyApps();
++  const navigate = useNavigate();
++  const [searchParams, setSearchParams] = useSearchParams();
++  const composerRef = useRef<MeComposerHandle>(null);
+ 
+-type SidebarSection = { label: string; items: SidebarItem[] };
++  useEffect(() => {
++    document.title = 'My threads | Floom';
++  }, []);
+ 
+-function buildSidebar(): SidebarSection[] {
+-  return [
+-    {
+-      label: 'Personal',
+-      items: [
+-        { kind: 'tab', id: 'your-apps', label: 'Your apps', icon: <IconPackage /> },
+-        { kind: 'tab', id: 'folders', label: 'Folders', icon: <IconLayers /> },
+-        { kind: 'tab', id: 'saved-results', label: 'Saved results', icon: <IconBookmark /> },
+-        { kind: 'tab', id: 'schedules', label: 'Schedules', icon: <IconClock /> },
+-        { kind: 'tab', id: 'my-tickets', label: 'My tickets', icon: <IconInbox /> },
+-      ],
+-    },
+-    {
+-      label: 'Workspace',
+-      items: [
+-        { kind: 'tab', id: 'shared', label: 'Shared with me', icon: <IconUsers /> },
+-      ],
+-    },
+-    {
+-      label: 'More',
+-      items: [
+-        { kind: 'link', href: '/apps', label: 'Browse the store', icon: <IconCompass /> },
+-        { kind: 'tab', id: 'install', label: 'Install to Claude', icon: <IconDownload /> },
+-      ],
+-    },
+-  ];
+-}
++  const [isMobile, setIsMobile] = useState(() => {
++    if (typeof window === 'undefined') return false;
++    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
++  });
+ 
+-export function MePage() {
+-  const { data: session, isAuthenticated } = useSession();
+-  const [tab, setTab] = useState<Tab>('your-apps');
+-  const sidebar = buildSidebar();
++  useEffect(() => {
++    if (typeof window === 'undefined') return;
++    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
++    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
++    mq.addEventListener('change', handler);
++    return () => mq.removeEventListener('change', handler);
++  }, []);
+ 
+-  return (
+-    <PageShell requireAuth="cloud" title="My dashboard | Floom">
+-      <div data-testid="me-page">
+-        <div style={{ marginBottom: 28 }}>
+-          <h1
+-            className="section-title-display"
+-            style={{ fontSize: 36, margin: '0 0 6px' }}
+-          >
+-            My dashboard
+-          </h1>
+-          <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0 }}>
+-            {isAuthenticated
+-              ? `Signed in as ${session?.user.email || session?.user.name}`
+-              : 'Local mode. Your runs are scoped to this device.'}
+-          </p>
+-        </div>
++  useEffect(() => {
++    if (sessionLoading) return;
++    if (!session) return;
++    if (session.cloud_mode && session.user.is_local) {
++      navigate('/login?next=' + encodeURIComponent('/me'), { replace: true });
++    }
++  }, [session, sessionLoading, navigate]);
++
++  const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
++  const [runsError, setRunsError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++    api
++      .getMyRuns(RUN_FETCH_LIMIT)
++      .then((res) => {
++        if (cancelled) return;
++        setRuns(res.runs);
++      })
++      .catch((err) => {
++        if (cancelled) return;
++        setRunsError((err as Error).message || 'Failed to load threads');
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++
++  const activeThreadId = searchParams.get('thread');
++  const activeThread = useMemo<MeRunSummary | null>(() => {
++    if (!runs || runs.length === 0) return null;
++    if (activeThreadId) {
++      const match = runs.find((r) => r.id === activeThreadId);
++      if (match) return match;
++    }
++    return runs[0];
++  }, [runs, activeThreadId]);
++
++  const [detail, setDetail] = useState<MeRunDetail | null>(null);
++  const [detailError, setDetailError] = useState<string | null>(null);
+ 
+-        <div className="me-layout">
+-          <aside className="me-sidebar" aria-label="Dashboard navigation">
+-            {sidebar.map((section) => (
+-              <div key={section.label} className="me-sidebar-section">
+-                <div className="me-sidebar-label">{section.label}</div>
+-                {section.items.map((item) => {
+-                  if (item.kind === 'link') {
+-                    return (
+-                      <Link
+-                        key={item.href}
+-                        to={item.href}
+-                        className="me-sidebar-item"
+-                        data-testid={`me-nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
+-                      >
+-                        <span className="me-sidebar-icon">{item.icon}</span>
+-                        <span>{item.label}</span>
+-                      </Link>
+-                    );
+-                  }
+-                  const isActive = tab === item.id;
+-                  return (
+-                    <button
+-                      key={item.id}
+-                      type="button"
+-                      onClick={() => setTab(item.id)}
+-                      className={`me-sidebar-item${isActive ? ' active' : ''}`}
+-                      data-testid={`me-nav-${item.id}`}
+-                      aria-current={isActive ? 'page' : undefined}
+-                    >
+-                      <span className="me-sidebar-icon">{item.icon}</span>
+-                      <span>{item.label}</span>
+-                    </button>
+-                  );
+-                })}
+-              </div>
+-            ))}
+-          </aside>
++  useEffect(() => {
++    if (!activeThread) {
++      setDetail(null);
++      setDetailError(null);
++      return;
++    }
++    let cancelled = false;
++    setDetail(null);
++    setDetailError(null);
++    api
++      .getMyRun(activeThread.id)
++      .then((res) => {
++        if (cancelled) return;
++        setDetail(res);
++      })
++      .catch((err) => {
++        if (cancelled) return;
++        setDetailError((err as Error).message || 'Failed to load run');
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [activeThread]);
++
++  const composerTarget = useMemo(() => {
++    if (activeThread?.app_slug) {
++      return { slug: activeThread.app_slug, name: activeThread.app_name };
++    }
++    if (apps && apps.length > 0) {
++      return { slug: apps[0].slug, name: apps[0].name };
++    }
++    return null;
++  }, [activeThread, apps]);
+ 
+-          <div className="me-main">
+-            {tab === 'your-apps' && (
+-              <>
+-                <YourAppsPanel />
+-                <RunsTab />
+-              </>
+-            )}
+-            {tab === 'folders' && (
+-              <ComingSoonStub
+-                title="Folders"
+-                description="Organize your apps and runs into folders. Coming in the next release."
+-                cta={{ label: 'Browse apps', to: '/apps' }}
+-                testId="stub-folders"
+-              />
+-            )}
+-            {tab === 'saved-results' && (
+-              <ComingSoonStub
+-                title="Saved results"
+-                description="Pin run outputs you want to keep. Coming in the next release."
+-                cta={{ label: 'View your runs', onClick: () => setTab('your-apps') }}
+-                testId="stub-saved-results"
+-              />
+-            )}
+-            {tab === 'schedules' && (
+-              <ComingSoonStub
+-                title="Schedules"
+-                description="Run Floom apps on a cron or webhook. Coming in the next release. For now, run your apps manually from the store."
+-                cta={{ label: 'Browse apps', to: '/apps' }}
+-                testId="stub-schedules"
+-              />
+-            )}
+-            {tab === 'my-tickets' && (
+-              <ComingSoonStub
+-                title="My tickets"
+-                description="Support inbox for your Floom apps. Coming in the next release."
+-                cta={{ label: 'Open feedback', href: 'mailto:team@floom.dev' }}
+-                testId="stub-my-tickets"
+-              />
+-            )}
+-            {tab === 'shared' && (
+-              <ComingSoonStub
+-                title="Shared with me"
+-                description="Apps and runs other Floom users have shared with you. Coming in the next release."
+-                cta={{ label: 'Browse public apps', to: '/apps' }}
+-                testId="stub-shared"
+-              />
+-            )}
+-            {tab === 'install' && <InstallTab session={session} />}
++  const handleNewThread = useCallback(() => {
++    if (!apps || apps.length === 0) {
++      navigate('/apps');
++      return;
++    }
++    if (searchParams.has('thread')) {
++      const next = new URLSearchParams(searchParams);
++      next.delete('thread');
++      setSearchParams(next, { replace: true });
++    }
++    requestAnimationFrame(() => composerRef.current?.focus());
++  }, [apps, navigate, searchParams, setSearchParams]);
++
++  useEffect(() => {
++    if (typeof window === 'undefined') return;
++    const onKey = (e: KeyboardEvent) => {
++      const isMeta = e.metaKey || e.ctrlKey;
++      if (isMeta && (e.key === 'n' || e.key === 'N')) {
++        const target = e.target as HTMLElement | null;
++        if (target && /INPUT|TEXTAREA/i.test(target.tagName)) return;
++        e.preventDefault();
++        handleNewThread();
++      }
++    };
++    window.addEventListener('keydown', onKey);
++    return () => window.removeEventListener('keydown', onKey);
++  }, [handleNewThread]);
++
++  const app = activeThread?.app_slug
++    ? apps?.find((a) => a.slug === activeThread.app_slug)
++    : null;
++
++  const hasAnyApps = !!apps && apps.length > 0;
++  const hasAnyRuns = !!runs && runs.length > 0;
++  const isEmpty = !appsLoading && !hasAnyApps && !!runs && runs.length === 0;
++
++  if (isMobile) {
++    return (
++      <div
++        data-testid="me-page-mobile"
++        style={{ minHeight: '100vh', background: 'var(--card)' }}
++      >
++        <MeMobile
++          threads={runs ?? []}
++          apps={apps ?? []}
++          onNewThread={handleNewThread}
++        />
++        {runsError && (
++          <div
++            role="alert"
++            style={{
++              padding: 16,
++              color: '#c2321f',
++              fontSize: 13,
++            }}
++          >
++            {runsError}
+           </div>
+-        </div>
++        )}
+       </div>
+-    </PageShell>
+-  );
+-}
++    );
++  }
+ 
+-// ---------- Coming soon stub ----------
+-interface StubCta {
+-  label: string;
+-  to?: string;
+-  href?: string;
+-  onClick?: () => void;
++  return (
++    <div
++      data-testid="me-page"
++      style={{
++        display: 'flex',
++        alignItems: 'stretch',
++        minHeight: '100vh',
++        background: 'var(--bg)',
++      }}
++    >
++      <MeRail
++        threads={runs ?? []}
++        activeThreadId={activeThread?.id}
++        onNewThread={handleNewThread}
++      />
++
++      <main
++        style={{
++          flex: 1,
++          minWidth: 0,
++          display: 'flex',
++          flexDirection: 'column',
++        }}
++      >
++        {isEmpty ? (
++          <EmptyStatePane />
++        ) : !hasAnyRuns && !runs ? (
++          <LoadingPane />
++        ) : !hasAnyRuns ? (
++          <NoThreadsYetPane hasApps={hasAnyApps} />
++        ) : activeThread ? (
++          <>
++            <MeThreadPane
++              thread={activeThread}
++              detail={detail}
++              detailError={detailError}
++              appVisibility={app?.visibility ?? null}
++            />
++          </>
++        ) : null}
++
++        {!isEmpty && (
++          <MeComposer
++            ref={composerRef}
++            targetSlug={composerTarget?.slug ?? null}
++            targetName={composerTarget?.name ?? null}
++          />
++        )}
++
++        {runsError && (
++          <div
++            role="alert"
++            style={{
++              padding: '12px 24px',
++              color: '#c2321f',
++              fontSize: 13,
++            }}
++          >
++            {runsError}
++          </div>
++        )}
++      </main>
++    </div>
++  );
+ }
+ 
+-function ComingSoonStub({
+-  title,
+-  description,
+-  cta,
+-  testId,
+-}: {
+-  title: string;
+-  description: string;
+-  cta: StubCta;
+-  testId: string;
+-}) {
++function EmptyStatePane() {
+   return (
+-    <div
+-      data-testid={testId}
++    <section
++      data-testid="me-empty"
+       style={{
+-        border: '1px solid var(--line)',
+-        background: 'var(--card)',
+-        borderRadius: 12,
+-        padding: '48px 32px',
++        flex: 1,
++        display: 'flex',
++        flexDirection: 'column',
++        alignItems: 'center',
++        justifyContent: 'center',
++        padding: '80px 32px',
+         textAlign: 'center',
+-        maxWidth: 520,
++        background: 'var(--card)',
+       }}
+     >
+       <div
+         style={{
+-          display: 'inline-flex',
+-          alignItems: 'center',
+-          gap: 6,
+-          padding: '4px 10px',
+-          borderRadius: 999,
++          width: 56,
++          height: 56,
++          borderRadius: 14,
+           background: 'var(--accent-soft)',
+           color: 'var(--accent)',
+-          fontSize: 11,
+-          fontWeight: 600,
+-          letterSpacing: '0.04em',
+-          textTransform: 'uppercase',
+-          marginBottom: 16,
++          display: 'flex',
++          alignItems: 'center',
++          justifyContent: 'center',
++          margin: '0 auto 18px',
+         }}
+       >
+-        Coming soon
++        <Logo size={28} />
+       </div>
+       <h2
++        className="serif-display"
+         style={{
+-          fontSize: 22,
+-          fontWeight: 700,
++          fontFamily: "'DM Serif Display', Georgia, serif",
++          fontSize: 28,
++          lineHeight: 1.1,
+           margin: '0 0 10px',
+           color: 'var(--ink)',
++          fontWeight: 400,
++          letterSpacing: '-0.02em',
+         }}
+       >
+-        {title}
++        Welcome — pick or build your first app.
+       </h2>
+       <p
+         style={{
+           fontSize: 14,
+           color: 'var(--muted)',
+-          margin: '0 auto 24px',
+           maxWidth: 420,
++          margin: '0 auto 28px',
+           lineHeight: 1.6,
+         }}
+       >
+-        {description}
++        Floom apps live here once you save or build them. Public apps are at{' '}
++        <Link to="/apps" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
++          /apps
++        </Link>
++        .
+       </p>
+-      {cta.to ? (
++      <div
++        style={{
++          display: 'flex',
++          gap: 10,
++          alignItems: 'center',
++          justifyContent: 'center',
++          flexWrap: 'wrap',
++        }}
++      >
+         <Link
+-          to={cta.to}
++          to="/apps"
++          data-testid="me-empty-browse"
+           style={{
+             display: 'inline-flex',
+             alignItems: 'center',
+             gap: 6,
+-            padding: '10px 20px',
+-            background: 'var(--accent)',
+-            color: '#fff',
+-            borderRadius: 8,
+-            fontSize: 14,
++            padding: '9px 14px',
++            background: 'var(--card)',
++            border: '1px solid var(--line)',
++            borderRadius: 10,
++            fontSize: 13.5,
+             fontWeight: 600,
++            color: 'var(--ink)',
+             textDecoration: 'none',
+           }}
+         >
+-          {cta.label}
++          Browse public apps →
+         </Link>
+-      ) : cta.href ? (
+-        <a
+-          href={cta.href}
++        <Link
++          to="/build"
++          data-testid="me-empty-build"
+           style={{
+             display: 'inline-flex',
+             alignItems: 'center',
+-            gap: 6,
+-            padding: '10px 20px',
+-            background: 'var(--accent)',
+-            color: '#fff',
+-            borderRadius: 8,
+-            fontSize: 14,
++            gap: 8,
++            padding: '9px 14px',
++            background: 'var(--ink)',
++            border: '1px solid var(--ink)',
++            borderRadius: 10,
++            fontSize: 13.5,
+             fontWeight: 600,
+-            textDecoration: 'none',
+-          }}
+-        >
+-          {cta.label}
+-        </a>
+-      ) : (
+-        <button
+-          type="button"
+-          onClick={cta.onClick}
+-          style={{
+-            padding: '10px 20px',
+-            background: 'var(--accent)',
+             color: '#fff',
+-            border: 'none',
+-            borderRadius: 8,
+-            fontSize: 14,
+-            fontWeight: 600,
+-            cursor: 'pointer',
+-            fontFamily: 'inherit',
++            textDecoration: 'none',
+           }}
+         >
+-          {cta.label}
+-        </button>
+-      )}
+-    </div>
+-  );
+-}
+-
+-// ---------- Sidebar icons (inline SVG, stroke-based) ----------
+-function IconPackage() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <path d="M16.5 9.4 7.55 4.24" /><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="m3.27 6.96 8.73 5.05 8.73-5.05" /><path d="M12 22.08V12" />
+-    </svg>
+-  );
+-}
+-function IconLayers() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" />
+-    </svg>
+-  );
+-}
+-function IconBookmark() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" />
+-    </svg>
+-  );
+-}
+-function IconClock() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+-    </svg>
+-  );
+-}
+-function IconInbox() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+-    </svg>
+-  );
+-}
+-function IconUsers() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+-    </svg>
+-  );
+-}
+-function IconCompass() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+-    </svg>
+-  );
+-}
+-function IconDownload() {
+-  return (
+-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+-    </svg>
+-  );
+-}
+-
+-// ---------- Your apps (v15.2 surface above the runs list) ----------
+-function YourAppsPanel() {
+-  const { apps } = useMyApps();
+-  if (!apps || apps.length === 0) return null;
+-  return (
+-    <section
+-      data-testid="your-apps-panel"
+-      style={{ marginBottom: 28 }}
+-    >
+-      <h2
+-        style={{
+-          fontSize: 12,
+-          fontWeight: 700,
+-          textTransform: 'uppercase',
+-          letterSpacing: '0.06em',
+-          color: 'var(--muted)',
+-          margin: '0 0 10px',
+-        }}
+-      >
+-        Your apps
+-      </h2>
+-      <div
+-        style={{
+-          display: 'grid',
+-          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+-          gap: 10,
+-        }}
+-      >
+-        {apps.map((app) => (
+-          <Link
+-            key={app.slug}
+-            to={`/me/a/${app.slug}`}
+-            data-testid={`your-apps-row-${app.slug}`}
+-            style={{
+-              display: 'flex',
+-              alignItems: 'center',
+-              gap: 10,
+-              padding: '10px 12px',
+-              background: 'var(--card)',
+-              border: '1px solid var(--line)',
+-              borderRadius: 10,
+-              textDecoration: 'none',
+-              color: 'var(--ink)',
+-            }}
++          Build your own
++          <svg
++            width="14"
++            height="14"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="1.75"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++            aria-hidden="true"
+           >
+-            <span
+-              style={{
+-                width: 28,
+-                height: 28,
+-                borderRadius: 7,
+-                background: 'var(--bg)',
+-                border: '1px solid var(--line)',
+-                display: 'inline-flex',
+-                alignItems: 'center',
+-                justifyContent: 'center',
+-                flexShrink: 0,
+-              }}
+-            >
+-              <AppIcon slug={app.slug} size={16} />
+-            </span>
+-            <span
+-              style={{
+-                flex: 1,
+-                fontSize: 13,
+-                fontWeight: 600,
+-                overflow: 'hidden',
+-                textOverflow: 'ellipsis',
+-                whiteSpace: 'nowrap',
+-              }}
+-            >
+-              {app.name}
+-            </span>
+-            {app.visibility === 'private' && (
+-              <span
+-                style={{
+-                  fontSize: 10,
+-                  fontWeight: 600,
+-                  textTransform: 'uppercase',
+-                  letterSpacing: '0.04em',
+-                  padding: '2px 6px',
+-                  borderRadius: 4,
+-                  background: 'var(--bg)',
+-                  border: '1px solid var(--line)',
+-                  color: 'var(--muted)',
+-                }}
+-              >
+-                Private
+-              </span>
+-            )}
+-          </Link>
+-        ))}
++            <path d="M5 12h14M12 5l7 7-7 7" />
++          </svg>
++        </Link>
+       </div>
+     </section>
+   );
+ }
+ 
+-// ---------- Runs tab ----------
+-function RunsTab() {
+-  const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
+-  const [error, setError] = useState<string | null>(null);
+-
+-  useEffect(() => {
+-    api
+-      .getMyRuns(50)
+-      .then((res) => setRuns(res.runs))
+-      .catch((err) => setError((err as Error).message));
+-  }, []);
+-
+-  if (error) {
+-    return (
+-      <ErrorCard
+-        title="Couldn't load your runs"
+-        message={error}
+-        data-testid="runs-error"
+-      />
+-    );
+-  }
+-  if (!runs) {
+-    return <SkeletonList />;
+-  }
+-  if (runs.length === 0) {
+-    return (
+-      <EmptyState
+-        icon={<RunIcon />}
+-        title="No runs yet"
+-        description="Run your first app from the store."
+-        cta={{ label: 'Browse apps', to: '/apps' }}
+-        testId="runs-empty"
+-      />
+-    );
+-  }
+-
++function NoThreadsYetPane({ hasApps }: { hasApps: boolean }) {
+   return (
+-    <div
+-      data-testid="runs-list"
++    <section
++      data-testid="me-no-threads"
+       style={{
+-        border: '1px solid var(--line)',
+-        borderRadius: 12,
++        flex: 1,
++        display: 'flex',
++        flexDirection: 'column',
++        alignItems: 'center',
++        justifyContent: 'center',
++        padding: '80px 32px',
++        textAlign: 'center',
+         background: 'var(--card)',
+-        overflow: 'hidden',
+       }}
+     >
+-      <div
++      <h2
+         style={{
+-          display: 'grid',
+-          gridTemplateColumns: '2fr 1fr 1fr 1fr 80px',
+-          gap: 8,
+-          padding: '12px 18px',
+-          fontSize: 11,
+-          textTransform: 'uppercase',
+-          letterSpacing: '0.06em',
+-          color: 'var(--muted)',
+-          fontWeight: 700,
+-          borderBottom: '1px solid var(--line)',
+-          background: 'var(--bg)',
++          fontFamily: "'DM Serif Display', Georgia, serif",
++          fontSize: 24,
++          lineHeight: 1.2,
++          margin: '0 0 8px',
++          color: 'var(--ink)',
++          fontWeight: 400,
+         }}
+       >
+-        <span>App</span>
+-        <span>Action</span>
+-        <span>Status</span>
+-        <span>Started</span>
+-        <span style={{ textAlign: 'right' }}>Time</span>
+-      </div>
+-      {runs.map((r) => (
+-        <Link
+-          key={r.id}
+-          to={`/me/runs/${r.id}`}
+-          style={{
+-            display: 'grid',
+-            gridTemplateColumns: '2fr 1fr 1fr 1fr 80px',
+-            gap: 8,
+-            padding: '14px 18px',
+-            borderBottom: '1px solid var(--line)',
+-            fontSize: 13,
+-            color: 'var(--ink)',
+-            textDecoration: 'none',
+-            alignItems: 'center',
+-          }}
+-          data-testid={`run-row-${r.id}`}
+-        >
+-          <span style={{ fontWeight: 600 }}>{r.app_name || r.app_slug || '(unknown)'}</span>
+-          <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: 'var(--muted)' }}>
+-            {r.action}
+-          </span>
+-          <StatusPill status={r.status} />
+-          <span style={{ color: 'var(--muted)', fontSize: 12 }}>{formatTime(r.started_at)}</span>
+-          <span style={{ textAlign: 'right', color: 'var(--muted)', fontSize: 12 }}>
+-            {r.duration_ms ? `${Math.round(r.duration_ms)}ms` : '-'}
+-          </span>
+-        </Link>
+-      ))}
+-    </div>
+-  );
+-}
+-
+-// ---------- Install tab ----------
+-// Shows a picker of apps the user has recently run; each selection renders
+-// a dynamic Claude Desktop config with the REAL app slug + correct shape.
+-// Claude Desktop's stable config format requires stdio servers with
+-// command/args — we wrap the HTTP MCP URL via the official mcp-remote bridge.
+-function InstallTab({ session: _session }: { session: SessionMePayload | null }) {
+-  const origin =
+-    typeof window !== 'undefined' ? window.location.origin : 'https://preview.floom.dev';
+-  const mcpUrl = `${origin}/mcp`;
+-
+-  const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
+-  const [error, setError] = useState<string | null>(null);
+-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+-
+-  useEffect(() => {
+-    api
+-      .getMyRuns(50)
+-      .then((res) => setRuns(res.runs))
+-      .catch((err) => setError((err as Error).message));
+-  }, []);
+-
+-  // De-dupe run list into unique apps, preserving most-recently-run order.
+-  // Runs come back newest-first from /api/me/runs, so the first occurrence
+-  // of each slug is the most recent.
+-  const recentApps: Array<{ slug: string; name: string }> = [];
+-  if (runs) {
+-    const seen = new Set<string>();
+-    for (const r of runs) {
+-      if (!r.app_slug || seen.has(r.app_slug)) continue;
+-      seen.add(r.app_slug);
+-      recentApps.push({ slug: r.app_slug, name: r.app_name || r.app_slug });
+-      if (recentApps.length >= 5) break;
+-    }
+-  }
+-
+-  // Default selection: first (most recent) app once data loads.
+-  const activeSlug = selectedSlug || recentApps[0]?.slug || null;
+-  const activeApp = recentApps.find((a) => a.slug === activeSlug) || null;
+-
+-  function buildConfigFor(slug: string): string {
+-    return JSON.stringify(
+-      {
+-        mcpServers: {
+-          [`floom-${slug}`]: {
+-            command: 'npx',
+-            args: ['-y', 'mcp-remote', `${origin}/mcp/app/${slug}`],
+-          },
+-        },
+-      },
+-      null,
+-      2,
+-    );
+-  }
+-
+-  return (
+-    <div data-testid="install-tab" style={{ maxWidth: 680 }}>
+-      <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px', color: 'var(--ink)' }}>
+-        Install to Claude Desktop
++        No threads yet.
+       </h2>
+-      <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.6 }}>
+-        Pick an app you've run, then paste its config into your <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, background: 'var(--bg)', padding: '2px 6px', borderRadius: 4 }}>claude_desktop_config.json</code> and restart Claude Desktop.
+-      </p>
+-
+-      <div
++      <p
+         style={{
+-          background: 'var(--card)',
+-          border: '1px solid var(--line)',
+-          borderRadius: 12,
+-          padding: '16px 20px',
+-          marginBottom: 16,
++          fontSize: 14,
++          color: 'var(--muted)',
++          maxWidth: 380,
++          margin: '0 auto 20px',
++          lineHeight: 1.6,
+         }}
+       >
+-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+-          Step 1: MCP URL
+-        </div>
+-        <CopyRow value={mcpUrl} />
+-      </div>
+-
+-      {error && (
+-        <ErrorCard
+-          title="Couldn't load your apps"
+-          message={error}
+-        />
+-      )}
+-
+-      {!runs && !error && (
+-        <div
+-          data-testid="install-loading"
+-          style={{
+-            background: 'var(--card)',
+-            border: '1px solid var(--line)',
+-            borderRadius: 12,
+-            padding: '16px 20px',
+-            marginBottom: 16,
+-            fontSize: 13,
+-            color: 'var(--muted)',
+-          }}
+-        >
+-          Loading your apps…
+-        </div>
+-      )}
+-
+-      {runs && recentApps.length === 0 && (
+-        <div
+-          data-testid="install-empty"
++        {hasApps
++          ? 'Start one below — every run shows up here.'
++          : 'Pick an app from the directory or build your own to kick things off.'}
++      </p>
++      {!hasApps && (
++        <Link
++          to="/apps"
+           style={{
+-            background: 'var(--card)',
+-            border: '1px dashed var(--line)',
+-            borderRadius: 12,
+-            padding: '24px 20px',
+-            marginBottom: 16,
++            display: 'inline-flex',
++            alignItems: 'center',
++            gap: 6,
++            padding: '9px 14px',
++            background: 'var(--ink)',
++            border: '1px solid var(--ink)',
++            borderRadius: 10,
++            fontSize: 13.5,
++            fontWeight: 600,
++            color: '#fff',
++            textDecoration: 'none',
+           }}
+         >
+-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+-            No apps to install yet
+-          </div>
+-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 14px', lineHeight: 1.55 }}>
+-            Run an app from the store first. Each app you run unlocks its own install config here.
+-          </p>
+-          <Link
+-            to="/apps"
+-            style={{
+-              display: 'inline-block',
+-              padding: '8px 14px',
+-              background: 'var(--ink)',
+-              color: '#fff',
+-              borderRadius: 8,
+-              fontSize: 13,
+-              fontWeight: 600,
+-              textDecoration: 'none',
+-            }}
+-          >
+-            Browse apps
+-          </Link>
+-        </div>
+-      )}
+-
+-      {recentApps.length > 0 && activeApp && (
+-        <>
+-          <div
+-            style={{
+-              background: 'var(--card)',
+-              border: '1px solid var(--line)',
+-              borderRadius: 12,
+-              padding: '16px 20px',
+-              marginBottom: 16,
+-            }}
+-          >
+-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+-              Step 2: Pick an app
+-            </div>
+-            <div
+-              role="tablist"
+-              aria-label="Recent apps"
+-              style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
+-            >
+-              {recentApps.map((a) => {
+-                const isActive = a.slug === activeSlug;
+-                return (
+-                  <button
+-                    key={a.slug}
+-                    type="button"
+-                    role="tab"
+-                    aria-selected={isActive}
+-                    data-testid={`install-app-${a.slug}`}
+-                    onClick={() => setSelectedSlug(a.slug)}
+-                    style={{
+-                      padding: '6px 12px',
+-                      fontSize: 12,
+-                      fontWeight: 600,
+-                      borderRadius: 999,
+-                      border: '1px solid var(--line)',
+-                      background: isActive ? 'var(--ink)' : 'var(--bg)',
+-                      color: isActive ? '#fff' : 'var(--ink)',
+-                      cursor: 'pointer',
+-                      fontFamily: 'inherit',
+-                    }}
+-                  >
+-                    {a.name}
+-                  </button>
+-                );
+-              })}
+-            </div>
+-          </div>
+-
+-          <div
+-            style={{
+-              background: 'var(--card)',
+-              border: '1px solid var(--line)',
+-              borderRadius: 12,
+-              padding: '16px 20px',
+-              marginBottom: 16,
+-            }}
+-          >
+-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+-              Step 3: Paste into config
+-            </div>
+-            <CodeBlock
+-              key={activeApp.slug}
+-              code={buildConfigFor(activeApp.slug)}
+-            />
+-          </div>
+-
+-          <div
+-            style={{
+-              background: 'var(--card)',
+-              border: '1px solid var(--line)',
+-              borderRadius: 12,
+-              padding: '16px 20px',
+-            }}
+-          >
+-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+-              Step 4 — Test from HTTP
+-            </div>
+-            <CodeBlock
+-              key={`${activeApp.slug}-curl`}
+-              code={`curl -X POST ${origin}/api/${activeApp.slug}/run \\
+-  -H "Content-Type: application/json" \\
+-  -d '{"action":"","inputs":{}}'`}
+-            />
+-          </div>
+-        </>
++          Browse apps →
++        </Link>
+       )}
+-    </div>
++    </section>
+   );
+ }
+ 
+-// ---------- shared helpers ----------
+-
+-function StatusPill({ status }: { status: string }) {
+-  const colors: Record<string, { bg: string; fg: string }> = {
+-    success: { bg: '#e6f4ea', fg: '#1a7f37' },
+-    error: { bg: '#fdecea', fg: '#c2321f' },
+-    timeout: { bg: '#fdecea', fg: '#c2321f' },
+-    running: { bg: '#ecfdf5', fg: '#047857' },
+-    pending: { bg: '#f4f4f0', fg: '#585550' },
+-  };
+-  const c = colors[status] || colors.pending;
++function LoadingPane() {
+   return (
+-    <span
++    <section
+       style={{
+-        display: 'inline-flex',
++        flex: 1,
++        display: 'flex',
+         alignItems: 'center',
+-        padding: '2px 8px',
+-        background: c.bg,
+-        color: c.fg,
+-        borderRadius: 999,
+-        fontSize: 11,
+-        fontWeight: 600,
+-        textTransform: 'uppercase',
+-        letterSpacing: '0.04em',
+-        width: 'fit-content',
+-      }}
+-    >
+-      {status}
+-    </span>
+-  );
+-}
+-
+-export function formatTime(iso: string): string {
+-  try {
+-    const d = new Date(iso);
+-    const now = new Date();
+-    const diff = now.getTime() - d.getTime();
+-    const sec = Math.floor(diff / 1000);
+-    if (sec < 60) return `${sec}s ago`;
+-    const min = Math.floor(sec / 60);
+-    if (min < 60) return `${min}m ago`;
+-    const hr = Math.floor(min / 60);
+-    if (hr < 24) return `${hr}h ago`;
+-    const day = Math.floor(hr / 24);
+-    if (day < 7) return `${day}d ago`;
+-    return d.toLocaleDateString();
+-  } catch {
+-    return iso;
+-  }
+-}
+-
+-function SkeletonList() {
+-  return (
+-    <div data-testid="skeleton-list">
+-      {[0, 1, 2].map((i) => (
+-        <div
+-          key={i}
+-          style={{
+-            height: 48,
+-            background: 'var(--bg)',
+-            border: '1px solid var(--line)',
+-            borderRadius: 8,
+-            marginBottom: 8,
+-            animation: 'pulse 1.5s infinite',
+-          }}
+-        />
+-      ))}
+-    </div>
+-  );
+-}
+-
+-function EmptyState({
+-  icon,
+-  title,
+-  description,
+-  cta,
+-  testId,
+-}: {
+-  icon: React.ReactNode;
+-  title: string;
+-  description: string;
+-  cta?: { label: string; to?: string; onClick?: () => void };
+-  testId?: string;
+-}) {
+-  return (
+-    <div
+-      data-testid={testId}
+-      style={{
+-        textAlign: 'center',
+-        padding: '56px 24px',
++        justifyContent: 'center',
++        color: 'var(--muted)',
++        fontSize: 13,
+         background: 'var(--card)',
+-        border: '1px dashed var(--line)',
+-        borderRadius: 12,
+       }}
+     >
+-      <div
+-        style={{
+-          width: 56,
+-          height: 56,
+-          borderRadius: 14,
+-          background: 'var(--bg)',
+-          border: '1px solid var(--line)',
+-          margin: '0 auto 16px',
+-          display: 'flex',
+-          alignItems: 'center',
+-          justifyContent: 'center',
+-          color: 'var(--muted)',
+-        }}
+-      >
+-        {icon}
+-      </div>
+-      <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)', margin: '0 0 6px' }}>
+-        {title}
+-      </h3>
+-      <p
+-        style={{
+-          fontSize: 13,
+-          color: 'var(--muted)',
+-          margin: '0 0 16px',
+-          maxWidth: 360,
+-          marginLeft: 'auto',
+-          marginRight: 'auto',
+-          lineHeight: 1.55,
+-        }}
+-      >
+-        {description}
+-      </p>
+-      {cta &&
+-        (cta.to ? (
+-          <Link
+-            to={cta.to}
+-            style={{
+-              display: 'inline-block',
+-              padding: '9px 16px',
+-              background: 'var(--ink)',
+-              color: '#fff',
+-              borderRadius: 8,
+-              fontSize: 13,
+-              fontWeight: 600,
+-              textDecoration: 'none',
+-            }}
+-          >
+-            {cta.label}
+-          </Link>
+-        ) : (
+-          <button
+-            type="button"
+-            onClick={cta.onClick}
+-            style={{
+-              padding: '9px 16px',
+-              background: 'var(--ink)',
+-              color: '#fff',
+-              border: 'none',
+-              borderRadius: 8,
+-              fontSize: 13,
+-              fontWeight: 600,
+-              fontFamily: 'inherit',
+-              cursor: 'pointer',
+-            }}
+-          >
+-            {cta.label}
+-          </button>
+-        ))}
+-    </div>
+-  );
+-}
+-
+-function ErrorCard({ title, message }: { title: string; message: string }) {
+-  return (
+-    <div
+-      style={{
+-        background: '#fff8e6',
+-        border: '1px solid #f4e0a5',
+-        borderRadius: 10,
+-        padding: '14px 18px',
+-        color: '#755a00',
+-      }}
+-    >
+-      <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>
+-      <div style={{ fontSize: 13, fontFamily: 'JetBrains Mono, monospace' }}>{message}</div>
+-    </div>
+-  );
+-}
+-
+-function CopyRow({ value }: { value: string }) {
+-  const [copied, setCopied] = useState(false);
+-  function copy() {
+-    try {
+-      void navigator.clipboard.writeText(value);
+-      setCopied(true);
+-      setTimeout(() => setCopied(false), 1500);
+-    } catch {
+-      // no-op
+-    }
+-  }
+-  return (
+-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+-      <code
+-        style={{
+-          flex: 1,
+-          fontSize: 12,
+-          fontFamily: 'JetBrains Mono, monospace',
+-          color: 'var(--ink)',
+-          background: 'var(--bg)',
+-          border: '1px solid var(--line)',
+-          borderRadius: 6,
+-          padding: '8px 12px',
+-          whiteSpace: 'nowrap',
+-          overflow: 'hidden',
+-          textOverflow: 'ellipsis',
+-        }}
+-      >
+-        {value}
+-      </code>
+-      <button
+-        type="button"
+-        onClick={copy}
+-        style={{
+-          padding: '6px 12px',
+-          background: 'var(--bg)',
+-          border: '1px solid var(--line)',
+-          borderRadius: 6,
+-          fontSize: 11,
+-          color: copied ? '#1a7f37' : 'var(--muted)',
+-          cursor: 'pointer',
+-          fontFamily: 'inherit',
+-        }}
+-      >
+-        {copied ? 'Copied' : 'Copy'}
+-      </button>
+-    </div>
+-  );
+-}
+-
+-function CodeBlock({ code }: { code: string }) {
+-  const [copied, setCopied] = useState(false);
+-  function copy() {
+-    try {
+-      void navigator.clipboard.writeText(code);
+-      setCopied(true);
+-      setTimeout(() => setCopied(false), 1500);
+-    } catch {
+-      // no-op
+-    }
+-  }
+-  return (
+-    <div style={{ position: 'relative' }}>
+-      <pre
+-        style={{
+-          background: '#0e0e0c',
+-          color: '#d4d4c8',
+-          fontFamily: 'JetBrains Mono, monospace',
+-          fontSize: 12,
+-          padding: 16,
+-          borderRadius: 8,
+-          overflowX: 'auto',
+-          lineHeight: 1.7,
+-          margin: 0,
+-          whiteSpace: 'pre',
+-        }}
+-      >
+-        {code}
+-      </pre>
+-      <button
+-        type="button"
+-        onClick={copy}
+-        style={{
+-          position: 'absolute',
+-          top: 8,
+-          right: 8,
+-          fontSize: 10,
+-          padding: '3px 8px',
+-          background: 'rgba(255,255,255,0.1)',
+-          border: '1px solid rgba(255,255,255,0.15)',
+-          borderRadius: 4,
+-          color: copied ? '#7bffc0' : 'rgba(255,255,255,0.5)',
+-          cursor: 'pointer',
+-          fontFamily: 'inherit',
+-        }}
+-      >
+-        {copied ? 'Copied' : 'Copy'}
+-      </button>
+-    </div>
+-  );
+-}
+-
+-function RunIcon() {
+-  return (
+-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+-      <path
+-        d="M8 5v14l11-7z"
+-        stroke="currentColor"
+-        strokeWidth="1.5"
+-        strokeLinejoin="round"
+-      />
+-    </svg>
++      Loading threads…
++    </section>
+   );
+ }

@@ -1,0 +1,686 @@
+diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
+index 6f8e68f..c68ca52 100644
+--- a/apps/server/src/index.ts
++++ b/apps/server/src/index.ts
+@@ -70,21 +70,34 @@ if (process.env.FLOOM_AUTH_TOKEN) {
+   console.log('[auth] FLOOM_AUTH_TOKEN is set — bearer auth required on all /api, /mcp, /p routes');
+ }
+ 
+-// Rate limiting for run surfaces. Applied to POST-heavy paths that actually
+-// execute an app. Health / hub list / /me/runs / MCP tools/list stay
+-// unthrottled so frontend polls and service discovery aren't affected.
++// Rate limiting for run surfaces. Applied to POST-heavy paths that
++// actually execute an app. Reads (GET polls, SSE streams, MCP
++// `tools/list` / `initialize`) fall through unthrottled — the
++// middleware itself short-circuits on non-POST and on JSON-RPC frames
++// whose method isn't `tools/call` (when `requireMcpToolsCall` is set).
+ // Routes covered:
+-//   - POST /api/run               (body-keyed slug, legacy)
++//   - POST /api/run               (body-keyed slug, legacy — extra
++//                                   per-(IP, app) check inside the
++//                                   handler since the slug isn't on
++//                                   the URL path here)
+ //   - POST /api/:slug/run         (slug-keyed, primary for paste-first)
+-//   - POST /api/:slug/jobs        (async enqueue)
+-//   - POST /mcp/app/:slug         (per-app MCP tool calls)
+-// The MCP admin root (/mcp) is rate-limited separately inside the tool
+-// handler (ingest_app only, 10/day).
++//   - POST /api/:slug/jobs        (async enqueue; GET poll + cancel
++//                                   are not charged because Hono's
++//                                   exact-match `app.use` doesn't
++//                                   prefix-match path params and the
++//                                   middleware also gates on POST)
++//   - POST /mcp/app/:slug         (per-app MCP `tools/call` only)
++// The MCP admin root (/mcp `ingest_app` tool) is rate-limited inside
++// the tool handler (10/day). `POST /api/hub/ingest` shares that budget
++// — both surfaces feed into `checkMcpIngestLimit`.
+ const rateLimit = runRateLimitMiddleware(resolveUserContext);
++const mcpAppRateLimit = runRateLimitMiddleware(resolveUserContext, {
++  requireMcpToolsCall: true,
++});
+ app.use('/api/run', rateLimit);
+ app.use('/api/:slug/run', rateLimit);
+ app.use('/api/:slug/jobs', rateLimit);
+-app.use('/mcp/app/:slug', rateLimit);
++app.use('/mcp/app/:slug', mcpAppRateLimit);
+ 
+ // API routes
+ app.route('/api/health', healthRouter);
+diff --git a/apps/server/src/lib/rate-limit.ts b/apps/server/src/lib/rate-limit.ts
+index 5c19fc3..75ea214 100644
+--- a/apps/server/src/lib/rate-limit.ts
++++ b/apps/server/src/lib/rate-limit.ts
+@@ -59,12 +59,21 @@ function maybeSweep(now: number): void {
+   }
+ }
+ 
++interface CheckResult {
++  allowed: boolean;
++  retryAfterSec: number;
++  /** Weighted current usage *after* this call was counted (or attempted). */
++  used: number;
++  /** Seconds until the current window ends (for RateLimit-Reset). */
++  resetAfterSec: number;
++}
++
+ function incrementAndCheck(
+   key: string,
+   limit: number,
+   windowMs: number,
+   now: number,
+-): { allowed: boolean; retryAfterSec: number } {
++): CheckResult {
+   maybeSweep(now);
+   const halfMs = windowMs / 2;
+   const entry = store.get(key);
+@@ -79,6 +88,8 @@ function incrementAndCheck(
+     return {
+       allowed: 1 <= limit,
+       retryAfterSec: 1 <= limit ? 0 : Math.ceil(windowMs / 1000),
++      used: 1,
++      resetAfterSec: Math.ceil(windowMs / 1000),
+     };
+   }
+ 
+@@ -96,10 +107,21 @@ function incrementAndCheck(
+   // Weighted slide: previous half decays linearly across the current half.
+   const weight = Math.max(0, 1 - (now - entry.currentStart) / halfMs);
+   const count = entry.currentCount + Math.floor(entry.previousCount * weight);
++  const resetAfterSec = Math.max(
++    1,
++    Math.ceil((entry.currentStart + windowMs - now) / 1000),
++  );
+ 
+-  if (count <= limit) return { allowed: true, retryAfterSec: 0 };
++  if (count <= limit) {
++    return { allowed: true, retryAfterSec: 0, used: count, resetAfterSec };
++  }
+   const retryAfterMs = Math.max(1000, entry.currentStart + windowMs - now);
+-  return { allowed: false, retryAfterSec: Math.ceil(retryAfterMs / 1000) };
++  return {
++    allowed: false,
++    retryAfterSec: Math.ceil(retryAfterMs / 1000),
++    used: count,
++    resetAfterSec,
++  };
+ }
+ 
+ // ---------- key extraction ----------
+@@ -120,17 +142,41 @@ export function extractIp(c: Context): string {
+ 
+ // ---------- response helpers ----------
+ 
++interface BindingState {
++  scope: Scope;
++  limit: number;
++  used: number;
++  resetAfterSec: number;
++  windowSec: number;
++}
++
++/**
++ * Emit IETF draft-ietf-httpapi-ratelimit-headers fields for the bucket
++ * that was the binding constraint. Called on both successful next()
++ * responses and 429 responses so well-behaved clients can self-throttle.
++ */
++function setStandardRateLimitHeaders(c: Context, state: BindingState): void {
++  const remaining = Math.max(0, state.limit - state.used);
++  c.header(
++    'RateLimit-Limit',
++    `${state.limit}, ${state.limit};w=${state.windowSec}`,
++  );
++  c.header('RateLimit-Remaining', String(remaining));
++  c.header('RateLimit-Reset', String(state.resetAfterSec));
++}
++
+ function rateLimitResponse(
+   c: Context,
+-  scope: Scope,
++  state: BindingState,
+   retryAfterSec: number,
+ ): Response {
+-  recordRateLimitHit(scope);
++  recordRateLimitHit(state.scope);
++  setStandardRateLimitHeaders(c, state);
+   return c.json(
+     {
+       error: 'rate_limit_exceeded',
+       retry_after_seconds: retryAfterSec,
+-      scope,
++      scope: state.scope,
+     },
+     429,
+     { 'Retry-After': String(retryAfterSec) },
+@@ -139,18 +185,58 @@ function rateLimitResponse(
+ 
+ // ---------- middleware ----------
+ 
++export interface RunRateLimitOptions {
++  /**
++   * When true, the middleware tries to parse the request body as JSON-RPC
++   * and only counts requests whose `method` is `tools/call`. `initialize`,
++   * `tools/list`, `notifications/*`, etc. fall through unthrottled. Used
++   * for `/mcp/app/:slug` so MCP service-discovery polls don't drain the
++   * per-app run budget. See docs/SELF_HOST.md `Rate limits` section.
++   */
++  requireMcpToolsCall?: boolean;
++}
++
+ /**
+  * Single middleware covering anon + authed + per-app caps. `resolveCtx` is
+  * injected so tests can pass a cheap stub instead of pulling in the real
+  * Better Auth lookup.
++ *
++ * Behaviour:
++ *   - skipped entirely when `FLOOM_RATE_LIMIT_DISABLED=true`
++ *   - skipped for non-POST methods (GET polls, SSE streams, OPTIONS
++ *     preflights are read-shaped surfaces that should never charge a run
++ *     budget — defence-in-depth even though our route registrations only
++ *     bind exact paths today)
++ *   - when `requireMcpToolsCall`, peeks the cloned request body and skips
++ *     when the JSON-RPC method is anything other than `tools/call`
++ *   - emits `RateLimit-Limit / RateLimit-Remaining / RateLimit-Reset`
++ *     headers reflecting the binding bucket on both 200 and 429 responses
+  */
+ export function runRateLimitMiddleware(
+   resolveCtx: (c: Context) => Promise<SessionContext>,
++  options: RunRateLimitOptions = {},
+ ): MiddlewareHandler {
+   return async (c, next) => {
+     if (isRateLimitDisabled()) return next();
++
++    // Read endpoints (GET, HEAD, OPTIONS) never charge a run budget.
++    // Polling /api/run/:id, GET /api/:slug/jobs/:id, and SSE streams
++    // would otherwise share the create bucket and starve creators that
++    // legitimately need to refresh state.
++    if (c.req.method !== 'POST') return next();
++
++    // MCP service-discovery polls (`tools/list`, `initialize`,
++    // `notifications/*`) reach this middleware as POST too because MCP
++    // Streamable HTTP is POST-only. Peek the JSON-RPC envelope and only
++    // charge `tools/call` (the actual action invocation).
++    if (options.requireMcpToolsCall) {
++      const isToolsCall = await peekIsMcpToolsCall(c);
++      if (!isToolsCall) return next();
++    }
++
+     const now = Date.now();
+     const windowMs = 3600 * 1000;
++    const windowSec = 3600;
+     const ip = extractIp(c);
+     const ctx = await resolveCtx(c);
+ 
+@@ -161,27 +247,79 @@ export function runRateLimitMiddleware(
+       : defaultAnonPerHour();
+     const primaryScope: Scope = ctx.is_authenticated ? 'user' : 'ip';
+     const p = incrementAndCheck(primaryKey, primaryCap, windowMs, now);
+-    if (!p.allowed) return rateLimitResponse(c, primaryScope, p.retryAfterSec);
++    const primaryState: BindingState = {
++      scope: primaryScope,
++      limit: primaryCap,
++      used: p.used,
++      resetAfterSec: p.resetAfterSec,
++      windowSec,
++    };
++    if (!p.allowed) return rateLimitResponse(c, primaryState, p.retryAfterSec);
+ 
+     // Per-(IP, app) cap applies in both auth states.
+     const slug = c.req.param('slug');
++    let binding: BindingState = primaryState;
+     if (slug) {
++      const appCap = defaultPerAppPerHour();
+       const r = incrementAndCheck(
+         `app:${ip}:${slug}`,
+-        defaultPerAppPerHour(),
++        appCap,
+         windowMs,
+         now,
+       );
+-      if (!r.allowed) return rateLimitResponse(c, 'app', r.retryAfterSec);
++      const appState: BindingState = {
++        scope: 'app',
++        limit: appCap,
++        used: r.used,
++        resetAfterSec: r.resetAfterSec,
++        windowSec,
++      };
++      if (!r.allowed) return rateLimitResponse(c, appState, r.retryAfterSec);
++      // Pick the tighter bucket (least remaining) for header reporting so
++      // the client always sees the closest-to-binding constraint.
++      if (
++        appCap - r.used < primaryCap - p.used ||
++        binding.scope === primaryScope && (appCap - r.used) <= (primaryCap - p.used)
++      ) {
++        binding = appState;
++      }
+     }
++    setStandardRateLimitHeaders(c, binding);
+     return next();
+   };
+ }
+ 
++/**
++ * Peek the request body for a JSON-RPC `method` field without consuming it
++ * for downstream handlers. Returns true when the method is `tools/call`,
++ * false for anything else (or when parsing fails — fail-open so we never
++ * 429 a discovery poll that we couldn't decode).
++ */
++async function peekIsMcpToolsCall(c: Context): Promise<boolean> {
++  try {
++    const raw = c.req.raw;
++    const cloned = raw.clone();
++    const text = await cloned.text();
++    if (!text) return false;
++    const parsed = JSON.parse(text);
++    // Some MCP clients send an array for batched JSON-RPC; if any frame
++    // is a tools/call, charge the bucket.
++    const frames = Array.isArray(parsed) ? parsed : [parsed];
++    return frames.some(
++      (f) =>
++        f && typeof f === 'object' && (f as { method?: unknown }).method === 'tools/call',
++    );
++  } catch {
++    return false;
++  }
++}
++
+ /**
+  * MCP `ingest_app` limit. Not a middleware because the MCP layer needs to
+  * surface the error inside a JSON-RPC tool envelope, not as a top-level HTTP
+- * 429. Per-user when authed, per-IP otherwise.
++ * 429. Per-user when authed, per-IP otherwise. Also re-used by the HTTP
++ * `/api/hub/ingest` handler so both ingest surfaces share one budget per
++ * caller — see Rate-limit hardening (2026-04-17).
+  */
+ export function checkMcpIngestLimit(
+   ctx: SessionContext,
+@@ -198,3 +336,30 @@ export function checkMcpIngestLimit(
+     ? { allowed: true }
+     : { allowed: false, retryAfterSec: r.retryAfterSec };
+ }
++
++/**
++ * Per-(IP, app) check for the legacy `POST /api/run` handler whose slug
++ * lives in the JSON body (`app_slug`) rather than the URL path. The
++ * shared middleware reads `c.req.param('slug')` and so misses this surface
++ * entirely — without this helper, hostile callers could drain a
++ * creator's budget by hitting `/api/run` with a body slug instead of
++ * `/api/:slug/run`. Returns the same shape as `checkMcpIngestLimit` so
++ * route handlers can branch on `.allowed` and return the canonical 429
++ * envelope.
++ */
++export function checkPerAppLimit(
++  ip: string,
++  slug: string,
++): { allowed: true } | { allowed: false; retryAfterSec: number } {
++  if (isRateLimitDisabled()) return { allowed: true };
++  const r = incrementAndCheck(
++    `app:${ip}:${slug}`,
++    defaultPerAppPerHour(),
++    3600 * 1000,
++    Date.now(),
++  );
++  if (!r.allowed) recordRateLimitHit('app');
++  return r.allowed
++    ? { allowed: true }
++    : { allowed: false, retryAfterSec: r.retryAfterSec };
++}
+diff --git a/apps/server/src/routes/hub.ts b/apps/server/src/routes/hub.ts
+index f4012d3..f4286eb 100644
+--- a/apps/server/src/routes/hub.ts
++++ b/apps/server/src/routes/hub.ts
+@@ -24,6 +24,7 @@ import {
+   RENDERERS_DIR,
+ } from '../services/renderer-bundler.js';
+ import { requireAuthenticatedInCloud } from '../lib/auth.js';
++import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
+ import type { AppRecord, NormalizedManifest } from '../types.js';
+ import type { OutputShape } from '@floom/renderer/contract';
+ 
+@@ -88,6 +89,23 @@ hubRouter.post('/detect', async (c) => {
+ 
+ hubRouter.post('/ingest', async (c) => {
+   const ctx = await resolveUserContext(c);
++  // Share the same per-user/IP daily budget as the MCP `ingest_app` tool.
++  // Without this, callers could bypass the 10/day cap by alternating
++  // between the HTTP and MCP surfaces. Checked BEFORE the cloud-mode
++  // auth gate so 429 is a distinct failure mode from 401, mirroring the
++  // MCP handler in routes/mcp.ts.
++  const ingestLimit = checkMcpIngestLimit(ctx, extractIp(c));
++  if (!ingestLimit.allowed) {
++    return c.json(
++      {
++        error: 'rate_limit_exceeded',
++        retry_after_seconds: ingestLimit.retryAfterSec,
++        scope: 'mcp_ingest',
++      },
++      429,
++      { 'Retry-After': String(ingestLimit.retryAfterSec) },
++    );
++  }
+   const gate = requireAuthenticatedInCloud(c, ctx);
+   if (gate) return gate;
+   let body: unknown;
+diff --git a/apps/server/src/routes/run.ts b/apps/server/src/routes/run.ts
+index 33b6242..b6c4ca4 100644
+--- a/apps/server/src/routes/run.ts
++++ b/apps/server/src/routes/run.ts
+@@ -10,6 +10,7 @@ import { dispatchRun, getRun } from '../services/runner.js';
+ import { validateInputs, ManifestError } from '../services/manifest.js';
+ import { getOrCreateStream } from '../lib/log-stream.js';
+ import { checkAppVisibility } from '../lib/auth.js';
++import { checkPerAppLimit, extractIp } from '../lib/rate-limit.js';
+ import { resolveUserContext } from '../services/session.js';
+ import type { AppRecord, NormalizedManifest } from '../types.js';
+ 
+@@ -25,6 +26,23 @@ runRouter.post('/', async (c) => {
+   if (typeof body.app_slug !== 'string') {
+     return c.json({ error: '"app_slug" is required' }, 400);
+   }
++  // Legacy /api/run carries the slug in the JSON body, not the URL path,
++  // so the global runRateLimitMiddleware can't see it and the per-(IP,
++  // app) bucket is never charged. Enforce parity with /api/:slug/run by
++  // hitting the same `app:${ip}:${slug}` cap manually now that the body
++  // has been parsed.
++  const appLimit = checkPerAppLimit(extractIp(c), body.app_slug);
++  if (!appLimit.allowed) {
++    return c.json(
++      {
++        error: 'rate_limit_exceeded',
++        retry_after_seconds: appLimit.retryAfterSec,
++        scope: 'app',
++      },
++      429,
++      { 'Retry-After': String(appLimit.retryAfterSec) },
++    );
++  }
+   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(body.app_slug) as AppRecord | undefined;
+   if (!row) return c.json({ error: `App not found: ${body.app_slug}` }, 404);
+   if (row.status !== 'active') {
+diff --git a/test/stress/test-rate-limit.mjs b/test/stress/test-rate-limit.mjs
+index 704c057..f22a2ba 100644
+--- a/test/stress/test-rate-limit.mjs
++++ b/test/stress/test-rate-limit.mjs
+@@ -211,6 +211,282 @@ rl.__resetStoreForTests();
+ const r11c = await mw11(makeCtx({ ip: '11.1.1.1' }), async () => undefined);
+ log('after explicit store reset, call passes', !r11c || r11c.status !== 429);
+ 
++// ----- Rate-limit hardening (2026-04-17): gap closures -----
++
++// Build a context that lets the middleware drive a real Hono response so
++// we can inspect outgoing headers via `c.header(...)`. Hono's Response
++// helpers wire `c.header` into the final response, but our hand-rolled
++// makeCtx above doesn't — so we add a lightweight header recorder here.
++function makeRichCtx({
++  ip = '1.2.3.4',
++  slug = null,
++  method = 'POST',
++  rawBody = null,
++  headers = {},
++} = {}) {
++  const hdrs = new Headers(
++    ip === null ? headers : { 'x-forwarded-for': ip, ...headers },
++  );
++  const outHeaders = {};
++  const buildBody = () =>
++    rawBody == null
++      ? null
++      : typeof rawBody === 'string'
++        ? rawBody
++        : JSON.stringify(rawBody);
++  return {
++    req: {
++      method,
++      header: (n) => hdrs.get(n.toLowerCase()) || hdrs.get(n) || null,
++      param: (n) => (n === 'slug' ? slug : null),
++      query: () => null,
++      raw: new Request(`http://test/x`, {
++        method,
++        headers: hdrs,
++        body: method === 'POST' ? buildBody() : undefined,
++      }),
++    },
++    header: (k, v) => {
++      outHeaders[k] = v;
++    },
++    json: (body, status, extra) => {
++      const allHeaders = {
++        'content-type': 'application/json',
++        ...outHeaders,
++        ...(extra || {}),
++      };
++      return new Response(JSON.stringify(body), {
++        status: status || 200,
++        headers: allHeaders,
++      });
++    },
++    _outHeaders: outHeaders,
++  };
++}
++
++// (a) legacy /api/run charges per-app bucket via checkPerAppLimit
++rl.__resetStoreForTests();
++process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '100';
++process.env.FLOOM_RATE_LIMIT_USER_PER_HOUR = '100';
++process.env.FLOOM_RATE_LIMIT_APP_PER_HOUR = '2';
++const ipLegacy = '12.0.0.1';
++const slugLegacy = 'flyfast';
++const legacyA = rl.checkPerAppLimit(ipLegacy, slugLegacy);
++const legacyB = rl.checkPerAppLimit(ipLegacy, slugLegacy);
++const legacyC = rl.checkPerAppLimit(ipLegacy, slugLegacy);
++log(
++  'legacy /api/run: first two pass (per-app bucket charged)',
++  legacyA.allowed && legacyB.allowed,
++);
++log(
++  'legacy /api/run: third blocks with retry-after',
++  !legacyC.allowed && legacyC.retryAfterSec > 0,
++);
++const legacyOtherSlug = rl.checkPerAppLimit(ipLegacy, 'opendraft');
++log(
++  'legacy /api/run: per-(IP, app) bucket is per-slug',
++  legacyOtherSlug.allowed,
++);
++const legacyDisabled = (() => {
++  process.env.FLOOM_RATE_LIMIT_DISABLED = 'true';
++  const r = rl.checkPerAppLimit(ipLegacy, slugLegacy);
++  delete process.env.FLOOM_RATE_LIMIT_DISABLED;
++  return r;
++})();
++log(
++  'legacy /api/run: respects FLOOM_RATE_LIMIT_DISABLED',
++  legacyDisabled.allowed,
++);
++
++// (b) /api/hub/ingest returns 429 after the daily ingest cap
++rl.__resetStoreForTests();
++process.env.FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY = '2';
++const ingestCtx = {
++  workspace_id: 'ws',
++  user_id: 'u_ingester',
++  device_id: 'd',
++  is_authenticated: true,
++};
++const ing1 = rl.checkMcpIngestLimit(ingestCtx, '13.0.0.1');
++const ing2 = rl.checkMcpIngestLimit(ingestCtx, '13.0.0.1');
++const ing3 = rl.checkMcpIngestLimit(ingestCtx, '13.0.0.1');
++log(
++  '/api/hub/ingest: first two ingests pass (shared mcp_ingest bucket)',
++  ing1.allowed && ing2.allowed,
++);
++log(
++  '/api/hub/ingest: third ingest 429s with retry-after',
++  !ing3.allowed && ing3.retryAfterSec > 0,
++);
++// Cross-surface contract: HTTP /ingest and MCP ingest_app share the
++// SAME per-user/IP bucket. A subsequent MCP call from the same user
++// must also be blocked because the HTTP path already exhausted the
++// budget.
++const mcpAfterHttp = rl.checkMcpIngestLimit(ingestCtx, '13.0.0.1');
++log(
++  '/api/hub/ingest + MCP ingest_app share one bucket per user',
++  !mcpAfterHttp.allowed,
++);
++
++// (c) tools/list under /mcp/app/:slug is NOT throttled
++rl.__resetStoreForTests();
++process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '1';
++process.env.FLOOM_RATE_LIMIT_APP_PER_HOUR = '1';
++const mwMcp = rl.runRateLimitMiddleware(anonResolve, {
++  requireMcpToolsCall: true,
++});
++const toolsListBody = {
++  jsonrpc: '2.0',
++  id: 1,
++  method: 'tools/list',
++};
++const initBody = { jsonrpc: '2.0', id: 0, method: 'initialize' };
++let toolsListAllowed = 0;
++for (let i = 0; i < 5; i++) {
++  const r = await mwMcp(
++    makeRichCtx({
++      ip: '14.0.0.1',
++      slug: 'petstore',
++      method: 'POST',
++      rawBody: toolsListBody,
++    }),
++    async () => undefined,
++  );
++  if (!r || r.status !== 429) toolsListAllowed++;
++}
++log(
++  '/mcp/app/:slug tools/list never 429s even past cap',
++  toolsListAllowed === 5,
++);
++const initR = await mwMcp(
++  makeRichCtx({
++    ip: '14.0.0.1',
++    slug: 'petstore',
++    method: 'POST',
++    rawBody: initBody,
++  }),
++  async () => undefined,
++);
++log('/mcp/app/:slug initialize never 429s', !initR || initR.status !== 429);
++// tools/call DOES charge the bucket
++const toolsCallBody = {
++  jsonrpc: '2.0',
++  id: 2,
++  method: 'tools/call',
++  params: { name: 'whatever', arguments: {} },
++};
++const tc1 = await mwMcp(
++  makeRichCtx({
++    ip: '15.0.0.1',
++    slug: 'petstore',
++    method: 'POST',
++    rawBody: toolsCallBody,
++  }),
++  async () => undefined,
++);
++const tc2 = await mwMcp(
++  makeRichCtx({
++    ip: '15.0.0.1',
++    slug: 'petstore',
++    method: 'POST',
++    rawBody: toolsCallBody,
++  }),
++  async () => undefined,
++);
++log('/mcp/app/:slug tools/call charges per-IP bucket', !tc1 || tc1.status !== 429);
++log('/mcp/app/:slug tools/call exhausts cap=1 → 429', tc2?.status === 429);
++
++// (d) GET /api/run/:id (and any non-POST) is NOT throttled even with
++//     a tiny cap. Defends against accidental future registration drift
++//     where someone widens app.use to a prefix and starts charging
++//     polls + SSE streams.
++rl.__resetStoreForTests();
++process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '1';
++const mwGet = rl.runRateLimitMiddleware(anonResolve);
++let getAllowed = 0;
++for (let i = 0; i < 5; i++) {
++  const r = await mwGet(
++    makeRichCtx({ ip: '16.0.0.1', method: 'GET' }),
++    async () => undefined,
++  );
++  if (!r || r.status !== 429) getAllowed++;
++}
++log('GET requests never 429 even past cap', getAllowed === 5);
++// HEAD + OPTIONS too
++const headR = await mwGet(
++  makeRichCtx({ ip: '16.0.0.1', method: 'HEAD' }),
++  async () => undefined,
++);
++const optR = await mwGet(
++  makeRichCtx({ ip: '16.0.0.1', method: 'OPTIONS' }),
++  async () => undefined,
++);
++log(
++  'HEAD + OPTIONS bypass the rate limiter',
++  (!headR || headR.status !== 429) && (!optR || optR.status !== 429),
++);
++
++// (e) Standard IETF RateLimit-* headers present on success and 429
++rl.__resetStoreForTests();
++process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '3';
++const mwHdr = rl.runRateLimitMiddleware(anonResolve);
++const okCtx = makeRichCtx({ ip: '17.0.0.1' });
++await mwHdr(okCtx, async () => undefined);
++log(
++  'success: RateLimit-Limit header present',
++  typeof okCtx._outHeaders['RateLimit-Limit'] === 'string' &&
++    okCtx._outHeaders['RateLimit-Limit'].startsWith('3'),
++);
++log(
++  'success: RateLimit-Limit declares window in seconds',
++  /w=3600/.test(okCtx._outHeaders['RateLimit-Limit'] || ''),
++);
++log(
++  'success: RateLimit-Remaining decrements toward zero',
++  okCtx._outHeaders['RateLimit-Remaining'] === '2',
++);
++log(
++  'success: RateLimit-Reset is a positive integer (seconds)',
++  Number(okCtx._outHeaders['RateLimit-Reset']) > 0,
++);
++// Burn the rest of the budget then trip the 429 and re-inspect headers.
++await mwHdr(makeRichCtx({ ip: '17.0.0.1' }), async () => undefined);
++await mwHdr(makeRichCtx({ ip: '17.0.0.1' }), async () => undefined);
++const overCtx = makeRichCtx({ ip: '17.0.0.1' });
++const overRes = await mwHdr(overCtx, async () => undefined);
++log('over-budget call returns 429', overRes?.status === 429);
++log(
++  '429: RateLimit-Limit header present',
++  overRes?.headers.get('ratelimit-limit')?.startsWith('3'),
++);
++log(
++  '429: RateLimit-Remaining is 0',
++  overRes?.headers.get('ratelimit-remaining') === '0',
++);
++log(
++  '429: RateLimit-Reset is a positive integer',
++  Number(overRes?.headers.get('ratelimit-reset')) > 0,
++);
++log(
++  '429: Retry-After is still emitted alongside standard headers',
++  Number(overRes?.headers.get('retry-after')) > 0,
++);
++
++// Per-(IP, app) bucket binding: when the per-app cap is tighter than
++// the IP cap, headers should reflect the per-app numbers (the binding
++// constraint), not the IP bucket.
++rl.__resetStoreForTests();
++process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '100';
++process.env.FLOOM_RATE_LIMIT_USER_PER_HOUR = '100';
++process.env.FLOOM_RATE_LIMIT_APP_PER_HOUR = '4';
++const mwBind = rl.runRateLimitMiddleware(anonResolve);
++const bindCtx = makeRichCtx({ ip: '18.0.0.1', slug: 'flyfast' });
++await mwBind(bindCtx, async () => undefined);
++log(
++  'binding bucket: RateLimit-Limit reflects the tighter per-app cap',
++  bindCtx._outHeaders['RateLimit-Limit']?.startsWith('4'),
++);
++
+ rmSync(tmp, { recursive: true, force: true });
+ console.log(`\n${passed} passed, ${failed} failed`);
+ process.exit(failed > 0 ? 1 : 0);

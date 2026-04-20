@@ -1,0 +1,854 @@
+diff --git a/apps/server/src/routes/hub.ts b/apps/server/src/routes/hub.ts
+index f4012d3..83bd76a 100644
+--- a/apps/server/src/routes/hub.ts
++++ b/apps/server/src/routes/hub.ts
+@@ -312,6 +312,12 @@ hubRouter.get('/', (c) => {
+         // stays nullable because an app that has never run has no average.
+         featured: row.featured === 1,
+         avg_run_ms: row.avg_run_ms,
++        // Async job queue (v0.3.0). Mirrored from /api/hub/:slug so the
++        // store directory can badge async apps without a per-card detail
++        // fetch. Boolean coerced from SQLite 0/1; async_mode is included
++        // when set so future UI can distinguish poll vs webhook flows.
++        is_async: row.is_async === 1,
++        async_mode: row.async_mode,
+         // Optional annotation for self-host blocked apps. Present only when
+         // the manifest explicitly declares a blocked_reason. Surfaced on the
+         // store card as a warning pill so users know the app is not
+diff --git a/apps/web/src/components/CookieBanner.tsx b/apps/web/src/components/CookieBanner.tsx
+index d177625..b45ebaa 100644
+--- a/apps/web/src/components/CookieBanner.tsx
++++ b/apps/web/src/components/CookieBanner.tsx
+@@ -1,65 +1,48 @@
+ // Cookie consent banner. Non-intrusive, fixed to bottom of viewport.
+-// - "Accept essential only" and "Accept all" buttons (essential-only is the
+-//   left/secondary action; we currently set zero non-essential cookies, so
+-//   both choices lead to the same set today but the choice is recorded).
+-// - Persists to localStorage AND a first-party cookie so server-rendered
+-//   pages can also respect the choice if we add any.
+-// - Hidden once a choice exists. SSR-safe (guards against undefined window).
++// - "Essential only" and "Accept all" buttons. "Essential only" keeps the
++//   browser Sentry SDK fully dark (no init, no transport spin-up). "Accept
++//   all" calls `initBrowserSentry()` immediately so the choice takes effect
++//   in the same session, no reload required.
++// - When the user later reopens the banner via the Footer "Cookie settings"
++//   link and downgrades from "all" → "essential", we call `closeBrowserSentry()`
++//   to flush + stop the SDK. (Anything already in flight at the network layer
++//   can't be recalled; documented on /cookies.)
++// - Persists to localStorage AND a first-party cookie via `lib/consent.ts`
++//   so server-rendered pages can also respect the choice if we add any.
++// - SSR-safe (the storage helpers guard against undefined window).
++//
++// All storage + event plumbing lives in `lib/consent.ts`; this file is just
++// the React surface.
+ 
+ import { useEffect, useState } from 'react';
+ import { Link } from 'react-router-dom';
+-
+-const STORAGE_KEY = 'floom.cookie-consent';
+-const COOKIE_NAME = 'floom.cookie-consent';
+-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
+-
+-type Choice = 'essential' | 'all';
+-
+-function readChoice(): Choice | null {
+-  if (typeof window === 'undefined') return null;
+-  try {
+-    const v = window.localStorage.getItem(STORAGE_KEY);
+-    if (v === 'essential' || v === 'all') return v;
+-  } catch {
+-    // localStorage can throw in private mode; fall through to cookie.
+-  }
+-  if (typeof document !== 'undefined') {
+-    const match = document.cookie.match(
+-      new RegExp('(?:^|; )' + COOKIE_NAME.replace(/\./g, '\\.') + '=([^;]+)'),
+-    );
+-    if (match && (match[1] === 'essential' || match[1] === 'all')) {
+-      return match[1] as Choice;
+-    }
+-  }
+-  return null;
+-}
+-
+-function writeChoice(choice: Choice) {
+-  try {
+-    window.localStorage.setItem(STORAGE_KEY, choice);
+-  } catch {
+-    // ignore
+-  }
+-  try {
+-    const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+-    document.cookie = `${COOKIE_NAME}=${choice}; Max-Age=${COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
+-  } catch {
+-    // ignore
+-  }
+-}
++import {
++  type Consent,
++  getConsent,
++  setConsent,
++  subscribeOpenCookieSettings,
++} from '../lib/consent';
++import { closeBrowserSentry, initBrowserSentry } from '../lib/sentry';
+ 
+ export function CookieBanner() {
+   const [visible, setVisible] = useState(false);
+ 
+   useEffect(() => {
+-    if (readChoice() === null) setVisible(true);
++    if (getConsent() === null) setVisible(true);
++    return subscribeOpenCookieSettings(() => setVisible(true));
+   }, []);
+ 
+   if (!visible) return null;
+ 
+-  const accept = (choice: Choice) => {
+-    writeChoice(choice);
++  const accept = (choice: Consent) => {
++    const previous = getConsent();
++    setConsent(choice);
+     setVisible(false);
++    if (choice === 'all') {
++      initBrowserSentry();
++    } else if (previous === 'all') {
++      closeBrowserSentry();
++    }
+   };
+ 
+   return (
+@@ -89,7 +72,9 @@ export function CookieBanner() {
+       }}
+     >
+       <p style={{ margin: 0, flex: '1 1 260px', lineHeight: 1.5 }}>
+-        Floom uses strictly necessary cookies to keep you signed in and remember your preferences. See our{' '}
++        Floom uses strictly necessary cookies to keep you signed in and remember your preferences.
++        Optional error monitoring (Sentry) only loads if you choose <strong>Accept all</strong>.
++        See our{' '}
+         <Link to="/cookies" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+           cookie policy
+         </Link>
+diff --git a/apps/web/src/components/FloomApp.tsx b/apps/web/src/components/FloomApp.tsx
+index 27ff5ce..f41cce3 100644
+--- a/apps/web/src/components/FloomApp.tsx
++++ b/apps/web/src/components/FloomApp.tsx
+@@ -1,4 +1,4 @@
+-import { useState, useCallback } from 'react';
++import { useState, useCallback, useEffect, useRef } from 'react';
+ import type {
+   AppDetail,
+   ActionSpec,
+@@ -14,6 +14,13 @@ import { JobProgress } from './runner/JobProgress';
+ import { CustomRendererHost } from './runner/CustomRendererHost';
+ import { Sidebar } from './Sidebar';
+ import * as api from '../api/client';
++import { jobToRunRecord } from '../lib/jobs';
++
++const TERMINAL_JOB_STATUSES: JobRecord['status'][] = ['succeeded', 'failed', 'cancelled'];
++
++function actionForJob(job: JobRecord, app: AppDetail, fallback: string): string {
++  return job.action && job.action in app.manifest.actions ? job.action : fallback;
++}
+ 
+ export interface FloomAppResult {
+   runId: string;
+@@ -33,6 +40,15 @@ export interface FloomAppProps {
+    */
+    initialRun?: RunRecord | null;
+    onResetInitialRun?: () => void;
++  /**
++   * Hydrate the runner from an already-fetched async JobRecord. Used by
++   * /p/:slug?job=<id> so a shared link to an async job either restores the
++   * finished output (terminal status) or resumes polling (queued/running).
++   * If both `initialRun` and `initialJob` are passed, `initialRun` wins
++   * (matches the documented URL-precedence: ?run= takes priority over ?job=).
++   */
++   initialJob?: JobRecord | null;
++   onResetInitialJob?: () => void;
+   onResult?: (result: FloomAppResult) => void;
+   showSidebar?: boolean;
+   standalone?: boolean;
+@@ -79,6 +95,8 @@ export function FloomApp({
+   initialInputs,
+   initialRun,
+   onResetInitialRun,
++  initialJob,
++  onResetInitialJob,
+   onResult,
+   showSidebar = true,
+   standalone = false,
+@@ -114,6 +132,35 @@ export function FloomApp({
+         run: initialRun,
+       };
+     }
++    // /p/:slug?job=<id> preload (v0.3.0 async job queue). Terminal jobs
++    // hydrate straight into `done` (rendered through OutputPanel via the
++    // jobToRunRecord adapter); non-terminal jobs land in the `job` phase
++    // and an effect below resumes polling.
++    if (initialJob) {
++      const actionName = actionForJob(initialJob, app, defaultEntry.action);
++      const spec = app.manifest.actions[actionName] ?? defaultEntry.spec;
++      const inputs = (initialJob.input as Record<string, unknown> | null) ?? buildInitialInputs(spec);
++      if (TERMINAL_JOB_STATUSES.includes(initialJob.status)) {
++        return {
++          phase: 'done' as Phase,
++          inputs,
++          action: actionName,
++          actionSpec: spec,
++          runId: initialJob.run_id || initialJob.id,
++          jobId: initialJob.id,
++          job: initialJob,
++          run: jobToRunRecord(initialJob, actionName),
++        };
++      }
++      return {
++        phase: 'job' as Phase,
++        inputs,
++        action: actionName,
++        actionSpec: spec,
++        jobId: initialJob.id,
++        job: initialJob,
++      };
++    }
+     return {
+       phase: 'inputs' as Phase,
+       inputs: buildInitialInputs(defaultEntry.spec, initialInputs),
+@@ -122,6 +169,55 @@ export function FloomApp({
+     };
+   });
+ 
++  // Track whether we've already wired polling for the hydrated initialJob.
++  // We only ever want to wire it once per mount; a job_id that flips to a
++  // terminal state should not retrigger this effect.
++  const resumedJobIdRef = useRef<string | null>(null);
++
++  // Resume polling when /p/:slug?job=<id> hydrates with an in-flight job.
++  // The effect runs after mount so the initial render pre-paints the
++  // JobProgress card; pollJob then takes over until terminal.
++  useEffect(() => {
++    if (!initialJob || TERMINAL_JOB_STATUSES.includes(initialJob.status)) return;
++    if (resumedJobIdRef.current === initialJob.id) return;
++    resumedJobIdRef.current = initialJob.id;
++    const stopPoll = api.pollJob(app.slug, initialJob.id, {
++      onUpdate: (job) => {
++        setState((s) => {
++          if (s.phase !== 'job' || s.jobId !== initialJob.id) return s;
++          return { ...s, job };
++        });
++      },
++      onDone: (job) => {
++        const action = actionForJob(job, app, state.action || defaultEntry?.action || '');
++        const run = jobToRunRecord(job, action);
++        setState((s) => ({
++          ...s,
++          phase: 'done',
++          job,
++          run,
++        }));
++        if (onResult) {
++          onResult({
++            runId: job.id,
++            output: job.output ? JSON.stringify(job.output) : '',
++            exitCode: job.status === 'succeeded' ? 0 : 1,
++          });
++        }
++      },
++      onError: () => {
++        // transient — pollJob keeps ticking until stopped
++      },
++    });
++    setState((s) => (s.phase === 'job' && s.jobId === initialJob.id
++      ? { ...s, cancelPoll: stopPoll }
++      : s));
++    return () => {
++      stopPoll();
++    };
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [initialJob?.id]);
++
+   const [sidebarOpen, setSidebarOpen] = useState(false);
+ 
+   const handleInputChange = useCallback((name: string, value: unknown) => {
+@@ -136,10 +232,12 @@ export function FloomApp({
+       action: defaultEntry.action,
+       actionSpec: defaultEntry.spec,
+     });
+-    // When the runner was hydrated from /p/:slug?run=<id>, also clear the
+-    // query param so refreshing the page doesn't re-restore the shared run.
++    // When the runner was hydrated from /p/:slug?run=<id> or ?job=<id>,
++    // also clear the query param so refreshing the page doesn't re-restore
++    // the shared run/job.
+     onResetInitialRun?.();
+-  }, [defaultEntry, initialInputs, onResetInitialRun]);
++    onResetInitialJob?.();
++  }, [defaultEntry, initialInputs, onResetInitialRun, onResetInitialJob]);
+ 
+   const handleRun = useCallback(async () => {
+     if (state.phase !== 'inputs') return;
+@@ -342,7 +440,8 @@ export function FloomApp({
+ 
+       {state.phase === 'done' && state.run && (
+         <>
+-          {initialRun && initialRun.id === state.run.id && (
++          {((initialRun && initialRun.id === state.run.id) ||
++            (initialJob && initialJob.id === state.jobId)) && (
+             <SharedRunBanner
+               standalone={standalone}
+               appName={app.name}
+@@ -675,43 +774,5 @@ function InputField({
+   );
+ }
+ 
+-// ── Async job adapter ──────────────────────────────────────────────────────
+-
+-/**
+- * Convert a terminal JobRecord (v0.3.0 async job queue) into a RunRecord so
+- * the existing OutputPanel can render succeeded/failed jobs without a
+- * parallel UI surface. The job queue reuses the runs table under the hood,
+- * but the job poll endpoint returns a Job shape; this adapter preserves the
+- * 5 output-card improvements (CopyButton, markdown-primary, HTML download,
+- * share-URL, error hints) without duplicating them.
+- */
+-function jobToRunRecord(job: JobRecord, action: string): RunRecord {
+-  const ok = job.status === 'succeeded';
+-  const startedAt = job.started_at || job.created_at;
+-  const finishedAt = job.finished_at;
+-  const duration =
+-    startedAt && finishedAt
+-      ? new Date(finishedAt).getTime() - new Date(startedAt).getTime()
+-      : null;
+-  const errorText =
+-    job.error == null
+-      ? null
+-      : typeof job.error === 'string'
+-        ? job.error
+-        : JSON.stringify(job.error);
+-  return {
+-    id: job.run_id || job.id,
+-    app_id: job.app_id,
+-    thread_id: null,
+-    action,
+-    inputs: job.input,
+-    outputs: job.output,
+-    status: ok ? 'success' : job.status === 'cancelled' ? 'error' : 'error',
+-    error: errorText,
+-    error_type: ok ? null : job.status === 'cancelled' ? 'cancelled' : 'runtime_error',
+-    duration_ms: duration,
+-    started_at: startedAt,
+-    finished_at: finishedAt,
+-    logs: '',
+-  };
+-}
++// jobToRunRecord lives in `lib/jobs.ts` so /p/:slug?job=<id> hydration can
++// reuse it without depending on this component.
+diff --git a/apps/web/src/components/Footer.tsx b/apps/web/src/components/Footer.tsx
+index 02a36dd..383e23e 100644
+--- a/apps/web/src/components/Footer.tsx
++++ b/apps/web/src/components/Footer.tsx
+@@ -1,4 +1,5 @@
+ import { Link } from 'react-router-dom';
++import { openCookieSettings } from '../lib/consent';
+ 
+ export function Footer() {
+   return (
+@@ -39,6 +40,23 @@ export function Footer() {
+         <Link to="/privacy" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>privacy</Link>
+         <Link to="/terms" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>terms</Link>
+         <Link to="/cookies" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>cookies</Link>
++        <button
++          type="button"
++          onClick={openCookieSettings}
++          style={{
++            fontSize: 13,
++            color: 'var(--muted)',
++            background: 'none',
++            border: 'none',
++            padding: 0,
++            cursor: 'pointer',
++            fontFamily: 'inherit',
++            textDecoration: 'underline',
++            textUnderlineOffset: '2px',
++          }}
++        >
++          cookie settings
++        </button>
+       </nav>
+     </footer>
+   );
+diff --git a/apps/web/src/lib/consent.ts b/apps/web/src/lib/consent.ts
+new file mode 100644
+index 0000000..2a655b9
+--- /dev/null
++++ b/apps/web/src/lib/consent.ts
+@@ -0,0 +1,93 @@
++// Cookie consent storage. Single source of truth for read/write/subscribe.
++// Used by `CookieBanner` (UI) and `lib/sentry.ts` (gate). Kept tiny and
++// SSR-safe so `initBrowserSentry` can be called from `main.tsx` at boot
++// without pulling in React.
++//
++// Storage layout (kept in sync, both written together in `setConsent`):
++//   - localStorage["floom.cookie-consent"] = "essential" | "all"
++//   - document.cookie  "floom.cookie-consent" = same value, 1 year, Lax
++//
++// We mirror to a first-party cookie so any future server-rendered routes
++// can respect the choice without waiting for client JS.
++
++export type Consent = 'essential' | 'all';
++
++export const CONSENT_STORAGE_KEY = 'floom.cookie-consent';
++export const CONSENT_COOKIE_NAME = 'floom.cookie-consent';
++const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
++
++const REOPEN_EVENT = 'floom:open-cookie-settings';
++const CHANGE_EVENT = 'floom:cookie-consent-change';
++
++export function getConsent(): Consent | null {
++  if (typeof window === 'undefined') return null;
++  try {
++    const v = window.localStorage.getItem(CONSENT_STORAGE_KEY);
++    if (v === 'essential' || v === 'all') return v;
++  } catch {
++    // localStorage can throw in private mode; fall through to cookie.
++  }
++  if (typeof document !== 'undefined') {
++    const match = document.cookie.match(
++      new RegExp('(?:^|; )' + CONSENT_COOKIE_NAME.replace(/\./g, '\\.') + '=([^;]+)'),
++    );
++    if (match && (match[1] === 'essential' || match[1] === 'all')) {
++      return match[1] as Consent;
++    }
++  }
++  return null;
++}
++
++export function setConsent(choice: Consent): void {
++  if (typeof window === 'undefined') return;
++  try {
++    window.localStorage.setItem(CONSENT_STORAGE_KEY, choice);
++  } catch {
++    // ignore (private mode)
++  }
++  try {
++    const secure = window.location.protocol === 'https:' ? '; Secure' : '';
++    document.cookie =
++      `${CONSENT_COOKIE_NAME}=${choice}; Max-Age=${COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
++  } catch {
++    // ignore
++  }
++  try {
++    window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: choice }));
++  } catch {
++    // ignore (older browsers)
++  }
++}
++
++/**
++ * Subscribe to consent changes. Returns an unsubscribe function. Useful for
++ * components that want to react to a user toggling their choice mid-session
++ * (e.g. footer "Cookie settings" → banner → new choice).
++ */
++export function subscribeConsent(fn: (next: Consent | null) => void): () => void {
++  if (typeof window === 'undefined') return () => {};
++  const handler = () => fn(getConsent());
++  window.addEventListener(CHANGE_EVENT, handler);
++  return () => window.removeEventListener(CHANGE_EVENT, handler);
++}
++
++/**
++ * Re-open the cookie banner so the user can change their choice. Implemented
++ * as a CustomEvent the banner listens for, so callers (e.g. footer button)
++ * don't need a ref to the banner instance.
++ */
++export function openCookieSettings(): void {
++  if (typeof window === 'undefined') return;
++  try {
++    window.dispatchEvent(new CustomEvent(REOPEN_EVENT));
++  } catch {
++    // ignore
++  }
++}
++
++/** Internal: banner subscribes to know when the footer button was clicked. */
++export function subscribeOpenCookieSettings(fn: () => void): () => void {
++  if (typeof window === 'undefined') return () => {};
++  window.addEventListener(REOPEN_EVENT, fn);
++  return () => window.removeEventListener(REOPEN_EVENT, fn);
++}
+diff --git a/apps/web/src/lib/jobs.ts b/apps/web/src/lib/jobs.ts
+new file mode 100644
+index 0000000..63b5b9a
+--- /dev/null
++++ b/apps/web/src/lib/jobs.ts
+@@ -0,0 +1,48 @@
++// Helpers for the v0.3.0 async job queue surface.
++//
++// `jobToRunRecord` is the adapter that lets a terminal JobRecord render
++// through the existing OutputPanel without a parallel UI surface. The
++// adapter lives here (not inside FloomApp) so that callers which deep-link
++// straight into a finished job — namely AppPermalinkPage handling
++// /p/:slug?job=<id> — can hydrate without depending on FloomApp internals.
++
++import type { JobRecord, RunRecord } from './types';
++
++/**
++ * Convert a terminal JobRecord into a RunRecord so the existing OutputPanel
++ * can render succeeded/failed/cancelled jobs without a parallel UI. The
++ * job queue stores its results in the runs table under the hood, but the
++ * job poll endpoint returns a Job shape; this adapter preserves the
++ * existing output-card improvements (CopyButton, markdown-primary, HTML
++ * download, share-URL, error hints) without duplicating them.
++ */
++export function jobToRunRecord(job: JobRecord, action: string): RunRecord {
++  const ok = job.status === 'succeeded';
++  const startedAt = job.started_at || job.created_at;
++  const finishedAt = job.finished_at;
++  const duration =
++    startedAt && finishedAt
++      ? new Date(finishedAt).getTime() - new Date(startedAt).getTime()
++      : null;
++  const errorText =
++    job.error == null
++      ? null
++      : typeof job.error === 'string'
++        ? job.error
++        : JSON.stringify(job.error);
++  return {
++    id: job.run_id || job.id,
++    app_id: job.app_id,
++    thread_id: null,
++    action,
++    inputs: job.input,
++    outputs: job.output,
++    status: ok ? 'success' : 'error',
++    error: errorText,
++    error_type: ok ? null : job.status === 'cancelled' ? 'cancelled' : 'runtime_error',
++    duration_ms: duration,
++    started_at: startedAt,
++    finished_at: finishedAt,
++    logs: '',
++  };
++}
+diff --git a/apps/web/src/lib/sentry.ts b/apps/web/src/lib/sentry.ts
+new file mode 100644
+index 0000000..e106251
+--- /dev/null
++++ b/apps/web/src/lib/sentry.ts
+@@ -0,0 +1,105 @@
++// Strict-opt-in browser Sentry init.
++//
++// Browser Sentry is a third-party processor under GDPR (events leave the EU
++// and hit Sentry's ingest). We only init when the user has explicitly chosen
++// "Accept all" in the cookie banner (Art. 6(1)(a) consent). "Essential only"
++// keeps the SDK fully dark — no DSN call, no transport spin-up, no PII leak
++// on first paint.
++//
++// Public API:
++//   - shouldInitBrowserSentry(consent, dsn): pure predicate (testable)
++//   - initBrowserSentry():     idempotent, returns true iff init happened
++//   - closeBrowserSentry():    best-effort flush + close; safe if not inited
++//
++// CookieBanner calls init/close inline when the user chooses, so the change
++// applies in the same session without a reload.
++
++import * as Sentry from '@sentry/react';
++import { getConsent, type Consent } from './consent';
++
++const SECRET_RE = /(password|token|api[_-]?key|authorization|secret|cookie)/i;
++
++function scrubDeep(v: unknown, depth = 0): unknown {
++  if (depth > 8 || v === null || v === undefined) return v;
++  if (Array.isArray(v)) return v.map((x) => scrubDeep(x, depth + 1));
++  if (typeof v === 'object') {
++    const obj = v as Record<string, unknown>;
++    for (const k of Object.keys(obj)) {
++      if (SECRET_RE.test(k)) obj[k] = '[Scrubbed]';
++      else obj[k] = scrubDeep(obj[k], depth + 1);
++    }
++    return obj;
++  }
++  return v;
++}
++
++function readDsn(): string | undefined {
++  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
++  return env?.VITE_SENTRY_DSN;
++}
++
++function readEnvironment(): string {
++  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
++  return env?.MODE || 'production';
++}
++
++/**
++ * Pure predicate: true iff browser Sentry SHOULD be initialized given the
++ * user's consent choice and whether a DSN is configured. Exported for tests
++ * so the gating contract is unit-checkable without touching the SDK.
++ */
++export function shouldInitBrowserSentry(
++  consent: Consent | null,
++  dsn: string | undefined,
++): boolean {
++  return consent === 'all' && Boolean(dsn);
++}
++
++let initialized = false;
++
++/**
++ * Initialize browser Sentry IFF the user accepted all cookies and a DSN is
++ * set. Idempotent — second call is a no-op. Returns true if the SDK is now
++ * (or was already) live, false otherwise.
++ */
++export function initBrowserSentry(): boolean {
++  if (initialized) return true;
++  const dsn = readDsn();
++  if (!shouldInitBrowserSentry(getConsent(), dsn)) return false;
++  Sentry.init({
++    dsn,
++    environment: readEnvironment(),
++    integrations: [Sentry.browserTracingIntegration()],
++    tracesSampleRate: 0.1,
++    beforeSend(event) {
++      if (event.request) scrubDeep(event.request);
++      if (event.extra) scrubDeep(event.extra);
++      if (event.contexts) scrubDeep(event.contexts);
++      return event;
++    },
++  });
++  initialized = true;
++  return true;
++}
++
++/**
++ * Best-effort close: flushes the queue and stops the SDK. Used when the user
++ * downgrades from "Accept all" to "Essential only" mid-session. Note: Sentry
++ * may have already enqueued an outbound request; `close()` waits up to 2s
++ * for it to drain. Anything already in flight at the network layer cannot
++ * be recalled. This limitation is documented on /cookies.
++ */
++export function closeBrowserSentry(): void {
++  if (!initialized) return;
++  try {
++    void Sentry.close(2000);
++  } catch {
++    // ignore
++  }
++  initialized = false;
++}
++
++/** Test-only: reset internal state. Not exported via index. */
++export function _resetBrowserSentryForTests(): void {
++  initialized = false;
++}
+diff --git a/apps/web/src/lib/types.ts b/apps/web/src/lib/types.ts
+index 965df14..a986519 100644
+--- a/apps/web/src/lib/types.ts
++++ b/apps/web/src/lib/types.ts
+@@ -92,6 +92,14 @@ export interface HubApp {
+    * Absence = app is runnable.
+    */
+   blocked_reason?: string;
++  /**
++   * v0.3.0 async job queue. When true, runs are enqueued via
++   * POST /api/:slug/jobs and polled until terminal. Surfaced on the
++   * directory listing so cards can badge async apps without a detail
++   * fetch.
++   */
++  is_async?: boolean;
++  async_mode?: 'poll' | 'webhook' | null;
+ }
+ 
+ export interface AppDetail extends HubApp {
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index ac19113..9483e4f 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -1,6 +1,5 @@
+ import React, { Suspense, lazy } from 'react';
+ import ReactDOM from 'react-dom/client';
+-import * as Sentry from '@sentry/react';
+ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+ // Landing is eager (LCP path). Everything else is lazy so the initial
+ // bundle only carries the homepage React tree. Trimmed initial JS from
+@@ -25,43 +24,16 @@ const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ defaul
+ import { IconSprite } from './components/IconSprite';
+ import { CookieBanner } from './components/CookieBanner';
+ import { primeSession } from './hooks/useSession';
++import { initBrowserSentry } from './lib/sentry';
+ import './styles/globals.css';
+ 
+-// Optional Sentry wiring. No-op when VITE_SENTRY_DSN is unset — the preview
+-// image ships without a DSN so this stays dark until Federico wires one up.
+-// Source maps are uploaded via Sentry's build plugin (not configured here
+-// yet — that's a follow-up when Sentry is actually turned on).
+-const SENTRY_DSN = (import.meta as { env?: Record<string, string | undefined> }).env
+-  ?.VITE_SENTRY_DSN;
+-if (SENTRY_DSN) {
+-  const SECRET_RE = /(password|token|api[_-]?key|authorization|secret|cookie)/i;
+-  function scrubDeep(v: unknown, depth = 0): unknown {
+-    if (depth > 8 || v === null || v === undefined) return v;
+-    if (Array.isArray(v)) return v.map((x) => scrubDeep(x, depth + 1));
+-    if (typeof v === 'object') {
+-      const obj = v as Record<string, unknown>;
+-      for (const k of Object.keys(obj)) {
+-        if (SECRET_RE.test(k)) obj[k] = '[Scrubbed]';
+-        else obj[k] = scrubDeep(obj[k], depth + 1);
+-      }
+-      return obj;
+-    }
+-    return v;
+-  }
+-  Sentry.init({
+-    dsn: SENTRY_DSN,
+-    environment: (import.meta as { env?: Record<string, string | undefined> }).env?.MODE ||
+-      'production',
+-    integrations: [Sentry.browserTracingIntegration()],
+-    tracesSampleRate: 0.1,
+-    beforeSend(event) {
+-      if (event.request) scrubDeep(event.request);
+-      if (event.extra) scrubDeep(event.extra);
+-      if (event.contexts) scrubDeep(event.contexts);
+-      return event;
+-    },
+-  });
+-}
++// Strict-opt-in browser Sentry. The init function is a no-op unless the user
++// has already chosen "Accept all" in the cookie banner AND a VITE_SENTRY_DSN
++// is configured. CookieBanner calls `initBrowserSentry()` directly when the
++// user accepts all mid-session, so the change applies without a reload.
++// Implementation: apps/web/src/lib/sentry.ts. Gating contract is unit-tested
++// in test/stress/test-web-consent-sentry.mjs.
++initBrowserSentry();
+ 
+ // Kick off the /api/session/me fetch as soon as the bundle loads so every
+ // page's first render already has a value.
+diff --git a/apps/web/src/pages/AppPermalinkPage.tsx b/apps/web/src/pages/AppPermalinkPage.tsx
+index 8af33df..5bc68f0 100644
+--- a/apps/web/src/pages/AppPermalinkPage.tsx
++++ b/apps/web/src/pages/AppPermalinkPage.tsx
+@@ -15,8 +15,8 @@ import { FloomApp } from '../components/FloomApp';
+ import { AppIcon } from '../components/AppIcon';
+ import { AppReviews } from '../components/AppReviews';
+ import { FeedbackButton } from '../components/FeedbackButton';
+-import { getApp, getAppReviews, getRun } from '../api/client';
+-import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
++import { getApp, getAppReviews, getJob, getRun } from '../api/client';
++import type { ActionSpec, AppDetail, JobRecord, ReviewSummary, RunRecord } from '../lib/types';
+ 
+ // Map of known app slugs to GitHub repo URLs
+ const GITHUB_REPOS: Record<string, string> = {
+@@ -34,6 +34,10 @@ export function AppPermalinkPage() {
+   const { slug } = useParams<{ slug: string }>();
+   const [searchParams, setSearchParams] = useSearchParams();
+   const runIdFromUrl = searchParams.get('run');
++  // ?job= is honoured only when ?run= is absent; the latter is the older
++  // sync-run deep link and stays the canonical share format. Reading both
++  // and preferring `run` keeps existing share URLs untouched.
++  const jobIdFromUrl = !runIdFromUrl ? searchParams.get('job') : null;
+ 
+   const [app, setApp] = useState<AppDetail | null>(null);
+   const [summary, setSummary] = useState<ReviewSummary | null>(null);
+@@ -47,6 +51,11 @@ export function AppPermalinkPage() {
+   // initialRunLoading avoids rendering the FloomApp in `inputs` phase (which
+   // would flash the empty form) while the run is being fetched.
+   const [initialRunLoading, setInitialRunLoading] = useState<boolean>(!!runIdFromUrl);
++  // Job prefetched from /api/:slug/jobs/:id when the URL contains ?job=<id>.
++  // Mirrors the ?run= path: terminal jobs render the OutputPanel directly,
++  // in-flight jobs hand off to JobProgress + resumed polling inside FloomApp.
++  const [initialJob, setInitialJob] = useState<JobRecord | null>(null);
++  const [initialJobLoading, setInitialJobLoading] = useState<boolean>(!!jobIdFromUrl);
+ 
+   useEffect(() => {
+     if (!slug) {
+@@ -132,6 +141,49 @@ export function AppPermalinkPage() {
+     );
+   }, [setSearchParams]);
+ 
++  // /p/:slug?job=<id> — fetch the async job and hydrate FloomApp. Terminal
++  // jobs render through the OutputPanel adapter (jobToRunRecord); in-flight
++  // jobs (queued/running) land in the JobProgress card with polling resumed
++  // inside FloomApp. Job ownership/visibility checks live server-side: the
++  // jobs route returns 404 when the caller can't see the underlying app, in
++  // which case we silently fall back to the empty form.
++  useEffect(() => {
++    if (!slug || !jobIdFromUrl) {
++      setInitialJob(null);
++      setInitialJobLoading(false);
++      return;
++    }
++    let cancelled = false;
++    setInitialJobLoading(true);
++    getJob(slug, jobIdFromUrl)
++      .then((job) => {
++        if (cancelled) return;
++        setInitialJob(job);
++      })
++      .catch(() => {
++        if (cancelled) return;
++        setInitialJob(null);
++      })
++      .finally(() => {
++        if (!cancelled) setInitialJobLoading(false);
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [slug, jobIdFromUrl]);
++
++  const handleResetInitialJob = useCallback(() => {
++    setInitialJob(null);
++    setSearchParams(
++      (prev) => {
++        const next = new URLSearchParams(prev);
++        next.delete('job');
++        return next;
++      },
++      { replace: true },
++    );
++  }, [setSearchParams]);
++
+   // SEO meta
+   useEffect(() => {
+     if (!app) return;
+@@ -699,12 +751,12 @@ export function AppPermalinkPage() {
+             padding: '28px 24px',
+           }}
+         >
+-          {initialRunLoading ? (
++          {initialRunLoading || initialJobLoading ? (
+             <div
+               data-testid="shared-run-loading"
+               style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}
+             >
+-              Loading shared run...
++              Loading shared {initialJobLoading ? 'job' : 'run'}...
+             </div>
+           ) : (
+             <FloomApp
+@@ -713,6 +765,8 @@ export function AppPermalinkPage() {
+               showSidebar={false}
+               initialRun={initialRun}
+               onResetInitialRun={handleResetInitialRun}
++              initialJob={initialJob}
++              onResetInitialJob={handleResetInitialJob}
+             />
+           )}
+         </section>
+diff --git a/apps/web/src/pages/AppsDirectoryPage.tsx b/apps/web/src/pages/AppsDirectoryPage.tsx
+index 90b8492..75e4d51 100644
+--- a/apps/web/src/pages/AppsDirectoryPage.tsx
++++ b/apps/web/src/pages/AppsDirectoryPage.tsx
+@@ -776,6 +776,7 @@ function FeaturedStoreCard({ app, spotlight = false }: { app: HubApp; spotlight?
+         <MetaPill label={app.runtime} />
+         <MetaPill label={`${app.actions.length} action${app.actions.length === 1 ? '' : 's'}`} />
+         <MetaPill label={speedLabel(app)} />
++        {app.is_async && <AsyncPill />}
+       </div>
+ 
+       {app.actions.length > 0 && (
+@@ -880,6 +881,7 @@ function StoreAppCard({ app }: { app: HubApp }) {
+         <MetaPill label={app.runtime} />
+         <MetaPill label={`${app.actions.length} action${app.actions.length === 1 ? '' : 's'}`} />
+         <MetaPill label={speedLabel(app)} />
++        {app.is_async && <AsyncPill />}
+       </div>
+ 
+       <StoreActionRow app={app} compact={true} />

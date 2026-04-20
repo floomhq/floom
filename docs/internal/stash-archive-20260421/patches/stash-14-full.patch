@@ -1,0 +1,2279 @@
+diff --git a/apps/server/package.json b/apps/server/package.json
+index d50c46b..20bc210 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@floom/server",
+-  "version": "0.4.0-minimal",
++  "version": "0.4.0-minimal.1",
+   "private": true,
+   "type": "module",
+   "scripts": {
+diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
+index fa4e477..39895b5 100644
+--- a/apps/server/src/index.ts
++++ b/apps/server/src/index.ts
+@@ -26,8 +26,9 @@ import { seedFromFile } from './services/seed.js';
+ import { ingestOpenApiApps } from './services/openapi-ingest.js';
+ import { backfillAppEmbeddings } from './services/embeddings.js';
+ import { globalAuthMiddleware } from './lib/auth.js';
+-import { getAuth, isCloudMode } from './lib/better-auth.js';
++import { getAuth, isCloudMode, runAuthMigrations } from './lib/better-auth.js';
+ import { startJobWorker } from './services/worker.js';
++import { startFastApps } from './services/fast-apps-sidecar.js';
+ 
+ const PORT = Number(process.env.PORT || 3051);
+ const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+@@ -111,9 +112,9 @@ app.get('/openapi.json', (c) =>
+     openapi: '3.0.0',
+     info: {
+       title: 'Floom self-host API',
+-      version: '0.4.0-minimal',
++      version: '0.4.0-minimal.1',
+       description:
+-        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI.',
++        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets). v0.3.2 adds Composio-backed OAuth connections (/api/connections). v0.4.0-alpha.2 adds the Stripe Connect partner-app surface (/api/stripe/*) with Express onboarding, direct charges with a 5% application fee, refunds, subscriptions, and webhook receiver. v0.4.0-alpha.3 (W3.1) adds workspaces + members + invites (/api/workspaces) and the session API (/api/session) wired to Better Auth in cloud mode. v0.4.0-minimal (W4-minimal) adds /api/me/runs, /api/hub/ingest, /api/apps/:slug/reviews, and /api/feedback for the end-to-end product UI. v0.4.0-minimal.1 (W4-minimal gap close) wires /auth/update-user + /auth/change-password + /auth/delete-user into /me/settings and runs Better Auth migrations on boot in cloud mode so sign-up works end-to-end against a fresh database.',
+     },
+     paths: {
+       '/api/health': {
+@@ -544,6 +545,23 @@ if (webDist) {
+ 
+ // Boot sequence: seed then start embeddings backfill in the background.
+ async function boot(): Promise<void> {
++  // W4-minimal gap close: run Better Auth migrations on boot when
++  // FLOOM_CLOUD_MODE is enabled. Creates `user`, `session`, `account`,
++  // `verification` tables plus organization + api-key tables on first
++  // boot. Idempotent — subsequent boots are a no-op once tables exist.
++  // Runs before seeding so any auth-dependent seed data has schemas to
++  // write into. Blocks boot on failure — fail fast if the migration
++  // step can't commit, rather than serving requests against a
++  // half-initialized auth DB.
++  if (isCloudMode()) {
++    try {
++      await runAuthMigrations();
++    } catch (err) {
++      console.error('[auth] migration failed — refusing to boot in cloud mode:', err);
++      process.exit(1);
++    }
++  }
++
+   try {
+     seedFromFile();
+   } catch (err) {
+@@ -576,6 +594,15 @@ async function boot(): Promise<void> {
+     startJobWorker();
+   }
+ 
++  // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its
++  // seven deterministic utility apps. Opt-out via FLOOM_FAST_APPS=false.
++  // Merged from wave/W4M-fast-apps (0.4.0-minimal.2) into wave/W4M-test-fixes
++  // so the published image has both gap-close auth migrations AND the fast-
++  // apps sidecar.
++  startFastApps().catch((err) => {
++    console.error('[fast-apps] boot failed:', err);
++  });
++
+   serve({ fetch: app.fetch, port: PORT }, (info) => {
+     console.log(`[server] listening on http://localhost:${info.port}`);
+     console.log(`[server] public url: ${PUBLIC_URL}`);
+diff --git a/apps/server/src/lib/better-auth.ts b/apps/server/src/lib/better-auth.ts
+index 0794fa8..41b16b2 100644
+--- a/apps/server/src/lib/better-auth.ts
++++ b/apps/server/src/lib/better-auth.ts
+@@ -20,6 +20,7 @@
+ // W3.1 ships with: magic link, GitHub OAuth, Google OAuth, email+password,
+ // API keys, organizations.
+ import { betterAuth } from 'better-auth';
++import { getMigrations } from 'better-auth/db/migration';
+ import { magicLink, organization } from 'better-auth/plugins';
+ import { apiKey } from '@better-auth/api-key';
+ import { db } from '../db.js';
+@@ -54,8 +55,9 @@ export function isCloudMode(): boolean {
+ let cachedAuth: FloomAuth | null | undefined;
+ 
+ /**
+- * Build the Better Auth instance from env. Returns null when cloud mode is
+- * disabled. Idempotent — the second call returns the cached instance.
++ * Build the Better Auth options object from env. Shared by `getAuth()` (which
++ * wraps it in `betterAuth(...)`) and `runAuthMigrations()` (which passes it
++ * straight to `getMigrations(...)`). Idempotent and side-effect-free.
+  *
+  * Required env vars in cloud mode:
+  *   - BETTER_AUTH_SECRET (32+ bytes hex/base64, used for cookie signing)
+@@ -66,13 +68,11 @@ let cachedAuth: FloomAuth | null | undefined;
+  *   - GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET
+  *   - FLOOM_MAGIC_LINK_EMAIL_FROM (defaults to noreply@floom.dev)
+  */
+-export function getAuth(): FloomAuth | null {
+-  if (cachedAuth !== undefined) return cachedAuth;
+-  if (!isCloudMode()) {
+-    cachedAuth = null;
+-    return null;
+-  }
+-
++// Typed as `Parameters<typeof betterAuth>[0]` so the return type is always
++// structurally assignable to what `betterAuth(...)` expects. Kept local so
++// callers don't import Better Auth's generic BetterAuthOptions.
++// eslint-disable-next-line @typescript-eslint/no-explicit-any
++function buildAuthOptions(): any {
+   const secret = process.env.BETTER_AUTH_SECRET;
+   if (!secret || secret.length < 16) {
+     throw new Error(
+@@ -104,7 +104,7 @@ export function getAuth(): FloomAuth | null {
+   const magicLinkFrom =
+     process.env.FLOOM_MAGIC_LINK_EMAIL_FROM || 'noreply@floom.dev';
+ 
+-  const built = betterAuth({
++  return {
+     appName: 'Floom',
+     secret,
+     baseURL,
+@@ -112,8 +112,8 @@ export function getAuth(): FloomAuth | null {
+     // `basePath` here matches the mount point in apps/server/src/index.ts.
+     basePath: '/auth',
+     // Pass the existing better-sqlite3 instance directly; Better Auth's
+-    // adapter detects the SqliteDatabase shape and creates its tables on
+-    // first boot in cloud mode.
++    // Kysely adapter detects the SqliteDatabase shape. Tables are created
++    // on boot by `runAuthMigrations()`, not lazily on first query.
+     database: db,
+     emailAndPassword: {
+       enabled: true,
+@@ -174,7 +174,26 @@ export function getAuth(): FloomAuth | null {
+         rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 100 },
+       }),
+     ],
+-  });
++    user: {
++      // W4-minimal gap close: enable the POST /auth/delete-user endpoint so
++      // /me/settings can delete an account without operator intervention.
++      // `password` kwarg on the body verifies the caller owns the credentials.
++      deleteUser: { enabled: true },
++    },
++  };
++}
++
++/**
++ * Build the Better Auth instance from env. Returns null when cloud mode is
++ * disabled. Idempotent — the second call returns the cached instance.
++ */
++export function getAuth(): FloomAuth | null {
++  if (cachedAuth !== undefined) return cachedAuth;
++  if (!isCloudMode()) {
++    cachedAuth = null;
++    return null;
++  }
++  const built = betterAuth(buildAuthOptions());
+   // Cast through `unknown` to widen the deeply-generic Better Auth return
+   // type to the structural FloomAuth interface above. The shape is verified
+   // by the integration test that round-trips a getSession call.
+@@ -182,6 +201,39 @@ export function getAuth(): FloomAuth | null {
+   return cachedAuth;
+ }
+ 
++/**
++ * Idempotent boot-time migration runner. In cloud mode, resolves the Better
++ * Auth schema from the same options `getAuth()` uses, and creates any
++ * missing tables (`user`, `session`, `account`, `verification`, organization
++ * tables, api-key tables, ...). Safe to call on every boot — Better Auth's
++ * `getMigrations` diffs the current table state against the target schema
++ * and only emits CREATE TABLE / ALTER TABLE statements for missing rows.
++ *
++ * In OSS mode this is a no-op.
++ *
++ * Throws on migration failure so the server fails fast instead of booting
++ * with a half-initialized auth DB.
++ */
++export async function runAuthMigrations(): Promise<{
++  applied: number;
++  tables: string[];
++}> {
++  if (!isCloudMode()) return { applied: 0, tables: [] };
++  const options = buildAuthOptions();
++  const { toBeCreated, toBeAdded, runMigrations } = await getMigrations(options);
++  const newTables = toBeCreated.map((t: { table: string }) => t.table);
++  const changedTables = toBeAdded.map((t: { table: string }) => t.table);
++  const total = newTables.length + changedTables.length;
++  if (total === 0) return { applied: 0, tables: [] };
++  await runMigrations();
++  // eslint-disable-next-line no-console
++  console.log(
++    `[auth] migrations applied: ${newTables.length} new table(s) [${newTables.join(', ') || '-'}], ` +
++      `${changedTables.length} altered table(s) [${changedTables.join(', ') || '-'}]`,
++  );
++  return { applied: total, tables: [...newTables, ...changedTables] };
++}
++
+ /**
+  * Reset the cached singleton. Tests only.
+  */
+diff --git a/apps/server/src/routes/health.ts b/apps/server/src/routes/health.ts
+index e2ef6d2..64faf70 100644
+--- a/apps/server/src/routes/health.ts
++++ b/apps/server/src/routes/health.ts
+@@ -9,7 +9,7 @@ healthRouter.get('/', (c) => {
+   return c.json({
+     status: 'ok',
+     service: 'floom-chat',
+-    version: '0.4.0-minimal',
++    version: '0.4.0-minimal.3',
+     apps: appCount,
+     threads: threadCount,
+     timestamp: new Date().toISOString(),
+diff --git a/apps/server/src/routes/run.ts b/apps/server/src/routes/run.ts
+index 2fa1e02..50dde85 100644
+--- a/apps/server/src/routes/run.ts
++++ b/apps/server/src/routes/run.ts
+@@ -82,7 +82,12 @@ runRouter.post('/', async (c) => {
+     ctx.device_id,
+   );
+ 
+-  dispatchRun(row, manifest, runId, actionName, validated);
++  // W4-minimal gap close: pass the resolved session context so the runner
++  // can look up per-user secrets (user_secrets table). Without this, the
++  // runner falls back to the synthetic 'local' workspace and every
++  // authenticated user's /api/secrets POST is effectively invisible to
++  // their own runs.
++  dispatchRun(row, manifest, runId, actionName, validated, undefined, ctx);
+ 
+   return c.json({ run_id: runId, status: 'pending' });
+ });
+@@ -290,7 +295,12 @@ slugRunRouter.post('/', async (c) => {
+     ctx.device_id,
+   );
+ 
+-  dispatchRun(row, manifest, runId, actionName, validated);
++  // W4-minimal gap close: pass the resolved session context so the runner
++  // can look up per-user secrets (user_secrets table). Without this, the
++  // runner falls back to the synthetic 'local' workspace and every
++  // authenticated user's /api/secrets POST is effectively invisible to
++  // their own runs.
++  dispatchRun(row, manifest, runId, actionName, validated, undefined, ctx);
+ 
+   return c.json({ run_id: runId, status: 'pending' });
+ });
+diff --git a/apps/server/src/services/fast-apps-sidecar.ts b/apps/server/src/services/fast-apps-sidecar.ts
+new file mode 100644
+index 0000000..d8a5ec2
+--- /dev/null
++++ b/apps/server/src/services/fast-apps-sidecar.ts
+@@ -0,0 +1,326 @@
++// Fast Apps sidecar lifecycle.
++//
++// At boot the Floom server forks `examples/fast-apps/server.mjs` as a child
++// process on localhost:$FAST_APPS_PORT (default 4200). Once the sidecar
++// answers its /health probe, we call ingestOpenApiApps on
++// `examples/fast-apps/apps.yaml` so the seven utility apps land in the
++// hub alongside any other proxied apps declared via FLOOM_APPS_CONFIG.
++//
++// Opt-out: set FLOOM_FAST_APPS=false (or 0) in the environment. Useful for
++// tests that want a truly empty hub or for operators who would rather not
++// run a second node process.
++//
++// Clean shutdown: on SIGINT/SIGTERM the parent process kills the sidecar
++// so we do not leak an orphan node on :4200.
++import { spawn, type ChildProcess } from 'node:child_process';
++import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { dirname, join, resolve } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { db } from '../db.js';
++import { ingestOpenApiApps } from './openapi-ingest.js';
++
++/**
++ * Slugs that should be pinned as `featured` in the store after ingest.
++ *  - The seven new fast-apps (uuid, password, hash, base64, json-format,
++ *    jwt-decode, word-count) are always fastest so they go first.
++ *  - Three bundled seed apps (hook-stats, claude-wrapped, session-recall)
++ *    are marked featured for continuity with the previous-wave demo flow;
++ *    Federico wants them pinned even though their docker runtime is
++ *    slower than the new fast-apps.
++ */
++const FEATURED_SLUGS = new Set<string>([
++  'uuid',
++  'password',
++  'hash',
++  'base64',
++  'json-format',
++  'jwt-decode',
++  'word-count',
++  'hook-stats',
++  'claude-wrapped',
++  'session-recall',
++]);
++
++const FAST_APPS_PORT = Number(process.env.FAST_APPS_PORT || 4200);
++const FAST_APPS_HOST = process.env.FAST_APPS_HOST || '127.0.0.1';
++
++function isEnabled(): boolean {
++  const raw = process.env.FLOOM_FAST_APPS;
++  if (raw === undefined || raw === '') return true;
++  return !/^(0|false|no|off)$/i.test(raw);
++}
++
++/**
++ * Find examples/fast-apps/server.mjs relative to the running compiled
++ * apps/server/dist/index.js. We walk up from the current file location
++ * until we find the sidecar, so the same helper works in both local dev
++ * (source tree) and the Docker image (which copies `examples/fast-apps`
++ * into `/app/examples/fast-apps`).
++ */
++function findSidecarScript(): string | null {
++  const here = dirname(fileURLToPath(import.meta.url));
++  const candidateRoots = [
++    // src/services -> ../..  = apps/server, ../../.. = apps, ../../../.. = repo root
++    resolve(here, '..', '..', '..', '..'),
++    // dist/services -> ../..  = apps/server, ../../.. = apps, ../../../.. = repo root
++    resolve(here, '..', '..', '..', '..'),
++    // Docker image layout: /app/apps/server/dist/services -> /app
++    resolve(here, '..', '..', '..', '..', '..'),
++    // Fallback: process.cwd
++    process.cwd(),
++    resolve(process.cwd(), '..'),
++    resolve(process.cwd(), '..', '..'),
++  ];
++  for (const root of candidateRoots) {
++    const serverScript = join(root, 'examples', 'fast-apps', 'server.mjs');
++    if (existsSync(serverScript)) return serverScript;
++  }
++  return null;
++}
++
++/**
++ * App descriptors for the seven fast apps. We materialize a temporary
++ * apps.yaml at boot using the *actual* sidecar port so tests and multi-
++ * instance deployments can bind to any port without touching the shipped
++ * examples/fast-apps/apps.yaml file on disk.
++ */
++interface FastAppDescriptor {
++  slug: string;
++  display_name: string;
++  description: string;
++  category: string;
++  icon: string;
++}
++
++const FAST_APP_DESCRIPTORS: FastAppDescriptor[] = [
++  {
++    slug: 'uuid',
++    display_name: 'UUID Generator',
++    description:
++      'Generate one or more UUID v4 or v7 strings. Pure random v4, or time-ordered v7 for sortable ids.',
++    category: 'developer-tools',
++    icon: 'uuid',
++  },
++  {
++    slug: 'password',
++    display_name: 'Password Generator',
++    description:
++      'Cryptographically secure password generator. Rejection-sampled crypto.randomBytes, no modulo bias, configurable alphabet.',
++    category: 'developer-tools',
++    icon: 'password',
++  },
++  {
++    slug: 'hash',
++    display_name: 'Hash',
++    description:
++      'Compute md5, sha1, sha256, or sha512 digests of UTF-8 text. Returns the hex digest and byte length.',
++    category: 'developer-tools',
++    icon: 'hash',
++  },
++  {
++    slug: 'base64',
++    display_name: 'Base64',
++    description:
++      'Encode text to base64 or decode base64 back to text. Supports the URL-safe alphabet for tokens and JWTs.',
++    category: 'developer-tools',
++    icon: 'base64',
++  },
++  {
++    slug: 'json-format',
++    display_name: 'JSON Formatter',
++    description:
++      'Parse and pretty-print JSON with configurable indent and optional sorted keys. Returns both formatted and minified forms.',
++    category: 'developer-tools',
++    icon: 'json-format',
++  },
++  {
++    slug: 'jwt-decode',
++    display_name: 'JWT Decoder',
++    description:
++      'Decode a JWT header and payload without verifying the signature. Shows algorithm, expiry, and claims for debugging.',
++    category: 'developer-tools',
++    icon: 'jwt-decode',
++  },
++  {
++    slug: 'word-count',
++    display_name: 'Word Count',
++    description:
++      'Count words, characters, lines, sentences, and paragraphs. Estimates reading time at 220 words per minute.',
++    category: 'writing',
++    icon: 'word-count',
++  },
++];
++
++/**
++ * Write an apps.yaml to a unique temp dir using the actual sidecar port
++ * and return its path. We avoid YAML escapes by keeping descriptions on a
++ * single line and JSON-stringifying them so colons and quotes do not
++ * confuse the parser.
++ */
++function writeRuntimeAppsYaml(host: string, port: number): string {
++  const tmpDir = mkdtempSync(join(tmpdir(), 'floom-fast-apps-yaml-'));
++  const path = join(tmpDir, 'apps.yaml');
++  const lines: string[] = ['apps:'];
++  for (const d of FAST_APP_DESCRIPTORS) {
++    lines.push(`  - slug: ${d.slug}`);
++    lines.push('    type: proxied');
++    lines.push(`    openapi_spec_url: http://${host}:${port}/openapi/${d.slug}.json`);
++    lines.push(`    display_name: ${JSON.stringify(d.display_name)}`);
++    lines.push(`    description: ${JSON.stringify(d.description)}`);
++    lines.push(`    category: ${d.category}`);
++    lines.push(`    icon: ${d.icon}`);
++  }
++  writeFileSync(path, lines.join('\n') + '\n', 'utf-8');
++  return path;
++}
++
++async function waitForHealthy(url: string, timeoutMs = 5000): Promise<boolean> {
++  const deadline = Date.now() + timeoutMs;
++  while (Date.now() < deadline) {
++    try {
++      const res = await fetch(url, { signal: AbortSignal.timeout(500) });
++      if (res.ok) return true;
++    } catch {
++      // retry
++    }
++    await new Promise((r) => setTimeout(r, 100));
++  }
++  return false;
++}
++
++let sidecarProcess: ChildProcess | null = null;
++
++export interface FastAppsBootResult {
++  enabled: boolean;
++  started: boolean;
++  ingested: number;
++  failed: number;
++  reason?: string;
++}
++
++/**
++ * Start the fast-apps sidecar and ingest its apps.yaml. Idempotent: calling
++ * twice in the same process is a no-op after the first run.
++ */
++export async function startFastApps(): Promise<FastAppsBootResult> {
++  if (!isEnabled()) {
++    return { enabled: false, started: false, ingested: 0, failed: 0, reason: 'disabled' };
++  }
++  if (sidecarProcess) {
++    return { enabled: true, started: true, ingested: 0, failed: 0, reason: 'already_running' };
++  }
++
++  const serverScript = findSidecarScript();
++  if (!serverScript) {
++    console.warn('[fast-apps] examples/fast-apps/server.mjs not found in any candidate path; skipping');
++    return {
++      enabled: true,
++      started: false,
++      ingested: 0,
++      failed: 0,
++      reason: 'sidecar_script_not_found',
++    };
++  }
++
++  console.log(`[fast-apps] forking sidecar: ${serverScript}`);
++  const child = spawn(process.execPath, [serverScript], {
++    env: {
++      ...process.env,
++      FAST_APPS_PORT: String(FAST_APPS_PORT),
++      FAST_APPS_HOST,
++      FAST_APPS_PUBLIC_BASE: `http://${FAST_APPS_HOST}:${FAST_APPS_PORT}`,
++    },
++    stdio: ['ignore', 'pipe', 'pipe'],
++  });
++
++  child.stdout?.on('data', (chunk: Buffer) => {
++    process.stdout.write(`[fast-apps] ${chunk}`);
++  });
++  child.stderr?.on('data', (chunk: Buffer) => {
++    process.stderr.write(`[fast-apps:err] ${chunk}`);
++  });
++  child.on('exit', (code, signal) => {
++    console.warn(`[fast-apps] sidecar exited code=${code} signal=${signal}`);
++    sidecarProcess = null;
++  });
++
++  sidecarProcess = child;
++
++  // Kill sidecar on parent shutdown so we do not orphan node on :4200.
++  const shutdown = () => {
++    if (sidecarProcess && !sidecarProcess.killed) {
++      sidecarProcess.kill('SIGTERM');
++    }
++  };
++  process.once('SIGINT', shutdown);
++  process.once('SIGTERM', shutdown);
++  process.once('exit', shutdown);
++
++  const healthy = await waitForHealthy(`http://${FAST_APPS_HOST}:${FAST_APPS_PORT}/health`);
++  if (!healthy) {
++    console.warn('[fast-apps] sidecar never became healthy; skipping ingest');
++    return {
++      enabled: true,
++      started: false,
++      ingested: 0,
++      failed: 0,
++      reason: 'sidecar_not_healthy',
++    };
++  }
++
++  // Materialize a runtime apps.yaml using the actual sidecar port so
++  // multi-instance and test setups can bind to any port. Lives in a
++  // mkdtempSync dir; cleaned up by the OS on reboot.
++  const runtimeYaml = writeRuntimeAppsYaml(FAST_APPS_HOST, FAST_APPS_PORT);
++  console.log(`[fast-apps] wrote runtime apps.yaml at ${runtimeYaml}`);
++
++  try {
++    const result = await ingestOpenApiApps(runtimeYaml);
++    console.log(
++      `[fast-apps] ingested ${result.apps_ingested} apps (${result.apps_failed} failed)`,
++    );
++    // Pin the fast apps + previously-featured demo apps to the top of the
++    // store. Idempotent: re-running updates featured=1 on the same slugs.
++    // Apps that are not present in the DB are silently skipped because the
++    // WHERE clause filters by slug.
++    const markFeatured = db.prepare(
++      `UPDATE apps SET featured = 1, updated_at = datetime('now') WHERE slug = ?`,
++    );
++    const featuredTxn = db.transaction((slugs: string[]) => {
++      let touched = 0;
++      for (const slug of slugs) {
++        const r = markFeatured.run(slug);
++        if (r.changes > 0) touched++;
++      }
++      return touched;
++    });
++    const pinned = featuredTxn(Array.from(FEATURED_SLUGS));
++    console.log(`[fast-apps] marked ${pinned} apps featured`);
++    return {
++      enabled: true,
++      started: true,
++      ingested: result.apps_ingested,
++      failed: result.apps_failed,
++    };
++  } catch (err) {
++    console.error('[fast-apps] ingest failed:', err);
++    return {
++      enabled: true,
++      started: true,
++      ingested: 0,
++      failed: 0,
++      reason: (err as Error).message,
++    };
++  }
++}
++
++/**
++ * Stop the sidecar. Exposed for tests that need a clean shutdown.
++ */
++export function stopFastApps(): void {
++  if (sidecarProcess && !sidecarProcess.killed) {
++    sidecarProcess.kill('SIGTERM');
++    sidecarProcess = null;
++  }
++}
+diff --git a/apps/server/src/services/workspaces.ts b/apps/server/src/services/workspaces.ts
+index bd5f55f..80130d2 100644
+--- a/apps/server/src/services/workspaces.ts
++++ b/apps/server/src/services/workspaces.ts
+@@ -636,11 +636,33 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
+   const userRow = db
+     .prepare('SELECT id, email, name FROM users WHERE id = ?')
+     .get(ctx.user_id) as { id: string; email: string | null; name: string | null } | undefined;
++  // W4-minimal gap close: in cloud mode, Better Auth's `user` table is the
++  // source of truth for display name + avatar image. Profile updates flow
++  // through /auth/update-user which writes to that table, not the Floom
++  // `users` table. We do a lazy read-through here so /api/session/me
++  // reflects the latest values without dual-writing on every mutation.
++  // In OSS mode the Better Auth table may not exist; guard with a
++  // try/catch so the query failure is a silent no-op.
++  let betterAuthUser:
++    | { name: string | null; image: string | null; email: string | null }
++    | undefined;
++  if (cloud_mode && ctx.user_id !== DEFAULT_USER_ID) {
++    try {
++      betterAuthUser = db
++        .prepare('SELECT name, image, email FROM user WHERE id = ?')
++        .get(ctx.user_id) as
++        | { name: string | null; image: string | null; email: string | null }
++        | undefined;
++    } catch {
++      betterAuthUser = undefined;
++    }
++  }
+   return {
+     user: {
+       id: ctx.user_id,
+-      email: userRow?.email || ctx.email || null,
+-      name: userRow?.name || null,
++      email: betterAuthUser?.email || userRow?.email || ctx.email || null,
++      name: betterAuthUser?.name || userRow?.name || null,
++      image: betterAuthUser?.image || null,
+       is_local: ctx.user_id === DEFAULT_USER_ID,
+     },
+     active_workspace: {
+diff --git a/apps/server/src/types.ts b/apps/server/src/types.ts
+index 04f8999..12e9da1 100644
+--- a/apps/server/src/types.ts
++++ b/apps/server/src/types.ts
+@@ -290,6 +290,7 @@ export interface SessionMePayload {
+     id: string;
+     email: string | null;
+     name: string | null;
++    image: string | null;
+     is_local: boolean;
+   };
+   active_workspace: {
+diff --git a/apps/web/src/api/client.ts b/apps/web/src/api/client.ts
+index 38af681..35978ca 100644
+--- a/apps/web/src/api/client.ts
++++ b/apps/web/src/api/client.ts
+@@ -103,11 +103,72 @@ export interface RunStreamHandlers {
+ 
+ /**
+  * Open an SSE connection to /api/run/:id/stream. Returns a cleanup function.
++ *
++ * The SSE stream can drop mid-run (mobile network switches, proxy timeouts,
++ * ERR_NETWORK_CHANGED, etc.). When that happens we fall back to polling
++ * /api/run/:id every 1500ms so the UI still advances to `done`.
++ *
++ * A belt-and-suspenders polling watchdog also runs for the first ~4 seconds
++ * of every run: if no SSE event has been received by then, polling starts
++ * regardless. This catches the "SSE never connects" failure mode that shows
++ * up as a stuck "Starting container…" on clients that silently drop the
++ * connection before it opens.
+  */
+ export function streamRun(runId: string, handlers: RunStreamHandlers): () => void {
+   const es = new EventSource(`/api/run/${runId}/stream`);
++  let closed = false;
++  let done = false;
++  let pollTimer: ReturnType<typeof setInterval> | null = null;
++  let watchdog: ReturnType<typeof setTimeout> | null = null;
++  let sawEvent = false;
++
++  const markDone = (run: RunRecord) => {
++    if (done) return;
++    done = true;
++    handlers.onStatus?.(run);
++    close();
++  };
++
++  const close = () => {
++    if (closed) return;
++    closed = true;
++    try {
++      es.close();
++    } catch {
++      // ignore
++    }
++    if (pollTimer) {
++      clearInterval(pollTimer);
++      pollTimer = null;
++    }
++    if (watchdog) {
++      clearTimeout(watchdog);
++      watchdog = null;
++    }
++  };
++
++  const startPolling = () => {
++    if (pollTimer || done || closed) return;
++    const poll = async () => {
++      if (done || closed) return;
++      try {
++        const run = await getRun(runId);
++        // Forward status updates even for pending/running states so the UI
++        // can show progress hints when SSE is unavailable.
++        if (!done && ['success', 'error', 'timeout'].includes(run.status)) {
++          markDone(run);
++        }
++      } catch {
++        // Transient network error, try again on the next tick.
++      }
++    };
++    // Kick off an immediate poll so the UI doesn't have to wait 1.5s.
++    void poll();
++    pollTimer = setInterval(poll, 1500);
++  };
+ 
+   es.addEventListener('log', (evt) => {
++    sawEvent = true;
+     try {
+       const data = JSON.parse((evt as MessageEvent).data);
+       handlers.onLog?.(data);
+@@ -117,11 +178,13 @@ export function streamRun(runId: string, handlers: RunStreamHandlers): () => voi
+   });
+ 
+   es.addEventListener('status', (evt) => {
++    sawEvent = true;
+     try {
+-      const data = JSON.parse((evt as MessageEvent).data);
+-      handlers.onStatus?.(data);
++      const data = JSON.parse((evt as MessageEvent).data) as RunRecord;
+       if (['success', 'error', 'timeout'].includes(data.status)) {
+-        es.close();
++        markDone(data);
++      } else {
++        handlers.onStatus?.(data);
+       }
+     } catch {
+       // ignore
+@@ -129,11 +192,21 @@ export function streamRun(runId: string, handlers: RunStreamHandlers): () => voi
+   });
+ 
+   es.onerror = () => {
++    // Don't surface the error to the user yet. Start polling instead; if
++    // the run is already finished we'll pick it up on the first poll.
+     handlers.onError?.(new Error('Stream disconnected'));
+-    es.close();
++    startPolling();
+   };
+ 
+-  return () => es.close();
++  // Watchdog: if no SSE event fires within 4 seconds, assume the stream
++  // silently failed to connect and start polling anyway.
++  watchdog = setTimeout(() => {
++    if (!sawEvent && !done && !closed) {
++      startPolling();
++    }
++  }, 4000);
++
++  return close;
+ }
+ 
+ export function createThread(): Promise<{ id: string }> {
+@@ -196,6 +269,41 @@ export function signOut(): Promise<unknown> {
+   return request('/auth/sign-out', { method: 'POST', body: JSON.stringify({}) });
+ }
+ 
++// W4-minimal gap close: wire /me/settings to the real Better Auth endpoints
++// that ship in 1.6.3. `updateUser` supports name + image; `changePassword`
++// verifies the current password server-side; `deleteUser` requires the
++// current password to prevent hostile session takeovers.
++export function updateAuthUser(body: {
++  name?: string;
++  image?: string | null;
++}): Promise<{ status: boolean }> {
++  return request('/auth/update-user', {
++    method: 'POST',
++    body: JSON.stringify(body),
++  });
++}
++
++export function changeAuthPassword(body: {
++  currentPassword: string;
++  newPassword: string;
++  revokeOtherSessions?: boolean;
++}): Promise<{ token: string | null; user: { id: string; email: string; name: string } }> {
++  return request('/auth/change-password', {
++    method: 'POST',
++    body: JSON.stringify(body),
++  });
++}
++
++export function deleteAuthUser(body: {
++  password?: string;
++  callbackURL?: string;
++}): Promise<{ success: boolean; message: string }> {
++  return request('/auth/delete-user', {
++    method: 'POST',
++    body: JSON.stringify(body),
++  });
++}
++
+ // Social sign-in: Better Auth expects a redirect-mode GET, but the UI
+ // fires window.location. We expose the URL here for callers to read.
+ export function socialSignInUrl(provider: 'github' | 'google', callbackURL = '/me'): string {
+diff --git a/apps/web/src/components/TopBar.tsx b/apps/web/src/components/TopBar.tsx
+index c315d8c..66fd086 100644
+--- a/apps/web/src/components/TopBar.tsx
++++ b/apps/web/src/components/TopBar.tsx
+@@ -197,22 +197,38 @@ export function TopBar(_props: Props = {}) {
+                     fontFamily: 'inherit',
+                   }}
+                 >
+-                  <span
+-                    style={{
+-                      width: 24,
+-                      height: 24,
+-                      borderRadius: '50%',
+-                      background: 'var(--accent)',
+-                      color: '#fff',
+-                      display: 'flex',
+-                      alignItems: 'center',
+-                      justifyContent: 'center',
+-                      fontSize: 11,
+-                      fontWeight: 700,
+-                    }}
+-                  >
+-                    {userInitial}
+-                  </span>
++                  {user?.image ? (
++                    <img
++                      src={user.image}
++                      alt=""
++                      width={24}
++                      height={24}
++                      style={{
++                        width: 24,
++                        height: 24,
++                        borderRadius: '50%',
++                        objectFit: 'cover',
++                      }}
++                    />
++                  ) : (
++                    <span
++                      style={{
++                        width: 24,
++                        height: 24,
++                        borderRadius: '50%',
++                        background: 'var(--accent)',
++                        color: '#fff',
++                        display: 'flex',
++                        alignItems: 'center',
++                        justifyContent: 'center',
++                        fontSize: 11,
++                        fontWeight: 700,
++                      }}
++                      data-testid="topbar-user-avatar-initial"
++                    >
++                      {userInitial}
++                    </span>
++                  )}
+                   <span style={{ fontSize: 13, color: 'var(--ink)' }}>{userLabel}</span>
+                 </button>
+                 {dropOpen && (
+diff --git a/apps/web/src/lib/types.ts b/apps/web/src/lib/types.ts
+index f2cfe38..b66cae0 100644
+--- a/apps/web/src/lib/types.ts
++++ b/apps/web/src/lib/types.ts
+@@ -131,6 +131,7 @@ export interface SessionMePayload {
+     id: string;
+     email: string | null;
+     name: string | null;
++    image: string | null;
+     is_local: boolean;
+   };
+   active_workspace: SessionWorkspace;
+diff --git a/apps/web/src/pages/MeSettingsPage.tsx b/apps/web/src/pages/MeSettingsPage.tsx
+index 5633c69..fb857d8 100644
+--- a/apps/web/src/pages/MeSettingsPage.tsx
++++ b/apps/web/src/pages/MeSettingsPage.tsx
+@@ -1,54 +1,155 @@
+-// W4-minimal: /me/settings — basic account settings.
++// W4-minimal: /me/settings — account settings wired to Better Auth 1.6.3.
+ //
+-// Four fields: display name, avatar URL, email (read-only), password.
+-// Plus a "delete account" section at the bottom with a confirm modal.
++// Three sections:
++//   1. Profile  — display name + avatar URL. POST /auth/update-user.
++//   2. Password — current + new + confirm. POST /auth/change-password.
++//   3. Delete   — password-gated confirm modal. POST /auth/delete-user.
+ //
+-// In OSS mode most fields are read-only because there's no Better Auth
+-// user record to mutate; the page renders an info banner explaining that.
++// Email is read-only — Better Auth has /auth/change-email, but it requires
++// a verification flow we don't yet ship email delivery for. Left out of
++// W4-minimal intentionally and flagged on the UI.
++//
++// In OSS mode the Better Auth endpoints are not mounted, so everything is
++// read-only and a banner explains why. The page never falls back to
++// localStorage or alert() stubs.
+ 
+-import { useState } from 'react';
++import { useEffect, useState } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { PageShell } from '../components/PageShell';
+-import { useSession } from '../hooks/useSession';
++import { useSession, refreshSession, clearSession } from '../hooks/useSession';
++import * as api from '../api/client';
++
++type FieldState = 'idle' | 'saving' | 'saved' | 'error';
+ 
+ export function MeSettingsPage() {
+   const { data: session, isAuthenticated } = useSession();
+-  const [name, setName] = useState(session?.user.name || '');
+-  const [password, setPassword] = useState('');
+-  const [avatarUrl, setAvatarUrl] = useState('');
+-  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+-  const [confirm, setConfirm] = useState(false);
+-  const [confirmText, setConfirmText] = useState('');
+   const navigate = useNavigate();
+ 
+-  async function handleSave(e: React.FormEvent) {
++  // Profile section state. The initial render may land before /api/session/me
++  // resolves (SPA boot path), so we also sync from `session` whenever it
++  // updates. Track a `dirty` flag per field so we stop clobbering user
++  // edits once they've typed something.
++  const [name, setName] = useState<string>(session?.user.name || '');
++  const [avatarUrl, setAvatarUrl] = useState<string>(session?.user.image || '');
++  const [nameDirty, setNameDirty] = useState(false);
++  const [avatarDirty, setAvatarDirty] = useState(false);
++  const [profileState, setProfileState] = useState<FieldState>('idle');
++  const [profileError, setProfileError] = useState<string>('');
++
++  // Re-seed form fields from the session whenever it changes, but only
++  // for fields the user hasn't started editing. This covers the race
++  // where the page mounts before /api/session/me resolves and also
++  // handles post-save re-syncs when refreshSession() updates the cache.
++  useEffect(() => {
++    if (!session) return;
++    if (!nameDirty) setName(session.user.name || '');
++    if (!avatarDirty) setAvatarUrl(session.user.image || '');
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [session?.user.name, session?.user.image]);
++
++  // Password section state.
++  const [currentPassword, setCurrentPassword] = useState('');
++  const [newPassword, setNewPassword] = useState('');
++  const [confirmPassword, setConfirmPassword] = useState('');
++  const [passwordState, setPasswordState] = useState<FieldState>('idle');
++  const [passwordError, setPasswordError] = useState<string>('');
++
++  // Delete-account modal state.
++  const [confirm, setConfirm] = useState(false);
++  const [deletePassword, setDeletePassword] = useState('');
++  const [deleteState, setDeleteState] = useState<FieldState>('idle');
++  const [deleteError, setDeleteError] = useState<string>('');
++
++  async function handleProfileSave(e: React.FormEvent) {
++    e.preventDefault();
++    if (!isAuthenticated) return;
++    setProfileState('saving');
++    setProfileError('');
++    try {
++      // Only send fields the user actually touched. `image: null` clears the
++      // avatar in Better Auth; undefined leaves it alone.
++      const body: { name?: string; image?: string | null } = {};
++      if (name !== (session?.user.name || '')) body.name = name;
++      if (avatarUrl !== (session?.user.image || '')) {
++        body.image = avatarUrl ? avatarUrl : null;
++      }
++      if (Object.keys(body).length === 0) {
++        setProfileState('saved');
++        setTimeout(() => setProfileState('idle'), 1500);
++        return;
++      }
++      await api.updateAuthUser(body);
++      await refreshSession();
++      // Reset dirty flags so the useEffect re-seeds from the freshly
++      // fetched session payload — otherwise the form still displays the
++      // pre-save values on a non-reload session refresh.
++      setNameDirty(false);
++      setAvatarDirty(false);
++      setProfileState('saved');
++      setTimeout(() => setProfileState('idle'), 1500);
++    } catch (err) {
++      setProfileState('error');
++      const e = err as api.ApiError;
++      setProfileError(e.message || 'Could not save profile.');
++    }
++  }
++
++  async function handlePasswordSave(e: React.FormEvent) {
+     e.preventDefault();
+     if (!isAuthenticated) return;
+-    setState('saving');
++    setPasswordError('');
++    if (newPassword.length < 8) {
++      setPasswordState('error');
++      setPasswordError('New password must be at least 8 characters.');
++      return;
++    }
++    if (newPassword !== confirmPassword) {
++      setPasswordState('error');
++      setPasswordError('New password and confirmation do not match.');
++      return;
++    }
++    setPasswordState('saving');
+     try {
+-      // Better Auth doesn't expose a generic update endpoint in the plugin
+-      // surface we mounted, so for W4-minimal we store this as a marker in
+-      // the local browser storage and surface a "saved" state. The real
+-      // settings path (hitting /auth/update-user) is wired in W4.1 when we
+-      // ship the cloud writer endpoint.
+-      if (typeof window !== 'undefined') {
+-        window.localStorage.setItem(
+-          'floom-settings-override',
+-          JSON.stringify({ name, avatarUrl }),
+-        );
++      await api.changeAuthPassword({
++        currentPassword,
++        newPassword,
++        revokeOtherSessions: true,
++      });
++      setCurrentPassword('');
++      setNewPassword('');
++      setConfirmPassword('');
++      setPasswordState('saved');
++      setTimeout(() => setPasswordState('idle'), 1500);
++    } catch (err) {
++      setPasswordState('error');
++      const e = err as api.ApiError;
++      if (e.status === 401 || e.status === 400) {
++        setPasswordError(e.message || 'Current password incorrect.');
++      } else {
++        setPasswordError(e.message || 'Could not change password.');
+       }
+-      setState('saved');
+-      setTimeout(() => setState('idle'), 1500);
+-    } catch {
+-      setState('error');
+     }
+   }
+ 
+   async function handleDelete() {
+-    if (confirmText !== session?.user.email) return;
+-    alert('Delete-account is wired in cloud mode only. Ask support to delete your account.');
+-    setConfirm(false);
+-    navigate('/');
++    if (!isAuthenticated) return;
++    setDeleteState('saving');
++    setDeleteError('');
++    try {
++      await api.deleteAuthUser({ password: deletePassword });
++      clearSession();
++      await refreshSession();
++      setConfirm(false);
++      navigate('/', { replace: true });
++    } catch (err) {
++      setDeleteState('error');
++      const e = err as api.ApiError;
++      if (e.status === 401 || e.status === 400) {
++        setDeleteError(e.message || 'Password incorrect.');
++      } else {
++        setDeleteError(e.message || 'Could not delete account.');
++      }
++    }
+   }
+ 
+   return (
+@@ -58,11 +159,12 @@ export function MeSettingsPage() {
+           Account settings
+         </h1>
+         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 28px' }}>
+-          Update your profile and password.
++          Update your profile, change your password, or delete your account.
+         </p>
+ 
+         {!isAuthenticated && (
+           <div
++            data-testid="settings-oss-banner"
+             style={{
+               background: '#fff8e6',
+               border: '1px solid #f4e0a5',
+@@ -73,16 +175,22 @@ export function MeSettingsPage() {
+               marginBottom: 20,
+             }}
+           >
+-            You're using the local account (OSS mode). Settings are read-only
++            You&apos;re using the local account (OSS mode). Settings are read-only
+             until cloud auth is enabled on this server.
+           </div>
+         )}
+ 
+-        <form onSubmit={handleSave}>
++        {/* ---------- Profile section ---------- */}
++        <form onSubmit={handleProfileSave} data-testid="settings-profile-form">
++          <SectionHeading>Profile</SectionHeading>
++
+           <Label>Display name</Label>
+           <Input
+             value={name}
+-            onChange={(e) => setName(e.target.value)}
++            onChange={(e) => {
++              setName(e.target.value);
++              setNameDirty(true);
++            }}
+             disabled={!isAuthenticated}
+             placeholder="Ada Lovelace"
+             data-testid="settings-name"
+@@ -91,13 +199,16 @@ export function MeSettingsPage() {
+           <Label>Avatar URL (optional)</Label>
+           <Input
+             value={avatarUrl}
+-            onChange={(e) => setAvatarUrl(e.target.value)}
++            onChange={(e) => {
++              setAvatarUrl(e.target.value);
++              setAvatarDirty(true);
++            }}
+             disabled={!isAuthenticated}
+-            placeholder="https://..."
++            placeholder="https://avatars.example.com/ada.png"
+             data-testid="settings-avatar"
+           />
+ 
+-          <Label>Email</Label>
++          <Label>Email (read-only)</Label>
+           <Input
+             value={session?.user.email || '(local)'}
+             readOnly
+@@ -105,39 +216,98 @@ export function MeSettingsPage() {
+             data-testid="settings-email"
+           />
+ 
++          {profileState === 'error' && profileError && (
++            <p data-testid="settings-profile-error" style={errorTextStyle}>
++              {profileError}
++            </p>
++          )}
++
++          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
++            <button
++              type="submit"
++              disabled={!isAuthenticated || profileState === 'saving'}
++              data-testid="settings-save"
++              style={primaryButtonStyle(isAuthenticated)}
++            >
++              {profileState === 'saving'
++                ? 'Saving...'
++                : profileState === 'saved'
++                ? 'Saved'
++                : 'Save profile'}
++            </button>
++          </div>
++        </form>
++
++        {/* ---------- Password section ---------- */}
++        <form
++          onSubmit={handlePasswordSave}
++          data-testid="settings-password-form"
++          style={{ marginTop: 40 }}
++        >
++          <SectionHeading>Change password</SectionHeading>
++
++          <Label>Current password</Label>
++          <Input
++            type="password"
++            value={currentPassword}
++            onChange={(e) => setCurrentPassword(e.target.value)}
++            disabled={!isAuthenticated}
++            autoComplete="current-password"
++            data-testid="settings-current-password"
++          />
++
+           <Label>New password</Label>
+           <Input
+             type="password"
+-            value={password}
+-            onChange={(e) => setPassword(e.target.value)}
++            value={newPassword}
++            onChange={(e) => setNewPassword(e.target.value)}
++            disabled={!isAuthenticated}
++            placeholder="At least 8 characters"
++            autoComplete="new-password"
++            data-testid="settings-new-password"
++          />
++
++          <Label>Confirm new password</Label>
++          <Input
++            type="password"
++            value={confirmPassword}
++            onChange={(e) => setConfirmPassword(e.target.value)}
+             disabled={!isAuthenticated}
+-            placeholder="Leave blank to keep current"
+-            data-testid="settings-password"
++            autoComplete="new-password"
++            data-testid="settings-confirm-password"
+           />
+ 
+-          <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
++          {passwordState === 'error' && passwordError && (
++            <p data-testid="settings-password-error" style={errorTextStyle}>
++              {passwordError}
++            </p>
++          )}
++
++          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+             <button
+               type="submit"
+-              disabled={!isAuthenticated || state === 'saving'}
+-              data-testid="settings-save"
+-              style={{
+-                padding: '10px 18px',
+-                background: 'var(--ink)',
+-                color: '#fff',
+-                border: 'none',
+-                borderRadius: 8,
+-                fontSize: 13,
+-                fontWeight: 600,
+-                cursor: isAuthenticated ? 'pointer' : 'not-allowed',
+-                fontFamily: 'inherit',
+-                opacity: isAuthenticated ? 1 : 0.5,
+-              }}
++              disabled={
++                !isAuthenticated ||
++                passwordState === 'saving' ||
++                !currentPassword ||
++                !newPassword ||
++                !confirmPassword
++              }
++              data-testid="settings-password-save"
++              style={primaryButtonStyle(
++                isAuthenticated && !!currentPassword && !!newPassword && !!confirmPassword,
++              )}
+             >
+-              {state === 'saving' ? 'Saving...' : state === 'saved' ? 'Saved' : 'Save changes'}
++              {passwordState === 'saving'
++                ? 'Changing...'
++                : passwordState === 'saved'
++                ? 'Password changed'
++                : 'Change password'}
+             </button>
+           </div>
+         </form>
+ 
++        {/* ---------- Delete-account section ---------- */}
+         <div
+           style={{
+             marginTop: 48,
+@@ -155,7 +325,12 @@ export function MeSettingsPage() {
+           </p>
+           <button
+             type="button"
+-            onClick={() => setConfirm(true)}
++            onClick={() => {
++              setConfirm(true);
++              setDeletePassword('');
++              setDeleteState('idle');
++              setDeleteError('');
++            }}
+             data-testid="settings-delete-trigger"
+             disabled={!isAuthenticated}
+             style={{
+@@ -179,6 +354,7 @@ export function MeSettingsPage() {
+           <div
+             role="dialog"
+             aria-modal="true"
++            data-testid="settings-delete-modal"
+             style={{
+               position: 'fixed',
+               inset: 0,
+@@ -205,13 +381,22 @@ export function MeSettingsPage() {
+                 Delete account?
+               </h3>
+               <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
+-                Type your email <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{session?.user.email}</code> to confirm.
++                This permanently deletes <code style={codeStyle}>{session?.user.email}</code> and
++                all associated data. Enter your password to confirm.
+               </p>
+               <Input
+-                value={confirmText}
+-                onChange={(e) => setConfirmText(e.target.value)}
+-                data-testid="settings-delete-confirm"
++                type="password"
++                value={deletePassword}
++                onChange={(e) => setDeletePassword(e.target.value)}
++                placeholder="Your password"
++                autoComplete="current-password"
++                data-testid="settings-delete-password"
+               />
++              {deleteState === 'error' && deleteError && (
++                <p data-testid="settings-delete-error" style={{ ...errorTextStyle, marginTop: 10 }}>
++                  {deleteError}
++                </p>
++              )}
+               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                 <button
+                   type="button"
+@@ -232,7 +417,8 @@ export function MeSettingsPage() {
+                 <button
+                   type="button"
+                   onClick={handleDelete}
+-                  disabled={confirmText !== session?.user.email}
++                  disabled={!deletePassword || deleteState === 'saving'}
++                  data-testid="settings-delete-confirm"
+                   style={{
+                     padding: '8px 16px',
+                     background: '#c2321f',
+@@ -241,12 +427,12 @@ export function MeSettingsPage() {
+                     borderRadius: 8,
+                     fontSize: 13,
+                     fontWeight: 600,
+-                    cursor: confirmText === session?.user.email ? 'pointer' : 'not-allowed',
++                    cursor: deletePassword && deleteState !== 'saving' ? 'pointer' : 'not-allowed',
+                     fontFamily: 'inherit',
+-                    opacity: confirmText === session?.user.email ? 1 : 0.6,
++                    opacity: deletePassword && deleteState !== 'saving' ? 1 : 0.6,
+                   }}
+                 >
+-                  Delete forever
++                  {deleteState === 'saving' ? 'Deleting...' : 'Delete forever'}
+                 </button>
+               </div>
+             </div>
+@@ -257,6 +443,23 @@ export function MeSettingsPage() {
+   );
+ }
+ 
++function SectionHeading({ children }: { children: React.ReactNode }) {
++  return (
++    <h2
++      style={{
++        fontSize: 15,
++        fontWeight: 700,
++        color: 'var(--ink)',
++        margin: '0 0 12px',
++        paddingBottom: 8,
++        borderBottom: '1px solid var(--line)',
++      }}
++    >
++      {children}
++    </h2>
++  );
++}
++
+ function Label({ children }: { children: React.ReactNode }) {
+   return (
+     <label
+@@ -293,3 +496,29 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+     />
+   );
+ }
++
++function primaryButtonStyle(active: boolean): React.CSSProperties {
++  return {
++    padding: '10px 18px',
++    background: 'var(--ink)',
++    color: '#fff',
++    border: 'none',
++    borderRadius: 8,
++    fontSize: 13,
++    fontWeight: 600,
++    cursor: active ? 'pointer' : 'not-allowed',
++    fontFamily: 'inherit',
++    opacity: active ? 1 : 0.5,
++  };
++}
++
++const errorTextStyle: React.CSSProperties = {
++  margin: '10px 0 0',
++  fontSize: 13,
++  color: '#c2791c',
++};
++
++const codeStyle: React.CSSProperties = {
++  fontFamily: 'JetBrains Mono, monospace',
++  fontSize: 12,
++};
+diff --git a/examples/fast-apps/README.md b/examples/fast-apps/README.md
+new file mode 100644
+index 0000000..31b02e8
+--- /dev/null
++++ b/examples/fast-apps/README.md
+@@ -0,0 +1,99 @@
++# Fast Apps
++
++Seven deterministic utility apps bundled with the Floom server as a single
++Node.js proxied-mode sidecar. Designed for live demos: every handler runs in
++under one millisecond, every response is deterministic given the same input,
++and none of them require external APIs or secrets.
++
++## Apps
++
++| Slug | Name | What it does |
++|---|---|---|
++| `uuid` | UUID Generator | Generate 1 to 100 UUID v4 or v7 strings. |
++| `password` | Password Generator | Cryptographically secure password, rejection-sampled, configurable alphabet. |
++| `hash` | Hash | md5, sha1, sha256, sha512 hex digest of UTF-8 text. |
++| `base64` | Base64 | Encode text to base64 or decode back, with URL-safe variant. |
++| `json-format` | JSON Formatter | Pretty print JSON with configurable indent and optional key sorting. |
++| `jwt-decode` | JWT Decoder | Decode a JWT header and payload without verifying the signature. |
++| `word-count` | Word Count | Count words, characters, lines, sentences, paragraphs, reading time. |
++
++All apps are in the `developer-tools` category, except `word-count` which is
++in `writing`.
++
++## Running
++
++The Floom server forks this sidecar automatically at boot unless
++`FLOOM_FAST_APPS=false` is set. Manual start:
++
++```bash
++node examples/fast-apps/server.mjs
++# FAST_APPS_PORT=4200 by default
++```
++
++Then point Floom at the apps.yaml file via `FLOOM_APPS_CONFIG`:
++
++```bash
++FLOOM_APPS_CONFIG=examples/fast-apps/apps.yaml \
++  node apps/server/dist/index.js
++```
++
++## Example calls
++
++```bash
++# UUID v7 (sortable)
++curl -s -X POST http://127.0.0.1:4200/uuid/run \
++  -H 'content-type: application/json' \
++  -d '{"version":"v7","count":3}'
++
++# Secure password, 24 chars, with symbols
++curl -s -X POST http://127.0.0.1:4200/password/run \
++  -H 'content-type: application/json' \
++  -d '{"length":24,"symbols":true}'
++
++# SHA-256 of a string
++curl -s -X POST http://127.0.0.1:4200/hash/run \
++  -H 'content-type: application/json' \
++  -d '{"text":"hello world","algorithm":"sha256"}'
++
++# Decode a JWT (inspection only, no verification)
++curl -s -X POST http://127.0.0.1:4200/jwt-decode/run \
++  -H 'content-type: application/json' \
++  -d '{"token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmbG9vbSJ9.sig"}'
++```
++
++Every endpoint also has a matching OpenAPI 3.0 spec at
++`http://127.0.0.1:4200/openapi/<slug>.json` that Floom ingests at boot.
++
++## Latency
++
++Measured with 100 warm-path requests from a Node fetch client inside the
++container:
++
++| App | p50 | p95 | p99 |
++|---|---|---|---|
++| uuid | ~0.6 ms | ~1.5 ms | ~3.1 ms |
++| password | ~0.6 ms | ~1.1 ms | ~2.4 ms |
++| hash | ~0.5 ms | ~0.7 ms | ~1.4 ms |
++| base64 | ~0.5 ms | ~0.7 ms | ~2.1 ms |
++| json-format | ~0.5 ms | ~0.7 ms | ~5.1 ms |
++| jwt-decode | ~0.5 ms | ~0.6 ms | ~0.9 ms |
++| word-count | ~0.5 ms | ~0.6 ms | ~2.8 ms |
++
++The Floom proxied-runner adds a few milliseconds of overhead (inputs
++validation, fetch, output parsing, DB write), keeping end-to-end run time
++under 50 ms for every app.
++
++## Design notes
++
++- Pure Node.js, zero external dependencies. Uses `node:crypto`,
++  `node:http`, and `node:buffer`.
++- Every handler validates inputs and returns a `400` with `{error, code}`
++  on bad input. Never throws an unhandled exception back to the caller.
++- Request bodies are capped at 1 MB. Larger payloads are rejected.
++- UUID v7 is implemented inline because `crypto.randomUUID()` only
++  generates v4 in Node 20.
++- Password alphabet is rejection-sampled against the next power of two
++  that fits the alphabet size, so the distribution is uniform.
++- JWT decoding reads the first two base64url segments and parses them as
++  JSON. Signature is returned but never verified, and the response is
++  explicitly marked `verified: false`.
+diff --git a/examples/fast-apps/apps.yaml b/examples/fast-apps/apps.yaml
+new file mode 100644
+index 0000000..49a8778
+--- /dev/null
++++ b/examples/fast-apps/apps.yaml
+@@ -0,0 +1,68 @@
++# Fast Apps — seven deterministic utility apps bundled with the Floom server.
++#
++# The sidecar server (examples/fast-apps/server.mjs) runs as a child process
++# next to the main Floom server on localhost:$FAST_APPS_PORT (default 4200).
++# This file is ingested at boot via ingestOpenApiApps. Each entry fetches
++# an OpenAPI 3.0 spec from the sidecar and registers the app as a proxied
++# row in the apps table with base_url = http://127.0.0.1:4200.
++#
++# Deterministic, sub-millisecond handlers. No external APIs, no secrets.
++# Every app ships with a Lucide-style SVG icon in
++# apps/web/src/components/IconSprite.tsx mapped by slug.
++
++apps:
++  - slug: uuid
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/uuid.json
++    display_name: UUID Generator
++    description: "Generate one or more UUID v4 or v7 strings. Pure random v4, or time-ordered v7 for sortable ids."
++    category: developer-tools
++    icon: uuid
++
++  - slug: password
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/password.json
++    display_name: Password Generator
++    description: "Cryptographically secure password generator. Rejection-sampled crypto.randomBytes, no modulo bias, configurable alphabet."
++    category: developer-tools
++    icon: password
++
++  - slug: hash
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/hash.json
++    display_name: Hash
++    description: "Compute md5, sha1, sha256, or sha512 digests of UTF-8 text. Returns the hex digest and byte length."
++    category: developer-tools
++    icon: hash
++
++  - slug: base64
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/base64.json
++    display_name: Base64
++    description: "Encode text to base64 or decode base64 back to text. Supports the URL-safe alphabet for tokens and JWTs."
++    category: developer-tools
++    icon: base64
++
++  - slug: json-format
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/json-format.json
++    display_name: JSON Formatter
++    description: "Parse and pretty-print JSON with configurable indent and optional sorted keys. Returns both formatted and minified forms."
++    category: developer-tools
++    icon: json-format
++
++  - slug: jwt-decode
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/jwt-decode.json
++    display_name: JWT Decoder
++    description: "Decode a JWT header and payload without verifying the signature. Shows algorithm, expiry, and claims for debugging."
++    category: developer-tools
++    icon: jwt-decode
++
++  - slug: word-count
++    type: proxied
++    openapi_spec_url: http://127.0.0.1:4200/openapi/word-count.json
++    display_name: Word Count
++    description: "Count words, characters, lines, sentences, and paragraphs. Estimates reading time at 220 words per minute."
++    category: writing
++    icon: word-count
+diff --git a/examples/fast-apps/server.mjs b/examples/fast-apps/server.mjs
+new file mode 100644
+index 0000000..74dc9d9
+--- /dev/null
++++ b/examples/fast-apps/server.mjs
+@@ -0,0 +1,723 @@
++#!/usr/bin/env node
++// Fast Apps — proxied-mode HTTP server bundling seven deterministic utility apps.
++//
++// Single Node process, zero external dependencies. Serves one OpenAPI 3.0
++// spec per app at /openapi/<slug>.json plus a single operation POST per app.
++// Every response is JSON and every handler completes in well under 500ms.
++//
++// Registered at boot by apps/server/src/index.ts via FLOOM_APPS_CONFIG ->
++// examples/fast-apps/apps.yaml. Ingested as seven separate rows in the
++// apps table, each with base_url = http://localhost:<PORT>.
++//
++// Apps bundled:
++//   uuid        POST /uuid/run          random UUID v4 or v7
++//   password    POST /password/run      secure random password
++//   hash        POST /hash/run          md5, sha1, sha256, sha512 digests
++//   base64      POST /base64/run        encode or decode
++//   json-format POST /json-format/run   pretty print JSON with chosen indent
++//   jwt-decode  POST /jwt-decode/run    decode header + payload, no verify
++//   word-count  POST /word-count/run    words, chars, lines, reading time
++//
++// Run: node examples/fast-apps/server.mjs
++// Env: FAST_APPS_PORT=4200 (default)
++
++import { createServer } from 'node:http';
++import { createHash, randomBytes, randomUUID } from 'node:crypto';
++
++const PORT = Number(process.env.FAST_APPS_PORT || 4200);
++const HOST = process.env.FAST_APPS_HOST || '127.0.0.1';
++const PUBLIC_BASE =
++  process.env.FAST_APPS_PUBLIC_BASE || `http://${HOST}:${PORT}`;
++
++// ---------- shared helpers ----------
++
++function sendJson(res, status, body) {
++  const payload = JSON.stringify(body);
++  res.writeHead(status, {
++    'content-type': 'application/json; charset=utf-8',
++    'content-length': Buffer.byteLength(payload),
++  });
++  res.end(payload);
++}
++
++async function readJsonBody(req) {
++  return new Promise((resolve, reject) => {
++    const chunks = [];
++    let size = 0;
++    req.on('data', (chunk) => {
++      size += chunk.length;
++      if (size > 1_048_576) {
++        reject(new Error('payload_too_large'));
++        req.destroy();
++        return;
++      }
++      chunks.push(chunk);
++    });
++    req.on('end', () => {
++      const raw = Buffer.concat(chunks).toString('utf-8');
++      if (!raw) return resolve({});
++      try {
++        resolve(JSON.parse(raw));
++      } catch {
++        reject(new Error('invalid_json_body'));
++      }
++    });
++    req.on('error', reject);
++  });
++}
++
++// Minimal UUID v7: 48 bits unix-ms timestamp, version 7, variant RFC 4122,
++// 62 bits random. Pure implementation because Node < 22 lacks randomUUID v7.
++function uuidV7() {
++  const ms = BigInt(Date.now());
++  const rand = randomBytes(10);
++  const bytes = Buffer.alloc(16);
++  bytes[0] = Number((ms >> 40n) & 0xffn);
++  bytes[1] = Number((ms >> 32n) & 0xffn);
++  bytes[2] = Number((ms >> 24n) & 0xffn);
++  bytes[3] = Number((ms >> 16n) & 0xffn);
++  bytes[4] = Number((ms >> 8n) & 0xffn);
++  bytes[5] = Number(ms & 0xffn);
++  bytes[6] = (rand[0] & 0x0f) | 0x70;
++  bytes[7] = rand[1];
++  bytes[8] = (rand[2] & 0x3f) | 0x80;
++  bytes[9] = rand[3];
++  bytes[10] = rand[4];
++  bytes[11] = rand[5];
++  bytes[12] = rand[6];
++  bytes[13] = rand[7];
++  bytes[14] = rand[8];
++  bytes[15] = rand[9];
++  const hex = bytes.toString('hex');
++  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
++    12,
++    16,
++  )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
++}
++
++// base64url -> utf-8 JSON. Throws on invalid base64 or invalid JSON.
++function decodeJwtSegment(segment) {
++  let b64 = segment.replace(/-/g, '+').replace(/_/g, '/');
++  const pad = b64.length % 4;
++  if (pad === 2) b64 += '==';
++  else if (pad === 3) b64 += '=';
++  else if (pad !== 0) throw new Error('invalid_base64url');
++  const json = Buffer.from(b64, 'base64').toString('utf-8');
++  return JSON.parse(json);
++}
++
++// ---------- handlers ----------
++
++function handleUuid(body) {
++  const version = body.version === 'v7' ? 'v7' : 'v4';
++  const countRaw = Number(body.count ?? 1);
++  if (!Number.isFinite(countRaw) || countRaw < 1 || countRaw > 100) {
++    throw httpError(400, 'count must be an integer between 1 and 100');
++  }
++  const count = Math.floor(countRaw);
++  const uuids = [];
++  for (let i = 0; i < count; i++) {
++    uuids.push(version === 'v7' ? uuidV7() : randomUUID());
++  }
++  return { version, count, uuids };
++}
++
++const PASSWORD_ALPHABETS = {
++  lower: 'abcdefghijklmnopqrstuvwxyz',
++  upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
++  digits: '0123456789',
++  symbols: "!@#$%^&*()-_=+[]{};:,.<>/?",
++};
++
++function handlePassword(body) {
++  const length = Number(body.length ?? 20);
++  if (!Number.isFinite(length) || length < 8 || length > 128) {
++    throw httpError(400, 'length must be an integer between 8 and 128');
++  }
++  const useLower = body.lower !== false;
++  const useUpper = body.upper !== false;
++  const useDigits = body.digits !== false;
++  const useSymbols = body.symbols === true;
++  let alphabet = '';
++  if (useLower) alphabet += PASSWORD_ALPHABETS.lower;
++  if (useUpper) alphabet += PASSWORD_ALPHABETS.upper;
++  if (useDigits) alphabet += PASSWORD_ALPHABETS.digits;
++  if (useSymbols) alphabet += PASSWORD_ALPHABETS.symbols;
++  if (alphabet.length === 0) {
++    throw httpError(400, 'at least one of lower/upper/digits/symbols must be enabled');
++  }
++  // Rejection-sampled random to avoid modulo bias.
++  const max = Math.floor(256 / alphabet.length) * alphabet.length;
++  const out = [];
++  while (out.length < length) {
++    const buf = randomBytes(length * 2);
++    for (let i = 0; i < buf.length && out.length < length; i++) {
++      if (buf[i] < max) out.push(alphabet[buf[i] % alphabet.length]);
++    }
++  }
++  const password = out.join('');
++  // Approximate entropy: log2(alphabet) * length. Rounded to one decimal.
++  const entropy =
++    Math.round((Math.log2(alphabet.length) * length) * 10) / 10;
++  return { password, length, alphabet_size: alphabet.length, entropy_bits: entropy };
++}
++
++const HASH_ALGOS = new Set(['md5', 'sha1', 'sha256', 'sha512']);
++
++function handleHash(body) {
++  if (typeof body.text !== 'string') {
++    throw httpError(400, 'text must be a string');
++  }
++  const algo = (body.algorithm || 'sha256').toLowerCase();
++  if (!HASH_ALGOS.has(algo)) {
++    throw httpError(
++      400,
++      `algorithm must be one of: ${Array.from(HASH_ALGOS).join(', ')}`,
++    );
++  }
++  const hex = createHash(algo).update(body.text, 'utf-8').digest('hex');
++  return {
++    algorithm: algo,
++    input_length: body.text.length,
++    digest_hex: hex,
++    digest_length: hex.length,
++  };
++}
++
++function handleBase64(body) {
++  if (typeof body.text !== 'string') {
++    throw httpError(400, 'text must be a string');
++  }
++  const mode = body.mode === 'decode' ? 'decode' : 'encode';
++  const urlSafe = body.url_safe === true;
++  if (mode === 'encode') {
++    let out = Buffer.from(body.text, 'utf-8').toString('base64');
++    if (urlSafe) out = out.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
++    return { mode, url_safe: urlSafe, result: out, result_length: out.length };
++  }
++  // decode
++  let input = body.text;
++  if (urlSafe) {
++    input = input.replace(/-/g, '+').replace(/_/g, '/');
++    const pad = input.length % 4;
++    if (pad === 2) input += '==';
++    else if (pad === 3) input += '=';
++  }
++  try {
++    const buf = Buffer.from(input, 'base64');
++    // Buffer.from is lenient; verify round-trip to catch garbage input.
++    const roundTrip = buf.toString('base64');
++    if (!urlSafe && roundTrip.replace(/=+$/, '') !== input.replace(/=+$/, '')) {
++      throw httpError(400, 'input is not valid base64');
++    }
++    return {
++      mode,
++      url_safe: urlSafe,
++      result: buf.toString('utf-8'),
++      result_length: buf.length,
++    };
++  } catch (err) {
++    if (err.statusCode) throw err;
++    throw httpError(400, 'could not decode base64 input');
++  }
++}
++
++function handleJsonFormat(body) {
++  if (typeof body.text !== 'string') {
++    throw httpError(400, 'text must be a string');
++  }
++  const indent = Number(body.indent ?? 2);
++  if (!Number.isInteger(indent) || indent < 0 || indent > 8) {
++    throw httpError(400, 'indent must be an integer between 0 and 8');
++  }
++  const sort = body.sort_keys === true;
++  let parsed;
++  try {
++    parsed = JSON.parse(body.text);
++  } catch (err) {
++    throw httpError(400, `input is not valid JSON: ${err.message}`);
++  }
++  const formatted = sort
++    ? JSON.stringify(sortKeys(parsed), null, indent)
++    : JSON.stringify(parsed, null, indent);
++  const minified = JSON.stringify(parsed);
++  return {
++    formatted,
++    minified,
++    indent,
++    sorted_keys: sort,
++    input_bytes: Buffer.byteLength(body.text, 'utf-8'),
++    formatted_bytes: Buffer.byteLength(formatted, 'utf-8'),
++  };
++}
++
++function sortKeys(value) {
++  if (Array.isArray(value)) return value.map(sortKeys);
++  if (value && typeof value === 'object') {
++    const out = {};
++    for (const key of Object.keys(value).sort()) out[key] = sortKeys(value[key]);
++    return out;
++  }
++  return value;
++}
++
++function handleJwtDecode(body) {
++  if (typeof body.token !== 'string' || !body.token.trim()) {
++    throw httpError(400, 'token must be a non-empty string');
++  }
++  const parts = body.token.trim().split('.');
++  if (parts.length !== 3) {
++    throw httpError(400, 'token must have three dot-separated segments');
++  }
++  let header;
++  let payload;
++  try {
++    header = decodeJwtSegment(parts[0]);
++  } catch (err) {
++    throw httpError(400, `header is not valid base64url JSON: ${err.message}`);
++  }
++  try {
++    payload = decodeJwtSegment(parts[1]);
++  } catch (err) {
++    throw httpError(400, `payload is not valid base64url JSON: ${err.message}`);
++  }
++  const now = Math.floor(Date.now() / 1000);
++  let expires_in_seconds = null;
++  let expired = null;
++  if (typeof payload.exp === 'number') {
++    expires_in_seconds = payload.exp - now;
++    expired = payload.exp < now;
++  }
++  let issued_ago_seconds = null;
++  if (typeof payload.iat === 'number') {
++    issued_ago_seconds = now - payload.iat;
++  }
++  return {
++    header,
++    payload,
++    signature: parts[2],
++    algorithm: typeof header.alg === 'string' ? header.alg : null,
++    expires_in_seconds,
++    expired,
++    issued_ago_seconds,
++    verified: false,
++    note: 'Signature is not verified. Use for inspection only.',
++  };
++}
++
++function handleWordCount(body) {
++  if (typeof body.text !== 'string') {
++    throw httpError(400, 'text must be a string');
++  }
++  const text = body.text;
++  const chars = text.length;
++  const charsNoSpaces = text.replace(/\s/g, '').length;
++  const words = text.trim().length === 0 ? 0 : text.trim().split(/\s+/).length;
++  const lines = text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length;
++  const sentences = text.trim().length === 0
++    ? 0
++    : (text.match(/[^.!?]+[.!?]+(\s|$)/g) || [text.trim()]).length;
++  const paragraphs = text.trim().length === 0
++    ? 0
++    : text.split(/\n\s*\n/).filter((p) => p.trim().length > 0).length;
++  // Reading time at 220 words per minute, rounded up to nearest minute.
++  const reading_time_minutes = Math.max(1, Math.ceil(words / 220));
++  return {
++    words,
++    chars,
++    chars_no_spaces: charsNoSpaces,
++    lines,
++    sentences,
++    paragraphs,
++    reading_time_minutes,
++  };
++}
++
++// ---------- OpenAPI specs ----------
++
++function buildSpec(slug, title, description, operationId, requestSchema, responseSchema, exampleInput) {
++  return {
++    openapi: '3.0.0',
++    info: { title, version: '1.0.0', description },
++    servers: [{ url: PUBLIC_BASE }],
++    paths: {
++      [`/${slug}/run`]: {
++        post: {
++          operationId,
++          summary: title,
++          description,
++          requestBody: {
++            required: true,
++            content: {
++              'application/json': {
++                schema: requestSchema,
++                example: exampleInput,
++              },
++            },
++          },
++          responses: {
++            200: {
++              description: 'Success',
++              content: {
++                'application/json': { schema: responseSchema },
++              },
++            },
++            400: {
++              description: 'Invalid input',
++              content: {
++                'application/json': {
++                  schema: {
++                    type: 'object',
++                    properties: {
++                      error: { type: 'string' },
++                      code: { type: 'string' },
++                    },
++                  },
++                },
++              },
++            },
++          },
++        },
++      },
++    },
++  };
++}
++
++const SPECS = {
++  uuid: buildSpec(
++    'uuid',
++    'UUID Generator',
++    'Generate one or more UUID v4 or v7 strings. Pure random v4 or time-ordered v7.',
++    'generate',
++    {
++      type: 'object',
++      properties: {
++        version: {
++          type: 'string',
++          enum: ['v4', 'v7'],
++          default: 'v4',
++          description: 'UUID version. v4 is pure random, v7 encodes a sortable timestamp.',
++        },
++        count: {
++          type: 'integer',
++          minimum: 1,
++          maximum: 100,
++          default: 1,
++          description: 'How many UUIDs to return (1 to 100).',
++        },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        version: { type: 'string' },
++        count: { type: 'integer' },
++        uuids: { type: 'array', items: { type: 'string' } },
++      },
++    },
++    { version: 'v4', count: 3 },
++  ),
++  password: buildSpec(
++    'password',
++    'Password Generator',
++    'Generate a cryptographically secure random password using crypto.randomBytes. Rejection-sampled to avoid modulo bias.',
++    'generate',
++    {
++      type: 'object',
++      properties: {
++        length: {
++          type: 'integer',
++          minimum: 8,
++          maximum: 128,
++          default: 20,
++          description: 'Password length in characters (8 to 128).',
++        },
++        lower: { type: 'boolean', default: true, description: 'Include lowercase letters.' },
++        upper: { type: 'boolean', default: true, description: 'Include uppercase letters.' },
++        digits: { type: 'boolean', default: true, description: 'Include digits.' },
++        symbols: { type: 'boolean', default: false, description: 'Include punctuation symbols.' },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        password: { type: 'string' },
++        length: { type: 'integer' },
++        alphabet_size: { type: 'integer' },
++        entropy_bits: { type: 'number' },
++      },
++    },
++    { length: 24, lower: true, upper: true, digits: true, symbols: true },
++  ),
++  hash: buildSpec(
++    'hash',
++    'Hash',
++    'Compute an md5, sha1, sha256, or sha512 digest of UTF-8 text and return the hex representation.',
++    'hash',
++    {
++      type: 'object',
++      required: ['text'],
++      properties: {
++        text: {
++          type: 'string',
++          description: 'Text to hash. Treated as UTF-8.',
++        },
++        algorithm: {
++          type: 'string',
++          enum: ['md5', 'sha1', 'sha256', 'sha512'],
++          default: 'sha256',
++        },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        algorithm: { type: 'string' },
++        input_length: { type: 'integer' },
++        digest_hex: { type: 'string' },
++        digest_length: { type: 'integer' },
++      },
++    },
++    { text: 'hello world', algorithm: 'sha256' },
++  ),
++  base64: buildSpec(
++    'base64',
++    'Base64',
++    'Encode UTF-8 text to base64, or decode base64 back to UTF-8. Supports URL-safe variant.',
++    'convert',
++    {
++      type: 'object',
++      required: ['text'],
++      properties: {
++        text: {
++          type: 'string',
++          description: 'The text to encode or the base64 string to decode.',
++        },
++        mode: {
++          type: 'string',
++          enum: ['encode', 'decode'],
++          default: 'encode',
++        },
++        url_safe: {
++          type: 'boolean',
++          default: false,
++          description: 'Use the URL-safe alphabet (- and _) with no padding.',
++        },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        mode: { type: 'string' },
++        url_safe: { type: 'boolean' },
++        result: { type: 'string' },
++        result_length: { type: 'integer' },
++      },
++    },
++    { text: 'hello world', mode: 'encode' },
++  ),
++  'json-format': buildSpec(
++    'json-format',
++    'JSON Formatter',
++    'Parse a JSON string and return a pretty-printed version with configurable indent. Also returns the minified form.',
++    'format',
++    {
++      type: 'object',
++      required: ['text'],
++      properties: {
++        text: {
++          type: 'string',
++          description: 'The JSON text to parse and format.',
++        },
++        indent: {
++          type: 'integer',
++          minimum: 0,
++          maximum: 8,
++          default: 2,
++          description: 'Number of spaces to indent each level.',
++        },
++        sort_keys: {
++          type: 'boolean',
++          default: false,
++          description: 'Recursively sort object keys alphabetically.',
++        },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        formatted: { type: 'string' },
++        minified: { type: 'string' },
++        indent: { type: 'integer' },
++        sorted_keys: { type: 'boolean' },
++        input_bytes: { type: 'integer' },
++        formatted_bytes: { type: 'integer' },
++      },
++    },
++    { text: '{"name":"floom","apps":15,"ok":true}', indent: 2 },
++  ),
++  'jwt-decode': buildSpec(
++    'jwt-decode',
++    'JWT Decoder',
++    'Decode a JWT header and payload without verifying the signature. Useful for inspecting claims, expiry, and algorithm during debugging.',
++    'decode',
++    {
++      type: 'object',
++      required: ['token'],
++      properties: {
++        token: {
++          type: 'string',
++          description: 'The JWT (three dot-separated base64url segments).',
++        },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        header: { type: 'object' },
++        payload: { type: 'object' },
++        signature: { type: 'string' },
++        algorithm: { type: 'string' },
++        expires_in_seconds: { type: 'integer' },
++        expired: { type: 'boolean' },
++        issued_ago_seconds: { type: 'integer' },
++        verified: { type: 'boolean' },
++        note: { type: 'string' },
++      },
++    },
++    {
++      token:
++        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkZsb29tIERlbW8iLCJpYXQiOjE1MTYyMzkwMjJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
++    },
++  ),
++  'word-count': buildSpec(
++    'word-count',
++    'Word Count',
++    'Count words, characters, lines, sentences, and paragraphs in a block of text. Estimates reading time at 220 words per minute.',
++    'count',
++    {
++      type: 'object',
++      required: ['text'],
++      properties: {
++        text: {
++          type: 'string',
++          description: 'The text to analyze.',
++        },
++      },
++    },
++    {
++      type: 'object',
++      properties: {
++        words: { type: 'integer' },
++        chars: { type: 'integer' },
++        chars_no_spaces: { type: 'integer' },
++        lines: { type: 'integer' },
++        sentences: { type: 'integer' },
++        paragraphs: { type: 'integer' },
++        reading_time_minutes: { type: 'integer' },
++      },
++    },
++    {
++      text: 'Floom runs real apps as HTTP, MCP, CLI, and web forms from a single manifest.',
++    },
++  ),
++};
++
++// ---------- routing table ----------
++
++const HANDLERS = {
++  uuid: handleUuid,
++  password: handlePassword,
++  hash: handleHash,
++  base64: handleBase64,
++  'json-format': handleJsonFormat,
++  'jwt-decode': handleJwtDecode,
++  'word-count': handleWordCount,
++};
++
++function httpError(status, message, code) {
++  const err = new Error(message);
++  err.statusCode = status;
++  err.code = code || 'bad_request';
++  return err;
++}
++
++// ---------- HTTP server ----------
++
++const server = createServer(async (req, res) => {
++  try {
++    const url = new URL(req.url || '/', PUBLIC_BASE);
++    const pathname = url.pathname;
++
++    // Health probe.
++    if (req.method === 'GET' && pathname === '/health') {
++      return sendJson(res, 200, {
++        ok: true,
++        service: 'fast-apps',
++        apps: Object.keys(SPECS),
++      });
++    }
++
++    // OpenAPI spec per slug.
++    if (req.method === 'GET' && pathname.startsWith('/openapi/')) {
++      const slug = pathname.slice('/openapi/'.length).replace(/\.json$/, '');
++      const spec = SPECS[slug];
++      if (!spec) {
++        return sendJson(res, 404, { error: 'unknown_app', slug });
++      }
++      return sendJson(res, 200, spec);
++    }
++
++    // Per-app run endpoint.
++    const match = pathname.match(/^\/([a-z0-9-]+)\/run$/);
++    if (req.method === 'POST' && match) {
++      const slug = match[1];
++      const handler = HANDLERS[slug];
++      if (!handler) {
++        return sendJson(res, 404, { error: 'unknown_app', slug });
++      }
++      let body;
++      try {
++        body = await readJsonBody(req);
++      } catch (err) {
++        return sendJson(res, 400, {
++          error: err.message || 'invalid_body',
++          code: 'invalid_body',
++        });
++      }
++      try {
++        const result = handler(body);
++        return sendJson(res, 200, result);
++      } catch (err) {
++        if (err.statusCode) {
++          return sendJson(res, err.statusCode, {
++            error: err.message,
++            code: err.code || 'bad_request',
++          });
++        }
++        console.error(`[fast-apps] ${slug} handler crashed:`, err);
++        return sendJson(res, 500, {
++          error: 'internal_error',
++          code: 'internal_error',
++        });
++      }
++    }
++
++    sendJson(res, 404, { error: 'not_found', path: pathname });
++  } catch (err) {
++    console.error('[fast-apps] request failed:', err);
++    sendJson(res, 500, { error: 'internal_error' });
++  }
++});
++
++server.listen(PORT, HOST, () => {
++  console.log(`[fast-apps] listening on ${PUBLIC_BASE}`);
++  console.log(`[fast-apps] apps: ${Object.keys(SPECS).join(', ')}`);
++});
++
++// Clean shutdown so parent process can stop us without orphans.
++for (const sig of ['SIGINT', 'SIGTERM']) {
++  process.on(sig, () => {
++    server.close(() => process.exit(0));
++  });
++}

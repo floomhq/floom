@@ -1,0 +1,513 @@
+diff --git a/apps/server/package.json b/apps/server/package.json
+index 4324196..3d50884 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -8,14 +8,16 @@
+     "build": "tsc && node scripts/copy-assets.mjs",
+     "start": "node dist/index.js",
+     "typecheck": "tsc --noEmit",
+-    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs"
++    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs && node ../../test/stress/test-renderer-contract.mjs && node ../../test/stress/test-renderer-defaults.mjs && node ../../test/stress/test-renderer-bundler.mjs && node ../../test/stress/test-renderer-e2e.mjs"
+   },
+   "dependencies": {
+     "@apidevtools/json-schema-ref-parser": "15.3.5",
++    "@floom/renderer": "workspace:*",
+     "@hono/node-server": "1.13.7",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "better-sqlite3": "11.5.0",
+     "dockerode": "4.0.2",
++    "esbuild": "0.24.2",
+     "hono": "4.6.12",
+     "json-schema-merge-allof": "0.8.1",
+     "nanoid": "5.0.9",
+diff --git a/apps/server/src/db.ts b/apps/server/src/db.ts
+index 918fa4b..825623b 100644
+--- a/apps/server/src/db.ts
++++ b/apps/server/src/db.ts
+@@ -13,6 +13,15 @@ export const db = new Database(DB_PATH);
+ db.pragma('journal_mode = WAL');
+ db.pragma('foreign_keys = ON');
+ 
++/**
++ * Synthetic defaults used in OSS solo mode and as the migration target for
++ * pre-existing rows. Every tenant-scoped query must include
++ * `workspace_id = ?`; these constants keep the solo-mode codepath the same
++ * as the multi-tenant codepath (P.4 research, section 4).
++ */
++export const DEFAULT_WORKSPACE_ID = 'local';
++export const DEFAULT_USER_ID = 'local';
++
+ // ---------- apps (a flat, slug-addressed set of runnable apps) ----------
+ db.exec(`
+   CREATE TABLE IF NOT EXISTS apps (
+@@ -181,3 +190,195 @@ db.exec(`
+     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+ `);
++
++// =====================================================================
++// ---------- W2.1: multi-tenant schema foundation ----------
++// =====================================================================
++// P.4 research delivered the full design. We ship the schema in v0.3.1
++// with synthetic `workspace_id='local'` + `user_id='local'` defaults so
++// OSS solo mode is a special case of multi-tenant (one codepath, no
++// feature flag). Cloud (W3.1) adds real workspaces + real user_ids on top
++// of the exact same schema.
++// ---------------------------------------------------------------------
++
++// ---------- workspaces (tenant container) ----------
++// `wrapped_dek` is the per-workspace 32-byte data encryption key wrapped
++// with the server-wide master KEK from FLOOM_MASTER_KEY env. Stored as a
++// hex string ("nonce:ciphertext:authTag") to stay sqlite-portable and so
++// the secrets service can rewrap without BLOB handling.
++db.exec(`
++  CREATE TABLE IF NOT EXISTS workspaces (
++    id TEXT PRIMARY KEY,
++    slug TEXT NOT NULL UNIQUE,
++    name TEXT NOT NULL,
++    plan TEXT NOT NULL DEFAULT 'oss',
++    wrapped_dek TEXT,
++    created_at TEXT NOT NULL DEFAULT (datetime('now'))
++  );
++  CREATE INDEX IF NOT EXISTS idx_workspaces_slug ON workspaces(slug);
++`);
++
++// ---------- users (global identity, shared across workspaces) ----------
++db.exec(`
++  CREATE TABLE IF NOT EXISTS users (
++    id TEXT PRIMARY KEY,
++    workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
++    email TEXT,
++    name TEXT,
++    auth_provider TEXT NOT NULL DEFAULT 'local',
++    auth_subject TEXT,
++    created_at TEXT NOT NULL DEFAULT (datetime('now'))
++  );
++  CREATE INDEX IF NOT EXISTS idx_users_workspace ON users(workspace_id);
++  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth
++    ON users(auth_provider, auth_subject)
++    WHERE auth_subject IS NOT NULL;
++`);
++
++// ---------- workspace_members (user <-> workspace <-> role) ----------
++db.exec(`
++  CREATE TABLE IF NOT EXISTS workspace_members (
++    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
++    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++    role TEXT NOT NULL DEFAULT 'admin',
++    joined_at TEXT NOT NULL DEFAULT (datetime('now')),
++    PRIMARY KEY (workspace_id, user_id)
++  );
++`);
++
++// ---------- app_memory: per-(workspace, app, user) JSONB blob store ----------
++// Creator declares `memory_keys: [...]` in their manifest. Floom gates
++// get/set to declared keys only. Values are stored as JSON strings.
++// device_id is nullable; it's populated for anonymous sessions so the
++// rekey transaction can find the rows when a user logs in.
++db.exec(`
++  CREATE TABLE IF NOT EXISTS app_memory (
++    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
++    app_slug TEXT NOT NULL,
++    user_id TEXT NOT NULL,
++    device_id TEXT,
++    key TEXT NOT NULL,
++    value TEXT NOT NULL,
++    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
++    PRIMARY KEY (workspace_id, app_slug, user_id, key)
++  );
++  CREATE INDEX IF NOT EXISTS idx_app_memory_device
++    ON app_memory(device_id)
++    WHERE device_id IS NOT NULL;
++  CREATE INDEX IF NOT EXISTS idx_app_memory_user
++    ON app_memory(workspace_id, user_id);
++`);
++
++// ---------- user_secrets: AES-256-GCM envelope-encrypted per-user vault ----------
++// ciphertext/nonce/auth_tag are stored as hex-encoded strings. Decryption
++// pulls the wrapped DEK for the workspace, unwraps with FLOOM_MASTER_KEY,
++// then AES-GCM-decrypts in memory. Per P.4 section 3.
++db.exec(`
++  CREATE TABLE IF NOT EXISTS user_secrets (
++    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
++    user_id TEXT NOT NULL,
++    key TEXT NOT NULL,
++    ciphertext TEXT NOT NULL,
++    nonce TEXT NOT NULL,
++    auth_tag TEXT NOT NULL,
++    created_at TEXT NOT NULL DEFAULT (datetime('now')),
++    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
++    PRIMARY KEY (workspace_id, user_id, key)
++  );
++`);
++
++// ---------- alter existing tables to add multi-tenant columns ----------
++// Idempotent column-add migrations (same pattern as app_type + is_async
++// above). Every alter uses DEFAULT 'local' so pre-existing v0.2/v0.3 rows
++// are automatically scoped to the synthetic default workspace and user
++// on first boot after upgrade.
++
++// apps: workspace_id + memory_keys (JSON array of allowed keys)
++if (!appCols.includes('workspace_id')) {
++  db.exec(`ALTER TABLE apps ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local'`);
++}
++if (!appCols.includes('memory_keys')) {
++  db.exec(`ALTER TABLE apps ADD COLUMN memory_keys TEXT`);
++}
++db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_workspace ON apps(workspace_id)`);
++
++// runs: workspace_id + user_id + device_id
++const runCols = (db.prepare(`PRAGMA table_info(runs)`).all() as { name: string }[]).map(
++  (r) => r.name,
++);
++if (!runCols.includes('workspace_id')) {
++  db.exec(`ALTER TABLE runs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local'`);
++}
++if (!runCols.includes('user_id')) {
++  db.exec(`ALTER TABLE runs ADD COLUMN user_id TEXT`);
++}
++if (!runCols.includes('device_id')) {
++  db.exec(`ALTER TABLE runs ADD COLUMN device_id TEXT`);
++}
++db.exec(
++  `CREATE INDEX IF NOT EXISTS idx_runs_workspace_user ON runs(workspace_id, user_id)`,
++);
++db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_device ON runs(device_id) WHERE device_id IS NOT NULL`);
++
++// chat_threads: workspace_id + user_id + device_id
++const threadCols = (db
++  .prepare(`PRAGMA table_info(chat_threads)`)
++  .all() as { name: string }[]).map((r) => r.name);
++if (!threadCols.includes('workspace_id')) {
++  db.exec(`ALTER TABLE chat_threads ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'local'`);
++}
++if (!threadCols.includes('user_id')) {
++  db.exec(`ALTER TABLE chat_threads ADD COLUMN user_id TEXT`);
++}
++if (!threadCols.includes('device_id')) {
++  db.exec(`ALTER TABLE chat_threads ADD COLUMN device_id TEXT`);
++}
++db.exec(
++  `CREATE INDEX IF NOT EXISTS idx_threads_workspace_user ON chat_threads(workspace_id, user_id)`,
++);
++db.exec(
++  `CREATE INDEX IF NOT EXISTS idx_threads_device ON chat_threads(device_id) WHERE device_id IS NOT NULL`,
++);
++
++// ---------- bootstrap: ensure the synthetic 'local' workspace exists ----------
++// Idempotent. Runs on every boot so the row is always present even after
++// a DB restore. The wrapped_dek column is left NULL here — user_secrets
++// lazily generates and persists the DEK the first time a secret is set
++// for this workspace, because doing it at boot would require reading
++// FLOOM_MASTER_KEY before the env is fully loaded in tests.
++const existingLocal = db
++  .prepare(`SELECT id FROM workspaces WHERE id = ?`)
++  .get(DEFAULT_WORKSPACE_ID) as { id: string } | undefined;
++if (!existingLocal) {
++  db.prepare(
++    `INSERT INTO workspaces (id, slug, name, plan) VALUES (?, ?, ?, 'oss')`,
++  ).run(DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_ID, 'Local');
++}
++const existingLocalUser = db
++  .prepare(`SELECT id FROM users WHERE id = ?`)
++  .get(DEFAULT_USER_ID) as { id: string } | undefined;
++if (!existingLocalUser) {
++  db.prepare(
++    `INSERT INTO users (id, workspace_id, email, name, auth_provider)
++     VALUES (?, ?, NULL, 'Local User', 'local')`,
++  ).run(DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID);
++}
++const existingLocalMember = db
++  .prepare(
++    `SELECT 1 as n FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
++  )
++  .get(DEFAULT_WORKSPACE_ID, DEFAULT_USER_ID) as { n: number } | undefined;
++if (!existingLocalMember) {
++  db.prepare(
++    `INSERT INTO workspace_members (workspace_id, user_id, role)
++     VALUES (?, ?, 'admin')`,
++  ).run(DEFAULT_WORKSPACE_ID, DEFAULT_USER_ID);
++}
++
++// Bump user_version so operators can see at a glance which schema
++// revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4.
++const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
++  .user_version;
++if (currentUserVersion < 4) {
++  db.pragma('user_version = 4');
++}
+diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
+index 987eaac..83302f2 100644
+--- a/apps/server/src/index.ts
++++ b/apps/server/src/index.ts
+@@ -15,6 +15,7 @@ import { runRouter, slugRunRouter } from './routes/run.js';
+ import { jobsRouter } from './routes/jobs.js';
+ import { mcpRouter } from './routes/mcp.js';
+ import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
++import { memoryRouter, secretsRouter } from './routes/memory.js';
+ import { seedFromFile } from './services/seed.js';
+ import { ingestOpenApiApps } from './services/openapi-ingest.js';
+ import { backfillAppEmbeddings } from './services/embeddings.js';
+@@ -51,6 +52,9 @@ app.route('/api/:slug/run', slugRunRouter);
+ // Async job queue: POST/GET /api/:slug/jobs[/:job_id][/cancel]
+ app.route('/api/:slug/jobs', jobsRouter);
+ app.route('/api/deploy-waitlist', deployWaitlistRouter);
++// W2.1: per-user state
++app.route('/api/memory', memoryRouter);
++app.route('/api/secrets', secretsRouter);
+ 
+ // Tiny, hand-written OpenAPI 3 document describing Floom's own admin API.
+ // Returned at /openapi.json so users hitting http://host/openapi.json get
+@@ -60,9 +64,9 @@ app.get('/openapi.json', (c) =>
+     openapi: '3.0.0',
+     info: {
+       title: 'Floom self-host API',
+-      version: '0.3.0',
++      version: '0.3.1',
+       description:
+-        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug.',
++        'Floom exposes three admin endpoints plus per-app run and MCP surfaces. For per-app tool schemas, call /api/hub and inspect each app manifest, or use the MCP tools/list over /mcp/app/:slug. v0.3.1 adds per-user app memory (/api/memory) and an encrypted secrets vault (/api/secrets).',
+     },
+     paths: {
+       '/api/health': {
+@@ -77,6 +81,35 @@ app.get('/openapi.json', (c) =>
+           responses: { '200': { description: 'JSON array of app records' } },
+         },
+       },
++      '/api/memory/{app_slug}': {
++        get: {
++          summary: 'List per-user memory keys for an app',
++          parameters: [
++            { name: 'app_slug', in: 'path', required: true, schema: { type: 'string' } },
++          ],
++          responses: { '200': { description: 'JSON {entries: {...}}' } },
++        },
++        post: {
++          summary: 'Upsert a per-user memory key (must be declared in manifest.memory_keys)',
++          parameters: [
++            { name: 'app_slug', in: 'path', required: true, schema: { type: 'string' } },
++          ],
++          responses: {
++            '200': { description: '{ok: true}' },
++            '403': { description: 'Key not in manifest.memory_keys' },
++          },
++        },
++      },
++      '/api/secrets': {
++        get: {
++          summary: 'List masked per-user secrets (never returns plaintext)',
++          responses: { '200': { description: 'JSON {entries: [{key, updated_at}]}' } },
++        },
++        post: {
++          summary: 'Upsert an encrypted per-user secret',
++          responses: { '200': { description: '{ok: true}' } },
++        },
++      },
+       '/api/{slug}/run': {
+         post: {
+           summary: 'Run an action on an app',
+diff --git a/apps/server/src/services/runner.ts b/apps/server/src/services/runner.ts
+index 82595f5..939e201 100644
+--- a/apps/server/src/services/runner.ts
++++ b/apps/server/src/services/runner.ts
+@@ -1,17 +1,33 @@
+ // Trimmed port of the marketplace runner. Loads secrets, dispatches a
+ // container run, streams output to the log bus, and updates the run record.
+-import { db } from '../db.js';
++import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+ import { runAppContainer } from './docker.js';
+ import { runProxied } from './proxied-runner.js';
+ import { getOrCreateStream } from '../lib/log-stream.js';
++import * as userSecrets from './user_secrets.js';
+ import type {
+   AppRecord,
+   ErrorType,
+   NormalizedManifest,
+   RunRecord,
+   RunStatus,
++  SessionContext,
+ } from '../types.js';
+ 
++/**
++ * Default tenant context used when a dispatchRun caller (legacy route, test)
++ * does not pass one. In OSS mode this always resolves to the synthetic local
++ * workspace + user, so no caller has to branch on "is multi-tenant on yet".
++ */
++function defaultContext(device_id?: string): SessionContext {
++  return {
++    workspace_id: DEFAULT_WORKSPACE_ID,
++    user_id: DEFAULT_USER_ID,
++    device_id: device_id || DEFAULT_USER_ID,
++    is_authenticated: false,
++  };
++}
++
+ interface UpdateRunArgs {
+   status?: RunStatus;
+   outputs?: unknown;
+@@ -102,9 +118,19 @@ function extractUserLogs(stdout: string): string {
+  * Fire-and-forget: dispatch a run in the background. Updates the run row as
+  * it progresses and feeds the log stream with output chunks.
+  *
++ * Precedence (lowest → highest):
++ *   1. Global admin secrets (secrets table, app_id IS NULL)
++ *   2. Per-app admin secrets (secrets table, app_id = this app)
++ *   3. Per-user persisted secrets (user_secrets table, W2.1)
++ *   4. Per-call MCP _auth override (perCallSecrets)
++ *
+  * `perCallSecrets` (optional) is an override passed by the MCP layer via the
+  * Floom MCP _auth extension. These values are merged into the per-run secrets
+  * for this invocation only; they are never persisted to the secrets table.
++ *
++ * `ctx` (optional) is the tenant context. When omitted we fall back to the
++ * synthetic 'local' workspace+user, which is correct for OSS solo mode and
++ * any pre-W2.1 call site that hasn't been migrated yet.
+  */
+ export function dispatchRun(
+   app: AppRecord,
+@@ -113,6 +139,7 @@ export function dispatchRun(
+   action: string,
+   inputs: Record<string, unknown>,
+   perCallSecrets?: Record<string, string>,
++  ctx?: SessionContext,
+ ): void {
+   // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
+   const globalRows = db
+@@ -125,6 +152,29 @@ export function dispatchRun(
+   const mergedSecrets: Record<string, string> = {};
+   for (const row of globalRows) mergedSecrets[row.name] = row.value;
+   for (const row of appRows) mergedSecrets[row.name] = row.value;
++
++  // W2.1: load per-user persisted secrets for the names the manifest declares.
++  // These override admin-level secrets (so a user can bring their own OpenAI
++  // key even if the operator set a workspace-wide default) but are themselves
++  // overridden by per-call MCP _auth.
++  const runtimeCtx = ctx || defaultContext();
++  const needs = manifest.secrets_needed || [];
++  if (needs.length > 0) {
++    try {
++      const userLevel = userSecrets.loadForRun(runtimeCtx, needs);
++      for (const [k, v] of Object.entries(userLevel)) {
++        if (v && v.length > 0) mergedSecrets[k] = v;
++      }
++    } catch (err) {
++      // Silent on purpose: a missing FLOOM_MASTER_KEY or a crypto error
++      // should not block runs that only use admin-level secrets. The
++      // operator will see the error at first /api/secrets POST instead.
++      console.warn(
++        `[runner] failed to load per-user secrets for ${app.slug}: ${(err as Error).message}`,
++      );
++    }
++  }
++
+   // Per-call secrets (from MCP _auth meta param) win over persisted secrets.
+   if (perCallSecrets) {
+     for (const [k, v] of Object.entries(perCallSecrets)) {
+diff --git a/apps/server/src/types.ts b/apps/server/src/types.ts
+index 2434719..85345cd 100644
+--- a/apps/server/src/types.ts
++++ b/apps/server/src/types.ts
+@@ -58,6 +58,13 @@ export interface NormalizedManifest {
+   secrets_needed: string[];
+   manifest_version: '1.0' | '2.0';
+   apt_packages?: string[];
++  /**
++   * W2.1: creator-declared list of keys this app is allowed to persist in
++   * the per-user `app_memory` table. Attempts to get/set a key not in this
++   * list are rejected. Optional — defaults to empty (memory disabled) for
++   * apps that don't need per-user state.
++   */
++  memory_keys?: string[];
+ }
+ 
+ export type AuthType =
+@@ -104,6 +111,11 @@ export interface AppRecord {
+   timeout_ms: number | null;
+   retries: number;
+   async_mode: AsyncMode | null;
++  // Multi-tenant fields (v0.3.1 / W2.1). workspace_id defaults to 'local' in
++  // OSS mode. `memory_keys` is a JSON array declared in the app manifest that
++  // lists which keys this app is allowed to persist in `app_memory`.
++  workspace_id: string;
++  memory_keys: string | null; // JSON-stringified string[]
+   created_at: string;
+   updated_at: string;
+ }
+@@ -188,3 +200,77 @@ export interface ChatTurnRecord {
+   payload: string;
+   created_at: string;
+ }
++
++// =====================================================================
++// W2.1: multi-tenant schema types
++// =====================================================================
++
++export interface WorkspaceRecord {
++  id: string;
++  slug: string;
++  name: string;
++  plan: string;
++  wrapped_dek: string | null;
++  created_at: string;
++}
++
++export interface UserRecord {
++  id: string;
++  workspace_id: string | null;
++  email: string | null;
++  name: string | null;
++  auth_provider: string;
++  auth_subject: string | null;
++  created_at: string;
++}
++
++export interface WorkspaceMemberRecord {
++  workspace_id: string;
++  user_id: string;
++  role: 'admin' | 'editor' | 'viewer' | string;
++  joined_at: string;
++}
++
++/**
++ * Request-scoped tenant context. Every route handler builds this in middleware
++ * (via `resolveUserContext`) and passes it to services. In OSS mode this is
++ * always `{ workspace_id: 'local', user_id: 'local', device_id }`; in Cloud
++ * (post-W3.1) it's the logged-in user's real ids.
++ */
++export interface SessionContext {
++  workspace_id: string;
++  user_id: string;
++  device_id: string;
++  is_authenticated: boolean;
++}
++
++export interface AppMemoryRecord {
++  workspace_id: string;
++  app_slug: string;
++  user_id: string;
++  device_id: string | null;
++  key: string;
++  value: string; // JSON-encoded value
++  updated_at: string;
++}
++
++export interface UserSecretRecord {
++  workspace_id: string;
++  user_id: string;
++  key: string;
++  ciphertext: string;
++  nonce: string;
++  auth_tag: string;
++  created_at: string;
++  updated_at: string;
++}
++
++/**
++ * Return shape from `rekeyDevice`. Each count tells the login handler how many
++ * rows were migrated from anonymous → authenticated, for logging and tests.
++ */
++export interface RekeyResult {
++  app_memory: number;
++  runs: number;
++  chat_threads: number;
++}

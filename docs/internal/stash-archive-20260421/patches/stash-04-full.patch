@@ -1,0 +1,62 @@
+diff --git a/apps/web/src/components/me/MeRail.tsx b/apps/web/src/components/me/MeRail.tsx
+index 2e6c56b..aaa28c9 100644
+--- a/apps/web/src/components/me/MeRail.tsx
++++ b/apps/web/src/components/me/MeRail.tsx
+@@ -13,12 +13,56 @@ import { Logo } from '../Logo';
+ import { AppIcon } from '../AppIcon';
+ import { useMyApps } from '../../hooks/useMyApps';
+ import { useSession } from '../../hooks/useSession';
++import type { MeRunSummary } from '../../lib/types';
++
++export interface ThreadGroups {
++  today: MeRunSummary[];
++  yesterday: MeRunSummary[];
++  earlier: MeRunSummary[];
++}
+ 
+ interface Props {
+   activeAppSlug?: string;
++  threads?: ThreadGroups | null;
++  activeThreadId?: string | null;
++  onNewThread?: () => void;
++  onThreadClick?: (runId: string) => void;
++}
++
++function threadTitle(r: MeRunSummary): string {
++  const ins = (r as MeRunSummary & { inputs?: Record<string, unknown> }).inputs;
++  if (ins && typeof ins === 'object') {
++    const prompt = ins['prompt'] ?? ins['query'] ?? ins['text'] ?? ins['input'];
++    if (typeof prompt === 'string' && prompt.trim()) return prompt.trim();
++    const first = Object.values(ins).find((v) => typeof v === 'string' && v.trim().length > 0);
++    if (typeof first === 'string') return first.trim();
++  }
++  return r.app_name || r.app_slug || `Run #${r.id.slice(0, 6)}`;
++}
++
++function threadTimeLabel(iso: string): string {
++  try {
++    const d = new Date(iso);
++    const now = new Date();
++    const diffMin = Math.max(0, Math.floor((now.getTime() - d.getTime()) / 60000));
++    if (diffMin < 1) return 'now';
++    if (diffMin < 60) return `${diffMin}m`;
++    if (now.toDateString() === d.toDateString()) {
++      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
++    }
++    return d.toLocaleDateString([], { weekday: 'short' });
++  } catch {
++    return '';
++  }
+ }
+ 
+-export function MeRail({ activeAppSlug }: Props) {
++export function MeRail({
++  activeAppSlug,
++  threads,
++  activeThreadId,
++  onNewThread,
++  onThreadClick,
++}: Props) {
+   const { apps, loading } = useMyApps();
+   const { data: session } = useSession();
+   const user = session?.user;

@@ -1,0 +1,413 @@
+diff --git a/apps/web/src/pages/AppsDirectoryPage.tsx b/apps/web/src/pages/AppsDirectoryPage.tsx
+index 91ad0c2..e69de29 100644
+--- a/apps/web/src/pages/AppsDirectoryPage.tsx
++++ b/apps/web/src/pages/AppsDirectoryPage.tsx
+@@ -1,380 +0,0 @@
+-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+-import { Search } from 'lucide-react';
+-import { PublicNav } from '../components/public/PublicNav';
+-import { PublicFooter } from '../components/public/PublicFooter';
+-import { AppStripe } from '../components/public/AppStripe';
+-import { FeedbackButton } from '../components/FeedbackButton';
+-import { getHub } from '../api/client';
+-import type { HubApp } from '../lib/types';
+-
+-const ALL = 'all';
+-
+-const CATEGORY_LABELS: Record<string, string> = {
+-  all: 'All',
+-  travel: 'Travel',
+-  'developer-tools': 'Developer',
+-  research: 'Research',
+-  marketing: 'Marketing',
+-  analytics: 'Analytics',
+-  productivity: 'Productivity',
+-  writing: 'Writing',
+-  ai: 'AI',
+-  seo: 'SEO',
+-  design: 'Design',
+-};
+-
+-function labelForCategory(category: string): string {
+-  return (
+-    CATEGORY_LABELS[category] ??
+-    category.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+-  );
+-}
+-
+-/**
+- * Small debounce hook so the search input doesn't thrash the filtered
+- * list on every keystroke. 150ms matches the v15 spec.
+- */
+-function useDebounced<T>(value: T, delayMs: number): T {
+-  const [debounced, setDebounced] = useState(value);
+-  useEffect(() => {
+-    const t = setTimeout(() => setDebounced(value), delayMs);
+-    return () => clearTimeout(t);
+-  }, [value, delayMs]);
+-  return debounced;
+-}
+-
+-export function AppsDirectoryPage() {
+-  const [apps, setApps] = useState<HubApp[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  const [rawSearch, setRawSearch] = useState('');
+-  const [activeCategory, setActiveCategory] = useState<string>(ALL);
+-
+-  const search = useDebounced(rawSearch, 150);
+-
+-  useEffect(() => {
+-    document.title = 'Apps · Floom';
+-    getHub()
+-      .then((rows) => {
+-        setApps(rows);
+-        setLoading(false);
+-      })
+-      .catch(() => setLoading(false));
+-  }, []);
+-
+-  const sortedApps = useMemo(() => {
+-    return [...apps].sort((a, b) => {
+-      if ((a.featured ?? false) !== (b.featured ?? false)) {
+-        return a.featured ? -1 : 1;
+-      }
+-      if (a.avg_run_ms != null || b.avg_run_ms != null) {
+-        if (a.avg_run_ms == null) return 1;
+-        if (b.avg_run_ms == null) return -1;
+-        if (a.avg_run_ms !== b.avg_run_ms) return a.avg_run_ms - b.avg_run_ms;
+-      }
+-      return a.name.localeCompare(b.name);
+-    });
+-  }, [apps]);
+-
+-  const categoryCounts = useMemo(() => {
+-    const counts = new Map<string, number>([[ALL, sortedApps.length]]);
+-    for (const app of sortedApps) {
+-      if (!app.category) continue;
+-      counts.set(app.category, (counts.get(app.category) ?? 0) + 1);
+-    }
+-    return counts;
+-  }, [sortedApps]);
+-
+-  const categories = useMemo(() => {
+-    const found = new Set<string>();
+-    for (const app of sortedApps) {
+-      if (app.category) found.add(app.category);
+-    }
+-    const ordered = Array.from(found).sort((a, b) => {
+-      const ca = categoryCounts.get(a) ?? 0;
+-      const cb = categoryCounts.get(b) ?? 0;
+-      if (ca !== cb) return cb - ca;
+-      return labelForCategory(a).localeCompare(labelForCategory(b));
+-    });
+-    return [ALL, ...ordered];
+-  }, [sortedApps, categoryCounts]);
+-
+-  const trimmedSearch = search.trim().toLowerCase();
+-
+-  const filteredApps = useMemo(() => {
+-    let list = sortedApps;
+-    if (activeCategory !== ALL) {
+-      list = list.filter((app) => app.category === activeCategory);
+-    }
+-    if (trimmedSearch) {
+-      list = list.filter((app) =>
+-        [app.name, app.description, app.category ?? '', app.author ?? '']
+-          .join(' ')
+-          .toLowerCase()
+-          .includes(trimmedSearch),
+-      );
+-    }
+-    return list;
+-  }, [sortedApps, activeCategory, trimmedSearch]);
+-
+-  const appCount = apps.length;
+-
+-  return (
+-    <div
+-      className="page-root"
+-      data-testid="apps-directory"
+-      style={{ minHeight: '100vh', background: 'var(--bg)' }}
+-    >
+-      <PublicNav variant="apps" />
+-
+-      <main>
+-        {/* HEADER · mono-tag + serif H1 + subhead */}
+-        <section
+-          style={{
+-            padding: '72px 24px 36px',
+-            background:
+-              'radial-gradient(ellipse 800px 360px at 50% 30%, rgba(5,150,105,0.05), transparent 70%)',
+-          }}
+-        >
+-          <div style={{ maxWidth: 900, margin: '0 auto', textAlign: 'center' }}>
+-            <span
+-              style={{
+-                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+-                fontSize: 11,
+-                color: 'var(--muted)',
+-                letterSpacing: '0.08em',
+-                textTransform: 'uppercase',
+-                fontWeight: 500,
+-              }}
+-            >
+-              PUBLIC DIRECTORY · {loading ? '—' : `${appCount} APP${appCount === 1 ? '' : 'S'}`}
+-            </span>
+-
+-            <h1
+-              className="apps-headline"
+-              style={{
+-                fontFamily: "'DM Serif Display', Georgia, serif",
+-                fontWeight: 400,
+-                fontSize: 48,
+-                lineHeight: 1.1,
+-                letterSpacing: '-0.02em',
+-                color: 'var(--ink)',
+-                margin: '18px 0 12px',
+-              }}
+-            >
+-              Apps on Floom
+-            </h1>
+-            <p
+-              style={{
+-                fontSize: 16,
+-                color: 'var(--muted)',
+-                margin: '0 0 36px',
+-                lineHeight: 1.6,
+-              }}
+-            >
+-              Run them. Fork them. Or build your own.
+-            </p>
+-
+-            {/* Google-style search pill */}
+-            <form
+-              role="search"
+-              onSubmit={(e) => e.preventDefault()}
+-              style={{
+-                background: 'var(--card)',
+-                border: '1.5px solid var(--line)',
+-                borderRadius: 999,
+-                padding: '8px 8px 8px 22px',
+-                display: 'flex',
+-                alignItems: 'center',
+-                gap: 12,
+-                maxWidth: 640,
+-                margin: '0 auto',
+-                transition: 'border-color 140ms ease, box-shadow 140ms ease',
+-              }}
+-              onFocus={(e) => {
+-                const el = e.currentTarget;
+-                el.style.borderColor = 'var(--ink)';
+-                el.style.boxShadow = '0 4px 0 var(--ink)';
+-              }}
+-              onBlur={(e) => {
+-                const el = e.currentTarget;
+-                el.style.borderColor = 'var(--line)';
+-                el.style.boxShadow = 'none';
+-              }}
+-            >
+-              <Search
+-                size={18}
+-                aria-hidden="true"
+-                style={{ color: 'var(--muted)', flexShrink: 0 }}
+-              />
+-              <input
+-                type="text"
+-                value={rawSearch}
+-                onChange={(e) => setRawSearch(e.target.value)}
+-                placeholder="hash a string · search flights · audit a website · generate uuid…"
+-                aria-label="Search apps"
+-                data-testid="apps-search"
+-                style={{
+-                  flex: 1,
+-                  minWidth: 0,
+-                  border: 0,
+-                  outline: 'none',
+-                  padding: '14px 0',
+-                  fontSize: 15,
+-                  background: 'transparent',
+-                  color: 'var(--ink)',
+-                }}
+-              />
+-              <button
+-                type="submit"
+-                data-testid="apps-search-submit"
+-                style={{
+-                  background: 'var(--ink)',
+-                  color: '#fff',
+-                  border: 0,
+-                  borderRadius: 999,
+-                  padding: '11px 20px',
+-                  fontWeight: 600,
+-                  fontSize: 14,
+-                  cursor: 'pointer',
+-                  flexShrink: 0,
+-                }}
+-              >
+-                Search
+-              </button>
+-            </form>
+-
+-            {/* Category chip strip */}
+-            {categories.length > 1 && (
+-              <div
+-                style={{
+-                  display: 'flex',
+-                  alignItems: 'center',
+-                  justifyContent: 'center',
+-                  gap: 8,
+-                  flexWrap: 'wrap',
+-                  marginTop: 28,
+-                }}
+-                data-testid="apps-chips"
+-              >
+-                {categories.map((cat) => (
+-                  <button
+-                    key={cat}
+-                    type="button"
+-                    data-testid={`chip-${cat}`}
+-                    onClick={() => setActiveCategory(cat)}
+-                    style={chipStyle(activeCategory === cat)}
+-                  >
+-                    <span>{labelForCategory(cat)}</span>
+-                    <span
+-                      style={{
+-                        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+-                        fontSize: 11,
+-                        opacity: 0.7,
+-                      }}
+-                    >
+-                      {categoryCounts.get(cat) ?? 0}
+-                    </span>
+-                  </button>
+-                ))}
+-              </div>
+-            )}
+-          </div>
+-        </section>
+-
+-        {/* APP LIST · thin stripes, single column */}
+-        <section style={{ padding: '0 24px 80px' }}>
+-          <div style={{ maxWidth: 760, margin: '0 auto' }}>
+-            {loading ? (
+-              <div
+-                style={{
+-                  textAlign: 'center',
+-                  padding: '60px 0',
+-                  color: 'var(--muted)',
+-                  fontSize: 14,
+-                }}
+-              >
+-                Loading apps…
+-              </div>
+-            ) : filteredApps.length === 0 ? (
+-              <div
+-                data-testid="apps-empty"
+-                style={{
+-                  textAlign: 'center',
+-                  padding: '60px 0',
+-                  color: 'var(--muted)',
+-                }}
+-              >
+-                <p style={{ fontSize: 16, margin: '0 0 10px' }}>
+-                  No apps match &ldquo;{rawSearch.trim()}&rdquo;
+-                  {activeCategory !== ALL ? ` in ${labelForCategory(activeCategory)}` : ''}.
+-                </p>
+-                <button
+-                  type="button"
+-                  onClick={() => {
+-                    setRawSearch('');
+-                    setActiveCategory(ALL);
+-                  }}
+-                  style={{
+-                    background: 'var(--card)',
+-                    border: '1px solid var(--line)',
+-                    borderRadius: 999,
+-                    padding: '8px 16px',
+-                    fontSize: 13,
+-                    fontWeight: 500,
+-                    color: 'var(--ink)',
+-                    cursor: 'pointer',
+-                    fontFamily: 'inherit',
+-                  }}
+-                >
+-                  Clear filters
+-                </button>
+-              </div>
+-            ) : (
+-              <div
+-                style={{ display: 'grid', gap: 12 }}
+-                data-testid="apps-list"
+-              >
+-                {filteredApps.map((app) => (
+-                  <AppStripe
+-                    key={app.slug}
+-                    slug={app.slug}
+-                    name={app.name}
+-                    description={app.description}
+-                    variant="apps"
+-                  />
+-                ))}
+-              </div>
+-            )}
+-          </div>
+-        </section>
+-      </main>
+-
+-      <PublicFooter />
+-      <FeedbackButton />
+-
+-      <style>{`
+-        @media (max-width: 640px) {
+-          .apps-headline { font-size: 30px !important; }
+-        }
+-      `}</style>
+-    </div>
+-  );
+-}
+-
+-function chipStyle(active: boolean): CSSProperties {
+-  return {
+-    display: 'inline-flex',
+-    alignItems: 'center',
+-    gap: 8,
+-    padding: '9px 16px',
+-    borderRadius: 999,
+-    border: `1px solid ${active ? 'var(--ink)' : 'var(--line)'}`,
+-    background: active ? 'var(--ink)' : 'var(--card)',
+-    color: active ? '#fff' : 'var(--ink)',
+-    fontSize: 13.5,
+-    fontWeight: 500,
+-    cursor: 'pointer',
+-    fontFamily: 'inherit',
+-    transition: 'all 140ms ease',
+-  };
+-}
+diff --git a/apps/web/src/pages/MeAppPage.tsx b/apps/web/src/pages/MeAppPage.tsx
+index 17cc81d..a2fcaa4 100644
+--- a/apps/web/src/pages/MeAppPage.tsx
++++ b/apps/web/src/pages/MeAppPage.tsx
+@@ -42,7 +42,9 @@ export function MeAppPage() {
+         if (cancelled) return;
+         const status = (err as { status?: number }).status;
+         if (status === 404) {
+-          nav('/me', { replace: true });
++          const q = new URLSearchParams({ notice: 'app_not_found' });
++          if (slug) q.set('slug', slug);
++          nav(`/me?${q.toString()}`, { replace: true });
+           return;
+         }
+         setError((err as Error).message || 'Failed to load app');
+diff --git a/apps/web/src/pages/MePage.tsx b/apps/web/src/pages/MePage.tsx
+index 08f9302..b585d1d 100644
+--- a/apps/web/src/pages/MePage.tsx
++++ b/apps/web/src/pages/MePage.tsx
+@@ -15,7 +15,7 @@
+ // stay live on main.
+ 
+ import { useEffect, useState, type ReactNode } from 'react';
+-import { Link } from 'react-router-dom';
++import { Link, useSearchParams } from 'react-router-dom';
+ import { PageShell } from '../components/PageShell';
+ import { useSession } from '../hooks/useSession';
+ import { useMyApps } from '../hooks/useMyApps';

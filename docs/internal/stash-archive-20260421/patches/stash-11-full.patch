@@ -1,0 +1,556 @@
+diff --git a/examples/ig-nano-scout/README.md b/examples/ig-nano-scout/README.md
+new file mode 100644
+index 0000000..b9019f8
+--- /dev/null
++++ b/examples/ig-nano-scout/README.md
+@@ -0,0 +1,85 @@
++# ig-nano-scout — first private Floom app
++
++Private app for finding nano Instagram creators by hashtag. Async (~60s per run),
++residential proxy, session-cookie auth (no password), stealth Chromium.
++
++## Private app model
++
++This is the reference implementation of Floom's **`visibility: private`** apps:
++
++- Not listed in `/api/hub` (public directory)
++- Not listed in MCP `list_apps` / `search_apps`
++- Only the `author` can `GET /api/hub/ig-nano-scout`, `POST /api/ig-nano-scout/jobs`,
++  or any per-run endpoint. Everyone else gets `404` (not `403` — existence is hidden)
++- Visible in `GET /api/hub/mine` for the owner
++
++## Deployment
++
++### 1. Build the upstream container
++
++```bash
++# on AX41
++cd /root/ig-nano-scout/cloud
++docker build -t floomhq/ig-nano-scout:latest .
++```
++
++### 2. Set secrets
++
++Drop secrets into `/root/secrets/ig-nano-scout.env`:
++
++```
++IG_SESSIONID=...
++IG_CSRFTOKEN=...
++IG_MID=...
++IG_DS_USER_ID=...
++EVOMI_PROXY_URL=http://USER:PASS@core-residential.evomi.com:1000
++IG_ACCOUNT_TZ=Europe/Vienna
++IG_ACCOUNT_COUNTRY=AT
++```
++
++### 3. Run the container
++
++```bash
++docker run -d \
++  --name ig-nano-scout \
++  --restart unless-stopped \
++  --env-file /root/secrets/ig-nano-scout.env \
++  -p 127.0.0.1:4320:4320 \
++  floomhq/ig-nano-scout:latest
++```
++
++### 4. Register in Floom
++
++Point Floom's apps config at this manifest (which declares `visibility: private`
++and `async: true`):
++
++```bash
++# in the floom server env
++FLOOM_APPS_CONFIG=/root/floom/examples/ig-nano-scout/apps.yaml
++# restart floom; seed reads the YAML and ingests on boot
++```
++
++Or merge its `apps:` entry into your existing multi-app config file.
++
++### 5. Run it
++
++```bash
++curl -X POST http://localhost:3051/api/ig-nano-scout/jobs \
++  -H 'Content-Type: application/json' \
++  -d '{"inputs": {"hashtags": ["vienna"], "per_tag": 5, "threshold": 10000}}'
++# -> { "job_id": "job_...", "status": "queued", "poll_url": "..." }
++
++curl $POLL_URL   # -> { status: "running" | "succeeded", output: {...} }
++```
++
++## Sanity check the privacy
++
++```bash
++# list public apps — should NOT include ig-nano-scout
++curl http://localhost:3051/api/hub/ | jq '.[] | .slug' | grep -c ig-nano-scout
++# -> 0
++
++# list owner apps — SHOULD include ig-nano-scout
++curl http://localhost:3051/api/hub/mine | jq '.apps[] | .slug' | grep -c ig-nano-scout
++# -> 1
++```
+diff --git a/examples/ig-nano-scout/apps.yaml b/examples/ig-nano-scout/apps.yaml
+new file mode 100644
+index 0000000..60ab5f4
+--- /dev/null
++++ b/examples/ig-nano-scout/apps.yaml
+@@ -0,0 +1,47 @@
++# ig-nano-scout — first private app on Floom.
++#
++# Finds nano Instagram creators (<N followers) matching a set of hashtags
++# using a stealth-patched Chromium behind a residential proxy. Runs a
++# long-lived scrape job (~60s) per call, so it opts into Floom's async
++# job queue.
++#
++# This app is PRIVATE: only the author can run/see it. It will never
++# appear in /api/hub (the public directory) or in MCP list_apps results.
++# It's owned by the user who ingested it and runs against their secrets.
++#
++# Upstream container:
++#   docker run -d --name ig-nano-scout --env-file /root/secrets/ig-nano-scout.env \
++#     -p 127.0.0.1:4320:4320 floomhq/ig-nano-scout:latest
++#
++# Floom then proxies POST /scout through its async job queue, so from
++# the client side it's just:
++#   POST /api/ig-nano-scout/jobs  { "hashtags": ["vienna"], "per_tag": 10 }
++#
++# Secrets listed here are for UI affordance only (the vault page lists
++# them as "required" for the owner to set). The actual secret values
++# live in the container's env, not in per-request auth headers.
++
++apps:
++  - slug: ig-nano-scout
++    type: proxied
++    openapi_spec_url: ./openapi.yaml
++    display_name: ig-nano-scout
++    description: >
++      Scrape Instagram hashtags for nano creators (<10k followers).
++      Stealth Chromium + residential proxy + session cookies. ~60s per run.
++    category: research
++    icon: 📸
++    visibility: private
++    auth: none
++    secrets:
++      - IG_SESSIONID
++      - IG_CSRFTOKEN
++      - EVOMI_PROXY_URL
++      - IG_ACCOUNT_TZ
++    # Async because a full scrape takes ~60s — too long for a synchronous
++    # HTTP request. Floom's worker picks jobs off the queue and notifies
++    # the client via poll or webhook.
++    async: true
++    async_mode: poll
++    timeout_ms: 180000   # 3 min hard cap
++    retries: 0           # IG banning is a real risk; don't retry blindly
+diff --git a/examples/ig-nano-scout/openapi.yaml b/examples/ig-nano-scout/openapi.yaml
+new file mode 100644
+index 0000000..2785bc2
+--- /dev/null
++++ b/examples/ig-nano-scout/openapi.yaml
+@@ -0,0 +1,156 @@
++openapi: 3.0.3
++info:
++  title: ig-nano-scout
++  description: >
++    Finds nano Instagram creators (<N followers) matching a set of hashtags.
++    Runs a stealth-patched Chromium behind a residential proxy, authenticated
++    with session cookies. Wrapped from the macOS-only ig-nano-scout project
++    into a cloud-deployable FastAPI service.
++  version: 0.1.0
++
++servers:
++  - url: http://ig-nano-scout:4320
++    description: Floom-internal docker network hostname
++  - url: http://127.0.0.1:4320
++    description: Local dev
++
++paths:
++  /scout:
++    post:
++      operationId: scout
++      summary: Scrape hashtags and return nano creators
++      description: >
++        Takes a list of hashtags, pulls top posts from each, fetches each
++        author's profile, filters to creators under `threshold` followers,
++        returns the nano list.
++      requestBody:
++        required: true
++        content:
++          application/json:
++            schema:
++              $ref: '#/components/schemas/ScoutRequest'
++      responses:
++        '200':
++          description: Scout completed
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/ScoutResponse'
++        '500':
++          description: Scout failed (proxy error, IG block, expired cookie)
++          content:
++            application/json:
++              schema:
++                type: object
++                properties:
++                  detail:
++                    type: string
++
++components:
++  schemas:
++    ScoutRequest:
++      type: object
++      properties:
++        hashtags:
++          type: array
++          items:
++            type: string
++          description: Hashtags without the # prefix (e.g. ["vienna","cafe"])
++          example: ["vienna", "cafevienna"]
++        per_tag:
++          type: integer
++          minimum: 1
++          maximum: 20
++          default: 8
++          description: How many posts to pull per hashtag
++        threshold:
++          type: integer
++          minimum: 100
++          maximum: 100000
++          default: 10000
++          description: Max followers to qualify as "nano"
++        headless:
++          type: boolean
++          default: true
++        use_proxy:
++          type: boolean
++          nullable: true
++          description: Override EVOMI_PROXY_URL env (null = use env, false = home IP)
++      required:
++        - hashtags
++
++    ScoutProfile:
++      type: object
++      properties:
++        username:
++          type: string
++        followers:
++          type: string
++          nullable: true
++        follower_count:
++          type: integer
++          nullable: true
++        following:
++          type: string
++          nullable: true
++        posts:
++          type: string
++          nullable: true
++        bio:
++          type: string
++        caption:
++          type: string
++
++    ScoutCounts:
++      type: object
++      properties:
++        users:
++          type: integer
++        results:
++          type: integer
++        nano:
++          type: integer
++
++    ScoutResponse:
++      type: object
++      properties:
++        status:
++          type: string
++          enum: [ok, failed]
++        started_at:
++          type: string
++          nullable: true
++        duration_ms:
++          type: integer
++          nullable: true
++        hashtags:
++          type: array
++          items:
++            type: string
++        per_tag:
++          type: integer
++          nullable: true
++        threshold:
++          type: integer
++          nullable: true
++        proxy_enabled:
++          type: boolean
++        counts:
++          $ref: '#/components/schemas/ScoutCounts'
++        users:
++          type: object
++          additionalProperties:
++            type: string
++        results:
++          type: array
++          items:
++            $ref: '#/components/schemas/ScoutProfile'
++        nano_results:
++          type: array
++          items:
++            $ref: '#/components/schemas/ScoutProfile'
++        error:
++          type: string
++          nullable: true
++      required:
++        - status
+diff --git a/screenshots-greenlight/apps-desktop.png b/screenshots-greenlight/apps-desktop.png
+new file mode 100644
+index 0000000..d53beab
+Binary files /dev/null and b/screenshots-greenlight/apps-desktop.png differ
+diff --git a/screenshots-greenlight/apps-mobile.png b/screenshots-greenlight/apps-mobile.png
+new file mode 100644
+index 0000000..9d9e834
+Binary files /dev/null and b/screenshots-greenlight/apps-mobile.png differ
+diff --git a/screenshots-greenlight/build-desktop.png b/screenshots-greenlight/build-desktop.png
+new file mode 100644
+index 0000000..c036eff
+Binary files /dev/null and b/screenshots-greenlight/build-desktop.png differ
+diff --git a/screenshots-greenlight/build-mobile.png b/screenshots-greenlight/build-mobile.png
+new file mode 100644
+index 0000000..68f2336
+Binary files /dev/null and b/screenshots-greenlight/build-mobile.png differ
+diff --git a/screenshots-greenlight/creator-flyfast.png b/screenshots-greenlight/creator-flyfast.png
+new file mode 100644
+index 0000000..c036eff
+Binary files /dev/null and b/screenshots-greenlight/creator-flyfast.png differ
+diff --git a/screenshots-greenlight/landing-desktop.png b/screenshots-greenlight/landing-desktop.png
+new file mode 100644
+index 0000000..6278024
+Binary files /dev/null and b/screenshots-greenlight/landing-desktop.png differ
+diff --git a/screenshots-greenlight/landing-mobile.png b/screenshots-greenlight/landing-mobile.png
+new file mode 100644
+index 0000000..739c753
+Binary files /dev/null and b/screenshots-greenlight/landing-mobile.png differ
+diff --git a/screenshots-greenlight/login-desktop.png b/screenshots-greenlight/login-desktop.png
+new file mode 100644
+index 0000000..c036eff
+Binary files /dev/null and b/screenshots-greenlight/login-desktop.png differ
+diff --git a/screenshots-greenlight/me-desktop.png b/screenshots-greenlight/me-desktop.png
+new file mode 100644
+index 0000000..c036eff
+Binary files /dev/null and b/screenshots-greenlight/me-desktop.png differ
+diff --git a/screenshots-greenlight/p-slug-flyfast-mobile.png b/screenshots-greenlight/p-slug-flyfast-mobile.png
+new file mode 100644
+index 0000000..de18771
+Binary files /dev/null and b/screenshots-greenlight/p-slug-flyfast-mobile.png differ
+diff --git a/screenshots-greenlight/p-slug-flyfast.png b/screenshots-greenlight/p-slug-flyfast.png
+new file mode 100644
+index 0000000..86e7f62
+Binary files /dev/null and b/screenshots-greenlight/p-slug-flyfast.png differ
+diff --git a/screenshots-greenlight/p-slug-openpaper.png b/screenshots-greenlight/p-slug-openpaper.png
+new file mode 100644
+index 0000000..b95f315
+Binary files /dev/null and b/screenshots-greenlight/p-slug-openpaper.png differ
+diff --git a/test/stress/test-visibility-private.mjs b/test/stress/test-visibility-private.mjs
+new file mode 100644
+index 0000000..86db8aa
+--- /dev/null
++++ b/test/stress/test-visibility-private.mjs
+@@ -0,0 +1,196 @@
++#!/usr/bin/env node
++// Private-visibility boundary tests.
++//
++// Verifies that apps with visibility='private' are:
++//   1. Never listed by GET /api/hub (public directory)
++//   2. Never matched by MCP search_apps / embeddings.pickApps
++//   3. Reachable via GET /api/hub/:slug only for the author (404 otherwise)
++//   4. Reachable via GET /api/hub/mine for the author
++//   5. Non-author callers see 404 (not 403) so the slug's existence
++//      is not leaked
++//
++// Companion to test-w31-auth-boundary.mjs — covers the one surface that
++// boundary test does not: visibility='private' on the apps table.
++//
++// Run: node test/stress/test-visibility-private.mjs
++
++import { mkdtempSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { randomUUID } from 'node:crypto';
++
++const tmp = mkdtempSync(join(tmpdir(), 'floom-vis-private-'));
++process.env.DATA_DIR = tmp;
++process.env.FLOOM_DISABLE_JOB_WORKER = 'true';
++process.env.FLOOM_MASTER_KEY =
++  '0'.repeat(16) + '1'.repeat(16) + '2'.repeat(16) + '3'.repeat(16);
++
++const { db } = await import('../../apps/server/dist/db.js');
++const { hubRouter } = await import('../../apps/server/dist/routes/hub.js');
++
++let passed = 0;
++let failed = 0;
++function log(label, ok, detail) {
++  if (ok) {
++    passed++;
++    console.log(`  ok  ${label}`);
++  } else {
++    failed++;
++    console.log(`  FAIL  ${label}${detail ? ' :: ' + detail : ''}`);
++  }
++}
++
++console.log('Visibility · private-app boundary');
++
++async function fetchRoute(router, method, path, body, cookie) {
++  const url = `http://localhost${path}`;
++  const init = { method };
++  if (body !== undefined) {
++    init.body = JSON.stringify(body);
++    init.headers = { 'content-type': 'application/json' };
++  }
++  if (cookie) {
++    init.headers = { ...(init.headers || {}), cookie };
++  }
++  const req = new Request(url, init);
++  const res = await router.fetch(req);
++  const text = await res.text();
++  let json = null;
++  try {
++    json = JSON.parse(text);
++  } catch {
++    // leave null
++  }
++  return { status: res.status, json, text };
++}
++
++// ---- seed apps: public + private + auth-required ----
++function insertApp({ slug, visibility, author }) {
++  const id = `app_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
++  const manifest = JSON.stringify({
++    name: slug,
++    description: `${slug} app`,
++    actions: {
++      run: { description: 'run it', input_schema: {}, output_schema: {} },
++    },
++  });
++  db.prepare(
++    `INSERT INTO apps
++       (id, slug, name, description, manifest, status, code_path,
++        author, workspace_id, app_type, visibility)
++     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', ?, 'local', 'proxied', ?)`,
++  ).run(id, slug, slug, `${slug} app`, manifest, author, visibility);
++  return id;
++}
++
++insertApp({ slug: 'pub-one', visibility: 'public', author: 'alice' });
++insertApp({ slug: 'pub-two', visibility: 'public', author: 'bob' });
++insertApp({ slug: 'priv-alice', visibility: 'private', author: 'alice' });
++insertApp({ slug: 'priv-bob', visibility: 'private', author: 'bob' });
++insertApp({ slug: 'gated', visibility: 'auth-required', author: 'alice' });
++
++// ---- 1. GET /api/hub/ excludes private apps ----
++const listRes = await fetchRoute(hubRouter, 'GET', '/');
++log(
++  'GET /api/hub/: returns 200',
++  listRes.status === 200,
++  `got ${listRes.status}`,
++);
++const listedSlugs = Array.isArray(listRes.json)
++  ? listRes.json.map((a) => a.slug)
++  : [];
++log(
++  'GET /api/hub/: lists public apps',
++  listedSlugs.includes('pub-one') && listedSlugs.includes('pub-two'),
++  `got [${listedSlugs.join(', ')}]`,
++);
++log(
++  'GET /api/hub/: hides priv-alice',
++  !listedSlugs.includes('priv-alice'),
++  `leaked! got [${listedSlugs.join(', ')}]`,
++);
++log(
++  'GET /api/hub/: hides priv-bob',
++  !listedSlugs.includes('priv-bob'),
++  `leaked! got [${listedSlugs.join(', ')}]`,
++);
++
++// ---- 2. embeddings.pickApps excludes private ----
++const { pickApps } = await import(
++  '../../apps/server/dist/services/embeddings.js'
++);
++const matches = await pickApps('test app', 10);
++const matchSlugs = matches.map((m) => m.slug);
++log(
++  'pickApps: never returns private apps',
++  !matchSlugs.includes('priv-alice') && !matchSlugs.includes('priv-bob'),
++  `leaked! got [${matchSlugs.join(', ')}]`,
++);
++
++// ---- 3. GET /api/hub/:slug returns 404 for private to non-author ----
++// In OSS mode the synthetic local user is 'local' (DEFAULT_USER_ID), which
++// does NOT match 'alice' or 'bob' author values — so both private apps are
++// invisible to the test runner, which is what we want.
++const privAliceAnon = await fetchRoute(hubRouter, 'GET', '/priv-alice');
++log(
++  'GET /api/hub/priv-alice (anon): 404 (not 403)',
++  privAliceAnon.status === 404,
++  `got ${privAliceAnon.status}`,
++);
++
++// Public apps stay reachable.
++const pubOneAnon = await fetchRoute(hubRouter, 'GET', '/pub-one');
++log(
++  'GET /api/hub/pub-one (anon): 200',
++  pubOneAnon.status === 200,
++  `got ${pubOneAnon.status}`,
++);
++
++// ---- 4. author sees their own private app via /mine ----
++// Seed a local-author private app so the OSS default user context finds it.
++insertApp({ slug: 'priv-local', visibility: 'private', author: 'local' });
++
++const mineRes = await fetchRoute(hubRouter, 'GET', '/mine');
++log(
++  'GET /api/hub/mine: returns 200',
++  mineRes.status === 200,
++  `got ${mineRes.status}`,
++);
++const mineSlugs = mineRes.json?.apps?.map((a) => a.slug) ?? [];
++log(
++  'GET /api/hub/mine: includes owner private app',
++  mineSlugs.includes('priv-local'),
++  `got [${mineSlugs.join(', ')}]`,
++);
++
++// ---- 5. author can GET their own private app directly ----
++const privLocalOwner = await fetchRoute(hubRouter, 'GET', '/priv-local');
++log(
++  'GET /api/hub/priv-local (owner): 200',
++  privLocalOwner.status === 200,
++  `got ${privLocalOwner.status}`,
++);
++
++// ---- 6. category filter on list still hides private ----
++db.prepare("UPDATE apps SET category = 'research' WHERE slug = 'priv-alice'").run();
++db.prepare("UPDATE apps SET category = 'research' WHERE slug = 'pub-one'").run();
++const filtered = await fetchRoute(hubRouter, 'GET', '/?category=research');
++const filteredSlugs = Array.isArray(filtered.json)
++  ? filtered.json.map((a) => a.slug)
++  : [];
++log(
++  'GET /api/hub/?category=research: includes public match',
++  filteredSlugs.includes('pub-one'),
++  `got [${filteredSlugs.join(', ')}]`,
++);
++log(
++  'GET /api/hub/?category=research: still hides private',
++  !filteredSlugs.includes('priv-alice'),
++  `leaked! got [${filteredSlugs.join(', ')}]`,
++);
++
++// ---- cleanup ----
++rmSync(tmp, { recursive: true, force: true });
++
++console.log(`\n${passed} passed, ${failed} failed`);
++if (failed > 0) process.exit(1);

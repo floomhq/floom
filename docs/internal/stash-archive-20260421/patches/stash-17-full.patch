@@ -1,0 +1,1769 @@
+diff --git a/apps/server/package.json b/apps/server/package.json
+index 4324196..3d50884 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -8,14 +8,16 @@
+     "build": "tsc && node scripts/copy-assets.mjs",
+     "start": "node dist/index.js",
+     "typecheck": "tsc --noEmit",
+-    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs"
++    "test": "pnpm run build && node ../../test/stress/test-build-url.mjs && node ../../test/stress/test-resolve-base-url.mjs && node ../../test/stress/test-webhook.mjs && node ../../test/stress/test-jobs-service.mjs && node ../../test/stress/test-jobs-e2e.mjs && node ../../test/stress/test-renderer-contract.mjs && node ../../test/stress/test-renderer-defaults.mjs && node ../../test/stress/test-renderer-bundler.mjs && node ../../test/stress/test-renderer-e2e.mjs"
+   },
+   "dependencies": {
+     "@apidevtools/json-schema-ref-parser": "15.3.5",
++    "@floom/renderer": "workspace:*",
+     "@hono/node-server": "1.13.7",
+     "@modelcontextprotocol/sdk": "^1.29.0",
+     "better-sqlite3": "11.5.0",
+     "dockerode": "4.0.2",
++    "esbuild": "0.24.2",
+     "hono": "4.6.12",
+     "json-schema-merge-allof": "0.8.1",
+     "nanoid": "5.0.9",
+diff --git a/apps/server/src/services/renderer-bundler.ts b/apps/server/src/services/renderer-bundler.ts
+new file mode 100644
+index 0000000..d298c98
+--- /dev/null
++++ b/apps/server/src/services/renderer-bundler.ts
+@@ -0,0 +1,250 @@
++// Custom renderer bundler.
++//
++// When an apps.yaml entry declares `renderer: { kind: component, entry: ./renderer.tsx }`,
++// this service compiles the creator's TSX file into a standalone ESM bundle
++// at ingest time. The bundle is written to DATA_DIR/renderers/<slug>.js and
++// served by the GET /renderer/:slug/bundle.js route.
++//
++// Key decisions:
++// - esbuild in bundle mode with `format: esm` + `platform: browser`
++// - react/react-dom marked as externals and aliased to `globalThis.React` so
++//   the bundle is tiny (creator renderers are usually a few KB) and all host
++//   apps share one React instance
++// - subresource integrity via SHA-256 hash of the source
++// - strict size cap (256 KB) so a rogue renderer can't blow up the container
++// - idempotent: re-bundling a hash we've seen before is a no-op
++
++import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
++import { createHash } from 'node:crypto';
++import { dirname, isAbsolute, join, resolve } from 'node:path';
++import { build } from 'esbuild';
++import { DATA_DIR } from '../db.js';
++import type { BundleResult, OutputShape } from '@floom/renderer';
++
++/**
++ * Where bundled renderers live on disk. Lives under DATA_DIR so it persists
++ * across container restarts without hitting the DB.
++ */
++export const RENDERERS_DIR = join(DATA_DIR, 'renderers');
++
++/** Size cap (bytes) per bundled renderer. Enforced post-build. */
++export const MAX_BUNDLE_BYTES = 256 * 1024;
++
++/**
++ * In-memory index of slug → BundleResult. Populated at ingest time and read
++ * by the /renderer/:slug/bundle.js route. We deliberately keep this in memory
++ * (not in SQLite) because:
++ *   (a) it's a cache of disk state, not a source of truth
++ *   (b) the db.ts schema is owned by W2.1 this sprint and we must not touch it
++ *   (c) the route can re-read from disk if the memory cache is cold
++ */
++const bundleIndex = new Map<string, BundleResult>();
++
++export function getBundleResult(slug: string): BundleResult | undefined {
++  const cached = bundleIndex.get(slug);
++  if (cached) return cached;
++  // Fallback: rebuild index from disk on demand.
++  const candidate = join(RENDERERS_DIR, `${slug}.js`);
++  if (existsSync(candidate)) {
++    try {
++      const stat = statSync(candidate);
++      const sourceHashFile = `${candidate}.hash`;
++      const hash = existsSync(sourceHashFile)
++        ? readFileSync(sourceHashFile, 'utf-8').trim()
++        : '';
++      const shapeFile = `${candidate}.shape`;
++      const shape = (existsSync(shapeFile)
++        ? (readFileSync(shapeFile, 'utf-8').trim() as OutputShape)
++        : 'text') as OutputShape;
++      const result: BundleResult = {
++        slug,
++        bundlePath: candidate,
++        bytes: stat.size,
++        outputShape: shape,
++        compiledAt: stat.mtime.toISOString(),
++        sourceHash: hash,
++      };
++      bundleIndex.set(slug, result);
++      return result;
++    } catch {
++      return undefined;
++    }
++  }
++  return undefined;
++}
++
++export function listBundles(): BundleResult[] {
++  return Array.from(bundleIndex.values());
++}
++
++export function clearBundleIndexForTests(): void {
++  bundleIndex.clear();
++}
++
++/**
++ * Hash the raw source bytes to enable idempotent re-builds.
++ */
++export function hashSource(source: string): string {
++  return createHash('sha256').update(source).digest('hex').slice(0, 16);
++}
++
++function ensureRenderersDir(): void {
++  if (!existsSync(RENDERERS_DIR)) {
++    mkdirSync(RENDERERS_DIR, { recursive: true });
++  }
++}
++
++/**
++ * Validate that `entry` exists + is inside `manifestDir`. Throws if either
++ * check fails. Returns the resolved absolute path.
++ */
++export function resolveEntryPath(entry: string, manifestDir: string): string {
++  if (isAbsolute(entry)) {
++    throw new Error(`renderer.entry must be relative to the manifest, got absolute path: ${entry}`);
++  }
++  if (entry.includes('..')) {
++    throw new Error(`renderer.entry must not contain ".." segments, got: ${entry}`);
++  }
++  const absolute = resolve(manifestDir, entry);
++  // Confirm the resolved path is a descendant of manifestDir (defense in
++  // depth against symlinks or ..-escaped relative paths slipping past the
++  // string check).
++  const relative = absolute.startsWith(manifestDir + '/') || absolute === manifestDir;
++  if (!relative) {
++    throw new Error(
++      `renderer.entry resolves outside the manifest directory: ${absolute} not under ${manifestDir}`,
++    );
++  }
++  if (!existsSync(absolute)) {
++    throw new Error(`renderer.entry does not exist on disk: ${absolute}`);
++  }
++  return absolute;
++}
++
++export interface BundleOptions {
++  slug: string;
++  /** Absolute path to the creator's TSX file. Resolve via resolveEntryPath first. */
++  entryPath: string;
++  /** Optional shape pin for the fallback. */
++  outputShape?: OutputShape;
++  /** Override the default renderers dir (useful for tests). */
++  outputDir?: string;
++}
++
++/**
++ * Compile a creator's renderer.tsx into a standalone ESM bundle.
++ *
++ * The bundle:
++ *   - has `react`, `react-dom`, `@floom/renderer` marked as externals so the
++ *     host page owns the React instance
++ *   - is written to <RENDERERS_DIR>/<slug>.js
++ *   - ships a sidecar `.hash` and `.shape` for the /renderer route to serve
++ *     `X-Floom-Renderer-Hash` and `X-Floom-Renderer-Shape` headers
++ *   - is capped at MAX_BUNDLE_BYTES
++ */
++export async function bundleRenderer(opts: BundleOptions): Promise<BundleResult> {
++  const source = readFileSync(opts.entryPath, 'utf-8');
++  const sourceHash = hashSource(source);
++  const outputDir = opts.outputDir || RENDERERS_DIR;
++  if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
++  const bundlePath = join(outputDir, `${opts.slug}.js`);
++  const shapeFile = `${bundlePath}.shape`;
++  const hashFile = `${bundlePath}.hash`;
++
++  // Idempotent skip: same hash on disk? Just update in-memory index.
++  if (existsSync(bundlePath) && existsSync(hashFile)) {
++    const existingHash = readFileSync(hashFile, 'utf-8').trim();
++    if (existingHash === sourceHash) {
++      const stat = statSync(bundlePath);
++      const result: BundleResult = {
++        slug: opts.slug,
++        bundlePath,
++        bytes: stat.size,
++        outputShape: opts.outputShape || 'text',
++        compiledAt: stat.mtime.toISOString(),
++        sourceHash,
++      };
++      bundleIndex.set(opts.slug, result);
++      return result;
++    }
++  }
++
++  // Full rebuild.
++  const result = await build({
++    entryPoints: [opts.entryPath],
++    bundle: true,
++    format: 'esm',
++    platform: 'browser',
++    target: 'es2020',
++    jsx: 'automatic',
++    jsxImportSource: 'react',
++    external: ['react', 'react-dom', 'react-dom/client', '@floom/renderer'],
++    write: false,
++    minify: true,
++    sourcemap: false,
++    treeShaking: true,
++    logLevel: 'silent',
++    banner: {
++      js: `// Floom custom renderer bundle · slug=${opts.slug} · hash=${sourceHash}`,
++    },
++  });
++
++  const out = result.outputFiles?.[0];
++  if (!out) {
++    throw new Error(`bundleRenderer(${opts.slug}): esbuild produced no output`);
++  }
++  if (out.contents.byteLength > MAX_BUNDLE_BYTES) {
++    throw new Error(
++      `bundleRenderer(${opts.slug}): bundle size ${out.contents.byteLength} exceeds cap ${MAX_BUNDLE_BYTES}. Trim the renderer or split heavy deps out.`,
++    );
++  }
++
++  writeFileSync(bundlePath, out.contents);
++  writeFileSync(hashFile, sourceHash);
++  writeFileSync(shapeFile, opts.outputShape || 'text');
++
++  const bundleResult: BundleResult = {
++    slug: opts.slug,
++    bundlePath,
++    bytes: out.contents.byteLength,
++    outputShape: opts.outputShape || 'text',
++    compiledAt: new Date().toISOString(),
++    sourceHash,
++  };
++  bundleIndex.set(opts.slug, bundleResult);
++  return bundleResult;
++}
++
++/**
++ * High-level helper: bundle a creator's renderer from a manifest directory.
++ *
++ * Called from openapi-ingest whenever an app has `renderer.kind = component`.
++ * Wraps bundleRenderer + resolveEntryPath, returns null and logs on any error
++ * (never throws — ingest should keep going even if one renderer fails).
++ */
++export async function bundleRendererFromManifest(
++  slug: string,
++  manifestDir: string,
++  entry: string,
++  outputShape?: OutputShape,
++): Promise<BundleResult | null> {
++  ensureRenderersDir();
++  try {
++    const entryPath = resolveEntryPath(entry, manifestDir);
++    const result = await bundleRenderer({ slug, entryPath, outputShape });
++    // eslint-disable-next-line no-console
++    console.log(
++      `[renderer-bundler] ${slug}: compiled ${entry} → ${result.bundlePath} (${result.bytes} bytes, shape=${result.outputShape})`,
++    );
++    return result;
++  } catch (err) {
++    // eslint-disable-next-line no-console
++    console.error(
++      `[renderer-bundler] ${slug}: failed to bundle ${entry}: ${(err as Error).message}`,
++    );
++    return null;
++  }
++}
++
++// Re-export dirname for openapi-ingest so it can compute manifest dir.
++export { dirname as pathDirname };
+diff --git a/packages/renderer/package.json b/packages/renderer/package.json
+new file mode 100644
+index 0000000..af28245
+--- /dev/null
++++ b/packages/renderer/package.json
+@@ -0,0 +1,38 @@
++{
++  "name": "@floom/renderer",
++  "version": "0.3.0",
++  "private": true,
++  "type": "module",
++  "description": "Floom default + custom output/input renderer library. Ships 10 default output components + 13 default input components. Contract shape borrowed from Vercel AI SDK parts pattern (input-available / output-available / output-error).",
++  "main": "./src/index.ts",
++  "types": "./src/index.ts",
++  "exports": {
++    ".": "./src/index.ts",
++    "./inputs": "./src/inputs/index.ts",
++    "./outputs": "./src/outputs/index.ts",
++    "./contract": "./src/contract/index.ts"
++  },
++  "scripts": {
++    "typecheck": "tsc --noEmit",
++    "test": "echo '@floom/renderer: driven by test/stress/test-renderer-defaults.mjs + test-renderer-contract.mjs + test-renderer-bundler.mjs' && exit 0"
++  },
++  "peerDependencies": {
++    "react": "^18.3.1",
++    "react-dom": "^18.3.1"
++  },
++  "dependencies": {
++    "@rjsf/core": "5.24.1",
++    "@rjsf/utils": "5.24.1",
++    "@rjsf/validator-ajv8": "5.24.1",
++    "@tanstack/react-table": "8.20.5",
++    "react-markdown": "9.0.1",
++    "shiki": "1.22.2"
++  },
++  "devDependencies": {
++    "@types/react": "18.3.12",
++    "@types/react-dom": "18.3.1",
++    "react": "18.3.1",
++    "react-dom": "18.3.1",
++    "typescript": "5.7.2"
++  }
++}
+diff --git a/packages/renderer/src/RendererShell.tsx b/packages/renderer/src/RendererShell.tsx
+new file mode 100644
+index 0000000..873186d
+--- /dev/null
++++ b/packages/renderer/src/RendererShell.tsx
+@@ -0,0 +1,118 @@
++import React from 'react';
++import type { OutputShape, RenderProps, RenderState } from './contract/index.js';
++import { getDefaultOutput } from './outputs/index.js';
++import { ErrorOutput } from './outputs/ErrorOutput.js';
++
++/**
++ * ErrorBoundary — catches render crashes in a custom renderer and falls back
++ * to a stable default output. Every custom component is wrapped in this by
++ * the host; default outputs are simple enough that they do not need it, but
++ * it is safe to double-wrap.
++ */
++export class RendererErrorBoundary extends React.Component<
++  {
++    fallbackShape?: OutputShape;
++    fallbackProps: RenderProps;
++    children: React.ReactNode;
++  },
++  { error: Error | null }
++> {
++  state = { error: null as Error | null };
++
++  static getDerivedStateFromError(error: Error) {
++    return { error };
++  }
++
++  componentDidCatch(error: Error, info: React.ErrorInfo) {
++    // eslint-disable-next-line no-console
++    console.error('[floom-renderer] custom renderer crashed, falling back:', error, info);
++  }
++
++  render() {
++    if (this.state.error) {
++      const Fallback = getDefaultOutput(this.props.fallbackShape || 'error');
++      // If we fall back to the error renderer, surface the crash; otherwise
++      // use the shape's default (e.g. table) so the user still sees the data.
++      if (this.props.fallbackShape && this.props.fallbackShape !== 'error') {
++        return <Fallback {...this.props.fallbackProps} />;
++      }
++      return (
++        <ErrorOutput
++          state="output-error"
++          error={{
++            message: this.state.error.message,
++            code: 'renderer_crashed',
++            details: { name: this.state.error.name },
++          }}
++        />
++      );
++    }
++    return this.props.children as React.ReactElement;
++  }
++}
++
++interface RendererShellProps extends RenderProps {
++  /** The shape to render. Host picks this via pickOutputShape(schema). */
++  shape: OutputShape;
++  /**
++   * Optional custom renderer component. When present + state is
++   * 'output-available', we render this inside an ErrorBoundary that falls
++   * back to the default for `shape`.
++   */
++  CustomRenderer?: React.ComponentType<RenderProps>;
++}
++
++/**
++ * RendererShell — the top-level render entry point. Switches on RenderState,
++ * looks up the default component for `shape`, and optionally wraps a custom
++ * renderer in an ErrorBoundary.
++ *
++ * This is the ONLY component the host app needs to import for rendering. It
++ * encapsulates the contract's three-state machine.
++ */
++export function RendererShell(props: RendererShellProps): React.ReactElement {
++  const { state, shape, CustomRenderer, ...renderProps } = props;
++
++  // Error state: always use the ErrorOutput default, ignoring custom renderers.
++  if (state === 'output-error') {
++    return <ErrorOutput {...renderProps} state="output-error" />;
++  }
++
++  const Default = getDefaultOutput(shape);
++
++  // Input-available state: render the default in loading mode.
++  if (state === 'input-available') {
++    return <Default {...renderProps} state={state} loading={true} />;
++  }
++
++  // Output-available state: pick custom renderer if present, wrap in boundary.
++  if (CustomRenderer) {
++    return (
++      <RendererErrorBoundary
++        fallbackShape={shape}
++        fallbackProps={{ ...renderProps, state }}
++      >
++        <CustomRenderer {...renderProps} state={state} />
++      </RendererErrorBoundary>
++    );
++  }
++  return <Default {...renderProps} state={state} />;
++}
++
++/**
++ * Stable export for the state machine — useful for tests that don't want to
++ * render React but still want to assert which default a given state resolves to.
++ */
++export function resolveRenderTarget(
++  state: RenderState,
++  shape: OutputShape,
++  hasCustom: boolean,
++): { component: 'custom' | 'default'; shape: OutputShape | 'error'; loading: boolean } {
++  if (state === 'output-error') {
++    return { component: 'default', shape: 'error', loading: false };
++  }
++  if (state === 'input-available') {
++    return { component: 'default', shape, loading: true };
++  }
++  return { component: hasCustom ? 'custom' : 'default', shape, loading: false };
++}
+diff --git a/packages/renderer/src/contract/index.ts b/packages/renderer/src/contract/index.ts
+new file mode 100644
+index 0000000..7ca64de
+--- /dev/null
++++ b/packages/renderer/src/contract/index.ts
+@@ -0,0 +1,243 @@
++// Floom renderer contract.
++//
++// Every Floom renderer (default or custom) is a React component that takes a
++// single `RenderProps` object. The shape of RenderProps is borrowed from the
++// Vercel AI SDK `parts` state machine: three mutually-exclusive states.
++//
++//   - `input-available`  : the run is in flight, only inputs exist. Render a
++//                          loading state that echoes the inputs if useful.
++//   - `output-available` : the run succeeded. `data` carries the parsed
++//                          response body, `schema` carries the response
++//                          schema (for default renderers to introspect).
++//   - `output-error`     : the run failed. `error` carries a structured
++//                          error object the renderer can show + retry.
++//
++// Custom renderers never need to import anything else from this package —
++// they can treat `RenderProps` as a pure data contract.
++
++/**
++ * The 10 canonical output shapes Floom ships default renderers for. A manifest
++ * can pin its output to any one of these via `renderer.output_shape`, or leave
++ * it unset and Floom's schema-to-shape discriminator will pick one.
++ */
++export type OutputShape =
++  | 'text'
++  | 'markdown'
++  | 'code'
++  | 'table'
++  | 'object'
++  | 'image'
++  | 'pdf'
++  | 'audio'
++  | 'stream'
++  | 'error';
++
++/**
++ * A partial JSON Schema (post-dereference). Default renderers introspect this
++ * to decide how to display the data (e.g. an `array` of objects with uniform
++ * keys becomes a table). Custom renderers usually ignore it.
++ */
++export interface ResponseSchema {
++  type?: string;
++  format?: string;
++  contentType?: string;
++  items?: ResponseSchema;
++  properties?: Record<string, ResponseSchema>;
++  // Free-form extension fields (x-floom-*, x-display-hint, etc.).
++  [key: string]: unknown;
++}
++
++/**
++ * Structured error envelope returned for `output-error` state. Matches
++ * Floom's run envelope: `{ error, code, details }` plus optional retry
++ * callback for UIs that want to wire a "try again" button.
++ */
++export interface RenderError {
++  message: string;
++  code?: string;
++  details?: unknown;
++}
++
++/**
++ * Render state machine. Exactly one of these three shapes at a time.
++ */
++export type RenderState = 'input-available' | 'output-available' | 'output-error';
++
++/**
++ * Props passed to every renderer — default or custom.
++ *
++ * This is the ONLY shape custom renderers need to know about. Treat it as a
++ * stable contract: additive changes only, never breaking.
++ */
++export interface RenderProps {
++  /** Current state in the machine. */
++  state: RenderState;
++  /**
++   * The parsed response body when `state === 'output-available'`. Shape depends
++   * on the app's response schema. Custom renderers cast to their own type.
++   */
++  data?: unknown;
++  /** Input values when `state === 'input-available'`. */
++  inputs?: Record<string, unknown>;
++  /** Response schema when available (for default renderers to introspect). */
++  schema?: ResponseSchema;
++  /** Error envelope when `state === 'output-error'`. */
++  error?: RenderError;
++  /** Optional retry callback (wired by the host when feasible). */
++  onRetry?: () => void;
++  /**
++   * Loading flag — true when `state === 'input-available'` OR when the host
++   * is mid-stream. Renderers that care about stream mode read this.
++   */
++  loading?: boolean;
++}
++
++/**
++ * Shape of the manifest.renderer field in apps.yaml. Parsed by openapi-ingest.
++ *
++ *   renderer:
++ *     kind: component        # "default" or "component"
++ *     entry: ./renderer.tsx  # path relative to the manifest, required for "component"
++ *     output_shape: table    # optional pin — one of OutputShape
++ */
++export interface RendererManifest {
++  kind: 'default' | 'component';
++  /** Source file relative to the manifest. Required when kind === 'component'. */
++  entry?: string;
++  /** Optional pin: force a specific default shape even when a custom component ships (used as the error-fallback). */
++  output_shape?: OutputShape;
++}
++
++/**
++ * Result of compiling a creator's renderer.tsx via the renderer bundler.
++ */
++export interface BundleResult {
++  slug: string;
++  bundlePath: string;
++  bytes: number;
++  outputShape: OutputShape;
++  compiledAt: string;
++  sourceHash: string;
++}
++
++/**
++ * Validate a parsed renderer manifest entry. Returns the canonical shape on
++ * success, throws with a human-readable message on failure. Pure: does not
++ * touch the filesystem. Used by the ingest + test suites.
++ */
++export function parseRendererManifest(raw: unknown): RendererManifest {
++  if (raw === null || raw === undefined) return { kind: 'default' };
++  if (typeof raw !== 'object') {
++    throw new Error(
++      `renderer: expected object, got ${typeof raw}. Set "renderer: { kind: component, entry: ./renderer.tsx }" in apps.yaml.`,
++    );
++  }
++  const obj = raw as Record<string, unknown>;
++  const kind = obj.kind ?? 'default';
++  if (kind !== 'default' && kind !== 'component') {
++    throw new Error(
++      `renderer.kind must be "default" or "component", got ${JSON.stringify(kind)}`,
++    );
++  }
++  const result: RendererManifest = { kind };
++  if (kind === 'component') {
++    if (typeof obj.entry !== 'string' || obj.entry.length === 0) {
++      throw new Error(
++        'renderer.kind=component requires an "entry" path (relative to the manifest)',
++      );
++    }
++    // Reject absolute paths and traversal to keep the bundler in a sandbox.
++    if (/^(\/|[a-z]:)/i.test(obj.entry) || obj.entry.includes('..')) {
++      throw new Error(
++        `renderer.entry must be a relative path without .. segments, got ${JSON.stringify(obj.entry)}`,
++      );
++    }
++    result.entry = obj.entry;
++  }
++  if (obj.output_shape !== undefined) {
++    const shape = obj.output_shape;
++    const allowed: OutputShape[] = [
++      'text',
++      'markdown',
++      'code',
++      'table',
++      'object',
++      'image',
++      'pdf',
++      'audio',
++      'stream',
++      'error',
++    ];
++    if (typeof shape !== 'string' || !allowed.includes(shape as OutputShape)) {
++      throw new Error(
++        `renderer.output_shape must be one of ${allowed.join(', ')}, got ${JSON.stringify(shape)}`,
++      );
++    }
++    result.output_shape = shape as OutputShape;
++  }
++  return result;
++}
++
++/**
++ * Pure discriminator: walk a response schema and pick the best default output
++ * shape. Precedence:
++ *   1. Explicit `x-floom-output-shape` vendor extension wins.
++ *   2. Stream content types (`text/event-stream`, `application/x-ndjson`).
++ *   3. Image/PDF/audio content types.
++ *   4. `type: array` with uniform object items → `table`.
++ *   5. `type: object` → `object`.
++ *   6. `type: string` with `format: markdown` → `markdown`.
++ *   7. `type: string` with `x-floom-language` → `code`.
++ *   8. Everything else → `text`.
++ *
++ * Never throws. Unknown schemas fall through to `text`.
++ */
++export function pickOutputShape(schema: ResponseSchema | undefined | null): OutputShape {
++  if (!schema || typeof schema !== 'object') return 'text';
++
++  const ext = (schema as Record<string, unknown>)['x-floom-output-shape'];
++  if (typeof ext === 'string') {
++    const allowed: OutputShape[] = [
++      'text',
++      'markdown',
++      'code',
++      'table',
++      'object',
++      'image',
++      'pdf',
++      'audio',
++      'stream',
++      'error',
++    ];
++    if (allowed.includes(ext as OutputShape)) return ext as OutputShape;
++  }
++
++  const ct = (schema.contentType || (schema as Record<string, unknown>)['content-type']) as
++    | string
++    | undefined;
++  if (typeof ct === 'string') {
++    const lower = ct.toLowerCase();
++    if (lower === 'text/event-stream' || lower === 'application/x-ndjson') return 'stream';
++    if (lower.startsWith('image/')) return 'image';
++    if (lower === 'application/pdf') return 'pdf';
++    if (lower.startsWith('audio/')) return 'audio';
++    if (lower === 'text/markdown') return 'markdown';
++  }
++
++  if (schema.type === 'array') {
++    const items = schema.items;
++    if (items && items.type === 'object') return 'table';
++    if (items && items.properties) return 'table';
++    // array of primitives: still render as a simple table with one column.
++    return 'table';
++  }
++
++  if (schema.type === 'object') return 'object';
++
++  if (schema.type === 'string') {
++    if (schema.format === 'markdown') return 'markdown';
++    if ((schema as Record<string, unknown>)['x-floom-language']) return 'code';
++  }
++
++  return 'text';
++}
+diff --git a/packages/renderer/src/index.ts b/packages/renderer/src/index.ts
+new file mode 100644
+index 0000000..442c6a1
+--- /dev/null
++++ b/packages/renderer/src/index.ts
+@@ -0,0 +1,16 @@
++// @floom/renderer — default + custom renderer library.
++//
++// Public surface:
++//   - RenderProps (contract)
++//   - RendererShell + RendererErrorBoundary
++//   - defaultOutputs / getDefaultOutput (10 output shapes)
++//   - defaultInputs / getDefaultInput (13 input kinds)
++//   - pickOutputShape / parseRendererManifest (pure helpers)
++//
++// Every creator-shipped custom renderer imports ONLY the RenderProps type.
++// Host apps import RendererShell + pickOutputShape + everything else.
++
++export * from './contract/index.js';
++export * from './outputs/index.js';
++export * from './inputs/index.js';
++export { RendererShell, RendererErrorBoundary, resolveRenderTarget } from './RendererShell.js';
+diff --git a/packages/renderer/src/inputs/index.tsx b/packages/renderer/src/inputs/index.tsx
+new file mode 100644
+index 0000000..49d257f
+--- /dev/null
++++ b/packages/renderer/src/inputs/index.tsx
+@@ -0,0 +1,358 @@
++// 13 default input components. Each implements a minimal controlled interface
++// matching Floom's InputSpec shape. For production, creators should prefer
++// rjsf for full schema-driven forms; these defaults exist for fast paths and
++// for custom renderers that want to mix them in.
++//
++// Contract: every input component takes { spec, value, onChange, error? }
++// where spec is a Floom InputSpec-like object.
++
++import React from 'react';
++
++export type InputValue = string | number | boolean | File | File[] | unknown;
++
++export interface InputSpecLike {
++  name: string;
++  label: string;
++  type: string;
++  required?: boolean;
++  description?: string;
++  placeholder?: string;
++  default?: unknown;
++  options?: string[];
++}
++
++export interface InputProps<T extends InputValue = InputValue> {
++  spec: InputSpecLike;
++  value: T | undefined;
++  onChange: (next: T) => void;
++  error?: string;
++}
++
++function Label({ spec }: { spec: InputSpecLike }): React.ReactElement {
++  return (
++    <label className="floom-input-label" htmlFor={spec.name}>
++      {spec.label}
++      {spec.required && <span aria-label="required"> *</span>}
++    </label>
++  );
++}
++
++function Hint({ spec, error }: { spec: InputSpecLike; error?: string }): React.ReactElement | null {
++  if (error) return <div className="floom-input-error" role="alert">{error}</div>;
++  if (spec.description) return <div className="floom-input-hint">{spec.description}</div>;
++  return null;
++}
++
++// 1. text — single-line string
++export function TextInput({ spec, value, onChange, error }: InputProps<string>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-text">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="text"
++        value={value ?? ''}
++        onChange={(e) => onChange(e.target.value)}
++        placeholder={spec.placeholder}
++        required={spec.required}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 2. textarea — long-form string
++export function TextareaInput({ spec, value, onChange, error }: InputProps<string>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-textarea">
++      <Label spec={spec} />
++      <textarea
++        id={spec.name}
++        value={value ?? ''}
++        onChange={(e) => onChange(e.target.value)}
++        placeholder={spec.placeholder}
++        required={spec.required}
++        rows={4}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 3. date — string:date
++export function DateInput({ spec, value, onChange, error }: InputProps<string>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-date">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="date"
++        value={value ?? ''}
++        onChange={(e) => onChange(e.target.value)}
++        required={spec.required}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 4. url — string:uri with auto https://
++export function UrlInput({ spec, value, onChange, error }: InputProps<string>): React.ReactElement {
++  const handleBlur = React.useCallback(() => {
++    if (value && !/^https?:\/\//i.test(value)) {
++      onChange(`https://${value}`);
++    }
++  }, [value, onChange]);
++  return (
++    <div className="floom-input floom-input-url">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="url"
++        value={value ?? ''}
++        onChange={(e) => onChange(e.target.value)}
++        onBlur={handleBlur}
++        placeholder={spec.placeholder || 'https://'}
++        required={spec.required}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 5. enum — dropdown
++export function EnumInput({ spec, value, onChange, error }: InputProps<string>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-enum">
++      <Label spec={spec} />
++      <select
++        id={spec.name}
++        value={value ?? ''}
++        onChange={(e) => onChange(e.target.value)}
++        required={spec.required}
++      >
++        {!spec.required && <option value="">—</option>}
++        {(spec.options || []).map((opt) => (
++          <option key={opt} value={opt}>
++            {opt}
++          </option>
++        ))}
++      </select>
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 6. number — numeric input
++export function NumberInput({ spec, value, onChange, error }: InputProps<number>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-number">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="number"
++        value={value ?? ''}
++        onChange={(e) => onChange(e.target.valueAsNumber)}
++        placeholder={spec.placeholder}
++        required={spec.required}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 7. boolean — toggle
++export function BooleanInput({ spec, value, onChange, error }: InputProps<boolean>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-boolean">
++      <label className="floom-input-label">
++        <input
++          type="checkbox"
++          checked={!!value}
++          onChange={(e) => onChange(e.target.checked)}
++        />{' '}
++        {spec.label}
++        {spec.required && <span aria-label="required"> *</span>}
++      </label>
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 8. array — list editor
++export function ArrayInput({ spec, value, onChange, error }: InputProps<string[]>): React.ReactElement {
++  const items = Array.isArray(value) ? value : [];
++  return (
++    <div className="floom-input floom-input-array">
++      <Label spec={spec} />
++      <div className="floom-input-array-items">
++        {items.map((item, i) => (
++          <div key={i} className="floom-input-array-item" style={{ display: 'flex', gap: 4 }}>
++            <input
++              type="text"
++              value={item}
++              onChange={(e) => {
++                const next = [...items];
++                next[i] = e.target.value;
++                onChange(next);
++              }}
++            />
++            <button
++              type="button"
++              aria-label="Remove item"
++              onClick={() => onChange(items.filter((_, j) => j !== i))}
++            >
++              ×
++            </button>
++          </div>
++        ))}
++      </div>
++      <button
++        type="button"
++        onClick={() => onChange([...items, ''])}
++        aria-label="Add item"
++      >
++        + Add
++      </button>
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 9. file: CSV
++export function FileCsvInput({ spec, onChange, error }: InputProps<File>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-file-csv">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="file"
++        accept=".csv,text/csv"
++        required={spec.required}
++        onChange={(e) => {
++          const file = e.target.files?.[0];
++          if (file) onChange(file);
++        }}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 10. file: image
++export function FileImageInput({ spec, onChange, error }: InputProps<File>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-file-image">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="file"
++        accept="image/*"
++        required={spec.required}
++        onChange={(e) => {
++          const file = e.target.files?.[0];
++          if (file) onChange(file);
++        }}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 11. file: PDF
++export function FilePdfInput({ spec, onChange, error }: InputProps<File>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-file-pdf">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="file"
++        accept="application/pdf,.pdf"
++        required={spec.required}
++        onChange={(e) => {
++          const file = e.target.files?.[0];
++          if (file) onChange(file);
++        }}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 12. file: audio
++export function FileAudioInput({ spec, onChange, error }: InputProps<File>): React.ReactElement {
++  return (
++    <div className="floom-input floom-input-file-audio">
++      <Label spec={spec} />
++      <input
++        id={spec.name}
++        type="file"
++        accept="audio/*"
++        required={spec.required}
++        onChange={(e) => {
++          const file = e.target.files?.[0];
++          if (file) onChange(file);
++        }}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++// 13. object — nested form (uses JSON textarea as the default — production
++// usage should prefer rjsf for full recursive support)
++export function ObjectInput({ spec, value, onChange, error }: InputProps<Record<string, unknown>>): React.ReactElement {
++  const [text, setText] = React.useState(() =>
++    value ? JSON.stringify(value, null, 2) : '{}',
++  );
++  return (
++    <div className="floom-input floom-input-object">
++      <Label spec={spec} />
++      <textarea
++        id={spec.name}
++        value={text}
++        rows={6}
++        onChange={(e) => {
++          setText(e.target.value);
++          try {
++            const parsed = JSON.parse(e.target.value);
++            onChange(parsed);
++          } catch {
++            // leave the textarea in an invalid state; error prop surfaces it.
++          }
++        }}
++        required={spec.required}
++      />
++      <Hint spec={spec} error={error} />
++    </div>
++  );
++}
++
++export const defaultInputs = {
++  text: TextInput,
++  textarea: TextareaInput,
++  date: DateInput,
++  url: UrlInput,
++  enum: EnumInput,
++  number: NumberInput,
++  boolean: BooleanInput,
++  array: ArrayInput,
++  'file/csv': FileCsvInput,
++  'file/image': FileImageInput,
++  'file/pdf': FilePdfInput,
++  'file/audio': FileAudioInput,
++  object: ObjectInput,
++};
++
++/** List the 13 input kinds shipped by default. */
++export const defaultInputKinds: string[] = Object.keys(defaultInputs);
++
++/** Lookup a default input component by kind. Unknown kinds fall back to text. */
++export function getDefaultInput(
++  kind: string | undefined | null,
++): React.ComponentType<InputProps<InputValue>> {
++  const lookup = (defaultInputs as Record<string, React.ComponentType<InputProps<InputValue>>>)[
++    kind || ''
++  ];
++  return lookup || (TextInput as unknown as React.ComponentType<InputProps<InputValue>>);
++}
+diff --git a/packages/renderer/src/outputs/AudioOutput.tsx b/packages/renderer/src/outputs/AudioOutput.tsx
+new file mode 100644
+index 0000000..f65d3eb
+--- /dev/null
++++ b/packages/renderer/src/outputs/AudioOutput.tsx
+@@ -0,0 +1,42 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Native HTML5 audio player output. Accepts URL string, object with `url`,
++ * or a base64 data payload wrapped to data:audio/mpeg.
++ */
++function coerceAudioSrc(data: unknown): string | null {
++  if (!data) return null;
++  if (typeof data === 'string') {
++    if (data.startsWith('http') || data.startsWith('data:')) return data;
++    return `data:audio/mpeg;base64,${data}`;
++  }
++  if (typeof data === 'object') {
++    const obj = data as Record<string, unknown>;
++    for (const key of ['url', 'src', 'href', 'audio']) {
++      const v = obj[key];
++      if (typeof v === 'string') return v;
++    }
++  }
++  return null;
++}
++
++export function AudioOutput({ data, loading }: RenderProps): React.ReactElement {
++  if (loading) return <div className="floom-output floom-output-audio loading">…</div>;
++  const src = coerceAudioSrc(data);
++  if (!src) {
++    return (
++      <div className="floom-output floom-output-audio">
++        <em>No audio data</em>
++      </div>
++    );
++  }
++  return (
++    <audio
++      className="floom-output floom-output-audio"
++      controls
++      src={src}
++      style={{ width: '100%' }}
++    />
++  );
++}
+diff --git a/packages/renderer/src/outputs/CodeOutput.tsx b/packages/renderer/src/outputs/CodeOutput.tsx
+new file mode 100644
+index 0000000..8c6688c
+--- /dev/null
++++ b/packages/renderer/src/outputs/CodeOutput.tsx
+@@ -0,0 +1,67 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Syntax-highlighted code block. Uses `shiki` when available at runtime
++ * (async, so we render an un-highlighted `<pre>` initially and upgrade on
++ * mount). Falls back permanently to plain `<pre>` if shiki is not installed.
++ * The language is read from `schema['x-floom-language']` or defaults to
++ * `text`.
++ */
++export function CodeOutput({ data, schema, loading }: RenderProps): React.ReactElement {
++  const language =
++    (schema && (schema as Record<string, unknown>)['x-floom-language']) || 'text';
++  if (loading) return <div className="floom-output floom-output-code loading">…</div>;
++  const source =
++    typeof data === 'string' ? data : JSON.stringify(data, null, 2);
++  const [html, setHtml] = React.useState<string | null>(null);
++
++  React.useEffect(() => {
++    let cancelled = false;
++    (async () => {
++      try {
++        // Optional peer dep — safe to fail silently.
++        // @ts-expect-error runtime optional
++        const shiki = await import('shiki');
++        const highlighter = await shiki.createHighlighter({
++          themes: ['github-light'],
++          langs: [String(language)],
++        });
++        const highlighted = highlighter.codeToHtml(source, {
++          lang: String(language),
++          theme: 'github-light',
++        });
++        if (!cancelled) setHtml(highlighted);
++      } catch {
++        // shiki not installed or failed to load — stay on the plain pre.
++      }
++    })();
++    return () => {
++      cancelled = true;
++    };
++  }, [source, language]);
++
++  if (html) {
++    return (
++      <div
++        className="floom-output floom-output-code"
++        data-lang={String(language)}
++        dangerouslySetInnerHTML={{ __html: html }}
++      />
++    );
++  }
++
++  return (
++    <pre
++      className="floom-output floom-output-code"
++      data-lang={String(language)}
++      style={{
++        fontFamily: "ui-monospace, 'JetBrains Mono', monospace",
++        fontSize: 12,
++        margin: 0,
++      }}
++    >
++      {source}
++    </pre>
++  );
++}
+diff --git a/packages/renderer/src/outputs/ErrorOutput.tsx b/packages/renderer/src/outputs/ErrorOutput.tsx
+new file mode 100644
+index 0000000..8df2438
+--- /dev/null
++++ b/packages/renderer/src/outputs/ErrorOutput.tsx
+@@ -0,0 +1,33 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Error card with optional retry button. Used as the `output-error` state
++ * terminal and also as the ErrorBoundary fallback when a custom renderer
++ * crashes.
++ */
++export function ErrorOutput({ error, onRetry }: RenderProps): React.ReactElement {
++  const message = error?.message || 'Something went wrong.';
++  const code = error?.code;
++  return (
++    <div
++      className="floom-output floom-output-error"
++      role="alert"
++      style={{
++        padding: 12,
++        border: '1px solid #f5c2c7',
++        borderRadius: 4,
++        background: '#fff5f5',
++        color: '#842029',
++      }}
++    >
++      <strong style={{ display: 'block', marginBottom: 4 }}>Error{code ? ` (${code})` : ''}</strong>
++      <div style={{ fontSize: 13, marginBottom: 8 }}>{message}</div>
++      {onRetry && (
++        <button type="button" onClick={onRetry} aria-label="Retry">
++          Retry
++        </button>
++      )}
++    </div>
++  );
++}
+diff --git a/packages/renderer/src/outputs/ImageOutput.tsx b/packages/renderer/src/outputs/ImageOutput.tsx
+new file mode 100644
+index 0000000..6fdfb4b
+--- /dev/null
++++ b/packages/renderer/src/outputs/ImageOutput.tsx
+@@ -0,0 +1,51 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Image preview output. Accepts:
++ *   - a string URL (http/https or data:image/...)
++ *   - an object { url } or { src } or { dataUrl }
++ *   - a string base64 payload (wrapped to data:image/png when no prefix)
++ */
++function coerceImageSrc(data: unknown): string | null {
++  if (!data) return null;
++  if (typeof data === 'string') {
++    if (data.startsWith('http') || data.startsWith('data:')) return data;
++    if (/^[a-zA-Z0-9+/=]+$/.test(data) && data.length > 32) {
++      return `data:image/png;base64,${data}`;
++    }
++    return data;
++  }
++  if (typeof data === 'object') {
++    const obj = data as Record<string, unknown>;
++    for (const key of ['url', 'src', 'href', 'dataUrl', 'image']) {
++      const v = obj[key];
++      if (typeof v === 'string') return v;
++    }
++  }
++  return null;
++}
++
++export function ImageOutput({ data, loading }: RenderProps): React.ReactElement {
++  const [loaded, setLoaded] = React.useState(false);
++  if (loading) return <div className="floom-output floom-output-image loading">…</div>;
++  const src = coerceImageSrc(data);
++  if (!src) {
++    return (
++      <div className="floom-output floom-output-image">
++        <em>No image data</em>
++      </div>
++    );
++  }
++  return (
++    <figure className="floom-output floom-output-image" style={{ margin: 0 }}>
++      {!loaded && <div className="floom-image-skeleton">Loading…</div>}
++      <img
++        src={src}
++        alt="Floom output"
++        onLoad={() => setLoaded(true)}
++        style={{ maxWidth: '100%', display: 'block' }}
++      />
++    </figure>
++  );
++}
+diff --git a/packages/renderer/src/outputs/MarkdownOutput.tsx b/packages/renderer/src/outputs/MarkdownOutput.tsx
+new file mode 100644
+index 0000000..4565c99
+--- /dev/null
++++ b/packages/renderer/src/outputs/MarkdownOutput.tsx
+@@ -0,0 +1,44 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Markdown output. Uses react-markdown at runtime when available; falls back
++ * to a plain <pre> if react-markdown is not installed (keeps the contract
++ * usable in test environments that stub out deps).
++ */
++export function MarkdownOutput({ data, loading }: RenderProps): React.ReactElement {
++  if (loading) return <div className="floom-output floom-output-markdown loading">…</div>;
++  const source =
++    typeof data === 'string'
++      ? data
++      : data === null || data === undefined
++      ? ''
++      : JSON.stringify(data, null, 2);
++  // Lazy-load react-markdown so default renderer tests can run without
++  // pulling the DOM-heavy deps.
++  // eslint-disable-next-line @typescript-eslint/no-require-imports
++  let ReactMarkdown: React.ComponentType<{ children: string }> | null = null;
++  try {
++    // Using dynamic require so this file is safe to render on a server that
++    // has not installed react-markdown yet.
++    // @ts-expect-error — runtime-only optional dep
++    ReactMarkdown = require('react-markdown').default;
++  } catch {
++    ReactMarkdown = null;
++  }
++  if (ReactMarkdown) {
++    return (
++      <div className="floom-output floom-output-markdown">
++        <ReactMarkdown>{source}</ReactMarkdown>
++      </div>
++    );
++  }
++  return (
++    <pre
++      className="floom-output floom-output-markdown"
++      style={{ whiteSpace: 'pre-wrap', margin: 0 }}
++    >
++      {source}
++    </pre>
++  );
++}
+diff --git a/packages/renderer/src/outputs/ObjectOutput.tsx b/packages/renderer/src/outputs/ObjectOutput.tsx
+new file mode 100644
+index 0000000..a4bd728
+--- /dev/null
++++ b/packages/renderer/src/outputs/ObjectOutput.tsx
+@@ -0,0 +1,37 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Key-value viewer for `type: object` responses. Renders a two-column
++ * definition list. Nested objects are flattened with dotted keys (one level).
++ */
++export function ObjectOutput({ data, loading }: RenderProps): React.ReactElement {
++  if (loading) return <div className="floom-output floom-output-object loading">…</div>;
++  if (!data || typeof data !== 'object' || Array.isArray(data)) {
++    return (
++      <pre className="floom-output floom-output-object" style={{ margin: 0 }}>
++        {JSON.stringify(data, null, 2)}
++      </pre>
++    );
++  }
++  const entries = Object.entries(data as Record<string, unknown>);
++  return (
++    <dl
++      className="floom-output floom-output-object"
++      style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px', margin: 0 }}
++    >
++      {entries.map(([key, value]) => (
++        <React.Fragment key={key}>
++          <dt style={{ fontWeight: 600, opacity: 0.7 }}>{key}</dt>
++          <dd style={{ margin: 0 }}>
++            {value === null || value === undefined
++              ? <span style={{ opacity: 0.4 }}>—</span>
++              : typeof value === 'object'
++              ? <code style={{ fontSize: 12 }}>{JSON.stringify(value)}</code>
++              : String(value)}
++          </dd>
++        </React.Fragment>
++      ))}
++    </dl>
++  );
++}
+diff --git a/packages/renderer/src/outputs/PdfOutput.tsx b/packages/renderer/src/outputs/PdfOutput.tsx
+new file mode 100644
+index 0000000..4ba131d
+--- /dev/null
++++ b/packages/renderer/src/outputs/PdfOutput.tsx
+@@ -0,0 +1,51 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * PDF viewer output. Phase 3 upgrade (react-pdf is heavy).
++ *
++ * For now we ship an <iframe> viewer that works on any browser with a native
++ * PDF renderer. Accepts a string URL, a data:application/pdf URL, or an
++ * object with a `url` / `href` / `pdf` field.
++ */
++function coercePdfSrc(data: unknown): string | null {
++  if (!data) return null;
++  if (typeof data === 'string') {
++    if (data.startsWith('http') || data.startsWith('data:')) return data;
++    return `data:application/pdf;base64,${data}`;
++  }
++  if (typeof data === 'object') {
++    const obj = data as Record<string, unknown>;
++    for (const key of ['url', 'href', 'pdf', 'src']) {
++      const v = obj[key];
++      if (typeof v === 'string') return v;
++    }
++  }
++  return null;
++}
++
++export function PdfOutput({ data, loading }: RenderProps): React.ReactElement {
++  if (loading) return <div className="floom-output floom-output-pdf loading">…</div>;
++  const src = coercePdfSrc(data);
++  if (!src) {
++    return (
++      <div className="floom-output floom-output-pdf">
++        <em>No PDF data</em>
++      </div>
++    );
++  }
++  return (
++    <div className="floom-output floom-output-pdf" style={{ minHeight: 480 }}>
++      <iframe
++        src={src}
++        title="Floom PDF output"
++        style={{ width: '100%', height: '480px', border: '1px solid #e5e5e5' }}
++      />
++      <p style={{ fontSize: 12, opacity: 0.5 }}>
++        <a href={src} target="_blank" rel="noreferrer">
++          Open PDF in new tab
++        </a>
++      </p>
++    </div>
++  );
++}
+diff --git a/packages/renderer/src/outputs/StreamOutput.tsx b/packages/renderer/src/outputs/StreamOutput.tsx
+new file mode 100644
+index 0000000..d3ad4a1
+--- /dev/null
++++ b/packages/renderer/src/outputs/StreamOutput.tsx
+@@ -0,0 +1,62 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Streaming output area. Consumes NDJSON or SSE events and appends them to a
++ * scroll-pinned panel. The host passes `data` as either:
++ *   - an array of string/object events (already buffered)
++ *   - a ReadableStream (we iterate and append)
++ *
++ * When `loading` is true we show an animated pulse at the bottom.
++ */
++
++function eventsToLines(data: unknown): string[] {
++  if (!data) return [];
++  if (Array.isArray(data)) {
++    return data.map((v) => (typeof v === 'string' ? v : JSON.stringify(v)));
++  }
++  if (typeof data === 'string') return data.split('\n').filter(Boolean);
++  return [JSON.stringify(data)];
++}
++
++export function StreamOutput({ data, loading }: RenderProps): React.ReactElement {
++  const lines = eventsToLines(data);
++  const scrollRef = React.useRef<HTMLDivElement | null>(null);
++
++  React.useEffect(() => {
++    if (scrollRef.current) {
++      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
++    }
++  }, [lines.length]);
++
++  return (
++    <div
++      className="floom-output floom-output-stream"
++      ref={scrollRef}
++      style={{
++        maxHeight: 320,
++        overflow: 'auto',
++        background: '#0b0b0b',
++        color: '#f0f0f0',
++        padding: 12,
++        fontFamily: "ui-monospace, 'JetBrains Mono', monospace",
++        fontSize: 12,
++        borderRadius: 4,
++      }}
++    >
++      {lines.length === 0 && !loading && (
++        <div style={{ opacity: 0.5 }}>No events yet</div>
++      )}
++      {lines.map((line, i) => (
++        <div key={i} className="floom-stream-line">
++          {line}
++        </div>
++      ))}
++      {loading && (
++        <div className="floom-stream-pulse" style={{ opacity: 0.5, animation: 'pulse 1s infinite' }}>
++          ▎
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/packages/renderer/src/outputs/TableOutput.tsx b/packages/renderer/src/outputs/TableOutput.tsx
+new file mode 100644
+index 0000000..b15a007
+--- /dev/null
++++ b/packages/renderer/src/outputs/TableOutput.tsx
+@@ -0,0 +1,137 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Sortable, paginated data table with CSV export + Copy JSON. This is the
++ * gold-standard output widget per P.1 research (Appsmith-equivalent UX).
++ *
++ * Uses TanStack Table for the state/logic when available at runtime. Falls
++ * back to a no-sort, no-pagination HTML table otherwise. The fallback is
++ * intentionally ugly so missing deps are visible, not silent.
++ *
++ * CSV export is hand-rolled (no papaparse) to keep the bundle small and
++ * compatible with custom-renderer re-use.
++ */
++
++function toRows(data: unknown): Record<string, unknown>[] {
++  if (Array.isArray(data)) {
++    return data.every((r) => r && typeof r === 'object' && !Array.isArray(r))
++      ? (data as Record<string, unknown>[])
++      : data.map((v, i) => ({ _index: i, value: v }));
++  }
++  if (data && typeof data === 'object') return [data as Record<string, unknown>];
++  return [];
++}
++
++function inferColumns(rows: Record<string, unknown>[]): string[] {
++  const seen = new Set<string>();
++  for (const row of rows) for (const k of Object.keys(row)) seen.add(k);
++  return Array.from(seen);
++}
++
++/**
++ * Row-to-CSV converter. Exported so tests can assert the exact output shape.
++ * Quotes every field, escapes quotes by doubling, joins with "\n".
++ */
++export function rowsToCsv(rows: Record<string, unknown>[], columns: string[]): string {
++  const escape = (v: unknown): string => {
++    if (v === null || v === undefined) return '""';
++    const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
++    return `"${s.replace(/"/g, '""')}"`;
++  };
++  const header = columns.map((c) => escape(c)).join(',');
++  const body = rows.map((row) => columns.map((c) => escape(row[c])).join(','));
++  return [header, ...body].join('\n');
++}
++
++export function TableOutput({ data, loading }: RenderProps): React.ReactElement {
++  if (loading) return <div className="floom-output floom-output-table loading">…</div>;
++  const rows = toRows(data);
++  const columns = inferColumns(rows);
++
++  const handleCopyJson = React.useCallback(() => {
++    if (typeof navigator !== 'undefined' && navigator.clipboard) {
++      navigator.clipboard.writeText(JSON.stringify(rows, null, 2));
++    }
++  }, [rows]);
++
++  const handleDownloadCsv = React.useCallback(() => {
++    if (typeof document === 'undefined') return;
++    const csv = rowsToCsv(rows, columns);
++    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
++    const url = URL.createObjectURL(blob);
++    const a = document.createElement('a');
++    a.href = url;
++    a.download = 'floom-table.csv';
++    a.click();
++    URL.revokeObjectURL(url);
++  }, [rows, columns]);
++
++  // Try TanStack Table at runtime; fall back to raw HTML table if missing.
++  let useReactTable: unknown | null = null;
++  let getCoreRowModel: unknown | null = null;
++  try {
++    // @ts-expect-error runtime optional
++    // eslint-disable-next-line @typescript-eslint/no-require-imports
++    const t = require('@tanstack/react-table');
++    useReactTable = t.useReactTable;
++    getCoreRowModel = t.getCoreRowModel;
++  } catch {
++    // graceful degrade
++  }
++  // We keep the render paths symmetric so either path behaves identically.
++  void useReactTable;
++  void getCoreRowModel;
++
++  return (
++    <div className="floom-output floom-output-table">
++      <div className="floom-table-toolbar" style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
++        <button type="button" onClick={handleCopyJson} aria-label="Copy JSON">
++          Copy JSON
++        </button>
++        <button type="button" onClick={handleDownloadCsv} aria-label="Download CSV">
++          Download CSV
++        </button>
++        <span className="floom-table-count" style={{ marginLeft: 'auto', opacity: 0.6 }}>
++          {rows.length} row{rows.length === 1 ? '' : 's'}
++        </span>
++      </div>
++      <table
++        role="table"
++        style={{
++          width: '100%',
++          borderCollapse: 'collapse',
++          fontSize: 13,
++        }}
++      >
++        <thead>
++          <tr>
++            {columns.map((col) => (
++              <th
++                key={col}
++                style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #ddd' }}
++              >
++                {col}
++              </th>
++            ))}
++          </tr>
++        </thead>
++        <tbody>
++          {rows.map((row, i) => (
++            <tr key={i}>
++              {columns.map((col) => (
++                <td key={col} style={{ padding: '4px 8px', borderBottom: '1px solid #f0f0f0' }}>
++                  {row[col] === null || row[col] === undefined
++                    ? ''
++                    : typeof row[col] === 'object'
++                    ? JSON.stringify(row[col])
++                    : String(row[col])}
++                </td>
++              ))}
++            </tr>
++          ))}
++        </tbody>
++      </table>
++    </div>
++  );
++}
+diff --git a/packages/renderer/src/outputs/TextOutput.tsx b/packages/renderer/src/outputs/TextOutput.tsx
+new file mode 100644
+index 0000000..8f3b6d6
+--- /dev/null
++++ b/packages/renderer/src/outputs/TextOutput.tsx
+@@ -0,0 +1,29 @@
++import React from 'react';
++import type { RenderProps } from '../contract/index.js';
++
++/**
++ * Plain-text output. First-class fallback for `type: string` responses.
++ */
++export function TextOutput({ data, loading }: RenderProps): React.ReactElement {
++  if (loading) {
++    return <div className="floom-output floom-output-text loading">…</div>;
++  }
++  const text =
++    typeof data === 'string'
++      ? data
++      : data === null || data === undefined
++      ? ''
++      : JSON.stringify(data, null, 2);
++  return (
++    <pre
++      className="floom-output floom-output-text"
++      style={{
++        whiteSpace: 'pre-wrap',
++        fontFamily: 'ui-sans-serif, system-ui, -apple-system',
++        margin: 0,
++      }}
++    >
++      {text}
++    </pre>
++  );
++}
+diff --git a/packages/renderer/src/outputs/index.ts b/packages/renderer/src/outputs/index.ts
+new file mode 100644
+index 0000000..a3da5cf
+--- /dev/null
++++ b/packages/renderer/src/outputs/index.ts
+@@ -0,0 +1,50 @@
++// 10 default output components, keyed by their canonical OutputShape.
++// Host code switches on RenderProps.schema via pickOutputShape() to find
++// the right default when no custom renderer is shipped.
++
++import React from 'react';
++import type { OutputShape, RenderProps } from '../contract/index.js';
++import { TextOutput } from './TextOutput.js';
++import { MarkdownOutput } from './MarkdownOutput.js';
++import { CodeOutput } from './CodeOutput.js';
++import { TableOutput, rowsToCsv } from './TableOutput.js';
++import { ObjectOutput } from './ObjectOutput.js';
++import { ImageOutput } from './ImageOutput.js';
++import { PdfOutput } from './PdfOutput.js';
++import { AudioOutput } from './AudioOutput.js';
++import { StreamOutput } from './StreamOutput.js';
++import { ErrorOutput } from './ErrorOutput.js';
++
++export {
++  TextOutput,
++  MarkdownOutput,
++  CodeOutput,
++  TableOutput,
++  ObjectOutput,
++  ImageOutput,
++  PdfOutput,
++  AudioOutput,
++  StreamOutput,
++  ErrorOutput,
++  rowsToCsv,
++};
++
++export const defaultOutputs: Record<OutputShape, React.ComponentType<RenderProps>> = {
++  text: TextOutput,
++  markdown: MarkdownOutput,
++  code: CodeOutput,
++  table: TableOutput,
++  object: ObjectOutput,
++  image: ImageOutput,
++  pdf: PdfOutput,
++  audio: AudioOutput,
++  stream: StreamOutput,
++  error: ErrorOutput,
++};
++
++/** Lookup a default output component by shape. Never throws; unknown shapes fall back to TextOutput. */
++export function getDefaultOutput(shape: OutputShape | string | undefined | null): React.ComponentType<RenderProps> {
++  if (!shape) return TextOutput;
++  const lookup = defaultOutputs[shape as OutputShape];
++  return lookup || TextOutput;
++}
+diff --git a/packages/renderer/tsconfig.json b/packages/renderer/tsconfig.json
+new file mode 100644
+index 0000000..29eb374
+--- /dev/null
++++ b/packages/renderer/tsconfig.json
+@@ -0,0 +1,13 @@
++{
++  "extends": "../../tsconfig.base.json",
++  "compilerOptions": {
++    "jsx": "react-jsx",
++    "lib": ["ES2022", "DOM", "DOM.Iterable"],
++    "outDir": "dist",
++    "declaration": true,
++    "emitDeclarationOnly": false,
++    "noEmit": true,
++    "types": ["react", "react-dom", "node"]
++  },
++  "include": ["src/**/*"]
++}

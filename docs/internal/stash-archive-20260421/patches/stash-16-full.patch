@@ -1,0 +1,20 @@
+diff --git a/apps/server/src/services/openapi-ingest.ts b/apps/server/src/services/openapi-ingest.ts
+index e44915f..7a4ff15 100644
+--- a/apps/server/src/services/openapi-ingest.ts
++++ b/apps/server/src/services/openapi-ingest.ts
+@@ -3,12 +3,15 @@
+ // specs, generates a Floom manifest for each operation, and upserts into the
+ // apps table. Idempotent: re-running with the same config does not duplicate.
+ import { readFileSync } from 'node:fs';
++import { dirname, resolve as resolvePath } from 'node:path';
+ import { parse as parseYaml } from 'yaml';
+ // @ts-expect-error — json-schema-merge-allof has no types on npm
+ import mergeAllOf from 'json-schema-merge-allof';
+ import $RefParser from '@apidevtools/json-schema-ref-parser';
++import { parseRendererManifest, type RendererManifest } from '@floom/renderer';
+ import { db } from '../db.js';
+ import { newAppId, newSecretId } from '../lib/ids.js';
++import { bundleRendererFromManifest } from './renderer-bundler.js';
+ import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
+ 
+ // ---------- config schema ----------

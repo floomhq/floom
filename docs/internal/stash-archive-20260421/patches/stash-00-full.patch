@@ -1,0 +1,1423 @@
+diff --git a/apps/server/package.json b/apps/server/package.json
+index be20f82..aec6735 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -25,6 +25,7 @@
+     "hono": "4.12.14",
+     "json-schema-merge-allof": "0.8.1",
+     "nanoid": "5.0.9",
++    "resend": "^6.12.0",
+     "stripe": "17.7.0",
+     "yaml": "2.8.3",
+     "zod": "^3.25.76"
+diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
+index 7686b8b..a1e8a27 100644
+--- a/apps/server/src/index.ts
++++ b/apps/server/src/index.ts
+@@ -16,6 +16,7 @@ import { jobsRouter } from './routes/jobs.js';
+ import { mcpRouter } from './routes/mcp.js';
+ import { rendererRouter } from './routes/renderer.js';
+ import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
++import { journalRouter } from './routes/journal.js';
+ import { memoryRouter, secretsRouter } from './routes/memory.js';
+ import { connectionsRouter } from './routes/connections.js';
+ import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
+@@ -109,6 +110,8 @@ app.route('/api/:slug/jobs', jobsRouter);
+ // run in the user's browser and fetch data via the already-authed /api routes).
+ app.route('/renderer', rendererRouter);
+ app.route('/api/deploy-waitlist', deployWaitlistRouter);
++// Build-in-public journal: double-opt-in subscribe, confirm, unsubscribe.
++app.route('/api/journal', journalRouter);
+ // W2.1: per-user state
+ app.route('/api/memory', memoryRouter);
+ app.route('/api/secrets', secretsRouter);
+diff --git a/apps/server/src/routes/journal.ts b/apps/server/src/routes/journal.ts
+new file mode 100644
+index 0000000..d565b35
+--- /dev/null
++++ b/apps/server/src/routes/journal.ts
+@@ -0,0 +1,237 @@
++// Journal: double-opt-in subscriber flow for the build-in-public log.
++//
++// Two lists (journal, product) live in one table, keyed by (email, list).
++// Subscription is double opt-in: POST /subscribe creates a pending row and
++// mails a confirmation link; GET /confirm?token=... flips confirmed_at.
++// Unsubscribe is one-click: GET /unsubscribe?token=... sets unsubscribed_at.
++//
++// The confirm / unsubscribe handlers 302 to SPA pages so the user ends up
++// on a branded success screen instead of a raw JSON body.
++
++import { Hono } from 'hono';
++import { z } from 'zod';
++import { createHash, randomBytes } from 'node:crypto';
++import { db } from '../db.js';
++import { sendEmail } from '../services/email.js';
++
++export const journalRouter = new Hono();
++
++db.exec(`
++  CREATE TABLE IF NOT EXISTS journal_subscribers (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    email TEXT NOT NULL,
++    list TEXT NOT NULL CHECK (list IN ('journal', 'product')),
++    token TEXT NOT NULL UNIQUE,
++    confirmed_at TEXT,
++    unsubscribed_at TEXT,
++    created_at TEXT NOT NULL DEFAULT (datetime('now')),
++    UNIQUE (email, list)
++  );
++  CREATE INDEX IF NOT EXISTS journal_subscribers_token_idx
++    ON journal_subscribers(token);
++  CREATE INDEX IF NOT EXISTS journal_subscribers_list_confirmed_idx
++    ON journal_subscribers(list, confirmed_at);
++`);
++
++const SubscribeBody = z.object({
++  email: z.string().email().max(320),
++  list: z.enum(['journal', 'product']).default('journal'),
++});
++
++// Rolling-window rate limit. 10 subscribe attempts per hour per IP hash.
++// Mirrors the feedback-route pattern so a single origin can't spray the
++// confirmation inbox of an arbitrary recipient.
++const RATE_LIMIT = 10;
++const WINDOW_MS = 60 * 60 * 1000;
++const buckets = new Map<string, number[]>();
++
++function hashIp(raw: string | null): string {
++  const salt = process.env.FLOOM_JOURNAL_SALT || 'floom-journal-v1';
++  return createHash('sha256').update(`${salt}:${raw || 'unknown'}`).digest('hex').slice(0, 32);
++}
++
++function rateLimitHit(key: string): boolean {
++  const now = Date.now();
++  const cutoff = now - WINDOW_MS;
++  const arr = (buckets.get(key) || []).filter((t) => t > cutoff);
++  if (arr.length >= RATE_LIMIT) {
++    buckets.set(key, arr);
++    return true;
++  }
++  arr.push(now);
++  buckets.set(key, arr);
++  return false;
++}
++
++function baseUrl(): string {
++  return (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3051}`).replace(/\/$/, '');
++}
++
++function newToken(): string {
++  return randomBytes(32).toString('hex');
++}
++
++interface SubscriberRow {
++  id: number;
++  email: string;
++  list: 'journal' | 'product';
++  token: string;
++  confirmed_at: string | null;
++  unsubscribed_at: string | null;
++}
++
++/**
++ * POST /api/journal/subscribe
++ * Body: { email, list? }  (list defaults to 'journal')
++ *
++ * Creates or refreshes a pending subscription. Always emits a fresh token
++ * and resends the confirmation email so a user who lost the first message
++ * can re-request it by submitting the form again. Returns ok:true either
++ * way — we never disclose whether an email already exists in the list.
++ */
++journalRouter.post('/subscribe', async (c) => {
++  const ipHeader =
++    c.req.header('x-forwarded-for') ||
++    c.req.header('x-real-ip') ||
++    'unknown';
++  const ipHash = hashIp(ipHeader.split(',')[0].trim());
++  if (rateLimitHit(ipHash)) {
++    return c.json(
++      { error: 'Too many attempts. Try again in an hour.', code: 'rate_limited' },
++      429,
++    );
++  }
++
++  let body: unknown;
++  try {
++    body = await c.req.json();
++  } catch {
++    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
++  }
++  const parsed = SubscribeBody.safeParse(body);
++  if (!parsed.success) {
++    return c.json(
++      { error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() },
++      400,
++    );
++  }
++
++  const email = parsed.data.email.trim().toLowerCase();
++  const list = parsed.data.list;
++  const token = newToken();
++
++  const existing = db
++    .prepare('SELECT id, confirmed_at FROM journal_subscribers WHERE email = ? AND list = ?')
++    .get(email, list) as Pick<SubscriberRow, 'id' | 'confirmed_at'> | undefined;
++
++  if (existing) {
++    db.prepare(
++      `UPDATE journal_subscribers
++       SET token = ?, unsubscribed_at = NULL
++       WHERE id = ?`,
++    ).run(token, existing.id);
++  } else {
++    db.prepare(
++      `INSERT INTO journal_subscribers (email, list, token) VALUES (?, ?, ?)`,
++    ).run(email, list, token);
++  }
++
++  // Already-confirmed, still-subscribed users don't need a second confirm
++  // mail. Tell them nothing changed.
++  if (existing?.confirmed_at) {
++    return c.json({ ok: true, status: 'already_confirmed' });
++  }
++
++  const confirmUrl = `${baseUrl()}/api/journal/confirm?token=${token}`;
++  const subject =
++    list === 'journal'
++      ? 'Confirm your Floom journal subscription'
++      : 'Confirm your Floom waitlist signup';
++  const text =
++    list === 'journal'
++      ? `One click to confirm you want raw weekly notes from building Floom:
++
++${confirmUrl}
++
++If this wasn't you, ignore this email — you won't hear from me again.
++
++— Federico`
++      : `One click to confirm you want to be on the Floom waitlist:
++
++${confirmUrl}
++
++If this wasn't you, ignore this email — you won't hear from me again.
++
++— Federico`;
++
++  const result = await sendEmail({ to: email, subject, text });
++  if (!result.ok) {
++    return c.json(
++      { error: 'Could not send confirmation email', code: 'email_failed' },
++      502,
++    );
++  }
++
++  return c.json({ ok: true, status: 'pending_confirmation', transport: result.transport });
++});
++
++/**
++ * GET /api/journal/confirm?token=...
++ * Flips confirmed_at to now() and redirects the browser to the SPA success
++ * page. Used from the link in the confirmation email, so returning JSON
++ * would be a worse UX than a redirect even if the token is invalid.
++ */
++journalRouter.get('/confirm', (c) => {
++  const token = c.req.query('token');
++  if (!token || typeof token !== 'string') {
++    return c.redirect('/journal?confirm=invalid', 302);
++  }
++
++  const row = db
++    .prepare(
++      `UPDATE journal_subscribers
++         SET confirmed_at = COALESCE(confirmed_at, datetime('now')),
++             unsubscribed_at = NULL
++       WHERE token = ?
++       RETURNING list`,
++    )
++    .get(token) as { list: 'journal' | 'product' } | undefined;
++
++  if (!row) {
++    return c.redirect('/journal?confirm=invalid', 302);
++  }
++  return c.redirect(`/journal/confirmed?list=${row.list}`, 302);
++});
++
++/**
++ * GET /api/journal/unsubscribe?token=...
++ * One-click unsubscribe. GDPR + Gmail List-Unsubscribe both expect an
++ * HTTP GET that works without JavaScript or a second confirmation.
++ */
++journalRouter.get('/unsubscribe', (c) => {
++  const token = c.req.query('token');
++  if (!token || typeof token !== 'string') {
++    return c.redirect('/journal?unsubscribe=invalid', 302);
++  }
++
++  const row = db
++    .prepare(
++      `UPDATE journal_subscribers
++         SET unsubscribed_at = datetime('now')
++       WHERE token = ?
++       RETURNING list`,
++    )
++    .get(token) as { list: 'journal' | 'product' } | undefined;
++
++  if (!row) {
++    return c.redirect('/journal?unsubscribe=invalid', 302);
++  }
++  return c.redirect(`/journal/unsubscribed?list=${row.list}`, 302);
++});
++
++/**
++ * Reset in-memory rate-limit bucket. Tests only.
++ */
++export function _resetJournalBucketsForTests(): void {
++  buckets.clear();
++}
+diff --git a/apps/server/src/services/email.ts b/apps/server/src/services/email.ts
+new file mode 100644
+index 0000000..2f0ed8a
+--- /dev/null
++++ b/apps/server/src/services/email.ts
+@@ -0,0 +1,54 @@
++// Unified email sender. Uses Resend when RESEND_API_KEY is set; otherwise
++// logs the outgoing email to stdout so OSS self-hosters and dev environments
++// still see confirmation URLs without needing an email provider.
++//
++// Resend is imported dynamically so the package only loads when actually
++// configured — the OSS image can skip installing it entirely if we ever move
++// it to an optional dep.
++
++interface SendEmailArgs {
++  to: string;
++  subject: string;
++  text: string;
++  from?: string;
++}
++
++interface SendEmailResult {
++  ok: boolean;
++  id?: string;
++  transport: 'resend' | 'stdout';
++  error?: string;
++}
++
++const DEFAULT_FROM = process.env.FLOOM_JOURNAL_FROM || 'Floom <journal@floom.dev>';
++
++export async function sendEmail({
++  to,
++  subject,
++  text,
++  from = DEFAULT_FROM,
++}: SendEmailArgs): Promise<SendEmailResult> {
++  const apiKey = process.env.RESEND_API_KEY;
++  if (!apiKey) {
++    // Dev / OSS fallback: log full email so operator can copy links.
++    console.log(
++      `[email:stdout] to=${to} from=${from} subject="${subject}"\n-----\n${text}\n-----`,
++    );
++    return { ok: true, transport: 'stdout' };
++  }
++
++  try {
++    const { Resend } = await import('resend');
++    const client = new Resend(apiKey);
++    const res = await client.emails.send({ from, to, subject, text });
++    if (res.error) {
++      console.error('[email:resend] send failed', res.error);
++      return { ok: false, transport: 'resend', error: String(res.error.message) };
++    }
++    return { ok: true, id: res.data?.id, transport: 'resend' };
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    console.error('[email:resend] threw', msg);
++    return { ok: false, transport: 'resend', error: msg };
++  }
++}
+diff --git a/apps/web/src/api/client.ts b/apps/web/src/api/client.ts
+index 9f51c19..d6c88b9 100644
+--- a/apps/web/src/api/client.ts
++++ b/apps/web/src/api/client.ts
+@@ -583,3 +583,19 @@ export function postFeedback(body: { text: string; email?: string; url?: string
+     body: JSON.stringify(body),
+   });
+ }
++
++// ---------- Journal: build-in-public subscribe (double opt-in) ----------
++
++export function subscribeJournal(
++  email: string,
++  list: 'journal' | 'product' = 'journal',
++): Promise<{
++  ok: true;
++  status: 'pending_confirmation' | 'already_confirmed';
++  transport?: 'resend' | 'stdout';
++}> {
++  return request('/api/journal/subscribe', {
++    method: 'POST',
++    body: JSON.stringify({ email, list }),
++  });
++}
+diff --git a/apps/web/src/components/Footer.tsx b/apps/web/src/components/Footer.tsx
+index 02a36dd..c37d713 100644
+--- a/apps/web/src/components/Footer.tsx
++++ b/apps/web/src/components/Footer.tsx
+@@ -34,6 +34,7 @@ export function Footer() {
+       <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+         <Link to="/apps" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>apps</Link>
+         <Link to="/protocol" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>protocol</Link>
++        <Link to="/journal" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>journal</Link>
+         <a href="https://github.com/floomhq/floom-monorepo" target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>github</a>
+         <Link to="/imprint" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>imprint</Link>
+         <Link to="/privacy" style={{ fontSize: 13, color: 'var(--muted)', textDecoration: 'none' }}>privacy</Link>
+diff --git a/apps/web/src/components/JournalSubscribeForm.tsx b/apps/web/src/components/JournalSubscribeForm.tsx
+new file mode 100644
+index 0000000..641e87d
+--- /dev/null
++++ b/apps/web/src/components/JournalSubscribeForm.tsx
+@@ -0,0 +1,114 @@
++import { useState } from 'react';
++import * as api from '../api/client';
++
++interface Props {
++  list?: 'journal' | 'product';
++  placeholder?: string;
++  ctaLabel?: string;
++}
++
++// Email capture for the journal / product waitlist. Handles three states
++// (idle, pending, error) and surfaces a post-submit message telling the
++// user to check their inbox. No analytics hooks — keep it thin.
++export function JournalSubscribeForm({
++  list = 'journal',
++  placeholder = 'you@work.com',
++  ctaLabel = 'Subscribe',
++}: Props) {
++  const [email, setEmail] = useState('');
++  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
++  const [message, setMessage] = useState<string | null>(null);
++
++  async function onSubmit(e: React.FormEvent) {
++    e.preventDefault();
++    if (state === 'loading') return;
++    setState('loading');
++    setMessage(null);
++    try {
++      const res = await api.subscribeJournal(email.trim(), list);
++      if (res.status === 'already_confirmed') {
++        setState('done');
++        setMessage("You're already subscribed. Thanks.");
++      } else {
++        setState('done');
++        setMessage('Check your inbox — one click to confirm.');
++      }
++    } catch (err) {
++      setState('error');
++      setMessage(
++        err instanceof Error && err.message ? err.message : 'Something went wrong. Try again.',
++      );
++    }
++  }
++
++  if (state === 'done') {
++    return (
++      <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0 }} role="status">
++        {message}
++      </p>
++    );
++  }
++
++  return (
++    <form
++      onSubmit={onSubmit}
++      style={{
++        display: 'flex',
++        gap: 8,
++        flexWrap: 'wrap',
++        maxWidth: 480,
++      }}
++    >
++      <input
++        type="email"
++        required
++        value={email}
++        onChange={(e) => setEmail(e.target.value)}
++        placeholder={placeholder}
++        aria-label="Email address"
++        style={{
++          flex: '1 1 220px',
++          padding: '10px 14px',
++          fontSize: 14,
++          fontFamily: 'inherit',
++          color: 'var(--ink)',
++          background: 'var(--card)',
++          border: '1px solid var(--line)',
++          borderRadius: 999,
++          outline: 'none',
++        }}
++      />
++      <button
++        type="submit"
++        disabled={state === 'loading'}
++        style={{
++          padding: '10px 18px',
++          fontSize: 14,
++          fontWeight: 600,
++          fontFamily: 'inherit',
++          color: '#fff',
++          background: 'var(--ink)',
++          border: '1px solid var(--ink)',
++          borderRadius: 999,
++          cursor: state === 'loading' ? 'wait' : 'pointer',
++          opacity: state === 'loading' ? 0.6 : 1,
++        }}
++      >
++        {state === 'loading' ? 'Sending…' : ctaLabel}
++      </button>
++      {state === 'error' && message && (
++        <p
++          style={{
++            flex: '1 1 100%',
++            fontSize: 13,
++            color: '#b91c1c',
++            margin: '4px 0 0',
++          }}
++          role="alert"
++        >
++          {message}
++        </p>
++      )}
++    </form>
++  );
++}
+diff --git a/apps/web/src/content/journal/index.ts b/apps/web/src/content/journal/index.ts
+new file mode 100644
+index 0000000..d5ad12d
+--- /dev/null
++++ b/apps/web/src/content/journal/index.ts
+@@ -0,0 +1,33 @@
++// Registry of journal entries. Each entry exports a React component for its
++// long-form body plus frontmatter metadata for the index page, OG tags, and
++// RSS. Ordered newest-first. Adding an entry is a one-line import + one row.
++
++import type { ComponentType } from 'react';
++import { Week3 } from './week-3';
++
++export interface JournalEntry {
++  slug: string;
++  title: string;
++  tldr: string;
++  date: string;
++  week: number;
++  readingTime: string;
++  Body: ComponentType;
++}
++
++export const JOURNAL_ENTRIES: JournalEntry[] = [
++  {
++    slug: 'week-3',
++    title: 'Week 3 — raw notes from building Floom',
++    tldr:
++      "People don't want an AI CEO. They want AI to take over the things they do manually right now — and they're struggling because the space is ambiguous. That's the gap Floom is built for.",
++    date: '2026-04-17',
++    week: 3,
++    readingTime: '4 min',
++    Body: Week3,
++  },
++];
++
++export function getEntry(slug: string): JournalEntry | undefined {
++  return JOURNAL_ENTRIES.find((e) => e.slug === slug);
++}
+diff --git a/apps/web/src/content/journal/week-3.tsx b/apps/web/src/content/journal/week-3.tsx
+new file mode 100644
+index 0000000..908c882
+--- /dev/null
++++ b/apps/web/src/content/journal/week-3.tsx
+@@ -0,0 +1,144 @@
++// Week 3 entry body. Plain JSX (no MDX setup) so content lives in the same
++// toolchain as the rest of the app. Styles are inherited from the journal
++// article container — see pages/JournalEntryPage.tsx.
++
++export function Week3() {
++  return (
++    <>
++      <p>
++        Three weeks ago I exited Scaile (in great hands with Simon now) and
++        started Floom. Every Friday I'll publish raw notes — what I shipped,
++        what I learned, what I got wrong. No narrative arc, no polish. If
++        that's useful, subscribe.
++      </p>
++
++      <h2>The thesis, in one line</h2>
++      <p>
++        Look at Paperclip.ing and similar products. I don't hear people saying
++        they want an AI CEO and CMO team of agents. They just want AI to take
++        over the things they do manually right now — and it's a huge struggle,
++        because the space is full of ambiguity.
++      </p>
++      <p>
++        That's the gap. Floom is the{' '}
++        <strong>production layer for mass-adopted agent work</strong>: the
++        security, access control, and digestible UI that turns frontier agent
++        capability into something 2 billion people can actually use, not just
++        10 million early adopters.
++      </p>
++
++      <h2>Where I actually am</h2>
++      <p>Pre-revenue by design. Disentangling the MVP in the open.</p>
++      <ul>
++        <li>
++          <strong>ARR:</strong> €0
++        </li>
++        <li>
++          <strong>Clients:</strong> 0
++        </li>
++        <li>
++          <strong>Team:</strong> 1 FTE (me)
++        </li>
++        <li>
++          <strong>Product:</strong> MVP WIP. Will untangle and ship versions
++          one by one.
++        </li>
++        <li>
++          <strong>Runway:</strong> F&amp;F round opening soon.
++        </li>
++        <li>
++          <strong>Location:</strong> Made it to SF (F.inc Canopy). Prepping
++          O-1 visa.
++        </li>
++      </ul>
++
++      <h2>What I did this week</h2>
++      <ul>
++        <li>
++          Talked to ~50 people. ~80% fit the broad ICP. The pain is real, the
++          articulation of it is not.
++        </li>
++        <li>
++          Co-ideated with Paul Schraven, Vlad, and Falco Schneider.
++        </li>
++        <li>
++          Had a trial with a strong dev in Berlin for the co-founder slot.
++          Didn't click on scope. Search continues.
++        </li>
++        <li>
++          Gave three speaker sessions: AI Beavers, Don't Gate, TechLabs.
++        </li>
++        <li>
++          Joined Don't Gate as AI Advisor — stays close to the customer I'm
++          building Floom for.
++        </li>
++        <li>Started prepping the O-1.</li>
++      </ul>
++
++      <h2>What I learned</h2>
++      <p>
++        <strong>
++          Creator-operators are struggling to get their teams onboard with
++          agents.
++        </strong>{' '}
++        This is exactly the problem I expected coming in. What I didn't expect
++        is how <em>early</em> the ambiguity sits — it's not "which tool," it's
++        "what is even the unit of work an agent should own." I need to
++        disentangle this before I build more.
++      </p>
++      <p>
++        <strong>
++          The field isn't as crowded as the Twitter timeline makes it look.
++        </strong>{' '}
++        Every frontier lab is coming at every layer at once — research, coding,
++        consumer, team infra. No one can win all four categories simultaneously.
++        The production layer — hardcoded use cases, security, access control,
++        digestible UI — is wide open and undervalued because it's unglamorous.
++      </p>
++      <p>
++        <strong>
++          Berlin has builder energy I didn't know I was missing.
++        </strong>{' '}
++        Hyper-connected, generous, fast. Hope to find the same thing in SF now.
++      </p>
++
++      <h2>What I got wrong</h2>
++      <p>
++        I underestimated how much user-pain discovery I still need. I was
++        starting to architect before I had enough pain interviews.
++        Course-correcting: a lot more discovery this week.
++      </p>
++
++      <h2>Next week</h2>
++      <ul>
++        <li>10+ more pain interviews.</li>
++        <li>
++          First Build Friday with the AI Beavers crew — planning to run it in
++          SF.
++        </li>
++        <li>
++          Open a Discord for contributors (separate from the one for users — I
++          want both but they're different conversations).
++        </li>
++        <li>First F&amp;F conversations.</li>
++        <li>Start untangling the MVP into shippable slices.</li>
++      </ul>
++
++      <h2>Help I need</h2>
++      <ul>
++        <li>
++          <strong>Intros to creator-operators</strong> running 5–50 person
++          teams who are actively trying (and struggling) to roll out agent
++          work internally. Reply to this email.
++        </li>
++        <li>
++          <strong>A co-founder.</strong> Technical, product-minded, wants to
++          own the production layer problem with me. SF or Berlin.
++        </li>
++      </ul>
++
++      <p>See you next Friday.</p>
++      <p>— Federico</p>
++    </>
++  );
++}
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index 402c16e..ee297d8 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -25,6 +25,10 @@ const ImprintPage = lazy(() => import('./pages/ImprintPage').then(m => ({ defaul
+ const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(m => ({ default: m.PrivacyPage })));
+ const TermsPage = lazy(() => import('./pages/TermsPage').then(m => ({ default: m.TermsPage })));
+ const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ default: m.CookiesPage })));
++const JournalPage = lazy(() => import('./pages/JournalPage').then(m => ({ default: m.JournalPage })));
++const JournalEntryPage = lazy(() => import('./pages/JournalEntryPage').then(m => ({ default: m.JournalEntryPage })));
++const JournalConfirmedPage = lazy(() => import('./pages/JournalConfirmedPage').then(m => ({ default: m.JournalConfirmedPage })));
++const JournalUnsubscribedPage = lazy(() => import('./pages/JournalUnsubscribedPage').then(m => ({ default: m.JournalUnsubscribedPage })));
+ import { IconSprite } from './components/IconSprite';
+ import { CookieBanner } from './components/CookieBanner';
+ import { primeSession } from './hooks/useSession';
+@@ -124,6 +128,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
+         <Route path="/privacy" element={<PrivacyPage />} />
+         <Route path="/terms" element={<TermsPage />} />
+         <Route path="/cookies" element={<CookiesPage />} />
++        {/* Build-in-public journal. SPA routes; confirm / unsubscribe land
++            here after the API 302s. */}
++        <Route path="/journal" element={<JournalPage />} />
++        <Route path="/journal/" element={<Navigate to="/journal" replace />} />
++        <Route path="/journal/confirmed" element={<JournalConfirmedPage />} />
++        <Route path="/journal/confirmed/" element={<Navigate to="/journal/confirmed" replace />} />
++        <Route path="/journal/unsubscribed" element={<JournalUnsubscribedPage />} />
++        <Route path="/journal/unsubscribed/" element={<Navigate to="/journal/unsubscribed" replace />} />
++        <Route path="/journal/:slug" element={<JournalEntryPage />} />
+         {/* /legal/* aliases so both URL conventions work. */}
+         <Route path="/legal/imprint" element={<Navigate to="/imprint" replace />} />
+         <Route path="/legal/privacy" element={<Navigate to="/privacy" replace />} />
+diff --git a/apps/web/src/pages/JournalConfirmedPage.tsx b/apps/web/src/pages/JournalConfirmedPage.tsx
+new file mode 100644
+index 0000000..c76ccd9
+--- /dev/null
++++ b/apps/web/src/pages/JournalConfirmedPage.tsx
+@@ -0,0 +1,76 @@
++// /journal/confirmed — lands after GET /api/journal/confirm flipped the
++// subscriber to confirmed. List (journal | product) comes from the query
++// string set by the redirect. Keep it short; the subscribe page already
++// has the context.
++
++import { Link, useSearchParams } from 'react-router-dom';
++import { PageShell } from '../components/PageShell';
++
++export function JournalConfirmedPage() {
++  const [params] = useSearchParams();
++  const list = params.get('list');
++  const isProduct = list === 'product';
++
++  return (
++    <PageShell title="You're in · Floom">
++      <article
++        style={{
++          maxWidth: 520,
++          margin: '0 auto',
++          textAlign: 'center',
++          paddingTop: 40,
++        }}
++      >
++        <h1
++          style={{
++            fontSize: 36,
++            fontWeight: 700,
++            lineHeight: 1.2,
++            color: 'var(--ink)',
++            margin: '0 0 16px',
++            letterSpacing: '-0.01em',
++          }}
++        >
++          You're in.
++        </h1>
++        <p
++          style={{
++            fontSize: 17,
++            lineHeight: 1.6,
++            color: 'var(--muted)',
++            margin: '0 0 32px',
++          }}
++        >
++          {isProduct
++            ? "I'll reach out when we open access."
++            : 'Weekly notes drop every Friday. Reply any time — I read everything.'}
++        </p>
++        <p
++          style={{
++            fontSize: 14,
++            color: 'var(--muted)',
++            margin: '0 0 32px',
++          }}
++        >
++          — Federico
++        </p>
++        <Link
++          to="/journal"
++          style={{
++            display: 'inline-block',
++            padding: '10px 18px',
++            fontSize: 14,
++            fontWeight: 600,
++            color: '#fff',
++            background: 'var(--ink)',
++            border: '1px solid var(--ink)',
++            borderRadius: 999,
++            textDecoration: 'none',
++          }}
++        >
++          Read the latest entry
++        </Link>
++      </article>
++    </PageShell>
++  );
++}
+diff --git a/apps/web/src/pages/JournalEntryPage.tsx b/apps/web/src/pages/JournalEntryPage.tsx
+new file mode 100644
+index 0000000..8fe12e2
+--- /dev/null
++++ b/apps/web/src/pages/JournalEntryPage.tsx
+@@ -0,0 +1,134 @@
++// /journal/:slug — individual journal entry. 404s through NotFoundPage's
++// component when the slug isn't in the registry. Entry bodies are plain
++// React components; the wrapper supplies the editorial typography via a
++// shared `.journal-article` class (see styles/globals.css additions).
++
++import { Link, Navigate, useParams } from 'react-router-dom';
++import { useEffect } from 'react';
++import { PageShell } from '../components/PageShell';
++import { JournalSubscribeForm } from '../components/JournalSubscribeForm';
++import { getEntry } from '../content/journal';
++
++function formatDate(iso: string): string {
++  return new Date(iso).toLocaleDateString('en-US', {
++    month: 'long',
++    day: 'numeric',
++    year: 'numeric',
++  });
++}
++
++export function JournalEntryPage() {
++  const { slug } = useParams<{ slug: string }>();
++  const entry = slug ? getEntry(slug) : undefined;
++
++  useEffect(() => {
++    if (entry) {
++      // Minimal OG/SEO hints for crawlers that execute JS. Full server-side
++      // OG is a follow-up (needs an HTML meta inject in the Hono SPA
++      // fallback or a prerender step).
++      const meta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
++      if (meta) meta.content = entry.tldr;
++    }
++  }, [entry]);
++
++  if (!slug) return <Navigate to="/journal" replace />;
++  if (!entry) return <Navigate to="/journal" replace />;
++
++  const { Body } = entry;
++
++  return (
++    <PageShell title={`${entry.title} · Floom Journal`}>
++      <article
++        className="journal-article"
++        style={{
++          maxWidth: 640,
++          margin: '0 auto',
++        }}
++      >
++        <nav style={{ marginBottom: 24 }}>
++          <Link
++            to="/journal"
++            style={{
++              fontSize: 13,
++              color: 'var(--muted)',
++              textDecoration: 'none',
++            }}
++          >
++            ← All entries
++          </Link>
++        </nav>
++
++        <header style={{ marginBottom: 40 }}>
++          <div
++            style={{
++              display: 'flex',
++              gap: 12,
++              fontSize: 13,
++              color: 'var(--muted)',
++              marginBottom: 12,
++            }}
++          >
++            <span
++              style={{
++                fontFamily:
++                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
++                fontSize: 12,
++              }}
++            >
++              Week {entry.week}
++            </span>
++            <span>·</span>
++            <time dateTime={entry.date}>{formatDate(entry.date)}</time>
++            <span>·</span>
++            <span>{entry.readingTime}</span>
++          </div>
++          <h1
++            style={{
++              fontSize: 36,
++              fontWeight: 700,
++              lineHeight: 1.2,
++              color: 'var(--ink)',
++              margin: '0 0 20px',
++              letterSpacing: '-0.01em',
++            }}
++          >
++            {entry.title}
++          </h1>
++          <p
++            style={{
++              fontSize: 19,
++              lineHeight: 1.55,
++              color: 'var(--muted)',
++              margin: 0,
++            }}
++          >
++            {entry.tldr}
++          </p>
++        </header>
++
++        <div className="journal-article-body">
++          <Body />
++        </div>
++
++        <footer
++          style={{
++            marginTop: 64,
++            paddingTop: 32,
++            borderTop: '1px solid var(--line)',
++          }}
++        >
++          <p
++            style={{
++              fontSize: 14,
++              color: 'var(--muted)',
++              margin: '0 0 16px',
++            }}
++          >
++            Next entry drops Friday. Get it in your inbox.
++          </p>
++          <JournalSubscribeForm list="journal" />
++        </footer>
++      </article>
++    </PageShell>
++  );
++}
+diff --git a/apps/web/src/pages/JournalPage.tsx b/apps/web/src/pages/JournalPage.tsx
+new file mode 100644
+index 0000000..9a71208
+--- /dev/null
++++ b/apps/web/src/pages/JournalPage.tsx
+@@ -0,0 +1,164 @@
++// /journal — build-in-public index. Lists every entry newest-first and
++// captures emails via the shared JournalSubscribeForm. Kept deliberately
++// plain: one column, editorial typography, no hero image, no CMS.
++
++import { Link, useSearchParams } from 'react-router-dom';
++import { PageShell } from '../components/PageShell';
++import { JournalSubscribeForm } from '../components/JournalSubscribeForm';
++import { JOURNAL_ENTRIES } from '../content/journal';
++
++function formatDate(iso: string): string {
++  return new Date(iso).toLocaleDateString('en-US', {
++    month: 'long',
++    day: 'numeric',
++    year: 'numeric',
++  });
++}
++
++export function JournalPage() {
++  const [params] = useSearchParams();
++  const confirmState = params.get('confirm');
++  const unsubscribeState = params.get('unsubscribe');
++
++  return (
++    <PageShell title="Journal · Floom">
++      <article
++        style={{
++          maxWidth: 640,
++          margin: '0 auto',
++        }}
++      >
++        {(confirmState === 'invalid' || unsubscribeState === 'invalid') && (
++          <div
++            role="alert"
++            style={{
++              padding: '12px 16px',
++              marginBottom: 24,
++              background: 'rgba(185, 28, 28, 0.06)',
++              border: '1px solid rgba(185, 28, 28, 0.2)',
++              borderRadius: 8,
++              fontSize: 14,
++              color: '#7f1d1d',
++            }}
++          >
++            That link has already been used or has expired. Enter your email
++            again to get a fresh one.
++          </div>
++        )}
++
++        <header style={{ marginBottom: 48 }}>
++          <p
++            style={{
++              fontSize: 12,
++              letterSpacing: '0.12em',
++              textTransform: 'uppercase',
++              color: 'var(--muted)',
++              margin: '0 0 12px',
++            }}
++          >
++            Journal
++          </p>
++          <h1
++            style={{
++              fontSize: 40,
++              fontWeight: 700,
++              lineHeight: 1.15,
++              color: 'var(--ink)',
++              margin: '0 0 16px',
++              letterSpacing: '-0.01em',
++            }}
++          >
++            Building Floom, in the open.
++          </h1>
++          <p
++            style={{
++              fontSize: 17,
++              lineHeight: 1.6,
++              color: 'var(--muted)',
++              margin: '0 0 24px',
++              maxWidth: 560,
++            }}
++          >
++            Weekly notes. Raw, unedited, shipped every Friday. The metrics,
++            the conversations, the things that didn't work.
++          </p>
++          <JournalSubscribeForm list="journal" />
++        </header>
++
++        <ol
++          style={{
++            listStyle: 'none',
++            padding: 0,
++            margin: 0,
++            borderTop: '1px solid var(--line)',
++          }}
++        >
++          {JOURNAL_ENTRIES.map((entry) => (
++            <li
++              key={entry.slug}
++              style={{
++                padding: '28px 0',
++                borderBottom: '1px solid var(--line)',
++              }}
++            >
++              <Link
++                to={`/journal/${entry.slug}`}
++                style={{
++                  display: 'block',
++                  textDecoration: 'none',
++                  color: 'inherit',
++                }}
++              >
++                <div
++                  style={{
++                    display: 'flex',
++                    gap: 12,
++                    fontSize: 13,
++                    color: 'var(--muted)',
++                    marginBottom: 8,
++                  }}
++                >
++                  <span
++                    style={{
++                      fontFamily:
++                        'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
++                      fontSize: 12,
++                    }}
++                  >
++                    Week {entry.week}
++                  </span>
++                  <span>·</span>
++                  <time dateTime={entry.date}>{formatDate(entry.date)}</time>
++                  <span>·</span>
++                  <span>{entry.readingTime}</span>
++                </div>
++                <h2
++                  style={{
++                    fontSize: 24,
++                    fontWeight: 700,
++                    lineHeight: 1.25,
++                    color: 'var(--ink)',
++                    margin: '0 0 8px',
++                    letterSpacing: '-0.005em',
++                  }}
++                >
++                  {entry.title}
++                </h2>
++                <p
++                  style={{
++                    fontSize: 15,
++                    lineHeight: 1.55,
++                    color: 'var(--muted)',
++                    margin: 0,
++                  }}
++                >
++                  {entry.tldr}
++                </p>
++              </Link>
++            </li>
++          ))}
++        </ol>
++      </article>
++    </PageShell>
++  );
++}
+diff --git a/apps/web/src/pages/JournalUnsubscribedPage.tsx b/apps/web/src/pages/JournalUnsubscribedPage.tsx
+new file mode 100644
+index 0000000..415afc5
+--- /dev/null
++++ b/apps/web/src/pages/JournalUnsubscribedPage.tsx
+@@ -0,0 +1,57 @@
++// /journal/unsubscribed — lands after GET /api/journal/unsubscribe flipped
++// the subscriber to unsubscribed. Keep copy honest and brief; offer a
++// one-click re-subscribe in case the click was a mistake.
++
++import { Link, useSearchParams } from 'react-router-dom';
++import { PageShell } from '../components/PageShell';
++
++export function JournalUnsubscribedPage() {
++  const [params] = useSearchParams();
++  const list = params.get('list');
++  const isProduct = list === 'product';
++
++  return (
++    <PageShell title="Unsubscribed · Floom">
++      <article
++        style={{
++          maxWidth: 520,
++          margin: '0 auto',
++          textAlign: 'center',
++          paddingTop: 40,
++        }}
++      >
++        <h1
++          style={{
++            fontSize: 32,
++            fontWeight: 700,
++            lineHeight: 1.2,
++            color: 'var(--ink)',
++            margin: '0 0 16px',
++            letterSpacing: '-0.01em',
++          }}
++        >
++          You're unsubscribed.
++        </h1>
++        <p
++          style={{
++            fontSize: 16,
++            lineHeight: 1.6,
++            color: 'var(--muted)',
++            margin: '0 0 32px',
++          }}
++        >
++          {isProduct
++            ? "You're off the Floom product waitlist. I won't email you again."
++            : "You're off the Floom journal list. I won't email you again."}
++        </p>
++        <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0 }}>
++          Changed your mind?{' '}
++          <Link to="/journal" style={{ color: 'var(--ink)', textDecoration: 'underline' }}>
++            Resubscribe
++          </Link>
++          .
++        </p>
++      </article>
++    </PageShell>
++  );
++}
+diff --git a/apps/web/src/styles/globals.css b/apps/web/src/styles/globals.css
+index a91e868..320006f 100644
+--- a/apps/web/src/styles/globals.css
++++ b/apps/web/src/styles/globals.css
+@@ -431,3 +431,66 @@ body {
+   50%  { transform: translateX(100%); }
+   100% { transform: translateX(250%); }
+ }
++
++/* ── Journal article typography (pages/JournalEntryPage + content/*) ─── */
++/* Scoped to .journal-article-body so only entry bodies pick it up.       */
++.journal-article-body {
++  font-size: 17px;
++  line-height: 1.7;
++  color: var(--ink);
++}
++.journal-article-body p {
++  margin: 0 0 20px;
++}
++.journal-article-body h2 {
++  font-size: 22px;
++  font-weight: 700;
++  line-height: 1.3;
++  color: var(--ink);
++  letter-spacing: -0.005em;
++  margin: 40px 0 16px;
++}
++.journal-article-body h3 {
++  font-size: 18px;
++  font-weight: 700;
++  color: var(--ink);
++  margin: 32px 0 12px;
++}
++.journal-article-body ul,
++.journal-article-body ol {
++  margin: 0 0 20px;
++  padding-left: 24px;
++}
++.journal-article-body li {
++  margin: 0 0 8px;
++}
++.journal-article-body li > p {
++  margin: 0 0 8px;
++}
++.journal-article-body strong {
++  color: var(--ink);
++  font-weight: 600;
++}
++.journal-article-body em {
++  font-style: italic;
++}
++.journal-article-body a {
++  color: var(--ink);
++  text-decoration: underline;
++  text-decoration-thickness: 1px;
++  text-underline-offset: 2px;
++}
++.journal-article-body blockquote {
++  margin: 24px 0;
++  padding: 4px 0 4px 20px;
++  border-left: 3px solid var(--accent);
++  color: var(--muted);
++  font-style: italic;
++}
++.journal-article-body code {
++  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
++  font-size: 14px;
++  padding: 2px 6px;
++  background: rgba(14, 14, 12, 0.06);
++  border-radius: 4px;
++}
+diff --git a/docker/.env.example b/docker/.env.example
+index b1949ea..1272566 100644
+--- a/docker/.env.example
++++ b/docker/.env.example
+@@ -182,6 +182,17 @@ FLOOM_MAX_ACTIONS_PER_APP=200
+ # the bundled apps/web/dist folder inside the published container.
+ # WEB_DIST=/app/apps/web/dist
+ 
++# ── Journal (routes/journal.ts) ────────────────────────────────────────
++# Build-in-public newsletter. Reuses RESEND_API_KEY below for delivery; if
++# unset, the server logs outbound emails (including the confirmation URL)
++# to stdout so dev and OSS self-hosters can still test the full flow.
++# From-address on the confirmation email (must be a verified domain on the
++# Resend account). Defaults to 'Floom <journal@floom.dev>'.
++# FLOOM_JOURNAL_FROM=Floom <journal@floom.dev>
++# Salt used when hashing caller IPs for the subscribe rate limiter. Default
++# is 'floom-journal-v1' — rotate if you want to invalidate existing buckets.
++# FLOOM_JOURNAL_SALT=floom-journal-v1
++
+ # ── Per-app secrets ─────────────────────────────────────────────────────
+ # Any env var whose name matches an entry in apps.yaml 'secrets:' list is
+ # picked up as a per-app secret at ingest time.
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index e7f1846..425e092 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -71,6 +71,9 @@ importers:
+       nanoid:
+         specifier: 5.0.9
+         version: 5.0.9
++      resend:
++        specifier: ^6.12.0
++        version: 6.12.0
+       stripe:
+         specifier: 17.7.0
+         version: 17.7.0
+@@ -1266,6 +1269,9 @@ packages:
+   '@shikijs/vscode-textmate@9.3.1':
+     resolution: {integrity: sha512-79QfK1393x9Ho60QFyLti+QfdJzRQCVLFb97kOIV7Eo9vQU/roINgk7m24uv0a7AUvN//RDH36FLjjK48v0s9g==}
+ 
++  '@stablelib/base64@1.0.1':
++    resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
++
+   '@standard-schema/spec@1.1.0':
+     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+ 
+@@ -1836,6 +1842,9 @@ packages:
+     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
+     engines: {node: '>=8.6.0'}
+ 
++  fast-sha256@1.3.0:
++    resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
++
+   fast-uri@3.1.0:
+     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
+ 
+@@ -2385,6 +2394,9 @@ packages:
+     engines: {node: '>=18'}
+     hasBin: true
+ 
++  postal-mime@2.7.4:
++    resolution: {integrity: sha512-0WdnFQYUrPGGTFu1uOqD2s7omwua8xaeYGdO6rb88oD5yJ/4pPHDA4sdWqfD8wQVfCny563n/HQS7zTFft+f/g==}
++
+   postcss-import@15.1.0:
+     resolution: {integrity: sha512-hpr+J05B2FVYUAXHeK1YyI267J/dDDhMU6B6civm8hSY1jYJnBXxzKDKDswzJmtLHryrjhnDjqqp/49t8FALew==}
+     engines: {node: '>=14.0.0'}
+@@ -2553,6 +2565,15 @@ packages:
+     resolution: {integrity: sha512-QT7FVMXfWOYFbeRBF6nu+I6tr2Tf3u0q8RIEjNob/heKY/nh7drD/k7eeMFmSQgnTtCzLDcCu/XEnpW2wk4xCQ==}
+     engines: {node: '>=9.3.0 || >=8.10.0 <9.0.0'}
+ 
++  resend@6.12.0:
++    resolution: {integrity: sha512-CaxEvX1z+/MGbgnhsM/bvmkbnZd1v1sEXELAjBNSDBQNMaB7MgqOyrBgI27CYikEgdaDnBrXghAXYWTBs/h5Bw==}
++    engines: {node: '>=20'}
++    peerDependencies:
++      '@react-email/render': '*'
++    peerDependenciesMeta:
++      '@react-email/render':
++        optional: true
++
+   resolve-pkg-maps@1.0.0:
+     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
+ 
+@@ -2659,6 +2680,9 @@ packages:
+     resolution: {integrity: sha512-wPldCk3asibAjQ/kziWQQt1Wh3PgDFpC0XpwclzKcdT1vql6KeYxf5LIt4nlFkUeR8WuphYMKqUA56X4rjbfgQ==}
+     engines: {node: '>=10.16.0'}
+ 
++  standardwebhooks@1.0.0:
++    resolution: {integrity: sha512-BbHGOQK9olHPMvQNHWul6MYlrRTAOKn03rOe4A8O3CLWhNf4YHBqq2HJKKC+sfqpxiBY52pNeesD6jIiLDz8jg==}
++
+   statuses@2.0.2:
+     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
+     engines: {node: '>= 0.8'}
+@@ -2696,6 +2720,9 @@ packages:
+     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
+     engines: {node: '>= 0.4'}
+ 
++  svix@1.90.0:
++    resolution: {integrity: sha512-ljkZuyy2+IBEoESkIpn8sLM+sxJHQcPxlZFxU+nVDhltNfUMisMBzWX/UR8SjEnzoI28ZjCzMbmYAPwSTucoMw==}
++
+   tailwindcss@3.4.16:
+     resolution: {integrity: sha512-TI4Cyx7gDiZ6r44ewaJmt0o6BrMCT5aK5e0rmJ/G9Xq3w7CX/5VXl/zIPEJZFUK5VEqwByyhqNPycPlvcK4ZNw==}
+     engines: {node: '>=14.0.0'}
+@@ -2805,6 +2832,10 @@ packages:
+   util-deprecate@1.0.2:
+     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
+ 
++  uuid@10.0.0:
++    resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
++    hasBin: true
++
+   validate.io-array@1.0.6:
+     resolution: {integrity: sha512-DeOy7CnPEziggrOO5CZhVKJw6S3Yi7e9e65R1Nl/RTN1vTQKnzjfvks0/8kQ40FP/dsjRAOd4hxmJ7uLa6vxkg==}
+ 
+@@ -3840,6 +3871,8 @@ snapshots:
+ 
+   '@shikijs/vscode-textmate@9.3.1': {}
+ 
++  '@stablelib/base64@1.0.1': {}
++
+   '@standard-schema/spec@1.1.0': {}
+ 
+   '@tanstack/react-table@8.20.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+@@ -4448,6 +4481,8 @@ snapshots:
+       merge2: 1.4.1
+       micromatch: 4.0.8
+ 
++  fast-sha256@1.3.0: {}
++
+   fast-uri@3.1.0: {}
+ 
+   fastq@1.20.1:
+@@ -5066,6 +5101,8 @@ snapshots:
+     optionalDependencies:
+       fsevents: 2.3.2
+ 
++  postal-mime@2.7.4: {}
++
+   postcss-import@15.1.0(postcss@8.4.49):
+     dependencies:
+       postcss: 8.4.49
+@@ -5265,6 +5302,11 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
++  resend@6.12.0:
++    dependencies:
++      postal-mime: 2.7.4
++      svix: 1.90.0
++
+   resolve-pkg-maps@1.0.0: {}
+ 
+   resolve@1.22.12:
+@@ -5429,6 +5471,11 @@ snapshots:
+       cpu-features: 0.0.10
+       nan: 2.26.2
+ 
++  standardwebhooks@1.0.0:
++    dependencies:
++      '@stablelib/base64': 1.0.1
++      fast-sha256: 1.3.0
++
+   statuses@2.0.2: {}
+ 
+   string_decoder@1.3.0:
+@@ -5471,6 +5518,11 @@ snapshots:
+ 
+   supports-preserve-symlinks-flag@1.0.0: {}
+ 
++  svix@1.90.0:
++    dependencies:
++      standardwebhooks: 1.0.0
++      uuid: 10.0.0
++
+   tailwindcss@3.4.16:
+     dependencies:
+       '@alloc/quick-lru': 5.2.0
+@@ -5619,6 +5671,8 @@ snapshots:
+ 
+   util-deprecate@1.0.2: {}
+ 
++  uuid@10.0.0: {}
++
+   validate.io-array@1.0.6: {}
+ 
+   validate.io-function@1.0.2: {}
