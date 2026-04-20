@@ -1,0 +1,58 @@
+{
+  "home": {
+    "desktop": { "route": "/", "name": "launch-home-desktop" },
+    "mobile": { "route": "/", "name": "launch-home-mobile" }
+  },
+  "store": {
+    "desktop": { "route": "/apps", "name": "launch-store-desktop" },
+    "mobile": { "route": "/apps", "name": "launch-store-mobile" }
+  },
+  "permalink_app": {
+    "desktop": { "route": "/p/hash", "name": "launch-permalink-hash-desktop" },
+    "mobile": { "route": "/p/hash", "name": "launch-permalink-hash-mobile" }
+  },
+  "protocol": {
+    "desktop": { "route": "/protocol", "name": "launch-protocol-desktop" },
+    "mobile": { "route": "/protocol", "name": "launch-protocol-mobile" }
+  },
+  "about": {
+    "desktop": { "route": "/about", "name": "launch-about-desktop" },
+    "mobile": { "route": "/about", "name": "launch-about-mobile" }
+  },
+  "install": {
+    "desktop": { "route": "/install", "name": "launch-install-desktop" },
+    "mobile": { "route": "/install", "name": "launch-install-mobile" }
+  },
+  "login": {
+    "desktop": { "route": "/login", "name": "launch-login-desktop" },
+    "mobile": { "route": "/login", "name": "launch-login-mobile" }
+  },
+  "signup": {
+    "desktop": { "route": "/signup", "name": "launch-signup-desktop" },
+    "mobile": { "route": "/signup", "name": "launch-signup-mobile" }
+  },
+  "studio_home": {
+    "desktop": { "route": "/studio", "name": "launch-studio-home-desktop" },
+    "mobile": { "route": "/studio", "name": "launch-studio-home-mobile" }
+  },
+  "studio_build": {
+    "desktop": { "route": "/studio/build", "name": "launch-studio-build-desktop" },
+    "mobile": { "route": "/studio/build", "name": "launch-studio-build-mobile" }
+  },
+  "legal": {
+    "desktop": { "route": "/legal", "name": "launch-legal-desktop" },
+    "mobile": { "route": "/legal", "name": "launch-legal-mobile" }
+  },
+  "privacy": {
+    "desktop": { "route": "/privacy", "name": "launch-privacy-desktop" },
+    "mobile": { "route": "/privacy", "name": "launch-privacy-mobile" }
+  },
+  "terms": {
+    "desktop": { "route": "/terms", "name": "launch-terms-desktop" },
+    "mobile": { "route": "/terms", "name": "launch-terms-mobile" }
+  },
+  "not_found": {
+    "desktop": { "route": "/__ux-audit-404-probe__", "name": "launch-404-desktop" },
+    "mobile": { "route": "/__ux-audit-404-probe__", "name": "launch-404-mobile" }
+  }
+}
