@@ -34,6 +34,7 @@ import {
   renderWelcomeEmail,
   sendEmail,
 } from './email.js';
+import { provisionPersonalWorkspace } from '../services/workspaces.js';
 
 // Better Auth's `Auth` type is generic over its options. Inferring the exact
 // concrete type would couple every consumer to the full plugin tuple shape,
@@ -191,7 +192,14 @@ function buildAuthOptions(): any {
       cookiePrefix: 'floom',
       defaultCookieAttributes: {
         sameSite: 'lax',
-        secure: true,
+        // Use Secure only on HTTPS. Hard-coding `true` in dev causes
+        // browsers that don't have the localhost exemption (non-Chrome,
+        // older Chromium, automated test runners) to silently drop the
+        // state/code-verifier cookie, producing `state_mismatch`.
+        secure:
+          process.env.NODE_ENV === 'production' ||
+          (process.env.PUBLIC_URL || '').startsWith('https://') ||
+          (process.env.BETTER_AUTH_URL || '').startsWith('https://'),
         httpOnly: true,
       },
     },
@@ -237,6 +245,35 @@ function buildAuthOptions(): any {
             email: string;
             name?: string | null;
           }): Promise<void> => {
+            // W3.1 cleanup: provision the Floom-side user row and a default
+            // workspace immediately on creation. This ensures following
+            // requests (or hooks like welcome email) can rely on the user
+            // record existing in the Floom tables.
+            try {
+              // Priority 1: Mirror user into Floom's users table.
+              // auth_provider 'better-auth' identifies these as cloud-managed accounts.
+              db.prepare(
+                `INSERT INTO users (id, email, name, auth_provider, auth_subject)
+                 VALUES (?, ?, ?, 'better-auth', ?)
+                 ON CONFLICT (id) DO UPDATE SET
+                   email = excluded.email,
+                   name = excluded.name`,
+              ).run(user.id, user.email, user.name || null, user.id);
+
+              // Priority 2: Provision the personal workspace.
+              // provisionPersonalWorkspace is idempotent: if the user somehow
+              // already has a workspace membership, it just returns it.
+              provisionPersonalWorkspace(user.id, user.email, user.name);
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[auth] critical: failed to provision user/workspace for ${user.email}:`,
+                err,
+              );
+              // We don't throw here — we want the user to land on the UI where
+              // session.ts resolveUserContext has a second-chance bootstrap.
+            }
+
             try {
               const publicUrl =
                 process.env.PUBLIC_URL ||

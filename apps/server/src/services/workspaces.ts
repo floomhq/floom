@@ -696,3 +696,62 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
     },
   };
 }
+
+/**
+ * Create a personal workspace for a freshly-signed-up user. Used when a
+ * user logs in via Better Auth and has no existing memberships. Picks a
+ * slug derived from the email local-part. Idempotent: if the user already
+ * has a workspace membership, we just ensure one is set as active and
+ * return its id.
+ */
+export function provisionPersonalWorkspace(
+  user_id: string,
+  email: string,
+  name?: string | null,
+): string {
+  const existing = db
+    .prepare(
+      `SELECT workspace_id FROM workspace_members WHERE user_id = ? LIMIT 1`,
+    )
+    .get(user_id) as { workspace_id: string } | undefined;
+
+  if (existing) {
+    db.prepare(
+      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT (user_id) DO UPDATE SET
+         workspace_id = excluded.workspace_id,
+         updated_at = excluded.updated_at`,
+    ).run(user_id, existing.workspace_id);
+    return existing.workspace_id;
+  }
+
+  const localPart = email.split('@')[0] || 'user';
+  const workspaceName = name ? `${name}'s workspace` : `${localPart}'s workspace`;
+  const baseSlug = localPart
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'user';
+
+  const slug = uniqueSlug(baseSlug);
+  const id = generateId('ws');
+
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO workspaces (id, slug, name, plan) VALUES (?, ?, ?, 'cloud_free')`,
+    ).run(id, slug, workspaceName);
+    db.prepare(
+      `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')`,
+    ).run(id, user_id);
+    db.prepare(
+      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT (user_id) DO UPDATE SET
+         workspace_id = excluded.workspace_id,
+         updated_at = excluded.updated_at`,
+    ).run(user_id, id);
+  });
+  tx();
+  return id;
+}

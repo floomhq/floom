@@ -19,9 +19,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
 import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
-import type { RekeyResult, SessionContext } from '../types.js';
 import { getAuth, isCloudMode } from '../lib/better-auth.js';
-import { getActiveWorkspaceId } from './workspaces.js';
+import type { RekeyResult, SessionContext } from '../types.js';
+import {
+  getActiveWorkspaceId,
+  provisionPersonalWorkspace,
+} from './workspaces.js';
 
 const COOKIE_NAME = 'floom_device';
 // 10 years in seconds — the cookie is a stable device id, not a session.
@@ -171,7 +174,11 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
   // an empty state.
   let activeWorkspaceId = getActiveWorkspaceId(userId);
   if (!activeWorkspaceId) {
-    activeWorkspaceId = bootstrapPersonalWorkspace(userId, session.user.email);
+    activeWorkspaceId = provisionPersonalWorkspace(
+      userId,
+      session.user.email,
+      session.user.name,
+    );
   }
 
   // Fire the rekey on first authenticated request. The function is
@@ -195,59 +202,6 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
   };
 }
 
-/**
- * Create a personal workspace for a freshly-signed-up user. Used when a
- * user logs in via Better Auth and has no existing memberships. Picks a
- * slug derived from the email local-part. Idempotent in the sense that
- * if the user re-runs this we just return the existing personal workspace.
- */
-function bootstrapPersonalWorkspace(user_id: string, email: string): string {
-  const existing = db
-    .prepare(
-      `SELECT workspace_id FROM workspace_members WHERE user_id = ? LIMIT 1`,
-    )
-    .get(user_id) as { workspace_id: string } | undefined;
-  if (existing) {
-    db.prepare(
-      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT (user_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         updated_at = excluded.updated_at`,
-    ).run(user_id, existing.workspace_id);
-    return existing.workspace_id;
-  }
-  const localPart = email.split('@')[0] || 'user';
-  const baseSlug = localPart
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32) || 'user';
-  let slug = baseSlug;
-  let n = 2;
-  while (db.prepare('SELECT 1 FROM workspaces WHERE slug = ?').get(slug)) {
-    slug = `${baseSlug}-${n}`;
-    n++;
-  }
-  const id = `ws_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO workspaces (id, slug, name, plan) VALUES (?, ?, ?, 'cloud_free')`,
-    ).run(id, slug, `${localPart}'s workspace`);
-    db.prepare(
-      `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')`,
-    ).run(id, user_id);
-    db.prepare(
-      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT (user_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         updated_at = excluded.updated_at`,
-    ).run(user_id, id);
-  });
-  tx();
-  return id;
-}
 
 /**
  * Build a SessionContext from already-resolved ids. Useful when the caller
