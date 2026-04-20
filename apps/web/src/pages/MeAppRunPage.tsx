@@ -139,7 +139,16 @@ export function MeAppRunPage() {
               <AppHeader app={app} />
               <TabBar slug={app.slug} active="overview" />
 
-              {missingKeys === null && (
+              {missingKeys === null && secrets.error && !secrets.entries && (
+                <SecretsFetchError
+                  error={secrets.error}
+                  onRetry={() => {
+                    void secrets.refresh();
+                  }}
+                />
+              )}
+
+              {missingKeys === null && !(secrets.error && !secrets.entries) && (
                 <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>
               )}
 
@@ -161,5 +170,64 @@ export function MeAppRunPage() {
         </main>
       </div>
     </PageShell>
+  );
+}
+
+// Inline error surface for the secrets fetch. Kept local to this page
+// (R12-3) instead of introducing a new shared component — if a second
+// page needs this treatment we can promote it later.
+function SecretsFetchError({
+  error,
+  onRetry,
+}: {
+  error: Error;
+  onRetry: () => void;
+}) {
+  const raw = (error.message || String(error)).trim();
+  const detail = raw.length > 200 ? `${raw.slice(0, 197)}…` : raw;
+  return (
+    <div
+      data-testid="secrets-fetch-error"
+      role="alert"
+      style={{
+        background: '#fdecea',
+        border: '1px solid #f4b7b1',
+        color: '#c2321f',
+        padding: '12px 14px',
+        borderRadius: 8,
+        fontSize: 13,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 600 }}>Couldn’t load your saved secrets.</span>
+        <button
+          type="button"
+          data-testid="secrets-fetch-retry"
+          onClick={onRetry}
+          style={{
+            marginLeft: 'auto',
+            padding: '6px 14px',
+            background: '#c2321f',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Retry
+        </button>
+      </div>
+      {detail && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', wordBreak: 'break-word' }}>
+          {detail}
+        </div>
+      )}
+    </div>
   );
 }
