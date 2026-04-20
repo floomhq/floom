@@ -313,6 +313,13 @@ export interface SessionMePayload {
   active_workspace: SessionWorkspace;
   workspaces: SessionWorkspace[];
   cloud_mode: boolean;
+  // Which OAuth social providers are wired on this server. UI uses this
+  // to show/hide "Continue with Google/GitHub" buttons. See
+  // apps/server/src/services/workspaces.ts `me()`.
+  auth_providers: {
+    google: boolean;
+    github: boolean;
+  };
 }
 
 export interface MeRunSummary {

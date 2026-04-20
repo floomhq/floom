@@ -678,5 +678,21 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
       role: m.role,
     })),
     cloud_mode,
+    // Gate OAuth buttons on the client. A provider is enabled iff both
+    // env vars are set on the server. In OSS mode we still return both
+    // as false rather than omitting the object, so the UI can render a
+    // stable shape.
+    auth_providers: {
+      google: Boolean(
+        cloud_mode &&
+          process.env.GOOGLE_OAUTH_CLIENT_ID &&
+          process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      ),
+      github: Boolean(
+        cloud_mode &&
+          process.env.GITHUB_OAUTH_CLIENT_ID &&
+          process.env.GITHUB_OAUTH_CLIENT_SECRET,
+      ),
+    },
   };
 }

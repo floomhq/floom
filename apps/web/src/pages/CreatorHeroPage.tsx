@@ -139,6 +139,13 @@ export function CreatorHeroPage() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
   const [hubCount, setHubCount] = useState<number | null>(null);
+  // Friction-reduction 2026-04-20: signed-in users see the detect result
+  // inline in the hero and can publish in one click without leaving the
+  // page. Signed-out users still route through /studio/build (the
+  // "Customize" path) so the signup prompt can present the full form.
+  const [detected, setDetected] = useState<DetectedApp | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
 
   useEffect(() => {
     document.title =
@@ -170,6 +177,8 @@ export function CreatorHeroPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setHeroError('');
+    setDetected(null);
+    setPublishedSlug(null);
 
     const rawLink = sourceLink.trim();
     if (!rawLink) {
@@ -181,19 +190,20 @@ export function CreatorHeroPage() {
       return;
     }
 
-    // Fix (2026-04-20 audit): always route to /studio/build with the raw
-    // URL in ?ingest_url=<urlencoded>. BuildPage picks it up on mount,
-    // pre-fills the matching ramp, and auto-triggers detect so the user
-    // sees the candidate operations without a second click. This is the
-    // belt-and-suspenders path that keeps the URL alive even if detect
-    // fails in the hero, or the user isn't authenticated yet (the URL
-    // survives the /signup?next= detour because it's a real query param
-    // on the `next` target, not just in localStorage).
+    // Friction-reduction 2026-04-20: for SIGNED-IN users, resolve the
+    // detect inline and morph the hero into a "Found N operations · Ready
+    // to publish" card with a single Publish button. No navigation, no
+    // second spinner screen on /studio/build. The "Customize" link inside
+    // the card still routes to /studio/build for the full form.
+    //
+    // For SIGNED-OUT users we keep the legacy flow: route to /studio/build
+    // (via /signup for anon) so the existing SignupToPublishModal + form
+    // owns the handoff. Moving anon-publish to an inline publish-as-draft
+    // card needs a schema change (is_draft + TTL sweeper) that we're not
+    // doing in this PR.
     const buildTarget =
       '/studio/build?ingest_url=' + encodeURIComponent(rawLink);
-    const nextTarget = isAuthenticated
-      ? buildTarget
-      : '/signup?next=' + encodeURIComponent(buildTarget);
+    const signedOutFallback = '/signup?next=' + encodeURIComponent(buildTarget);
 
     setIsDetecting(true);
     try {
@@ -207,43 +217,101 @@ export function CreatorHeroPage() {
       if (candidates.length > 0) {
         for (const candidate of candidates) {
           try {
-            const detected = await api.detectApp(candidate);
-            persistPendingPublish(detected, 'github');
-            navigate(nextTarget);
+            const d = await api.detectApp(candidate);
+            persistPendingPublish(d, 'github');
+            if (isAuthenticated) {
+              // Morph the hero in-place — no navigation.
+              setDetected(d);
+              return;
+            }
+            navigate(signedOutFallback);
             return;
           } catch {
             // Try the next candidate path.
           }
         }
-        // All GitHub candidates failed — still route to /studio/build with
-        // the raw URL so BuildPage can show the same error inline with the
-        // full context (attempted paths, guidance). Losing the URL here
-        // was the "blank form" conversion killer the audit flagged.
-        navigate(nextTarget);
+        // All GitHub candidates failed — fall through to the generic
+        // build-page path with the URL intact. Signed-in users still see
+        // the full form on /studio/build (not a total dead-end).
+        navigate(isAuthenticated ? buildTarget : signedOutFallback);
         return;
       }
 
-      const detected = await api.detectApp(normalizeLink(rawLink));
-      persistPendingPublish(detected, 'openapi');
-      navigate(nextTarget);
+      const d = await api.detectApp(normalizeLink(rawLink));
+      persistPendingPublish(d, 'openapi');
+      if (isAuthenticated) {
+        setDetected(d);
+        return;
+      }
+      navigate(signedOutFallback);
     } catch (err) {
       // Even on hero-side detect failure, take the user to /studio/build
       // with the URL intact. BuildPage re-runs detect and renders the
       // inline error per the new error taxonomy. This replaces the old
       // "sorry, try again" dead-end at the hero.
-      // We still log the message so the user isn't surprised if they
-      // cancel the navigation.
       if (err instanceof api.ApiError && err.status >= 500) {
         // 5xx is likely transient — keep them in the hero with a retry hint
         // instead of handing them a broken form downstream.
         setHeroError('We could not read that link right now. Try again in a moment.');
         return;
       }
-      navigate(nextTarget);
+      navigate(isAuthenticated ? buildTarget : signedOutFallback);
     } finally {
       setIsDetecting(false);
     }
   };
+
+  // One-click publish from the inline hero card. Signed-in only (the
+  // setDetected path is gated above). Errors fall back to /studio/build
+  // with the URL intact so the user can fix the slug collision or adjust
+  // visibility with the full form.
+  async function handleInlinePublish() {
+    if (!detected) return;
+    setIsPublishing(true);
+    setHeroError('');
+    try {
+      const res = await api.ingestApp({
+        openapi_url: detected.openapi_spec_url,
+        name: detected.name,
+        slug: detected.slug,
+        description: detected.description,
+        category: detected.category || undefined,
+        visibility: 'public',
+      });
+      try {
+        window.localStorage.removeItem(PENDING_KEY);
+      } catch {
+        /* ignore */
+      }
+      setPublishedSlug(res.slug);
+      // Navigate straight to /p/:slug — that's the "app is live" proof.
+      navigate(`/p/${res.slug}`);
+    } catch (err) {
+      // Slug collision or anything else: route to /studio/build with the
+      // URL so the user can resolve it with the full form (suggestions,
+      // visibility, custom name). Don't strand them in the hero.
+      const rawLink = sourceLink.trim();
+      const fallback =
+        '/studio/build?ingest_url=' + encodeURIComponent(rawLink);
+      if (err instanceof api.ApiError && err.status === 409) {
+        // Let them customize in the full form where the slug suggestions
+        // already render.
+        navigate(fallback);
+        return;
+      }
+      setHeroError(
+        (err as Error).message ||
+          'We could not publish that. Open the full form to continue.',
+      );
+    } finally {
+      setIsPublishing(false);
+    }
+  }
+
+  function handleCustomize() {
+    const rawLink = sourceLink.trim();
+    navigate('/studio/build?ingest_url=' + encodeURIComponent(rawLink));
+  }
 
   return (
     <div
@@ -455,6 +523,124 @@ export function CreatorHeroPage() {
               >
                 {heroError}
               </p>
+            )}
+
+            {/* Friction-reduction 2026-04-20: inline publish card.
+                Replaces the old "redirect to /studio/build and spin
+                again" detour when the caller is signed in. Shows the
+                detect summary + a single Publish button + a Customize
+                link that routes to the full form. */}
+            {detected && !publishedSlug && (
+              <div
+                data-testid="hero-publish-card"
+                style={{
+                  maxWidth: 620,
+                  margin: '16px auto 0',
+                  padding: '16px 18px',
+                  borderRadius: 14,
+                  border: '1px solid var(--line)',
+                  background: 'var(--card)',
+                  boxShadow: '0 2px 0 rgba(0,0,0,0.04)',
+                  textAlign: 'left',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: 'var(--ink)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {detected.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12.5,
+                        color: 'var(--muted)',
+                        marginTop: 2,
+                      }}
+                    >
+                      Found {detected.tools_count || detected.actions.length}{' '}
+                      {(detected.tools_count || detected.actions.length) === 1
+                        ? 'operation'
+                        : 'operations'}{' '}
+                      · Ready to publish as <code>/p/{detected.slug}</code>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginTop: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleInlinePublish}
+                    disabled={isPublishing}
+                    data-testid="hero-publish"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      border: '1px solid var(--accent)',
+                      borderRadius: 10,
+                      padding: '11px 18px',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: isPublishing ? 'wait' : 'pointer',
+                      opacity: isPublishing ? 0.84 : 1,
+                    }}
+                  >
+                    {isPublishing ? 'Publishing...' : 'Publish'}
+                    <ArrowRight size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCustomize}
+                    data-testid="hero-customize"
+                    style={{
+                      background: 'transparent',
+                      color: 'var(--muted)',
+                      border: '1px solid var(--line)',
+                      borderRadius: 10,
+                      padding: '10px 14px',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Customize
+                  </button>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                      marginLeft: 'auto',
+                    }}
+                  >
+                    Public · floom.dev/p/{detected.slug}
+                  </span>
+                </div>
+              </div>
             )}
 
             <div
