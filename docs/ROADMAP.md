@@ -23,8 +23,8 @@ Backends land; the UI to drive them is re-enabled incrementally.
 |---|---|
 | Workspace switcher | Backend shipped, UI stub |
 | Composio connections (150+ OAuth tools) | Backend shipped, UI stub |
-| Async job queue | Backend shipped, UI in flight |
-| Custom renderer upload | Backend shipped, UI in flight |
+| Async job queue | Shipped (`RunSurface.tsx`, `JobProgress.tsx`) |
+| Custom renderer upload | Shipped (`CustomRendererPanel.tsx`) |
 | Stripe Connect monetization | Backend stub, UI deferred to v1.1+ |
 | App memory per-user | Backend stub, UI deferred to v1.1+ |
 
