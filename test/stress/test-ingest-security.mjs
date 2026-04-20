@@ -1,45 +1,30 @@
 #!/usr/bin/env node
-// Regression test for INGEST-SECRETS-GLOBAL:
-// The OpenAPI → Floom manifest converter must respect per-operation
-// security overrides when computing `secrets_needed`. The previous
-// implementation walked `components.securitySchemes` blindly and listed
-// every defined scheme, which blocked every operation in the petstore
-// demo with a bogus "missing API_KEY_KEY" error even though no operation
-// actually references the api_key scheme at runtime.
+// Regression test for the OpenAPI → Floom secret-derivation pipeline.
 //
-// Test matrix:
-//   1. Petstore (real spec): most operations reference `petstore_auth`
-//      (oauth2 implicit, not handled) or `api_key OR petstore_auth`
-//      alternatives. Only `getInventory` strictly requires api_key
-//      (single-alternative `security: [{api_key: []}]`). Assertions:
-//        - `findPetsByStatus.secrets_needed === []` (petstore_auth is
-//          oauth2 which we don't model as a secret)
-//        - `addPet.secrets_needed === []` (same reasoning)
-//        - `getInventory.secrets_needed === ['api_key']`
-//        - app-level manifest.secrets_needed === ['api_key'] (surfaced
-//          to MCP / /build preview as the union of per-action needs)
-//      The per-action check in proxied-runner means findPetsByStatus
-//      and addPet run without any secret configured, while getInventory
-//      still fails loudly if api_key is missing.
-//   2. Synthetic spec: global `security: [{api_key: []}]` applied to an
-//      operation that does NOT override → deriveSecretsFromSpec returns
-//      ['api_key'].
-//   3. Synthetic spec: same global, but the operation declares
-//      `security: []` (empty array, OpenAPI 3 "no auth") →
-//      deriveSecretsFromSpec returns [] because that operation
-//      explicitly overrides and every other op is public.
-//   4. Synthetic spec: same global, but the operation declares
-//      `security: [{other_key: []}]` (different scheme) →
-//      deriveSecretsFromSpec returns ['other_key'], not 'api_key'. The
-//      global is overridden.
-//   5. Synthetic spec: no global security, operation-level
-//      `security: [{api_key: []}]` → deriveSecretsFromSpec returns
-//      ['api_key'].
-//   6. Regression: a fast-apps style spec with no security at all →
-//      deriveSecretsFromSpec returns [].
-//   7. Mixed operations: one public, one requires api_key → the app
-//      manifest's secrets_needed includes api_key (at least one op
-//      needs it).
+// Two overlapping behaviors are covered:
+//
+// (a) App-level `manifest.secrets_needed` must list every secret a user
+//     could ever need to configure. We derive this by walking
+//     `components.securitySchemes` directly — presence of a scheme is
+//     treated as a request for that secret, even when the spec omits
+//     `security` requirement blocks. This is the fix for the secrets
+//     deadlock (2026-04-20): specs with schemes but no `security`
+//     requirements used to produce empty `secrets_needed`, leaving
+//     users with an API that returns 401/403 and a Studio panel that
+//     shows "nothing to configure".
+//
+//     Naming rules (encoded in `deriveAuthFromSpec`):
+//       - apiKey  → UPPER_SNAKE_CASE of the scheme's `name` attr
+//                   (fallback: scheme key)
+//       - bearer  → "BEARER_TOKEN" (or "<KEY>_BEARER_TOKEN" if multi)
+//       - basic   → "BASIC_AUTH_USER" + "BASIC_AUTH_PASS"
+//       - oauth2  → skipped (handled out-of-band)
+//
+// (b) Per-action `actions.<name>.secrets_needed` respects per-operation
+//     `security` overrides (OpenAPI 3.x §4.8.10): operation-level
+//     replaces global, alternatives are OR-combined. The proxied-runner
+//     blocks each action only when ITS required secrets are missing, so
+//     public ops run even when other ops in the same spec need auth.
 //
 // Run: node test/stress/test-ingest-security.mjs
 
@@ -47,9 +32,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 
 process.env.FLOOM_MAX_ACTIONS_PER_APP = '0';
 
-const { specToManifest, dereferenceSpec, deriveSecretsFromSpec } = await import(
-  '../../apps/server/dist/services/openapi-ingest.js'
-);
+const { specToManifest, dereferenceSpec, deriveSecretsFromSpec, deriveAuthFromSpec } =
+  await import('../../apps/server/dist/services/openapi-ingest.js');
 
 if (typeof specToManifest !== 'function') {
   console.error('FAIL: specToManifest is not exported from openapi-ingest');
@@ -57,6 +41,10 @@ if (typeof specToManifest !== 'function') {
 }
 if (typeof deriveSecretsFromSpec !== 'function') {
   console.error('FAIL: deriveSecretsFromSpec is not exported from openapi-ingest');
+  process.exit(1);
+}
+if (typeof deriveAuthFromSpec !== 'function') {
+  console.error('FAIL: deriveAuthFromSpec is not exported from openapi-ingest');
   process.exit(1);
 }
 
@@ -128,11 +116,17 @@ function mkAppSpec(slug, displayName) {
 }
 
 // Mirror the production call path in ingestAppFromUrl:
-//   specToManifest(spec, appSpec, deriveSecretsFromSpec(spec))
+//   const { secrets, authSchemes } = deriveAuthFromSpec(spec);
+//   specToManifest(spec, appSpec, secrets, authSchemes);
 // This exercises both the derivation logic and the manifest assembly.
 function buildManifest(spec, slug, displayName) {
-  const derived = deriveSecretsFromSpec(spec);
-  return specToManifest(spec, mkAppSpec(slug, displayName), derived);
+  const derived = deriveAuthFromSpec(spec);
+  return specToManifest(
+    spec,
+    mkAppSpec(slug, displayName),
+    derived.secrets,
+    derived.authSchemes,
+  );
 }
 
 // ---------- Test 1: real petstore spec ----------
@@ -143,16 +137,16 @@ console.log('Test 1: real petstore spec → per-action secrets_needed');
   const spec = await dereferenceSpec(raw);
   const manifest = buildManifest(spec, 'petstore-test', 'Petstore');
 
-  // App-level: union of all per-action requirements. getInventory
-  // strictly requires api_key, no other petstore op produces a manifest
-  // secret, so the union is ['api_key'].
+  // App-level: petstore declares `api_key` (apiKey scheme, name="api_key")
+  // and `petstore_auth` (oauth2). Only api_key produces a manifest
+  // secret, normalized to UPPER_SNAKE_CASE of its `name` attribute.
   assertDeepEqual(
-    'petstore app-level secrets_needed is [api_key] (from getInventory)',
+    'petstore app-level secrets_needed is [API_KEY] (from api_key scheme)',
     manifest.secrets_needed,
-    ['api_key'],
+    ['API_KEY'],
   );
 
-  // Per-action: the demo-critical operations must NOT require api_key.
+  // Per-action: the demo-critical operations must NOT require API_KEY.
   const findPetsByStatus = manifest.actions.findPetsByStatus;
   if (!findPetsByStatus) {
     failed++;
@@ -183,9 +177,9 @@ console.log('Test 1: real petstore spec → per-action secrets_needed');
     console.log('  FAIL  petstore manifest missing getInventory');
   } else {
     assertDeepEqual(
-      'getInventory.secrets_needed === [api_key] (strict op-level requirement)',
+      'getInventory.secrets_needed === [API_KEY] (strict op-level requirement)',
       getInventory.secrets_needed,
-      ['api_key'],
+      ['API_KEY'],
     );
   }
 
@@ -200,6 +194,19 @@ console.log('Test 1: real petstore spec → per-action secrets_needed');
       'getPetById.secrets_needed === [] (alternatives, intersection is empty)',
       getPetById.secrets_needed,
       [],
+    );
+  }
+
+  // auth_schemes field surfaces the apiKey scheme's transport info so
+  // the runner knows where to inject the credential.
+  if (!Array.isArray(manifest.auth_schemes)) {
+    failed++;
+    console.log('  FAIL  petstore manifest missing auth_schemes array');
+  } else {
+    assertDeepEqual(
+      'petstore auth_schemes describes the api_key header',
+      manifest.auth_schemes,
+      [{ key: 'API_KEY', type: 'apiKey', in: 'header', name: 'api_key' }],
     );
   }
 }
@@ -229,9 +236,9 @@ console.log('\nTest 2: global api_key security, operation does NOT override');
   };
   const manifest = buildManifest(spec, 'global-inherit', 'Global Inherit');
   assertIncludes(
-    'secrets_needed includes api_key when global applies',
+    'secrets_needed includes X_API_KEY (normalized from name attr)',
     manifest.secrets_needed,
-    'api_key',
+    'X_API_KEY',
   );
 }
 
@@ -260,9 +267,18 @@ console.log('\nTest 3: operation security: [] overrides global (OpenAPI 3)');
     },
   };
   const manifest = buildManifest(spec, 'empty-override', 'Empty Override');
+  // App-level still surfaces X_API_KEY because the scheme is declared —
+  // users may want to configure it even though the only ingested op is
+  // explicitly public. Per-action secrets_needed stays [] so the runner
+  // does not block getPublic.
   assertDeepEqual(
-    'secrets_needed is empty when every op overrides with security: []',
+    'app-level secrets_needed includes X_API_KEY from scheme walk',
     manifest.secrets_needed,
+    ['X_API_KEY'],
+  );
+  assertDeepEqual(
+    'getPublic.secrets_needed === [] (explicit security: [] override)',
+    manifest.actions.getPublic.secrets_needed,
     [],
   );
 }
@@ -293,15 +309,22 @@ console.log('\nTest 4: operation security references a DIFFERENT scheme');
     },
   };
   const manifest = buildManifest(spec, 'other-override', 'Other Override');
+  // Both schemes are declared, so both appear app-level. Per-action
+  // secrets_needed still respects the override (only X_OTHER_KEY).
   assertIncludes(
-    'secrets_needed includes other_key (the override scheme)',
+    'app-level secrets_needed includes X_OTHER_KEY',
     manifest.secrets_needed,
-    'other_key',
+    'X_OTHER_KEY',
   );
-  assertNotIncludes(
-    'secrets_needed does NOT include api_key (global was overridden)',
+  assertIncludes(
+    'app-level secrets_needed includes X_API_KEY (scheme is declared)',
     manifest.secrets_needed,
-    'api_key',
+    'X_API_KEY',
+  );
+  assertDeepEqual(
+    'getOther.secrets_needed === [X_OTHER_KEY] (op override narrows it)',
+    manifest.actions.getOther.secrets_needed,
+    ['X_OTHER_KEY'],
   );
 }
 
@@ -330,9 +353,14 @@ console.log('\nTest 5: no global security, operation declares api_key');
   };
   const manifest = buildManifest(spec, 'op-level', 'Op Level');
   assertIncludes(
-    'secrets_needed includes api_key from op-level declaration',
+    'secrets_needed includes X_API_KEY from scheme declaration',
     manifest.secrets_needed,
-    'api_key',
+    'X_API_KEY',
+  );
+  assertDeepEqual(
+    'getSecure.secrets_needed === [X_API_KEY]',
+    manifest.actions.getSecure.secrets_needed,
+    ['X_API_KEY'],
   );
 }
 
@@ -394,9 +422,14 @@ console.log('\nTest 7: mixed ops — one public, one requires api_key');
   };
   const manifest = buildManifest(spec, 'mixed', 'Mixed');
   assertIncludes(
-    'secrets_needed includes api_key (privateOp still requires it)',
+    'secrets_needed includes X_API_KEY (privateOp still requires it)',
     manifest.secrets_needed,
-    'api_key',
+    'X_API_KEY',
+  );
+  assertDeepEqual(
+    'publicOp.secrets_needed === [] (explicit security: [] override)',
+    manifest.actions.publicOp.secrets_needed,
+    [],
   );
 }
 
@@ -430,10 +463,164 @@ console.log('\nTest 8: op-level alternatives (A OR B) — neither strictly requi
     },
   };
   const manifest = buildManifest(spec, 'alternatives', 'Alternatives');
-  assertDeepEqual(
-    'secrets_needed empty when op offers alternatives (A OR B)',
+  // Even when every op offers alternatives (so none is strictly
+  // required), the scheme is declared and thus appears app-level so the
+  // user can configure it up-front. The per-action list stays empty so
+  // the runner does not block the op.
+  assertIncludes(
+    'app-level secrets_needed includes X_API_KEY (scheme is declared)',
     manifest.secrets_needed,
+    'X_API_KEY',
+  );
+  assertDeepEqual(
+    'getEither.secrets_needed === [] (alternatives — nothing strictly required)',
+    manifest.actions.getEither.secrets_needed,
     [],
+  );
+}
+
+// ---------- Test 9: http bearer scheme ----------
+
+console.log('\nTest 9: http bearer scheme → BEARER_TOKEN');
+{
+  const spec = {
+    openapi: '3.0.0',
+    info: { title: 'Bearer', version: '1.0' },
+    servers: [{ url: 'https://example.com' }],
+    security: [{ bearerAuth: [] }],
+    components: {
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer' },
+      },
+    },
+    paths: {
+      '/me': {
+        get: {
+          operationId: 'getMe',
+          responses: { '200': { description: 'ok' } },
+        },
+      },
+    },
+  };
+  const manifest = buildManifest(spec, 'bearer-app', 'Bearer App');
+  assertDeepEqual(
+    'bearer single-scheme secrets_needed === [BEARER_TOKEN]',
+    manifest.secrets_needed,
+    ['BEARER_TOKEN'],
+  );
+  assertDeepEqual(
+    'bearer single-scheme auth_schemes[0]',
+    manifest.auth_schemes,
+    [{ key: 'BEARER_TOKEN', type: 'bearer' }],
+  );
+}
+
+// ---------- Test 10: http basic scheme ----------
+
+console.log('\nTest 10: http basic scheme → USER + PASS pair');
+{
+  const spec = {
+    openapi: '3.0.0',
+    info: { title: 'Basic', version: '1.0' },
+    servers: [{ url: 'https://example.com' }],
+    security: [{ basicAuth: [] }],
+    components: {
+      securitySchemes: {
+        basicAuth: { type: 'http', scheme: 'basic' },
+      },
+    },
+    paths: {
+      '/admin': {
+        get: {
+          operationId: 'getAdmin',
+          responses: { '200': { description: 'ok' } },
+        },
+      },
+    },
+  };
+  const manifest = buildManifest(spec, 'basic-app', 'Basic App');
+  assertDeepEqual(
+    'basic scheme emits BASIC_AUTH_USER + BASIC_AUTH_PASS',
+    manifest.secrets_needed,
+    ['BASIC_AUTH_USER', 'BASIC_AUTH_PASS'],
+  );
+}
+
+// ---------- Test 11: multiple bearer schemes are disambiguated ----------
+
+console.log('\nTest 11: multiple bearer schemes → prefixed keys');
+{
+  const spec = {
+    openapi: '3.0.0',
+    info: { title: 'Two Bearers', version: '1.0' },
+    servers: [{ url: 'https://example.com' }],
+    components: {
+      securitySchemes: {
+        adminBearer: { type: 'http', scheme: 'bearer' },
+        userBearer: { type: 'http', scheme: 'bearer' },
+      },
+    },
+    paths: {
+      '/ping': {
+        get: { operationId: 'ping', responses: { '200': { description: 'ok' } } },
+      },
+    },
+  };
+  const manifest = buildManifest(spec, 'two-bearers', 'Two Bearers');
+  assertIncludes(
+    'secrets_needed includes ADMIN_BEARER_BEARER_TOKEN',
+    manifest.secrets_needed,
+    'ADMIN_BEARER_BEARER_TOKEN',
+  );
+  assertIncludes(
+    'secrets_needed includes USER_BEARER_BEARER_TOKEN',
+    manifest.secrets_needed,
+    'USER_BEARER_BEARER_TOKEN',
+  );
+  assertNotIncludes(
+    'secrets_needed does NOT include plain BEARER_TOKEN when multiple bearers exist',
+    manifest.secrets_needed,
+    'BEARER_TOKEN',
+  );
+}
+
+// ---------- Test 12: schemes without `security` still surface ----------
+
+console.log('\nTest 12: spec declares schemes but no `security` → still surfaced');
+{
+  // Real-world deadlock case (2026-04-20): spec ships with
+  // components.securitySchemes but forgets global/per-op `security`.
+  // Upstream still rejects unauthenticated requests with 401 at
+  // runtime, so we must list the scheme anyway — otherwise Studio
+  // shows nothing to configure and the user is stranded.
+  const spec = {
+    openapi: '3.0.0',
+    info: { title: 'Deadlock', version: '1.0' },
+    servers: [{ url: 'https://example.com' }],
+    components: {
+      securitySchemes: {
+        myToken: { type: 'apiKey', name: 'X-My-Token', in: 'header' },
+      },
+    },
+    paths: {
+      '/thing': {
+        get: {
+          operationId: 'getThing',
+          responses: { '200': { description: 'ok' } },
+        },
+      },
+    },
+  };
+  const manifest = buildManifest(spec, 'deadlock', 'Deadlock');
+  assertDeepEqual(
+    'schemes surface even without `security` blocks',
+    manifest.secrets_needed,
+    ['X_MY_TOKEN'],
+  );
+  assertDeepEqual(
+    'auth_schemes describes the apiKey transport',
+    manifest.auth_schemes,
+    [{ key: 'X_MY_TOKEN', type: 'apiKey', in: 'header', name: 'X-My-Token' }],
   );
 }
 

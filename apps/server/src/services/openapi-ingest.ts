@@ -17,7 +17,12 @@ import type { RendererManifest } from '@floom/renderer/contract';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
-import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
+import type {
+  NormalizedManifest,
+  InputSpec,
+  OutputSpec,
+  ManifestAuthScheme,
+} from '../types.js';
 
 // ---------- config schema ----------
 
@@ -665,6 +670,7 @@ export function specToManifest(
   spec: OpenApiSpec,
   appSpec: OpenApiAppSpec,
   secretNames: string[],
+  authSchemes?: ManifestAuthScheme[],
 ): NormalizedManifest {
   const actions: NormalizedManifest['actions'] = {};
   const maxActions = getMaxActionsCap(); // 0 = unlimited
@@ -793,6 +799,7 @@ export function specToManifest(
     ...(appSpec.blocked_reason ? { blocked_reason: appSpec.blocked_reason } : {}),
     ...(license ? { license } : {}),
     ...(appSpec.render ? { render: appSpec.render } : {}),
+    ...(authSchemes && authSchemes.length > 0 ? { auth_schemes: authSchemes } : {}),
   };
 }
 
@@ -905,8 +912,22 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       // Cyclic refs (Stripe has some) are left in place rather than throwing.
       const derefedSpec = await dereferenceSpec(spec);
 
-      const secretNames = appSpec.secrets || [];
-      const manifest = specToManifest(derefedSpec, appSpec, secretNames);
+      // Merge creator-declared secrets (apps.yaml `secrets:`) with the
+      // ones we derive by walking the spec's `components.securitySchemes`.
+      // Either source can be empty — the deadlock fix (2026-04-20) makes
+      // sure specs that ship with schemes produce non-empty
+      // `secrets_needed` even when the operator forgot to list them.
+      const derivedAuth = deriveAuthFromSpec(derefedSpec);
+      const declaredSecrets = appSpec.secrets || [];
+      const mergedSecretNames = Array.from(
+        new Set<string>([...declaredSecrets, ...derivedAuth.secrets]),
+      );
+      const manifest = specToManifest(
+        derefedSpec,
+        appSpec,
+        mergedSecretNames,
+        derivedAuth.authSchemes,
+      );
       // Cache the dereferenced spec so the proxied-runner operates on the
       // same shape (path params, query params, request body, response schema)
       // that the manifest declared. This also lets the runner walk request
@@ -1002,7 +1023,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           appSpec.slug,
         );
         // Insert placeholder secrets if not already present (so the UI shows them)
-        for (const name of secretNames) {
+        for (const name of mergedSecretNames) {
           insertSecret.run(newSecretId(), name, '', existing.id);
         }
         console.log(`[openapi-ingest] updated ${appSpec.slug}`);
@@ -1030,7 +1051,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           asyncMode,
         );
         // Insert placeholder secrets
-        for (const name of secretNames) {
+        for (const name of mergedSecretNames) {
           insertSecret.run(newSecretId(), name, '', appId);
         }
         console.log(`[openapi-ingest] inserted ${appSpec.slug}`);
@@ -1187,32 +1208,27 @@ export async function detectAppFromUrl(
     description: info.description || undefined,
     auth: 'none',
   };
-  const manifest = specToManifest(derefed, appSpec, deriveSecretsFromSpec(derefed));
+  const detectedAuth = deriveAuthFromSpec(derefed);
+  const manifest = specToManifest(
+    derefed,
+    appSpec,
+    detectedAuth.secrets,
+    detectedAuth.authSchemes,
+  );
   const actions = Object.entries(manifest.actions).map(([k, v]) => ({
     name: k,
     label: v.label,
     description: v.description,
   }));
 
-  // Auth-type detection: read securitySchemes from the spec components.
-  type SpecWithComponents = {
-    components?: { securitySchemes?: Record<string, { type?: string; scheme?: string }> };
-  };
-  const schemes =
-    ((derefed as SpecWithComponents).components?.securitySchemes ?? {}) as Record<
-      string,
-      { type?: string; scheme?: string }
-    >;
+  // Auth-type detection for the /build preview pill: pick the first
+  // scheme we model. Matches the manifest's `auth_schemes[0].type` on
+  // most specs; the pill is informational only, the runner reads the
+  // full scheme list from the manifest.
   let auth_type: string | null = null;
-  for (const scheme of Object.values(schemes)) {
-    if (scheme?.type === 'http' && scheme?.scheme === 'bearer') {
-      auth_type = 'bearer';
-      break;
-    }
-    if (scheme?.type === 'apiKey') {
-      auth_type = 'apikey';
-      break;
-    }
+  if (detectedAuth.authSchemes.length > 0) {
+    const t = detectedAuth.authSchemes[0].type;
+    auth_type = t === 'apiKey' ? 'apikey' : t;
   }
 
   return {
@@ -1319,7 +1335,13 @@ export async function ingestAppFromSpec(args: {
     auth: 'none',
   };
 
-  const manifest = specToManifest(derefed, appSpec, deriveSecretsFromSpec(derefed));
+  const derivedAuth = deriveAuthFromSpec(derefed);
+  const manifest = specToManifest(
+    derefed,
+    appSpec,
+    derivedAuth.secrets,
+    derivedAuth.authSchemes,
+  );
   const resolvedBaseUrl = resolveBaseUrl(derefed, appSpec, openapi_url || undefined);
 
   if (existing) {
@@ -1381,21 +1403,127 @@ export async function ingestAppFromSpec(args: {
 }
 
 /**
- * Return true if the scheme produces a "secret" that Floom's manifest
- * needs to request from the operator. We only model schemes we can
- * actually inject at runtime: HTTP bearer and apiKey. OAuth2 flows are
- * handled out-of-band (the user completes an authorization flow) so we
- * do not list them as required secrets. http-basic is handled via two
- * secrets (user/pass) but the creator is expected to declare those in
- * apps.yaml — we do not auto-derive them here to avoid guessing names.
+ * Normalize an arbitrary header / scheme name to UPPER_SNAKE_CASE.
+ * Handles hyphens, camelCase, consecutive separators, and leading /
+ * trailing non-alphanumerics. Empty input returns an empty string.
+ *
+ *   "X-API-Key"    -> "X_API_KEY"
+ *   "api_key"      -> "API_KEY"
+ *   "apiKeyAuth"   -> "API_KEY_AUTH"
+ *   "authorization" -> "AUTHORIZATION"
  */
-function schemeRequiresSecret(scheme: {
+export function toUpperSnakeCase(s: string): string {
+  if (!s) return '';
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
+type RawSecurityScheme = {
   type?: string;
   scheme?: string;
-}): boolean {
+  name?: string;
+  in?: string;
+};
+
+/**
+ * Count how many `http bearer` schemes the spec declares. When there is
+ * more than one, each bearer key is prefixed with its scheme key to
+ * keep them distinguishable (see `schemeToSecretEntries`).
+ */
+function countBearerSchemes(
+  schemes: Record<string, RawSecurityScheme>,
+): number {
+  let n = 0;
+  for (const s of Object.values(schemes)) {
+    if (s?.type === 'http' && s?.scheme === 'bearer') n++;
+  }
+  return n;
+}
+
+/**
+ * Translate one OpenAPI security scheme into the auth-scheme entries
+ * Floom persists on the manifest. Each entry's `key` is the secret
+ * name the user configures in Studio → Secrets. Unsupported scheme
+ * types (oauth2, openIdConnect, mutualTLS) return an empty array — we
+ * do not model them as secrets, the runner handles them out-of-band.
+ *
+ * Naming rules (see docs in `deriveAuthFromSpec`):
+ *   - apiKey  : `name` attr if present else the scheme key,
+ *               normalized to UPPER_SNAKE_CASE.
+ *   - bearer  : "BEARER_TOKEN", or "<SCHEME_KEY>_BEARER_TOKEN" when
+ *               the spec declares more than one bearer scheme.
+ *   - basic   : two keys, "BASIC_AUTH_USER" and "BASIC_AUTH_PASS".
+ */
+function schemeToSecretEntries(
+  schemeKey: string,
+  scheme: RawSecurityScheme,
+  hasMultipleBearer: boolean,
+): ManifestAuthScheme[] {
+  if (!scheme) return [];
+  if (scheme.type === 'apiKey') {
+    const rawName = scheme.name || schemeKey;
+    const key = toUpperSnakeCase(rawName);
+    if (!key) return [];
+    const rawIn = scheme.in;
+    const inVal: ManifestAuthScheme['in'] =
+      rawIn === 'header' || rawIn === 'query' || rawIn === 'cookie'
+        ? rawIn
+        : undefined;
+    const entry: ManifestAuthScheme = { key, type: 'apiKey' };
+    if (inVal) entry.in = inVal;
+    if (scheme.name) entry.name = scheme.name;
+    return [entry];
+  }
+  if (scheme.type === 'http' && scheme.scheme === 'bearer') {
+    const key = hasMultipleBearer
+      ? `${toUpperSnakeCase(schemeKey)}_BEARER_TOKEN`
+      : 'BEARER_TOKEN';
+    return [{ key, type: 'bearer' }];
+  }
+  if (scheme.type === 'http' && scheme.scheme === 'basic') {
+    return [
+      { key: 'BASIC_AUTH_USER', type: 'basic' },
+      { key: 'BASIC_AUTH_PASS', type: 'basic' },
+    ];
+  }
+  // oauth2 / openIdConnect / unknown: handled out-of-band.
+  return [];
+}
+
+/**
+ * Map a single scheme key (as written in `components.securitySchemes`)
+ * to the normalized secret keys it requires. Used by
+ * `requiredSecretsForOperation` so per-action `secrets_needed` matches
+ * the app-level `secrets_needed` keys 1:1.
+ */
+function schemeKeyToSecretKeys(
+  spec: OpenApiSpec,
+  schemeKey: string,
+): string[] {
+  const schemes = spec.components?.securitySchemes ?? {};
+  const scheme = schemes[schemeKey];
+  if (!scheme) return [];
+  const hasMultipleBearer = countBearerSchemes(schemes) > 1;
+  return schemeToSecretEntries(schemeKey, scheme, hasMultipleBearer).map(
+    (e) => e.key,
+  );
+}
+
+/**
+ * Return true if the scheme produces a "secret" that Floom's manifest
+ * needs to request from the operator. We only model schemes we can
+ * actually inject at runtime: HTTP bearer, HTTP basic, apiKey. OAuth2
+ * flows are handled out-of-band (the user completes an authorization
+ * flow) so we do not list them as required secrets.
+ */
+function schemeRequiresSecret(scheme: RawSecurityScheme): boolean {
   if (!scheme) return false;
   if (scheme.type === 'apiKey') return true;
   if (scheme.type === 'http' && scheme.scheme === 'bearer') return true;
+  if (scheme.type === 'http' && scheme.scheme === 'basic') return true;
   return false;
 }
 
@@ -1428,8 +1556,8 @@ function effectiveSecurityForOperation(
 }
 
 /**
- * Return the set of security-scheme names that are STRICTLY required by
- * a single operation. A scheme is strictly required iff it appears in
+ * Return the set of normalized secret keys STRICTLY required by a
+ * single operation. A scheme is strictly required iff it appears in
  * EVERY alternative of the operation's effective security array. If at
  * least one alternative omits the scheme, the caller can satisfy the op
  * by picking that alternative, so the scheme is not strictly required.
@@ -1437,8 +1565,10 @@ function effectiveSecurityForOperation(
  * This is the correct reading of OpenAPI 3.x §4.8.10 "Security
  * Requirement Object" (AND within an object, OR across the array).
  *
- * Only schemes that produce a manifest secret (apiKey, http bearer) are
- * returned — oauth2 and other flows are handled out-of-band.
+ * Returned keys are the same UPPER_SNAKE_CASE identifiers used on the
+ * app-level `manifest.secrets_needed` (see `deriveAuthFromSpec`). Only
+ * schemes that produce a manifest secret (apiKey, http bearer, http
+ * basic) are returned — oauth2 and other flows are handled out-of-band.
  */
 export function requiredSecretsForOperation(
   spec: OpenApiSpec,
@@ -1450,7 +1580,6 @@ export function requiredSecretsForOperation(
   const effective = effectiveSecurityForOperation(spec, op);
   if (!effective) return []; // op is public
 
-  // Intersect scheme names across all alternatives.
   let intersection: Set<string> | null = null;
   for (const requirement of effective) {
     const namesInThisAlt = new Set(Object.keys(requirement));
@@ -1465,43 +1594,74 @@ export function requiredSecretsForOperation(
   if (!intersection) return [];
 
   const out: string[] = [];
+  const seen = new Set<string>();
   for (const schemeName of intersection) {
     const scheme = schemes[schemeName];
-    if (scheme && schemeRequiresSecret(scheme)) {
-      out.push(schemeName);
+    if (!scheme || !schemeRequiresSecret(scheme)) continue;
+    for (const key of schemeKeyToSecretKeys(spec, schemeName)) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
     }
   }
   return out;
 }
 
 /**
- * Collect the set of security-scheme names that are strictly required by
- * at least one operation in the spec (after applying per-operation
- * overrides) AND whose scheme type produces a manifest secret. Used to
- * populate the app-level `manifest.secrets_needed`, which is surfaced to
- * MCP clients and the /build preview UI so operators know which secrets
- * to configure.
+ * Walk `components.securitySchemes` and derive the list of secret keys
+ * Floom should request from the user, plus an `auth_schemes` descriptor
+ * the runner reads to know where to inject each credential.
  *
- * Per-operation granularity lives on the action itself
- * (`ActionSpec.secrets_needed`) so the proxied-runner only blocks an
- * action when THAT action's required secrets are missing, rather than
- * blanket-blocking the entire app.
+ * This is the fix for the "secrets deadlock" (2026-04-20): specs that
+ * declare `securitySchemes` but omit `security` (or declare it only
+ * per-op with alternatives) used to produce an empty
+ * `manifest.secrets_needed`, stranding users between Studio
+ * ("nothing to configure") and the runner ("add a secret"). We now
+ * treat the presence of a supported scheme as a request for that
+ * secret, regardless of whether `security` was populated.
+ *
+ * Naming rules:
+ *   - type apiKey        → use `name` attr if present else the scheme
+ *                          key, normalized to UPPER_SNAKE_CASE
+ *                          ("X-API-Key" → "X_API_KEY")
+ *   - http bearer        → "BEARER_TOKEN", or
+ *                          "<SCHEME_KEY>_BEARER_TOKEN" when the spec
+ *                          declares more than one bearer scheme
+ *   - http basic         → "BASIC_AUTH_USER" + "BASIC_AUTH_PASS"
+ *   - oauth2 / other     → skipped (handled out-of-band)
+ *
+ * Duplicates are collapsed: multiple schemes that normalize to the
+ * same key only show up once in `secrets` and once in `authSchemes`.
  */
-export function deriveSecretsFromSpec(spec: OpenApiSpec): string[] {
-  const required = new Set<string>();
-  const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
-
-  for (const pathItem of Object.values(spec.paths || {})) {
-    for (const method of methods) {
-      const op = pathItem[method as keyof OpenApiPath] as
-        | OpenApiOperation
-        | undefined;
-      if (!op) continue;
-      for (const name of requiredSecretsForOperation(spec, op)) {
-        required.add(name);
-      }
+export function deriveAuthFromSpec(spec: OpenApiSpec): {
+  secrets: string[];
+  authSchemes: ManifestAuthScheme[];
+} {
+  const schemes = spec.components?.securitySchemes ?? {};
+  if (Object.keys(schemes).length === 0) {
+    return { secrets: [], authSchemes: [] };
+  }
+  const hasMultipleBearer = countBearerSchemes(schemes) > 1;
+  const secrets: string[] = [];
+  const authSchemes: ManifestAuthScheme[] = [];
+  const seen = new Set<string>();
+  for (const [schemeKey, scheme] of Object.entries(schemes)) {
+    const entries = schemeToSecretEntries(schemeKey, scheme, hasMultipleBearer);
+    for (const entry of entries) {
+      if (seen.has(entry.key)) continue;
+      seen.add(entry.key);
+      secrets.push(entry.key);
+      authSchemes.push(entry);
     }
   }
+  return { secrets, authSchemes };
+}
 
-  return Array.from(required);
+/**
+ * Backwards-compatible wrapper around `deriveAuthFromSpec` that returns
+ * only the secret keys. Kept because external callers (test harness,
+ * older services) import this as `deriveSecretsFromSpec(spec) -> string[]`.
+ */
+export function deriveSecretsFromSpec(spec: OpenApiSpec): string[] {
+  return deriveAuthFromSpec(spec).secrets;
 }

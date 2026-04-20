@@ -119,6 +119,31 @@ export interface NormalizedManifest {
    * transparently falls back to the first-action default.
    */
   primary_action?: string;
+  /**
+   * Auth schemes derived from the OpenAPI spec's `components.securitySchemes`
+   * at ingest, one entry per key in `secrets_needed`. Tells the
+   * proxied-runner where to inject each credential (header vs. query
+   * vs. cookie, which name). Populated only for proxied apps whose
+   * spec declared schemes; empty / absent otherwise.
+   *
+   * Fix for the "secrets deadlock" (2026-04-20): specs with
+   * `securitySchemes` but no `security` requirement block used to
+   * produce an empty `secrets_needed`, leaving users stranded between
+   * Studio ("nothing to configure") and the runner ("add a secret").
+   */
+  auth_schemes?: ManifestAuthScheme[];
+}
+
+/**
+ * One declared authentication scheme on a proxied app. `key` matches an
+ * entry in `manifest.secrets_needed`. `in` + `name` are only populated
+ * for `type: apiKey` schemes where we know the transport position.
+ */
+export interface ManifestAuthScheme {
+  key: string;
+  type: 'apiKey' | 'bearer' | 'basic';
+  in?: 'header' | 'query' | 'cookie';
+  name?: string;
 }
 
 export interface RenderConfig {
