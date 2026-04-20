@@ -187,6 +187,17 @@ export function buildUrl(
 // Keyed by "<token_url>::<client_id>". Each entry has { token, expires_at }.
 const oauth2TokenCache = new Map<string, { token: string; expires_at: number }>();
 
+  const FORBIDDEN_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'host',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-real-ip',
+  'connection',
+  'content-length',
+]);
+
 async function fetchOAuth2ClientCredentialsToken(
   tokenUrl: string,
   clientId: string,
@@ -216,8 +227,10 @@ async function fetchOAuth2ClientCredentialsToken(
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
+    const errorText = await res.text();
+    const redactedText = errorText.substring(0, 256).replace(clientSecret, '[redacted]');
     throw new Error(
-      `OAuth2 token endpoint returned HTTP ${res.status}: ${await res.text()}`,
+      `OAuth2 token endpoint returned HTTP ${res.status}: ${redactedText}${errorText.length > 256 ? '...' : ''}`,
     );
   }
   const json = (await res.json()) as {
@@ -384,6 +397,10 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
         if (v === undefined || v === null || v === '') continue;
         if (k.startsWith(HEADER_PREFIX)) {
           const headerName = k.slice(HEADER_PREFIX.length).replace(/_/g, '-');
+          if (FORBIDDEN_HEADERS.has(headerName.toLowerCase())) {
+            console.warn(`[proxied] blocking reserved header injection via input: ${headerName}`);
+            continue;
+          }
           extraHeaders[headerName] = String(v);
         } else if (k.startsWith(COOKIE_PREFIX)) {
           const cookieName = k.slice(COOKIE_PREFIX.length);

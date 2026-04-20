@@ -10,7 +10,7 @@
 //   DELETE /api/hub/:slug/renderer      — drop the custom renderer, fall back to default
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { mkdtempSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { db } from '../db.js';
@@ -774,6 +774,11 @@ hubRouter.post('/:slug/renderer', async (c) => {
   } finally {
     try {
       unlinkSync(entryPath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      rmSync(dir, { recursive: true, force: true });
     } catch {
       /* ignore */
     }

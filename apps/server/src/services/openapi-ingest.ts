@@ -4,6 +4,7 @@
 // apps table. Idempotent: re-running with the same config does not duplicate.
 import { readFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
+import * as dns from 'node:dns/promises';
 import { parse as parseYaml } from 'yaml';
 // @ts-expect-error — json-schema-merge-allof has no types on npm
 import mergeAllOf from 'json-schema-merge-allof';
@@ -845,7 +846,52 @@ export function specToManifest(
   };
 }
 
+async function isSafeUrl(urlString: string): Promise<boolean> {
+  let u: URL;
+  try {
+    u = new URL(urlString);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if (!u.hostname) return false;
+  
+  // localhost / loopback string check
+  if (u.hostname === 'localhost' || u.hostname.endsWith('.localhost')) return false;
+  if (/^127\.\d+\.\d+\.\d+$/.test(u.hostname) || u.hostname === '::1') return false;
+  if (/^169\.254\.\d+\.\d+$/.test(u.hostname)) return false;
+
+  // Resolve to prevent DNS bypass
+  try {
+    const records = await dns.lookup(u.hostname, { all: true });
+    for (const record of records) {
+      if (isPrivateIp(record.address)) return false;
+    }
+  } catch {
+    return false; // DNS failed
+  }
+  return true;
+}
+
+function isPrivateIp(ip: string): boolean {
+  // IPv4 Private
+  if (/^10\./.test(ip)) return true;
+  if (/^192\.168\./.test(ip)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
+  // IPv4 Loopback/Link-local
+  if (/^127\./.test(ip)) return true;
+  if (/^169\.254\./.test(ip)) return true;
+  // IPv6 Loopback/Private
+  if (ip === '::1') return true;
+  if (/^[fF][cdCD]/.test(ip)) return true; // fc00::/7 fd00::/8
+  if (/^[fF][eE][89aAbB]/.test(ip)) return true; // fe80::/10
+  return false;
+}
+
 export async function fetchSpec(url: string): Promise<OpenApiSpec> {
+  if (!(await isSafeUrl(url))) {
+    throw new Error(`Invalid or disallowed OpenAPI URL: ${url}`);
+  }
   const res = await fetch(url, {
     headers: { Accept: 'application/json, application/yaml, text/plain' },
     signal: AbortSignal.timeout(30_000),
@@ -857,8 +903,12 @@ export async function fetchSpec(url: string): Promise<OpenApiSpec> {
   // Try JSON first, fall back to YAML
   try {
     return JSON.parse(text) as OpenApiSpec;
-  } catch {
-    return parseYaml(text) as OpenApiSpec;
+  } catch (jsonErr) {
+    try {
+      return parseYaml(text) as OpenApiSpec;
+    } catch (yamlErr) {
+      throw new Error(`Failed to parse spec from ${url} as JSON or YAML: ${(yamlErr as Error).message}`);
+    }
   }
 }
 
@@ -945,8 +995,11 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           spec = await fetchSpec(appSpec.openapi_spec_url);
         } catch (err) {
           console.warn(
-            `[openapi-ingest] could not fetch spec for ${appSpec.slug}: ${(err as Error).message}. Using empty spec.`,
+            `[openapi-ingest] could not fetch spec for ${appSpec.slug}: ${(err as Error).message}. Skipping ingest for this app.`,
           );
+          errors.push({ slug: appSpec.slug, error: (err as Error).message });
+          apps_failed++;
+          continue; // Skip inserting an empty manifest
         }
       }
 
