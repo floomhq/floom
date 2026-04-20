@@ -1,0 +1,61 @@
+name: Deploy preview
+
+# Auto-deploy preview.floom.dev on every push to main.
+# Prod (floom.dev on Hetzner) stays manual.
+#
+# Flow: push main -> wait for CI (typecheck + test) to pass -> SSH to AX41 ->
+# the forced-command deploy key runs /usr/local/sbin/floom-deploy-preview.sh
+# which rebuilds the image, rolls the container with --no-deps, health-checks,
+# and rolls back to the previous compose if the new image fails to come up.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Serialize deploys: if a second push lands while we are deploying, queue it
+# instead of cancelling. We want the most-recent main to end up live, not
+# a half-finished rebuild.
+concurrency:
+  group: deploy-preview
+  cancel-in-progress: false
+
+jobs:
+  wait-for-ci:
+    name: Wait for CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Typecheck
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: 'Typecheck'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success
+      - name: Wait for Test
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: 'Test'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          allowed-conclusions: success
+
+  deploy:
+    name: Deploy to AX41 preview
+    needs: wait-for-ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH to AX41 (forced-command runs deploy script)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.AX41_HOST }}
+          username: ${{ secrets.AX41_USER }}
+          key: ${{ secrets.AX41_DEPLOY_KEY }}
+          # The authorized_keys forced-command ignores whatever we send here
+          # and runs /usr/local/sbin/floom-deploy-preview.sh. We pass a
+          # placeholder just so the action has something to transmit.
+          script: "deploy"
+          timeout: 15m
+          command_timeout: 15m
