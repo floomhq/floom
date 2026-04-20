@@ -34,6 +34,7 @@ import { AppHeader, TabBar } from './MeAppPage';
 import { useSecrets } from '../hooks/useSecrets';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
+import { collectRequiredSecretKeys } from '../lib/manifest-secrets';
 import type {
   AppDetail,
   UserSecretEntry,
@@ -111,7 +112,11 @@ export function MeAppSecretsPage({
     };
   }, [slug, app]);
 
-  const neededKeys = app?.manifest?.secrets_needed ?? [];
+  // Union of manifest-level and per-action `secrets_needed`. Fixes the
+  // "doesn't declare any secrets" dead end for OpenAPI apps whose
+  // operations declare per-op security but no manifest-level list.
+  // Audit: route-18 §5 and LAUNCH C1 / M1 (2026-04-20).
+  const neededKeys = collectRequiredSecretKeys(app?.manifest);
 
   // Ownership: in OSS mode both `author` and the session user id are
   // 'local' so the creator view is shown by default. In Cloud mode the

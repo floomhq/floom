@@ -16,6 +16,7 @@ import { RunSurface } from '../components/runner/RunSurface';
 import { useSecrets } from '../hooks/useSecrets';
 import * as api from '../api/client';
 import type { AppDetail } from '../lib/types';
+import { collectRequiredSecretKeys } from '../lib/manifest-secrets';
 
 // Apps whose manifest.secrets_needed lists optional cookies alongside
 // required ones get a manual required-set override. For ig-nano-scout
@@ -72,7 +73,13 @@ export function MeAppRunPage() {
 
   const missingKeys = useMemo(() => {
     if (!app || !secrets.entries) return null;
-    const declared = app.manifest?.secrets_needed ?? [];
+    // Union of manifest-level and per-action `secrets_needed`. Pre-fix
+    // the runner's `auth_error` copy told owners to "add a secret in
+    // Secrets" but the preflight only looked at the manifest-level
+    // list, so an OpenAPI app with per-operation security slipped past
+    // this gate and hit 401 inside RunSurface instead. See
+    // `lib/manifest-secrets.ts` and audit R12-2 / C1.
+    const declared = collectRequiredSecretKeys(app.manifest);
     const required = REQUIRED_SECRETS_OVERRIDE[app.slug] ?? declared;
     const keysSet = new Set(secrets.entries.map((s) => s.key));
     return required.filter((k) => !keysSet.has(k));
