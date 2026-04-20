@@ -274,7 +274,7 @@ export function AppPermalinkPage() {
       name: app.name,
       description: app.description,
       applicationCategory: app.category || 'UtilitiesApplication',
-      url: `https://floom.dev/p/${app.slug}`,
+      url: `${window.location.origin}/p/${app.slug}`,
       author: {
         '@type': 'Person',
         name: app.author_display || app.author || 'floomhq',
@@ -499,8 +499,10 @@ export function AppPermalinkPage() {
     );
   }
 
-  const mcpEndpoint = `https://floom.dev/mcp/app/${app.slug}`;
-  const httpEndpoint = `https://floom.dev/api/run`;
+  // Use the live origin so each env (floom.dev, preview.floom.dev,
+  // docker.floom.dev) exposes its own endpoints in the share/MCP panels.
+  const mcpEndpoint = `${window.location.origin}/mcp/app/${app.slug}`;
+  const httpEndpoint = `${window.location.origin}/api/run`;
   const githubRepo = GITHUB_REPOS[app.slug];
   const firstAction = Object.keys(app.manifest?.actions ?? {})[0] || app.actions?.[0] || 'run';
   const curlExample = `curl -X POST ${httpEndpoint} \\

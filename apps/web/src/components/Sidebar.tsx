@@ -2,8 +2,6 @@ import { useState } from 'react';
 import type { AppDetail } from '../lib/types';
 import { AppIcon } from './AppIcon';
 
-const PUBLIC_URL = 'https://floom.dev';
-
 interface Props {
   app: AppDetail | null;
   open: boolean;
@@ -12,6 +10,10 @@ interface Props {
 
 export function Sidebar({ app, open, onClose }: Props) {
   if (!open || !app) return null;
+
+  // Use the live origin so each env (floom.dev, preview.floom.dev,
+  // docker.floom.dev) shows its own endpoints in the MCP/HTTP cards.
+  const publicUrl = window.location.origin;
 
   const actions = Object.entries(app.manifest?.actions ?? {});
   const secrets = app.manifest?.secrets_needed ?? [];
@@ -126,13 +128,13 @@ export function Sidebar({ app, open, onClose }: Props) {
             <p className="sidebar-section-label">Use this app from anywhere</p>
             <IntegrationRow
               label="MCP server"
-              value={`${PUBLIC_URL}/mcp/app/${app.slug}`}
+              value={`${publicUrl}/mcp/app/${app.slug}`}
               hint="Paste into Claude Desktop or Cursor."
               copyable
             />
             <IntegrationRow
               label="HTTP POST"
-              value={`POST ${PUBLIC_URL}/api/run  { app_slug: "${app.slug}", inputs: {...} }`}
+              value={`POST ${publicUrl}/api/run  { app_slug: "${app.slug}", inputs: {...} }`}
               hint="cURL-friendly. Returns a run_id; stream via SSE."
               copyable
             />
