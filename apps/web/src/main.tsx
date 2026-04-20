@@ -24,6 +24,10 @@ const MeInstallPage = lazy(() => import('./pages/MeInstallPage').then(m => ({ de
 // 2026-04-20 (PRR tail cleanup): public /install stub — separate from
 // /me/install which is the authenticated "Install to Claude" flow.
 const InstallPage = lazy(() => import('./pages/InstallPage').then(m => ({ default: m.InstallPage })));
+// 2026-04-20: /about graduated from redirect to a real story page. Tells
+// who Floom is for, why headless, what it isn't, who's behind it. H1
+// "Get that thing off localhost fast." lives alongside the landing H1.
+const AboutPage = lazy(() => import('./pages/AboutPage').then(m => ({ default: m.AboutPage })));
 const BuildPage = lazy(() => import('./pages/BuildPage').then(m => ({ default: m.BuildPage })));
 const CreatorPage = lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
 const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ default: m.CreatorAppPage })));
@@ -212,7 +216,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             NotFoundPage. Wire them to the closest existing route so deep
             links from external docs, blogs, and wireframes land safely). */}
         <Route path="/browse" element={<Navigate to="/apps" replace />} />
-        <Route path="/about" element={<Navigate to="/" replace />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/deploy" element={<Navigate to="/studio/build" replace />} />
         <Route path="/docs" element={<Navigate to="/protocol" replace />} />
         {/* /docs/* deep links from wireframes/blogs/external docs. Map each
