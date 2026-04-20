@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { useSession, refreshSession, clearSession } from '../hooks/useSession';
 import * as api from '../api/client';
+import { friendlyAuthError } from '../lib/authErrors';
 
 /**
  * Card wrapper: restores visual structure so /me/settings matches the Store
@@ -121,8 +122,10 @@ export function MeSettingsPage() {
       setTimeout(() => setProfileState('idle'), 1500);
     } catch (err) {
       setProfileState('error');
-      const e = err as api.ApiError;
-      setProfileError(e.message || 'Could not save profile.');
+      setProfileError(
+        friendlyAuthError(err as api.ApiError, 'signin').message ||
+          'Could not save profile.',
+      );
     }
   }
 
@@ -155,10 +158,11 @@ export function MeSettingsPage() {
     } catch (err) {
       setPasswordState('error');
       const e = err as api.ApiError;
+      const copy = friendlyAuthError(e, 'signin');
       if (e.status === 401 || e.status === 400) {
-        setPasswordError(e.message || 'Current password incorrect.');
+        setPasswordError(copy.message || 'Current password incorrect.');
       } else {
-        setPasswordError(e.message || 'Could not change password.');
+        setPasswordError(copy.message || 'Could not change password.');
       }
     }
   }
@@ -176,10 +180,11 @@ export function MeSettingsPage() {
     } catch (err) {
       setDeleteState('error');
       const e = err as api.ApiError;
+      const copy = friendlyAuthError(e, 'signin');
       if (e.status === 401 || e.status === 400) {
-        setDeleteError(e.message || 'Password incorrect.');
+        setDeleteError(copy.message || 'Password incorrect.');
       } else {
-        setDeleteError(e.message || 'Could not delete account.');
+        setDeleteError(copy.message || 'Could not delete account.');
       }
     }
   }

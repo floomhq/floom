@@ -55,15 +55,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     let code: string | null = null;
-    let msg = text;
+    let msg = '';
     let payload: unknown = null;
     try {
-      const j = JSON.parse(text) as { error?: string; code?: string };
-      msg = j.error || text;
+      // Floom routes return `{ error, code }`; Better Auth returns
+      // `{ message, code }`. Accept both shapes so error UIs never have
+      // to render raw JSON as a fallback.
+      const j = JSON.parse(text) as {
+        error?: string;
+        message?: string;
+        code?: string;
+      };
+      msg = j.error || j.message || '';
       code = j.code || null;
       payload = j;
     } catch {
-      // non-JSON error
+      // non-JSON error: keep the raw text as the message
+      msg = text;
     }
     throw new ApiError(
       msg || `${res.status} ${res.statusText}`,
