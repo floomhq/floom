@@ -42,21 +42,12 @@ interface BuildPageProps {
   /** Wrapper component used for the outer layout. Defaults to PageShell
    *  (store surface). Studio wraps with StudioLayout. */
   layout?: React.ComponentType<{ children: React.ReactNode; title?: string }>;
-  /** Legacy: used to set the target of an in-page "← Creator dashboard"
-   *  link above the H1. Removed in the 2026-04-20 nav unification — the
-   *  TopBar's Store/Studio pill is now the only mode-switch affordance.
-   *  Prop kept so existing callers (StudioBuildPage) stay type-compatible
-   *  without needing edits; unused inside the component. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  backHref?: string;
   /** Redirect target after publish — Studio sends to /studio/:slug. */
   postPublishHref?: (slug: string) => string;
 }
 
 export function BuildPage({
   layout: Layout = PageShell,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  backHref: _backHref = '/creator',
   postPublishHref,
 }: BuildPageProps = {}) {
   const [searchParams] = useSearchParams();

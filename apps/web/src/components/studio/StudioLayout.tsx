@@ -6,9 +6,11 @@
 // StudioLayout's job is just to pass in the sidebar, the darker
 // background, and the studio-specific <main> padding/max-width.
 //
-// The mobile drawer (hamburger at bottom-left that opens the sidebar
-// on <900px) stays here because it is a Studio-specific affordance.
-// The TopBar itself keeps its normal hamburger on <640px.
+// Mobile (<768px): the sidebar is hidden. The TopBar renders a studio
+// hamburger (left of the pill) that opens the sidebar as a slide-in
+// drawer from the left. Drawer closes on route change or backdrop tap.
+// Before the 2026-04-20 nav-polish pass this was a floating ☰ button
+// anchored bottom-left of the viewport, which nobody noticed.
 //
 // Shape: TopBar + left sidebar (240px fixed desktop, drawer on mobile)
 // + darker main surface on `colors.sidebarBg`. Auth-gates cloud-only.
@@ -56,6 +58,7 @@ export function StudioLayout({
       requireAuth="cloud"
       allowSignedOutShell={allowSignedOutShell}
       rootBackground={colors.sidebarBg}
+      onStudioMenuOpen={() => setMenuOpen(true)}
       sidebar={
         <div className="studio-sidebar-wrap" style={{ display: 'contents' }}>
           <StudioSidebar
@@ -75,48 +78,19 @@ export function StudioLayout({
         ...contentStyle,
       }}
     >
-      {/* Mobile drawer toggle (sidebar is hidden <900px). Shown via
-          CSS on narrow viewports only. */}
-      <button
-        type="button"
-        onClick={() => setMenuOpen((v) => !v)}
-        aria-label="Open Studio menu"
-        data-testid="studio-mobile-toggle"
-        className="studio-mobile-toggle"
-        style={{
-          position: 'fixed',
-          bottom: 18,
-          left: 18,
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          border: '1px solid var(--line)',
-          background: 'var(--ink)',
-          color: '#fff',
-          fontSize: 16,
-          fontFamily: 'inherit',
-          cursor: 'pointer',
-          zIndex: 30,
-          display: 'none',
-        }}
-      >
-        ☰
-      </button>
-
+      {/* Mobile drawer (<768px). Backdrop catches tap-outside-to-close;
+          inner sidebar stops propagation so taps on it don't dismiss.
+          Opens via the TopBar's studio hamburger (onStudioMenuOpen).
+          Closes on route change (useEffect above) or backdrop tap. */}
       {menuOpen && (
         <div
+          className="studio-mobile-drawer-backdrop"
           role="presentation"
           onClick={() => setMenuOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 40,
-            background: 'rgba(14,14,12,0.4)',
-          }}
         >
           <div
+            className="studio-mobile-drawer-panel"
             onClick={(e) => e.stopPropagation()}
-            style={{ position: 'absolute', top: 0, left: 0, height: '100%' }}
           >
             <StudioSidebar
               activeAppSlug={activeAppSlug}
