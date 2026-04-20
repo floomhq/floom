@@ -10,10 +10,10 @@ import * as api from '../api/client';
 import type { MeRunSummary } from '../lib/types';
 
 export function MeInstallPage() {
-  const origin =
-    typeof window !== 'undefined'
-      ? window.location.origin
-      : 'https://floom.dev';
+  // Use the live origin so each env (floom.dev, preview.floom.dev,
+  // docker.floom.dev) shows its own install URLs rather than sending
+  // users to a hardcoded canonical domain.
+  const origin = window.location.origin;
   const mcpUrl = `${origin}/mcp`;
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);

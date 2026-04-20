@@ -1765,12 +1765,11 @@ function SignupToPublishModal({
 
 function ShareableUrl({ slug }: { slug: string }) {
   // Publish-success shareable URL with one-click copy. Uses the live
-  // origin so the copied value is a full https:// URL, not the relative
-  // /p/slug that the old banner displayed.
+  // origin so the copied value is a full https:// URL that reflects the
+  // current env (floom.dev on prod, preview.floom.dev on preview, etc.),
+  // not the relative /p/slug that the old banner displayed.
   const [copied, setCopied] = useState(false);
-  const origin =
-    typeof window !== 'undefined' ? window.location.origin : 'https://floom.dev';
-  const fullUrl = `${origin}/p/${slug}`;
+  const fullUrl = `${window.location.origin}/p/${slug}`;
   async function copy() {
     try {
       await navigator.clipboard.writeText(fullUrl);
