@@ -25,6 +25,15 @@ export function getRunStartErrorMessage(
   if (status === 429 || message.toLowerCase().includes('rate_limit_exceeded')) {
     return "You've hit the current run limit. Wait a minute, then try again.";
   }
+  // Launch blocker fix (2026-04-20): the server returns "App is inactive,
+  // cannot run" for seed apps whose docker image is missing on this host.
+  // Echoing that raw message to the user reads as a permission problem
+  // ("is the app turned off?") when really the creator just hasn't
+  // published a runnable image. Translate to neutral copy that matches
+  // the post-run `app_unavailable` class.
+  if (/app is inactive|app_inactive/i.test(message)) {
+    return "This app isn't available right now. The creator needs to fix or republish it. Try another app in the meantime.";
+  }
   return message || fallback;
 }
 
