@@ -30,6 +30,10 @@ interface Stripe {
   slug: string;
   name: string;
   description: string;
+  // Rescue 2026-04-21 (Fix 4): category drives the tile-tint variety
+  // on the landing stripes. Optional so the static fallback roster
+  // still works even when /api/hub hasn't responded yet.
+  category?: string;
 }
 
 // Landing v4 (2026-04-20): keep the 5-slug preference. Tiles + stripes
@@ -42,26 +46,31 @@ const FALLBACK_STRIPES: Stripe[] = [
     slug: 'opendraft',
     name: 'opendraft',
     description: 'Draft posts, docs, and emails from a prompt',
+    category: 'writing',
   },
   {
     slug: 'openpaper',
     name: 'openpaper',
     description: 'Turn any PDF into a conversation',
+    category: 'research',
   },
   {
     slug: 'bouncer',
     name: 'bouncer',
     description: 'Independent quality audits for your work',
+    category: 'ai',
   },
   {
     slug: 'openslides',
     name: 'openslides',
     description: 'Pitch decks from a single brief',
+    category: 'design',
   },
   {
     slug: 'uuid',
     name: 'uuid',
     description: 'Zero-config UUID generator. No inputs, always works.',
+    category: 'developer-tools',
   },
 ];
 
@@ -120,12 +129,12 @@ function pickStripes(apps: HubApp[]): Stripe[] {
   const picked: Stripe[] = [];
   for (const slug of PREFERRED_SLUGS) {
     const hit = bySlug.get(slug);
-    if (hit) picked.push({ slug: hit.slug, name: hit.name, description: hit.description });
+    if (hit) picked.push({ slug: hit.slug, name: hit.name, description: hit.description, category: hit.category ?? undefined });
   }
   if (picked.length >= 5) return picked.slice(0, 5);
   for (const app of apps) {
     if (picked.some((p) => p.slug === app.slug)) continue;
-    picked.push({ slug: app.slug, name: app.name, description: app.description });
+    picked.push({ slug: app.slug, name: app.name, description: app.description, category: app.category ?? undefined });
     if (picked.length >= 5) break;
   }
   return picked.length >= 3 ? picked : FALLBACK_STRIPES;
@@ -773,6 +782,7 @@ export function CreatorHeroPage() {
                   slug={s.slug}
                   name={s.name}
                   description={s.description}
+                  category={s.category}
                   variant="landing"
                 />
               ))}
