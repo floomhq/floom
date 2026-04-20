@@ -39,6 +39,7 @@ const StudioAppSecretsPage = lazy(() => import('./pages/StudioAppSecretsPage').t
 const StudioAppAccessPage = lazy(() => import('./pages/StudioAppAccessPage').then(m => ({ default: m.StudioAppAccessPage })));
 const StudioAppRendererPage = lazy(() => import('./pages/StudioAppRendererPage').then(m => ({ default: m.StudioAppRendererPage })));
 const StudioAppAnalyticsPage = lazy(() => import('./pages/StudioAppAnalyticsPage').then(m => ({ default: m.StudioAppAnalyticsPage })));
+const StudioTriggersTab = lazy(() => import('./pages/StudioTriggersTab').then(m => ({ default: m.StudioTriggersTab })));
 const StudioSettingsPage = lazy(() => import('./pages/StudioSettingsPage').then(m => ({ default: m.StudioSettingsPage })));
 const ImprintPage = lazy(() => import('./pages/ImprintPage').then(m => ({ default: m.ImprintPage })));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(m => ({ default: m.PrivacyPage })));
@@ -196,6 +197,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/studio/:slug/access" element={<StudioAppAccessPage />} />
         <Route path="/studio/:slug/renderer" element={<StudioAppRendererPage />} />
         <Route path="/studio/:slug/analytics" element={<StudioAppAnalyticsPage />} />
+        <Route path="/studio/:slug/triggers" element={<StudioTriggersTab />} />
         {/* Legacy creator-context redirects into Studio (preserve old links). */}
         <Route path="/build" element={<Navigate to="/studio/build" replace />} />
         <Route path="/creator" element={<Navigate to="/studio" replace />} />

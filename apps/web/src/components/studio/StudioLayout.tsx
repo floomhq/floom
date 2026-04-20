@@ -22,7 +22,7 @@ interface Props {
   children: ReactNode;
   title?: string;
   activeAppSlug?: string;
-  activeSubsection?: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics';
+  activeSubsection?: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics' | 'triggers';
   contentStyle?: CSSProperties;
   allowSignedOutShell?: boolean;
 }

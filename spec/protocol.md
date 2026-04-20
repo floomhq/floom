@@ -264,7 +264,39 @@ Source: [`routes/mcp.ts`](../apps/server/src/routes/mcp.ts).
 
 ---
 
-## 8. Hub API
+## 8. Triggers
+
+A trigger fires an app run from an external event. Two dispatcher shapes share one table; the difference is how the run is initiated:
+
+- **`schedule`** — a scheduler worker wakes every 30s, finds triggers whose `next_run_at <= NOW()`, and enqueues a job. `cron_expression` is a standard 5-field crontab (e.g. `0 9 * * 1` = 09:00 every Monday). `tz` is an IANA zone (default `UTC`). Cron parsing follows `cron-parser` semantics (DST-aware).
+- **`webhook`** — an external sender POSTs to `/hook/:webhook_url_path` with an HMAC-SHA256 signature. Valid signature + enabled trigger + active app ⇒ 204 No Content and a job is enqueued.
+
+Both shapes converge on the same job-queue dispatch path (§5), so outgoing webhook delivery, retries, and timeouts are reused.
+
+### 8.1. Management endpoints (owner-only)
+
+- **`POST /api/hub/:slug/triggers`** — create a trigger for an owned app. Body: `{ action, inputs?, trigger_type: 'schedule' | 'webhook', cron_expression?, tz? }`. For `webhook`, the server generates and returns `{ webhook_url, webhook_secret, webhook_url_path }` **once** — the secret is never returned again (subsequent GETs mask it). For `schedule`, `cron_expression` is required; `tz` defaults to `UTC`.
+- **`GET /api/me/triggers`** — list the caller's triggers (across all their apps).
+- **`PATCH /api/me/triggers/:id`** — update `enabled`, `cron_expression`, `tz`, `inputs`, or `action`. Cron changes recompute `next_run_at`.
+- **`DELETE /api/me/triggers/:id`** — remove. App deletion cascades (FK ON DELETE CASCADE).
+
+### 8.2. Incoming webhook contract
+
+- **`POST /hook/:webhook_url_path`** — public. Headers:
+  - `X-Floom-Signature: sha256=<hex>` (required) — HMAC-SHA256 of the raw request body using `webhook_secret` as the key.
+  - `X-Request-ID` (optional) — idempotency key; duplicates within 24h return 200 with `{ deduped: true, request_id }`.
+- Returns `204 No Content` on success; the `Location` header points at the created job. 401 on signature mismatch. 404 on unknown path. 204 silently on disabled trigger (no-op, prevents retry storms).
+- Body may be empty. If the body is a JSON object with a top-level `inputs` key, those inputs override the stored inputs for this run. Otherwise the stored inputs are used as-is; non-JSON bodies are accepted and ignored.
+
+### 8.3. Outgoing webhook payload (on completion)
+
+When a job finishes, the server POSTs to the app's `webhook_url` (if set) with `{ job_id, slug, status, output, error, duration_ms, attempts, triggered_by, trigger_id? }`. `triggered_by` is `'schedule'`, `'webhook'`, or `'manual'` (direct API call). `trigger_id` is present when `triggered_by !== 'manual'`.
+
+Source: [`routes/triggers.ts`](../apps/server/src/routes/triggers.ts), [`routes/webhook.ts`](../apps/server/src/routes/webhook.ts), [`services/triggers.ts`](../apps/server/src/services/triggers.ts), [`services/triggers-worker.ts`](../apps/server/src/services/triggers-worker.ts).
+
+---
+
+## 9. Hub API
 
 - **`GET /api/hub`** — list every active public app. Query: `category`, `sort` (`default` = featured then `avg_run_ms` asc then newest; also `name`, `newest`, `category`), `include_fixtures=true` to bypass the E2E fixture filter. Returns `[{ slug, name, description, category, author, author_display, icon, actions, runtime, featured, avg_run_ms, created_at }]`. Private apps are NEVER listed; `auth-required` apps ARE listed but still require the bearer token to run.
 - **`GET /api/hub/:slug`** — single-app detail. Returns `{ slug, name, description, category, author, author_display, creator_handle, version, version_status, published_at, icon, manifest, visibility, is_async, async_mode, timeout_ms, renderer, created_at }`. Private apps return 404 unless the caller is the owner. `renderer` is `{ source_hash, bytes, output_shape, compiled_at }` when a custom renderer is compiled, else `null`.
@@ -279,7 +311,7 @@ Source: [`routes/hub.ts`](../apps/server/src/routes/hub.ts).
 
 ---
 
-## 9. Secrets
+## 10. Secrets
 
 An app declares env vars it needs in `secrets_needed` (top-level) and/or per-action (`ActionSpec.secrets_needed` overrides the top-level list for that action). Example: `{ "secrets_needed": ["GEMINI_API_KEY"] }`.
 
@@ -296,7 +328,7 @@ Source: [`services/runner.ts`](../apps/server/src/services/runner.ts), [`service
 
 ---
 
-## 10. Extensibility — what's replaceable
+## 11. Extensibility — what's replaceable
 
 Floom is a protocol, not a single implementation. Adapter interfaces for the five pluggable concerns are formalized in [adapters.md](./adapters.md). The reference implementation ships in this repo (Docker + HTTP proxy runtime, SQLite storage, Better Auth, encrypted-column secrets, in-process metrics + Sentry). Alternate implementations welcome via PRs that conform to the interface contracts.
 
@@ -322,6 +354,7 @@ The renderer is the only concern that is currently swappable *at runtime* (per-a
 - Hub routes: [`apps/server/src/routes/hub.ts`](../apps/server/src/routes/hub.ts)
 - MCP routes: [`apps/server/src/routes/mcp.ts`](../apps/server/src/routes/mcp.ts)
 - Webhook delivery: [`apps/server/src/services/webhook.ts`](../apps/server/src/services/webhook.ts)
+- Triggers (schedule + webhook): [`apps/server/src/routes/triggers.ts`](../apps/server/src/routes/triggers.ts), [`apps/server/src/routes/webhook.ts`](../apps/server/src/routes/webhook.ts), [`apps/server/src/services/triggers.ts`](../apps/server/src/services/triggers.ts), [`apps/server/src/services/triggers-worker.ts`](../apps/server/src/services/triggers-worker.ts)
 - Renderer sandbox: [`apps/server/src/routes/renderer.ts`](../apps/server/src/routes/renderer.ts)
 - Example manifests: [`apps/server/src/db/seed.json`](../apps/server/src/db/seed.json)
 - Auth + rate limit: [`apps/server/src/lib/auth.ts`](../apps/server/src/lib/auth.ts), [`apps/server/src/lib/rate-limit.ts`](../apps/server/src/lib/rate-limit.ts)
