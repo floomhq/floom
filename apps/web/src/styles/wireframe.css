@@ -745,6 +745,23 @@ input { font-family: inherit; }
   40% { opacity: 1; transform: scale(1); }
 }
 
+/* Fix 2 (2026-04-20): "current step" line surfaced above the terminal
+   so slow AI runs show live progress instead of a dead spinner.
+   The full stream stays visible below; this is just a readable
+   headline of the most recent non-noise log line. */
+.stream-current-step {
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .terminal-card {
   background: var(--terminal-bg);
   border-radius: 16px;

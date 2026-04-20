@@ -306,6 +306,17 @@ export function CreatorHeroPage() {
               <IntegrationLogos variant="inline" />
             </div>
 
+            {/* Fix 3 (2026-04-20): "examples at top" — an eyebrow strip of
+                real live-app icons placed ABOVE the H1 so the first thing
+                a visitor sees is proof of a working product, not brand
+                copy. Federico's audit: "examples at top should be at top".
+                The full-size HeroAppTiles grid still appears below the
+                CTAs (see §Hero app-tile strip further down) as the
+                interactive proof row. This eyebrow is the compact
+                glance-in-the-fold version: 4 monochrome app marks + a
+                "N live apps →" link to /apps. */}
+            <HeroAppsEyebrow apps={visibleStripes} totalCount={hubCount} />
+
             {/* H1 (locked 2026-04-18). 60px desktop so there's more room for
                 the CTA + tile strip above the fold. */}
             <h1
@@ -698,8 +709,117 @@ export function CreatorHeroPage() {
           .hero-works-with { margin-bottom: 16px !important; }
           .integration-logos { flex-direction: column !important; gap: 10px !important; }
           .live-apps-header { flex-direction: column !important; align-items: flex-start !important; }
+          .hero-apps-eyebrow { font-size: 11.5px !important; padding: 6px 10px !important; gap: 8px !important; }
+          .hero-apps-eyebrow-mark { width: 18px !important; height: 18px !important; font-size: 10px !important; }
         }
       `}</style>
+    </div>
+  );
+}
+
+/**
+ * Fix 3 (2026-04-20): compact "examples at top" strip placed above the
+ * H1. Federico's audit: "examples at top should be at top". The
+ * existing HeroAppTiles grid lives below the CTAs — it's the big,
+ * tappable proof row. This eyebrow is the glance-in-the-fold version so
+ * the FIRST thing a visitor sees is a real app, not brand copy.
+ *
+ * Layout: 4 mini chips (one-letter marks + slug) + a link to /apps.
+ * Whole row links to /apps on mobile (single tap target). No hero CTA
+ * real-estate loss, sits where the Integrations row used to breathe.
+ */
+function HeroAppsEyebrow({
+  apps,
+  totalCount,
+}: {
+  apps: Stripe[];
+  totalCount: number | null;
+}) {
+  if (!apps || apps.length === 0) return null;
+  const chips = apps.slice(0, 4);
+  return (
+    <div
+      data-testid="hero-apps-eyebrow"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        flexWrap: 'wrap',
+        marginBottom: 18,
+      }}
+    >
+      <ul
+        aria-label="Live apps running on Floom"
+        style={{
+          listStyle: 'none',
+          margin: 0,
+          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+        }}
+      >
+        {chips.map((a) => (
+          <li key={a.slug}>
+            <Link
+              to={`/p/${a.slug}`}
+              data-testid={`hero-apps-eyebrow-chip-${a.slug}`}
+              className="hero-apps-eyebrow"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 12px',
+                borderRadius: 999,
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                textDecoration: 'none',
+                color: 'var(--ink)',
+                fontSize: 12.5,
+                fontWeight: 500,
+              }}
+            >
+              <span
+                className="hero-apps-eyebrow-mark"
+                aria-hidden="true"
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 6,
+                  background:
+                    'linear-gradient(135deg, rgba(5,150,105,0.12), rgba(5,150,105,0.04))',
+                  color: 'var(--accent)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                }}
+              >
+                {a.slug.charAt(0).toUpperCase()}
+              </span>
+              <span>{a.slug}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <Link
+        to="/apps"
+        data-testid="hero-apps-eyebrow-more"
+        style={{
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: 'var(--muted)',
+          textDecoration: 'none',
+          padding: '6px 10px',
+          borderRadius: 8,
+        }}
+      >
+        {totalCount != null ? `${totalCount} live apps` : 'Browse live apps'} →
+      </Link>
     </div>
   );
 }

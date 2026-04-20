@@ -51,6 +51,13 @@ export interface ActionSpec {
    * `secrets_needed`. See apps/server/src/types.ts for details.
    */
   secrets_needed?: string[];
+  /**
+   * Fix 2 (2026-04-20): per-action estimated run time in milliseconds.
+   * Overrides the manifest-level value when set. Surfaced next to the
+   * live elapsed timer as "~Ns typical" so slow AI actions don't read
+   * as frozen.
+   */
+  estimated_duration_ms?: number;
 }
 
 export interface NormalizedManifest {
@@ -78,6 +85,13 @@ export interface NormalizedManifest {
    * Falls back to the first action key when missing or invalid.
    */
   primary_action?: string;
+  /**
+   * Fix 2 (2026-04-20): app-level typical run duration in milliseconds.
+   * When set, the runner surfaces "~Ns typical" next to the live
+   * elapsed timer so long AI runs don't read as frozen.
+   * `ActionSpec.estimated_duration_ms` overrides this per-action.
+   */
+  estimated_duration_ms?: number;
 }
 
 export interface RenderConfig {

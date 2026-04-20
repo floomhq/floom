@@ -152,7 +152,19 @@ body {
   height: 2px;
   background: var(--ink);
   border-radius: 2px;
-  transition: transform 0.2s, opacity 0.2s;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  transform-origin: center;
+}
+/* Fix 1 (2026-04-20): morph hamburger → X when the drawer is open so
+   the close affordance is visible without adding a second control. */
+.topbar-hamburger[data-open='true'] span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+.topbar-hamburger[data-open='true'] span:nth-child(2) {
+  opacity: 0;
+}
+.topbar-hamburger[data-open='true'] span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
 }
 
 .topbar-mobile-menu {
@@ -161,10 +173,19 @@ body {
   border-bottom: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  /* Lock to the viewport so a long menu scrolls without pushing the
+     page behind it. Body scroll is also locked from TopBar.tsx while
+     the drawer is open. */
+  max-height: calc(100dvh - 56px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .topbar-mobile-link {
-  display: block;
+  display: flex;
+  align-items: center;
   padding: 14px 24px;
+  /* Fix 1 (2026-04-20): 48px min tap height, comfortable one-thumb hits. */
+  min-height: 48px;
   font-size: 15px;
   color: var(--ink);
   border: none;
@@ -174,12 +195,82 @@ body {
   font-family: inherit;
   border-bottom: 1px solid var(--line);
   text-decoration: none;
+  width: 100%;
 }
 .topbar-mobile-link:last-child {
   border-bottom: none;
 }
-.topbar-mobile-link:hover {
+.topbar-mobile-link:hover,
+.topbar-mobile-link:focus-visible {
   background: var(--bg);
+}
+
+/* Fix 1 (2026-04-20): primary mobile link — "Apps". Federico's audit:
+   "don't find app store on mobile fast". Now leads the drawer with a
+   storefront icon, 18px bold weight, tinted background so it pops. */
+.topbar-mobile-link-primary {
+  gap: 12px;
+  padding: 18px 24px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent, #1a7f37) 8%, var(--card));
+}
+.topbar-mobile-link-primary:hover,
+.topbar-mobile-link-primary:focus-visible {
+  background: color-mix(in oklab, var(--accent, #1a7f37) 14%, var(--card));
+}
+.topbar-mobile-link-primary svg {
+  color: var(--accent, #1a7f37);
+}
+
+/* Signed-in avatar footer inside the drawer. */
+.topbar-mobile-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+.topbar-mobile-footer-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent, #1a7f37);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.topbar-mobile-footer-avatar img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.topbar-mobile-footer-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-mobile-footer-signout {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 36px;
 }
 
 /* ── Mobile responsive ───────────────────────────────────────────────── */

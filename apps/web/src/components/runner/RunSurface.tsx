@@ -78,6 +78,13 @@ interface RunState {
   cancelPoll?: () => void;
   run?: RunRecord;
   errorMessage?: string;
+  /**
+   * Fix 2 (2026-04-20): client-side timestamp of when the current run
+   * started. Surfaced by StreamingTerminal/JobProgress so the user sees
+   * elapsed seconds ticking up (0:03, 0:15, 0:42) instead of a dead
+   * spinner. Cleared when the phase transitions away from job/streaming.
+   */
+  runStartedAt?: number;
 }
 
 /**
@@ -342,6 +349,7 @@ export function RunSurface({
 
     if (app.is_async) {
       try {
+        const startedAt = Date.now();
         const { job_id } = await api.startJob(app.slug, inputs, action);
         let stopPoll: (() => void) | null = null;
         setState((s) => ({
@@ -349,6 +357,7 @@ export function RunSurface({
           phase: 'job',
           jobId: job_id,
           job: null,
+          runStartedAt: startedAt,
         }));
 
         stopPoll = api.pollJob(app.slug, job_id, {
@@ -404,8 +413,15 @@ export function RunSurface({
     }
 
     try {
+      const startedAt = Date.now();
       const { run_id } = await api.startRun(app.slug, inputs, undefined, action);
-      setState((s) => ({ ...s, phase: 'streaming', runId: run_id, logs: [] }));
+      setState((s) => ({
+        ...s,
+        phase: 'streaming',
+        runId: run_id,
+        logs: [],
+        runStartedAt: startedAt,
+      }));
 
       const close = api.streamRun(run_id, {
         onLog: (line) => {
@@ -958,6 +974,9 @@ function OutputSlot({
         app={appAsPickResult}
         lines={state.logs ?? []}
         onCancel={onCancelStream}
+        appDetail={app}
+        action={state.action}
+        startedAt={state.runStartedAt ?? null}
       />
     );
   }
@@ -968,6 +987,9 @@ function OutputSlot({
         app={appAsPickResult}
         job={state.job ?? null}
         onCancel={onCancelJob}
+        appDetail={app}
+        action={state.action}
+        startedAt={state.runStartedAt ?? null}
       />
     );
   }

@@ -464,7 +464,8 @@
           "GEMINI_API_KEY"
         ],
         "manifest_version": "2.0",
-        "knowledge_enabled": true
+        "knowledge_enabled": true,
+        "estimated_duration_ms": 20000
       }
     },
     {
@@ -566,7 +567,8 @@
         "knowledge_enabled": true,
         "render": {
           "refinable": true
-        }
+        },
+        "estimated_duration_ms": 25000
       }
     },
     {
@@ -718,7 +720,8 @@
         "manifest_version": "2.0",
         "render": {
           "refinable": true
-        }
+        },
+        "estimated_duration_ms": 30000
       }
     },
     {
@@ -1125,7 +1128,8 @@
         "manifest_version": "2.0",
         "render": {
           "refinable": true
-        }
+        },
+        "estimated_duration_ms": 45000
       }
     },
     {
@@ -1314,7 +1318,8 @@
           "mime": "application/pdf",
           "previewHtml_field": "preview",
           "refinable": true
-        }
+        },
+        "estimated_duration_ms": 30000
       }
     },
     {

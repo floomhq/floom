@@ -59,6 +59,15 @@ export interface ActionSpec {
    * OpenAPI 3.x §4.8.10). Fix for INGEST-SECRETS-GLOBAL (2026-04-16).
    */
   secrets_needed?: string[];
+  /**
+   * Fix 2 (2026-04-20): per-action estimated run time in milliseconds.
+   * When set, this overrides the app-level `estimated_duration_ms` for
+   * this specific action. Useful when one action is significantly
+   * slower than the others (e.g. a "generate" action for an AI app
+   * that's 30s vs. a "list" action that's 200ms). Validated + capped
+   * identically to the app-level field.
+   */
+  estimated_duration_ms?: number;
 }
 
 export interface NormalizedManifest {
@@ -119,6 +128,17 @@ export interface NormalizedManifest {
    * transparently falls back to the first-action default.
    */
   primary_action?: string;
+  /**
+   * Fix 2 (2026-04-20): typical run duration in milliseconds. Purely
+   * advisory — surfaced by the web runner next to the elapsed timer as
+   * "~Ns typical" so a long AI run (20–40s) doesn't read as frozen.
+   * Creators declare this in the manifest; Floom validates it server-side
+   * and caps it at 10 minutes (600000ms) so an extreme value can't
+   * distort the UI. Absent = the runner just shows live elapsed time.
+   *
+   * ActionSpec.estimated_duration_ms takes precedence when both are set.
+   */
+  estimated_duration_ms?: number;
 }
 
 export interface RenderConfig {

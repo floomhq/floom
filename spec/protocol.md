@@ -77,10 +77,11 @@ The normalized manifest shape (v2.0):
 | `license` | string | no | SPDX identifier (e.g. `"MIT"`), set from `info.license` at ingest. |
 | `render` | `RenderConfig` | no | Renderer hints (§3.3). |
 | `primary_action` | string | no | Key of the action the /p/:slug runner should select by default on multi-action apps. Must match a key in `actions` (invalid values are ignored, falling back to the first action). Surfaced as a "Primary" pill on the tab. Creators set this from `/studio/:slug`. |
+| `estimated_duration_ms` | integer | no | Typical run duration in milliseconds (positive integer, capped at 600000 / 10 minutes server-side). Purely advisory — shown as "~Ns typical" next to the elapsed timer so users don't think a long AI run is frozen. When absent, the runner just shows the live elapsed time. Can also be declared per-action on the `ActionSpec`; the action-level value wins when both are set. |
 
 ### 3.1 `ActionSpec`
 
-Fields: `label` (string, required), `description?` (string), `inputs` (InputSpec[]), `outputs` (OutputSpec[]), `secrets_needed?` (string[], per-action override of the top-level list).
+Fields: `label` (string, required), `description?` (string), `inputs` (InputSpec[]), `outputs` (OutputSpec[]), `secrets_needed?` (string[], per-action override of the top-level list), `estimated_duration_ms?` (integer, same semantics as the top-level field — action-level wins over app-level).
 
 ### 3.2 Inputs and outputs
 

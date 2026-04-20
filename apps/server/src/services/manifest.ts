@@ -158,7 +158,37 @@ function validateAction(raw: unknown, actionName: string): ActionSpec {
     assertStringArray(raw.secrets_needed, `actions.${actionName}.secrets_needed`);
     action.secrets_needed = raw.secrets_needed;
   }
+  // Fix 2 (2026-04-20): per-action estimated duration, for slow-run
+  // progress UX. Positive integer, capped at 10 minutes. Silently drop
+  // when invalid — this is advisory only; a bad value should not
+  // prevent the app from running.
+  const actionEst = normalizeEstimatedDuration(
+    raw.estimated_duration_ms,
+    `actions.${actionName}.estimated_duration_ms`,
+  );
+  if (actionEst !== undefined) action.estimated_duration_ms = actionEst;
   return action;
+}
+
+/**
+ * Fix 2 (2026-04-20): validate + clamp `estimated_duration_ms`.
+ * Positive integer. Non-integer or non-positive values throw. Values
+ * above 10 minutes are clamped so a bad manifest can't blow out the
+ * runner's "~Ns typical" copy.
+ */
+const MAX_ESTIMATED_DURATION_MS = 600_000;
+function normalizeEstimatedDuration(
+  raw: unknown,
+  path: string,
+): number | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    throw new ManifestError(`${path} must be a positive integer (milliseconds)`, path);
+  }
+  if (!Number.isInteger(raw) || raw <= 0) {
+    throw new ManifestError(`${path} must be a positive integer (milliseconds)`, path);
+  }
+  return Math.min(raw, MAX_ESTIMATED_DURATION_MS);
 }
 
 /**
@@ -255,6 +285,12 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     apt_packages.push(...(raw.apt_packages as string[]));
   }
 
+  // Fix 2 (2026-04-20): app-level estimated duration.
+  const estimated_duration_ms = normalizeEstimatedDuration(
+    raw.estimated_duration_ms,
+    'estimated_duration_ms',
+  );
+
   return {
     name: raw.name,
     description: raw.description,
@@ -268,6 +304,7 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     ...(typeof raw.license === 'string' && raw.license.trim().length > 0
       ? { license: raw.license.trim() }
       : {}),
+    ...(estimated_duration_ms !== undefined && { estimated_duration_ms }),
   };
 }
 

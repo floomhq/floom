@@ -119,9 +119,14 @@ export function TopBar({ compact = false }: Props = {}) {
     setMenuOpen(false);
   }, [location.pathname, location.hash]);
 
-  // a11y 2026-04-20: Escape closes the mobile menu and returns focus to
-  // the hamburger button. Without this, keyboard users had no way to
-  // dismiss the overlay once open.
+  // Mobile menu a11y + UX (2026-04-20 Fix 1):
+  //   - Escape closes the drawer (and returns focus to the hamburger).
+  //   - Outside taps close it.
+  //   - Body scroll is locked while open so the page underneath doesn't
+  //     drift when the user taps a long menu on a phone.
+  // Federico's audit: "mobile menu is broken, don't find app store on
+  // mobile fast". Apart from the reorder below, we also wanted to make
+  // sure the menu itself behaves correctly once it's open.
   useEffect(() => {
     if (!menuOpen) return;
     function onKey(e: KeyboardEvent) {
@@ -130,8 +135,26 @@ export function TopBar({ compact = false }: Props = {}) {
         hamburgerRef.current?.focus();
       }
     }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    function onPointer(e: MouseEvent | TouchEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // Ignore clicks inside the header (menu or hamburger button).
+      if (target.closest('.topbar, .topbar-mobile-menu, .topbar-hamburger')) {
+        return;
+      }
+      setMenuOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('touchstart', onPointer);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('touchstart', onPointer);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [menuOpen]);
 
   async function handleLogout() {
@@ -420,8 +443,10 @@ export function TopBar({ compact = false }: Props = {}) {
           type="button"
           className="hamburger topbar-hamburger"
           data-testid="hamburger"
-          aria-label="Open menu"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
           aria-expanded={menuOpen}
+          aria-controls="topbar-mobile-menu"
+          data-open={menuOpen ? 'true' : 'false'}
           onClick={() => setMenuOpen((v) => !v)}
         >
           <span />
@@ -431,15 +456,51 @@ export function TopBar({ compact = false }: Props = {}) {
       </div>
 
       {menuOpen && (
-        <div className="topbar-mobile-menu" role="menu" aria-label="Mobile navigation">
+        // Fix 1 (mobile menu, 2026-04-20): Federico flagged "don't find
+        // app store on mobile fast". The drawer now leads with Apps —
+        // styled as the primary menu item: leading storefront icon, 18px
+        // bold, taller tap target. Everything else (Docs, Publish, Sign
+        // in / Me / Studio / Settings / Sign out) stacks below in plain
+        // style. Signed-in order per spec: Apps, Me, Studio(N), Docs,
+        // Publish, Settings, avatar footer with Sign out. Signed-out:
+        // Apps, Docs, Publish, Sign in.
+        <div
+          id="topbar-mobile-menu"
+          className="topbar-mobile-menu"
+          role="menu"
+          aria-label="Mobile navigation"
+          data-testid="topbar-mobile-menu"
+        >
           <Link
             to="/apps"
-            className="topbar-mobile-link"
+            className="topbar-mobile-link topbar-mobile-link-primary"
+            data-testid="topbar-mobile-apps"
             role="menuitem"
             onClick={() => setMenuOpen(false)}
           >
-            Apps
+            <StoreIcon />
+            <span>Apps</span>
           </Link>
+          {isAuthenticated && (
+            <Link
+              to="/me"
+              className="topbar-mobile-link"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+            >
+              Me
+            </Link>
+          )}
+          {isAuthenticated && (
+            <Link
+              to="/studio"
+              className="topbar-mobile-link"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+            >
+              {ownedAppCount > 0 ? `Studio (${ownedAppCount})` : 'Open Studio →'}
+            </Link>
+          )}
           <Link
             to="/protocol"
             className="topbar-mobile-link"
@@ -461,22 +522,6 @@ export function TopBar({ compact = false }: Props = {}) {
           {isAuthenticated ? (
             <>
               <Link
-                to="/me"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-              >
-                My dashboard
-              </Link>
-              <Link
-                to="/studio"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-              >
-                {ownedAppCount > 0 ? `Studio (${ownedAppCount})` : 'Open Studio →'}
-              </Link>
-              <Link
                 to="/me/settings"
                 className="topbar-mobile-link"
                 role="menuitem"
@@ -484,26 +529,33 @@ export function TopBar({ compact = false }: Props = {}) {
               >
                 Settings
               </Link>
-              <button
-                type="button"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  void handleLogout();
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  width: '100%',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  color: 'var(--ink)',
-                  fontFamily: 'inherit',
-                }}
+              <div
+                className="topbar-mobile-footer"
+                data-testid="topbar-mobile-footer"
               >
-                Sign out
-              </button>
+                <span
+                  className="topbar-mobile-footer-avatar"
+                  aria-hidden="true"
+                >
+                  {user?.image ? (
+                    <img src={user.image} alt="" width={28} height={28} />
+                  ) : (
+                    userInitial
+                  )}
+                </span>
+                <span className="topbar-mobile-footer-name">{userLabel}</span>
+                <button
+                  type="button"
+                  className="topbar-mobile-footer-signout"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void handleLogout();
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
             </>
           ) : (
             !isLoginPage && (
@@ -520,5 +572,29 @@ export function TopBar({ compact = false }: Props = {}) {
         </div>
       )}
     </header>
+  );
+}
+
+// Storefront icon for the Apps primary entry in the mobile drawer.
+// Drawn inline so we don't pull in a new SVG sprite for a single use.
+function StoreIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
+    >
+      <path d="M3 9l1.5-4.5A2 2 0 0 1 6.4 3h11.2a2 2 0 0 1 1.9 1.5L21 9" />
+      <path d="M3 9v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V9" />
+      <path d="M3 9h18" />
+      <path d="M9 21V13h6v8" />
+    </svg>
   );
 }

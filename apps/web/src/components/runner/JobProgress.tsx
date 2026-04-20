@@ -13,22 +13,50 @@
 //
 // Backend route: apps/server/src/routes/jobs.ts (live on main since v0.3.0).
 
-import type { PickResult } from '../../lib/types';
+import type { AppDetail, PickResult } from '../../lib/types';
 import type { JobRecord } from '../../lib/types';
+import { useElapsed, formatElapsed, formatEstimate } from '../../hooks/useElapsed';
 
 interface Props {
   app: PickResult;
   job: JobRecord | null;
   onCancel?: () => void;
+  /**
+   * Fix 2 (2026-04-20): when provided, the header shows "~Ns typical"
+   * from `appDetail.manifest.estimated_duration_ms` (or the per-action
+   * override) next to the live elapsed timer so a slow async job (30s+)
+   * reads as expected progress rather than a hung queue.
+   */
+  appDetail?: AppDetail;
+  /** Action being run — picks the per-action estimate when set. */
+  action?: string;
+  /**
+   * Client-side run start time. Falls back to `job.started_at` from the
+   * server. Used for the live elapsed timer so the user sees time
+   * actually moving, including while the job is still queued.
+   */
+  startedAt?: Date | number | null;
 }
 
-export function JobProgress({ app, job, onCancel }: Props) {
+export function JobProgress({ app, job, onCancel, appDetail, action, startedAt }: Props) {
   const status = job?.status ?? 'queued';
   const label = status === 'queued' ? 'Queued' : status === 'running' ? 'Running' : status;
-  const startedAt = job?.started_at ? new Date(job.started_at) : null;
-  const elapsed = startedAt
-    ? Math.max(0, Date.now() - startedAt.getTime())
-    : null;
+
+  // Prefer the server's `started_at` once the job has moved to running;
+  // fall back to the client-side start timestamp (set by RunSurface when
+  // the user clicked Run) so the timer starts immediately, even while
+  // the job is still in the queue.
+  const serverStart = job?.started_at ? new Date(job.started_at).getTime() : null;
+  const clientStart =
+    startedAt == null
+      ? null
+      : typeof startedAt === 'number'
+        ? startedAt
+        : startedAt.getTime();
+  const startMs = serverStart ?? clientStart;
+
+  const elapsed = useElapsed(startMs);
+  const estimate = pickEstimate(appDetail, action);
 
   return (
     <div className="assistant-turn" data-testid="job-progress">
@@ -38,6 +66,32 @@ export function JobProgress({ app, job, onCancel }: Props) {
         <span data-testid="job-status-pill" style={{ color: 'var(--muted)' }}>
           {label}
         </span>
+        {elapsed != null && (
+          <>
+            <span className="t-dim">·</span>
+            <span
+              data-testid="job-elapsed"
+              style={{
+                color: 'var(--muted)',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+              aria-label={`Elapsed ${Math.floor(elapsed / 1000)} seconds`}
+            >
+              {formatElapsed(elapsed)}
+            </span>
+          </>
+        )}
+        {estimate > 0 && (
+          <>
+            <span className="t-dim">·</span>
+            <span
+              data-testid="job-estimate"
+              style={{ color: 'var(--muted)', fontSize: 12 }}
+            >
+              {formatEstimate(estimate)}
+            </span>
+          </>
+        )}
         {job?.attempts != null && job.attempts > 1 && (
           <>
             <span className="t-dim">·</span>
@@ -86,7 +140,6 @@ export function JobProgress({ app, job, onCancel }: Props) {
             {job?.id ? `job ${job.id.slice(0, 12)}…` : 'creating job…'}
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {elapsed != null && <span>{formatElapsed(elapsed)}</span>}
             {onCancel && job && status !== 'cancelled' && (
               <button
                 type="button"
@@ -105,13 +158,13 @@ export function JobProgress({ app, job, onCancel }: Props) {
   );
 }
 
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return `${m}m ${rem}s`;
+function pickEstimate(appDetail: AppDetail | undefined, action: string | undefined): number {
+  if (!appDetail?.manifest) return 0;
+  const m = appDetail.manifest;
+  if (action && m.actions?.[action]?.estimated_duration_ms) {
+    return m.actions[action].estimated_duration_ms as number;
+  }
+  return typeof m.estimated_duration_ms === 'number' ? m.estimated_duration_ms : 0;
 }
 
 function Spinner({ active }: { active: boolean }) {
