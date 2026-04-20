@@ -16,6 +16,15 @@ export interface WebhookPayload {
   error: unknown;
   duration_ms: number | null;
   attempts: number;
+  /**
+   * How this run was initiated. Populated by the worker when the job was
+   * enqueued by a trigger (schedule or webhook); 'manual' for direct API
+   * calls. Clients should treat `undefined` as 'manual' for backwards
+   * compat with v0.3.0 payloads.
+   */
+  triggered_by?: 'schedule' | 'webhook' | 'manual';
+  /** Trigger id (tgr_...) when `triggered_by !== 'manual'`. */
+  trigger_id?: string;
 }
 
 export interface DeliverOptions {

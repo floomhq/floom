@@ -16,3 +16,5 @@ export const newConnectionId = makeId('con');
 // W3.3: Stripe Connect partner app
 export const newStripeAccountRowId = makeId('sa');
 export const newStripeWebhookEventRowId = makeId('swe');
+// Triggers (unified schedule + webhook)
+export const newTriggerId = makeId('tgr');

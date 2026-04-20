@@ -842,6 +842,35 @@ export function AppPermalinkPage() {
                 >
                   Add to your tools <ChevronDown />
                 </button>
+                {/* Triggers (2026-04-20): re-add the "Schedule" button for
+                    creators. Previously removed in #148 because the feature
+                    didn't exist yet; now it does. Links to the Studio
+                    Triggers tab pre-scoped to this app. Only visible to the
+                    app's author to avoid promising scheduling to runners
+                    who don't own the app. */}
+                {app.author && sessionUserId && app.author === sessionUserId && (
+                  <Link
+                    to={`/studio/${app.slug}/triggers`}
+                    data-testid="cta-schedule"
+                    style={{
+                      padding: '11px 18px',
+                      border: '1px solid var(--line)',
+                      borderRadius: 10,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: 'var(--ink)',
+                      background: 'var(--card)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Schedule
+                  </Link>
+                )}
                 <button
                   type="button"
                   data-testid="cta-share"

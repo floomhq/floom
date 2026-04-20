@@ -765,6 +765,64 @@ for (const seed of PRIMARY_ACTION_SEEDS) {
   }
 }
 
+// =====================================================================
+// ---------- Triggers (unified schedule + webhook) ---------------------
+// =====================================================================
+// A trigger fires an app run from an external event. Two `trigger_type`
+// values share one table + one dispatch path:
+//
+//   'schedule' — scheduler worker polls every 30s; fires if next_run_at<=NOW.
+//                Requires cron_expression; optional tz (default 'UTC').
+//   'webhook'  — POST /hook/:webhook_url_path is signature-verified with
+//                HMAC-SHA256(body, webhook_secret). Headers:
+//                X-Floom-Signature: sha256=<hex>
+//                Optional X-Request-ID for 24h idempotency.
+//
+// Both shapes converge on the same job-queue dispatch (v0.3.0) so the
+// outgoing webhook delivery + retry + timeout logic is reused.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS triggers (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    inputs TEXT NOT NULL DEFAULT '{}',
+    trigger_type TEXT NOT NULL CHECK (trigger_type IN ('schedule', 'webhook')),
+    cron_expression TEXT,
+    tz TEXT,
+    webhook_secret TEXT,
+    webhook_url_path TEXT,
+    next_run_at INTEGER,
+    last_fired_at INTEGER,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    retry_policy TEXT,
+    created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000),
+    updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_triggers_schedule
+    ON triggers(trigger_type, enabled, next_run_at);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_webhook_path
+    ON triggers(webhook_url_path)
+    WHERE webhook_url_path IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_triggers_app ON triggers(app_id);
+  CREATE INDEX IF NOT EXISTS idx_triggers_user ON triggers(user_id);
+`);
+
+// Idempotency ledger for incoming webhook POSTs. Insert (trigger_id, request_id)
+// on first delivery; reject duplicates within 24h via the composite PK.
+// Garbage-collected lazily by the scheduler worker (see triggers-worker.ts).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS trigger_webhook_deliveries (
+    trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    PRIMARY KEY (trigger_id, request_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_received
+    ON trigger_webhook_deliveries(received_at);
+`);
+
 // Bump user_version so operators can see at a glance which schema
 // revision their DB is on. v0.3.0 was at user_version=3; W2.1 lands v4;
 // W2.3 lands v5; W3.3 + W3.1 land v6 (rolled into the same alpha series).
@@ -772,8 +830,9 @@ for (const seed of PRIMARY_ACTION_SEEDS) {
 // Fast-apps wave lands v8 with apps.featured + apps.avg_run_ms columns.
 // v0.4.0 cleanup sprint lands v9: chat_threads → run_threads, chat_turns → run_turns.
 // secrets-policy lands v10: app_secret_policies + app_creator_secrets.
+// triggers (unified schedule + webhook) lands v11.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 10) {
-  db.pragma('user_version = 10');
+if (currentUserVersion < 11) {
+  db.pragma('user_version = 11');
 }

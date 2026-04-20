@@ -286,6 +286,85 @@ export function cancelJob(appSlug: string, jobId: string): Promise<JobRecord> {
   });
 }
 
+// ---------- Triggers (unified schedule + webhook) ----------
+
+export interface TriggerPublic {
+  id: string;
+  app_id: string;
+  app_slug?: string;
+  action: string;
+  inputs: Record<string, unknown>;
+  trigger_type: 'schedule' | 'webhook';
+  cron_expression: string | null;
+  tz: string | null;
+  webhook_url_path: string | null;
+  webhook_secret_set: boolean;
+  next_run_at: number | null;
+  last_fired_at: number | null;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CreateTriggerResponse {
+  trigger: TriggerPublic;
+  // Only present on webhook creates.
+  webhook_url?: string;
+  webhook_secret?: string;
+  webhook_url_path?: string;
+}
+
+export function listMyTriggers(): Promise<{ triggers: TriggerPublic[] }> {
+  return request<{ triggers: TriggerPublic[] }>('/api/me/triggers');
+}
+
+export function createScheduleTrigger(
+  slug: string,
+  body: {
+    action: string;
+    cron_expression: string;
+    tz?: string;
+    inputs?: Record<string, unknown>;
+  },
+): Promise<CreateTriggerResponse> {
+  return request<CreateTriggerResponse>(`/api/hub/${slug}/triggers`, {
+    method: 'POST',
+    body: JSON.stringify({ trigger_type: 'schedule', ...body }),
+  });
+}
+
+export function createWebhookTrigger(
+  slug: string,
+  body: { action: string; inputs?: Record<string, unknown> },
+): Promise<CreateTriggerResponse> {
+  return request<CreateTriggerResponse>(`/api/hub/${slug}/triggers`, {
+    method: 'POST',
+    body: JSON.stringify({ trigger_type: 'webhook', ...body }),
+  });
+}
+
+export function updateTrigger(
+  id: string,
+  body: {
+    enabled?: boolean;
+    cron_expression?: string;
+    tz?: string;
+    inputs?: Record<string, unknown>;
+    action?: string;
+  },
+): Promise<{ trigger: TriggerPublic }> {
+  return request<{ trigger: TriggerPublic }>(`/api/me/triggers/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteTrigger(id: string): Promise<{ ok: true; id: string }> {
+  return request<{ ok: true; id: string }>(`/api/me/triggers/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 /**
  * Poll an async job until it reaches a terminal state. Uses a gentle 1.5s
  * interval to mirror the run-stream polling fallback. Returns a cleanup
