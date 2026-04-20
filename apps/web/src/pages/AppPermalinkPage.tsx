@@ -11,11 +11,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
-import { RunSurface } from '../components/runner/RunSurface';
+import { RunSurface, type RunSurfaceResult } from '../components/runner/RunSurface';
 import { AppIcon } from '../components/AppIcon';
 import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
+import { Confetti } from '../components/Confetti';
 import { getApp, getAppReviews, getRun, shareRun, ApiError } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
@@ -25,6 +26,11 @@ import {
   getPermalinkLoadErrorMessage,
   type PermalinkLoadOutcome,
 } from '../lib/publicPermalinks';
+import {
+  hasConfettiShown,
+  markConfettiShown,
+  samplePrefill,
+} from '../lib/onboarding';
 
 // Map of known app slugs to GitHub repo URLs. Only slugs whose example
 // directory lives in examples/ are linked; stub-only apps (floom.yaml with
@@ -87,6 +93,15 @@ export function AppPermalinkPage() {
   // visual bloat during active runs. User can click "View details" to
   // re-expand in place; the tab bar stays rendered below in both states.
   const [heroExpanded, setHeroExpanded] = useState(false);
+
+  // First-run onboarding glue:
+  //   - fire confetti + share card on the first successful run the user
+  //     sees for an app they haven't celebrated yet (keyed in localStorage)
+  //   - show a muted "Your app is live" card with Copy-link + Make-another
+  //     once confetti has played
+  const [confettiFire, setConfettiFire] = useState(false);
+  const [celebrate, setCelebrate] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   useEffect(() => {
     if (!slug) {
@@ -187,6 +202,41 @@ export function AppPermalinkPage() {
       { replace: true },
     );
   }, [setSearchParams]);
+
+  // Compute sample input pre-fill for the first input of each action.
+  // Only fires on first visit (no shared-run ?run=<id>) so that a direct
+  // link to a completed run stays faithful to the inputs that actually
+  // produced it. We hydrate ALL inputs (so RunSurface's buildInitialInputs
+  // doesn't discard our value in favour of '' for the unprefilled ones),
+  // but only assign real samples to inputs whose name/type we recognise.
+  const samplePrefillInputs = useMemo<Record<string, unknown> | null>(() => {
+    if (!app) return null;
+    if (runIdFromUrl) return null; // respect shared-run links
+    const firstActionKey = Object.keys(app.manifest.actions)[0];
+    const action = firstActionKey ? app.manifest.actions[firstActionKey] : undefined;
+    if (!action || action.inputs.length === 0) return null;
+    // Prefill ONLY the first input (the one the user would have clicked
+    // into first). Everything else uses its existing default/empty.
+    const first = action.inputs[0];
+    const sample = samplePrefill(first);
+    if (sample == null) return null;
+    return { [first.name]: sample };
+  }, [app, runIdFromUrl]);
+
+  // Fire confetti on the first successful run the user sees for an app
+  // they haven't celebrated yet. Cap at one per (user, slug) pair via
+  // localStorage — second run same day = no confetti.
+  const handleRunResult = useCallback(
+    (result: RunSurfaceResult) => {
+      if (!app) return;
+      if (result.exitCode !== 0) return;
+      if (hasConfettiShown(app.slug)) return;
+      markConfettiShown(app.slug);
+      setConfettiFire(true);
+      setCelebrate(true);
+    },
+    [app],
+  );
 
   // SEO meta
   useEffect(() => {
@@ -468,6 +518,8 @@ export function AppPermalinkPage() {
   return (
     <div className="page-root">
       <TopBar compact={topBarCompact} />
+
+      <Confetti fire={confettiFire} onDone={() => setConfettiFire(false)} />
 
       <main
         id="main"
@@ -1101,8 +1153,26 @@ export function AppPermalinkPage() {
                 <RunSurface
                   app={app}
                   initialRun={initialRun}
+                  initialInputs={samplePrefillInputs ?? undefined}
                   onResetInitialRun={handleResetInitialRun}
+                  onResult={handleRunResult}
                 />
+                {celebrate && (
+                  <CelebrationCard
+                    slug={app.slug}
+                    copied={shareCopied}
+                    onCopy={() => {
+                      try {
+                        navigator.clipboard.writeText(window.location.href);
+                        setShareCopied(true);
+                        window.setTimeout(() => setShareCopied(false), 1800);
+                      } catch {
+                        /* clipboard blocked — show toast fallback */
+                      }
+                    }}
+                    onDismiss={() => setCelebrate(false)}
+                  />
+                )}
               </>
             )}
           </section>
@@ -1840,6 +1910,103 @@ function ComingSoonModal({
             Close
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * CelebrationCard — rendered inline below the RunSurface once the user
+ * completes their first successful run on an app. Keeps the post-run
+ * moment anchored near the output they just produced rather than
+ * hijacking the viewport with a modal. Copy-link + Make-another.
+ */
+function CelebrationCard({
+  slug,
+  copied,
+  onCopy,
+  onDismiss,
+}: {
+  slug: string;
+  copied: boolean;
+  onCopy: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      data-testid="celebration-card"
+      style={{
+        marginTop: 18,
+        padding: '18px 20px',
+        borderRadius: 14,
+        border: '1px solid var(--accent, #10b981)',
+        background: 'rgba(16, 185, 129, 0.06)',
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 12,
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <strong style={{ fontSize: 15, color: 'var(--ink, #0f172a)' }}>
+          Your app is live
+        </strong>
+        <p style={{ margin: '4px 0 0', color: 'var(--muted, #64748b)', fontSize: 13 }}>
+          This link works for anyone — send it to coworkers, Twitter, anywhere.
+        </p>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          data-testid="celebration-copy"
+          onClick={onCopy}
+          style={{
+            padding: '8px 14px',
+            borderRadius: 8,
+            background: 'var(--accent, #10b981)',
+            color: '#fff',
+            border: 'none',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          {copied ? 'Copied!' : 'Copy share link'}
+        </button>
+        <Link
+          to="/studio/build"
+          data-testid="celebration-make-another"
+          style={{
+            padding: '8px 14px',
+            borderRadius: 8,
+            background: 'var(--card, #fff)',
+            color: 'var(--ink, #0f172a)',
+            border: '1px solid var(--line, #e5e7eb)',
+            fontSize: 13,
+            fontWeight: 500,
+            textDecoration: 'none',
+          }}
+        >
+          Make another
+        </Link>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={`Dismiss celebration for ${slug}`}
+          style={{
+            padding: '8px 10px',
+            borderRadius: 8,
+            background: 'transparent',
+            color: 'var(--muted, #64748b)',
+            border: 'none',
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          Dismiss
+        </button>
       </div>
     </div>
   );

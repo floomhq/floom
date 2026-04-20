@@ -28,6 +28,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { PageShell } from '../components/PageShell';
 import { AppIcon } from '../components/AppIcon';
 import { ToolTile } from '../components/me/ToolTile';
+import { Tour } from '../components/onboarding/Tour';
+import { hasOnboarded, resetOnboarding } from '../lib/onboarding';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
@@ -331,6 +333,13 @@ export function MePage() {
   // a clear next step instead of landing on a bare runs list.
   const showWelcome = searchParams.get('welcome') === '1';
 
+  // First-run tour state. The tour fires automatically for users who
+  // haven't onboarded yet AND who have no runs AND no published apps.
+  // It can also be opened manually via `?tour=1` (used by the /me
+  // footer "Restart tour" link).
+  const forceTour = searchParams.get('tour') === '1';
+  const [tourOpen, setTourOpen] = useState(false);
+
   function dismissNotice() {
     const next = new URLSearchParams(searchParams);
     next.delete('notice');
@@ -342,6 +351,32 @@ export function MePage() {
     const next = new URLSearchParams(searchParams);
     next.delete('welcome');
     setSearchParams(next, { replace: true });
+  }
+
+  // Auto-open the tour for new users landing on /me, or on ?tour=1.
+  //   - ?tour=1 always opens (Restart tour link, or /onboarding redirect)
+  //   - First-run auto-open: only when runs have loaded AND come back
+  //     empty AND localStorage.floom_onboarded is false. Waiting for
+  //     `runs` to load prevents flashing the tour at returning users
+  //     whose runs happen to be fetching.
+  useEffect(() => {
+    if (forceTour) {
+      setTourOpen(true);
+      return;
+    }
+    if (sessionPending || !canLoadPersonalData) return;
+    if (runs !== null && runs.length === 0 && !hasOnboarded()) {
+      setTourOpen(true);
+    }
+  }, [forceTour, runs, sessionPending, canLoadPersonalData]);
+
+  function closeTour() {
+    setTourOpen(false);
+    if (forceTour) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('tour');
+      setSearchParams(next, { replace: true });
+    }
   }
 
   const visibleRuns = useMemo(
@@ -398,6 +433,19 @@ export function MePage() {
         </header>
 
         {showWelcome && <WelcomeBanner onDismiss={dismissWelcome} />}
+
+        {/* First-run welcome card: brand-new signup (no runs, not yet
+            onboarded). Prompts directly into the tour instead of the
+            generic "try an app" CTA. If they've been through onboarding
+            but just haven't run anything yet, the fallback "browse the
+            store" card renders (see FirstRunBrowseCard below). */}
+        {canLoadPersonalData && runs !== null && runs.length === 0 && (
+          !hasOnboarded() ? (
+            <FirstRunPublishCard onStart={() => setTourOpen(true)} />
+          ) : (
+            <FirstRunBrowseCard />
+          )
+        )}
 
         {showNotice && (
           <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />
@@ -609,8 +657,137 @@ export function MePage() {
             </div>
           )}
         </section>
+
+        {/* Footer affordance: let users re-trigger the tour after they
+            dismissed it. Muted, single line — this is not a CTA. */}
+        <div
+          data-testid="me-restart-tour"
+          style={{
+            marginTop: 28,
+            paddingTop: 18,
+            borderTop: '1px solid var(--line)',
+            fontSize: 12,
+            color: 'var(--muted)',
+            textAlign: 'center',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              resetOnboarding();
+              setTourOpen(true);
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              color: 'var(--muted)',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+          >
+            Restart tour
+          </button>
+        </div>
       </div>
+
+      {tourOpen && <Tour onClose={closeTour} />}
     </PageShell>
+  );
+}
+
+/**
+ * First-run card for brand-new signups with no runs and no apps. Drops
+ * the user directly into the tour (paste -> publish -> run -> share).
+ * Lives on /me empty state — the one place a fresh user reliably lands.
+ */
+function FirstRunPublishCard({ onStart }: { onStart: () => void }) {
+  return (
+    <section
+      data-testid="me-first-run-card"
+      style={{
+        border: '1px solid var(--line)',
+        borderRadius: 14,
+        background: 'var(--card)',
+        padding: '20px 22px',
+        marginBottom: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <strong style={{ fontSize: 16 }}>Let&rsquo;s publish your first app</strong>
+      <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.55 }}>
+        Paste an OpenAPI URL or pick a sample. Publish in one click, share the link.
+        The whole thing takes under a minute.
+      </p>
+      <div>
+        <button
+          type="button"
+          onClick={onStart}
+          data-testid="me-first-run-start"
+          style={{
+            display: 'inline-block',
+            padding: '10px 16px',
+            borderRadius: 8,
+            border: 'none',
+            background: 'var(--accent, #10b981)',
+            color: '#fff',
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: 'pointer',
+          }}
+        >
+          Let&rsquo;s publish your first app →
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Soft CTA for users who finished the tour (or skipped it) but haven't
+ * actually run anything yet. Points to the app directory — "try what
+ * other people built".
+ */
+function FirstRunBrowseCard() {
+  return (
+    <section
+      data-testid="me-first-run-browse-card"
+      style={{
+        border: '1px solid var(--line)',
+        borderRadius: 14,
+        background: 'var(--card)',
+        padding: '20px 22px',
+        marginBottom: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <strong style={{ fontSize: 15 }}>Try running an app in the store</strong>
+      <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.55 }}>
+        See how Floom apps feel before you publish another one.
+      </p>
+      <div>
+        <Link
+          to="/apps"
+          style={{
+            display: 'inline-block',
+            padding: '10px 16px',
+            borderRadius: 8,
+            background: 'var(--ink)',
+            color: '#fff',
+            fontWeight: 600,
+            fontSize: 14,
+            textDecoration: 'none',
+          }}
+        >
+          Browse apps →
+        </Link>
+      </div>
+    </section>
   );
 }
 
