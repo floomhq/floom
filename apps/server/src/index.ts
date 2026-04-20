@@ -935,7 +935,11 @@ async function boot(): Promise<void> {
   }
 
   try {
-    seedFromFile();
+    // Await so the docker-image-availability probe runs before the hub
+    // serves its first /api/hub request. Without await, a fast client
+    // could hit the hub before any inactive-marking SQL landed and see
+    // seed apps whose images aren't actually on this host.
+    await seedFromFile();
   } catch (err) {
     console.error('[seed] failed:', err);
   }

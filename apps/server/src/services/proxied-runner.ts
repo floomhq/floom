@@ -31,7 +31,12 @@ export type ProxiedErrorType =
   | 'timeout'
   | 'missing_secret'
   | 'floom_internal_error'
-  | 'runtime_error';
+  | 'runtime_error'
+  // Creator-config bug (e.g. upstream returns 401/403 but the manifest
+  // declares no `secrets_needed`). Different from `auth_error` because
+  // the user cannot fix it — routing it to `auth_error` would show the
+  // "Open Secrets" dead-end (see web/components/runner/OutputPanel.tsx).
+  | 'app_unavailable';
 
 export interface ProxiedRunResult {
   status: 'success' | 'error';
@@ -588,7 +593,22 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
     // single most useful breadcrumb for debugging. Stack traces and
     // long blobs still live in the full `logs`.
     const upstreamMessage = extractUpstreamMessage(parsed, responseText);
-    const errorType: ProxiedErrorType = classifyHttpStatus(res.status);
+    // Dead-end fix (2026-04-20): a 401/403 on an app whose manifest
+    // declares no secrets is a creator-config bug, not an auth problem
+    // the user can solve. Before this guard the UI showed "This app
+    // needs authentication — Open Secrets", which routed to a panel
+    // that said "This app doesn't declare any secrets. Nothing to
+    // configure here." A direct contradiction. Now we classify as
+    // `app_unavailable` so the runner surface renders a neutral "This
+    // app is temporarily unavailable" card with no Open-Secrets link.
+    const manifestSecrets = input.manifest.secrets_needed ?? [];
+    let errorType: ProxiedErrorType = classifyHttpStatus(res.status);
+    if (
+      errorType === 'auth_error' &&
+      manifestSecrets.length === 0
+    ) {
+      errorType = 'app_unavailable';
+    }
     return {
       status: 'error',
       outputs: parsed,

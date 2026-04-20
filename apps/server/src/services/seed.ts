@@ -3,9 +3,34 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Docker from 'dockerode';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import type { NormalizedManifest } from '../types.js';
+
+/**
+ * Probe the Docker daemon to confirm `image` exists locally. Used by the
+ * seeder to skip bundled demo apps whose image hasn't been built on this
+ * host (e.g. the 14 first-party apps with marketplace-minted images
+ * like `floom-app-app_yyyzfrybsv:v1`). Without this guard, those apps
+ * appeared in /api/hub, landed on the store grid, and every click
+ * returned `floom_internal_error` because `docker.createContainer`
+ * threw 404 at run time.
+ *
+ * Docker-unavailable (no socket, daemon down) → returns `false` and the
+ * seeder skips the docker apps entirely. That matches the safer default:
+ * don't ship apps that can't possibly run.
+ */
+async function dockerImageExists(image: string): Promise<boolean> {
+  try {
+    const docker = new Docker();
+    const img = docker.getImage(image);
+    await img.inspect();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface SeedApp {
   slug: string;
@@ -41,7 +66,11 @@ function findSeedFile(): string | null {
   return null;
 }
 
-export function seedFromFile(): { apps_added: number; secrets_added: number } {
+export async function seedFromFile(): Promise<{
+  apps_added: number;
+  secrets_added: number;
+  apps_skipped_missing_image: number;
+}> {
   // FLOOM_SEED_APPS gates the bundled docker-based demo apps. They require
   // /var/run/docker.sock mounted into the container AND can connect to a
   // host Docker daemon, so we default to OFF (empty hub) and let users
@@ -55,12 +84,12 @@ export function seedFromFile(): { apps_added: number; secrets_added: number } {
     console.log(
       '[seed] FLOOM_SEED_APPS not set — starting with empty hub. Use apps.yaml to register apps.',
     );
-    return { apps_added: 0, secrets_added: 0 };
+    return { apps_added: 0, secrets_added: 0, apps_skipped_missing_image: 0 };
   }
   const path = findSeedFile();
   if (!path) {
     console.log('[seed] no seed.json found — skipping');
-    return { apps_added: 0, secrets_added: 0 };
+    return { apps_added: 0, secrets_added: 0, apps_skipped_missing_image: 0 };
   }
   const raw = readFileSync(path, 'utf-8');
   const seed = JSON.parse(raw) as SeedFile;
@@ -69,8 +98,39 @@ export function seedFromFile(): { apps_added: number; secrets_added: number } {
     '[seed] FLOOM_SEED_APPS is on — the bundled docker demo apps require /var/run/docker.sock to be mounted into the container.',
   );
 
+  // Launch blocker fix (2026-04-20): every bundled seed app ships with a
+  // marketplace-minted docker_image (e.g. `floom-app-app_yyyzfrybsv:v1`).
+  // Those images aren't built into this OSS stack, so dispatching a run
+  // used to throw `(HTTP code 404) no such container - No such image`
+  // from dockerode, which the runner caught and re-labelled as
+  // `floom_internal_error`. That label rendered as "Something broke
+  // inside Floom" on /p/:slug — misleading, because the root cause is a
+  // missing image, not a Floom runtime bug. We now probe each image
+  // once at boot; any app whose image is absent is skipped entirely so
+  // it never appears in /api/hub.
+  //
+  // Operators who want the first-party apps back should build the
+  // matching images on the host (same tag as in seed.json) and restart
+  // the server — the probe picks them up on the next boot.
+  const imagesToCheck = Array.from(
+    new Set(seed.apps.map((a) => a.docker_image).filter(Boolean)),
+  );
+  const imageAvailability = new Map<string, boolean>();
+  await Promise.all(
+    imagesToCheck.map(async (img) => {
+      imageAvailability.set(img, await dockerImageExists(img));
+    }),
+  );
+  const missingImages = imagesToCheck.filter((img) => !imageAvailability.get(img));
+  if (missingImages.length > 0) {
+    console.log(
+      `[seed] ${missingImages.length}/${imagesToCheck.length} seed images are NOT present locally. Skipping those apps so the store only lists runnable apps.`,
+    );
+  }
+
   let appsAdded = 0;
   let secretsAdded = 0;
+  let appsSkipped = 0;
 
   const insertApp = db.prepare(
     `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon)
@@ -80,10 +140,34 @@ export function seedFromFile(): { apps_added: number; secrets_added: number } {
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
   );
   const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
+  const markAppInactive = db.prepare(
+    `UPDATE apps SET status = 'inactive' WHERE id = ?`,
+  );
 
   const txn = db.transaction(() => {
     for (const app of seed.apps) {
       const existing = existsBySlug.get(app.slug) as { id: string } | undefined;
+      const imageOk = !app.docker_image || imageAvailability.get(app.docker_image);
+
+      // Image is absent on this host: skip the insert, and if a previous
+      // boot had already inserted the row (e.g. before this guard landed),
+      // mark it inactive so /api/hub (which filters on status='active')
+      // stops surfacing it without losing any existing runs.
+      if (!imageOk) {
+        appsSkipped++;
+        if (existing) {
+          markAppInactive.run(existing.id);
+          console.log(
+            `[seed] ${app.slug}: image "${app.docker_image}" not found locally — marking inactive`,
+          );
+        } else {
+          console.log(
+            `[seed] ${app.slug}: image "${app.docker_image}" not found locally — not inserting`,
+          );
+        }
+        continue;
+      }
+
       let appId: string;
       if (!existing) {
         appId = newAppId();
@@ -122,6 +206,12 @@ export function seedFromFile(): { apps_added: number; secrets_added: number } {
   });
   txn();
 
-  console.log(`[seed] apps added: ${appsAdded}, secrets added: ${secretsAdded}`);
-  return { apps_added: appsAdded, secrets_added: secretsAdded };
+  console.log(
+    `[seed] apps added: ${appsAdded}, secrets added: ${secretsAdded}, skipped (image missing): ${appsSkipped}`,
+  );
+  return {
+    apps_added: appsAdded,
+    secrets_added: secretsAdded,
+    apps_skipped_missing_image: appsSkipped,
+  };
 }

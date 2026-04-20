@@ -188,24 +188,46 @@ export async function runAppContainer(opts: {
     imageName = appRow?.docker_image || imageTag(opts.appId);
   }
 
-  const container = await docker.createContainer({
-    Image: imageName,
-    name: `floom-chat-run-${opts.runId}`,
-    Cmd: [configArg],
-    Env: env,
-    HostConfig: {
-      AutoRemove: false,
-      Memory: memoryBytes,
-      MemorySwap: memoryBytes,
-      NanoCpus: Math.floor(cpus * 1e9),
-      NetworkMode: network,
-      Binds: [],
-      ReadonlyRootfs: false,
-    },
-    AttachStdout: true,
-    AttachStderr: true,
-    Tty: false,
-  });
+  let container;
+  try {
+    container = await docker.createContainer({
+      Image: imageName,
+      name: `floom-chat-run-${opts.runId}`,
+      Cmd: [configArg],
+      Env: env,
+      HostConfig: {
+        AutoRemove: false,
+        Memory: memoryBytes,
+        MemorySwap: memoryBytes,
+        NanoCpus: Math.floor(cpus * 1e9),
+        NetworkMode: network,
+        Binds: [],
+        ReadonlyRootfs: false,
+      },
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+  } catch (err) {
+    // Launch blocker fix (2026-04-20): the marketplace-minted seed apps
+    // carry docker_image tags that aren't built on this host (see
+    // services/seed.ts). Dockerode throws `(HTTP code 404) no such
+    // container - No such image: <tag>` which, before this guard, was
+    // bubbling up as a generic Floom-side crash and the /p/:slug runner
+    // surface rendered "Something broke inside Floom". Re-throw as a
+    // tagged error so the upstream classifier can label the run
+    // `app_unavailable` — the creator published a broken image, not us.
+    const msg = (err as Error).message || '';
+    if (/no such image|No such image|HTTP code 404/i.test(msg)) {
+      const e = new Error(
+        `This app's container image "${imageName}" isn't available on this Floom instance. The app creator needs to publish it.`,
+      );
+      (e as Error & { floom_error_class?: string }).floom_error_class =
+        'app_unavailable';
+      throw e;
+    }
+    throw err;
+  }
 
   const stdoutStream = new PassThrough();
   const stderrStream = new PassThrough();
