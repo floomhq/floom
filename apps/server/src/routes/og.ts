@@ -107,8 +107,7 @@ function renderMainSvg(): string {
     <path d="M0 0 L52 0 L52 56 L26 42 L0 56 Z" fill="url(#accent)"/>
     <text x="72" y="40" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="36" fill="${ink}">Floom</text>
   </g>
-  <text x="80" y="318" font-family="'DM Serif Display', Georgia, serif" font-size="64" fill="${ink}">Production infrastructure for AI</text>
-  <text x="80" y="390" font-family="'DM Serif Display', Georgia, serif" font-size="64" fill="${ink}">apps that do real work.</text>
+  <text x="80" y="360" font-family="'DM Serif Display', Georgia, serif" font-size="96" fill="${ink}">Ship AI apps fast.</text>
   <text x="80" y="460" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="30" fill="${muted}">The protocol + runtime for agentic work.</text>
   <text x="80" y="${HEIGHT - 60}" font-family="'JetBrains Mono', 'Menlo', monospace" font-size="20" fill="${accent}" font-weight="600">Vibe-coding speed. Production-grade safety.</text>
   <text x="${WIDTH - 80}" y="${HEIGHT - 60}" font-family="'JetBrains Mono', 'Menlo', monospace" font-size="20" fill="${muted}" text-anchor="end">floom.dev</text>
@@ -147,7 +146,7 @@ ogRouter.get('/:slugPng{[a-z0-9][a-z0-9-]*\\.svg}', (c) => {
     // sensible in previewers rather than a 404 image.
     copy = {
       title: 'Floom',
-      description: 'Production infrastructure for AI apps that do real work.',
+      description: 'Ship AI apps fast.',
       author: null,
     };
   } else {

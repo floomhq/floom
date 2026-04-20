@@ -148,8 +148,7 @@ export function CreatorHeroPage() {
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title =
-      'Floom · Production infrastructure for AI apps that do real work';
+    document.title = 'Ship AI apps fast · Floom';
     api
       .getHub()
       .then((apps) => {
@@ -400,7 +399,7 @@ export function CreatorHeroPage() {
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
-              Production infrastructure for AI apps that do real work.
+              Ship AI apps fast.
             </h1>
 
             {/* Accent line (locked copy). Goosebumps pass: 17->19 so the
