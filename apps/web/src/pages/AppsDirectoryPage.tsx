@@ -321,14 +321,14 @@ export function AppsDirectoryPage() {
           <div style={{ maxWidth: 760, margin: '0 auto' }}>
             {loading ? (
               <div
-                style={{
-                  textAlign: 'center',
-                  padding: '60px 0',
-                  color: 'var(--muted)',
-                  fontSize: 14,
-                }}
+                style={{ display: 'grid', gap: 12 }}
+                data-testid="apps-list-skeleton"
+                aria-busy="true"
+                aria-label="Loading apps"
               >
-                Loading apps…
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <AppStripeSkeleton key={i} />
+                ))}
               </div>
             ) : hubError ? (
               <div
@@ -448,6 +448,10 @@ export function AppsDirectoryPage() {
         @media (max-width: 640px) {
           .apps-headline { font-size: 30px !important; }
         }
+        @keyframes apps-skeleton-shimmer {
+          0% { background-position: -200px 0; }
+          100% { background-position: calc(200px + 100%) 0; }
+        }
       `}</style>
     </div>
   );
@@ -469,4 +473,59 @@ function chipStyle(active: boolean): CSSProperties {
     fontFamily: 'inherit',
     transition: 'all 140ms ease',
   };
+}
+
+/**
+ * Placeholder row shown while the hub fetch is pending.
+ *
+ * Matches AppStripe's "apps" variant: same padding, same 42px icon tile,
+ * same two-line title + description stack. This keeps the first-paint
+ * shape stable so the real rows land without a layout shift, and stops
+ * us from briefly showing the error card before the fetch resolves.
+ */
+function AppStripeSkeleton() {
+  const shimmer: CSSProperties = {
+    background:
+      'linear-gradient(90deg, var(--line) 0%, rgba(0,0,0,0.04) 50%, var(--line) 100%)',
+    backgroundSize: '200px 100%',
+    backgroundRepeat: 'no-repeat',
+    animation: 'apps-skeleton-shimmer 1.2s ease-in-out infinite',
+    borderRadius: 6,
+  };
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 18,
+        padding: '20px 22px',
+        background: 'var(--card)',
+        border: '1px solid var(--line)',
+        borderRadius: 14,
+      }}
+    >
+      <span
+        style={{
+          width: 42,
+          height: 42,
+          borderRadius: 12,
+          flexShrink: 0,
+          ...shimmer,
+        }}
+      />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ height: 14, width: '38%', ...shimmer }} />
+        <div style={{ height: 12, width: '78%', marginTop: 10, ...shimmer }} />
+      </div>
+      <div
+        style={{
+          width: 20,
+          height: 14,
+          flexShrink: 0,
+          ...shimmer,
+        }}
+      />
+    </div>
+  );
 }
