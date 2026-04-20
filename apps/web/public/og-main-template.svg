@@ -19,8 +19,7 @@
     <path d="M0 0 L52 0 L52 56 L26 42 L0 56 Z" fill="url(#accent)"/>
     <text x="72" y="40" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="36" fill="#0B0F0E">Floom</text>
   </g>
-  <text x="80" y="318" font-family="'DM Serif Display', Georgia, serif" font-size="64" fill="#0B0F0E">Production infrastructure for AI</text>
-  <text x="80" y="390" font-family="'DM Serif Display', Georgia, serif" font-size="64" fill="#0B0F0E">apps that do real work.</text>
+  <text x="80" y="360" font-family="'DM Serif Display', Georgia, serif" font-size="96" fill="#0B0F0E">Ship AI apps fast.</text>
   <text x="80" y="460" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="30" fill="#5F6A6E">The protocol + runtime for agentic work.</text>
   <text x="80" y="570" font-family="'JetBrains Mono', Menlo, monospace" font-size="20" fill="#047857" font-weight="600">Vibe-coding speed. Production-grade safety.</text>
   <text x="1120" y="570" font-family="'JetBrains Mono', Menlo, monospace" font-size="20" fill="#5F6A6E" text-anchor="end">floom.dev</text>

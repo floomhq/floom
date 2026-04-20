@@ -627,7 +627,7 @@ if (webDist) {
   // updates don't reach non-JS crawlers (social previewers, SEO bots,
   // curl/wget). Rewrite the <title> tag per-route in the same middleware
   // that already handles /p/:slug OG rewriting.
-  const LANDING_TITLE = 'Floom · Production infrastructure for AI apps that do real work';
+  const LANDING_TITLE = 'Ship AI apps fast · Floom';
   function escapeTitle(t: string): string {
     // <title> is #PCDATA so only < & > really matter. We also strip newlines
     // defensively so a row with a stray \n doesn't break the document.

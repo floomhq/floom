@@ -431,7 +431,7 @@ export function LoginPage() {
             color: 'var(--ink)',
           }}
         >
-          Production infrastructure for AI apps that do real work.
+          Ship AI apps fast.
         </h2>
         <ul
           style={{
