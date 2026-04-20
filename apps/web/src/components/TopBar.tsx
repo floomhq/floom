@@ -16,6 +16,15 @@ interface Props {
    * Wired by the parent page via route state — see AppPermalinkPage.
    */
   compact?: boolean;
+  /**
+   * Studio-only mobile hamburger. When set, renders a second hamburger
+   * button (visible <768px only, hidden on desktop) that opens the
+   * Studio sidebar drawer. Fires when the user taps it. StudioLayout
+   * wires this up; store pages leave it undefined. Added 2026-04-20
+   * nav-polish pass — replaces the bottom-left floating ☰ that never
+   * belonged in the chrome.
+   */
+  onStudioMenuOpen?: () => void;
 }
 
 const navBaseStyle: CSSProperties = {
@@ -61,14 +70,6 @@ const menuItemStyle: CSSProperties = {
   textDecoration: 'none',
   borderRadius: 6,
 };
-
-function navStyle(active: boolean): CSSProperties {
-  return {
-    ...navBaseStyle,
-    color: active ? 'var(--ink)' : 'var(--muted)',
-    background: active ? 'rgba(5, 150, 105, 0.08)' : 'transparent',
-  };
-}
 
 // Mode-toggle pill. Replaces the scattered "| Studio" breadcrumb + "← Store"
 // CTA pattern that used to live in the studio branch of this TopBar (and
@@ -116,7 +117,7 @@ function pillSideStyle(active: boolean): CSSProperties {
 //
 // Mobile: hamburger menu keeps the same links plus a sign-in / sign-out
 // entry.
-export function TopBar({ compact = false }: Props = {}) {
+export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
   const { data, isAuthenticated, refresh } = useSession();
@@ -135,11 +136,14 @@ export function TopBar({ compact = false }: Props = {}) {
   const ownedAppCount = myApps?.length ?? 0;
   const deployHref = isAuthenticated ? '/studio/build' : '/signup?next=%2Fstudio%2Fbuild';
 
-  // Pill is only useful for authed users (anon users can't enter Studio
-  // without signing up first, so forcing a "Studio" tab on them adds
-  // noise). Authed users see it on EVERY surface so they can always
-  // jump between modes.
-  const showPill = isAuthenticated;
+  // Nav-polish 2026-04-20: pill is now visible to EVERY visitor, authed
+  // or not. Federico's call: showing "Store | Studio" to logged-out
+  // users advertises Studio as a destination, drives signup. Anon users
+  // clicking Studio land on /studio's anon landing (which auth-gates to
+  // /login via BaseLayout), so the click still has a safe destination.
+  // Hidden only on /login and /signup so the auth flow is visually
+  // quiet.
+  const showPill = !isLoginPage;
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -220,8 +224,41 @@ export function TopBar({ compact = false }: Props = {}) {
           <Logo size={compact ? 18 : 20} withWordmark={!compact} variant="glow" />
         </Link>
 
-        {/* Middle slot: Store/Studio pill for authed users, marketing
-            nav for anon store visitors, nothing for anon login/signup. */}
+        {/* Studio-only mobile menu trigger. Visible <768px AND only on
+            /studio/* (onStudioMenuOpen is undefined everywhere else).
+            Replaces the bottom-left floating ☰ that used to live in
+            StudioLayout — that affordance was invisible on the TopBar
+            and confused Federico. Now it sits right where a sidebar
+            toggle belongs: next to the logo, in the header.
+            CSS `.topbar-studio-toggle` hides it >=768px. */}
+        {onStudioMenuOpen && (
+          <button
+            type="button"
+            className="topbar-studio-toggle"
+            data-testid="studio-mobile-toggle"
+            aria-label="Open Studio menu"
+            onClick={onStudioMenuOpen}
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+        )}
+
+        {/* Middle slot: Store/Studio pill toggle (every visitor),
+            nothing on /login + /signup. */}
         {showPill ? (
           <nav
             className="topbar-links topbar-links-desktop topbar-pill-nav"
@@ -233,7 +270,7 @@ export function TopBar({ compact = false }: Props = {}) {
           >
             <div style={pillWrapStyle} role="group" aria-label="Switch mode">
               <Link
-                to="/apps"
+                to="/store"
                 data-testid="topbar-mode-store"
                 aria-current={!isStudio ? 'page' : undefined}
                 style={pillSideStyle(!isStudio)}
@@ -249,49 +286,6 @@ export function TopBar({ compact = false }: Props = {}) {
                 Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
               </Link>
             </div>
-          </nav>
-        ) : !isLoginPage ? (
-          <nav
-            className="topbar-links topbar-links-desktop"
-            aria-label="Desktop navigation"
-            style={{
-              flex: 1,
-              justifyContent: 'center',
-              gap: 10,
-            }}
-          >
-            <Link
-              to="/apps"
-              data-testid="topbar-apps"
-              aria-current={
-                location.pathname.startsWith('/apps') ||
-                location.pathname.startsWith('/p/')
-                  ? 'page'
-                  : undefined
-              }
-              style={navStyle(
-                location.pathname.startsWith('/apps') ||
-                  location.pathname.startsWith('/p/'),
-              )}
-            >
-              Apps
-            </Link>
-            <Link
-              to="/protocol"
-              data-testid="topbar-protocol"
-              aria-current={
-                location.pathname.startsWith('/protocol') ||
-                location.pathname === '/docs'
-                  ? 'page'
-                  : undefined
-              }
-              style={navStyle(
-                location.pathname.startsWith('/protocol') ||
-                  location.pathname === '/docs',
-              )}
-            >
-              Docs
-            </Link>
           </nav>
         ) : (
           <div style={{ flex: 1 }} />
@@ -513,7 +507,7 @@ export function TopBar({ compact = false }: Props = {}) {
                 }}
               >
                 <Link
-                  to="/apps"
+                  to="/store"
                   onClick={() => setMenuOpen(false)}
                   data-testid="topbar-mobile-mode-store"
                   style={{

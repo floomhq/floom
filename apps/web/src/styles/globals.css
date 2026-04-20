@@ -179,7 +179,10 @@ body {
   position: fixed;
   top: 0;
   right: 0;
-  bottom: 0;
+  /* Height pinned to the viewport. Using `bottom: 0` alone under Chrome
+     mobile emulation + sticky ancestor collapsed the drawer to ~55px;
+     `height: 100vh` works reliably. Nav-polish 2026-04-20. */
+  height: 100vh;
   width: min(320px, calc(100vw - 40px));
   background: var(--card);
   border-left: 1px solid var(--line);
@@ -724,21 +727,89 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
-/* Studio sidebar: identical mobile pattern — hide below 900px, where the
-   240px rail + main column padding starts colliding. A floating toggle
-   opens the sidebar as a drawer on mobile (see StudioLayout.tsx). */
-@media (max-width: 900px) {
+/* Studio sidebar: hide below 768px. The TopBar exposes a studio-specific
+   hamburger (`.topbar-studio-toggle`) in that range that opens the
+   sidebar as a left-anchored slide-in drawer (see StudioLayout.tsx).
+   Desktop >=768px: sidebar stays inline in the flex row, hamburger is
+   hidden. Nav-polish 2026-04-20: dropped the 900px breakpoint + the
+   bottom-left floating ☰ which never sat where a toggle belongs. */
+@media (max-width: 767.98px) {
+  /* StudioSidebar uses inline `display: flex` for the desktop layout,
+     so we need !important here to win specificity and hide it on
+     mobile. The drawer panel below overrides this back to `flex` via
+     a descendant selector + !important. */
   .studio-sidebar {
-    display: none;
-  }
-  .studio-mobile-toggle {
-    display: inline-flex !important;
-    align-items: center;
-    justify-content: center;
+    display: none !important;
   }
   .studio-main {
     padding: 20px 20px 120px !important;
   }
+}
+
+/* Studio hamburger in the TopBar — only rendered on /studio/* routes
+   (StudioLayout wires `onStudioMenuOpen`; store pages don't). Hidden
+   on desktop so the pill + profile chip own the header. */
+.topbar-studio-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.topbar-studio-toggle:hover {
+  background: var(--bg);
+}
+@media (max-width: 767.98px) {
+  .topbar-studio-toggle {
+    display: inline-flex;
+  }
+}
+
+/* Studio sidebar drawer (<768px). Backdrop scrim + panel sliding in
+   from the left. Panel uses the full sidebar width (240px) or the
+   viewport, whichever is smaller, so the nav is usable at 320w too.
+   Inside the drawer the sidebar forces display:flex to override the
+   .studio-sidebar { display:none } rule above, and drops `position:
+   sticky` / `height: 100vh` (the panel owns those instead). */
+.studio-mobile-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(14, 14, 12, 0.42);
+  animation: topbar-scrim-in 140ms ease-out;
+}
+.studio-mobile-drawer-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(280px, 86vw);
+  background: var(--card);
+  box-shadow: 16px 0 40px rgba(0, 0, 0, 0.12);
+  animation: studio-drawer-in 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+  overflow-y: auto;
+}
+@keyframes studio-drawer-in {
+  from { transform: translateX(-16px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+/* Inside the drawer, force the sidebar visible and unpin from the
+   viewport (the drawer panel is what scrolls + sizes now). */
+.studio-mobile-drawer-panel .studio-sidebar {
+  display: flex !important;
+  position: static !important;
+  height: 100% !important;
+  width: 100% !important;
+  border-right: none !important;
 }
 
 /* /login value-pitch: 2-column on desktop, stack on mobile. */

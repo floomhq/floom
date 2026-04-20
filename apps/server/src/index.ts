@@ -654,7 +654,16 @@ if (webDist) {
   // whatever canonical was baked into index.html at build time.
   function rewriteCanonical(html: string, pathname: string): string {
     if (!publicOrigin) return html;
-    const canonical = `${publicOrigin}${pathname === '/index.html' ? '/' : pathname}`;
+    // Nav-polish 2026-04-20: /store is an alias for /apps (same component
+    // mounted at both paths). Canonicalize /store -> /apps so crawlers
+    // don't index duplicates.
+    const canonicalPath =
+      pathname === '/store' || pathname === '/store/'
+        ? '/apps'
+        : pathname === '/index.html'
+          ? '/'
+          : pathname;
+    const canonical = `${publicOrigin}${canonicalPath}`;
     return html.replace(
       /<link rel="canonical" href="[^"]*"/,
       `<link rel="canonical" href="${canonical}"`,
@@ -667,6 +676,9 @@ if (webDist) {
   function titleForPath(pathname: string): string | null {
     if (pathname === '/' || pathname === '/index.html') return LANDING_TITLE;
     if (pathname === '/apps' || pathname === '/apps/') return 'Apps · Floom';
+    // Nav-polish 2026-04-20: /store is mounted on the same AppsDirectoryPage
+    // component as /apps (label "Store" on the TopBar pill matches the URL).
+    if (pathname === '/store' || pathname === '/store/') return 'Store · Floom';
     if (pathname === '/login') return 'Sign in · Floom';
     if (pathname === '/signup') return 'Create account · Floom';
     // 2026-04-20 (PRR tail cleanup): /install is a public stub that links
