@@ -14,11 +14,25 @@
 // localStorage or alert() stubs.
 
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { useSession, refreshSession, clearSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { friendlyAuthError } from '../lib/authErrors';
+
+/**
+ * Tab state lives in the URL (?tab=account|studio|danger) so deep links
+ * from the sidebar ("Settings" in Studio) land on the right panel and
+ * browser back/forward works as expected. `/studio/settings` also
+ * redirects to `/me/settings?tab=studio` (see StudioSettingsPage).
+ *
+ * Three tabs:
+ *   - Account: profile + password (the original /me/settings content)
+ *   - Studio: creator API keys + billing stubs (was /studio/settings)
+ *   - Danger zone: delete account (was mid-page on /me/settings)
+ */
+type SettingsTab = 'account' | 'studio' | 'danger';
+const VALID_TABS: readonly SettingsTab[] = ['account', 'studio', 'danger'] as const;
 
 /**
  * Card wrapper: restores visual structure so /me/settings matches the Store
@@ -57,6 +71,15 @@ type FieldState = 'idle' | 'saving' | 'saved' | 'error';
 export function MeSettingsPage() {
   const { data: session, isAuthenticated } = useSession();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = (searchParams.get('tab') || 'account') as SettingsTab;
+  const activeTab: SettingsTab = VALID_TABS.includes(rawTab) ? rawTab : 'account';
+  const setActiveTab = (next: SettingsTab) => {
+    const sp = new URLSearchParams(searchParams);
+    if (next === 'account') sp.delete('tab');
+    else sp.set('tab', next);
+    setSearchParams(sp, { replace: true });
+  };
 
   // Profile section state. The initial render may land before /api/session/me
   // resolves (SPA boot path), so we also sync from `session` whenever it
@@ -208,6 +231,12 @@ export function MeSettingsPage() {
     navigate('/', { replace: true });
   }
 
+  const tabSubtitle: Record<SettingsTab, string> = {
+    account: 'Update your profile, change your password, or sign out.',
+    studio: 'Creator API keys and billing. Account basics live in the Account tab.',
+    danger: 'Permanently delete your account. Read carefully, this cannot be undone.',
+  };
+
   return (
     <PageShell requireAuth="cloud" title="Settings | Floom">
       <div data-testid="settings-page" style={{ maxWidth: 620 }}>
@@ -223,10 +252,10 @@ export function MeSettingsPage() {
         >
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 700, margin: '0 0 6px', color: 'var(--ink)' }}>
-              Account settings
+              Settings
             </h1>
             <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0 }}>
-              Update your profile, change your password, or sign out.
+              {tabSubtitle[activeTab]}
             </p>
           </div>
           <button
@@ -264,6 +293,56 @@ export function MeSettingsPage() {
           </button>
         </div>
 
+        {/* ---------- Tab nav ---------- */}
+        <div
+          role="tablist"
+          aria-label="Settings sections"
+          data-testid="settings-tabs"
+          style={{
+            display: 'flex',
+            gap: 4,
+            borderBottom: '1px solid var(--line)',
+            marginBottom: 20,
+            overflowX: 'auto',
+          }}
+        >
+          {(
+            [
+              { id: 'account', label: 'Account' },
+              { id: 'studio', label: 'Studio' },
+              { id: 'danger', label: 'Danger zone' },
+            ] as Array<{ id: SettingsTab; label: string }>
+          ).map((t) => {
+            const isActive = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                data-testid={`settings-tab-${t.id}`}
+                onClick={() => setActiveTab(t.id)}
+                style={{
+                  padding: '10px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: isActive
+                    ? '2px solid var(--accent)'
+                    : '2px solid transparent',
+                  color: isActive ? 'var(--ink)' : 'var(--muted)',
+                  fontSize: 13,
+                  fontWeight: isActive ? 700 : 500,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  marginBottom: -1,
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
         {!isAuthenticated && (
           <div
             data-testid="settings-oss-banner"
@@ -282,6 +361,9 @@ export function MeSettingsPage() {
           </div>
         )}
 
+        {/* ---------- Account tab ---------- */}
+        {activeTab === 'account' && (
+          <>
         {/* ---------- Profile card ---------- */}
         <SettingsCard id="settings-card-profile">
         <form onSubmit={handleProfileSave} data-testid="settings-profile-form">
@@ -411,8 +493,66 @@ export function MeSettingsPage() {
           </div>
         </form>
         </SettingsCard>
+          </>
+        )}
 
-        {/* ---------- Danger zone card ---------- */}
+        {/* ---------- Studio tab ---------- */}
+        {activeTab === 'studio' && (
+          <>
+            <SettingsCard id="settings-card-studio-keys">
+              <SectionHeading>Creator API keys</SectionHeading>
+              <StubPanel
+                label="Coming v1.1"
+                title="Personal access tokens"
+                desc="Publish + manage apps from CI or the Floom CLI. Until then, use your browser session or the self-host API token."
+              />
+            </SettingsCard>
+
+            <SettingsCard id="settings-card-studio-billing">
+              <SectionHeading>Billing</SectionHeading>
+              <StubPanel
+                label="Coming v1.1"
+                title="Cloud plan"
+                desc="Running Studio yourself is free forever. Paid Cloud adds longer-running jobs, live updates, and managed sign-in keys."
+              />
+            </SettingsCard>
+
+            <SettingsCard id="settings-card-studio-apps">
+              <SectionHeading>Your apps</SectionHeading>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  margin: '0 0 12px',
+                  lineHeight: 1.55,
+                }}
+              >
+                Manage individual apps (secrets, triggers, access, analytics)
+                from Studio.
+              </p>
+              <Link
+                to="/studio"
+                data-testid="settings-studio-link"
+                style={{
+                  display: 'inline-flex',
+                  padding: '8px 14px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                  background: 'var(--card)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 8,
+                  textDecoration: 'none',
+                }}
+              >
+                Open Studio →
+              </Link>
+            </SettingsCard>
+          </>
+        )}
+
+        {/* ---------- Danger zone tab ---------- */}
+        {activeTab === 'danger' && (
         <SettingsCard id="settings-card-danger" danger>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: '#c2321f', margin: '0 0 6px' }}>
             Danger zone
@@ -446,6 +586,7 @@ export function MeSettingsPage() {
             Delete my account
           </button>
         </SettingsCard>
+        )}
 
         {confirm && (
           <div
@@ -537,6 +678,55 @@ export function MeSettingsPage() {
         )}
       </div>
     </PageShell>
+  );
+}
+
+/**
+ * "Coming v1.1" placeholder used inside the Studio tab (Creator API keys,
+ * Billing). Same visual treatment as the old StudioSettingsPage used so
+ * the content feels unchanged, just re-grouped into a tab.
+ */
+function StubPanel({
+  label,
+  title,
+  desc,
+}: {
+  label: string;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <div
+      style={{
+        border: '1px dashed var(--line)',
+        borderRadius: 10,
+        padding: 16,
+        background: 'var(--card)',
+      }}
+    >
+      <div
+        style={{
+          display: 'inline-block',
+          padding: '3px 8px',
+          borderRadius: 4,
+          background: 'var(--accent-soft)',
+          color: 'var(--accent)',
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          marginBottom: 8,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
+        {title}
+      </div>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0, lineHeight: 1.55 }}>
+        {desc}
+      </p>
+    </div>
   );
 }
 

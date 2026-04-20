@@ -54,10 +54,11 @@ export function ProofRow({ hubCount, runsToday }: ProofRowProps) {
           flexWrap: 'wrap',
         }}
       >
-        <Stat
-          value={hubCount !== null ? String(hubCount) : '—'}
-          label="apps live"
-        />
+        {hubCount !== null ? (
+          <Stat value={String(hubCount)} label="apps live" />
+        ) : (
+          <StatSkeleton label="apps live" />
+        )}
         {showRunsToday && (
           <>
             <Divider />
@@ -77,8 +78,60 @@ export function ProofRow({ hubCount, runsToday }: ProofRowProps) {
             gap: 24px !important;
           }
         }
+        @keyframes proof-shimmer {
+          0%   { opacity: 0.35; }
+          50%  { opacity: 0.75; }
+          100% { opacity: 0.35; }
+        }
       `}</style>
     </section>
+  );
+}
+
+/**
+ * Loading placeholder for the app-count stat. Replaces the previous em-dash
+ * fallback which rendered as a raw "—" on fresh loads and looked like a
+ * broken counter.
+ *
+ * Dimensioned to match the real Stat's numeric column (26px glyph height)
+ * so there's zero layout shift once the real value lands.
+ */
+function StatSkeleton({ label }: { label: string }) {
+  return (
+    <span
+      data-testid="home-proof-stat-skeleton"
+      style={{
+        display: 'inline-flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 4,
+        minWidth: 0,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          display: 'inline-block',
+          width: 48,
+          height: 26,
+          borderRadius: 6,
+          background: 'var(--line)',
+          animation: 'proof-shimmer 1.2s ease-in-out infinite',
+        }}
+      />
+      <span
+        style={{
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 11,
+          color: 'var(--muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
+    </span>
   );
 }
 

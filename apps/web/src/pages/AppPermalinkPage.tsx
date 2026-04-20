@@ -982,7 +982,26 @@ export function AppPermalinkPage() {
               </div>
               <MetaRow
                 label="License"
-                value={app.manifest?.license?.trim() || 'See project documentation'}
+                value={
+                  githubRepo ? (
+                    <a
+                      href={`${githubRepo}/blob/main/LICENSE`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        color: 'var(--accent)',
+                        textDecoration: 'none',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {app.manifest?.license?.trim() || 'View LICENSE'}
+                    </a>
+                  ) : app.manifest?.license?.trim() ? (
+                    app.manifest.license.trim()
+                  ) : (
+                    'See project documentation'
+                  )
+                }
               />
               {githubRepo && (
                 <MetaRow

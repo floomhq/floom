@@ -25,9 +25,16 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 function labelForCategory(category: string): string {
+  // Backend emits a mix of slug-cased (developer-tools) and snake-cased
+  // (open_data, developer_tools) values. Normalize both at display time
+  // so chips always read as "Open data", "Developer tools" — not
+  // "Open_data" or "Developer-tools". URL + filter state keep the raw
+  // value, so this is purely cosmetic.
   return (
     CATEGORY_LABELS[category] ??
-    category.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    category
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
   );
 }
 

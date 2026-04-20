@@ -89,9 +89,9 @@ export function BuildPage({
   // State machine
   const [step, setStep] = useState<Step>('ramp');
   const [error, setError] = useState<{ message: string; details?: string } | null>(null);
-  const [githubError, setGithubError] = useState<'private' | 'no-openapi' | 'unreachable' | null>(
-    null,
-  );
+  const [githubError, setGithubError] = useState<
+    'private' | 'no-openapi' | 'unreachable' | 'repo-not-found' | null
+  >(null);
   // Slug-taken recovery (audit 2026-04-20, Fix 2). When the publish
   // request 409s with `slug_taken`, the server returns three suggestions
   // (numeric / version / random suffix). We surface them as clickable
@@ -163,11 +163,18 @@ export function BuildPage({
     }
   }, [editSlug]);
 
+  /** Parses a GitHub URL into { owner, repo } or null if it doesn't match. */
+  function parseGithubUrl(raw: string): { owner: string; repo: string } | null {
+    const m = raw.trim().match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?(?:\/|$)/i);
+    if (!m) return null;
+    return { owner: m[1], repo: m[2] };
+  }
+
   /** Transforms a GitHub repo URL into candidate raw OpenAPI URLs. */
   function githubCandidates(raw: string): string[] {
-    const m = raw.trim().match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?(?:\/|$)/i);
-    if (!m) return [];
-    const [, owner, repo] = m;
+    const parsed = parseGithubUrl(raw);
+    if (!parsed) return [];
+    const { owner, repo } = parsed;
     const bases = [
       `https://raw.githubusercontent.com/${owner}/${repo}/main`,
       `https://raw.githubusercontent.com/${owner}/${repo}/master`,
@@ -179,19 +186,67 @@ export function BuildPage({
   }
 
   /**
+   * Check if a GitHub repo actually exists (and is public). Returns:
+   *   - 'exists'    → repo is real and public, proceed to openapi probe
+   *   - 'not-found' → repo 404 (typo, deleted, or private w/o access)
+   *   - 'unknown'   → network / rate-limit / CORS hiccup; caller should
+   *                   treat as "exists" and fall through to the openapi
+   *                   probe so a transient GitHub API flake doesn't
+   *                   block an otherwise-valid repo.
+   *
+   * Uses the unauthenticated GitHub REST API (60 req/hr per IP). CORS is
+   * open on api.github.com so this works from the browser without a
+   * proxy. We intentionally don't parse the response — a 2xx means the
+   * repo exists, a 404 means it doesn't, anything else is "unknown".
+   */
+  async function checkGithubRepoExists(
+    owner: string,
+    repo: string,
+  ): Promise<'exists' | 'not-found' | 'unknown'> {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+        method: 'GET',
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (res.status === 404) return 'not-found';
+      if (res.ok) return 'exists';
+      return 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
    * Run detect against all GitHub raw-URL candidates, in order. Returns
    * true on success (state updated to `review`); false means every
    * candidate failed and `githubError` was set. Shared between the
    * manual GitHub ramp form and the hero-URL auto-detect on mount.
+   *
+   * 2026-04-20 (round 2): added an explicit repo-existence probe before
+   * the OpenAPI fan-out. Previously, every failure landed on "We couldn't
+   * find your app file" — even when the repo itself was 404 — which
+   * misled users into checking their spec instead of the URL. Now a
+   * real 404 on the repo shows a dedicated "repo not found" error.
    */
   async function runGithubDetect(inputUrl: string): Promise<boolean> {
     setError(null);
     setGithubError(null);
-    const candidates = githubCandidates(inputUrl);
-    if (candidates.length === 0) {
+    const parsed = parseGithubUrl(inputUrl);
+    if (!parsed) {
       setGithubError('unreachable');
       return false;
     }
+
+    // Probe repo existence up front. Only block on a definitive 404 —
+    // unknowns fall through to the openapi probe so flaky rate-limits
+    // don't break happy-path detection.
+    const existence = await checkGithubRepoExists(parsed.owner, parsed.repo);
+    if (existence === 'not-found') {
+      setGithubError('repo-not-found');
+      return false;
+    }
+
+    const candidates = githubCandidates(inputUrl);
     setGithubAttempts({ attemptedUrls: candidates });
     for (const candidate of candidates) {
       try {
@@ -207,9 +262,8 @@ export function BuildPage({
         // try next
       }
     }
-    // All failed. Distinguish private-repo (403/404 on all raw urls) from
-    // missing OpenAPI. Without a HEAD request we can't tell reliably, so
-    // show the no-openapi hint by default.
+    // Repo confirmed to exist (or unknown) but no OpenAPI spec at any of
+    // the candidate paths. Show the no-openapi hint.
     setGithubError('no-openapi');
     return false;
   }
@@ -660,7 +714,14 @@ export function BuildPage({
                       copy="Paste a full URL like https://github.com/owner/repo."
                     />
                   )}
-                  {githubAttempts && githubAttempts.attemptedUrls.length > 0 && (
+                  {githubError === 'repo-not-found' && (
+                    <ErrorCard
+                      severity="amber"
+                      title="This repo doesn't exist or isn't public"
+                      copy="Double-check the URL. Make sure you're pasting a public GitHub repo like https://github.com/owner/repo."
+                    />
+                  )}
+                  {githubError !== 'repo-not-found' && githubAttempts && githubAttempts.attemptedUrls.length > 0 && (
                     <details
                       style={{
                         background: 'var(--bg)',

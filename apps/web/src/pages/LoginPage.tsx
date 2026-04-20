@@ -146,21 +146,12 @@ export function LoginPage() {
         }}
         data-testid={mode === 'signin' ? 'login-page' : 'signup-page'}
       >
-        {/* Brand mark on the auth hero. Glow + boot-in fade on mount
-            makes the page feel intentional rather than springing into
-            existence as a form. Boot-in is a one-shot so it doesn't
-            re-animate while the user switches sign-in / create-account
-            tabs. */}
-        <div
-          data-testid="login-logo"
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            marginBottom: 20,
-          }}
-        >
-          <Logo size={56} variant="glow" animate="boot-in" />
-        </div>
+        {/* 2026-04-20 (round 2): dropped the page-level hero logo. The
+            TopBar above this column already renders the floom mark, so
+            rendering another 56px glow mark here stacked two logos on
+            top of each other and looked redundant. The right-column
+            value-pitch block (below) keeps its small brand mark since
+            it's a separate visual unit. */}
         <h1
           style={{
             fontSize: 28,

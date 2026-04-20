@@ -864,7 +864,7 @@ export function CreatorHeroPage() {
                 <span style={{ color: '#6ee7b7' }}>docker run -p 3010:3010 floomhq/floom</span>
               </div>
               <div style={{ color: '#94a3b8', marginTop: 6 }}>
-                <span style={{ color: '#6ee7b7' }}>✓</span> Floom is up. 14 apps ready. Claude integration live.
+                <span style={{ color: '#6ee7b7' }}>✓</span> Floom is up. Browse the full catalog on localhost. Claude integration live.
               </div>
             </div>
             <p style={{ marginTop: 24, fontSize: 14 }}>
