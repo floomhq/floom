@@ -424,6 +424,7 @@ export function AppsDirectoryPage() {
                     slug={app.slug}
                     name={app.name}
                     description={app.description}
+                    category={app.category ?? undefined}
                     variant="apps"
                   />
                 ))}
