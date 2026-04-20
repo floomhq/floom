@@ -672,6 +672,12 @@ if (webDist) {
     // 2026-04-20 (PRR tail cleanup): /install is a public stub that links
     // to CLI install steps. Kept distinct from /me/install (dashboard).
     if (pathname === '/install' || pathname === '/install/') return 'Install the Floom CLI · Floom';
+    // 2026-04-20 (about-page ship): /about is a real story page now (not
+    // a redirect to landing). Per-route SSR title so crawlers + social
+    // previews see the About title, not the landing title.
+    if (pathname === '/about' || pathname === '/about/') {
+      return 'About Floom · Get that thing off localhost fast';
+    }
     // /onboarding is a redirect to /me?welcome=1 but the title the server
     // returns before the 302 hops still matters for preview bots.
     if (pathname === '/onboarding' || pathname === '/onboarding/') return 'Welcome to Floom · Floom';
@@ -719,6 +725,26 @@ if (webDist) {
     let out = rewriteCanonical(html, pathname);
     const title = titleForPath(pathname);
     if (title) out = rewriteTitle(out, title);
+    // 2026-04-20 (about-page ship): the SPA fallback + <noscript> block in
+    // index.html bake the landing H1 ("Production infrastructure for AI
+    // apps that do real work."). Crawlers + curl-based verification read
+    // the HTML before JS runs, so every page returned the landing H1.
+    // For /about we rewrite the fallback copy to the About hero so the
+    // page has a truthful H1 pre-hydrate. Kept narrow (this one route)
+    // to avoid ripple with the parallel H1-swap work on /.
+    if (pathname === '/about' || pathname === '/about/') {
+      const aboutH1 = 'Get that thing off localhost fast.';
+      const aboutSub =
+        "Floom exists for one reason: to turn your code into a real app with a real URL so other people can actually use it.";
+      out = out.replace(
+        /<div style="display:none" data-spa-fallback>[\s\S]*?<\/div>/,
+        `<div style="display:none" data-spa-fallback>\n        <h1>${aboutH1}</h1>\n        <p>${aboutSub}</p>\n        <p><a href="/studio/build">Paste your thing</a> &middot; <a href="/">Home</a></p>\n      </div>`,
+      );
+      out = out.replace(
+        /<noscript>[\s\S]*?<\/noscript>/,
+        `<noscript>\n      <h1>${aboutH1}</h1>\n      <p>${aboutSub}</p>\n      <p><a href="/studio/build">Paste your thing</a> &middot; <a href="/">Home</a></p>\n    </noscript>`,
+      );
+    }
     return out;
   }
 

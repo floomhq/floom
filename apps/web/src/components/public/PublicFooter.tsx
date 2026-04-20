@@ -10,6 +10,12 @@ import { Link } from 'react-router-dom';
 // proprietorship. Renamed the "Imprint" link to "Legal" — the /imprint
 // route still resolves (back-compat for bookmarks and sitemaps), and
 // /legal is added as an alias so either URL hits the same page.
+//
+// 2026-04-20 (about-page ship): added a one-line identity strip above
+// the link row — "Get that thing off localhost fast." This is the About
+// page H1 and pulls double-duty here as the site-wide tagline. Muted,
+// centered to match the existing rhythm. Also wired an "About" link into
+// the link row (new page, supersedes the old `/about` → `/` redirect).
 const LINK_STYLE: React.CSSProperties = { color: 'var(--muted)', textDecoration: 'none' };
 
 function FootLink({ children, to, href }: { children: React.ReactNode; to?: string; href?: string }) {
@@ -34,12 +40,24 @@ export function PublicFooter() {
     <footer
       data-testid="public-footer"
       style={{
-        padding: '28px 24px',
+        padding: '24px 24px 28px',
         textAlign: 'center',
         background: 'var(--card)',
         borderTop: '1px solid var(--line)',
       }}
     >
+      {/* Identity strip: tagline double-duty with the About page H1. */}
+      <div
+        data-testid="footer-tagline"
+        style={{
+          fontSize: 12,
+          color: 'var(--muted)',
+          letterSpacing: '0.01em',
+          margin: '0 0 10px',
+        }}
+      >
+        Get that thing off localhost fast.
+      </div>
       <div
         style={{
           display: 'inline-flex',
@@ -53,6 +71,8 @@ export function PublicFooter() {
         }}
       >
         <span>Built in SF</span>
+        <span aria-hidden="true">·</span>
+        <FootLink to="/about">About</FootLink>
         <span aria-hidden="true">·</span>
         <FootLink to="/docs">Docs</FootLink>
         <span aria-hidden="true">·</span>
