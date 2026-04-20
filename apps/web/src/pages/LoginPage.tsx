@@ -16,7 +16,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
-import { Logo } from '../components/Logo';
 import { useSession, refreshSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import {
@@ -445,7 +444,12 @@ export function LoginPage() {
       {/* Right column: value pitch. Hidden on mobile via CSS (<1024px).
           Kept intentionally quiet: one headline + one supporting line.
           The three-bullet + closing-line version read as filler on an
-          auth page, so we dropped it (2026-04-20). */}
+          auth page, so we dropped it (2026-04-20).
+          2026-04-21: dropped the standalone brand mark from this panel.
+          The TopBar already renders the floom logo in the chrome, so
+          showing another one here read as double-branding. Stripe /
+          Linear / Notion put one mark in the chrome and zero in the
+          side panel. */}
       <aside
         className="login-right"
         data-testid="login-value-pitch"
@@ -453,19 +457,6 @@ export function LoginPage() {
           padding: '8px 0 0',
         }}
       >
-        <div
-          data-testid="login-right-logo"
-          data-glow="true"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            marginBottom: 24,
-          }}
-        >
-          <Logo size={32} variant="glow" />
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>floom</div>
-        </div>
         <h2
           style={{
             fontSize: 22,

@@ -39,9 +39,6 @@ export function StudioSidebar({
   const settingsHref = signedOutPreview
     ? '/login?next=%2Fstudio%2Fsettings'
     : '/studio/settings';
-  const newAppHref = signedOutPreview
-    ? '/signup?next=%2Fstudio%2Fbuild'
-    : '/studio/build';
 
   return (
     <aside
@@ -85,15 +82,12 @@ export function StudioSidebar({
           <Logo size={22} />
           <span>Studio</span>
         </Link>
-
-        <Link
-          to={newAppHref}
-          data-testid="studio-new-app"
-          style={primaryCtaStyle}
-        >
-          <span style={{ fontSize: 15, lineHeight: 1 }}>+</span>
-          <span>{signedOutPreview ? 'Publish an app' : 'New app'}</span>
-        </Link>
+        {/* 2026-04-21: dropped the sidebar "+ New app" CTA. The Studio
+            dashboard body already renders a primary "+ New app" button
+            (see StudioHomePage / studio-new-app-cta), and having the
+            same button twice in the same viewport was clutter. The
+            sidebar still exposes "Build" as nav via the dashboard
+            entry point. */}
       </div>
 
       <div
@@ -394,23 +388,6 @@ function SubNav({
     </div>
   );
 }
-
-const primaryCtaStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 6,
-  padding: '9px 12px',
-  background: 'var(--ink)',
-  border: '1px solid var(--ink)',
-  borderRadius: 8,
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#fff',
-  textDecoration: 'none',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-};
 
 const privatePillStyle: CSSProperties = {
   fontSize: 10,
