@@ -19,6 +19,11 @@ import { PageShell } from '../components/PageShell';
 import { Logo } from '../components/Logo';
 import { useSession, refreshSession } from '../hooks/useSession';
 import * as api from '../api/client';
+import {
+  friendlyAuthError,
+  type AuthErrorCopy,
+  type AuthErrorAction,
+} from '../lib/authErrors';
 
 type Mode = 'signin' | 'signup';
 
@@ -35,7 +40,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [state, setState] = useState<'idle' | 'submitting' | 'error'>('idle');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [errorCopy, setErrorCopy] = useState<AuthErrorCopy | null>(null);
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
 
   const nextPath = searchParams.get('next') || '/me';
@@ -73,7 +78,7 @@ export function LoginPage() {
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
     setState('submitting');
-    setErrorMsg('');
+    setErrorCopy(null);
     try {
       if (mode === 'signin') {
         await api.signInWithPassword(email, password);
@@ -84,18 +89,37 @@ export function LoginPage() {
       navigate(nextPath, { replace: true });
     } catch (err) {
       setState('error');
-      const e = err as api.ApiError;
-      if (e.status === 404) {
-        setErrorMsg(
-          'Cloud auth is not enabled on this server. Run with FLOOM_CLOUD_MODE=true or use the local dev user.',
-        );
-      } else if (e.status === 401) {
-        setErrorMsg('Wrong email or password.');
-      } else if (e.status === 422 || e.status === 400) {
-        setErrorMsg(e.message || 'Email or password invalid.');
-      } else {
-        setErrorMsg(e.message || 'Sign-in failed.');
-      }
+      setErrorCopy(friendlyAuthError(err as api.ApiError, mode));
+    }
+  }
+
+  // Wire error-recovery CTAs (e.g. "Sign in instead" after a duplicate
+  // signup attempt) to real UI behavior. Keeps the email the user already
+  // typed so they don't re-enter it on the other tab.
+  function handleErrorAction(action: AuthErrorAction) {
+    if (action.kind === 'switch-to-signin') {
+      setMode('signin');
+      setErrorCopy(null);
+      setPassword('');
+      setState('idle');
+      return;
+    }
+    if (action.kind === 'switch-to-signup') {
+      setMode('signup');
+      setErrorCopy(null);
+      setPassword('');
+      setState('idle');
+      return;
+    }
+    if (action.kind === 'resend-verification') {
+      // No dedicated resend endpoint on the client yet; send the user to
+      // the support mailer as a graceful fallback. When Better Auth's
+      // email-verification plugin lands we can hit it directly.
+      window.location.href =
+        'mailto:team@floom.dev?subject=' +
+        encodeURIComponent('Resend Floom verification email') +
+        '&body=' +
+        encodeURIComponent(`Please resend verification for ${email}.`);
     }
   }
 
@@ -344,17 +368,43 @@ export function LoginPage() {
             </div>
           )}
 
-          {state === 'error' && (
-            <p
+          {state === 'error' && errorCopy && (
+            <div
               data-testid="auth-error"
               style={{
                 margin: '0 0 12px',
+                padding: '10px 12px',
+                background: '#fff8e6',
+                border: '1px solid #f4e0a5',
+                borderRadius: 8,
                 fontSize: 13,
-                color: '#c2791c',
+                color: '#8a5a00',
+                lineHeight: 1.5,
               }}
             >
-              {errorMsg}
-            </p>
+              <div>{errorCopy.message}</div>
+              {errorCopy.action && (
+                <button
+                  type="button"
+                  data-testid="auth-error-action"
+                  onClick={() => handleErrorAction(errorCopy.action!.intent)}
+                  style={{
+                    marginTop: 6,
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent)',
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    padding: 0,
+                    textDecoration: 'underline',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {errorCopy.action.label}
+                </button>
+              )}
+            </div>
           )}
           <button
             type="submit"
@@ -401,7 +451,10 @@ export function LoginPage() {
         </p>
       </div>
 
-      {/* Right column: value pitch. Hidden on mobile via CSS (<1024px). */}
+      {/* Right column: value pitch. Hidden on mobile via CSS (<1024px).
+          Kept intentionally quiet: one headline + one supporting line.
+          The three-bullet + closing-line version read as filler on an
+          auth page, so we dropped it (2026-04-20). */}
       <aside
         className="login-right"
         data-testid="login-value-pitch"
@@ -416,7 +469,7 @@ export function LoginPage() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            marginBottom: 20,
+            marginBottom: 24,
           }}
         >
           <Logo size={32} variant="glow" />
@@ -424,96 +477,28 @@ export function LoginPage() {
         </div>
         <h2
           style={{
-            fontSize: 20,
+            fontSize: 22,
             fontWeight: 700,
             lineHeight: 1.3,
-            margin: '0 0 16px',
+            margin: '0 0 12px',
             color: 'var(--ink)',
           }}
         >
           Ship AI apps fast.
         </h2>
-        <ul
+        <p
           style={{
-            listStyle: 'none',
-            padding: 0,
-            margin: '0 0 24px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          <ValueBullet
-            title="Ship AI apps in 30 seconds, not weeks."
-            desc="Paste your app's link. Get a Claude tool, a page to share, a CLI, and a URL your teammates can hit."
-          />
-          <ValueBullet
-            title="Free to run yourself. Cloud for the creator tools."
-            desc="The open-source version is yours forever. Cloud adds longer-running jobs, live updates, and managed sign-in keys."
-          />
-          <ValueBullet
-            title="One app. Five ways to use it."
-            desc="Same app runs in Claude, ChatGPT, Notion, your terminal, and the Store. No glue code."
-          />
-        </ul>
-        <div
-          style={{
-            fontSize: 12,
+            fontSize: 14,
             color: 'var(--muted)',
-            padding: '12px 14px',
-            background: 'var(--bg)',
-            border: '1px solid var(--line)',
-            borderRadius: 10,
+            lineHeight: 1.6,
+            margin: 0,
           }}
         >
-          Built for creators who want their apps run by agents, not polished into dashboards.
-        </div>
+          Paste a GitHub link. Get a runnable app in 30 seconds.
+        </p>
       </aside>
       </div>
     </PageShell>
-  );
-}
-
-function ValueBullet({ title, desc }: { title: string; desc: string }) {
-  return (
-    <li
-      className="value-bullet"
-      style={{
-        display: 'flex',
-        gap: 10,
-        alignItems: 'flex-start',
-        padding: '12px 14px',
-        background: 'var(--card)',
-        border: '1px solid var(--line)',
-        borderRadius: 10,
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          display: 'inline-flex',
-          width: 18,
-          height: 18,
-          borderRadius: 9,
-          background: 'var(--accent)',
-          color: '#fff',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          fontSize: 11,
-          fontWeight: 700,
-          marginTop: 2,
-        }}
-      >
-        ✓
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 2 }}>
-          {title}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>{desc}</div>
-      </div>
-    </li>
   );
 }
 
