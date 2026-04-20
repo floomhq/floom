@@ -6,7 +6,12 @@ import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { IntegrationLogos } from '../components/home/IntegrationLogos';
-import { ArchitectureDiagram } from '../components/home/ArchitectureDiagram';
+// Goosebumps pass 2026-04-20: ArchitectureDiagram removed from landing.
+// It was dev-oriented ("ingest -> normalize -> typed manifest -> docker
+// runner -> renderer cascade") and the ICP is creators + biz users. The
+// conceptual story lives in /protocol docs where readers actually want
+// implementation detail. Landing now reads in 20s: hero -> outcomes ->
+// apps -> Why (3 cards) -> Layers (5 cards) -> self-host -> built-by.
 import { InlineDemo } from '../components/home/InlineDemo';
 import { WhyFloom } from '../components/home/WhyFloom';
 import { LayersGrid } from '../components/home/LayersGrid';
@@ -266,14 +271,17 @@ export function CreatorHeroPage() {
           data-testid="hero"
           style={{
             position: 'relative',
-            padding: '48px 24px 56px',
+            // Goosebumps pass 2026-04-20: more vertical breathing room.
+            // 48->72 top, 56->88 bottom so H1 has space above and the
+            // CTA row lands centered in the fold, not crammed at the top.
+            padding: '72px 24px 88px',
             background:
-              'radial-gradient(ellipse 720px 360px at 50% 20%, rgba(5,150,105,0.05), transparent 70%)',
+              'radial-gradient(ellipse 760px 400px at 50% 26%, rgba(5,150,105,0.06), transparent 70%)',
           }}
         >
           <div
             style={{
-              maxWidth: 920,
+              maxWidth: 960,
               margin: '0 auto',
               textAlign: 'center',
             }}
@@ -306,36 +314,40 @@ export function CreatorHeroPage() {
               <IntegrationLogos variant="inline" />
             </div>
 
-            {/* H1 (locked 2026-04-18). 60px desktop so there's more room for
-                the CTA + tile strip above the fold. */}
+            {/* H1 (locked copy). Goosebumps pass 2026-04-20: sized up to
+                72px desktop with tighter tracking so the title hits with
+                the weight the copy earns. Linear/Stripe/Vercel reference
+                class: serif display face, balanced wrap, deep contrast
+                against muted sub-copy. */}
             <h1
               className="hero-headline"
               style={{
                 fontFamily: "'DM Serif Display', Georgia, serif",
                 fontWeight: 400,
-                fontSize: 60,
-                lineHeight: 1.05,
-                letterSpacing: '-0.025em',
+                fontSize: 72,
+                lineHeight: 1.02,
+                letterSpacing: '-0.03em',
                 color: 'var(--ink)',
-                margin: '0 0 14px',
+                margin: '0 0 20px',
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
               Production infrastructure for AI apps that do real work.
             </h1>
 
-            {/* Accent line (locked). */}
+            {/* Accent line (locked copy). Goosebumps pass: 17->19 so the
+                green accent does real work as the H1's emotional follow. */}
             <p
               className="hero-accent"
               data-testid="hero-accent"
               style={{
                 fontFamily: "'Inter', system-ui, sans-serif",
-                fontSize: 17,
-                lineHeight: 1.4,
+                fontSize: 19,
+                lineHeight: 1.35,
                 fontWeight: 600,
-                letterSpacing: '-0.005em',
+                letterSpacing: '-0.01em',
                 color: 'var(--accent)',
-                margin: '0 0 6px',
+                margin: '0 0 8px',
               }}
             >
               Vibe-coding speed. Production-grade safety.
@@ -351,7 +363,7 @@ export function CreatorHeroPage() {
                 lineHeight: 1.5,
                 fontWeight: 400,
                 color: 'var(--muted)',
-                margin: '0 0 26px',
+                margin: '0 0 36px',
               }}
             >
               The protocol + runtime for agentic work.
@@ -414,9 +426,14 @@ export function CreatorHeroPage() {
                   cursor: isDetecting ? 'wait' : 'pointer',
                   opacity: isDetecting ? 0.84 : 1,
                   whiteSpace: 'nowrap',
+                  // Goosebumps pass 2026-04-20: subtle inset highlight +
+                  // soft outer shadow so the primary CTA reads as pressable,
+                  // not painted-on. Matches v6 .btn-primary polish.
+                  boxShadow:
+                    '0 4px 14px rgba(5,150,105,0.3), inset 0 1px 0 rgba(255,255,255,0.2)',
                 }}
               >
-                {isDetecting ? 'Checking link...' : 'Start setup'}
+                {isDetecting ? 'Checking link...' : 'Publish your app'}
                 <ArrowRight size={16} aria-hidden="true" />
               </button>
             </form>
@@ -584,10 +601,10 @@ export function CreatorHeroPage() {
         {/* LAYERS · what ships today (now with icon-badges) */}
         <LayersGrid />
 
-        {/* ARCHITECTURE · demoted from pre-demo position. Retitled to
-            "How a Floom app works" at the section level; dev-targeted
-            section, now labeled as such with a FOR BUILDERS eyebrow. */}
-        <ArchitectureDiagram />
+        {/* ARCHITECTURE removed 2026-04-20 goosebumps pass — the diagram
+            was a dev-speak middle-section that broke the narrative for the
+            creator/biz ICP. See imports for full rationale. The conceptual
+            story (ingest -> manifest -> runner) lives in /protocol. */}
 
         {/* MCP SNIPPET · Claude Desktop integration in 3 lines */}
         <McpSnippet />
@@ -679,18 +696,22 @@ export function CreatorHeroPage() {
          the full hero (logos + H1 + CTA + app tiles) fits on the first
          fold at every viewport. */}
       <style>{`
+        /* Goosebumps pass 2026-04-20: step-down sequence from the 72px
+           desktop H1. Each step keeps the vertical rhythm (margins
+           retained proportionally) so the hero never looks crowded. */
         @media (max-width: 1040px) {
-          .hero-headline { font-size: 52px !important; }
+          .hero-headline { font-size: 60px !important; }
         }
         @media (max-width: 780px) {
-          .hero-headline { font-size: 42px !important; }
+          .hero-headline { font-size: 48px !important; margin-bottom: 18px !important; }
+          .hero-accent { font-size: 17px !important; }
           .hero-works-with { gap: 10px !important; }
         }
         @media (max-width: 640px) {
-          [data-testid="hero"] { padding: 36px 20px 40px !important; }
-          .hero-headline { font-size: 34px !important; line-height: 1.08 !important; margin-bottom: 12px !important; }
-          .hero-accent { font-size: 14px !important; margin-bottom: 4px !important; }
-          .hero-sub-positioning { font-size: 14px !important; margin-bottom: 20px !important; }
+          [data-testid="hero"] { padding: 52px 20px 60px !important; }
+          .hero-headline { font-size: 36px !important; line-height: 1.05 !important; margin-bottom: 14px !important; }
+          .hero-accent { font-size: 15px !important; margin-bottom: 6px !important; }
+          .hero-sub-positioning { font-size: 14px !important; margin-bottom: 26px !important; }
           .hero-input { flex-direction: column !important; align-items: stretch !important; padding: 10px !important; }
           .hero-input input { padding: 14px !important; font-size: 13.5px !important; }
           .hero-input button { width: 100% !important; padding: 14px !important; justify-content: center !important; }

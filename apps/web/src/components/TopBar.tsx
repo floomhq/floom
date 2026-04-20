@@ -40,13 +40,17 @@ const secondaryCtaStyle: CSSProperties = {
   padding: '8px 14px',
 };
 
+// Goosebumps pass 2026-04-20: primary nav CTA is brand green so the eye
+// tracks "Publish an app" as the single primary action. Black-on-white was
+// generic; green ties the CTA to the brand system (accent-700 #047857) and
+// matches the hero "Publish your app" submit button exactly.
 const primaryCtaStyle: CSSProperties = {
   ...navBaseStyle,
   padding: '9px 16px',
-  background: 'var(--ink)',
+  background: 'var(--accent)',
   color: '#fff',
-  border: '1px solid var(--ink)',
-  boxShadow: '0 8px 20px rgba(14,14,12,0.08)',
+  border: '1px solid var(--accent)',
+  boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
 };
 
 const menuItemStyle: CSSProperties = {
@@ -273,11 +277,7 @@ export function TopBar({ compact = false }: Props = {}) {
             <Link
               to={deployHref}
               aria-current={isDeploy ? 'page' : undefined}
-              style={{
-                ...primaryCtaStyle,
-                background: isDeploy ? 'var(--accent)' : primaryCtaStyle.background,
-                borderColor: isDeploy ? 'var(--accent)' : 'var(--ink)',
-              }}
+              style={primaryCtaStyle}
             >
               Publish an app
             </Link>

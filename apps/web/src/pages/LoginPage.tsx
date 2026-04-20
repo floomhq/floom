@@ -499,16 +499,20 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
+// Goosebumps pass 2026-04-20: auth primary CTAs (Sign in / Create account)
+// are brand green, matching the nav "Publish an app" + hero "Publish your
+// app" submit button. One primary action per view, same color system.
 const primaryButtonStyle: React.CSSProperties = {
   width: '100%',
   padding: '12px 16px',
-  background: 'var(--ink)',
+  background: 'var(--accent)',
   color: '#fff',
-  border: 'none',
+  border: '1px solid var(--accent)',
   borderRadius: 8,
   fontSize: 14,
   fontWeight: 600,
   fontFamily: 'inherit',
   cursor: 'pointer',
   marginTop: 12,
+  boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
 };
