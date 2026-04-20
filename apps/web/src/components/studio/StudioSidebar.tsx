@@ -21,7 +21,7 @@ const RAIL_WIDTH = 240;
 
 interface Props {
   activeAppSlug?: string;
-  activeSubsection?: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics';
+  activeSubsection?: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics' | 'triggers';
   signedOutPreview?: boolean;
 }
 
@@ -341,15 +341,16 @@ function SubNav({
   active,
 }: {
   slug: string;
-  active: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics';
+  active: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics' | 'triggers';
 }) {
   const items: Array<{
-    id: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics';
+    id: 'overview' | 'runs' | 'secrets' | 'access' | 'renderer' | 'analytics' | 'triggers';
     label: string;
     to: string;
   }> = [
     { id: 'overview', label: 'Overview', to: `/studio/${slug}` },
     { id: 'runs', label: 'Runs', to: `/studio/${slug}/runs` },
+    { id: 'triggers', label: 'Triggers', to: `/studio/${slug}/triggers` },
     { id: 'secrets', label: 'Secrets', to: `/studio/${slug}/secrets` },
     { id: 'access', label: 'Access', to: `/studio/${slug}/access` },
     { id: 'renderer', label: 'Renderer', to: `/studio/${slug}/renderer` },

@@ -21,6 +21,7 @@ import {
 } from './jobs.js';
 import { dispatchRun, getRun } from './runner.js';
 import { deliverWebhook, type WebhookPayload } from './webhook.js';
+import { getJobTriggerContext } from './triggers-worker.js';
 import type {
   AppRecord,
   JobRecord,
@@ -200,6 +201,15 @@ async function deliverCompletion(jobId: string): Promise<void> {
       ? new Date(job.finished_at + 'Z').getTime() - new Date(job.started_at + 'Z').getTime()
       : null;
 
+  // Trigger context (unified triggers). When a job was enqueued by a
+  // schedule or webhook trigger, include `triggered_by` + `trigger_id`
+  // in the outgoing webhook payload so receivers can branch on origin.
+  // When no context is found, we default to 'manual' (direct API call).
+  const trigCtx = getJobTriggerContext(job.id);
+  const triggered_by: 'schedule' | 'webhook' | 'manual' = trigCtx
+    ? trigCtx.trigger_type
+    : 'manual';
+
   const payload: WebhookPayload = {
     job_id: job.id,
     slug: job.slug,
@@ -208,6 +218,8 @@ async function deliverCompletion(jobId: string): Promise<void> {
     error,
     duration_ms: Number.isFinite(duration) ? duration : null,
     attempts: job.attempts,
+    triggered_by,
+    ...(trigCtx ? { trigger_id: trigCtx.trigger_id } : {}),
   };
   try {
     const result = await deliverWebhook(job.webhook_url, payload);

@@ -37,7 +37,10 @@ import { getAuth, isCloudMode, runAuthMigrations } from './lib/better-auth.js';
 import { runRateLimitMiddleware } from './lib/rate-limit.js';
 import { resolveUserContext } from './services/session.js';
 import { startJobWorker } from './services/worker.js';
+import { startTriggersWorker } from './services/triggers-worker.js';
 import { securityHeaders } from './middleware/security.js';
+import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
+import { webhookRouter } from './routes/webhook.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -206,6 +209,15 @@ app.route('/api/me', meRouter);
 // policies and creator-owned secret values. Mounted at /api/me/apps so
 // the URL scheme reads as "this caller's relationship to :slug".
 app.route('/api/me/apps', meAppsRouter);
+// Unified triggers (schedule + webhook). `/api/me/triggers` is the caller's
+// list; create is under `/api/hub/:slug/triggers` so the owner-check reuses
+// the hub router pattern. See routes/triggers.ts for the full surface.
+app.route('/api/me/triggers', meTriggersRouter);
+app.route('/api/hub', hubTriggersRouter);
+// Incoming webhook dispatch. Public, signature-verified. Mounted outside
+// `/api/*` so the global FLOOM_AUTH_TOKEN bearer-auth middleware doesn't
+// block external senders. HMAC signature is the auth. See routes/webhook.ts.
+app.route('/hook', webhookRouter);
 app.route('/api/apps', reviewsRouter);
 app.route('/api/feedback', feedbackRouter);
 
@@ -611,7 +623,7 @@ if (webDist) {
   // Paths that must never be swallowed by the SPA wildcard. These reach
   // Hono's other route handlers or return a real 404. The order matters:
   // prefix matches first, then exact matches.
-  const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/', '/og/'];
+  const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/', '/og/', '/hook/'];
   const spaExcludedExact = new Set(['/openapi.json', '/metrics']);
 
   // Crawlers don't run JS, so client-side meta updates in AppPermalinkPage
@@ -926,6 +938,13 @@ async function boot(): Promise<void> {
   // worker manually via `processOneJob`.
   if (process.env.FLOOM_DISABLE_JOB_WORKER !== 'true') {
     startJobWorker();
+  }
+
+  // Start the triggers scheduler. Polls the `triggers` table every 30s
+  // and enqueues jobs for schedule-type triggers whose next_run_at has
+  // arrived. Opt-out via FLOOM_DISABLE_TRIGGERS_WORKER=true for tests.
+  if (process.env.FLOOM_DISABLE_TRIGGERS_WORKER !== 'true') {
+    startTriggersWorker();
   }
 
   // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its

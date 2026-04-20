@@ -613,3 +613,40 @@ export interface FeedbackRecord {
   ip_hash: string | null;
   created_at: string;
 }
+
+// =====================================================================
+// Triggers (unified schedule + webhook)
+// =====================================================================
+
+export type TriggerType = 'schedule' | 'webhook';
+
+/**
+ * A trigger fires an app run from an external event. Two dispatcher shapes
+ * share one table:
+ *   - schedule: scheduler worker polls next_run_at and fires when ready.
+ *   - webhook: public POST /hook/:webhook_url_path validates HMAC-SHA256
+ *     signature then enqueues a run.
+ *
+ * `inputs` is JSON-encoded; at fire time it's merged with any webhook body
+ * inputs (webhook payload can override/extend). `retry_policy` is reserved
+ * for per-trigger retry overrides; today we fall back to the app's retries.
+ */
+export interface TriggerRecord {
+  id: string;
+  app_id: string;
+  user_id: string;
+  workspace_id: string;
+  action: string;
+  inputs: string; // JSON-encoded Record<string, unknown>
+  trigger_type: TriggerType;
+  cron_expression: string | null;
+  tz: string | null;
+  webhook_secret: string | null;
+  webhook_url_path: string | null;
+  next_run_at: number | null; // epoch ms
+  last_fired_at: number | null; // epoch ms
+  enabled: 0 | 1;
+  retry_policy: string | null;
+  created_at: number; // epoch ms
+  updated_at: number; // epoch ms
+}
