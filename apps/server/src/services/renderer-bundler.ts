@@ -23,10 +23,17 @@
 // - size cap (512 KB) so a rogue renderer can't blow up the container
 // - idempotent: re-bundling a hash we've seen before is a no-op
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  statSync,
+  realpathSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { isAbsolute, join, resolve, basename, dirname } from 'node:path';
+import { isAbsolute, join, resolve, basename, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { DATA_DIR } from '../db.js';
@@ -114,37 +121,96 @@ export const MAX_BUNDLE_BYTES = 512 * 1024;
  */
 const bundleIndex = new Map<string, BundleResult>();
 
+/**
+ * Character class enforced for any slug that reaches the renderer filesystem.
+ *
+ * Matches (and is deliberately narrower than) the hub-ingest slug validator
+ * so a slug that was valid at ingest time remains valid here. Lowercase
+ * alphanumeric + hyphen, 1..63 chars, must start with an alphanumeric.
+ *
+ * Rejects:
+ *   - `.`   (dots, including `..`)
+ *   - `/` and `\\`
+ *   - percent-encoded sequences after Hono URL-decoding
+ *   - UPPERCASE (Linux filesystems are case-sensitive; keep our surface lower)
+ *   - empty string, leading hyphen
+ *
+ * This is the **primary** defense against path traversal on
+ * `GET /renderer/:slug/{bundle.js,frame.html,meta}`. Without it,
+ * `path.join(RENDERERS_DIR, `${slug}.js`)` normalizes `..` segments and
+ * can resolve to an arbitrary `.js` file on disk — which would then be
+ * served with `application/javascript` content-type, unauthenticated.
+ */
+const RENDERER_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+export function isValidRendererSlug(slug: string): boolean {
+  return typeof slug === 'string' && RENDERER_SLUG_RE.test(slug);
+}
+
+/**
+ * Resolve the real path of `candidate` and verify it lives under the real
+ * path of `RENDERERS_DIR`. Returns `null` if any resolution fails or the
+ * prefix check rejects the path.
+ *
+ * Defense in depth against symlinks: an attacker who somehow planted a
+ * symlink inside RENDERERS_DIR (e.g. via a different write vulnerability)
+ * cannot use a slug that passes `isValidRendererSlug` to trick us into
+ * reading files outside the intended directory. The slug allowlist is the
+ * primary guard; this is the belt-and-braces layer.
+ */
+function resolveSafeBundlePath(candidate: string): string | null {
+  try {
+    const realCandidate = realpathSync(candidate);
+    const realRoot = realpathSync(RENDERERS_DIR);
+    if (realCandidate === realRoot) return null;
+    if (!realCandidate.startsWith(realRoot + sep)) return null;
+    return realCandidate;
+  } catch {
+    return null;
+  }
+}
+
 export function getBundleResult(slug: string): BundleResult | undefined {
+  // Fail closed on anything that doesn't match the ingest-time slug
+  // pattern. This is the single choke point for all three HTTP routes
+  // (meta, bundle.js, frame.html); validating here keeps the handlers
+  // thin and guarantees no future route forgets to call a validator.
+  if (!isValidRendererSlug(slug)) return undefined;
+
   const cached = bundleIndex.get(slug);
   if (cached) return cached;
+
   // Fallback: rebuild index from disk on demand.
   const candidate = join(RENDERERS_DIR, `${slug}.js`);
-  if (existsSync(candidate)) {
-    try {
-      const stat = statSync(candidate);
-      const sourceHashFile = `${candidate}.hash`;
-      const hash = existsSync(sourceHashFile)
-        ? readFileSync(sourceHashFile, 'utf-8').trim()
-        : '';
-      const shapeFile = `${candidate}.shape`;
-      const shape = (existsSync(shapeFile)
-        ? (readFileSync(shapeFile, 'utf-8').trim() as OutputShape)
-        : 'text') as OutputShape;
-      const result: BundleResult = {
-        slug,
-        bundlePath: candidate,
-        bytes: stat.size,
-        outputShape: shape,
-        compiledAt: stat.mtime.toISOString(),
-        sourceHash: hash,
-      };
-      bundleIndex.set(slug, result);
-      return result;
-    } catch {
-      return undefined;
-    }
+  if (!existsSync(candidate)) return undefined;
+  // Belt-and-braces: even though the slug regex rejects `.` and `/`, the
+  // on-disk path could still be a symlink pointing outside the dir. Refuse
+  // to serve anything whose realpath is not a descendant of RENDERERS_DIR.
+  if (!resolveSafeBundlePath(candidate)) return undefined;
+
+  try {
+    const stat = statSync(candidate);
+    const sourceHashFile = `${candidate}.hash`;
+    const hash = existsSync(sourceHashFile)
+      ? readFileSync(sourceHashFile, 'utf-8').trim()
+      : '';
+    const shapeFile = `${candidate}.shape`;
+    const shape = (existsSync(shapeFile)
+      ? (readFileSync(shapeFile, 'utf-8').trim() as OutputShape)
+      : 'text') as OutputShape;
+    const result: BundleResult = {
+      slug,
+      bundlePath: candidate,
+      bytes: stat.size,
+      outputShape: shape,
+      compiledAt: stat.mtime.toISOString(),
+      sourceHash: hash,
+    };
+    bundleIndex.set(slug, result);
+    return result;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 export function listBundles(): BundleResult[] {
