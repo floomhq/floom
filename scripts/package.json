@@ -1,0 +1,5 @@
+{
+  "name": "@floom/scripts",
+  "private": true,
+  "type": "module"
+}
