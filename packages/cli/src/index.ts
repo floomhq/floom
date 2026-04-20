@@ -13,8 +13,9 @@ program
   .option('--branch <branch>', 'branch or tag', 'main')
   .action((repo: string, opts: { branch: string }) => {
     console.error(
-      `floom deploy is not wired in the public beta. Use the web UI at `
-        + `floom.dev/build or call POST /api/deploy-github directly.\n`
+      `floom deploy is not wired in the public beta yet. Use the web UI at `
+        + `https://floom.dev/build to host a repo. The programmatic deploy API `
+        + `is on the roadmap; we will update this command once it ships.\n`
         + `(repo=${repo} branch=${opts.branch})`,
     );
     process.exit(1);
