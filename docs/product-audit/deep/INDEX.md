@@ -32,4 +32,8 @@ Each **`pd-NN-*.md`** is produced by one background subagent. **Mandatory lens:*
 | 19 | `pd-19-roadmap-p0-execution-gap.md` | ROADMAP P0 checklist vs repo state (rate limits, legal, async UI, repo-hosted, wireframes) |
 | 20 | `pd-20-docs-protocol-product.md` | `/protocol`, redirects from `/docs/*`, thin copy — documentation as part of product |
 
-**Status:** subagents spawned 2026-04-20; refresh directory as `pd-*.md` files appear.
+**Status:** subagents spawned 2026-04-20; all 20 tracks now present on `main`.
+
+## Second wave (narrower, deeper)
+
+Cross-cutting themes with extra failure-tree depth: [`../deeper/INDEX.md`](../deeper/INDEX.md) (`pd2-01`–`pd2-10`).
