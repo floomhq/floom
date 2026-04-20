@@ -448,6 +448,7 @@ Always mount `/data` to a named volume or a host directory. `docker run --rm` wi
 ## Security
 
 - **Never expose port 3051 to the public internet without setting `FLOOM_AUTH_TOKEN`.** With no auth, anyone with your URL can call any app and exhaust your API quotas / secrets.
+- **Do not combine `FLOOM_AUTH_TOKEN` with `FLOOM_CLOUD_MODE=true` on the same deployment.** Both systems read `Authorization: Bearer <value>` from the same header. The global middleware matches the operator token first and rejects the request before Better Auth sees it, so every signed-in user's API key is silently 401'd. Pick one per deployment: `FLOOM_AUTH_TOKEN` for a single-tenant or CI-guarded box, `FLOOM_CLOUD_MODE` for a multi-user Floom. If you need an operator kill-switch on a Cloud deployment, run a second private instance and put the token there. See the comment block above `FLOOM_AUTH_TOKEN` in `docker/.env.example`.
 - **Avoid `-v /var/run/docker.sock:/var/run/docker.sock` unless you trust everyone who can reach port 3051.** Mounting the Docker socket inside a container exposed to the network grants host root.
 - **FLOOM_SEED_APPS is off by default** for exactly this reason: it requires the Docker socket mount.
 - **Per-app visibility** (`visibility: auth-required` in apps.yaml) lets you keep some apps public while gating specific ones behind `FLOOM_AUTH_TOKEN`.

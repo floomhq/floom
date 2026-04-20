@@ -89,6 +89,15 @@ docker run -d --name floom \
 
 Then open `http://localhost:3051/p/resend`, or point your agent at `http://localhost:3051/mcp/app/resend`.
 
+### Auth modes
+
+Floom ships with two independent auth layers and they share one header. Read this before you deploy:
+
+- `FLOOM_AUTH_TOKEN` is an operator-wide kill switch. When set, every `/api/*`, `/mcp/*`, `/p/*` request must present `Authorization: Bearer <token>`. Use it for a solo box or a CI/staging guard.
+- `FLOOM_CLOUD_MODE=true` turns on Better Auth so real users sign in and their API keys ride the same `Authorization: Bearer <key>` header.
+
+A single header can only carry one token. Enabling both on the same deployment locks your signed-in users out of the API. Pick one per deployment — see the comment block above `FLOOM_AUTH_TOKEN` in [`docker/.env.example`](./docker/.env.example) for the full breakdown.
+
 Full guide: [docs/SELF_HOST.md](./docs/SELF_HOST.md) · Protocol spec: [spec/protocol.md](./spec/protocol.md)
 
 ## The manifest
