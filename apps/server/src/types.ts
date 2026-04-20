@@ -229,6 +229,11 @@ export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'timeout';
  *   upstream_outage    — upstream 5xx OR timeout at the upstream hop.
  *   network_unreachable — fetch failed before any status arrived.
  *   floom_internal_error — our own bug (runner crash, build fail, OOM).
+ *   app_unavailable    — creator-config bug: container image missing,
+ *                        upstream 403 with no declared secret, etc. Not
+ *                        a Floom-side crash and not a user-input
+ *                        problem — the app itself is broken/not
+ *                        installed on this instance.
  */
 export type ErrorType =
   | 'timeout'
@@ -240,7 +245,8 @@ export type ErrorType =
   | 'auth_error'
   | 'upstream_outage'
   | 'network_unreachable'
-  | 'floom_internal_error';
+  | 'floom_internal_error'
+  | 'app_unavailable';
 
 export interface RunRecord {
   id: string;

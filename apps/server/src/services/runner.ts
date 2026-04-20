@@ -545,11 +545,18 @@ async function runActionWorker(opts: {
     // user's input. Classify as floom_internal_error so the UI doesn't
     // tell the caller to "try again in a minute" when the fix is on
     // our side.
-    const e = err as Error;
+    //
+    // Exception (2026-04-20): docker.ts tags "no such image" failures
+    // with `floom_error_class === 'app_unavailable'`. Those are creator
+    // misconfig, not a Floom bug — surface as the dedicated class so
+    // the UI can render "This app isn't available" instead of the
+    // misleading "Something broke inside Floom" card.
+    const e = err as Error & { floom_error_class?: string };
+    const klass = e.floom_error_class;
     updateRun(opts.runId, {
       status: 'error',
       error: e.message || 'Runner crashed',
-      error_type: 'floom_internal_error',
+      error_type: klass === 'app_unavailable' ? 'app_unavailable' : 'floom_internal_error',
       logs: e.stack || '',
       finished: true,
     });

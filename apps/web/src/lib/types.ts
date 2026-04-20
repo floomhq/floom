@@ -257,7 +257,13 @@ export type RunErrorType =
   | 'auth_error'
   | 'upstream_outage'
   | 'network_unreachable'
-  | 'floom_internal_error';
+  | 'floom_internal_error'
+  // 2026-04-20 dead-end fix: creator-side config bug. Covers upstream
+  // 401/403 on an app that declares no secrets (no Open-Secrets
+  // remediation is possible) AND the missing-docker-image case. The UI
+  // surfaces "This app isn't available right now" with no misleading
+  // action buttons.
+  | 'app_unavailable';
 
 export interface RunRecord {
   id: string;

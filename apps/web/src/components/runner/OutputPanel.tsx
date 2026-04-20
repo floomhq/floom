@@ -300,6 +300,10 @@ type ErrorClass =
   | 'missing_secret_prompt'
   | 'repo_auth'
   | 'deprecated_model'
+  // 2026-04-20 dead-end fix: upstream said 403 but the app doesn't declare
+  // any secret (old behaviour showed "Open Secrets" → empty panel).
+  // Also covers the missing-docker-image case for seed apps.
+  | 'app_unavailable'
   | 'unknown';
 
 interface ErrorCopy {
@@ -320,6 +324,16 @@ interface ClassifyContext {
   appName: string;
   /** Host extracted from app.base_url, e.g. "api.petstore.example". */
   upstreamHost: string | null;
+  /**
+   * Count of secrets the manifest declares. 0 means the app has no
+   * Secrets panel to route to, so routing a 401/403 to `auth_error`
+   * (which shows "Open Secrets") would land on "This app doesn't
+   * declare any secrets. Nothing to configure here." — a direct
+   * contradiction we saw on floom.dev 2026-04-20. When 0 we degrade
+   * the class to `app_unavailable` so the error card shows a neutral
+   * "temporarily unavailable" message with no misleading action.
+   */
+  declaredSecretsCount: number;
 }
 
 function ErrorCard({
@@ -344,6 +358,12 @@ function ErrorCard({
       // so the network_unreachable sub-line falls back to "its
       // backend" instead of leaking the literal string "null".
       upstreamHost: appDetail?.upstream_host ?? null,
+      // Dead-end fix (2026-04-20): the classifier needs to know whether
+      // routing to the "auth_error + Open Secrets" message makes sense.
+      // If the manifest declares zero secrets, the Secrets panel is
+      // empty and the remediation link leads nowhere — the classifier
+      // downgrades the class to `app_unavailable` instead.
+      declaredSecretsCount: appDetail?.manifest?.secrets_needed?.length ?? 0,
     };
   }, [appDetail, run.app_slug]);
 
@@ -703,6 +723,11 @@ function metaLabelFor(run: RunRecord): string {
   const copy = classifyRunError(run, {
     appName: run.app_slug || 'this app',
     upstreamHost: null,
+    // We don't have the manifest here (meta is rendered before appDetail
+    // is in scope); 0 is the safe default because `auth_error` with 0
+    // declared secrets will land on the `app_unavailable` meta label,
+    // which matches what the big card will render.
+    declaredSecretsCount: 0,
   });
   return copy.meta;
 }
@@ -733,6 +758,12 @@ export function classifyRunError(
     return buildUserInputError(run, appName, upstream, error);
   }
   if (type === 'auth_error') {
+    // Dead-end fix (2026-04-20): if the app declares no secrets, the
+    // Secrets panel is empty and "Open Secrets" leads nowhere. Downgrade
+    // to app_unavailable so we show an honest "temporarily broken" state.
+    if (ctx.declaredSecretsCount === 0) {
+      return buildAppUnavailable(appName);
+    }
     return buildAuthError(appName, upstream);
   }
   if (type === 'upstream_outage') {
@@ -740,6 +771,9 @@ export function classifyRunError(
   }
   if (type === 'network_unreachable') {
     return buildNetworkUnreachable(appName, host);
+  }
+  if (type === 'app_unavailable') {
+    return buildAppUnavailable(appName);
   }
   if (type === 'floom_internal_error') {
     return buildFloomInternalError(run, upstream);
@@ -799,7 +833,10 @@ export function classifyRunError(
   const httpFromString = extractHttpStatus(error);
   const http = upstream ?? httpFromString;
   if (http !== null) {
-    if (http === 401 || http === 403) return buildAuthError(appName, http);
+    if (http === 401 || http === 403) {
+      if (ctx.declaredSecretsCount === 0) return buildAppUnavailable(appName);
+      return buildAuthError(appName, http);
+    }
     if (http === 404) {
       // 404 is user_input_error: the app rejected this particular
       // path/resource the user asked for. Generic "Can't reach" was the
@@ -947,6 +984,27 @@ function buildNetworkUnreachable(
     severity: 'upstream',
     headline: `Can’t reach ${appName}.`,
     sub: `Floom couldn’t connect to ${hostStr}. The app may be offline, the URL may be wrong, or a firewall is blocking.`,
+  };
+}
+
+/**
+ * "This app is temporarily unavailable." Used for two cases:
+ *  1. Docker image referenced in seed.json isn't on the host (first-party
+ *     apps that were never published).
+ *  2. Upstream returned 401/403 but the app declares no secrets, so the
+ *     Secrets panel would be empty — the old "Open Secrets" link led to
+ *     a dead-end "This app doesn't declare any secrets" page.
+ *
+ * No "Report" / "Open Secrets" buttons: the creator (not the user)
+ * needs to fix it, and we don't have a creator-side inbox yet.
+ */
+function buildAppUnavailable(appName: string): ErrorCopy {
+  return {
+    klass: 'app_unavailable',
+    meta: 'app_unavailable',
+    severity: 'upstream',
+    headline: `${appName} isn\u2019t available right now.`,
+    sub: `The creator needs to fix or republish this app. Try another app in the meantime.`,
   };
 }
 
