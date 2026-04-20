@@ -47,8 +47,17 @@ export function LoginPage() {
   useEffect(() => {
     if (oauthErrorParam) {
       setState('error');
+      if (oauthErrorParam === 'access_denied') {
+        setErrorCopy({
+          message: "Sign-in was cancelled. Try again whenever you're ready.",
+        });
+      } else {
+        setErrorCopy({
+          message: `Sign-in failed (${oauthErrorParam}). Please try again.`,
+        });
+      }
     }
-  }, []);
+  }, [oauthErrorParam]);
   const rawNext = searchParams.get('next');
   const safeNext =
     rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')

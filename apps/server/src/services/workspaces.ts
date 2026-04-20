@@ -727,7 +727,9 @@ export function provisionPersonalWorkspace(
   }
 
   const localPart = email.split('@')[0] || 'user';
-  const workspaceName = name ? `${name}'s workspace` : `${localPart}'s workspace`;
+  const workspaceName = name
+    ? `${name.toLowerCase()}'s workspace`
+    : `${localPart.toLowerCase()}'s workspace`;
   const baseSlug = localPart
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
