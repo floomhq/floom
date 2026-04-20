@@ -25,10 +25,16 @@
 // The route is mounted in index.ts alongside the other Hono routers. Bundles
 // live under DATA_DIR/renderers/<slug>.js (see services/renderer-bundler.ts).
 //
-// Auth: the renderer bundle is served behind the same global auth gate as
-// the rest of the API (handled by globalAuthMiddleware in index.ts). The
-// bundle is public-by-default because a creator who ships a renderer
-// intends it to run in the user's browser; the bundle contains no secrets.
+// Auth: `/renderer/*` is intentionally NOT behind `globalAuthMiddleware`
+// (see index.ts; the middleware is scoped to `/api/*`, `/mcp/*`, `/p/*`).
+// A creator who ships a renderer means it to run in an end-user's browser
+// tab, and the bundle contains no secrets (see renderer-bundler.ts). The
+// safety story is: (1) slug must match `RENDERER_SLUG_RE` before we touch
+// the filesystem — enforced centrally in `getBundleResult` — which kills
+// path-traversal at the boundary; (2) `FRAME_CSP` on `frame.html` blocks
+// `connect-src` so a rogue bundle can't phone home; (3) the parent
+// embeds the iframe with `sandbox="allow-scripts"` (no `allow-same-origin`)
+// so the bundle sees an opaque origin.
 
 import { Hono } from 'hono';
 import { readFileSync, existsSync } from 'node:fs';
