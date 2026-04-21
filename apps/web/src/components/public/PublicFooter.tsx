@@ -78,6 +78,8 @@ export function PublicFooter() {
         <span aria-hidden="true">·</span>
         <FootLink to="/docs">Docs</FootLink>
         <span aria-hidden="true">·</span>
+        <FootLink to="/docs/limits">Limits</FootLink>
+        <span aria-hidden="true">·</span>
         <FootLink href="https://github.com/floomhq/floom">GitHub</FootLink>
         <span aria-hidden="true">·</span>
         <FootLink to="/legal">Legal</FootLink>

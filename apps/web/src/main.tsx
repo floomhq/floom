@@ -34,6 +34,10 @@ const AboutPage = lazy(() => import('./pages/AboutPage').then(m => ({ default: m
 // Free during beta, self-host free forever, paid plans TBD. Fixes the
 // commercial-visitor dead-end called out in the product audit (pd-12).
 const PricingPage = lazy(() => import('./pages/PricingPage').then(m => ({ default: m.PricingPage })));
+// 2026-04-22 (#298): /docs/limits — runtime and limits transparency page
+// for technical founders. Listed before the /docs/* catch-all so it
+// reaches LimitsPage instead of redirecting to /protocol.
+const LimitsPage = lazy(() => import('./pages/LimitsPage').then(m => ({ default: m.LimitsPage })));
 const BuildPage = lazy(() => import('./pages/BuildPage').then(m => ({ default: m.BuildPage })));
 const CreatorPage = lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
 const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ default: m.CreatorAppPage })));
@@ -266,7 +270,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/docs/protocol" element={<Navigate to="/protocol" replace />} />
         <Route path="/docs/self-host" element={<Navigate to="/protocol#self-hosting" replace />} />
         <Route path="/docs/api-reference" element={<Navigate to="/protocol#api-surface" replace />} />
-        <Route path="/docs/rate-limits" element={<Navigate to="/protocol#plumbing-layers-auto-applied" replace />} />
+        <Route path="/docs/rate-limits" element={<Navigate to="/docs/limits" replace />} />
+        {/* Runtime and limits (#298). Listed before the /docs/* catch-all. */}
+        <Route path="/docs/limits" element={<LimitsPage />} />
         <Route path="/docs/changelog" element={<ExternalRedirect to="https://github.com/floomhq/floom/releases" />} />
         {/* Catch-all /docs/* (any other subpath wireframes advertise) falls back to /protocol. */}
         <Route path="/docs/*" element={<Navigate to="/protocol" replace />} />

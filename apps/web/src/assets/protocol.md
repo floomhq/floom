@@ -46,7 +46,7 @@ From the OpenAPI spec, Floom derives:
 Every Floom app gets:
 
 - Secrets vault (injected as env vars at runtime)
-- Rate limiting (global + per-IP, custom per-operation)
+- Rate limiting (global + per-IP, custom per-operation). See [Runtime and limits](/docs/limits) for the exact numbers.
 - Streaming output for long-running operations
 - Run history + audit log
 - (Coming soon) Access control, staging environments, version control, per-app databases, OAuth, payment / billing
