@@ -191,6 +191,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             because "run an owned app" is a /me (consumer) action, not a
             creator management action — the RunSurface lives there, and
             Studio links into it when needed. */}
+        {/* Index route: /me/apps was 404ing; /me already renders the
+            user's apps list in the sidebar, so redirect there. */}
+        <Route path="/me/apps" element={<Navigate to="/me" replace />} />
         <Route path="/me/apps/:slug" element={<StudioSlugRedirect />} />
         <Route path="/me/apps/:slug/secrets" element={<StudioSlugRedirect subpath="secrets" />} />
         <Route path="/me/apps/:slug/run" element={<MeAppRunPage />} />
