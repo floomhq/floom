@@ -27,6 +27,7 @@ const {
   hashSource,
   clearBundleIndexForTests,
   getBundleResult,
+  getReactNodePaths,
   MAX_BUNDLE_BYTES,
 } = await import('../../apps/server/src/services/renderer-bundler.ts');
 
@@ -225,6 +226,106 @@ log(
       }),
     'exceeds cap',
   ),
+);
+
+// ---- B7: getReactNodePaths resolves react AND react-dom -------------------
+// Regression: pnpm's virtual store gives each package its own isolated
+// node_modules parent, so only adding react's parent would leave imports
+// like `react-dom/client` unresolvable at bundle time.
+import { createRequire } from 'node:module';
+import { existsSync as existsSyncCheck } from 'node:fs';
+const nodePaths = getReactNodePaths();
+log('getReactNodePaths: returns an array', Array.isArray(nodePaths));
+log('getReactNodePaths: returns at least one path', nodePaths.length > 0);
+log(
+  'getReactNodePaths: every returned path exists on disk',
+  nodePaths.every((p) => existsSyncCheck(p)),
+);
+// Sanity: the paths must actually be usable by `require.resolve` to find
+// BOTH react and react-dom/client. This is the exact contract esbuild
+// needs — if this fails, the bundler will throw "Could not resolve".
+const nodeReq = createRequire(import.meta.url);
+let foundReact = false;
+let foundReactDomClient = false;
+for (const p of nodePaths) {
+  try {
+    nodeReq.resolve('react', { paths: [p] });
+    foundReact = true;
+  } catch {
+    // ignore — not all paths contain every package
+  }
+  try {
+    nodeReq.resolve('react-dom/client', { paths: [p] });
+    foundReactDomClient = true;
+  } catch {
+    // ignore
+  }
+}
+log(
+  'getReactNodePaths: at least one path resolves `react`',
+  foundReact,
+  JSON.stringify(nodePaths),
+);
+log(
+  'getReactNodePaths: at least one path resolves `react-dom/client`',
+  foundReactDomClient,
+  JSON.stringify(nodePaths),
+);
+// Dedup check: set-like behaviour means no duplicate entries.
+log(
+  'getReactNodePaths: no duplicate entries',
+  new Set(nodePaths).size === nodePaths.length,
+);
+
+// B7 smoke: end-to-end bundle with `react-dom/client` import must succeed
+// (this was the reported failure — esbuild throwing "Could not resolve
+// 'react-dom/client'" because the creator's bundle imports it via the
+// wrapper and react-dom wasn't reachable from the nodePaths list).
+clearBundleIndexForTests();
+const b7Dir = join(tmp, 'b7-fixture');
+mkdirSync(b7Dir, { recursive: true });
+const b7Entry = join(b7Dir, 'renderer.tsx');
+writeFileSync(
+  b7Entry,
+  `import React from 'react';
+// Touch react-dom/client directly in user code (wrapper also imports it;
+// this guarantees esbuild has to resolve it from the creator's source,
+// not only from our stdin-injected wrapper).
+import 'react-dom/client';
+export default function B7Demo() {
+  return React.createElement('div', { 'data-marker': 'b7-marker' }, 'b7');
+}
+`,
+);
+let b7Err = null;
+let b7Result;
+try {
+  b7Result = await bundleRenderer({
+    slug: 'b7-renderer-smoke',
+    entryPath: b7Entry,
+    outputShape: 'text',
+    outputDir: outDir,
+  });
+} catch (err) {
+  b7Err = err;
+}
+log(
+  'B7 smoke: bundle with react-dom/client import compiles without error',
+  b7Err === null,
+  b7Err ? String(b7Err.message) : undefined,
+);
+log(
+  'B7 smoke: bundle file written',
+  b7Result && existsSync(b7Result.bundlePath),
+);
+const b7Body = b7Result ? readFileSync(b7Result.bundlePath, 'utf-8') : '';
+log(
+  'B7 smoke: bundle does not include "Could not resolve" error text',
+  !b7Body.includes('Could not resolve'),
+);
+log(
+  'B7 smoke: bundle contains creator marker',
+  b7Body.includes('b7-marker'),
 );
 
 // Cleanup

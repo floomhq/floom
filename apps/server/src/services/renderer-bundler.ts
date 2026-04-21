@@ -65,24 +65,50 @@ import type { BundleResult, OutputShape } from '@floom/renderer/contract';
  * Resolved lazily (via the `getReactNodePaths()` helper) so tests that point
  * DATA_DIR at a tmpdir still find react via the monorepo tree.
  */
-function getReactNodePaths(): string[] {
+export function getReactNodePaths(): string[] {
   const here = dirname(fileURLToPath(import.meta.url));
   const paths = new Set<string>();
 
-  // Strategy 1: ask Node's resolver where `react` actually lives, then add
-  // the parent node_modules so esbuild can find `react`, `react-dom`,
-  // `react-dom/client` from the same virtual-store dir.
-  try {
-    const req = createRequire(import.meta.url);
-    // `react/package.json` is the most stable target — react's "main" can
-    // be ESM-only in some versions, which trips plain `require.resolve('react')`.
-    const reactPkgPath = req.resolve('react/package.json');
-    // <parent-node_modules>/react/package.json → <parent-node_modules>
-    const reactDir = dirname(reactPkgPath);
-    const reactParentNodeModules = dirname(reactDir);
-    paths.add(reactParentNodeModules);
-  } catch {
-    // createRequire can fail in some esbuild/tsx edge cases; fall through.
+  // Strategy 1: ask Node's resolver where each React package actually lives,
+  // then add the parent node_modules so esbuild can find them.
+  //
+  // Why we resolve BOTH `react` AND `react-dom` independently (B7 fix):
+  // pnpm's virtual store puts each package under its own
+  // `.pnpm/<name>@<ver>/node_modules/<name>` dir. That parent `node_modules`
+  // contains only the single package plus its declared deps — so the parent
+  // `node_modules` for `react` does NOT contain `react-dom`, and vice versa.
+  // Pushing only one of them onto esbuild's `nodePaths` leaves the other
+  // unresolvable. Pushing both (plus `react/jsx-runtime` for the JSX
+  // transform) covers every import creators are allowed to make.
+  //
+  // `react/jsx-runtime` is resolved too: esbuild's `jsx: 'automatic'` +
+  // `jsxImportSource: 'react'` emits `import { jsx } from 'react/jsx-runtime'`.
+  // In pnpm, that lives in the same virtual-store dir as `react`, but
+  // resolving it explicitly is cheap and catches any future layout where
+  // React and its jsx-runtime diverge.
+  const req = createRequire(import.meta.url);
+  const specs = ['react/package.json', 'react-dom/package.json', 'react/jsx-runtime'];
+  for (const spec of specs) {
+    try {
+      const resolved = req.resolve(spec);
+      // Walk up from the resolved file until we find the enclosing
+      // `node_modules` dir. Covers both `react/package.json` (sits at
+      // <nm>/react/package.json) and `react/jsx-runtime` (resolves to a
+      // file inside the package dir).
+      let dir = dirname(resolved);
+      for (let i = 0; i < 4; i++) {
+        if (basename(dir) === 'node_modules') {
+          paths.add(dir);
+          break;
+        }
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    } catch {
+      // createRequire can fail for some specs in edge cases; fall through
+      // to hardcoded candidates below.
+    }
   }
 
   // Strategy 2: hardcoded candidates (backup for tests + flat installs).
