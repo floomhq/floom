@@ -180,9 +180,12 @@ body {
   top: 0;
   right: 0;
   /* Height pinned to the viewport. Using `bottom: 0` alone under Chrome
-     mobile emulation + sticky ancestor collapsed the drawer to ~55px;
-     `height: 100vh` works reliably. Nav-polish 2026-04-20. */
-  height: 100vh;
+     mobile emulation + sticky ancestor collapsed the drawer to ~55px.
+     `100dvh` keeps the drawer full-height even when the mobile browser
+     chrome slides away; `max-height: 100vh` caps it on browsers that
+     don't support dvh. Nav-polish 2026-04-20, rescue 2026-04-21. */
+  height: 100dvh;
+  max-height: 100vh;
   width: min(320px, calc(100vw - 40px));
   background: var(--card);
   border-left: 1px solid var(--line);
