@@ -286,7 +286,7 @@ try {
   log(
     'duplicate slug owned by another workspace fails',
     dup.json?.result?.isError === true &&
-      dupPayload?.error === 'ingest_failed' &&
+      dupPayload?.error === 'slug_taken' &&
       typeof dupPayload?.message === 'string' &&
       dupPayload.message.includes('already taken'),
     JSON.stringify(dupPayload),
