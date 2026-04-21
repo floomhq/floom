@@ -242,9 +242,28 @@ interface OpenApiSpec {
         scheme?: string;
         name?: string;
         in?: string;
+        description?: string;
       }
     >;
   };
+  /**
+   * Swagger 2.0 security definitions (predecessor of
+   * OpenAPI 3.x `components.securitySchemes`). Same shape minus the
+   * `http` + `scheme` split — Swagger 2 uses `type: 'basic'` instead of
+   * `type: 'http', scheme: 'basic'`, and has no bearer equivalent. We
+   * merge both worlds in `collectSecuritySchemes` so downstream lookup
+   * paths can stay OpenAPI-3-shaped.
+   */
+  securityDefinitions?: Record<
+    string,
+    {
+      type?: string;
+      name?: string;
+      in?: string;
+      description?: string;
+      flow?: string; // swagger 2 oauth2
+    }
+  >;
 }
 
 // ---------- helpers ----------
@@ -721,19 +740,49 @@ export function specToManifest(
     // Used by fast-apps apps.yaml to rename the uuid app's "Version"
     // selector to "UUID format" without changing the body key.
     const labelOverrides = appSpec.input_labels;
-    const finalInputs = labelOverrides
+    const labeledInputs = labelOverrides
       ? action.inputs.map((inp) =>
           labelOverrides[inp.name]
             ? { ...inp, label: labelOverrides[inp.name] }
             : inp,
         )
       : action.inputs;
+
+    // Regex-based auth lifter. For specs that don't declare a security
+    // scheme (or declare one but forget to reference it at the op level),
+    // any parameter whose name smells like a credential is promoted into
+    // `secrets_needed` and removed from the public `inputs` list. This
+    // keeps the run form from rendering plaintext textboxes for API keys
+    // that get logged and stored un-scoped.
+    const liftedSecrets: string[] = [];
+    const remainingInputs: InputSpec[] = [];
+    for (const inp of labeledInputs) {
+      if (inputNameLooksLikeAuth(inp.name)) {
+        // Normalize to the bare credential name (`X-API-Key` instead of
+        // `header_X-API-Key`) so proxied-runner injection matches by key.
+        const bare = inp.name.replace(/^(header|cookie)_/i, '');
+        liftedSecrets.push(bare);
+      } else {
+        remainingInputs.push(inp);
+      }
+    }
+
+    // Union per-op scheme-derived secrets with regex-lifted ones, deduped
+    // and stable-ordered (scheme-derived first).
+    const mergedSecrets: string[] = [];
+    const seenSecret = new Set<string>();
+    for (const key of [...opSecrets, ...liftedSecrets]) {
+      if (!key || seenSecret.has(key)) continue;
+      seenSecret.add(key);
+      mergedSecrets.push(key);
+    }
+
     actions[name] = {
       label,
       description: action.description,
-      inputs: finalInputs,
+      inputs: remainingInputs,
       outputs: action.outputs,
-      secrets_needed: opSecrets,
+      secrets_needed: mergedSecrets,
     };
     count++;
   }
@@ -1194,15 +1243,10 @@ export async function detectAppFromUrl(
     description: v.description,
   }));
 
-  // Auth-type detection: read securitySchemes from the spec components.
-  type SpecWithComponents = {
-    components?: { securitySchemes?: Record<string, { type?: string; scheme?: string }> };
-  };
-  const schemes =
-    ((derefed as SpecWithComponents).components?.securitySchemes ?? {}) as Record<
-      string,
-      { type?: string; scheme?: string }
-    >;
+  // Auth-type detection: merged view of OpenAPI 3 `components.securitySchemes`
+  // and Swagger 2 `securityDefinitions`, so a spec ingested via either path
+  // detects the right credential type for the /build preview pill.
+  const schemes = collectSecuritySchemes(derefed);
   let auth_type: string | null = null;
   for (const scheme of Object.values(schemes)) {
     if (scheme?.type === 'http' && scheme?.scheme === 'bearer') {
@@ -1400,6 +1444,104 @@ function schemeRequiresSecret(scheme: {
 }
 
 /**
+ * Shape we use internally for a security scheme after merging OpenAPI 3
+ * and Swagger 2 conventions. OpenAPI 3 already uses this shape; for
+ * Swagger 2 we map `type: 'basic'` → `type: 'http', scheme: 'basic'` so
+ * downstream code can reason about a single world.
+ */
+interface MergedSecurityScheme {
+  type?: string;
+  scheme?: string;
+  name?: string;
+  in?: string;
+  description?: string;
+}
+
+/**
+ * Return the combined view of security schemes declared in the spec.
+ * Reads `components.securitySchemes` (OpenAPI 3.x) and `securityDefinitions`
+ * (Swagger 2.0). If both are present — legal on Swagger→OpenAPI converted
+ * specs — OpenAPI 3 entries win on name collision because that's the
+ * canonical location on any spec fresh enough to have both fields.
+ */
+export function collectSecuritySchemes(
+  spec: OpenApiSpec,
+): Record<string, MergedSecurityScheme> {
+  const merged: Record<string, MergedSecurityScheme> = {};
+
+  // Swagger 2.0 — normalize basic → http+basic.
+  const swagger2 = spec.securityDefinitions;
+  if (swagger2 && typeof swagger2 === 'object') {
+    for (const [name, raw] of Object.entries(swagger2)) {
+      if (!raw) continue;
+      if (raw.type === 'basic') {
+        merged[name] = {
+          type: 'http',
+          scheme: 'basic',
+          description: raw.description,
+        };
+      } else {
+        merged[name] = {
+          type: raw.type,
+          name: raw.name,
+          in: raw.in,
+          description: raw.description,
+        };
+      }
+    }
+  }
+
+  // OpenAPI 3.x — wins on collision.
+  const oas3 = spec.components?.securitySchemes;
+  if (oas3 && typeof oas3 === 'object') {
+    for (const [name, raw] of Object.entries(oas3)) {
+      if (!raw) continue;
+      merged[name] = {
+        type: raw.type,
+        scheme: raw.scheme,
+        name: raw.name,
+        in: raw.in,
+        description: raw.description,
+      };
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * Parameter names that almost always carry a credential, even when the
+ * spec failed to declare a matching security scheme. Any input whose
+ * runtime `name` matches this pattern is promoted to `secrets_needed` and
+ * removed from the action's inputs so the run form doesn't render a
+ * plaintext textbox for it.
+ *
+ * Real-world hits we've seen in user-ingested specs:
+ *   - `api_key`, `apiKey`, `api-key`, `apikey`
+ *   - `wskey`  (WorldCat / OCLC Search)
+ *   - `access_token`, `auth_token`, `access-token`
+ *   - `bearer` (when servers expect just the token)
+ *   - `X-API-Key` (emitted by `header_X-API-Key` after sanitization)
+ */
+const AUTH_PARAM_REGEX = /^(api[-_]?key|apikey|wskey|access[-_]?token|auth[-_]?token|bearer|x-api-key)$/i;
+
+/**
+ * Return true if the given input name looks like an auth credential. The
+ * match is done against both the raw name and the post-sanitization name
+ * used for header inputs (prefixed with `header_`), so a spec that
+ * declares an `X-API-Key` header parameter is caught whether or not the
+ * ingest pipeline has already prefixed it.
+ */
+function inputNameLooksLikeAuth(name: string): boolean {
+  if (!name) return false;
+  if (AUTH_PARAM_REGEX.test(name)) return true;
+  // Strip the `header_` / `cookie_` prefix our ingest pipeline applies
+  // to non-query params, then retest.
+  const stripped = name.replace(/^(header|cookie)_/i, '');
+  return AUTH_PARAM_REGEX.test(stripped);
+}
+
+/**
  * Resolve the EFFECTIVE security requirements for a single operation.
  * Per OpenAPI 3.x §4.8.10, an operation-level `security` field REPLACES
  * the global `security` field entirely (not merges). An empty array
@@ -1444,7 +1586,9 @@ export function requiredSecretsForOperation(
   spec: OpenApiSpec,
   op: OpenApiOperation,
 ): string[] {
-  const schemes = spec.components?.securitySchemes ?? {};
+  // Merged view: OpenAPI 3 `components.securitySchemes` + Swagger 2
+  // `securityDefinitions`. See collectSecuritySchemes() for details.
+  const schemes = collectSecuritySchemes(spec);
   if (Object.keys(schemes).length === 0) return [];
 
   const effective = effectiveSecurityForOperation(spec, op);
@@ -1499,6 +1643,16 @@ export function deriveSecretsFromSpec(spec: OpenApiSpec): string[] {
       if (!op) continue;
       for (const name of requiredSecretsForOperation(spec, op)) {
         required.add(name);
+      }
+      // Regex fallback: surface any parameter whose name smells like a
+      // credential. Matches the per-action lifter in `specToManifest` so
+      // the app-level `secrets_needed` union stays in sync with each
+      // action's per-op `secrets_needed`.
+      for (const param of op.parameters || []) {
+        if (!param?.name) continue;
+        if (inputNameLooksLikeAuth(param.name)) {
+          required.add(param.name.replace(/^(header|cookie)_/i, ''));
+        }
       }
     }
   }
