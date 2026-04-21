@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
@@ -37,41 +37,41 @@ interface Stripe {
   category?: string;
 }
 
-// Landing v4 (2026-04-20): keep the 5-slug preference. Tiles + stripes
-// share the same roster so the hero teaser and the featured section
-// stay in sync.
-const PREFERRED_SLUGS = ['opendraft', 'openpaper', 'bouncer', 'openslides', 'uuid'] as const;
+// P0 launch curation (issue #253, 2026-04-21): the three showcase demos
+// are the hero proof-of-life. lead-scorer leads because it is the
+// highest-surface-area demo (CSV in, enriched rows + scores + reasoning
+// out) and hits the "real work" positioning hardest. Tiles + stripes
+// share this roster so the hero teaser and featured section stay in
+// sync. /apps/web/src/lib/hub-filter.ts hides everything else from the
+// public listings.
+const PREFERRED_SLUGS = ['lead-scorer', 'competitor-analyzer', 'resume-screener'] as const;
 
+// Descriptions pulled from each app's floom.yaml manifest on the demo
+// feature branches (feature/lead-scorer-demo, feature/competitor-
+// analyzer-demo, feature/resume-screener-demo). Kept slightly shorter
+// than the full manifest text so the hero tile clamp (~80 chars) and
+// the stripe row don't drop mid-clause.
 const FALLBACK_STRIPES: Stripe[] = [
   {
-    slug: 'opendraft',
-    name: 'opendraft',
-    description: 'Draft posts, docs, and emails from a prompt',
-    category: 'writing',
+    slug: 'lead-scorer',
+    name: 'Lead Scorer',
+    description:
+      'Upload a CSV of leads + your ICP. Get fit scores, reasoning, and enriched columns.',
+    category: 'growth',
   },
   {
-    slug: 'openpaper',
-    name: 'openpaper',
-    description: 'Turn any PDF into a conversation',
+    slug: 'competitor-analyzer',
+    name: 'Competitor Analyzer',
+    description:
+      'Paste competitor URLs, get positioning, pricing, and a strengths/weaknesses table.',
     category: 'research',
   },
   {
-    slug: 'bouncer',
-    name: 'bouncer',
-    description: 'Independent quality audits for your work',
-    category: 'ai',
-  },
-  {
-    slug: 'openslides',
-    name: 'openslides',
-    description: 'Pitch decks from a single brief',
-    category: 'design',
-  },
-  {
-    slug: 'uuid',
-    name: 'uuid',
-    description: 'Zero-config UUID generator. No inputs, always works.',
-    category: 'developer-tools',
+    slug: 'resume-screener',
+    name: 'Resume Screener',
+    description:
+      'Upload a zip of PDFs + a JD, get a ranked shortlist with reasoning per candidate.',
+    category: 'growth',
   },
 ];
 
@@ -136,12 +136,11 @@ function pickStripes(apps: HubApp[]): Stripe[] {
     const hit = bySlug.get(slug);
     if (hit) picked.push({ slug: hit.slug, name: hit.name, description: hit.description, category: hit.category ?? undefined });
   }
-  if (picked.length >= 5) return picked.slice(0, 5);
-  for (const app of apps) {
-    if (picked.some((p) => p.slug === app.slug)) continue;
-    picked.push({ slug: app.slug, name: app.name, description: app.description, category: app.category ?? undefined });
-    if (picked.length >= 5) break;
-  }
+  // P0 curation (#253): we only ship 3 showcase tiles. If the hub fetch
+  // didn't return any of the three, fall back to the static roster so
+  // the hero still renders meaningful proof-of-life instead of random
+  // first-party utilities.
+  if (picked.length === PREFERRED_SLUGS.length) return picked;
   return picked.length >= 3 ? picked : FALLBACK_STRIPES;
 }
 
@@ -178,14 +177,10 @@ export function CreatorHeroPage() {
       });
   }, []);
 
-  const enrichedFallbackStripes = useMemo(() => {
-    return FALLBACK_STRIPES.map((s) => {
-      const demo = LAUNCH_APPS.find((a) => a.slug === s.slug);
-      return demo ? { slug: s.slug, name: demo.name, description: demo.tagline } : s;
-    });
-  }, []);
-
-  const visibleStripes = stripes === FALLBACK_STRIPES ? enrichedFallbackStripes : stripes;
+  // P0 curation (#253): FALLBACK_STRIPES are authored from the manifests
+  // directly, so the old LAUNCH_APPS enrichment (opendraft/openpaper/...)
+  // is no longer needed. Render the roster as-is.
+  const visibleStripes = stripes;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

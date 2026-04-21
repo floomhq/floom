@@ -13,7 +13,7 @@ import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
-import { isTestFixture } from '../lib/hub-filter';
+import { isPubliclyListed } from '../lib/hub-filter';
 
 const ALL = 'all';
 
@@ -103,7 +103,7 @@ export function AppsDirectoryPage() {
   }, [loadHub]);
 
   const sortedApps = useMemo(() => {
-    return apps.filter((a) => !isTestFixture(a)).sort((a, b) => {
+    return apps.filter(isPubliclyListed).sort((a, b) => {
       if ((a.featured ?? false) !== (b.featured ?? false)) {
         return a.featured ? -1 : 1;
       }
