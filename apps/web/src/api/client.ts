@@ -120,6 +120,52 @@ export function parsePrompt(
   });
 }
 
+/**
+ * localStorage key for the user's bring-your-own Gemini API key, used by
+ * the 3 launch demo apps (lead-scorer / competitor-analyzer /
+ * resume-screener) once the 5 free runs per 24h are exhausted. See
+ * apps/server/src/lib/byok-gate.ts for the server-side rule.
+ *
+ * We never send this to analytics. `startRun` attaches it as
+ * `X-User-Api-Key` only for the one request and the server injects it
+ * per-call (perCallSecrets) without persisting.
+ */
+export const USER_GEMINI_KEY_STORAGE_KEY = 'floom_user_gemini_key';
+
+/** Read the user's saved Gemini key, if any. SSR-safe and tolerant of
+ * storage access failures (private mode, disabled storage, etc.). Returns
+ * null for anything < 20 chars so obvious typos don't trigger a request
+ * that's guaranteed to 401 downstream. */
+export function readUserGeminiKey(): string | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(USER_GEMINI_KEY_STORAGE_KEY);
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    return trimmed.length >= 20 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeUserGeminiKey(value: string): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(USER_GEMINI_KEY_STORAGE_KEY, value.trim());
+  } catch {
+    // ignore — caller will just see the next request 429 again.
+  }
+}
+
+export function clearUserGeminiKey(): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.removeItem(USER_GEMINI_KEY_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export async function startRun(
   appSlug: string,
   inputs: Record<string, unknown>,
@@ -136,8 +182,17 @@ export async function startRun(
   // drops File to `{}` and the app never receives the bytes. Works for
   // both proxied and docker runtimes — see serialize-inputs.ts.
   const serialized = await serializeInputs(inputs);
+  // BYOK (launch 2026-04-21): for the 3 demo slugs the server gates at 5
+  // free runs per IP per 24h. If the user has saved a key, attach it so
+  // the server uses it instead and bypasses the gate. We always send the
+  // header when the key is present — the server ignores it for slugs it
+  // doesn't gate, so there's no leakage risk.
+  const userKey = readUserGeminiKey();
+  const headers: Record<string, string> = {};
+  if (userKey) headers['X-User-Api-Key'] = userKey;
   return request('/api/run', {
     method: 'POST',
+    headers,
     body: JSON.stringify({
       app_slug: appSlug,
       inputs: serialized,
