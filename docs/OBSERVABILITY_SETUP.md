@@ -5,12 +5,14 @@ for a self-hosted or cloud-hosted Floom deployment. Every piece below is
 optional and ships "off by default" in the open-source build: setting the
 right environment variables is all it takes to light them up.
 
-Three things get wired in this document:
+Four things get wired in this document:
 
 1. **Sentry error tracking** (server + browser) with secret scrubbing.
 2. **Source-map upload** so browser stacks are readable, not minified soup.
 3. **External heartbeat** (cron on a separate VPS) that pages you when the
    server stops answering.
+4. **App-level Discord alerts** for 5xx bursts, unhandled rejections, and
+   repeated-429 abuse signals (set `DISCORD_ALERTS_WEBHOOK_URL`, section 4).
 
 ---
 
@@ -235,6 +237,54 @@ To pipe Sentry issues into the same Discord channel:
 
 ---
 
+## 4. App-level Discord alerts
+
+The Sentry → Discord rule in section 3 only fires on issues Sentry sees.
+Some operational signals live outside Sentry: unhandled process rejections,
+container-level 5xx bursts, and repeated-429 abuse from a single IP. Floom
+ships a small `sendDiscordAlert()` helper that posts those directly to a
+Discord webhook when `DISCORD_ALERTS_WEBHOOK_URL` is set.
+
+What fires:
+
+- **5xx unhandled errors** — every exception reaching Hono's top-level
+  `onError` handler posts a rate-limited alert (1 / minute / error class).
+- **unhandledRejection + uncaughtException** — process-level crashes that
+  would otherwise just scroll past in `docker logs`.
+- **Repeated 429s from one IP** — when the same IP trips 10+ rate-limits
+  in 5 minutes, a single alert fires. That IP is then debounced for an hour
+  so a sustained attack doesn't spam the channel.
+
+Setup:
+
+1. In your Discord server: Edit Channel on `#floom-alerts` (or a
+   channel of your choice) → Integrations → Webhooks → New Webhook →
+   copy URL.
+2. Add to your deployment env:
+   ```bash
+   # /opt/floom-mcp-preview/.env
+   DISCORD_ALERTS_WEBHOOK_URL=https://discord.com/api/webhooks/...
+   ```
+3. Restart the container (no rebuild — runtime env):
+   ```bash
+   cd /opt/floom-mcp-preview && docker compose up -d --no-deps floom-mcp-preview
+   ```
+4. Verify in boot logs — you should see `[discord-alerts] enabled`:
+   ```bash
+   docker logs floom-mcp-preview 2>&1 | grep discord-alerts
+   ```
+5. Smoke test — hit a route that throws:
+   ```bash
+   curl -X POST https://preview.floom.dev/api/run -H 'content-type: application/json' -d '{"invalid":true}'
+   ```
+   Expected: one Discord post within a few seconds.
+
+When the env var is unset, the helper is a hard no-op — no attempted
+posts, no log spam, no cost. This is the OSS default so nothing leaks
+from a self-hosted box.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -245,3 +295,5 @@ To pipe Sentry issues into the same Discord channel:
 | Browser errors not appearing in Sentry at all | `VITE_SENTRY_DSN` is build-time — confirm you rebuilt the image after setting it. |
 | Heartbeat alerts never fire | `curl -X POST` the webhook by hand to confirm it works. Check `/var/log/syslog` for cron failures. |
 | Heartbeat alerts keep firing on healthy target | Look at exit code of `curl -s -o /dev/null -w '%{http_code}' <target>` from the Hetzner box — cert or network issue. |
+| `[discord-alerts] disabled` in boot logs | `DISCORD_ALERTS_WEBHOOK_URL` is missing or doesn't start with `https://discord.com/api/webhooks/`. Fix the env var, restart. |
+| Discord alerts never fire despite `[discord-alerts] enabled` | The per-title debounce is 60s. Trigger a NEW error class, or wait a minute. If still nothing, `curl -X POST` the webhook by hand to verify it works. |
