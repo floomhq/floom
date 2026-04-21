@@ -8,6 +8,11 @@ import type {
   OutputSpec,
   OutputType,
 } from '../types.js';
+import {
+  assertFileEnvelope,
+  FileEnvelopeError,
+  isFileEnvelope,
+} from '../lib/file-inputs.js';
 
 const VALID_RUNTIMES = ['python', 'node'] as const;
 type Runtime = (typeof VALID_RUNTIMES)[number];
@@ -332,6 +337,35 @@ export function validateInputs(
         );
       }
       cleaned[spec.name] = value;
+    } else if (spec.type === 'file') {
+      // File inputs arrive as the FileEnvelope shape produced by
+      // apps/web/src/api/serialize-inputs.ts:
+      //   { __file: true, name, mime_type, size, content_b64 }
+      // The docker runner materializes this to a real file and
+      // rewrites the input value to an in-container path before
+      // invoking the entrypoint; the proxied runner wraps it in a
+      // Blob for multipart bodies. We also accept a plain string
+      // (path) so a second validateInputs pass on an already-
+      // materialized inputs record (e.g. from a replayed run row)
+      // doesn't trip — that path is authoritative and has already
+      // been produced by the runner.
+      if (typeof value === 'string') {
+        cleaned[spec.name] = value;
+      } else if (isFileEnvelope(value)) {
+        try {
+          cleaned[spec.name] = assertFileEnvelope(spec.name, value);
+        } catch (err) {
+          if (err instanceof FileEnvelopeError) {
+            throw new ManifestError(err.message, err.field);
+          }
+          throw err;
+        }
+      } else {
+        throw new ManifestError(
+          `Input ${spec.name} must be a file upload object ({ __file, name, content_b64 }) or a path string`,
+          spec.name,
+        );
+      }
     } else {
       cleaned[spec.name] = value;
     }
