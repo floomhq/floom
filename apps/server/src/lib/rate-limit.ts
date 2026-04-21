@@ -11,6 +11,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { BlockList, isIP } from 'node:net';
 import type { SessionContext } from '../types.js';
+import { hasValidAdminBearer } from './auth.js';
 import { recordRateLimitHit } from './metrics-counters.js';
 
 type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
@@ -360,6 +361,12 @@ export function runRateLimitMiddleware(
 ): MiddlewareHandler {
   return async (c, next) => {
     if (isRateLimitDisabled()) return next();
+    // Admin bypass (2026-04-21): when FLOOM_AUTH_TOKEN is configured AND
+    // the caller presents the matching bearer, skip rate-limit entirely.
+    // This unblocks ops sweeps, monitoring, and catalog rebuilds from the
+    // server operator without opening the limit up publicly. Returns false
+    // when no token is configured, so OSS mode still enforces the caps.
+    if (hasValidAdminBearer(c)) return next();
     const now = Date.now();
     const windowMs = 3600 * 1000;
     const ip = extractIp(c);

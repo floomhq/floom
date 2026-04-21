@@ -286,6 +286,71 @@ for (let i = 0; i < 10; i++) {
 log('disabled flag lets 10 calls through cap=1', unblocked === 10);
 delete process.env.FLOOM_RATE_LIMIT_DISABLED;
 
+// 8b. admin-bearer bypass (2026-04-21): when FLOOM_AUTH_TOKEN is set AND
+// the caller presents matching bearer, skip rate-limit entirely. Used for
+// ops sweeps and monitoring.
+rl.__resetStoreForTests();
+process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '1';
+process.env.FLOOM_AUTH_TOKEN = 'admin-secret-token';
+const mw8b = rl.runRateLimitMiddleware(anonResolve);
+let adminOk = 0;
+for (let i = 0; i < 10; i++) {
+  const r = await mw8b(
+    makeCtx({
+      ip: '9.9.9.10',
+      headers: { authorization: 'Bearer admin-secret-token' },
+    }),
+    async () => undefined,
+  );
+  if (!r || r.status !== 429) adminOk++;
+}
+log('admin bearer bypasses rate-limit (10/10 pass cap=1)', adminOk === 10);
+
+// Wrong token: still rate-limited. cap=1 → first call OK, second 429s.
+rl.__resetStoreForTests();
+const wrongA = await mw8b(
+  makeCtx({
+    ip: '9.9.9.11',
+    headers: { authorization: 'Bearer wrong-token' },
+  }),
+  async () => undefined,
+);
+const wrongB = await mw8b(
+  makeCtx({
+    ip: '9.9.9.11',
+    headers: { authorization: 'Bearer wrong-token' },
+  }),
+  async () => undefined,
+);
+log(
+  'wrong bearer still rate-limited',
+  (!wrongA || wrongA.status !== 429) && wrongB?.status === 429,
+);
+
+// No token configured on the server: bypass disabled even if caller sends
+// any bearer. FLOOM_AUTH_TOKEN unset → admin bypass must not fire.
+delete process.env.FLOOM_AUTH_TOKEN;
+rl.__resetStoreForTests();
+const noTokenMw = rl.runRateLimitMiddleware(anonResolve);
+const noTokenA = await noTokenMw(
+  makeCtx({
+    ip: '9.9.9.12',
+    headers: { authorization: 'Bearer anything' },
+  }),
+  async () => undefined,
+);
+const noTokenB = await noTokenMw(
+  makeCtx({
+    ip: '9.9.9.12',
+    headers: { authorization: 'Bearer anything' },
+  }),
+  async () => undefined,
+);
+log(
+  'bypass disabled when FLOOM_AUTH_TOKEN unset (OSS mode)',
+  (!noTokenA || noTokenA.status !== 429) && noTokenB?.status === 429,
+);
+
 // 9. MCP ingest per-user
 rl.__resetStoreForTests();
 process.env.FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY = '2';
