@@ -40,7 +40,9 @@ import { StreamingTerminal } from './StreamingTerminal';
 import { ARRAY_INPUT_NAMES, InputField, maybePrependHttps } from './InputField';
 import { useSession } from '../../hooks/useSession';
 import * as api from '../../api/client';
+import { ApiError } from '../../api/client';
 import { buildPublicRunPath, getRunStartErrorMessage } from '../../lib/publicPermalinks';
+import { BYOKModal } from '../BYOKModal';
 
 export interface RunSurfaceResult {
   runId: string;
@@ -347,6 +349,19 @@ export function RunSurface({
     };
   });
 
+  // BYOK modal (launch 2026-04-21): when /api/run returns 429 byok_required
+  // for the 3 demo slugs (lead-scorer / competitor-analyzer / resume-screener)
+  // we pop this modal so the user can paste their own Gemini key and retry.
+  // See apps/server/src/lib/byok-gate.ts and api/client.ts::startRun.
+  const [byokOpen, setByokOpen] = useState(false);
+  const [byokPayload, setByokPayload] = useState<{
+    slug?: string;
+    usage?: number;
+    limit?: number;
+    get_key_url?: string;
+    message?: string;
+  } | null>(null);
+
   const handleInputChange = useCallback((name: string, value: unknown) => {
     setState((s) => {
       // Issue #256: editing a flagged field clears its inline error so
@@ -565,6 +580,21 @@ export function RunSurface({
       });
     } catch (err) {
       const e = err as Error;
+      // BYOK gate: 429 byok_required → show key modal instead of a
+      // dead-end error panel. onSaved will re-invoke handleRun, which
+      // attaches the saved key via startRun's X-User-Api-Key header.
+      if (
+        e instanceof ApiError &&
+        e.status === 429 &&
+        e.payload &&
+        typeof e.payload === 'object' &&
+        (e.payload as { error?: string }).error === 'byok_required'
+      ) {
+        setByokPayload(e.payload as typeof byokPayload);
+        setByokOpen(true);
+        setState((s) => ({ ...s, phase: s.hasRun ? 'done' : 'ready' }));
+        return;
+      }
       const serverFieldError = parseMissingRequiredInput(e, actionSpec);
       if (serverFieldError) {
         setState((s) => ({ ...s, inputErrors: serverFieldError }));
@@ -818,6 +848,17 @@ export function RunSurface({
       </div>
 
       <PastRunsDisclosure appSlug={app.slug} />
+
+      <BYOKModal
+        open={byokOpen}
+        payload={byokPayload}
+        onClose={() => setByokOpen(false)}
+        onSaved={() => {
+          setByokOpen(false);
+          // Retry: startRun picks up the saved key on the next call.
+          void handleRun();
+        }}
+      />
     </div>
   );
 }
