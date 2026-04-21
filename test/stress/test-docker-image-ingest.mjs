@@ -315,7 +315,200 @@ try {
   );
 
   // ===================================================================
-  // 7. Flag off short-circuits ingestAppFromDockerImage itself
+  // 7a. parseRegistry — extracts registry hostname from image refs
+  // ===================================================================
+  log(
+    'parseRegistry(ghcr.io/org/repo:tag) is ghcr.io',
+    ingestMod.parseRegistry('ghcr.io/openpaper-dev/ig-nano-scout:cli-v1') === 'ghcr.io',
+  );
+  log(
+    'parseRegistry(docker.io/library/alpine:latest) is docker.io',
+    ingestMod.parseRegistry('docker.io/library/alpine:latest') === 'docker.io',
+  );
+  log(
+    'parseRegistry(library/alpine) defaults to docker.io',
+    ingestMod.parseRegistry('library/alpine') === 'docker.io',
+  );
+  log(
+    'parseRegistry(alpine:3.19) defaults to docker.io',
+    ingestMod.parseRegistry('alpine:3.19') === 'docker.io',
+  );
+  log(
+    'parseRegistry(custom:5000/team/app:v1) keeps port',
+    ingestMod.parseRegistry('registry.example.com:5000/team/app:v1') ===
+      'registry.example.com:5000',
+  );
+  log(
+    'parseRegistry(localhost:5000/foo/bar) keeps port (colon heuristic)',
+    ingestMod.parseRegistry('localhost:5000/foo/bar') === 'localhost:5000',
+  );
+  log(
+    'parseRegistry(floomhq/ig-nano-scout) (no dot in prefix) defaults docker.io',
+    ingestMod.parseRegistry('floomhq/ig-nano-scout') === 'docker.io',
+  );
+
+  // ===================================================================
+  // 7b. loadRegistryAuth — reads FLOOM_REGISTRY_AUTH env var safely
+  // ===================================================================
+  const savedAuth = process.env.FLOOM_REGISTRY_AUTH;
+
+  delete process.env.FLOOM_REGISTRY_AUTH;
+  log(
+    'loadRegistryAuth returns undefined when env unset',
+    ingestMod.loadRegistryAuth('ghcr.io') === undefined,
+  );
+
+  process.env.FLOOM_REGISTRY_AUTH = '{not valid json';
+  log(
+    'loadRegistryAuth returns undefined on malformed JSON',
+    ingestMod.loadRegistryAuth('ghcr.io') === undefined,
+  );
+
+  process.env.FLOOM_REGISTRY_AUTH = JSON.stringify({
+    'ghcr.io': {
+      username: 'test-user',
+      serveraddress: 'ghcr.io',
+      password: 'test-pat-xyz',
+    },
+  });
+  const ghcrAuth = ingestMod.loadRegistryAuth('ghcr.io');
+  log(
+    'loadRegistryAuth returns entry for matching registry',
+    ghcrAuth?.username === 'test-user' && ghcrAuth?.password === 'test-pat-xyz',
+  );
+  log(
+    'loadRegistryAuth returns undefined for unmatched registry',
+    ingestMod.loadRegistryAuth('registry.gitlab.com') === undefined,
+  );
+
+  // Restore prior env.
+  if (savedAuth === undefined) {
+    delete process.env.FLOOM_REGISTRY_AUTH;
+  } else {
+    process.env.FLOOM_REGISTRY_AUTH = savedAuth;
+  }
+
+  // ===================================================================
+  // 7c. pullImage passes authconfig to docker.pull when registry has auth
+  // ===================================================================
+  process.env.FLOOM_REGISTRY_AUTH = JSON.stringify({
+    'ghcr.io': {
+      username: 'openpaper-dev',
+      serveraddress: 'ghcr.io',
+      password: 'ghcr-pat-secret',
+    },
+  });
+
+  let capturedPullArgs = null;
+  const passThroughStream = new (await import('node:stream')).Readable({
+    read() {
+      this.push(null);
+    },
+  });
+  const capturingDocker = {
+    pull: async (ref, opts) => {
+      capturedPullArgs = { ref, opts };
+      return passThroughStream;
+    },
+    modem: {
+      followProgress: (_stream, onFinished) => {
+        // Immediately resolve with no errors so pullImage returns cleanly.
+        onFinished(null, []);
+      },
+    },
+  };
+
+  // Drive pullImage indirectly via a full ingest call with skipPull=false.
+  // We bypass the outer flag check by setting it earlier.
+  process.env.FLOOM_ENABLE_DOCKER_PUBLISH = 'true';
+  await ingestMod.ingestAppFromDockerImage({
+    docker_image_ref: 'ghcr.io/openpaper-dev/ig-nano-scout:cli-v1',
+    slug: 'auth-pull-smoke',
+    name: 'auth pull smoke',
+    workspace_id: 'local',
+    author_user_id: 'local',
+    dockerClient: capturingDocker,
+    skipInspect: true,
+    ctx,
+  });
+  log(
+    'pullImage forwarded imageRef to docker.pull',
+    capturedPullArgs?.ref === 'ghcr.io/openpaper-dev/ig-nano-scout:cli-v1',
+  );
+  log(
+    'pullImage passed authconfig for ghcr.io',
+    capturedPullArgs?.opts?.authconfig?.username === 'openpaper-dev' &&
+      capturedPullArgs?.opts?.authconfig?.password === 'ghcr-pat-secret',
+  );
+
+  // Now with no auth entry for the registry — opts should be empty.
+  process.env.FLOOM_REGISTRY_AUTH = JSON.stringify({
+    'gitlab.example.com': { username: 'x', password: 'y', serveraddress: 'gitlab.example.com' },
+  });
+  capturedPullArgs = null;
+  await ingestMod.ingestAppFromDockerImage({
+    docker_image_ref: 'ghcr.io/openpaper-dev/ig-nano-scout:cli-v1',
+    slug: 'auth-pull-nomatch',
+    name: 'auth pull nomatch',
+    workspace_id: 'local',
+    author_user_id: 'local',
+    dockerClient: capturingDocker,
+    skipInspect: true,
+    ctx,
+  });
+  log(
+    'pullImage omits authconfig when no registry entry matches',
+    capturedPullArgs?.opts?.authconfig === undefined,
+  );
+
+  // Surface pull auth failure (401) as DockerImageIngestError, not a 500.
+  const failingDocker = {
+    pull: async () => passThroughStream,
+    modem: {
+      followProgress: (_stream, onFinished) => {
+        onFinished(null, [
+          {
+            errorDetail: {
+              message:
+                '(HTTP code 401) unexpected - Head "https://ghcr.io/v2/openpaper-dev/ig-nano-scout/manifests/cli-v1": unauthorized',
+            },
+          },
+        ]);
+      },
+    },
+  };
+  delete process.env.FLOOM_REGISTRY_AUTH;
+  let pullErr = null;
+  try {
+    await ingestMod.ingestAppFromDockerImage({
+      docker_image_ref: 'ghcr.io/openpaper-dev/ig-nano-scout:cli-v1',
+      slug: 'auth-pull-401',
+      name: 'auth pull 401',
+      workspace_id: 'local',
+      author_user_id: 'local',
+      dockerClient: failingDocker,
+      skipInspect: true,
+      ctx,
+    });
+  } catch (err) {
+    pullErr = err;
+  }
+  log(
+    'private-registry pull without auth surfaces pull_failed with 401 text',
+    Boolean(pullErr) &&
+      pullErr.code === 'pull_failed' &&
+      /401|unauthorized/i.test(pullErr.message),
+    pullErr ? `${pullErr.code}: ${pullErr.message}` : 'no error thrown',
+  );
+
+  if (savedAuth === undefined) {
+    delete process.env.FLOOM_REGISTRY_AUTH;
+  } else {
+    process.env.FLOOM_REGISTRY_AUTH = savedAuth;
+  }
+
+  // ===================================================================
+  // 8. Flag off short-circuits ingestAppFromDockerImage itself
   // ===================================================================
   delete process.env.FLOOM_ENABLE_DOCKER_PUBLISH;
   let flagOff = null;
