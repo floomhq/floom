@@ -696,6 +696,11 @@ if (webDist) {
     if (pathname === '/about' || pathname === '/about/') {
       return 'About Floom · Get that thing off localhost fast';
     }
+    // 2026-04-20 (pricing-page ship): /pricing graduated from redirect
+    // to a real page. Honest placeholder (free during beta, self-host
+    // free forever, paid plans TBD). SSR title so outbound-comparison
+    // crawlers see "Pricing", not the landing title.
+    if (pathname === '/pricing' || pathname === '/pricing/') return 'Pricing · Floom';
     // /onboarding is a redirect to /me?welcome=1 but the title the server
     // returns before the 302 hops still matters for preview bots.
     if (pathname === '/onboarding' || pathname === '/onboarding/') return 'Welcome to Floom · Floom';

@@ -30,6 +30,10 @@ const InstallPage = lazy(() => import('./pages/InstallPage').then(m => ({ defaul
 // who Floom is for, why headless, what it isn't, who's behind it. H1
 // "Get that thing off localhost fast." lives alongside the landing H1.
 const AboutPage = lazy(() => import('./pages/AboutPage').then(m => ({ default: m.AboutPage })));
+// 2026-04-20: /pricing graduated from redirect to an honest placeholder.
+// Free during beta, self-host free forever, paid plans TBD. Fixes the
+// commercial-visitor dead-end called out in the product audit (pd-12).
+const PricingPage = lazy(() => import('./pages/PricingPage').then(m => ({ default: m.PricingPage })));
 const BuildPage = lazy(() => import('./pages/BuildPage').then(m => ({ default: m.BuildPage })));
 const CreatorPage = lazy(() => import('./pages/CreatorPage').then(m => ({ default: m.CreatorPage })));
 const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ default: m.CreatorAppPage })));
@@ -250,7 +254,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             to /me?welcome=1 so the dashboard shows a one-shot welcome
             banner ("Welcome to Floom — try an app ↓"). */}
         <Route path="/onboarding" element={<Navigate to="/me?welcome=1" replace />} />
-        <Route path="/pricing" element={<Navigate to="/" replace />} />
+        <Route path="/pricing" element={<PricingPage />} />
         <Route path="/p/:slug/dashboard" element={<PSlugDashboardRedirect />} />
         {/* Legal pages. Floom, Inc. is a Delaware C-Corp. /legal is the
             canonical company-info route; /imprint is kept as a back-compat
