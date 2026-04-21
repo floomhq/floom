@@ -17,7 +17,9 @@ import { CustomRendererPanel } from '../components/CustomRendererPanel';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { RunSurface } from '../components/runner/RunSurface';
-import type { DetectedApp, AppDetail, OutputSpec } from '../lib/types';
+import { OutputPlaceholderStub } from '../components/runner/OutputPlaceholderStub';
+import { SecretsCallout } from '../components/runner/SecretsCallout';
+import type { DetectedApp, AppDetail } from '../lib/types';
 
 type Step = 'ramp' | 'review' | 'publishing' | 'done';
 
@@ -1159,6 +1161,98 @@ export function BuildPage({
               </ul>
             </details>
 
+            {/* Disclosure: preview. Collapsed by default. Shows the 
+                interactive RunSurface in non-runnable mode. */}
+            <details
+              data-testid="build-preview-disclosure"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 12,
+                padding: '0 4px',
+                marginBottom: 12,
+              }}
+            >
+              <summary
+                data-testid="build-preview-summary"
+                style={{
+                  cursor: 'pointer',
+                  listStyle: 'none',
+                  padding: '14px 18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 13,
+                  color: 'var(--ink)',
+                  fontWeight: 500,
+                  userSelect: 'none',
+                }}
+              >
+                <Chevron />
+                Preview run surface
+              </summary>
+              <div style={{ padding: '0 0 20px' }}>
+                <SecretsCallout secrets={detected.secrets_needed} />
+
+                <div style={{
+                  position: 'relative',
+                  opacity: 0.95,
+                  transform: 'scale(1)',
+                  transformOrigin: 'top center',
+                  margin: '20px auto 0',
+                  maxWidth: 960,
+                  border: '1px solid var(--line)',
+                  borderRadius: 12,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                  background: 'var(--card)',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{ 
+                    padding: '10px 16px', 
+                    background: 'var(--bg)', 
+                    borderBottom: '1px solid var(--line)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: 'var(--muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8
+                  }}>
+                    <div style={{ width: 8, height: 8, borderRadius: 99, background: '#10b981' }} />
+                    App Preview
+                  </div>
+                  <RunSurface
+                    app={{
+                      slug: slug || detected.slug,
+                      name: name || detected.name,
+                      description: description || detected.description,
+                      category: category || detected.category,
+                      icon: null,
+                      author: null,
+                      actions: detected.actions.map((a) => a.name),
+                      runtime: 'python',
+                      created_at: new Date().toISOString(),
+                      manifest: {
+                        name: name || detected.name,
+                        description: description || detected.description,
+                        actions: Object.fromEntries(detected.actions.map((a) => [a.name, a])),
+                        runtime: 'python',
+                        python_dependencies: [],
+                        node_dependencies: {},
+                        secrets_needed: detected.secrets_needed,
+                        manifest_version: '2.0',
+                      },
+                    } as AppDetail}
+                    preview={true}
+                  />
+                </div>
+
+                <OutputPlaceholderStub outputs={detected.actions[0]?.outputs || []} />
+              </div>
+            </details>
+
             {/* Disclosure: edit details. Collapsed by default. Contains
                 name, slug, description, category — the full metadata. */}
             <details
@@ -1371,50 +1465,7 @@ export function BuildPage({
                 Preview run surface
               </summary>
               <div style={{ padding: '0 0 20px' }}>
-                {detected.secrets_needed.length > 0 && (
-                  <div style={{
-                    margin: '20px 20px 0',
-                    padding: '16px',
-                    background: 'var(--card)',
-                    borderRadius: 10,
-                    border: '1px solid var(--line)',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <div style={{ 
-                        width: 24, height: 24, borderRadius: 6, background: 'var(--accent)', 
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white'
-                      }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                      </div>
-                      <h4 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>
-                        Detected secrets needed
-                      </h4>
-                    </div>
-                    <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
-                      When users run your app, they'll be prompted to provide these keys. You can also provide
-                      your own keys in the Studio after publishing.
-                    </p>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {detected.secrets_needed.map((s) => (
-                        <span
-                          key={s}
-                          style={{
-                            padding: '4px 10px',
-                            background: 'var(--bg)',
-                            border: '1px solid var(--line)',
-                            borderRadius: 6,
-                            fontSize: 12,
-                            fontFamily: 'JetBrains Mono, monospace',
-                            color: 'var(--ink)'
-                          }}
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <SecretsCallout secrets={detected.secrets_needed} />
 
                 <div style={{
                   position: 'relative',
@@ -2213,70 +2264,3 @@ function FileIcon() {
   );
 }
 
-function OutputPlaceholderStub({ outputs }: { outputs: OutputSpec[] }) {
-  if (outputs.length === 0) return null;
-  return (
-    <div style={{ margin: '24px 20px 0' }}>
-      <div style={{
-        fontSize: 11,
-        fontWeight: 700,
-        color: 'var(--muted)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        marginBottom: 12,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8
-      }}>
-        <div style={{ width: 12, height: 1.5, background: 'var(--line)' }} />
-        Result surface preview
-      </div>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-        gap: 12
-      }}>
-        {outputs.map((out) => (
-          <div
-            key={out.name}
-            style={{
-              padding: '14px',
-              background: 'var(--bg)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              opacity: 0.7,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-              {out.label || out.name}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{
-                fontSize: 10,
-                fontWeight: 700,
-                padding: '2px 6px',
-                background: 'var(--line)',
-                borderRadius: 4,
-                color: 'var(--muted)',
-                textTransform: 'uppercase'
-              }}>
-                {out.type}
-              </span>
-              {out.description && (
-                <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {out.description}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
-        Actual output will be rendered using the {outputs.length > 1 ? 'best components' : 'best component'} for these data types.
-      </div>
-    </div>
-  );
-}
