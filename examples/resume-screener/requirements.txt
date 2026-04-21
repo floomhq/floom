@@ -1,0 +1,2 @@
+pypdf>=4.2.0
+google-genai>=0.8.0

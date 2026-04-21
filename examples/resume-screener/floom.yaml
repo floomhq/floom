@@ -1,0 +1,49 @@
+name: Resume Screener
+description: Rank candidate CVs against a job description. Upload a zip of PDFs,
+  paste the JD, get a ranked shortlist with reasoning.
+actions:
+  screen:
+    label: Screen Resumes
+    inputs:
+      - name: cvs_zip
+        label: CV Bundle (zip of PDFs)
+        type: file
+        required: true
+        description: >-
+          A .zip file containing one or more candidate CVs as PDFs. The manifest
+          input shape does not support arrays-of-files yet (only `file`,
+          `textarea`, etc.), so we accept a single zip and unpack it in the
+          sandbox. Each top-level .pdf in the archive becomes one candidate.
+      - name: job_description
+        label: Job Description
+        type: textarea
+        required: true
+        placeholder: Paste the JD. The role, responsibilities, must-haves, nice-to-haves.
+        description: Free-text job description. The model ranks each CV against this.
+      - name: must_haves
+        label: Must-haves (one per line)
+        type: textarea
+        required: false
+        description: >-
+          Optional hard requirements, one per line. Any candidate missing one of
+          these is flagged `must_have_pass: false` regardless of score.
+    outputs:
+      - name: ranked
+        label: Ranked Candidates
+        type: json
+      - name: summary
+        label: Summary
+        type: text
+      - name: model
+        label: Model
+        type: text
+    description: Parse each PDF, score against the JD with Gemini 3, return a
+      ranked shortlist with reasoning, gaps, and must-have pass/fail.
+runtime: python
+python_dependencies:
+  - pypdf>=4.2.0
+  - google-genai>=0.8.0
+node_dependencies: {}
+secrets_needed:
+  - GEMINI_API_KEY
+manifest_version: "2.0"

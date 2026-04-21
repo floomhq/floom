@@ -1,0 +1,21 @@
+# Resume Screener -- Floom demo app.
+# Standalone image. For Floom's managed build path the floom runtime generates
+# its own Dockerfile via apps/server/src/services/docker.ts (buildPythonDockerfile).
+# This file lets you run the app directly with `docker run`.
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY main.py /app/main.py
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+ENTRYPOINT ["python", "/app/main.py"]
