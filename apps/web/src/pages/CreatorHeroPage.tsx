@@ -25,7 +25,6 @@ import { useSession } from '../hooks/useSession';
 import type { DetectedApp, HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
 import { normalizeGithubUrl } from '../lib/githubUrl';
-import { LAUNCH_APPS } from '../data/demoData';
 
 interface Stripe {
   slug: string;
