@@ -258,8 +258,9 @@ export function InlineDemo() {
             style={{
               margin: 0,
               padding: '16px 18px',
-              background: '#0b1220',
-              color: '#e2e8f0',
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
               fontSize: 13,
               lineHeight: 1.65,
@@ -270,7 +271,7 @@ export function InlineDemo() {
             }}
           >
             {prettyOutput ?? (
-              <span style={{ color: '#8b9ba9' }}>
+              <span style={{ color: 'var(--muted)' }}>
                 {'// Output appears here after Run.'}
               </span>
             )}

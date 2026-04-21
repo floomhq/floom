@@ -46,14 +46,17 @@ function renderHighlightedJson(raw: string): React.ReactNode {
       tokens.push(
         <span
           key={`s-${key++}`}
-          style={{ color: isKey ? '#7dd3fc' : '#6ee7b7' }}
+          style={{
+            color: isKey ? 'var(--accent)' : 'var(--ink)',
+            fontWeight: isKey ? 600 : 400,
+          }}
         >
           {str}
         </span>,
       );
     } else if (ch === '{' || ch === '}' || ch === '[' || ch === ']' || ch === ',' || ch === ':') {
       tokens.push(
-        <span key={`p-${key++}`} style={{ color: '#94a3b8' }}>
+        <span key={`p-${key++}`} style={{ color: 'var(--muted)' }}>
           {ch}
         </span>,
       );
@@ -74,7 +77,7 @@ function renderHighlightedJson(raw: string): React.ReactNode {
         i += 1;
       }
       tokens.push(
-        <span key={`w-${key++}`} style={{ color: '#e2e8f0' }}>
+        <span key={`w-${key++}`} style={{ color: 'var(--ink)' }}>
           {raw.slice(start, i)}
         </span>,
       );
@@ -152,8 +155,8 @@ export function McpSnippet() {
         <div
           style={{
             position: 'relative',
-            background: '#0b1220',
-            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
             borderRadius: 14,
             padding: '20px 22px',
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
@@ -174,9 +177,9 @@ export function McpSnippet() {
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              background: copied ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-              color: copied ? '#fff' : '#e2e8f0',
-              border: '1px solid ' + (copied ? 'var(--accent)' : 'rgba(255,255,255,0.1)'),
+              background: copied ? 'var(--accent)' : 'var(--bg)',
+              color: copied ? '#fff' : 'var(--ink)',
+              border: '1px solid ' + (copied ? 'var(--accent)' : 'var(--line)'),
               borderRadius: 8,
               padding: '7px 11px',
               fontSize: 12,
@@ -189,7 +192,7 @@ export function McpSnippet() {
             {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
             {copied ? 'Copied' : 'Copy'}
           </button>
-          <pre style={{ margin: 0, whiteSpace: 'pre', color: '#e2e8f0' }}>
+          <pre style={{ margin: 0, whiteSpace: 'pre', color: 'var(--ink)' }}>
             {renderHighlightedJson(SNIPPET)}
           </pre>
         </div>

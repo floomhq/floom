@@ -7,7 +7,7 @@
 // "coming soon" stubs (schedule needs job queue UI; the provider
 // connectors ship after v1 per project_floom_layers.md).
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
@@ -44,8 +44,6 @@ const GITHUB_REPOS: Record<string, string> = {
   'ig-nano-scout': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/ig-nano-scout',
 };
 
-type ComingSoonTarget = 'chatgpt' | 'notion' | 'terminal' | 'schedule';
-
 export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -62,7 +60,6 @@ export function AppPermalinkPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadFailure, setLoadFailure] = useState<PermalinkLoadOutcome | null>(null);
-  const [comingSoon, setComingSoon] = useState<ComingSoonTarget | null>(null);
   // Fix 4 (2026-04-19): tiny self-dismissing toast for the Share button.
   const [shareToast, setShareToast] = useState(false);
 
@@ -87,12 +84,12 @@ export function AppPermalinkPage() {
   // card with a CTA to open the app fresh instead.
   const [runNotFound, setRunNotFound] = useState(false);
 
-  // v6-align 2026-04-20: when a run is active (?run=<id> in URL or
-  // initialRun resolved), collapse the hero to a thin strip so the run
-  // output gets ~60% more vertical room. Federico flagged the hero as
-  // visual bloat during active runs. User can click "View details" to
-  // re-expand in place; the tab bar stays rendered below in both states.
-  const [heroExpanded, setHeroExpanded] = useState(false);
+  // 2026-04-21 restructure: the hero is now ALWAYS compact. The old
+  // full-fold hero pushed the Run form below the fold on 1279x712, which
+  // was Federico's complaint (screenshot 21.11.45). Meta (Category /
+  // License / Runtime / Created by) moved to the About tab's Details
+  // block so the Run form is the first interactive surface on /p/:slug.
+  // The previous `heroExpanded` toggle + dual-state rendering is gone.
 
   // First-run onboarding glue:
   //   - fire confetti + share card on the first successful run the user
@@ -202,6 +199,54 @@ export function AppPermalinkPage() {
       { replace: true },
     );
   }, [setSearchParams]);
+
+  // 2026-04-21 restructure: after the Run surface mounts (not a shared
+  // run, Run tab active), move keyboard focus to the first visible input
+  // so power users can type + submit without a click. Scoped to the
+  // RunSurface container so we don't steal focus from e.g. a toast. We
+  // scope the effect to the (slug, activeTab) pair so switching tabs
+  // away and back doesn't re-steal focus mid-scroll.
+  const runSurfaceRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (activeTab !== 'run') return;
+    if (runIdFromUrl || initialRun || initialRunLoading) return;
+    if (!app) return;
+    // Defer one frame so RunSurface and InputCard have mounted.
+    const raf = requestAnimationFrame(() => {
+      const root = runSurfaceRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLElement>(
+        'input.input-field, textarea.input-field, select.input-field',
+      );
+      if (target && typeof target.focus === 'function') {
+        // preventScroll so auto-focus doesn't trigger a jump on long pages.
+        target.focus({ preventScroll: true });
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [app, activeTab, runIdFromUrl, initialRun, initialRunLoading]);
+
+  // Single-line plain-text description for the compact header. Strips
+  // markdown syntax + collapses whitespace so a multi-line or markdown
+  // description still renders as one clean line above the tabs. The full
+  // rich description still renders (markdown-formatted) in the About tab.
+  const headerDescription = useMemo<string>(() => {
+    if (!app?.description) return '';
+    return app.description
+      // drop fenced code blocks entirely
+      .replace(/```[\s\S]*?```/g, ' ')
+      // inline code -> bare
+      .replace(/`([^`]+)`/g, '$1')
+      // links -> label only
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      // emphasis / strong markers
+      .replace(/(\*\*|__|\*|_)/g, '')
+      // headings / list markers at line start
+      .replace(/^\s*(#+|[-*+]|\d+\.)\s+/gm, '')
+      // collapse whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+  }, [app?.description]);
 
   // Compute sample input pre-fill for the first input of each action.
   // Only fires on first visit (no shared-run ?run=<id>) so that a direct
@@ -502,13 +547,7 @@ export function AppPermalinkPage() {
   // Use the live origin so each env (floom.dev, preview.floom.dev,
   // docker.floom.dev) exposes its own endpoints in the share/MCP panels.
   const mcpEndpoint = `${window.location.origin}/mcp/app/${app.slug}`;
-  const httpEndpoint = `${window.location.origin}/api/run`;
   const githubRepo = GITHUB_REPOS[app.slug];
-  const firstAction = Object.keys(app.manifest?.actions ?? {})[0] || app.actions?.[0] || 'run';
-  const curlExample = `curl -X POST ${httpEndpoint} \\
-  -H "Content-Type: application/json" \\
-  -d '{"app_slug":"${app.slug}","action":"${firstAction}","inputs":{}}'`;
-  const cliExample = `floom run ${app.slug}`;
 
   // Upgrade 4 (2026-04-19): compact TopBar when a run is active so the
   // output gets more vertical room. True whenever ?run=<id> is present
@@ -579,134 +618,59 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-        {/* v6-align 2026-04-20: collapsed hero strip when a run is active.
-            Shows a compact app-identity row with a "View details" toggle so
-            the full hero is one click away. The tab bar below still renders
-            and carries the primary nav during an active run. Federico
-            flagged the full hero as visual bloat during runs. */}
-        {topBarCompact && !heroExpanded && (
-          <section
-            data-testid="permalink-hero-collapsed"
+        {/* 2026-04-21 restructure: compact header. Single-row icon + name +
+            version/stability inline + (owner) Schedule + Share. One-line
+            truncated description below. This replaces the previous
+            full-fold hero (big icon, 40px h1, CTA row, meta-card sidebar)
+            which pushed the Run form below the fold on 1279x712. Full
+            description + Category / License / Runtime / Source / Created by
+            now live in the About tab's Details block. Test-ids preserved
+            where practical so analytics + smoke stay green. */}
+        <section
+          data-testid="permalink-hero"
+          style={{
+            marginBottom: 18,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div
             style={{
-              marginBottom: 20,
               display: 'flex',
               alignItems: 'center',
               gap: 14,
-              padding: '10px 14px',
-              border: '1px solid var(--line)',
-              borderRadius: 12,
-              background: 'var(--card)',
-              boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
+              flexWrap: 'wrap',
             }}
           >
             <div
               style={{
-                width: 36,
-                height: 36,
+                width: 40,
+                height: 40,
                 borderRadius: 10,
                 border: '1px solid var(--accent-border, var(--line))',
                 background: 'var(--accent-soft, var(--bg))',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                color: 'var(--accent)',
                 flexShrink: 0,
               }}
             >
-              <AppIcon slug={app.slug} size={20} />
+              <AppIcon slug={app.slug} size={22} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              {/* a11y 2026-04-20: collapsed hero dropped the <h1>, so
-                  /p/:slug?run=<id> shipped without a page heading. Promote
-                  the app-name element to <h1> with compact visual styling
-                  so screen readers still announce a clear page title. */}
               <h1
                 style={{
-                  fontSize: 15,
+                  fontSize: 22,
                   fontWeight: 700,
                   color: 'var(--ink)',
+                  margin: 0,
+                  lineHeight: 1.2,
+                  letterSpacing: '-0.01em',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  margin: 0,
-                  lineHeight: 1.2,
-                }}
-              >
-                {app.name}
-              </h1>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--muted)',
-                  fontFamily: 'JetBrains Mono, monospace',
-                }}
-              >
-                v{app.version ?? '0.1.0'}
-                {heroHandle && ` · by @${heroHandle}`}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setHeroExpanded(true)}
-              data-testid="permalink-hero-expand"
-              style={{
-                padding: '7px 12px',
-                border: '1px solid var(--line)',
-                background: 'var(--card)',
-                color: 'var(--muted)',
-                borderRadius: 8,
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              View details <ChevronDown />
-            </button>
-          </section>
-        )}
-
-        {/* Hero — full form. Hidden in collapsed state; shown by default
-            otherwise, or when the user has clicked "View details". */}
-        {(!topBarCompact || heroExpanded) && (
-        <section data-testid="permalink-hero" style={{ marginBottom: 40 }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '96px minmax(0, 1fr) 280px',
-              gap: 28,
-              alignItems: 'start',
-            }}
-            className="permalink-hero-grid"
-          >
-            <div
-              style={{
-                width: 96,
-                height: 96,
-                borderRadius: 22,
-                border: '1px solid var(--accent-border, var(--line))',
-                background: 'var(--accent-soft, var(--bg))',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--accent)',
-              }}
-            >
-              <AppIcon slug={app.slug} size={56} />
-            </div>
-
-            <div>
-              <h1
-                style={{
-                  fontSize: 40,
-                  fontWeight: 700,
-                  margin: '0 0 6px',
-                  color: 'var(--ink)',
-                  letterSpacing: '-0.02em',
-                  lineHeight: 1.1,
                 }}
               >
                 {app.name}
@@ -714,16 +678,19 @@ export function AppPermalinkPage() {
               <div
                 data-testid="hero-version-meta"
                 style={{
-                  fontSize: 13,
+                  fontSize: 12,
                   color: 'var(--muted)',
-                  marginBottom: 12,
+                  marginTop: 2,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
                   flexWrap: 'wrap',
+                  fontFamily: 'JetBrains Mono, monospace',
                 }}
               >
                 <span data-testid="hero-version">v{app.version ?? '0.1.0'}</span>
+                <span aria-hidden="true">·</span>
+                <span data-testid="hero-version-status">{app.version_status ?? 'stable'}</span>
                 {heroHandle && (
                   <>
                     <span aria-hidden="true">·</span>
@@ -736,314 +703,91 @@ export function AppPermalinkPage() {
                     <span data-testid="hero-published">{publishedRelative}</span>
                   </>
                 )}
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span data-testid="hero-version-status">{app.version_status ?? 'stable'}</span>
-                </>
-              </div>
-
-              {/* Rating row. CLS fix (2026-04-18): reserve min-height 30px
-                  so the CTA buttons below don't jump when getAppReviews()
-                  resolves. Apps with 0 ratings get an empty reserved slot;
-                  when summary.count > 0 the stars + text fill the same box. */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  flexWrap: 'wrap',
-                  marginBottom: 14,
-                  minHeight: 30,
-                }}
-              >
                 {summary && summary.count > 0 && (
                   <>
-                    <StarsRow value={summary.avg} size={16} />
-                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-                      {summary.avg.toFixed(1)} · {summary.count} rating
-                      {summary.count === 1 ? '' : 's'}
+                    <span aria-hidden="true">·</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <StarsRow value={summary.avg} size={12} />
+                      {summary.avg.toFixed(1)} ({summary.count})
                     </span>
                   </>
                 )}
               </div>
-
-              {/* Upgrade 3 (2026-04-19): markdown-enabled description. */}
-              <DescriptionMarkdown
-                description={app.description}
-                testId="hero-description"
-              />
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <a
-                  href="#run"
-                  data-testid="cta-run"
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexShrink: 0,
+              }}
+            >
+              {app.author && sessionUserId && app.author === sessionUserId && (
+                <Link
+                  to={`/studio/${app.slug}/triggers`}
+                  data-testid="cta-schedule"
                   style={{
-                    /* v6-align 2026-04-20: inset highlight + soft outer
-                       shadow per v6 .btn-accent (wireframes-floom/v6.html
-                       L168-174). Separates the primary Run CTA from the
-                       neutral "Add to your tools" and ghost "Share". */
-                    padding: '11px 22px',
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    border: '1px solid var(--accent)',
-                    borderRadius: 10,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                    boxShadow:
-                      '0 1px 2px rgba(5, 150, 105, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
-                    transition: 'background 0.15s ease, box-shadow 0.15s ease',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  Run {app.name}
-                </a>
-                {/* Fix 4 (2026-04-19): wire the 2 previously-dead CTAs.
-                    "Add to your tools" switches to the Install tab (where
-                    the MCP connector card lives). Share copies the URL
-                    and pops a toast instead of a silent write.
-                    2026-04-20 (P2 #148): Schedule was removed entirely.
-                    Don't dangle dead affordances — it used to open a
-                    ComingSoonModal which users read as broken UI. It'll
-                    come back when the job-queue UI lands (P2 v1.1). */}
-                <button
-                  type="button"
-                  data-testid="cta-add-to-tools"
-                  onClick={() => {
-                    setActiveTab('install');
-                    setSearchParams(
-                      (prev) => {
-                        const next = new URLSearchParams(prev);
-                        next.set('tab', 'install');
-                        return next;
-                      },
-                      { replace: true },
-                    );
-                    // Defer the anchor scroll until the tab has swapped content.
-                    requestAnimationFrame(() => {
-                      const el = document.getElementById('connectors');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    });
-                  }}
-                  style={{
-                    padding: '11px 18px',
+                    padding: '7px 12px',
                     border: '1px solid var(--line)',
-                    borderRadius: 10,
-                    fontSize: 14,
-                    fontWeight: 600,
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 500,
                     color: 'var(--ink)',
                     background: 'var(--card)',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
+                    textDecoration: 'none',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 6,
+                    gap: 4,
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  Add to your tools <ChevronDown />
-                </button>
-                {/* Triggers (2026-04-20): re-add the "Schedule" button for
-                    creators. Previously removed in #148 because the feature
-                    didn't exist yet; now it does. Links to the Studio
-                    Triggers tab pre-scoped to this app. Only visible to the
-                    app's author to avoid promising scheduling to runners
-                    who don't own the app. */}
-                {app.author && sessionUserId && app.author === sessionUserId && (
-                  <Link
-                    to={`/studio/${app.slug}/triggers`}
-                    data-testid="cta-schedule"
-                    style={{
-                      padding: '11px 18px',
-                      border: '1px solid var(--line)',
-                      borderRadius: 10,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: 'var(--ink)',
-                      background: 'var(--card)',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      textDecoration: 'none',
-                    }}
-                  >
-                    Schedule
-                  </Link>
-                )}
-                <button
-                  type="button"
-                  data-testid="cta-share"
-                  onClick={() => {
-                    // P0 2026-04-20: runs are owner-only by default, so
-                    // copying the /r/:id URL without first flipping
-                    // `runs.is_public` on the server would hand out a
-                    // link that returns 404 to anyone but the owner.
-                    // When a run is in context we opt it in via
-                    // shareRun(); when no run is in context the button
-                    // shares the bare app page which needs no flip.
-                    const copyUrl = (url: string) => {
-                      void navigator.clipboard.writeText(url).then(() => {
-                        setShareToast(true);
-                        window.setTimeout(() => setShareToast(false), 1800);
-                      });
-                    };
-                    try {
-                      const currentUrl = new URL(window.location.href);
-                      const currentRunId = currentUrl.searchParams.get('run');
-                      if (!currentRunId) {
-                        copyUrl(currentUrl.toString());
-                        return;
-                      }
-                      void shareRun(currentRunId)
-                        .then(() => {
-                          copyUrl(
-                            `${window.location.origin}${buildPublicRunPath(currentRunId)}`,
-                          );
-                        })
-                        .catch(() => {
-                          // If the share flip fails (non-owner, network
-                          // blip) fall back to copying the app-page URL
-                          // without the run id — better a slightly less
-                          // helpful link than a link that 404s for the
-                          // recipient.
-                          currentUrl.searchParams.delete('run');
-                          copyUrl(currentUrl.toString());
-                        });
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                  style={{
-                    padding: '11px 14px',
-                    border: '1px solid transparent',
-                    borderRadius: 10,
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: 'var(--muted)',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
-                  <ShareIcon /> Share
-                </button>
-              </div>
-            </div>
-
-            {/* Meta card. CLS fix (2026-04-18): min-height so the hero
-                row height is stable whether or not the optional rows
-                (Rating, Runtime, Source) render. */}
-            <aside
-              style={{
-                background: 'var(--card)',
-                border: '1px solid var(--line)',
-                borderRadius: 14,
-                padding: 20,
-                fontSize: 13,
-                color: 'var(--muted)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-                minHeight: 260,
-              }}
-              data-testid="meta-card"
-            >
-              {summary && summary.count > 0 && (
-                <MetaRow label="Rating" value={`${summary.avg.toFixed(1)} / 5`} />
+                  Schedule
+                </Link>
               )}
-              {createdByLabel && <MetaRow label="Created by" value={createdByLabel} />}
-              {app.category && <MetaRow label="Category" value={app.category} />}
-              {app.runtime && (
-                <MetaRow
-                  label="Runtime"
-                  value={
-                    <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink)' }}>
-                      {app.runtime}
-                    </span>
-                  }
-                />
-              )}
-              <div style={{ height: 1, background: 'var(--line)', margin: '6px 0' }} />
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.07em',
-                }}
-              >
-                For developers
-              </div>
-              <MetaRow
-                label="License"
-                value={
-                  githubRepo ? (
-                    <a
-                      href={`${githubRepo}/blob/main/LICENSE`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        color: 'var(--accent)',
-                        textDecoration: 'none',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {app.manifest?.license?.trim() || 'View LICENSE'}
-                    </a>
-                  ) : app.manifest?.license?.trim() ? (
-                    app.manifest.license.trim()
-                  ) : (
-                    'See project documentation'
-                  )
-                }
-              />
-              {githubRepo && (
-                <MetaRow
-                  label="Source"
-                  value={
-                    <a
-                      href={githubRepo}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        color: 'var(--accent)',
-                        textDecoration: 'none',
-                        fontWeight: 500,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
-                      <GithubIcon /> GitHub
-                    </a>
-                  }
-                />
-              )}
-            </aside>
-          </div>
-          {/* v6-align 2026-04-20: collapse affordance when the hero is
-              expanded during a run. Puts the control in the same visual
-              lane the user just clicked to expand from. */}
-          {topBarCompact && heroExpanded && (
-            <div style={{ marginTop: 18, textAlign: 'right' }}>
               <button
                 type="button"
-                onClick={() => setHeroExpanded(false)}
-                data-testid="permalink-hero-collapse"
+                data-testid="cta-share"
+                aria-label="Share link"
+                onClick={() => {
+                  // Same share logic as before: if ?run=<id> is in the URL,
+                  // opt the run public via shareRun() and copy the /r/:id
+                  // permalink; otherwise copy the bare app page URL. Keeps
+                  // anon-viewer share-link flow intact.
+                  const copyUrl = (url: string) => {
+                    void navigator.clipboard.writeText(url).then(() => {
+                      setShareToast(true);
+                      window.setTimeout(() => setShareToast(false), 1800);
+                    });
+                  };
+                  try {
+                    const currentUrl = new URL(window.location.href);
+                    const currentRunId = currentUrl.searchParams.get('run');
+                    if (!currentRunId) {
+                      copyUrl(currentUrl.toString());
+                      return;
+                    }
+                    void shareRun(currentRunId)
+                      .then(() => {
+                        copyUrl(
+                          `${window.location.origin}${buildPublicRunPath(currentRunId)}`,
+                        );
+                      })
+                      .catch(() => {
+                        currentUrl.searchParams.delete('run');
+                        copyUrl(currentUrl.toString());
+                      });
+                  } catch {
+                    /* ignore */
+                  }
+                }}
                 style={{
-                  padding: '7px 12px',
+                  padding: '7px 10px',
                   border: '1px solid var(--line)',
-                  background: 'var(--card)',
-                  color: 'var(--muted)',
                   borderRadius: 8,
-                  fontSize: 12,
-                  fontWeight: 600,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: 'var(--muted)',
+                  background: 'var(--card)',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
                   display: 'inline-flex',
@@ -1051,12 +795,29 @@ export function AppPermalinkPage() {
                   gap: 4,
                 }}
               >
-                Hide details
+                <ShareIcon /> Share
               </button>
             </div>
+          </div>
+          {headerDescription && (
+            <p
+              data-testid="hero-description"
+              title={headerDescription}
+              style={{
+                fontSize: 13,
+                color: 'var(--muted)',
+                margin: 0,
+                lineHeight: 1.5,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '100%',
+              }}
+            >
+              {headerDescription}
+            </p>
           )}
         </section>
-        )}
 
         {/* v16 tab bar: Run is default, everything else is opt-in. This
             replaces the previous "scroll past marketing to reach the run
@@ -1125,6 +886,7 @@ export function AppPermalinkPage() {
         {activeTab === 'run' && (
           <section
             id="run"
+            ref={runSurfaceRef}
             data-testid="tab-content-run-primary"
             data-surface="run"
             className="run-surface"
@@ -1293,13 +1055,10 @@ export function AppPermalinkPage() {
           </section>
         )}
 
-        {/* About + reviews. Round 2 polish: description already prints in
-            the hero; duplicating it here created 2-3 repetitions on the
-            same page (finding from UI audit v2). For short descriptions
-            (< 200 chars) we skip the heading + paragraph entirely so the
-            About tab becomes a pure ratings + reviews surface. Long
-            descriptions (user-authored copy, > 200 chars) still render
-            here as a secondary read. */}
+        {/* About + reviews. 2026-04-21 restructure: the hero now shows a
+            one-line truncated description, so the full markdown
+            description always renders here (no more 200-char gate). This
+            is the canonical prose surface for the app. */}
         <section
           style={{
             background: 'var(--card)',
@@ -1309,7 +1068,7 @@ export function AppPermalinkPage() {
             marginBottom: 24,
           }}
         >
-          {app.description && app.description.length >= 200 && (
+          {app.description && (
             <>
               <h2
                 style={{
@@ -1340,6 +1099,105 @@ export function AppPermalinkPage() {
           {summary && summary.count > 0 && <RatingsWidget summary={summary} />}
 
           <AppReviews slug={app.slug} />
+        </section>
+
+        {/* Details block. 2026-04-21 restructure: former hero meta-card
+            (Created by / Category / Runtime / License / Source) moved
+            here so the primary fold of /p/:slug stays on the Run form
+            + output. Rendered as a two-column key-value grid inside the
+            About tab — secondary info, not competing with the Run CTA. */}
+        <section
+          data-testid="details-card"
+          style={{
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
+            borderRadius: 14,
+            padding: '24px 28px',
+            marginBottom: 24,
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              margin: '0 0 14px',
+              color: 'var(--ink)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.07em',
+            }}
+          >
+            Details
+          </h2>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '10px 28px',
+              fontSize: 13,
+              color: 'var(--muted)',
+            }}
+          >
+            {createdByLabel && <MetaRow label="Created by" value={createdByLabel} />}
+            {app.category && <MetaRow label="Category" value={app.category} />}
+            {app.runtime && (
+              <MetaRow
+                label="Runtime"
+                value={
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink)' }}>
+                    {app.runtime}
+                  </span>
+                }
+              />
+            )}
+            {summary && summary.count > 0 && (
+              <MetaRow label="Rating" value={`${summary.avg.toFixed(1)} / 5`} />
+            )}
+            <MetaRow
+              label="License"
+              value={
+                githubRepo ? (
+                  <a
+                    href={`${githubRepo}/blob/main/LICENSE`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      color: 'var(--accent)',
+                      textDecoration: 'none',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {app.manifest?.license?.trim() || 'View LICENSE'}
+                  </a>
+                ) : app.manifest?.license?.trim() ? (
+                  app.manifest.license.trim()
+                ) : (
+                  'See project documentation'
+                )
+              }
+            />
+            {githubRepo && (
+              <MetaRow
+                label="Source"
+                value={
+                  <a
+                    href={githubRepo}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      color: 'var(--accent)',
+                      textDecoration: 'none',
+                      fontWeight: 500,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <GithubIcon /> GitHub
+                  </a>
+                }
+              />
+            )}
+          </div>
         </section>
         </>
         )}
@@ -1444,16 +1302,6 @@ export function AppPermalinkPage() {
       <Footer />
       <FeedbackButton />
 
-      {comingSoon && (
-        <ComingSoonModal
-          target={comingSoon}
-          mcpUrl={mcpEndpoint}
-          curlExample={curlExample}
-          cliExample={cliExample}
-          onClose={() => setComingSoon(null)}
-        />
-      )}
-
       {shareToast && (
         <div
           role="status"
@@ -1524,14 +1372,6 @@ function ArrowRight() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-function ChevronDown() {
-  return (
-    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -1764,203 +1604,6 @@ function ConnectorCard({
   return (
     <div data-testid={testId} style={commonStyle}>
       {inner}
-    </div>
-  );
-}
-
-function ComingSoonModal({
-  target,
-  mcpUrl,
-  curlExample,
-  cliExample,
-  onClose,
-}: {
-  target: ComingSoonTarget;
-  mcpUrl: string;
-  curlExample: string;
-  cliExample: string;
-  onClose: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const config = (() => {
-    switch (target) {
-      case 'chatgpt':
-        return {
-          title: 'Add to ChatGPT',
-          copy:
-            'One-click install is coming soon. For now, copy the MCP URL and paste it into your ChatGPT custom GPT under "Actions".',
-          value: mcpUrl,
-          valueLabel: 'MCP URL',
-        };
-      case 'notion':
-        return {
-          title: 'Add to Notion',
-          copy:
-            'One-click install is coming soon. For now, copy the MCP URL and paste it into the Floom connector block on your Notion page.',
-          value: mcpUrl,
-          valueLabel: 'MCP URL',
-        };
-      case 'terminal':
-        return {
-          title: 'Add to Terminal',
-          copy: 'The floom CLI ships alongside Cloud tier. For now, run from any shell with curl.',
-          value: `${cliExample}\n\n# or HTTP:\n${curlExample}`,
-          valueLabel: 'Command',
-        };
-      case 'schedule':
-      default:
-        return {
-          title: 'Scheduling is coming soon',
-          copy: 'Scheduled runs ship with the job queue release.',
-          value: mcpUrl,
-          valueLabel: 'MCP URL',
-        };
-    }
-  })();
-
-  const copy = () => {
-    try {
-      void navigator.clipboard.writeText(config.value).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      });
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="coming-soon-title"
-      data-testid={`coming-soon-modal-${target}`}
-      onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(14, 14, 12, 0.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-        zIndex: 1000,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--card)',
-          border: '1px solid var(--line)',
-          borderRadius: 14,
-          padding: '28px 28px 24px',
-          maxWidth: 500,
-          width: '100%',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-        }}
-      >
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 10px',
-            borderRadius: 999,
-            background: 'var(--accent-soft)',
-            color: 'var(--accent)',
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            marginBottom: 14,
-          }}
-        >
-          Coming soon
-        </div>
-        <h2
-          id="coming-soon-title"
-          style={{ fontSize: 20, fontWeight: 700, margin: '0 0 10px', color: 'var(--ink)' }}
-        >
-          {config.title}
-        </h2>
-        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 20px', lineHeight: 1.55 }}>
-          {config.copy}
-        </p>
-        <div
-          style={{
-            background: 'var(--bg)',
-            border: '1px solid var(--line)',
-            borderRadius: 8,
-            padding: '10px 12px',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 10,
-            marginBottom: 18,
-          }}
-        >
-          <pre
-            style={{
-              flex: 1,
-              margin: 0,
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: 12,
-              color: 'var(--ink)',
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              maxHeight: 140,
-            }}
-          >
-            {config.value}
-          </pre>
-          <button
-            type="button"
-            onClick={copy}
-            data-testid="coming-soon-copy"
-            style={{
-              padding: '6px 12px',
-              background: 'var(--accent)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              flexShrink: 0,
-            }}
-          >
-            {copied ? 'Copied' : `Copy ${config.valueLabel}`}
-          </button>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: '8px 18px',
-              background: 'transparent',
-              color: 'var(--muted)',
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
-          >
-            Close
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
