@@ -344,8 +344,8 @@ export function LoginPage() {
 
           {mode === 'signin' && (
             <div style={{ textAlign: 'right', margin: '-2px 0 12px' }}>
-              <a
-                href="mailto:team@floom.dev?subject=Password%20reset"
+              <Link
+                to="/forgot-password"
                 data-testid="forgot-password-link"
                 style={{
                   fontSize: 12,
@@ -354,7 +354,7 @@ export function LoginPage() {
                 }}
               >
                 Forgot password?
-              </a>
+              </Link>
             </div>
           )}
 
