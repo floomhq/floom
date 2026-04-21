@@ -90,8 +90,9 @@ const anonResolve = async () => anonCtx;
 
 console.log('Rate limit library');
 
-// 1. defaults (bumped 2026-04-19, issue #128: 20/200/50 → 60/300/500)
-log('anon default is 60/hr', rl.defaultAnonPerHour() === 60);
+// 1. defaults (bumped 2026-04-21 pre-launch: anon 60 → 150 for shared-NAT
+// and launch traffic; user/per-app unchanged from 2026-04-19 bump).
+log('anon default is 150/hr', rl.defaultAnonPerHour() === 150);
 log('user default is 300/hr', rl.defaultUserPerHour() === 300);
 log('per-app default is 500/hr', rl.defaultPerAppPerHour() === 500);
 log('mcp ingest default is 10/day', rl.defaultMcpIngestPerDay() === 10);
@@ -221,6 +222,17 @@ const body5 = await second.json();
 log('error body has rate_limit_exceeded', body5.error === 'rate_limit_exceeded');
 log('scope is ip for anon', body5.scope === 'ip');
 log('retry_after_seconds > 0', body5.retry_after_seconds > 0);
+// Clamp: the internal sliding window is 3600s, so retry-after on a cold
+// bucket with limit=1 can be up to ~3600. We cap the public-facing value at
+// 300 so the UX reads "come back in 5 min" not "46 min".
+log(
+  'retry_after_seconds clamped at 300',
+  body5.retry_after_seconds <= 300,
+);
+log(
+  'Retry-After header clamped at 300',
+  Number(second.headers.get('retry-after')) <= 300,
+);
 
 // 6. authed user bucket
 rl.__resetStoreForTests();
@@ -273,6 +285,71 @@ for (let i = 0; i < 10; i++) {
 }
 log('disabled flag lets 10 calls through cap=1', unblocked === 10);
 delete process.env.FLOOM_RATE_LIMIT_DISABLED;
+
+// 8b. admin-bearer bypass (2026-04-21): when FLOOM_AUTH_TOKEN is set AND
+// the caller presents matching bearer, skip rate-limit entirely. Used for
+// ops sweeps and monitoring.
+rl.__resetStoreForTests();
+process.env.FLOOM_RATE_LIMIT_IP_PER_HOUR = '1';
+process.env.FLOOM_AUTH_TOKEN = 'admin-secret-token';
+const mw8b = rl.runRateLimitMiddleware(anonResolve);
+let adminOk = 0;
+for (let i = 0; i < 10; i++) {
+  const r = await mw8b(
+    makeCtx({
+      ip: '9.9.9.10',
+      headers: { authorization: 'Bearer admin-secret-token' },
+    }),
+    async () => undefined,
+  );
+  if (!r || r.status !== 429) adminOk++;
+}
+log('admin bearer bypasses rate-limit (10/10 pass cap=1)', adminOk === 10);
+
+// Wrong token: still rate-limited. cap=1 → first call OK, second 429s.
+rl.__resetStoreForTests();
+const wrongA = await mw8b(
+  makeCtx({
+    ip: '9.9.9.11',
+    headers: { authorization: 'Bearer wrong-token' },
+  }),
+  async () => undefined,
+);
+const wrongB = await mw8b(
+  makeCtx({
+    ip: '9.9.9.11',
+    headers: { authorization: 'Bearer wrong-token' },
+  }),
+  async () => undefined,
+);
+log(
+  'wrong bearer still rate-limited',
+  (!wrongA || wrongA.status !== 429) && wrongB?.status === 429,
+);
+
+// No token configured on the server: bypass disabled even if caller sends
+// any bearer. FLOOM_AUTH_TOKEN unset → admin bypass must not fire.
+delete process.env.FLOOM_AUTH_TOKEN;
+rl.__resetStoreForTests();
+const noTokenMw = rl.runRateLimitMiddleware(anonResolve);
+const noTokenA = await noTokenMw(
+  makeCtx({
+    ip: '9.9.9.12',
+    headers: { authorization: 'Bearer anything' },
+  }),
+  async () => undefined,
+);
+const noTokenB = await noTokenMw(
+  makeCtx({
+    ip: '9.9.9.12',
+    headers: { authorization: 'Bearer anything' },
+  }),
+  async () => undefined,
+);
+log(
+  'bypass disabled when FLOOM_AUTH_TOKEN unset (OSS mode)',
+  (!noTokenA || noTokenA.status !== 429) && noTokenB?.status === 429,
+);
 
 // 9. MCP ingest per-user
 rl.__resetStoreForTests();
