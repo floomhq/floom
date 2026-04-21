@@ -257,8 +257,8 @@ function ProxiedVsHosted() {
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
-              background: 'var(--terminal-bg, #0e0e0c)',
-              color: 'var(--terminal-ink, #d4d4c8)',
+              background: 'var(--bg)',
+              color: 'var(--ink)',
               fontFamily: 'JetBrains Mono, monospace',
               fontSize: 11.5,
               padding: '16px',
@@ -274,10 +274,10 @@ function ProxiedVsHosted() {
               style={{
                 position: 'absolute', top: 8, right: 8,
                 fontSize: 10, padding: '2px 8px',
-                background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
                 borderRadius: 4,
-                color: copiedLeft ? '#7bffc0' : 'rgba(255,255,255,0.5)',
+                color: copiedLeft ? 'var(--accent)' : 'var(--muted)',
                 cursor: 'pointer', fontFamily: 'inherit', transition: 'color 0.15s',
               }}
             >
@@ -302,8 +302,8 @@ function ProxiedVsHosted() {
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
-              background: 'var(--terminal-bg, #0e0e0c)',
-              color: 'var(--terminal-ink, #d4d4c8)',
+              background: 'var(--bg)',
+              color: 'var(--ink)',
               fontFamily: 'JetBrains Mono, monospace',
               fontSize: 11.5,
               padding: '16px',
@@ -319,10 +319,10 @@ function ProxiedVsHosted() {
               style={{
                 position: 'absolute', top: 8, right: 8,
                 fontSize: 10, padding: '2px 8px',
-                background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
                 borderRadius: 4,
-                color: copiedRight ? '#7bffc0' : 'rgba(255,255,255,0.5)',
+                color: copiedRight ? 'var(--accent)' : 'var(--muted)',
                 cursor: 'pointer', fontFamily: 'inherit', transition: 'color 0.15s',
               }}
             >
