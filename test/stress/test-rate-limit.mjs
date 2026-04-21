@@ -90,8 +90,9 @@ const anonResolve = async () => anonCtx;
 
 console.log('Rate limit library');
 
-// 1. defaults (bumped 2026-04-19, issue #128: 20/200/50 → 60/300/500)
-log('anon default is 60/hr', rl.defaultAnonPerHour() === 60);
+// 1. defaults (bumped 2026-04-21 pre-launch: anon 60 → 150 for shared-NAT
+// and launch traffic; user/per-app unchanged from 2026-04-19 bump).
+log('anon default is 150/hr', rl.defaultAnonPerHour() === 150);
 log('user default is 300/hr', rl.defaultUserPerHour() === 300);
 log('per-app default is 500/hr', rl.defaultPerAppPerHour() === 500);
 log('mcp ingest default is 10/day', rl.defaultMcpIngestPerDay() === 10);
@@ -221,6 +222,17 @@ const body5 = await second.json();
 log('error body has rate_limit_exceeded', body5.error === 'rate_limit_exceeded');
 log('scope is ip for anon', body5.scope === 'ip');
 log('retry_after_seconds > 0', body5.retry_after_seconds > 0);
+// Clamp: the internal sliding window is 3600s, so retry-after on a cold
+// bucket with limit=1 can be up to ~3600. We cap the public-facing value at
+// 300 so the UX reads "come back in 5 min" not "46 min".
+log(
+  'retry_after_seconds clamped at 300',
+  body5.retry_after_seconds <= 300,
+);
+log(
+  'Retry-After header clamped at 300',
+  Number(second.headers.get('retry-after')) <= 300,
+);
 
 // 6. authed user bucket
 rl.__resetStoreForTests();
