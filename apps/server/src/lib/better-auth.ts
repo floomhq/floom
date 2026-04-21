@@ -95,17 +95,33 @@ function buildAuthOptions(): any {
     process.env.PUBLIC_URL ||
     `http://localhost:${process.env.PORT || 3051}`;
 
-  const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const socialProviders: Record<string, any> = {};
   if (process.env.GITHUB_OAUTH_CLIENT_ID && process.env.GITHUB_OAUTH_CLIENT_SECRET) {
     socialProviders.github = {
       clientId: process.env.GITHUB_OAUTH_CLIENT_ID,
       clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
+      // Update the user's name and avatar from GitHub on EVERY login,
+      // not just on first sign-up. This is the official Better Auth flag
+      // that triggers internalAdapter.updateUser() inside handleOAuthUserInfo.
+      overrideUserInfoOnSignIn: true,
+      mapProfile: async (profile: any) => ({
+        name: profile.name || profile.login,
+        email: profile.email,
+        image: profile.avatar_url || profile.image || null,
+      }),
     };
   }
   if (process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
     socialProviders.google = {
       clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
       clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      overrideUserInfoOnSignIn: true,
+      mapProfile: async (profile: any) => ({
+        name: profile.name || profile.displayName,
+        email: profile.email,
+        image: profile.picture || profile.image || null,
+      }),
     };
   }
 
@@ -192,14 +208,22 @@ function buildAuthOptions(): any {
       cookiePrefix: 'floom',
       defaultCookieAttributes: {
         sameSite: 'lax',
-        // Use Secure only on HTTPS. Hard-coding `true` in dev causes
-        // browsers that don't have the localhost exemption (non-Chrome,
-        // older Chromium, automated test runners) to silently drop the
-        // state/code-verifier cookie, producing `state_mismatch`.
-        secure:
-          process.env.NODE_ENV === 'production' ||
-          (process.env.PUBLIC_URL || '').startsWith('https://') ||
-          (process.env.BETTER_AUTH_URL || '').startsWith('https://'),
+        // Secure is determined by the serving hostname, not NODE_ENV.
+        // This means a local HTTPS tunnel (ngrok, etc.) gets Secure=true
+        // automatically, and the flag stays false only when the host is
+        // literally localhost/127.0.0.1 where browsers waive the requirement.
+        secure: (() => {
+          const host =
+            process.env.BETTER_AUTH_URL ||
+            process.env.PUBLIC_URL ||
+            'http://localhost';
+          try {
+            const { hostname } = new URL(host);
+            return hostname !== 'localhost' && hostname !== '127.0.0.1';
+          } catch {
+            return false;
+          }
+        })(),
         httpOnly: true,
       },
     },
