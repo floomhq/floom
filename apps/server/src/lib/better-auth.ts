@@ -421,10 +421,12 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
             }
 
             try {
+              const isDev = process.env.NODE_ENV !== 'production';
               const publicUrl =
+                process.env.FLOOM_APP_URL ||
                 process.env.PUBLIC_URL ||
-                process.env.BETTER_AUTH_URL ||
-                'https://floom.dev';
+                (isDev ? 'http://localhost:5173' : 'https://floom.dev');
+
               const { subject, html, text } = renderWelcomeEmail({
                 name: user.name ?? null,
                 publicUrl,

@@ -663,11 +663,17 @@ export async function signInWithSocial(
   provider: 'github' | 'google',
   callbackURL = '/me',
 ): Promise<void> {
+  const absoluteURL = callbackURL.startsWith('http')
+    ? callbackURL
+    : typeof window !== 'undefined'
+      ? `${window.location.origin}${callbackURL.startsWith('/') ? '' : '/'}${callbackURL}`
+      : callbackURL;
+
   const res = await request<{ url?: string; redirect?: boolean }>(
     '/auth/sign-in/social',
     {
       method: 'POST',
-      body: JSON.stringify({ provider, callbackURL }),
+      body: JSON.stringify({ provider, callbackURL: absoluteURL }),
     },
   );
   if (!res?.url) {
