@@ -43,7 +43,41 @@ import type {
 
 export const mcpRouter = new Hono();
 
-const PUBLIC_URL = process.env.PUBLIC_URL || 'https://floom.dev';
+/**
+ * Resolve the public origin used in MCP response bodies (permalink, mcp_url,
+ * etc.).
+ *
+ * Priority (B8 fix — was hardcoded to `https://floom.dev`):
+ *   1. `FLOOM_PUBLIC_ORIGIN` env (explicit operator override — used in prod
+ *      to pin responses to the canonical origin regardless of which host
+ *      the request came in on).
+ *   2. The origin of the incoming request. Any reverse proxy (nginx, Cloud
+ *      Run) is expected to preserve the public hostname in `c.req.url`; if
+ *      not, set `FLOOM_PUBLIC_ORIGIN` to override.
+ *
+ * Why no hardcoded fallback: defaulting to `https://floom.dev` on preview
+ * environments caused ingest_app responses to hand out prod permalinks that
+ * broke the preview→ingest→click-through loop. Deriving from the request
+ * keeps preview.floom.dev, docker.floom.dev, and local dev all self-consistent.
+ *
+ * NB: email templates (`apps/server/src/lib/email.ts`) and canonical URL meta
+ * tags in HTML responses intentionally still point at the prod origin —
+ * emails are only sent from prod, and canonical tags must resolve to the
+ * indexed URL. Only MCP response bodies use this helper.
+ */
+export function getPublicBaseUrl(c: Context): string {
+  const override = process.env.FLOOM_PUBLIC_ORIGIN;
+  if (typeof override === 'string' && override.length > 0) {
+    return override.replace(/\/+$/, '');
+  }
+  try {
+    return new URL(c.req.url).origin;
+  } catch {
+    // Defensive fallback. Any request reaching a Hono handler will have a
+    // parseable URL, so this branch should be unreachable in practice.
+    return 'https://floom.dev';
+  }
+}
 
 function formatRun(row: RunRecord) {
   return {
@@ -319,9 +353,14 @@ function createPerAppMcpServer(
 interface AdminToolContext {
   ctx: SessionContext;
   ip: string;
+  baseUrl: string;
 }
 
-function serializeHubApp(row: AppRecord, manifest: NormalizedManifest | null) {
+function serializeHubApp(
+  row: AppRecord,
+  manifest: NormalizedManifest | null,
+  baseUrl: string,
+) {
   return {
     slug: row.slug,
     name: row.name,
@@ -335,8 +374,8 @@ function serializeHubApp(row: AppRecord, manifest: NormalizedManifest | null) {
     featured: row.featured === 1,
     avg_run_ms: row.avg_run_ms,
     created_at: row.created_at,
-    permalink: `${PUBLIC_URL}/p/${row.slug}`,
-    mcp_url: `${PUBLIC_URL}/mcp/app/${row.slug}`,
+    permalink: `${baseUrl}/p/${row.slug}`,
+    mcp_url: `${baseUrl}/mcp/app/${row.slug}`,
   };
 }
 
@@ -348,7 +387,7 @@ function safeParseManifest(raw: string): NormalizedManifest | null {
   }
 }
 
-function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
+function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer {
   const server = new McpServer({
     name: 'floom-admin',
     version: '0.4.0',
@@ -588,8 +627,8 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
                   slug: result.slug,
                   name: result.name,
                   created: result.created,
-                  permalink: `${PUBLIC_URL}/p/${result.slug}`,
-                  mcp_url: `${PUBLIC_URL}/mcp/app/${result.slug}`,
+                  permalink: `${baseUrl}/p/${result.slug}`,
+                  mcp_url: `${baseUrl}/mcp/app/${result.slug}`,
                 },
                 null,
                 2,
@@ -681,7 +720,7 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
           )
         : rowsNoFixtures;
       const results = filtered.slice(0, lim).map((row) =>
-        serializeHubApp(row, safeParseManifest(row.manifest)),
+        serializeHubApp(row, safeParseManifest(row.manifest), baseUrl),
       );
       return {
         content: [
@@ -731,8 +770,8 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
             text: JSON.stringify(
               results.map((r) => ({
                 ...r,
-                permalink: `${PUBLIC_URL}/p/${r.slug}`,
-                mcp_url: `${PUBLIC_URL}/mcp/app/${r.slug}`,
+                permalink: `${baseUrl}/p/${r.slug}`,
+                mcp_url: `${baseUrl}/mcp/app/${r.slug}`,
               })),
               null,
               2,
@@ -785,7 +824,7 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
             type: 'text' as const,
             text: JSON.stringify(
               {
-                ...serializeHubApp(row, manifest),
+                ...serializeHubApp(row, manifest, baseUrl),
                 manifest,
               },
               null,
@@ -800,7 +839,7 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
   return server;
 }
 
-function createSearchMcpServer(): McpServer {
+function createSearchMcpServer(baseUrl: string): McpServer {
   const server = new McpServer({
     name: 'floom-chat-search',
     version: '0.3.0',
@@ -825,7 +864,7 @@ function createSearchMcpServer(): McpServer {
             text: JSON.stringify(
               results.map((r) => ({
                 ...r,
-                mcp_url: `${PUBLIC_URL}/mcp/app/${r.slug}`,
+                mcp_url: `${baseUrl}/mcp/app/${r.slug}`,
               })),
               null,
               2,
@@ -852,13 +891,15 @@ async function handleMcp(server: McpServer, rawRequest: Request): Promise<Respon
 mcpRouter.all('/', async (c: Context) => {
   const ctx = await resolveUserContext(c);
   const ip = extractIp(c);
-  const server = createAdminMcpServer({ ctx, ip });
+  const baseUrl = getPublicBaseUrl(c);
+  const server = createAdminMcpServer({ ctx, ip, baseUrl });
   return handleMcp(server, c.req.raw);
 });
 
 // /mcp/search — gallery-wide search
 mcpRouter.all('/search', async (c) => {
-  const server = createSearchMcpServer();
+  const baseUrl = getPublicBaseUrl(c);
+  const server = createSearchMcpServer(baseUrl);
   return handleMcp(server, c.req.raw);
 });
 
