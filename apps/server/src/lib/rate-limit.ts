@@ -11,6 +11,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { BlockList, isIP } from 'node:net';
 import type { SessionContext } from '../types.js';
+import { hasValidAdminBearer } from './auth.js';
 import { recordRateLimitHit } from './metrics-counters.js';
 
 type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
@@ -30,8 +31,15 @@ export const isRateLimitDisabled = (): boolean =>
 // per user rewards sign-in with 5× anon headroom; per-(IP, app) 500/hr stops
 // a single slug from monopolizing the process while still allowing bursty
 // automations.
+//
+// Bumped again 2026-04-21 (pre-launch): anon raised 60 → 150 to absorb
+// launch-day traffic. Shared NAT IPs (offices, mobile carriers, university
+// networks), HN frontpage spikes, and demo embeds on the landing page all
+// collapse onto a handful of source IPs, so 60/hr was tripping legitimate
+// multi-user traffic. 150 keeps the per-client bucket tight enough to stop
+// single-origin abuse while leaving room for 2-3 people behind one IP.
 export const defaultAnonPerHour = (): number =>
-  envNumber('FLOOM_RATE_LIMIT_IP_PER_HOUR', 60);
+  envNumber('FLOOM_RATE_LIMIT_IP_PER_HOUR', 150);
 export const defaultUserPerHour = (): number =>
   envNumber('FLOOM_RATE_LIMIT_USER_PER_HOUR', 300);
 export const defaultPerAppPerHour = (): number =>
@@ -288,6 +296,17 @@ export function extractIp(c: Context): string {
 
 // ---------- response helpers ----------
 
+// Cap the public retry-after at 5 minutes. The sliding window is an hour,
+// so on a cold bucket the true "seconds until under limit" can exceed 2500s.
+// Telling a user "come back in 46 minutes" looks broken and wastes retries;
+// capping at 300s produces a predictable "try again in a few minutes" UX
+// while the internal sliding window keeps enforcing the real budget.
+const RETRY_AFTER_CLAMP_SEC = 300;
+
+function clampRetryAfter(sec: number): number {
+  return Math.min(sec, RETRY_AFTER_CLAMP_SEC);
+}
+
 function rateLimitResponse(
   c: Context,
   scope: Scope,
@@ -295,15 +314,16 @@ function rateLimitResponse(
   limit: number,
 ): Response {
   recordRateLimitHit(scope);
+  const retryAfter = clampRetryAfter(result.retryAfterSec);
   return c.json(
     {
       error: 'rate_limit_exceeded',
-      retry_after_seconds: result.retryAfterSec,
+      retry_after_seconds: retryAfter,
       scope,
     },
     429,
     {
-      'Retry-After': String(result.retryAfterSec),
+      'Retry-After': String(retryAfter),
       'X-RateLimit-Limit': String(limit),
       'X-RateLimit-Remaining': '0',
       'X-RateLimit-Reset': String(result.resetAt),
@@ -341,6 +361,12 @@ export function runRateLimitMiddleware(
 ): MiddlewareHandler {
   return async (c, next) => {
     if (isRateLimitDisabled()) return next();
+    // Admin bypass (2026-04-21): when FLOOM_AUTH_TOKEN is configured AND
+    // the caller presents the matching bearer, skip rate-limit entirely.
+    // This unblocks ops sweeps, monitoring, and catalog rebuilds from the
+    // server operator without opening the limit up publicly. Returns false
+    // when no token is configured, so OSS mode still enforces the caps.
+    if (hasValidAdminBearer(c)) return next();
     const now = Date.now();
     const windowMs = 3600 * 1000;
     const ip = extractIp(c);
