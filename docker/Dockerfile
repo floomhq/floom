@@ -30,6 +30,13 @@ COPY packages ./packages
 # Copy the fast-apps sidecar bundle into the build context so the runtime
 # stage can grab it from the builder image. Pure .mjs source, no build step.
 COPY examples/fast-apps ./examples/fast-apps
+# Launch demos (#252): the 3 showcase apps shipped as self-contained
+# python:3.12-slim images. services/launch-demos.ts reads each demo's
+# Dockerfile + source from these dirs on boot and builds the image against
+# the host docker daemon (via the mounted /var/run/docker.sock).
+COPY examples/lead-scorer ./examples/lead-scorer
+COPY examples/competitor-analyzer ./examples/competitor-analyzer
+COPY examples/resume-screener ./examples/resume-screener
 
 # Re-run pnpm install to re-link workspace packages after the source COPY.
 # pnpm 9 has a symlink quirk where workspace package symlinks created by the
@@ -109,6 +116,14 @@ COPY --from=builder /app/packages/renderer/src ./packages/renderer/src
 # Set FLOOM_FAST_APPS=false to skip this on environments that prefer an
 # empty hub.
 COPY --from=builder /app/examples/fast-apps ./examples/fast-apps
+
+# Launch demos (#252): source dirs consumed at boot by
+# services/launch-demos.ts to build + register the 3 showcase apps
+# (lead-scorer, competitor-analyzer, resume-screener).
+# Set FLOOM_SEED_LAUNCH_DEMOS=false to skip.
+COPY --from=builder /app/examples/lead-scorer ./examples/lead-scorer
+COPY --from=builder /app/examples/competitor-analyzer ./examples/competitor-analyzer
+COPY --from=builder /app/examples/resume-screener ./examples/resume-screener
 
 WORKDIR /app/apps/server
 
