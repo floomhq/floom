@@ -623,7 +623,12 @@ if (webDist) {
   // Paths that must never be swallowed by the SPA wildcard. These reach
   // Hono's other route handlers or return a real 404. The order matters:
   // prefix matches first, then exact matches.
-  const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/', '/og/', '/hook/'];
+  //
+  // /auth/ must be excluded so Better Auth's OAuth redirect handler
+  // (/auth/sign-in/social, /auth/callback/*) isn't served as index.html —
+  // which rendered a blank page instead of triggering the Google/GitHub
+  // redirect. Fix for blank-page on social sign-in reported post-launch.
+  const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/', '/og/', '/hook/', '/auth/'];
   const spaExcludedExact = new Set(['/openapi.json', '/metrics']);
 
   // Crawlers don't run JS, so client-side meta updates in AppPermalinkPage
