@@ -1,0 +1,11 @@
+company,website,industry,country,employee_count,title,contact_name
+Acme Fintech GmbH,https://example.com/acme,fintech,DE,120,CFO,Lena Brandt
+PayRail Systems,https://example.com/payrail,payments,NL,450,VP Finance,Tom van Dijk
+SeedlyAI,https://example.com/seedly,ai tooling,US,15,Founder,Priya Sharma
+OakRidge Manufacturing,https://example.com/oakridge,industrial,US,2800,Controller,Mike Johnson
+Brickly,https://example.com/brickly,construction tech,FR,65,CFO,Claire Dupont
+Voltara Energy,https://example.com/voltara,energy,ES,320,Head of Finance,Luis Moreno
+Papermint Studio,https://example.com/papermint,design agency,UK,12,Director,Sophie Clarke
+Fjord Logistics,https://example.com/fjord,logistics,NO,180,Finance Lead,Kari Nilsen
+Kernel Biotech,https://example.com/kernel,biotech,US,220,CFO,Dr. Sam Patel
+Stenberg Analytics,https://example.com/stenberg,data analytics,SE,90,CFO,Anna Stenberg

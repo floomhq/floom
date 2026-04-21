@@ -1,0 +1,57 @@
+name: Lead Scorer
+slug: lead-scorer
+description: |
+  Drop in a CSV of leads + your ICP. Gemini 3 researches each company with
+  live web search and URL context, scores fit 0-100, and returns reasoning
+  + enriched fields (industry, employee range, country, buy signal).
+category: growth
+actions:
+  score:
+    label: Score Leads
+    description: |
+      For each row of the CSV, research the company and score fit against the
+      ICP. Runs 8 rows in parallel inside the container.
+    inputs:
+      - name: data
+        label: Leads CSV
+        type: file/csv
+        required: true
+        description: |
+          CSV with a header row. Any columns work; `company`, `website`,
+          `name`, `title`, `industry`, `country` are used as-is if present.
+      - name: icp
+        label: Ideal Customer Profile
+        type: textarea
+        required: true
+        placeholder: e.g. B2B SaaS CFOs at 100-500 employee fintechs in EU
+        description: Free-text description of the lead you want.
+    outputs:
+      - name: total
+        label: Total Rows
+        type: number
+      - name: scored
+        label: Successfully Scored
+        type: number
+      - name: failed
+        label: Failed
+        type: number
+      - name: rows
+        label: Scored Leads
+        type: table
+      - name: score_distribution
+        label: Score Distribution
+        type: json
+      - name: dry_run
+        label: Dry Run
+        type: text
+      - name: model
+        label: Model
+        type: text
+runtime: python
+python_dependencies:
+  - google-genai==1.64.0
+node_dependencies: {}
+secrets_needed:
+  - GEMINI_API_KEY
+output_type: table
+manifest_version: "2.0"
