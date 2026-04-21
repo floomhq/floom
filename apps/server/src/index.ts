@@ -29,6 +29,7 @@ import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
 import { seedFromFile } from './services/seed.js';
+import { seedLaunchDemos } from './services/launch-demos.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { startFastApps } from './services/fast-apps-sidecar.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
@@ -959,6 +960,16 @@ async function boot(): Promise<void> {
     await seedFromFile();
   } catch (err) {
     console.error('[seed] failed:', err);
+  }
+
+  // Launch-demo seeder (#252): builds + registers the 3 showcase apps
+  // (lead-scorer, competitor-analyzer, resume-screener) from
+  // examples/<slug>/ on boot. Idempotent — skips build if the image tag
+  // already exists, skips insert if the slug row already exists.
+  try {
+    await seedLaunchDemos();
+  } catch (err) {
+    console.error('[launch-demos] failed:', err);
   }
 
   // OpenAPI ingest: if FLOOM_APPS_CONFIG is set, ingest apps from the config file.
