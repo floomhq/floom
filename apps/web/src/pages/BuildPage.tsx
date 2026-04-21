@@ -10,7 +10,7 @@
 //
 // Once a spec is detected the existing review/publish UI runs unchanged.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { CustomRendererPanel } from '../components/CustomRendererPanel';
@@ -119,6 +119,15 @@ export function BuildPage({
   // target.
   const [comingSoon, setComingSoon] = useState<'docker' | null>(null);
 
+  // ---- "Host this repo" ramp (issue #234) ----
+  const [deployUrl, setDeployUrl] = useState('');
+  const [deployLogs, setDeployLogs] = useState('');
+  const [deployPhase, setDeployPhase] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle');
+  const [deployResult, setDeployResult] = useState<{ slug: string; app_url: string } | null>(null);
+  const [deployError, setDeployError] = useState<{ message: string; draft_manifest?: string } | null>(null);
+  // Ref to the log pane for auto-scroll.
+  const deployLogRef = useRef<HTMLPreElement | null>(null);
+
   // Pre-fill if we got here via /build?edit=slug
   useEffect(() => {
     if (!editSlug) return;
@@ -178,8 +187,51 @@ export function BuildPage({
     const bases = [
       `https://raw.githubusercontent.com/${owner}/${repo}/main`,
       `https://raw.githubusercontent.com/${owner}/${repo}/master`,
+      `https://raw.githubusercontent.com/${owner}/${repo}/develop`,
     ];
-    const paths = ['openapi.yaml', 'openapi.yml', 'openapi.json', 'docs/openapi.yaml', 'api/openapi.yaml'];
+    // Ordered by most common first. Covers: OpenAPI v3 + Swagger v2 naming,
+    // root / docs / api / spec / swagger / openapi subdirs, and common
+    // API-first repo layouts (Stripe, GitHub, Twilio, Plaid, etc.).
+    const paths = [
+      // Root — OpenAPI v3
+      'openapi.yaml',
+      'openapi.yml',
+      'openapi.json',
+      // Root — Swagger v2 (very common legacy name)
+      'swagger.yaml',
+      'swagger.yml',
+      'swagger.json',
+      // docs/ subdir
+      'docs/openapi.yaml',
+      'docs/openapi.yml',
+      'docs/openapi.json',
+      'docs/swagger.yaml',
+      'docs/swagger.yml',
+      'docs/swagger.json',
+      // api/ subdir
+      'api/openapi.yaml',
+      'api/openapi.yml',
+      'api/openapi.json',
+      'api/swagger.yaml',
+      // spec/ subdir (Stripe, Twilio pattern)
+      'spec/openapi.yaml',
+      'spec/openapi.yml',
+      'spec/openapi.json',
+      'spec/swagger.yaml',
+      // openapi/ subdir (Stripe uses openapi/spec3.yaml — try common names)
+      'openapi/openapi.yaml',
+      'openapi/spec.yaml',
+      'openapi/spec3.yaml',
+      // src/main/resources/ (Java Spring / Quarkus pattern)
+      'src/main/resources/openapi.yaml',
+      'src/main/resources/openapi.json',
+      // Other common locations
+      'api-docs/openapi.yaml',
+      'api-docs/swagger.yaml',
+      '.openapi/openapi.yaml',
+      'schema/openapi.yaml',
+      'schema/swagger.yaml',
+    ];
     const urls: string[] = [];
     for (const b of bases) for (const p of paths) urls.push(`${b}/${p}`);
     return urls;
@@ -483,6 +535,41 @@ export function BuildPage({
     }
   }
 
+  // ---- issue #234: host-this-repo handler ----
+  function handleDeploy(e: React.FormEvent) {
+    e.preventDefault();
+    if (!deployUrl.trim()) return;
+    if (!isAuthenticated) {
+      setSignupPrompt(true);
+      return;
+    }
+    setDeployPhase('deploying');
+    setDeployLogs('');
+    setDeployResult(null);
+    setDeployError(null);
+
+    api.deployGithub(deployUrl.trim(), {
+      handlers: {
+        onLog: (text) => {
+          setDeployLogs((prev) => prev + text);
+          // auto-scroll
+          requestAnimationFrame(() => {
+            const el = deployLogRef.current;
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+        },
+        onDone: (result) => {
+          setDeployPhase('done');
+          setDeployResult(result);
+        },
+        onError: (err) => {
+          setDeployPhase('error');
+          setDeployError(err);
+        },
+      },
+    });
+  }
+
   return (
     <Layout title="Publish an app | Floom">
       <div data-testid="build-page" style={{ maxWidth: 1040, margin: '0 auto' }}>
@@ -696,8 +783,8 @@ export function BuildPage({
                   {githubError === 'no-openapi' && (
                     <ErrorCard
                       severity="red"
-                      title="We couldn't find your app file"
-                      copy="Floom needs an openapi.yaml (or .json) file in your repo root. Add one, or paste the direct link below. Importing from Docker images and agent wrappers is on the roadmap."
+                      title="We couldn't find an OpenAPI spec"
+                      copy="We checked common paths (openapi.yaml, swagger.yaml, docs/, spec/, api/, etc.) but didn't find a spec. If your repo has one at a different path, paste the direct raw URL in the field below."
                     />
                   )}
                   {githubError === 'private' && (
@@ -858,6 +945,261 @@ export function BuildPage({
               >
                 Find it
               </button>
+            </form>
+
+            {/* RAMP 3 — Host this repo (issue #234).
+                Clones the repo on Floom's infrastructure, builds a
+                Docker image, and registers a live hosted app. No OpenAPI
+                spec required — auto-detect handles runtime detection. */}
+            <form
+              onSubmit={handleDeploy}
+              data-testid="ramp-host"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 14,
+                padding: 22,
+                marginTop: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: 'var(--bg)',
+                    border: '1px solid var(--line)',
+                    color: 'var(--muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <GithubIcon size={15} />
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>
+                  Host this repo
+                </div>
+                <span
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: 999,
+                    background: 'rgba(99,102,241,0.1)',
+                    color: 'rgb(99,102,241)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  Beta
+                </span>
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 12px', lineHeight: 1.55 }}>
+                No OpenAPI spec needed. Floom clones your repo, detects the runtime, builds a
+                container, and publishes it as a hosted app. Works with Python, Node, Go, and Rust.
+              </p>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '4px 6px 4px 12px',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  background: 'var(--bg)',
+                  marginBottom: 12,
+                  flexWrap: 'nowrap',
+                }}
+              >
+                <GithubIcon size={14} />
+                <input
+                  type="url"
+                  value={deployUrl}
+                  onChange={(e) => setDeployUrl(e.target.value)}
+                  required
+                  placeholder="https://github.com/you/your-repo"
+                  data-testid="build-host-url"
+                  disabled={deployPhase === 'deploying'}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: '10px 4px',
+                    border: 'none',
+                    background: 'transparent',
+                    fontSize: 14,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    color: 'var(--ink)',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  data-testid="build-host-deploy"
+                  disabled={!deployUrl || deployPhase === 'deploying'}
+                  style={{
+                    padding: '8px 14px',
+                    background: 'rgb(99,102,241)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: (!deployUrl || deployPhase === 'deploying') ? 'not-allowed' : 'pointer',
+                    opacity: (!deployUrl || deployPhase === 'deploying') ? 0.55 : 1,
+                    fontFamily: 'inherit',
+                    flexShrink: 0,
+                  }}
+                >
+                  {deployPhase === 'deploying' ? 'Deploying…' : 'Deploy'}
+                </button>
+              </div>
+
+              {/* Build log terminal */}
+              {(deployPhase === 'deploying' || deployLogs) && (
+                <pre
+                  ref={deployLogRef}
+                  data-testid="build-host-log"
+                  style={{
+                    margin: '0 0 12px',
+                    padding: '12px 14px',
+                    background: '#0d1117',
+                    color: '#e6edf3',
+                    borderRadius: 8,
+                    fontSize: 11.5,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    lineHeight: 1.6,
+                    maxHeight: 280,
+                    overflowY: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {deployLogs || 'Starting…'}
+                  {deployPhase === 'deploying' && (
+                    <span style={{ opacity: 0.5 }}>▌</span>
+                  )}
+                </pre>
+              )}
+
+              {/* Success state */}
+              {deployPhase === 'done' && deployResult && (
+                <div
+                  data-testid="build-host-done"
+                  style={{
+                    padding: '12px 14px',
+                    background: 'rgba(5,150,105,0.08)',
+                    border: '1px solid rgba(5,150,105,0.25)',
+                    borderRadius: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>
+                    ✓ App deployed
+                  </span>
+                  <a
+                    href={deployResult.app_url}
+                    data-testid="build-host-app-link"
+                    style={{
+                      padding: '6px 12px',
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      borderRadius: 7,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Open app →
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeployPhase('idle');
+                      setDeployLogs('');
+                      setDeployUrl('');
+                      setDeployResult(null);
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      background: 'transparent',
+                      border: '1px solid var(--line)',
+                      borderRadius: 7,
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Deploy another
+                  </button>
+                </div>
+              )}
+
+              {/* Error state */}
+              {deployPhase === 'error' && deployError && (
+                <div
+                  data-testid="build-host-error"
+                  style={{
+                    padding: '10px 14px',
+                    background: '#fdecea',
+                    border: '1px solid #f4b7b1',
+                    color: '#c2321f',
+                    borderRadius: 8,
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontWeight: 500 }}>{deployError.message}</div>
+                  {deployError.draft_manifest && (
+                    <details style={{ marginTop: 8, fontSize: 11 }}>
+                      <summary style={{ cursor: 'pointer', fontWeight: 500 }}>
+                        Draft manifest (edit and retry)
+                      </summary>
+                      <pre
+                        style={{
+                          marginTop: 6,
+                          padding: '8px 10px',
+                          background: 'rgba(0,0,0,0.05)',
+                          borderRadius: 6,
+                          fontSize: 10.5,
+                          fontFamily: 'JetBrains Mono, monospace',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {deployError.draft_manifest}
+                      </pre>
+                    </details>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setDeployPhase('idle'); setDeployLogs(''); }}
+                    style={{
+                      marginTop: 8,
+                      padding: '5px 10px',
+                      background: 'transparent',
+                      border: '1px solid #f4b7b1',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: '#c2321f',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 8 }}>
+                Requires Docker on the Floom server. Build takes 1–5 minutes.
+              </div>
             </form>
 
             {/* More-ways footer — single collapsed disclosure after the

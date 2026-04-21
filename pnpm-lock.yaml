@@ -41,6 +41,9 @@ importers:
       '@floom/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer
+      '@floom/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@hono/node-server':
         specifier: 1.19.13
         version: 1.19.13(hono@4.12.14)

@@ -13,7 +13,7 @@ import { BlockList, isIP } from 'node:net';
 import type { SessionContext } from '../types.js';
 import { recordRateLimitHit } from './metrics-counters.js';
 
-type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
+type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest' | 'deploy';
 
 function envNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -38,6 +38,8 @@ export const defaultPerAppPerHour = (): number =>
   envNumber('FLOOM_RATE_LIMIT_APP_PER_HOUR', 500);
 export const defaultMcpIngestPerDay = (): number =>
   envNumber('FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY', 10);
+export const defaultDeployPerDay = (): number =>
+  envNumber('FLOOM_RATE_LIMIT_DEPLOY_PER_DAY', 5);
 export const defaultTrustedProxyHopCount = (): number =>
   envNumber('FLOOM_TRUSTED_PROXY_HOP_COUNT', 1);
 
@@ -371,6 +373,27 @@ export function runRateLimitMiddleware(
     }
     return next();
   };
+}
+
+/**
+ * GitHub deploy limit. Per-user when authed, per-IP otherwise.
+ * Defaults to 5 deploys/day; operator can raise via
+ * FLOOM_RATE_LIMIT_DEPLOY_PER_DAY.
+ */
+export function checkDeployLimit(
+  ctx: SessionContext,
+  ip: string,
+): { allowed: true } | { allowed: false; retryAfterSec: number } {
+  if (isRateLimitDisabled()) return { allowed: true };
+  const key = ctx.is_authenticated
+    ? `deploy:user:${ctx.user_id}`
+    : `deploy:ip:${ip}`;
+  const windowMs = 24 * 3600 * 1000;
+  const r = incrementAndCheck(key, defaultDeployPerDay(), windowMs, Date.now());
+  if (!r.allowed) recordRateLimitHit('deploy');
+  return r.allowed
+    ? { allowed: true }
+    : { allowed: false, retryAfterSec: r.retryAfterSec };
 }
 
 /**

@@ -630,6 +630,94 @@ export function ingestApp(body: {
   });
 }
 
+/**
+ * Stream a GitHub repo→hosted deploy. Opens an EventSource on
+ * POST /api/deploy-github and returns a cleanup function.
+ *
+ * SSE events:
+ *   { event: 'log',   data: { text: string } }
+ *   { event: 'done',  data: { slug, app_url, artifact_id, commit_sha } }
+ *   { event: 'error', data: { message, draft_manifest? } }
+ */
+export interface DeployGithubHandlers {
+  onLog?: (text: string) => void;
+  onDone?: (result: { slug: string; app_url: string; artifact_id: string; commit_sha?: string }) => void;
+  onError?: (err: { message: string; draft_manifest?: string }) => void;
+}
+
+export function deployGithub(
+  repo_url: string,
+  opts: { ref?: string; handlers: DeployGithubHandlers },
+): () => void {
+  let closed = false;
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const res = await fetch('/api/deploy-github', {
+        method: 'POST',
+        credentials: 'include',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({ repo_url, ref: opts.ref }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = `Deploy request failed (${res.status})`;
+        try {
+          const j = JSON.parse(text) as { error?: string; message?: string };
+          message = j.error || j.message || message;
+        } catch {
+          /* keep default */
+        }
+        if (!closed) opts.handlers.onError?.({ message });
+        return;
+      }
+      const reader = res.body?.getReader();
+      if (!reader) {
+        if (!closed) opts.handlers.onError?.({ message: 'No response body' });
+        return;
+      }
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || closed) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() ?? '';
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let event = 'message';
+          let data = '';
+          for (const line of lines) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            if (line.startsWith('data:')) data = line.slice(5).trim();
+          }
+          if (!data) continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (event === 'log') opts.handlers.onLog?.(parsed.text ?? '');
+            else if (event === 'done') opts.handlers.onDone?.(parsed);
+            else if (event === 'error') opts.handlers.onError?.(parsed);
+          } catch {
+            /* malformed SSE chunk */
+          }
+        }
+      }
+    } catch (err) {
+      if (!closed && !(err instanceof DOMException && err.name === 'AbortError')) {
+        opts.handlers.onError?.({ message: (err as Error).message || 'Network error' });
+      }
+    }
+  })();
+
+  return () => {
+    closed = true;
+    controller.abort();
+  };
+}
+
 export function getMyApps(): Promise<{ apps: CreatorApp[] }> {
   return request('/api/hub/mine');
 }

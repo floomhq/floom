@@ -16,6 +16,7 @@ import { jobsRouter } from './routes/jobs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { rendererRouter } from './routes/renderer.js';
 import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
+import { deployGithubRouter } from './routes/deploy-github.js';
 import { memoryRouter, secretsRouter } from './routes/memory.js';
 import { connectionsRouter } from './routes/connections.js';
 import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
@@ -187,6 +188,10 @@ app.route('/renderer', rendererRouter);
 // Public, no auth. See routes/og.ts for format details.
 app.route('/og', ogRouter);
 app.route('/api/deploy-waitlist', deployWaitlistRouter);
+// Issue #234: repo→hosted pipeline. POST body: { repo_url, ref? }.
+// Restricted CORS (creator-scoped, cookie-bearing). Rate-limited: 5/day per user.
+app.use('/api/deploy-github', restrictedCors);
+app.route('/api/deploy-github', deployGithubRouter);
 // W2.1: per-user state
 app.route('/api/memory', memoryRouter);
 app.route('/api/secrets', secretsRouter);
