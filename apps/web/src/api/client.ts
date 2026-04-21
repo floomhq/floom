@@ -442,9 +442,24 @@ export function getSessionMe(): Promise<SessionMePayload> {
   return request<SessionMePayload>('/api/session/me');
 }
 
-// Workspace switching UI is deferred — see docs/DEFERRED-UI.md and
-// feature/ui-workspace-switcher. The backend /api/session/switch-workspace
-// route stays live; the client wrapper is restored on that branch.
+/**
+ * Switch the caller's active workspace. Server-side the pointer is stored
+ * on the user row; the next /api/session/me will return the new
+ * `active_workspace` and `workspaces` scope. After calling this, callers
+ * should refresh workspace-scoped caches (session, apps, runs) so the UI
+ * reflects the new scope.
+ */
+export function switchWorkspace(
+  workspace_id: string,
+): Promise<{ ok: true; active_workspace_id: string }> {
+  return request<{ ok: true; active_workspace_id: string }>(
+    '/api/session/switch-workspace',
+    {
+      method: 'POST',
+      body: JSON.stringify({ workspace_id }),
+    },
+  );
+}
 
 // Better Auth endpoints are mounted at /auth/* in cloud mode. The UI calls
 // them directly; in OSS mode these 404, and the UI falls back to a

@@ -23,6 +23,7 @@ import {
   threadTitle,
   threadTimeLabel,
 } from '../../lib/thread';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 const RAIL_WIDTH = 280;
 
@@ -46,6 +47,8 @@ export function MeRail({
   const { apps, loading } = useMyApps();
   const { data: session } = useSession();
   const user = session?.user;
+  const activeWorkspace = session?.active_workspace;
+  const workspaces = session?.workspaces;
 
   const visibleThreads =
     threads && threadLimit ? threads.slice(0, threadLimit) : threads;
@@ -268,6 +271,12 @@ export function MeRail({
           background: 'var(--bg)',
         }}
       >
+        {activeWorkspace && workspaces && (
+          <WorkspaceSwitcher
+            active={activeWorkspace}
+            workspaces={workspaces}
+          />
+        )}
         {user ? (
           <div
             style={{
