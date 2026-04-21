@@ -30,6 +30,7 @@ import { ogRouter } from './routes/og.js';
 import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
+import { sendDiscordAlert, logAlertsBootState } from './lib/alerts.js';
 import { seedFromFile } from './services/seed.js';
 import { seedLaunchDemos } from './services/launch-demos.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
@@ -60,6 +61,9 @@ const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
 // Optional Sentry wiring. No-op when SENTRY_DSN is unset.
 initSentry();
+// Optional Discord alerts. No-op when DISCORD_ALERTS_WEBHOOK_URL is unset.
+// Logs one line at boot so operators can verify wiring via docker logs.
+logAlertsBootState();
 
 const app = new Hono();
 app.use('*', logger());
@@ -163,16 +167,36 @@ app.use('*', securityHeaders);
 // surface a generic 500 to the caller. Hono's onError fires for any thrown
 // error that reaches the top of the router stack.
 app.onError((err, c) => {
-  captureServerError(err, { path: new URL(c.req.url).pathname, method: c.req.method });
+  const path = new URL(c.req.url).pathname;
+  const method = c.req.method;
+  captureServerError(err, { path, method });
+  // Discord alert on 5xx. The helper is rate-limited per-title so a
+  // regression storm collapses to one ping / minute / error class.
+  // Using `err.name` as the title groups "TypeError", "DbError", etc.
+  // and leaves room for the path in the body.
+  const name = (err as { name?: string })?.name || 'Error';
+  const message = (err as { message?: string })?.message || String(err);
+  sendDiscordAlert(
+    `Floom 5xx: ${name}`,
+    '```\n' + message + '\n```',
+    { path, method },
+  );
   console.error('[server] unhandled error:', err);
   return c.json({ error: 'internal_server_error' }, 500);
 });
 process.on('unhandledRejection', (reason) => {
   captureServerError(reason);
+  const message =
+    reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : JSON.stringify(reason);
+  sendDiscordAlert('Floom unhandledRejection', '```\n' + String(message).slice(0, 500) + '\n```');
   console.error('[server] unhandledRejection:', reason);
 });
 process.on('uncaughtException', (err) => {
   captureServerError(err);
+  sendDiscordAlert(
+    'Floom uncaughtException',
+    '```\n' + (err?.message || String(err)).slice(0, 500) + '\n```',
+  );
   console.error('[server] uncaughtException:', err);
 });
 // Global auth gate: if FLOOM_AUTH_TOKEN is set, every API/MCP/p route

@@ -13,6 +13,7 @@ import { BlockList, isIP } from 'node:net';
 import type { SessionContext } from '../types.js';
 import { hasValidAdminBearer } from './auth.js';
 import { recordRateLimitHit } from './metrics-counters.js';
+import { sendDiscordAlert } from './alerts.js';
 
 type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
 
@@ -307,6 +308,53 @@ function clampRetryAfter(sec: number): number {
   return Math.min(sec, RETRY_AFTER_CLAMP_SEC);
 }
 
+// ---------- abuse alerting ----------
+//
+// One IP tripping many 429s in a short window is an abuse signal (scraper,
+// stuck retry loop, credential-stuffing bot). Track per-IP 429 counts in a
+// rolling 5-min window; when a threshold trips, fire one Discord alert and
+// debounce for an hour so a sustained attack doesn't spam the channel.
+interface AbuseWindow {
+  windowStart: number;
+  count: number;
+  lastAlertAt: number;
+}
+const abuseStore = new Map<string, AbuseWindow>();
+const ABUSE_WINDOW_MS = 5 * 60 * 1000;
+const ABUSE_THRESHOLD = 10;
+const ABUSE_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
+
+function noteRateLimitHitForAbuse(ip: string, scope: Scope, now: number): void {
+  // Skip authed-user 429s (misconfigured client, not abuse) and unknown IPs.
+  if (scope === 'user') return;
+  if (ip === 'unknown') return;
+  let entry = abuseStore.get(ip);
+  if (!entry || now - entry.windowStart > ABUSE_WINDOW_MS) {
+    entry = { windowStart: now, count: 0, lastAlertAt: entry?.lastAlertAt ?? 0 };
+    abuseStore.set(ip, entry);
+  }
+  entry.count += 1;
+  if (entry.count >= ABUSE_THRESHOLD && now - entry.lastAlertAt > ABUSE_ALERT_COOLDOWN_MS) {
+    entry.lastAlertAt = now;
+    // Mask IPv4 last octet; truncate IPv6. Actionable signal without
+    // splashing raw PII into Discord.
+    const masked = ip.includes('.')
+      ? ip.replace(/\.\d+$/, '.xxx')
+      : ip.replace(/(:[0-9a-f]+){5,}$/i, ':xxxx');
+    sendDiscordAlert(
+      'Floom abuse: repeated 429s',
+      `IP \`${masked}\` tripped ${entry.count} rate-limits in ${Math.round(ABUSE_WINDOW_MS / 60000)}m.`,
+      { scope },
+    );
+  }
+  if (entry.count > 10_000) entry.count = 10_000;
+}
+
+/** Reset the abuse store. Exported for tests. */
+export function __resetAbuseStoreForTests(): void {
+  abuseStore.clear();
+}
+
 function rateLimitResponse(
   c: Context,
   scope: Scope,
@@ -314,6 +362,7 @@ function rateLimitResponse(
   limit: number,
 ): Response {
   recordRateLimitHit(scope);
+  noteRateLimitHitForAbuse(extractIp(c), scope, Date.now());
   const retryAfter = clampRetryAfter(result.retryAfterSec);
   return c.json(
     {
