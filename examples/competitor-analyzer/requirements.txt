@@ -1,0 +1,4 @@
+# Intentionally empty.
+# main.py uses only the Python 3.12 standard library (urllib, json,
+# concurrent.futures). No third-party SDK — we call the Gemini REST endpoint
+# directly so the image stays slim and has no dep drift over time.

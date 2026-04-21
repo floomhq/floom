@@ -1,0 +1,36 @@
+slug: competitor-analyzer
+name: Competitor Analyzer
+description: Paste competitor URLs, get positioning, pricing, and strengths/weaknesses table. Grounded in live web data via Gemini 3 URL-context + search.
+creator: floom
+category: research
+
+action: analyze
+label: Analyze Competitors
+
+inputs:
+  - name: urls
+    type: array
+    required: true
+    label: Competitor URLs
+    description: Competitor homepages to analyze. One per line. https:// is added automatically if omitted.
+    placeholder: |
+      https://linear.app
+      https://notion.so
+      https://asana.com
+  - name: your_product
+    type: textarea
+    required: true
+    label: Your product
+    description: One-line description of what you sell, so the analysis is comparative.
+    placeholder: e.g. We sell B2B sales automation software to EU mid-market.
+
+output_type: table
+
+secrets_needed:
+  - GEMINI_API_KEY
+
+runtime: python
+image: floom/competitor-analyzer:latest
+memory_mb: 512
+timeout: 180s
+manifest_version: "2.0"
