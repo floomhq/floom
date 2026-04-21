@@ -131,6 +131,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const hamburgerRef = useRef<HTMLButtonElement>(null);
 
   const isStudio = location.pathname.startsWith('/studio');
+  // #249 (re-raised 2026-04-21): Run pill side is "active" when the
+  // user is on /apps (public run directory) or /p/:slug (a run page).
+  const isApps =
+    location.pathname === '/apps' ||
+    location.pathname.startsWith('/apps/') ||
+    location.pathname.startsWith('/p/');
   const isLoginPage =
     location.pathname === '/login' || location.pathname === '/signup';
   const ownedAppCount = myApps?.length ?? 0;
@@ -263,18 +269,26 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Middle slot: Store/Studio pill toggle (every visitor),
+        {/* Middle slot: Store/Studio/Run pill (every visitor),
             nothing on /login + /signup.
             #82 (2026-04-21): the pill is absolutely centred within the
             topbar-inner container so it sits exactly on the horizontal
             midline regardless of how wide the logo or the right-side
             nav (Me · Docs · avatar) get. The previous flex-1 + center
             pattern left it optically off-centre whenever the two
-            flanks had different widths, which is always. */}
+            flanks had different widths, which is always.
+            #249 re-raised 2026-04-21: Federico asked "where is the
+            runtime where I can actually run my apps?" — Store + Studio
+            alone didn't show a run surface. Fix: add "Run" as a third
+            pill side linking to /apps (the public directory of
+            runnable apps). Triplet = Store (browse) · Studio (build)
+            · Run (execute), mirrors the protocol mental model. Visible
+            to everyone, not just authed users (Me is still the authed
+            dashboard on the right side). */}
         {showPill && (
           <nav
             className="topbar-links topbar-links-desktop topbar-pill-nav"
-            aria-label="Mode switcher"
+            aria-label="Primary"
             style={{
               position: 'absolute',
               left: '50%',
@@ -283,12 +297,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               pointerEvents: 'auto',
             }}
           >
-            <div style={pillWrapStyle} role="group" aria-label="Switch mode">
+            <div style={pillWrapStyle} role="group" aria-label="Switch section">
               <Link
                 to="/store"
                 data-testid="topbar-mode-store"
-                aria-current={!isStudio ? 'page' : undefined}
-                style={pillSideStyle(!isStudio)}
+                aria-current={!isStudio && !isApps ? 'page' : undefined}
+                style={pillSideStyle(!isStudio && !isApps)}
               >
                 Store
               </Link>
@@ -299,6 +313,14 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 style={pillSideStyle(isStudio)}
               >
                 Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
+              </Link>
+              <Link
+                to="/apps"
+                data-testid="topbar-mode-run"
+                aria-current={isApps ? 'page' : undefined}
+                style={pillSideStyle(isApps)}
+              >
+                Run
               </Link>
             </div>
           </nav>
@@ -572,7 +594,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   onClick={() => setMenuOpen(false)}
                   data-testid="topbar-mobile-mode-store"
                   style={{
-                    ...pillSideStyle(!isStudio),
+                    ...pillSideStyle(!isStudio && !isApps),
                     flex: 1,
                     padding: '8px 10px',
                   }}
@@ -590,6 +612,18 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   }}
                 >
                   Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
+                </Link>
+                <Link
+                  to="/apps"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-mode-run"
+                  style={{
+                    ...pillSideStyle(isApps),
+                    flex: 1,
+                    padding: '8px 10px',
+                  }}
+                >
+                  Run
                 </Link>
               </div>
             )}
