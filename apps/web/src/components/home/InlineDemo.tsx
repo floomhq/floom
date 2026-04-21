@@ -122,7 +122,19 @@ async function pollUntilDone(
   throw new Error('Timed out waiting for the demo run');
 }
 
-export function InlineDemo() {
+interface InlineDemoProps {
+  /**
+   * Hero-placement variant (2026-04-22, issue #297). When true, skip the
+   * section's own eyebrow + H2 + description — the landing H1 above the
+   * demo already frames it — and drop section padding so the demo card
+   * sits tight against the hero copy above the fold at 1280x800.
+   *
+   * Default (false) keeps the standalone section framing for any reuse.
+   */
+  compact?: boolean;
+}
+
+export function InlineDemo({ compact = false }: InlineDemoProps = {}) {
   const [state, setState] = useState<DemoState>(INITIAL);
   const [byokOpen, setByokOpen] = useState(false);
   const [byokPayload, setByokPayload] = useState<{
@@ -203,47 +215,53 @@ export function InlineDemo() {
       data-section="inline-demo"
       style={{
         background: 'var(--bg)',
-        padding: '72px 24px',
+        // Compact = hero-placement: no top padding (the hero section
+        // already provides breathing room above), smaller bottom
+        // padding so the secondary GitHub-ingest block lands near the
+        // fold. Full = standalone section padding.
+        padding: compact ? '0 24px 48px' : '72px 24px',
       }}
     >
       <div style={{ maxWidth: 820, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 32 }}>
-          <SectionEyebrow tone="accent" testid="inline-demo-eyebrow">
-            Try it live · right here, right now
-          </SectionEyebrow>
-          <h2
-            style={{
-              fontFamily: "'DM Serif Display', Georgia, serif",
-              fontWeight: 400,
-              fontSize: 40,
-              lineHeight: 1.1,
-              letterSpacing: '-0.02em',
-              color: 'var(--ink)',
-              margin: '0 0 12px',
-            }}
-          >
-            Try it with a real app.
-          </h2>
-          <p
-            style={{
-              fontSize: 16,
-              color: 'var(--muted)',
-              lineHeight: 1.55,
-              maxWidth: 560,
-              margin: '0 auto',
-            }}
-          >
-            Not a screenshot. Hit Run and you are scoring 5 real companies
-            against an ICP through{' '}
-            <Link
-              to="/p/lead-scorer"
-              style={{ color: 'var(--ink)', textDecoration: 'underline' }}
+        {!compact && (
+          <header style={{ textAlign: 'center', marginBottom: 32 }}>
+            <SectionEyebrow tone="accent" testid="inline-demo-eyebrow">
+              Try it live · right here, right now
+            </SectionEyebrow>
+            <h2
+              style={{
+                fontFamily: "'DM Serif Display', Georgia, serif",
+                fontWeight: 400,
+                fontSize: 40,
+                lineHeight: 1.1,
+                letterSpacing: '-0.02em',
+                color: 'var(--ink)',
+                margin: '0 0 12px',
+              }}
             >
-              the lead-scorer app
-            </Link>
-            {' '}— same runtime every Floom app uses.
-          </p>
-        </header>
+              Try it with a real app.
+            </h2>
+            <p
+              style={{
+                fontSize: 16,
+                color: 'var(--muted)',
+                lineHeight: 1.55,
+                maxWidth: 560,
+                margin: '0 auto',
+              }}
+            >
+              Not a screenshot. Hit Run and you are scoring 5 real companies
+              against an ICP through{' '}
+              <Link
+                to="/p/lead-scorer"
+                style={{ color: 'var(--ink)', textDecoration: 'underline' }}
+              >
+                the lead-scorer app
+              </Link>
+              {' '}— same runtime every Floom app uses.
+            </p>
+          </header>
+        )}
 
         <div
           style={{

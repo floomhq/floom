@@ -346,27 +346,25 @@ export function CreatorHeroPage() {
       <TopBar />
 
       <main id="main" style={{ display: 'block' }}>
-        {/* HERO v4 (2026-04-20 deep audit):
-            - Integration logos moved ABOVE H1 as a tight "WORKS WITH" strip.
-              Gives the hero a visual anchor instead of opening with a
-              typography wall.
-            - H1 + accent + sub (all locked copy) retained but tightened:
-              H1 60px on desktop, 52px on small desktop, 34px on mobile.
-            - Dual equal-weight CTAs: Publish your app (primary emerald) +
-              Browse 22 live apps (secondary outlined, same padding/height).
-              v11 pattern restored.
-            - 5-tile app strip directly under the CTAs. This is the single
-              biggest structural fix: above-fold proof-of-life in the hero.
-            - hero-stats chip removed from hero; promoted to a dedicated
-              ProofRow section directly below. */}
+        {/* HERO v5 (2026-04-22, issue #297):
+            - Integration logos "WORKS WITH" strip still opens.
+            - H1 + accent + sub (locked copy). Target-user line added
+              directly under the sub so the visitor sees "for who" before
+              scrolling.
+            - Live lead-scorer demo (InlineDemo compact) sits directly
+              below this section. It IS the above-the-fold proof now;
+              no static tiles + form wall. The publish-form + CTA row +
+              HeroAppTiles are demoted to a "...or wrap your existing
+              API" section below the demo. */}
         <section
           data-testid="hero"
           style={{
             position: 'relative',
-            // Goosebumps pass 2026-04-20: more vertical breathing room.
-            // 48->72 top, 56->88 bottom so H1 has space above and the
-            // CTA row lands centered in the fold, not crammed at the top.
-            padding: '72px 24px 88px',
+            // Tight bottom padding 2026-04-22 (issue #297): the live
+            // demo now sits directly below the hero text, so we pull
+            // the bottom from 88->28 to keep H1 + live demo in the
+            // 1280x800 above-the-fold slot. Top stays at 72.
+            padding: '72px 24px 28px',
             background:
               'radial-gradient(ellipse 760px 400px at 50% 26%, rgba(5,150,105,0.06), transparent 70%)',
           }}
@@ -455,11 +453,89 @@ export function CreatorHeroPage() {
                 lineHeight: 1.5,
                 fontWeight: 400,
                 color: 'var(--muted)',
-                margin: '0 0 36px',
+                margin: '0 0 14px',
               }}
             >
               The protocol + runtime for agentic work.
             </p>
+
+            {/* Target-user line (issue #297, 2026-04-22). Plain-English
+                "who Floom is for" line placed directly under the
+                positioning sub, matching the existing hero hierarchy
+                (H1 -> accent -> sub -> audience). Exact copy locked by
+                Federico; do not rewrite. */}
+            <p
+              className="hero-target-user"
+              data-testid="hero-target-user"
+              style={{
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 14,
+                lineHeight: 1.5,
+                fontWeight: 500,
+                color: 'var(--muted)',
+                margin: '0 0 28px',
+                opacity: 0.85,
+              }}
+            >
+              For founders, solo devs, and small teams building internal AI tools.
+            </p>
+          </div>
+        </section>
+
+        {/* LIVE DEMO (promoted to above-the-fold 2026-04-22, issue #297).
+            Federico's call: the hero proof should BE a real runnable
+            demo, not a static card grid + form. The lead-scorer demo
+            lets the visitor run a real /api/run in 1 click, then the
+            GitHub-ingest entry drops below as a secondary CTA. */}
+        <InlineDemo compact />
+
+        {/* PUBLISH YOUR APP (demoted from hero 2026-04-22, issue #297).
+            The GitHub-repo ingest form now sits below the live demo as
+            a secondary entry point: "...or wrap your existing API".
+            This still owns the primary conversion for builders who
+            have an OpenAPI URL ready. */}
+        <section
+          data-testid="hero-publish"
+          data-section="hero-publish"
+          style={{
+            background: 'var(--bg)',
+            padding: '24px 24px 56px',
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 960,
+              margin: '0 auto',
+              textAlign: 'center',
+            }}
+          >
+            <p
+              data-testid="hero-publish-eyebrow"
+              style={{
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: 'var(--muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.12em',
+                margin: '0 0 12px',
+              }}
+            >
+              ...or wrap your existing API
+            </p>
+            <h2
+              style={{
+                fontFamily: "'DM Serif Display', Georgia, serif",
+                fontWeight: 400,
+                fontSize: 28,
+                lineHeight: 1.15,
+                letterSpacing: '-0.02em',
+                color: 'var(--ink)',
+                margin: '0 0 20px',
+              }}
+            >
+              Point Floom at a repo, get a live app.
+            </h2>
 
             <form
               onSubmit={handleSubmit}
@@ -727,12 +803,14 @@ export function CreatorHeroPage() {
 
         {/* PROOF ROW (new 2026-04-20): quantified trust strip. Extracted
             from the hero-stats inline chip into its own breathing-room
-            section. */}
+            section. Stays below the publish form so the above-the-fold
+            slot belongs to the live demo (issue #297, 2026-04-22). */}
         <ProofRow hubCount={hubCount} />
 
-        {/* INLINE DEMO (promoted): the strongest section on the page, now
-            the first proof a scrolling user hits after the ProofRow. */}
-        <InlineDemo />
+        {/* InlineDemo was rendered here pre-#297. It is now promoted to
+            the hero slot (directly below the H1/subhead/target-user).
+            Rendering it a second time would double-mount the run state
+            and the BYOK modal. */}
 
         {/* FEATURED APPS (promoted from below-demo). The stripes do the
             heavy lifting; we lead into them with a compact inline header
@@ -920,10 +998,11 @@ export function CreatorHeroPage() {
           .hero-works-with { gap: 10px !important; }
         }
         @media (max-width: 640px) {
-          [data-testid="hero"] { padding: 52px 20px 60px !important; }
+          [data-testid="hero"] { padding: 52px 20px 20px !important; }
           .hero-headline { font-size: 36px !important; line-height: 1.05 !important; margin-bottom: 14px !important; }
           .hero-accent { font-size: 15px !important; margin-bottom: 6px !important; }
-          .hero-sub-positioning { font-size: 14px !important; margin-bottom: 26px !important; }
+          .hero-sub-positioning { font-size: 14px !important; margin-bottom: 10px !important; }
+          .hero-target-user { font-size: 13px !important; margin-bottom: 20px !important; }
           .hero-input { flex-direction: column !important; align-items: stretch !important; padding: 10px !important; }
           .hero-input input { padding: 14px !important; font-size: 13.5px !important; }
           .hero-input button { width: 100% !important; padding: 14px !important; justify-content: center !important; }
