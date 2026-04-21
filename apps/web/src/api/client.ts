@@ -19,6 +19,16 @@ import type {
   SecretPoliciesResponse,
 } from '../lib/types';
 import { track } from '../lib/posthog';
+import { serializeInputs } from './serialize-inputs';
+
+// Re-export the file-input helpers so callers that need to show the
+// "file too big" error can catch the typed exception without a second
+// import path.
+export {
+  serializeInputs,
+  FileInputTooLargeError,
+  DEFAULT_MAX_FILE_BYTES,
+} from './serialize-inputs';
 
 const API_BASE = '';
 
@@ -110,7 +120,7 @@ export function parsePrompt(
   });
 }
 
-export function startRun(
+export async function startRun(
   appSlug: string,
   inputs: Record<string, unknown>,
   threadId?: string,
@@ -121,9 +131,19 @@ export function startRun(
   // response shape is {run_id, status}; we don't need to wait for it to
   // classify the event.
   track('run_triggered', { app_slug: appSlug, action: action ?? null });
+  // Walk inputs and replace any `File` with the runtime-agnostic
+  // FileEnvelope (__file + content_b64). Without this, JSON.stringify
+  // drops File to `{}` and the app never receives the bytes. Works for
+  // both proxied and docker runtimes — see serialize-inputs.ts.
+  const serialized = await serializeInputs(inputs);
   return request('/api/run', {
     method: 'POST',
-    body: JSON.stringify({ app_slug: appSlug, inputs, thread_id: threadId, action }),
+    body: JSON.stringify({
+      app_slug: appSlug,
+      inputs: serialized,
+      thread_id: threadId,
+      action,
+    }),
   });
 }
 
@@ -291,14 +311,18 @@ export interface StartJobResponse {
   webhook_url_template: string;
 }
 
-export function startJob(
+export async function startJob(
   appSlug: string,
   inputs: Record<string, unknown>,
   action?: string,
 ): Promise<StartJobResponse> {
+  // Same File → FileEnvelope walk as startRun; the jobs path enqueues
+  // the same inputs shape and the runner materializes files the same
+  // way. See serialize-inputs.ts for the contract.
+  const serialized = await serializeInputs(inputs);
   return request<StartJobResponse>(`/api/${appSlug}/jobs`, {
     method: 'POST',
-    body: JSON.stringify({ action, inputs }),
+    body: JSON.stringify({ action, inputs: serialized }),
   });
 }
 
