@@ -714,17 +714,6 @@ export function resetPassword(body: {
   );
 }
 
-// Social sign-in: Better Auth expects a redirect-mode GET, but the UI
-// fires window.location. We expose the URL here for callers to read.
-export function socialSignInUrl(provider: 'github' | 'google', callbackURL = '/me'): string {
-  const absoluteURL = callbackURL.startsWith('http')
-    ? callbackURL
-    : typeof window !== 'undefined'
-      ? `${window.location.origin}${callbackURL.startsWith('/') ? '' : '/'}${callbackURL}`
-      : callbackURL;
-
-  return `/auth/login/social/${provider}?callbackURL=${encodeURIComponent(absoluteURL)}`;
-}
 
 // ---------- W4-minimal: runs history + detail ----------
 
