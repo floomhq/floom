@@ -126,6 +126,54 @@ function synthesizeDefaultManifest(
 }
 
 /**
+ * Parse the registry hostname out of an image reference. Docker's convention:
+ *   - The first `/`-separated segment is a registry hostname only if it
+ *     contains a `.` (domain) or `:` (port). Otherwise it's a Docker Hub
+ *     namespace and the registry defaults to `docker.io`.
+ *   - A ref with no `/` at all (e.g. `alpine`) is implicit `docker.io`.
+ *
+ * Examples:
+ *   ghcr.io/openpaper-dev/ig-nano-scout:cli-v1 → "ghcr.io"
+ *   registry.example.com:5000/team/app:v1      → "registry.example.com:5000"
+ *   docker.io/library/alpine:latest            → "docker.io"
+ *   library/alpine                             → "docker.io"
+ *   alpine:3.19                                → "docker.io"
+ */
+export function parseRegistry(imageRef: string): string {
+  const firstSlash = imageRef.indexOf('/');
+  if (firstSlash === -1) return 'docker.io';
+  const prefix = imageRef.slice(0, firstSlash);
+  if (prefix.includes('.') || prefix.includes(':')) return prefix;
+  return 'docker.io';
+}
+
+/**
+ * Look up auth credentials for a registry from the FLOOM_REGISTRY_AUTH env var.
+ *
+ * Format: JSON map keyed by registry hostname:
+ *   FLOOM_REGISTRY_AUTH='{"ghcr.io": {"username":"...","serveraddress":"ghcr.io","password":"<PAT>"}}'
+ *
+ * Returns undefined when the env var is unset, malformed, or has no entry for
+ * the requested registry. Callers pull unauthenticated in that case, which is
+ * the correct behavior for public images. We swallow JSON parse errors
+ * deliberately: a malformed env var should not blow up the ingest path, and
+ * the operator will see the 401 from the downstream pull if they intended
+ * auth.
+ *
+ * NOTE: never log the returned object — it contains a PAT / password.
+ */
+export function loadRegistryAuth(registry: string): Docker.AuthConfig | undefined {
+  const raw = process.env.FLOOM_REGISTRY_AUTH;
+  if (!raw) return undefined;
+  try {
+    const map = JSON.parse(raw) as Record<string, Docker.AuthConfig>;
+    return map[registry];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Pull a remote image into the local daemon. Idempotent — if the image is
  * already present the daemon reports "Image is up to date" and we return.
  *
@@ -134,13 +182,22 @@ function synthesizeDefaultManifest(
  * "unauthorized: authentication required" for private registries) surface as
  * an `errorDetail` event rather than a stream error, so we explicitly look for
  * either shape.
+ *
+ * Private registries: the daemon's HTTP API always re-contacts the registry
+ * (even when the image is cached locally) and does NOT read
+ * `/root/.docker/config.json` on the daemon host, so we must pass credentials
+ * explicitly as `authconfig`. We resolve them from FLOOM_REGISTRY_AUTH keyed
+ * by the registry hostname parsed from the image ref. If no entry matches
+ * (public images, Docker Hub without a login) we pull unauthenticated.
  */
 async function pullImage(
   docker: Docker,
   imageRef: string,
   timeoutMs: number,
 ): Promise<void> {
-  const stream = await docker.pull(imageRef);
+  const registry = parseRegistry(imageRef);
+  const authconfig = loadRegistryAuth(registry);
+  const stream = await docker.pull(imageRef, authconfig ? { authconfig } : {});
 
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
