@@ -846,8 +846,9 @@ export function CreatorHeroPage() {
             </p>
             <div
               style={{
-                background: '#0b1220',
-                color: '#e2e8f0',
+                background: 'var(--bg)',
+                color: 'var(--ink)',
+                border: '1px solid var(--line)',
                 borderRadius: 12,
                 padding: '20px 22px',
                 fontFamily: "'JetBrains Mono', ui-monospace, monospace",
@@ -860,11 +861,11 @@ export function CreatorHeroPage() {
               }}
             >
               <div>
-                <span style={{ color: '#8b9ba9' }}>$</span>{' '}
-                <span style={{ color: '#6ee7b7' }}>docker run -p 3010:3010 floomhq/floom</span>
+                <span style={{ color: 'var(--muted)' }}>$</span>{' '}
+                <span style={{ color: 'var(--ink)', fontWeight: 600 }}>docker run -p 3010:3010 floomhq/floom</span>
               </div>
-              <div style={{ color: '#94a3b8', marginTop: 6 }}>
-                <span style={{ color: '#6ee7b7' }}>✓</span> Floom is up. Browse the full catalog on localhost. Claude integration live.
+              <div style={{ color: 'var(--muted)', marginTop: 6 }}>
+                <span style={{ color: 'var(--accent)', fontWeight: 700 }}>✓</span> Floom is up. Browse the full catalog on localhost. Claude integration live.
               </div>
             </div>
             <p style={{ marginTop: 24, fontSize: 14 }}>
