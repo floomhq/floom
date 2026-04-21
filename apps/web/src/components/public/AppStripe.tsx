@@ -41,13 +41,34 @@ interface AppStripeProps {
  *   amber    — "make / create / generate" AI apps (research, marketing, design, text)
  *   slate    — third-party data & API integrations (open_data, financial, location, etc.)
  */
+// #279 launch polish (2026-04-21): each tint carries a soft radial
+// gradient + inner highlight so the icon tile reads as a physical chip
+// instead of a flat painted square. "Goosebumps" version of the
+// category tints Federico flagged as "not sexy enough".
 interface Tint {
   bg: string;
   fg: string;
+  gradient: string;
+  ring: string;
 }
-const TINT_EMERALD: Tint = { bg: '#ecfdf5', fg: '#047857' };
-const TINT_AMBER: Tint = { bg: '#fffaf0', fg: '#b45309' };
-const TINT_SLATE: Tint = { bg: '#f1f5f9', fg: '#475569' };
+const TINT_EMERALD: Tint = {
+  bg: '#ecfdf5',
+  fg: '#047857',
+  gradient: 'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
+  ring: 'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
+};
+const TINT_AMBER: Tint = {
+  bg: '#fffaf0',
+  fg: '#b45309',
+  gradient: 'radial-gradient(circle at 30% 25%, #fef3c7 0%, #fffaf0 55%, #fde68a 100%)',
+  ring: 'inset 0 0 0 1px rgba(180,83,9,0.15), 0 1px 2px rgba(180,83,9,0.14), inset 0 1px 0 rgba(255,255,255,0.6)',
+};
+const TINT_SLATE: Tint = {
+  bg: '#f1f5f9',
+  fg: '#475569',
+  gradient: 'radial-gradient(circle at 30% 25%, #e2e8f0 0%, #f1f5f9 55%, #cbd5e1 100%)',
+  ring: 'inset 0 0 0 1px rgba(71,85,105,0.12), 0 1px 2px rgba(71,85,105,0.12), inset 0 1px 0 rgba(255,255,255,0.6)',
+};
 
 const CATEGORY_TINT: Record<string, Tint> = {
   // Floom-native / creator-tools -> emerald (stays with the brand accent)
@@ -119,12 +140,13 @@ export function AppStripe({ slug, name, description, meta, variant = 'landing', 
           width: iconSize,
           height: iconSize,
           borderRadius: 12,
-          background: color.bg,
+          background: color.gradient,
           color: color.fg,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
+          boxShadow: color.ring,
         }}
       >
         <AppIcon slug={slug} size={innerIcon} color={color.fg} />

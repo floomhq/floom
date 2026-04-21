@@ -125,20 +125,23 @@ export function AppHeader({ app }: { app: AppDetail }) {
         marginBottom: 20,
       }}
     >
+      {/* #279 launch polish (2026-04-21): gradient tile + ring. */}
       <div
         style={{
           width: 44,
           height: 44,
           borderRadius: 10,
-          background: 'var(--bg)',
-          border: '1px solid var(--line)',
+          background:
+            'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
+          boxShadow:
+            'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
         }}
       >
-        <AppIcon slug={app.slug} size={22} />
+        <AppIcon slug={app.slug} size={22} color="#047857" />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
