@@ -2,7 +2,9 @@
 // (v16 shell) and was the basis for the older AppInputsCard. Extracted so
 // both call sites render identical controls with matching a11y labels.
 
+import { useRef, useState } from 'react';
 import type { InputSpec } from '../../lib/types';
+import { DEFAULT_MAX_FILE_BYTES } from '../../api/client';
 
 export const ARRAY_INPUT_NAMES = new Set<string>(['hashtags']);
 
@@ -160,6 +162,26 @@ export function InputField({ spec, value, onChange, idPrefix = 'floom-inp', erro
     );
   }
 
+  // File input: drag-drop zone + click-to-pick. The File object passes
+  // through on `onChange` and is walked by serializeInputs() before
+  // JSON.stringify — both Docker and proxied runtimes consume the
+  // resulting FileEnvelope. Spec.type is the narrow InputType 'file'
+  // but manifest authors also use "file/csv", "file/pdf" etc. — we
+  // accept any type that starts with "file".
+  const isFileType = spec.type === 'file' || String(spec.type).startsWith('file');
+  if (isFileType) {
+    return (
+      <FileInputControl
+        spec={spec}
+        value={value}
+        onChange={onChange}
+        id={id}
+        label={cleanLabel}
+        error={error}
+      />
+    );
+  }
+
   // Fix 6 (2026-04-19): URL inputs auto-prepend https:// on blur if the
   // user typed a bare domain. Placeholder swaps to a no-https example so
   // users aren't cued to type the scheme.
@@ -214,6 +236,239 @@ export function InputField({ spec, value, onChange, idPrefix = 'floom-inp', erro
       />
       {error && <FieldError id={errorId!} text={error} />}
     </div>
+  );
+}
+
+/**
+ * File-input control. Drag-drop zone + click-to-pick. Accepts a single
+ * `File` via onChange. Cap check (5 MB) mirrors the client serializer
+ * so users see the size error before hitting Run, not after.
+ *
+ * Spec.type naming: the JSON schema says `type: "file"`, but some app
+ * manifests write `file/csv` or `file/pdf` to advertise the expected
+ * MIME. We pass the tail through to the `<input accept>` attribute so
+ * the native picker pre-filters, but we never reject on client side —
+ * the container is the authority on whether the bytes are usable.
+ */
+function FileInputControl({
+  spec,
+  value,
+  onChange,
+  id,
+  label,
+  error: externalError,
+}: {
+  spec: InputSpec;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  id: string;
+  label: string;
+  error?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  // Derive the accept attribute from a `file/<ext>` spec.type. "file/csv"
+  // → ".csv,text/csv"; "file/pdf" → ".pdf,application/pdf"; "file"
+  // (the narrow InputType) → unset (allow anything).
+  const subtype = String(spec.type).includes('/')
+    ? String(spec.type).split('/')[1]?.toLowerCase() ?? ''
+    : '';
+  const accept = subtype ? acceptFor(subtype) : undefined;
+  const file = value instanceof File ? value : null;
+  const err = externalError ?? localError ?? undefined;
+  const errorId = err ? `${id}-error` : undefined;
+
+  const accept_file = (f: File | null) => {
+    setLocalError(null);
+    if (!f) {
+      onChange(null);
+      return;
+    }
+    if (f.size > DEFAULT_MAX_FILE_BYTES) {
+      setLocalError(
+        `File is ${formatBytes(f.size)} — cap is ${formatBytes(DEFAULT_MAX_FILE_BYTES)}. Try a smaller one.`,
+      );
+      onChange(null);
+      return;
+    }
+    onChange(f);
+  };
+
+  return (
+    <div className="input-group">
+      <label className="input-label" htmlFor={id}>
+        {label}
+        {!spec.required && (
+          <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
+        )}
+      </label>
+      <div
+        data-testid={`file-drop-${spec.name}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const f = e.dataTransfer.files?.[0] ?? null;
+          accept_file(f);
+        }}
+        onClick={() => inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-describedby={errorId}
+        style={{
+          border: `1.5px dashed ${err ? '#c44a2b' : dragging ? 'var(--accent)' : 'var(--line)'}`,
+          borderRadius: 10,
+          padding: file ? '14px 16px' : '22px 16px',
+          textAlign: 'center',
+          background: dragging
+            ? 'rgba(34, 139, 34, 0.04)'
+            : file
+              ? 'var(--card)'
+              : 'rgba(0,0,0,0.015)',
+          cursor: 'pointer',
+          transition: 'border-color 120ms, background 120ms',
+        }}
+      >
+        {file ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <FileIcon />
+              <div style={{ textAlign: 'left', minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: 'var(--ink)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: 260,
+                  }}
+                >
+                  {file.name}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                  {formatBytes(file.size)}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                accept_file(null);
+                if (inputRef.current) inputRef.current.value = '';
+              }}
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--line)',
+                borderRadius: 6,
+                padding: '4px 10px',
+                fontSize: 12,
+                color: 'var(--muted)',
+                cursor: 'pointer',
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500 }}>
+              Drop a file here or click to pick
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+              {subtype ? `.${subtype} · ` : ''}
+              up to {formatBytes(DEFAULT_MAX_FILE_BYTES)}
+            </div>
+          </>
+        )}
+        <input
+          ref={inputRef}
+          id={id}
+          type="file"
+          accept={accept}
+          aria-invalid={Boolean(err) || undefined}
+          aria-describedby={errorId}
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            accept_file(f);
+          }}
+        />
+      </div>
+      {err && <FieldError id={errorId!} text={err} />}
+    </div>
+  );
+}
+
+function acceptFor(subtype: string): string {
+  // Map common subtypes to `accept` values. Fall back to the subtype as
+  // a bare extension (".xyz"), which works for anything the native
+  // picker can filter on.
+  switch (subtype) {
+    case 'csv':
+      return '.csv,text/csv';
+    case 'pdf':
+      return '.pdf,application/pdf';
+    case 'image':
+      return 'image/*';
+    case 'audio':
+      return 'audio/*';
+    case 'video':
+      return 'video/*';
+    case 'zip':
+      return '.zip,application/zip';
+    case 'json':
+      return '.json,application/json';
+    case 'txt':
+    case 'text':
+      return '.txt,text/plain';
+    default:
+      return `.${subtype}`;
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function FileIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: 'var(--muted)', flexShrink: 0 }}
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
   );
 }
 

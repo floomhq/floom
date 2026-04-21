@@ -132,9 +132,15 @@ function resolveRenderProps(
 }
 
 interface CascadeArgs {
-  app: Pick<AppDetail, 'manifest'>;
+  app: Pick<AppDetail, 'manifest' | 'slug'>;
   action?: string;
   runOutput: unknown;
+  /**
+   * Issue #282: RowTable uses these to name the downloaded CSV, e.g.
+   * `lead-scorer-<run_id>.csv`. Both are optional — RowTable falls back
+   * to a timestamped filename if either is missing.
+   */
+  runId?: string;
 }
 
 export interface CascadeResult {
@@ -312,11 +318,16 @@ function humanizeKey(key: string): string {
  * appDetail is available) can reuse the same heuristics before falling
  * into the JsonRaw dump.
  */
-export function shapePick(runOutput: unknown): ReactElement | null {
+export function shapePick(
+  runOutput: unknown,
+  ctx?: { appSlug?: string; runId?: string },
+): ReactElement | null {
   // Scalar top-level values are already handled by the OutputRenderer's
   // pre-existing "not an object" branch. The shape-pick layer only
   // triggers on objects.
   if (!runOutput || typeof runOutput !== 'object') return null;
+  const appSlug = ctx?.appSlug;
+  const runId = ctx?.runId;
 
   // Arrays at the top level. Array of strings → StringList, array of
   // flat objects → RowTable. Anything else falls through.
@@ -325,7 +336,7 @@ export function shapePick(runOutput: unknown): ReactElement | null {
       return <StringList items={runOutput} />;
     }
     if (isArrayOfFlatObjects(runOutput)) {
-      return <RowTable rows={runOutput} />;
+      return <RowTable rows={runOutput} appSlug={appSlug} runId={runId} />;
     }
     return null;
   }
@@ -363,7 +374,7 @@ export function shapePick(runOutput: unknown): ReactElement | null {
       return <StringList items={inner} label={label} />;
     }
     if (isArrayOfFlatObjects(inner)) {
-      return <RowTable rows={inner} label={label} />;
+      return <RowTable rows={inner} label={label} appSlug={appSlug} runId={runId} />;
     }
     // Unwrapped value is a nested object — continue with the current
     // object (still falls into the headline / key-value path below
@@ -445,13 +456,22 @@ export function shapePick(runOutput: unknown): ReactElement | null {
  * element: null}` to signal the caller should render its JsonRaw
  * fallback.
  */
-export function pickRenderer({ app, action, runOutput }: CascadeArgs): CascadeResult {
+export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): CascadeResult {
+  const appSlug = app.slug;
   const render = app.manifest?.render;
   if (render && typeof render.output_component === 'string') {
     const Component = OUTPUT_LIBRARY[render.output_component];
     if (Component) {
       const resolved = resolveRenderProps(render, runOutput);
       if (resolved) {
+        // Issue #282: if the manifest pinned RowTable, splice in the
+        // download-naming props. Harmless for other components because
+        // RowTableProps declares them as optional and they're ignored
+        // elsewhere.
+        if (render.output_component === 'RowTable') {
+          resolved.appSlug = appSlug;
+          resolved.runId = runId;
+        }
         return { kind: 'library', element: <Component {...resolved} /> };
       }
     }
@@ -469,7 +489,7 @@ export function pickRenderer({ app, action, runOutput }: CascadeArgs): CascadeRe
 
   // Layer 3b: runtime-shape heuristics. This is what keeps
   // OpenAPI-ingested apps out of the JSON-dump fallback.
-  const shape = shapePick(runOutput);
+  const shape = shapePick(runOutput, { appSlug, runId });
   if (shape) {
     return { kind: 'shape', element: shape };
   }

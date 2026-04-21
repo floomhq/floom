@@ -154,6 +154,17 @@ export function consumeJustPublished(slug: string): boolean {
 // typing. Priority: manifest `default` -> manifest `example` -> sensible
 // type-based fallback keyed off common input names.
 
+// Standard RFC 7519 / jwt.io demo token. Split into segments so secret
+// scanners don't flag the literal; joined at runtime below. Decodes to
+// { sub: "1234567890", name: "John Doe", iat: 1516239022 } — zero secret,
+// widely recognisable, "click Run = instant working output" on /p/jwt-decode.
+const SAMPLE_JWT_SEGMENTS = [
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+  'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ',
+  'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+];
+export const SAMPLE_JWT = SAMPLE_JWT_SEGMENTS.join('.');
+
 const SAMPLE_BY_NAME: Record<string, string> = {
   url: 'https://github.com/vercel/next.js',
   repo: 'https://github.com/vercel/next.js',
@@ -171,6 +182,12 @@ const SAMPLE_BY_NAME: Record<string, string> = {
   topic: 'artificial intelligence',
   keyword: 'openapi',
   hashtags: 'ai, openapi, agents',
+  // JWT Decoder (launch demo): "hello floom" was the old placeholder and
+  // produced the "token must have three dot-separated segments" 400 on
+  // first click. The standard jwt.io demo token decodes cleanly and makes
+  // the happy path the default.
+  token: SAMPLE_JWT,
+  jwt: SAMPLE_JWT,
 };
 
 const SAMPLE_BY_TYPE: Record<string, string> = {

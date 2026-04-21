@@ -68,7 +68,12 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
   // returns `{ kind: 'fallback' }`.
   const cascade =
     !isError && appDetail
-      ? pickRenderer({ app: appDetail, action: run.action, runOutput: run.outputs })
+      ? pickRenderer({
+          app: appDetail,
+          action: run.action,
+          runOutput: run.outputs,
+          runId: run.id,
+        })
       : null;
 
   return (
@@ -400,6 +405,11 @@ function ErrorCard({
     ? `/me/apps/${appDetail.slug}`
     : null;
 
+  // User-input errors render as a compact, form-field-style card:
+  // smaller icon, tighter padding, less visual alarm. Upstream/platform
+  // errors keep the fuller alert card because they surface something the
+  // user can't control.
+  const isUserSeverity = copy.severity === 'user';
   return (
     <div
       data-testid="run-error-card"
@@ -409,18 +419,18 @@ function ErrorCard({
       style={{
         borderColor: palette.border,
         background: palette.bg,
-        padding: 16,
+        padding: isUserSeverity ? 14 : 16,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <WarnIcon color={palette.icon} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: isUserSeverity ? 10 : 12 }}>
+        <WarnIcon color={palette.icon} size={isUserSeverity ? 14 : 18} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p
             data-testid="run-error-headline"
             style={{
               margin: 0,
               fontWeight: 600,
-              fontSize: 15,
+              fontSize: isUserSeverity ? 14 : 15,
               color: palette.headline,
               lineHeight: 1.35,
             }}
@@ -669,12 +679,12 @@ function buildReportIssueUrl(run: RunRecord): string {
   return `https://github.com/floomhq/floom/issues/new?title=${title}&body=${body}&labels=bug,internal-error`;
 }
 
-function WarnIcon({ color }: { color: string }) {
+function WarnIcon({ color, size = 18 }: { color: string; size?: number }) {
   return (
     <svg
       aria-hidden
-      width="18"
-      height="18"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke={color}
@@ -702,8 +712,20 @@ function palettForSeverity(severity: ErrorCopy['severity']) {
       icon: '#c2321f',
     };
   }
-  // Upstream / user errors — warm amber. Not red: these are expected
-  // failure modes, not alarms.
+  if (severity === 'user') {
+    // User-input errors are not alarms — the user made a fixable choice
+    // and needs a calm "try again" nudge, not a warning-colored block.
+    // Neutral ink on near-white so it reads as a form-field message, not
+    // a full alert card. Matches the inline FieldError styling.
+    return {
+      bg: 'var(--card)',
+      border: 'var(--line)',
+      headline: 'var(--ink)',
+      sub: 'var(--muted)',
+      icon: '#8a6d3b',
+    };
+  }
+  // Upstream errors — warm amber. "The server hiccuped, try again."
   return {
     bg: '#fffaf0',
     border: '#f5d8a4',
@@ -925,17 +947,22 @@ function buildUserInputError(
   upstream: number | null,
   error: string,
 ): ErrorCopy {
-  const statusStr = upstream != null ? String(upstream) : 'a 4xx';
-  const msg = extractMessageFromError(error) || 'bad request';
+  const msg = extractMessageFromError(error) || 'the input wasn’t accepted';
   return {
     klass: 'user_input_error',
     meta: 'user_input_error',
     severity: 'user',
-    headline: 'The app didn’t accept your input.',
-    sub: `${appName} returned ${statusStr}: ${msg}. Review your input and try again.`,
+    // Softer lead — no "didn't accept", no app-name duplication (the
+    // surrounding card already identifies the app). Raw HTTP status +
+    // upstream message lives in the collapsed "Show details" block so
+    // it's available without crowding the headline.
+    headline: 'Check the input and try again.',
+    sub: `${msg[0]?.toUpperCase() ?? ''}${msg.slice(1)}.`,
   };
-  // run param kept for symmetry with other builders (future: field name).
+  // run + upstream kept for symmetry with other builders (future: field name).
   void run;
+  void upstream;
+  void appName;
 }
 
 function buildAuthError(appName: string, upstream: number | null): ErrorCopy {
