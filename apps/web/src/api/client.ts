@@ -532,6 +532,36 @@ export function socialSignInUrl(provider: 'github' | 'google', callbackURL = '/m
   return `/auth/sign-in/social?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`;
 }
 
+// Password reset (pre-launch P0): pair of helpers for the /forgot-password
+// request step and the /reset-password confirmation step. Backed by Better
+// Auth's built-in endpoints (password.mjs in better-auth@1.6.3):
+//   POST /auth/request-password-reset  { email, redirectTo }
+//   POST /auth/reset-password?token=…  { newPassword }
+// `redirectTo` is the frontend URL Better Auth redirects to after the
+// token-callback GET validates the token (it appends ?token=<token>).
+export function requestPasswordReset(body: {
+  email: string;
+  redirectTo: string;
+}): Promise<{ status: boolean; message?: string }> {
+  return request('/auth/request-password-reset', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function resetPassword(body: {
+  newPassword: string;
+  token: string;
+}): Promise<{ status: boolean }> {
+  return request(
+    `/auth/reset-password?token=${encodeURIComponent(body.token)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ newPassword: body.newPassword }),
+    },
+  );
+}
+
 // ---------- W4-minimal: runs history + detail ----------
 
 export function getMyRuns(limit = 50): Promise<{ runs: MeRunSummary[] }> {

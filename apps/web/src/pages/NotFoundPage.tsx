@@ -1,9 +1,47 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Logo } from '../components/Logo';
 import { PublicFooter } from '../components/public/PublicFooter';
 
+/**
+ * Imperatively append a `<meta name="robots" content="noindex,nofollow">`
+ * tag to document.head when the NotFoundPage mounts, and remove it on
+ * unmount. We can't change the server response status from a SPA route
+ * (that needs SSR), but the noindex meta keeps Googlebot / Bingbot from
+ * treating soft-404s as real pages in the index.
+ *
+ * A helmet library would be cleaner, but react-helmet-async is not a
+ * dep here and the whole behavior is ~15 lines. Uses a data-* marker
+ * so we don't duplicate the tag on StrictMode double-mounts.
+ */
+function useNoIndexMeta() {
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const MARKER = 'data-floom-notfound-robots';
+    // If a marker already exists (StrictMode double-effect), reuse it.
+    let tag = document.head.querySelector(
+      `meta[${MARKER}]`,
+    ) as HTMLMetaElement | null;
+    if (!tag) {
+      tag = document.createElement('meta');
+      tag.setAttribute('name', 'robots');
+      tag.setAttribute('content', 'noindex,nofollow');
+      tag.setAttribute(MARKER, '1');
+      document.head.appendChild(tag);
+    }
+    return () => {
+      // Remove only the tag we added. Leave any unrelated robots meta alone.
+      const existing = document.head.querySelector(
+        `meta[${MARKER}]`,
+      );
+      if (existing) existing.remove();
+    };
+  }, []);
+}
+
 export function NotFoundPage() {
+  useNoIndexMeta();
   return (
     <div className="page-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <TopBar />

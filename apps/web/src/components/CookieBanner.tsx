@@ -114,7 +114,6 @@ export function CookieBanner() {
           gap: 6,
         }}
       >
-        <span aria-hidden="true">🍪</span>
         Cookies
       </button>
     );

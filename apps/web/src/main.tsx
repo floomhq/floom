@@ -13,6 +13,8 @@ const AppPermalinkPage = lazy(() => import('./pages/AppPermalinkPage').then(m =>
 const PublicRunPermalinkPage = lazy(() => import('./pages/PublicRunPermalinkPage').then(m => ({ default: m.PublicRunPermalinkPage })));
 const ProtocolPage = lazy(() => import('./pages/ProtocolPage').then(m => ({ default: m.ProtocolPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then(m => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
 const MePage = lazy(() => import('./pages/MePage').then(m => ({ default: m.MePage })));
 const MeRunDetailPage = lazy(() => import('./pages/MeRunDetailPage').then(m => ({ default: m.MeRunDetailPage })));
 const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ default: m.MeSettingsPage })));
@@ -172,6 +174,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         {/* W4-minimal: auth pages */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<LoginPage />} />
+        {/* Pre-launch P0: real password-reset flow. Replaces the old
+            mailto link that dropped into Federico's inbox. Better Auth's
+            `sendResetPassword` hook emails the reset link; this page
+            handles the form side. */}
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         {/* W4-minimal: user dashboard */}
         <Route path="/me" element={<MePage />} />
         <Route path="/me/install" element={<MeInstallPage />} />
@@ -183,6 +191,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             because "run an owned app" is a /me (consumer) action, not a
             creator management action — the RunSurface lives there, and
             Studio links into it when needed. */}
+        {/* Index route: /me/apps was 404ing; /me already renders the
+            user's apps list in the sidebar, so redirect there. */}
+        <Route path="/me/apps" element={<Navigate to="/me" replace />} />
         <Route path="/me/apps/:slug" element={<StudioSlugRedirect />} />
         <Route path="/me/apps/:slug/secrets" element={<StudioSlugRedirect subpath="secrets" />} />
         <Route path="/me/apps/:slug/run" element={<MeAppRunPage />} />
