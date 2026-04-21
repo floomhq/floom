@@ -874,3 +874,34 @@ export function postFeedback(body: { text: string; email?: string; url?: string 
     body: JSON.stringify(body),
   });
 }
+
+// ---------- Smart feedback: paste -> parse -> submit ----------
+
+export type FeedbackBucket = 'bug' | 'feature' | 'question' | 'feedback';
+
+export interface ParsedFeedback {
+  title: string;
+  description: string;
+  bucket: FeedbackBucket;
+}
+
+export function parseFeedback(body: { text: string }): Promise<ParsedFeedback> {
+  return request<ParsedFeedback>('/api/feedback/parse', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function submitFeedback(body: {
+  title: string;
+  description: string;
+  bucket: FeedbackBucket;
+  email?: string;
+  notify?: boolean;
+  url?: string;
+}): Promise<{ issue_url: string; issue_number: number }> {
+  return request('/api/feedback/submit', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

@@ -663,6 +663,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
 `);
 
+// ---------- Smart feedback: email subscription on filed issues ----------
+// Each row is a "notify me when this GitHub issue closes" subscription
+// created by POST /api/feedback/submit. The store-only-for-launch scope
+// means no worker reads this table yet — a follow-up job will poll the
+// GitHub API for issue state and flip `resolved_at`. We still persist on
+// submit so the follow-up worker has a backlog to drain on day one.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS feedback_notifications (
+    id TEXT PRIMARY KEY,
+    github_issue_number INTEGER NOT NULL,
+    email TEXT NOT NULL,
+    user_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_feedback_notifications_issue
+    ON feedback_notifications(github_issue_number);
+  CREATE INDEX IF NOT EXISTS idx_feedback_notifications_email
+    ON feedback_notifications(email, resolved_at);
+`);
+
 // =====================================================================
 // ---------- Secrets policy (per-app creator-override vs user-vault) ---
 // =====================================================================
@@ -831,8 +852,9 @@ db.exec(`
 // v0.4.0 cleanup sprint lands v9: chat_threads → run_threads, chat_turns → run_turns.
 // secrets-policy lands v10: app_secret_policies + app_creator_secrets.
 // triggers (unified schedule + webhook) lands v11.
+// smart-feedback lands v12: feedback_notifications (subscribe-on-filed).
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 11) {
-  db.pragma('user_version = 11');
+if (currentUserVersion < 12) {
+  db.pragma('user_version = 12');
 }
