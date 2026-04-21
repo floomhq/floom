@@ -203,6 +203,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           maxWidth: 1180,
           gap: compact ? 10 : 16,
           padding: compact ? '0 20px' : undefined,
+          // #82 (2026-04-21): make the inner container a positioning
+          // context so the centred pill can sit absolutely in the
+          // middle, independent of left/right column widths. Without
+          // this, unequal sides (logo on the left vs Me+Docs+avatar on
+          // the right) visually shifted the pill off-centre.
+          position: 'relative',
         }}
       >
         {/* Logo: always links home. No context-specific destination,
@@ -258,14 +264,23 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
         )}
 
         {/* Middle slot: Store/Studio pill toggle (every visitor),
-            nothing on /login + /signup. */}
-        {showPill ? (
+            nothing on /login + /signup.
+            #82 (2026-04-21): the pill is absolutely centred within the
+            topbar-inner container so it sits exactly on the horizontal
+            midline regardless of how wide the logo or the right-side
+            nav (Me · Docs · avatar) get. The previous flex-1 + center
+            pattern left it optically off-centre whenever the two
+            flanks had different widths, which is always. */}
+        {showPill && (
           <nav
             className="topbar-links topbar-links-desktop topbar-pill-nav"
             aria-label="Mode switcher"
             style={{
-              flex: 1,
-              justifyContent: 'center',
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'auto',
             }}
           >
             <div style={pillWrapStyle} role="group" aria-label="Switch mode">
@@ -287,8 +302,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               </Link>
             </div>
           </nav>
-        ) : (
-          <div style={{ flex: 1 }} />
         )}
 
         <div
