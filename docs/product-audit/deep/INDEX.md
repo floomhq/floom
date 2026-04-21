@@ -37,3 +37,8 @@ Each **`pd-NN-*.md`** is produced by one background subagent. **Mandatory lens:*
 ## Second wave (narrower, deeper)
 
 Cross-cutting themes with extra failure-tree depth: [`../deeper/INDEX.md`](../deeper/INDEX.md) (`pd2-01`–`pd2-10`).
+
+## Sibling audit packs (parallel, same depth bar)
+
+- [`../../repo-hygiene-audit/INDEX.md`](../../repo-hygiene-audit/INDEX.md) — `rh-01`–`rh-06`: unused surface, TODO clusters, env drift, scripts inventory, dependency/workspace edges, test hygiene.
+- [`../../docs-audit/INDEX.md`](../../docs-audit/INDEX.md) — `da-01`–`da-05`: doc/code truth, first-30-minutes, OpenAPI+MCP narrative, link hygiene, legal/trust copy.
