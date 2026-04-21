@@ -20,6 +20,12 @@ import {
   ingestAppFromSpec,
   ingestAppFromUrl,
 } from '../services/openapi-ingest.js';
+import {
+  ingestAppFromDockerImage,
+  isDockerPublishEnabled,
+  DockerPublishDisabledError,
+  DOCKER_PUBLISH_FLAG,
+} from '../services/docker-image-ingest.js';
 import { resolveUserContext } from '../services/session.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { checkAppVisibility } from '../lib/auth.js';
@@ -352,9 +358,9 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
   server.registerTool(
     'ingest_app',
     {
-      title: 'Ingest App from OpenAPI',
+      title: 'Ingest App from OpenAPI or Docker image',
       description:
-        'Create or update a Floom app from an OpenAPI spec. Provide either `openapi_url` (fetched server-side) or `openapi_spec` (inline JSON object). Overrides: name, description, slug, category. Requires authentication in Cloud mode. Returns the persisted slug + permalink.',
+        'Create or update a Floom app. Two ingest modes: (1) OpenAPI — supply `openapi_url` or `openapi_spec`; (2) Docker image — supply `docker_image_ref` (gated behind FLOOM_ENABLE_DOCKER_PUBLISH=true, off by default). Exactly one mode per call. Overrides: name, description, slug, category. Requires authentication in Cloud mode. Returns the persisted slug + permalink.',
       inputSchema: {
         openapi_url: z
           .string()
@@ -370,17 +376,37 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
           .describe(
             'Inline OpenAPI spec object (alternative to openapi_url). Must declare servers[].url or swagger host for runtime calls to resolve.',
           ),
+        docker_image_ref: z
+          .string()
+          .min(1)
+          .max(512)
+          .optional()
+          .describe(
+            'Docker image reference (admin-gated). Example: "ghcr.io/floomhq/ig-nano-scout:latest". Requires FLOOM_ENABLE_DOCKER_PUBLISH=true on the server.',
+          ),
+        manifest: z
+          .record(z.unknown())
+          .optional()
+          .describe(
+            'Optional Floom manifest (v1 or v2) paired with docker_image_ref. If absent, a minimal single-action manifest is synthesized.',
+          ),
+        secret_bindings: z
+          .record(z.string())
+          .optional()
+          .describe(
+            'Map of container env var → vault key in the caller\'s user_secrets. Example: {"IG_SESSIONID": "instagram_session_id"}. Only honored with docker_image_ref.',
+          ),
         name: z
           .string()
           .min(1)
           .max(120)
           .optional()
-          .describe('Display name override. Defaults to spec.info.title.'),
+          .describe('Display name override. Defaults to spec.info.title or image repo name.'),
         description: z
           .string()
           .max(5000)
           .optional()
-          .describe('Description override. Defaults to spec.info.description.'),
+          .describe('Description override. Defaults to spec.info.description or image label.'),
         slug: z
           .string()
           .min(1)
@@ -395,6 +421,12 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
           .max(48)
           .optional()
           .describe('Category tag (e.g. "productivity", "data", "ai").'),
+        visibility: z
+          .enum(['public', 'private', 'auth-required'])
+          .optional()
+          .describe(
+            'Visibility override. Docker apps default to "private" in cloud mode, "public" in OSS local mode. OpenAPI apps keep existing defaults.',
+          ),
       },
     },
     async (args) => {
@@ -451,7 +483,13 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
 
       const openapi_url = typeof args.openapi_url === 'string' ? args.openapi_url : undefined;
       const openapi_spec = args.openapi_spec as Record<string, unknown> | undefined;
-      if (!openapi_url && !openapi_spec) {
+      const docker_image_ref =
+        typeof args.docker_image_ref === 'string' ? args.docker_image_ref : undefined;
+
+      // Exactly one ingest mode per call. Both provided ⇒ ambiguous;
+      // neither provided ⇒ nothing to ingest.
+      const modes = [openapi_url, openapi_spec, docker_image_ref].filter(Boolean).length;
+      if (modes === 0) {
         return {
           isError: true,
           content: [
@@ -460,7 +498,47 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
               text: JSON.stringify(
                 {
                   error: 'invalid_input',
-                  message: 'Supply either openapi_url or openapi_spec.',
+                  message: 'Supply one of: openapi_url, openapi_spec, docker_image_ref.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+      if (modes > 1) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: 'invalid_input',
+                  message:
+                    'Supply exactly one of: openapi_url, openapi_spec, docker_image_ref.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      // Docker-image path is admin-gated. Reject before touching the daemon so
+      // the schema field can advertise the capability without exposing it.
+      if (docker_image_ref && !isDockerPublishEnabled()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: 'docker_publish_disabled',
+                  message: `Docker-image ingest is disabled on this Floom instance. Set ${DOCKER_PUBLISH_FLAG}=true to enable.`,
                 },
                 null,
                 2,
@@ -480,7 +558,16 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
           author_user_id: ctx.user_id,
         };
         let result: { slug: string; name: string; created: boolean };
-        if (openapi_url) {
+        if (docker_image_ref) {
+          result = await ingestAppFromDockerImage({
+            ...common,
+            docker_image_ref,
+            manifest: args.manifest,
+            secret_bindings: args.secret_bindings as Record<string, string> | undefined,
+            visibility: args.visibility as 'public' | 'private' | 'auth-required' | undefined,
+            ctx,
+          });
+        } else if (openapi_url) {
           // Prefer URL path — ingestAppFromUrl fetches + dereferences.
           result = await ingestAppFromUrl({ ...common, openapi_url });
         } else {
@@ -511,6 +598,18 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
           ],
         };
       } catch (err) {
+        // Preserve error codes from known ingest failures so MCP clients can
+        // render targeted UI (docker_publish_disabled, pull_failed,
+        // invalid_image_ref, manifest_invalid, etc.). Fall back to a generic
+        // ingest_failed for everything else.
+        let errorCode = 'ingest_failed';
+        if (err instanceof DockerPublishDisabledError) {
+          errorCode = 'docker_publish_disabled';
+        } else if (
+          typeof (err as { code?: unknown }).code === 'string'
+        ) {
+          errorCode = (err as { code: string }).code;
+        }
         return {
           isError: true,
           content: [
@@ -518,7 +617,7 @@ function createAdminMcpServer({ ctx, ip }: AdminToolContext): McpServer {
               type: 'text' as const,
               text: JSON.stringify(
                 {
-                  error: 'ingest_failed',
+                  error: errorCode,
                   message: (err as Error).message || 'Ingest failed',
                 },
                 null,
