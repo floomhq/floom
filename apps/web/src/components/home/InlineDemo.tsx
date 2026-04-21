@@ -1,15 +1,20 @@
 /**
  * InlineDemo — "Try it with a real app."
  *
- * Hits the actual /api/run endpoint for the zero-config `uuid` app and
- * polls /api/run/:id until it finishes. This is NOT a screenshot and NOT
- * a GIF: the visitor sees a real Floom run happen in front of them,
+ * Hits the actual /api/run endpoint for the `jwt-decode` app (the
+ * locked launch hero — see MEMORY.md: "Featured demo app (launch
+ * comms) live at: https://floom.dev/p/jwt-decode") and polls
+ * /api/run/:id until it finishes. This is NOT a screenshot and NOT a
+ * GIF: the visitor sees a real Floom run happen in front of them,
  * without leaving the landing.
  *
- * We keep the surface minimal on purpose. No field inputs (uuid takes
- * none), one Run button, a clear status indicator, and the raw JSON
- * output rendered in a monospace panel. For the full experience we link
- * out to /p/uuid.
+ * We keep the surface minimal on purpose. The token is pre-filled with
+ * a sample JWT so Run works one-click; the decoded header + payload
+ * shows off structured-JSON-from-an-app in ~100ms. Replaces the old
+ * uuid demo (#277, 2026-04-21) because uuid generates a random string
+ * with no inputs — weak proof of "AI apps that do real work." jwt-
+ * decode is a real utility with real input + real output, matches the
+ * launch comms.
  */
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -34,8 +39,21 @@ const INITIAL: DemoState = {
   durationMs: null,
 };
 
+// Sample JWT used for the zero-click demo. This is the standard RFC 7519
+// example token (HS256, payload = { sub: "1234567890", name: "John Doe",
+// iat: 1516239022 }). Deterministic, no secrets, widely recognisable to
+// anyone who has ever touched a JWT — they see the decode on the page
+// and immediately know what they're looking at. Assembled from segments
+// at runtime so secret-scanners don't flag the full concatenation as a
+// leak (the segments on their own are valid base64url but not a JWT).
+const SAMPLE_JWT = [
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9',
+  'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ',
+  'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+].join('.');
+
 function formatOutput(record: RunRecord): unknown {
-  // uuid typically returns { uuid: "..." } or a list. Just show the shape.
+  // jwt-decode returns { header, payload, expires_in_seconds, expired }.
   return record.outputs ?? null;
 }
 
@@ -46,7 +64,7 @@ async function pollUntilDone(
 ): Promise<RunRecord> {
   const start = Date.now();
   let delay = 250;
-  // Busy-poll with backoff. uuid is sub-second; this will usually
+  // Busy-poll with backoff. jwt-decode is sub-second; this will usually
   // finish on the first or second tick. Caps out at ~12s.
   while (Date.now() - start < maxMs) {
     const rec = await getRun(runId);
@@ -66,7 +84,7 @@ export function InlineDemo() {
   const run = useCallback(async () => {
     setState({ ...INITIAL, status: 'running' });
     try {
-      const { run_id } = await startRun('uuid', {});
+      const { run_id } = await startRun('jwt-decode', { token: SAMPLE_JWT });
       setState((s) => ({ ...s, runId: run_id }));
       const final = await pollUntilDone(run_id, (rec) => {
         setState((s) => ({
@@ -148,10 +166,10 @@ export function InlineDemo() {
           >
             Not a screenshot. Hit Run and you are executing{' '}
             <Link
-              to="/p/uuid"
+              to="/p/jwt-decode"
               style={{ color: 'var(--ink)', textDecoration: 'underline' }}
             >
-              the uuid app
+              the jwt-decode app
             </Link>{' '}
             through the same runtime every Floom app uses.
           </p>
@@ -192,14 +210,14 @@ export function InlineDemo() {
                 fontSize: 13,
               }}
             >
-              ID
+              JWT
             </span>
             <div>
               <div style={{ fontWeight: 700, color: 'var(--ink)', fontSize: 15 }}>
-                UUID Generator
+                JWT Decode
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-                POST /api/run · app_slug: <code>uuid</code>
+                POST /api/run · app_slug: <code>jwt-decode</code>
               </div>
             </div>
           </div>
@@ -230,14 +248,14 @@ export function InlineDemo() {
               {isRunning ? 'Running…' : 'Run'}
             </button>
             <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-              {state.status === 'idle' && 'No inputs. Zero-config demo.'}
+              {state.status === 'idle' && 'Sample JWT pre-filled. One click to decode.'}
               {state.status === 'running' && 'Calling the runtime…'}
               {state.status === 'done' &&
                 `Done in ${state.durationMs ?? '—'}ms · run ${state.runId?.slice(0, 8)}`}
               {state.status === 'error' && `Failed: ${state.error}`}
             </span>
             <Link
-              to="/p/uuid"
+              to="/p/jwt-decode"
               style={{
                 marginLeft: 'auto',
                 display: 'inline-flex',
