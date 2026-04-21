@@ -58,7 +58,9 @@ const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ defaul
 import { IconSprite } from './components/IconSprite';
 import { CookieBanner } from './components/CookieBanner';
 import { RouteLoading } from './components/RouteLoading';
-import { primeSession } from './hooks/useSession';
+import { primeSession, refreshSession } from './hooks/useSession';
+import { initPostHog, identifyFromSession, track } from './lib/posthog';
+import type { SessionMePayload } from './lib/types';
 import './styles/globals.css';
 
 // Optional Sentry wiring. No-op when VITE_SENTRY_DSN is unset — the preview
@@ -100,6 +102,26 @@ if (SENTRY_DSN) {
 // Kick off the /api/session/me fetch as soon as the bundle loads so every
 // page's first render already has a value.
 primeSession();
+
+// PostHog analytics (launch-infra #4, 2026-04-20). No-op when
+// VITE_POSTHOG_KEY is unset; see apps/web/src/lib/posthog.ts. Init
+// happens before the first render so the landing_viewed event below fires
+// with the correct distinct_id.
+initPostHog();
+
+// Rebind PostHog identity whenever the session hook resolves. Covers
+// first-load + every login/logout transition. refreshSession returns the
+// same payload that useSession caches.
+void refreshSession().then((session: SessionMePayload | null) => {
+  identifyFromSession(session);
+});
+
+// Fire landing_viewed exactly once, on the first page that mounts. We
+// bind it to pathname===/ because that's the creator-hero route; other
+// deep-links (e.g. /apps, /p/:slug) are NOT landing views.
+if (typeof window !== 'undefined' && window.location.pathname === '/') {
+  track('landing_viewed');
+}
 
 // Wireframe v11 puts each app's creator view at /p/:slug/dashboard. Preview
 // wired it to /creator/:slug. Redirect the wireframe URL to the live one so

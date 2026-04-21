@@ -22,6 +22,7 @@ import { ProofRow } from '../components/home/ProofRow';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
 import * as api from '../api/client';
 import { useSession } from '../hooks/useSession';
+import { track } from '../lib/posthog';
 import type { DetectedApp, HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
 import { normalizeGithubUrl } from '../lib/githubUrl';
@@ -188,6 +189,15 @@ export function CreatorHeroPage() {
     setPublishedSlug(null);
 
     const rawLink = sourceLink.trim();
+    // Analytics (launch-infra #4): fire publish_clicked on every hero
+    // Publish CTA submit, before any redirects or detect calls. We
+    // forward `has_url` so the funnel distinguishes empty-form clicks
+    // (user just exploring /studio/build) from link-backed publishes.
+    track('publish_clicked', {
+      has_url: rawLink.length > 0,
+      authenticated: isAuthenticated,
+    });
+
     if (!rawLink) {
       navigate(
         isAuthenticated

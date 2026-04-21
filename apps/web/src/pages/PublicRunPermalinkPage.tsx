@@ -4,6 +4,7 @@ import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { RouteLoading } from '../components/RouteLoading';
 import { getRun } from '../api/client';
+import { track } from '../lib/posthog';
 import {
   classifyPermalinkLoadError,
   getPermalinkLoadErrorMessage,
@@ -20,6 +21,11 @@ export function PublicRunPermalinkPage() {
       setState('not_found');
       return;
     }
+    // Analytics (launch-infra #4): share_link_opened fires once per mount,
+    // before the getRun resolves. `/r/:runId` always implies a shared run
+    // link; `/p/:slug?run=...` mounts are handled inside AppPermalinkPage
+    // (not here) and are intentionally out of scope for this task's edit.
+    track('share_link_opened', { run_id: runId });
     let cancelled = false;
     setState('loading');
     getRun(runId)

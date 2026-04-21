@@ -18,6 +18,7 @@ import type {
   SecretPolicy,
   SecretPoliciesResponse,
 } from '../lib/types';
+import { track } from '../lib/posthog';
 
 const API_BASE = '';
 
@@ -115,6 +116,11 @@ export function startRun(
   threadId?: string,
   action?: string,
 ): Promise<{ run_id: string; status: string }> {
+  // Analytics (launch-infra #4): fire run_triggered BEFORE the POST lands
+  // so we capture even the runs that error out at submit time. The api
+  // response shape is {run_id, status}; we don't need to wait for it to
+  // classify the event.
+  track('run_triggered', { app_slug: appSlug, action: action ?? null });
   return request('/api/run', {
     method: 'POST',
     body: JSON.stringify({ app_slug: appSlug, inputs, thread_id: threadId, action }),
@@ -178,6 +184,19 @@ export function streamRun(runId: string, handlers: RunStreamHandlers): () => voi
   const markDone = (run: RunRecord) => {
     if (done) return;
     done = true;
+    // Analytics (launch-infra #4): classify the terminal state. `success`
+    // → run_succeeded; anything else (error / timeout / aborted) →
+    // run_failed, with the error_type forwarded when the server set one.
+    if (run.status === 'success') {
+      track('run_succeeded', { run_id: run.id, app_slug: run.app_slug ?? null });
+    } else {
+      track('run_failed', {
+        run_id: run.id,
+        app_slug: run.app_slug ?? null,
+        status: run.status,
+        error_type: run.error_type ?? null,
+      });
+    }
     handlers.onStatus?.(run);
     close();
   };
@@ -654,9 +673,18 @@ export function ingestApp(body: {
   category?: string;
   visibility?: 'public' | 'private' | 'auth-required';
 }): Promise<{ slug: string; name: string; created: boolean }> {
-  return request('/api/hub/ingest', {
+  // Analytics (launch-infra #4): publish_succeeded fires on the resolved
+  // 201 response. Failures propagate via the thrown ApiError and are not
+  // double-counted as publish_failed (that event isn't in the tracked set).
+  return request<{ slug: string; name: string; created: boolean }>('/api/hub/ingest', {
     method: 'POST',
     body: JSON.stringify(body),
+  }).then((result) => {
+    track('publish_succeeded', {
+      slug: result.slug,
+      created: result.created,
+    });
+    return result;
   });
 }
 

@@ -23,6 +23,7 @@ import {
   type AuthErrorCopy,
   type AuthErrorAction,
 } from '../lib/authErrors';
+import { track, identifyFromSession } from '../lib/posthog';
 
 type Mode = 'signin' | 'signup';
 
@@ -90,7 +91,14 @@ export function LoginPage() {
       } else {
         await api.signUpWithPassword(email, password, name || undefined);
       }
-      await refreshSession();
+      const session = await refreshSession();
+      // Analytics (launch-infra #4): rebind identity to the just-authed
+      // user, then fire signup_completed for the /signup branch only.
+      // Sign-in is out of the tracked-events set.
+      identifyFromSession(session);
+      if (mode === 'signup') {
+        track('signup_completed');
+      }
       navigate(nextPath, { replace: true });
     } catch (err) {
       setState('error');
