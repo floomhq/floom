@@ -309,6 +309,59 @@ export function IconSprite() {
         />
       </symbol>
 
+      {/* Launch-demo icons (#253 / #279, 2026-04-21). The three hero demos
+          (lead-scorer, competitor-analyzer, resume-screener) were falling
+          through to djb2-hashed generic fallbacks, which is what Federico's
+          "not sexy enough" audit was pointing at — the headline apps on the
+          landing had random icons. Explicit mappings now so the
+          visual identity matches the narrative. */}
+      <symbol id="app-lead-scorer" viewBox="0 0 24 24">
+        {/* Lucide `target` — scoring / fit / bullseye for "score CSV leads". */}
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="12" cy="12" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+      </symbol>
+      <symbol id="app-competitor-analyzer" viewBox="0 0 24 24">
+        {/* Lucide `scale` / balance — comparative analysis across competitors. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 3v18M5 21h14M6 8L3 14h6L6 8zM18 8l-3 6h6l-3-6z"
+        />
+      </symbol>
+      <symbol id="app-resume-screener" viewBox="0 0 24 24">
+        {/* Lucide `user-check` inside a document outline — rank CVs against a
+            JD, tick the shortlist. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
+        />
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M14 2v6h6"
+        />
+        <circle cx="11" cy="13" r="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M8 18c.5-1.5 1.6-2.5 3-2.5s2.5 1 3 2.5M14 18l2 2 4-4"
+        />
+      </symbol>
+
       {/* Default fallback app icon */}
       <symbol id="app-default" viewBox="0 0 24 24">
         <rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -473,6 +526,10 @@ export function iconForSlug(slug: string): string {
     'json-format': 'app-json-format',
     'jwt-decode': 'app-jwt-decode',
     'word-count': 'app-word-count',
+    // Launch demos (#253 / #279)
+    'lead-scorer': 'app-lead-scorer',
+    'competitor-analyzer': 'app-competitor-analyzer',
+    'resume-screener': 'app-resume-screener',
   };
   const explicit = map[slug];
   if (explicit) return explicit;

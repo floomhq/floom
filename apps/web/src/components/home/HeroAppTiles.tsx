@@ -123,18 +123,24 @@ export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
               el.style.transform = 'translateY(0)';
             }}
           >
+            {/* #279 launch polish (2026-04-21): radial gradient + inset
+                highlight so the chip reads as a physical pill, not a flat
+                square. Matches AppStripe's goosebumps tint. */}
             <span
               aria-hidden="true"
               style={{
                 width: 32,
                 height: 32,
                 borderRadius: 9,
-                background: '#ecfdf5',
+                background:
+                  'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
                 color: '#047857',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
+                boxShadow:
+                  'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
               }}
             >
               <AppIcon slug={t.slug} size={18} color="#047857" />
