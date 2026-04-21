@@ -67,13 +67,23 @@ export function FeedbackButton() {
 
   return (
     <>
-      {/* Landing visual audit 2026-04-18: on 375px viewports the floating
-          trigger overlapped the hero "Try it" button and /imprint's
-          first body section. Hide the trigger on small screens; the
-          modal itself stays reachable via ?feedback=open deep links. */}
+      {/* Pre-launch: feedback must be reachable on mobile too. We previously
+          hid the trigger on ≤640px to avoid overlapping hero CTAs. Keep it
+          visible but shrink it to a compact icon-only pill in the
+          bottom-left corner so it doesn't cover the viewport-centered
+          CTAs. On desktop it remains the full bottom-right labelled pill. */}
       <style>{`
         @media (max-width: 640px) {
-          [data-testid="feedback-trigger"] { display: none !important; }
+          [data-testid="feedback-trigger"] {
+            bottom: 12px !important;
+            right: auto !important;
+            left: 12px !important;
+            padding: 7px 10px !important;
+            font-size: 12px !important;
+          }
+          [data-testid="feedback-trigger"] .feedback-trigger-label {
+            display: none;
+          }
         }
       `}</style>
       <button
@@ -109,7 +119,7 @@ export function FeedbackButton() {
             strokeLinejoin="round"
           />
         </svg>
-        Feedback
+        <span className="feedback-trigger-label">Feedback</span>
       </button>
 
       {open && (
