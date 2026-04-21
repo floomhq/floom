@@ -14,12 +14,45 @@ import { checkAppVisibility, hasValidAdminBearer } from '../lib/auth.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
+import { extractIp } from '../lib/rate-limit.js';
+import {
+  byokRequiredResponse,
+  decideByok,
+  isByokGated,
+  recordFreeRun,
+} from '../lib/byok-gate.js';
 import type {
   AppRecord,
   NormalizedManifest,
   RunRecord,
   SessionContext,
 } from '../types.js';
+
+/**
+ * BYOK header: callers can pass their own Gemini API key on a per-run basis.
+ * When present AND the app is in BYOK_GATED_SLUGS, the server:
+ *   1. Does NOT count the run against the 5/day free budget.
+ *   2. Injects the key as a per-call secret (GEMINI_API_KEY).
+ *   3. Never logs or persists the value (it's merged into mergedSecrets for
+ *      this single dispatchRun call only).
+ *
+ * Header name kept lowercase on read (Hono normalizes) and well-known so
+ * the frontend and any curl-user can discover it in the 429 payload docs.
+ */
+const USER_API_KEY_HEADER = 'x-user-api-key';
+
+function extractUserApiKey(c: Context): string | null {
+  const raw = c.req.header(USER_API_KEY_HEADER);
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  // Minimum plausible length for a Google AI Studio key (prefix "AIza" +
+  // 35 chars). We don't hard-validate here — the dry-run path inside the
+  // container is the real authority on whether the key works — but a
+  // blank/near-blank header should fall through to free-quota instead of
+  // being treated as "user provided a key".
+  if (trimmed.length < 20) return null;
+  return trimmed;
+}
 
 export const runRouter = new Hono();
 
@@ -206,6 +239,39 @@ runRouter.post('/', async (c) => {
     return c.json({ error: e.message, field: e.field }, 400);
   }
 
+  // Launch-week BYOK gate (2026-04-21).
+  // Scoped to the 3 hero demo apps (lead-scorer / competitor-analyzer /
+  // resume-screener). First 5 anon runs per IP per 24h are Floom-paid; after
+  // that the caller must provide X-User-Api-Key (their own Gemini key).
+  // Admin bearers bypass (internal ops / monitoring). Everyone else is
+  // treated the same for launch — cloud auth'd callers share the same budget
+  // as anon. We can split later if abuse materializes.
+  const bypassBecauseAdmin = hasValidAdminBearer(c);
+  const userApiKey = extractUserApiKey(c);
+  const perCallSecrets: Record<string, string> = {};
+  if (isByokGated(row.slug) && !bypassBecauseAdmin) {
+    const ip = extractIp(c);
+    const decision = decideByok(ip, row.slug, userApiKey !== null);
+    if (decision.block) {
+      return c.json(
+        byokRequiredResponse(row.slug, decision.usage, decision.limit),
+        429,
+      );
+    }
+    if (userApiKey) {
+      // BYOK path: inject the caller's key for this run only. perCallSecrets
+      // is transient — dispatchRun merges it into the per-run secrets bag
+      // and never writes it to disk. Do NOT record against the free budget;
+      // the user is paying their own API bill.
+      perCallSecrets.GEMINI_API_KEY = userApiKey;
+    } else {
+      // Free path: count this run against the 24h budget BEFORE dispatch so
+      // a burst of 6 concurrent requests can't all slip through the
+      // usage<5 check.
+      recordFreeRun(ip, row.slug);
+    }
+  }
+
   // W4M.1: scope the run by the current session so /api/me/runs can filter
   // by user_id / device_id. `ctx` was already resolved above for the
   // visibility check (private apps need the caller's user_id).
@@ -230,7 +296,18 @@ runRouter.post('/', async (c) => {
   // runner falls back to the synthetic 'local' workspace and every
   // authenticated user's /api/secrets POST is effectively invisible to
   // their own runs.
-  dispatchRun(row, manifest, runId, actionName, validated, undefined, ctx);
+  //
+  // BYOK key (if any) rides in as perCallSecrets — highest-precedence slot
+  // in dispatchRun's merge order. Transient, never persisted.
+  dispatchRun(
+    row,
+    manifest,
+    runId,
+    actionName,
+    validated,
+    Object.keys(perCallSecrets).length > 0 ? perCallSecrets : undefined,
+    ctx,
+  );
 
   return c.json({ run_id: runId, status: 'pending' });
 });
@@ -528,6 +605,29 @@ slugRunRouter.post('/', async (c) => {
     return c.json({ error: e.message, field: e.field }, 400);
   }
 
+  // Launch-week BYOK gate (2026-04-21). Mirrors POST /api/run above —
+  // the slug-based endpoint is the same product surface (e.g. curl users,
+  // self-host), so it shares the same 5-free-runs-then-BYOK rule for the
+  // 3 hero demo apps.
+  const bypassBecauseAdminSlug = hasValidAdminBearer(c);
+  const userApiKeySlug = extractUserApiKey(c);
+  const perCallSecretsSlug: Record<string, string> = {};
+  if (isByokGated(row.slug) && !bypassBecauseAdminSlug) {
+    const ip = extractIp(c);
+    const decision = decideByok(ip, row.slug, userApiKeySlug !== null);
+    if (decision.block) {
+      return c.json(
+        byokRequiredResponse(row.slug, decision.usage, decision.limit),
+        429,
+      );
+    }
+    if (userApiKeySlug) {
+      perCallSecretsSlug.GEMINI_API_KEY = userApiKeySlug;
+    } else {
+      recordFreeRun(ip, row.slug);
+    }
+  }
+
   // W4M.1: scope the run by the current session. `ctx` already resolved
   // for the visibility check above.
   const runId = newRunId();
@@ -549,7 +649,15 @@ slugRunRouter.post('/', async (c) => {
   // runner falls back to the synthetic 'local' workspace and every
   // authenticated user's /api/secrets POST is effectively invisible to
   // their own runs.
-  dispatchRun(row, manifest, runId, actionName, validated, undefined, ctx);
+  dispatchRun(
+    row,
+    manifest,
+    runId,
+    actionName,
+    validated,
+    Object.keys(perCallSecretsSlug).length > 0 ? perCallSecretsSlug : undefined,
+    ctx,
+  );
 
   return c.json({ run_id: runId, status: 'pending' });
 });
