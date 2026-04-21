@@ -66,12 +66,18 @@ export function LoginPage() {
   }, [nextPath]);
 
   // OAuth social sign-in (Google/GitHub). Buttons render only when the
-  // server reports the provider is configured. Fires a top-level navigation
-  // to the Better Auth social endpoint; the redirect chain ends back at
-  // /me (or `nextPath`) with the session cookie set.
-  function signInWithProvider(provider: 'github' | 'google') {
-    const url = api.socialSignInUrl(provider, nextPath);
-    window.location.assign(url);
+  // server reports the provider is configured. `signInWithSocial` POSTs
+  // to Better Auth, reads the provider consent URL + state cookie, then
+  // top-level-navigates so the redirect chain carries the cookie back to
+  // /auth/callback/<provider>. GET on /auth/sign-in/social returns 404
+  // (POST-only endpoint) — that was the 2026-04-21 launch bug.
+  async function signInWithProvider(provider: 'github' | 'google') {
+    try {
+      await api.signInWithSocial(provider, nextPath);
+    } catch (err) {
+      setState('error');
+      setErrorCopy(friendlyAuthError(err as api.ApiError, 'signin'));
+    }
   }
 
   async function handlePasswordSubmit(e: React.FormEvent) {

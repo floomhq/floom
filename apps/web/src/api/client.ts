@@ -526,10 +526,40 @@ export function deleteAuthUser(body: {
   });
 }
 
-// Social sign-in: Better Auth expects a redirect-mode GET, but the UI
-// fires window.location. We expose the URL here for callers to read.
-export function socialSignInUrl(provider: 'github' | 'google', callbackURL = '/me'): string {
-  return `/auth/sign-in/social?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`;
+// Social sign-in (P0 launch fix 2026-04-21): Better Auth's
+// `/auth/sign-in/social` endpoint is POST-only. The earlier
+// `window.location.assign('/auth/sign-in/social?...')` helper fired a
+// GET, which Better Auth answers with 404 — that was the launch-blocking
+// "OAuth 404" bug Vikas reported.
+//
+// The correct shape is: POST the provider payload, get `{ url, redirect }`
+// back (the Google/GitHub consent URL + state cookie set by the server),
+// then top-level-navigate to that URL. Better Auth's browser SDK does the
+// same thing internally; we inline it here to avoid pulling the SDK for
+// one call.
+export async function signInWithSocial(
+  provider: 'github' | 'google',
+  callbackURL = '/me',
+): Promise<void> {
+  const res = await request<{ url?: string; redirect?: boolean }>(
+    '/auth/sign-in/social',
+    {
+      method: 'POST',
+      body: JSON.stringify({ provider, callbackURL }),
+    },
+  );
+  if (!res?.url) {
+    throw new ApiError(
+      'OAuth provider did not return a redirect URL',
+      500,
+      'oauth_no_url',
+      res,
+    );
+  }
+  // Top-level navigation so the provider's state cookie (set by the POST
+  // above, scoped to the current host) is carried into the subsequent
+  // redirect chain back to /auth/callback/<provider>.
+  window.location.assign(res.url);
 }
 
 // Password reset (pre-launch P0): pair of helpers for the /forgot-password
