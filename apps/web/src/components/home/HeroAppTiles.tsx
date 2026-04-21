@@ -62,12 +62,17 @@ function clampToWordBoundary(text: string, cap: number): string {
 export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
   if (tiles.length === 0) return null;
 
-  // Always show 4 tiles. When more apps exist, the 4th tile gets a
-  // "+N more" footer that links to the full directory. Keeps the grid
-  // a predictable 4×1 (desktop) / 2×2 (mobile) at every breakpoint.
+  // Show up to 4 tiles. When the roster has fewer (post-2026-04-21
+  // curation: only 3 showcase demos), render exactly that many — no
+  // ghost slots, no padding. When more apps exist, the last tile gets
+  // a "+N more" footer that links to the full directory. If the
+  // visible roster already covers the entire public hub, the overflow
+  // badge is suppressed regardless of DISPLAYED_TILE_COUNT, so we
+  // never say "+0 more" or imply hidden apps that don't exist.
   const shown = tiles.slice(0, DISPLAYED_TILE_COUNT);
   const effectiveTotal = typeof totalCount === 'number' ? totalCount : tiles.length;
-  const overflowCount = Math.max(0, effectiveTotal - DISPLAYED_TILE_COUNT);
+  const hasHiddenApps = effectiveTotal > shown.length;
+  const overflowCount = hasHiddenApps ? effectiveTotal - shown.length : 0;
 
   return (
     <div
