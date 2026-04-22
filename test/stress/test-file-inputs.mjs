@@ -157,6 +157,7 @@ console.log('server materializeFileInputs');
   // No envelopes → zero-overhead no-op.
   const r = materializeFileInputs('run-empty', { foo: 'bar' });
   log('no envelopes: hostDir empty', r.hostDir === '');
+  log('no envelopes: mountSource empty', r.mountSource === '');
   log('no envelopes: inputs unchanged', r.inputs.foo === 'bar');
   r.cleanup(); // safe no-op
 }
@@ -165,6 +166,7 @@ console.log('server materializeFileInputs');
   // Single envelope at top level.
   const r = materializeFileInputs('run-1', { data: envelope });
   log('envelope: hostDir populated', r.hostDir.length > 0 && existsSync(r.hostDir));
+  log('envelope: mountSource defaults to hostDir', r.mountSource === r.hostDir);
   log(
     'envelope: input rewritten to container path',
     typeof r.inputs.data === 'string' &&
@@ -213,6 +215,38 @@ console.log('server materializeFileInputs');
   log('mime→ext: pdf envelope picks .pdf',
     typeof r.inputs.doc === 'string' && r.inputs.doc.endsWith('.pdf'));
   r.cleanup();
+}
+
+{
+  // Containerized-server mode: write into a bind-mounted container path
+  // but tell Docker to mount the host-side mirror of that directory.
+  const prevDir = process.env.FLOOM_FILE_INPUTS_DIR;
+  const prevHostDir = process.env.FLOOM_FILE_INPUTS_HOST_DIR;
+  const containerRoot = mkdtempSync(join(tmpdir(), 'floom-file-inputs-container-'));
+  process.env.FLOOM_FILE_INPUTS_DIR = containerRoot;
+  process.env.FLOOM_FILE_INPUTS_HOST_DIR = '/opt/floom-preview-file-inputs';
+  try {
+    const r = materializeFileInputs('run-shared', { data: envelope });
+    log(
+      'shared-root: hostDir uses FLOOM_FILE_INPUTS_DIR',
+      r.hostDir === join(containerRoot, 'floom-run-shared'),
+      r.hostDir,
+    );
+    log(
+      'shared-root: mountSource uses FLOOM_FILE_INPUTS_HOST_DIR',
+      r.mountSource === '/opt/floom-preview-file-inputs/floom-run-shared',
+      r.mountSource,
+    );
+    const hostFile = r.hostDir + '/' + r.inputs.data.slice(CONTAINER_INPUTS_DIR.length + 1);
+    log('shared-root: file materialized under container-visible dir', existsSync(hostFile), hostFile);
+    r.cleanup();
+    log('shared-root: cleanup removes container-visible dir', !existsSync(r.hostDir));
+  } finally {
+    if (prevDir === undefined) delete process.env.FLOOM_FILE_INPUTS_DIR;
+    else process.env.FLOOM_FILE_INPUTS_DIR = prevDir;
+    if (prevHostDir === undefined) delete process.env.FLOOM_FILE_INPUTS_HOST_DIR;
+    else process.env.FLOOM_FILE_INPUTS_HOST_DIR = prevHostDir;
+  }
 }
 
 // -------------------------------------------------------------

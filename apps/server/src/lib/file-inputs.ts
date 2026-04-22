@@ -216,13 +216,33 @@ export interface MaterializedInputs {
   /** The rewritten inputs tree — every FileEnvelope has been replaced
    *  with its in-container path (CONTAINER_INPUTS_DIR/<name>.<ext>). */
   inputs: Record<string, unknown>;
-  /** Absolute host path of the temp dir holding the materialized files.
-   *  Mount this into the container at CONTAINER_INPUTS_DIR as read-only.
-   *  Empty string when there were no file envelopes to materialize. */
+  /** Absolute path on the current filesystem where the materialized files
+   *  were written. Empty string when there were no file envelopes. */
   hostDir: string;
+  /** Absolute path the Docker daemon must bind into the child app
+   *  container. In host mode this matches hostDir; in containerized
+   *  server mode it points at the host-side mirror of hostDir. */
+  mountSource: string;
   /** Cleanup function the caller MUST invoke once the container has
    *  exited. No-op when hostDir is empty. Safe to call multiple times. */
   cleanup: () => void;
+}
+
+function resolveMaterializedDirs(runId: string): {
+  hostDir: string;
+  mountSource: string;
+} {
+  const suffix = `floom-${runId}`;
+  const containerRoot = process.env.FLOOM_FILE_INPUTS_DIR?.trim();
+  const hostRoot = process.env.FLOOM_FILE_INPUTS_HOST_DIR?.trim();
+  if (containerRoot) {
+    return {
+      hostDir: join(containerRoot, suffix),
+      mountSource: join(hostRoot || containerRoot, suffix),
+    };
+  }
+  const root = join(tmpdir(), suffix);
+  return { hostDir: root, mountSource: root };
 }
 
 /**
@@ -249,10 +269,10 @@ export function materializeFileInputs(
     return null; // return value ignored on this pass
   });
   if (envelopeCount === 0) {
-    return { inputs, hostDir: '', cleanup: () => {} };
+    return { inputs, hostDir: '', mountSource: '', cleanup: () => {} };
   }
 
-  const hostDir = join(tmpdir(), `floom-${runId}`);
+  const { hostDir, mountSource } = resolveMaterializedDirs(runId);
   mkdirSync(hostDir, { recursive: true, mode: 0o700 });
 
   // Track basenames used so two file inputs that collapse to the same
@@ -290,5 +310,5 @@ export function materializeFileInputs(
     }
   };
 
-  return { inputs: rewritten, hostDir, cleanup };
+  return { inputs: rewritten, hostDir, mountSource, cleanup };
 }

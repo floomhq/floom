@@ -189,11 +189,11 @@ export async function runAppContainer(opts: {
   // non-file apps keep their existing bind profile.
   const materialized = materializeFileInputs(opts.runId, opts.inputs);
   const binds: string[] = [];
-  if (materialized.hostDir) {
+  if (materialized.mountSource) {
     // Read-only bind: the app can read but never overwrite its inputs.
     // This also keeps the host-side envelope off the container FS so a
     // malicious app can't exfiltrate another run's files by reading /tmp.
-    binds.push(`${materialized.hostDir}:${CONTAINER_INPUTS_DIR}:ro`);
+    binds.push(`${materialized.mountSource}:${CONTAINER_INPUTS_DIR}:ro`);
   }
   const configArg = JSON.stringify({
     action: opts.action,
