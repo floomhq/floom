@@ -404,6 +404,7 @@ export function MePage() {
       title="Me · Floom"
       contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
       allowSignedOutShell={signedOutPreview}
+      noIndex
     >
       <div data-testid="me-page" style={s.main}>
         <header style={s.header}>

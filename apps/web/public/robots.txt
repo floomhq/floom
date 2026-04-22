@@ -1,4 +1,14 @@
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /auth/
+Disallow: /mcp/
+Disallow: /hook/
+Disallow: /renderer/
+Disallow: /studio/
+Disallow: /me/
+Disallow: /r/
+Disallow: /forgot-password
+Disallow: /reset-password
 
 Sitemap: https://floom.dev/sitemap.xml

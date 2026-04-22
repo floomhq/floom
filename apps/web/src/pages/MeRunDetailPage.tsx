@@ -25,7 +25,7 @@ export function MeRunDetailPage() {
   }, [runId]);
 
   return (
-    <PageShell requireAuth="cloud" title="Run detail | Floom">
+    <PageShell requireAuth="cloud" title="Run detail | Floom" noIndex>
       <div data-testid="run-detail" style={{ maxWidth: 900 }}>
         <Link
           to="/me"

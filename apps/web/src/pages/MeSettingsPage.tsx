@@ -238,7 +238,7 @@ export function MeSettingsPage() {
   };
 
   return (
-    <PageShell requireAuth="cloud" title="Settings | Floom">
+    <PageShell requireAuth="cloud" title="Settings | Floom" noIndex>
       <div data-testid="settings-page" style={{ maxWidth: 620 }}>
         <div
           style={{

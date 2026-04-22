@@ -48,6 +48,13 @@ interface Props {
    *  doesn't render. StudioLayout passes this to open its sidebar
    *  drawer. */
   onStudioMenuOpen?: () => void;
+  /** Emit `<meta name="robots" content="noindex,nofollow">` while this
+   *  layout is mounted. Used for auth-gated surfaces (Studio, /me/*,
+   *  password reset) that shouldn't appear in search results even if a
+   *  crawler ignores robots.txt. Tag is removed on unmount so navigating
+   *  from a noindex route back to a public page doesn't bleed the
+   *  directive across. Added 2026-04-22 for launch SEO pass. */
+  noIndex?: boolean;
 }
 
 export function BaseLayout({
@@ -61,6 +68,7 @@ export function BaseLayout({
   rootBackground,
   bareMain = false,
   onStudioMenuOpen,
+  noIndex = false,
 }: Props) {
   const { data, loading, error } = useSession();
   const navigate = useNavigate();
@@ -88,6 +96,30 @@ export function BaseLayout({
   useEffect(() => {
     if (title) document.title = title;
   }, [title]);
+
+  // noindex meta for auth-gated pages (Studio, /me/*, password reset).
+  // Belt-and-suspenders with robots.txt — crawlers that skip robots.txt
+  // still honor the meta tag. Uses a data-* marker so we only remove the
+  // tag we added (won't disturb NotFoundPage's own noindex marker).
+  useEffect(() => {
+    if (!noIndex) return;
+    if (typeof document === 'undefined') return;
+    const MARKER = 'data-floom-base-noindex';
+    let tag = document.head.querySelector(
+      `meta[${MARKER}]`,
+    ) as HTMLMetaElement | null;
+    if (!tag) {
+      tag = document.createElement('meta');
+      tag.setAttribute('name', 'robots');
+      tag.setAttribute('content', 'noindex,nofollow');
+      tag.setAttribute(MARKER, '1');
+      document.head.appendChild(tag);
+    }
+    return () => {
+      const existing = document.head.querySelector(`meta[${MARKER}]`);
+      if (existing) existing.remove();
+    };
+  }, [noIndex]);
 
   const rootStyle: CSSProperties | undefined = rootBackground
     ? { background: rootBackground }

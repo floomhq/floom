@@ -362,6 +362,7 @@ export function MeAppSecretsPage({
       requireAuth="cloud"
       title={app ? `${app.name} · Secrets · Floom` : 'Secrets · Floom'}
       contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
+      noIndex
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 'calc(100vh - 56px)' }}>
         <MeRail activeAppSlug={slug} />

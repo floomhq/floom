@@ -57,7 +57,7 @@ export function MeInstallPage() {
   }
 
   return (
-    <PageShell requireAuth="cloud" title="Install to Claude | Floom">
+    <PageShell requireAuth="cloud" title="Install to Claude | Floom" noIndex>
       <div data-testid="install-page" style={{ maxWidth: 680 }}>
         <nav
           aria-label="Breadcrumb"

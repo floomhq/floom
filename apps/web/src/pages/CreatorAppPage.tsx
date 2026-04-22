@@ -72,7 +72,7 @@ export function CreatorAppPage() {
   }, [slug]);
 
   return (
-    <PageShell requireAuth="cloud" title={`${slug} activity | Floom`}>
+    <PageShell requireAuth="cloud" title={`${slug} activity | Floom`} noIndex>
       <div data-testid="creator-app-page" style={{ maxWidth: 960 }}>
         <Link
           to="/creator"

@@ -711,10 +711,68 @@ if (webDist) {
       return 'The Floom Protocol · Floom';
     }
     if (pathname.startsWith('/r/')) return 'Run · Floom';
+    if (pathname === '/legal') return 'Legal · Floom';
     if (pathname === '/imprint') return 'Imprint · Floom';
     if (pathname === '/privacy') return 'Privacy · Floom';
     if (pathname === '/terms') return 'Terms · Floom';
     if (pathname === '/cookies') return 'Cookies · Floom';
+    return null;
+  }
+
+  // Map a non-slug pathname to its OG/Twitter description + short social
+  // title. Added 2026-04-22 for launch SEO pass — before this, every
+  // non-slug page (Store, Pricing, About, Protocol, etc.) shared the
+  // landing OG description, so every social preview looked identical.
+  // Returns null for paths we haven't claimed (falls back to landing copy).
+  type SocialMeta = { ogTitle: string; description: string };
+  function socialMetaForPath(pathname: string): SocialMeta | null {
+    if (pathname === '/apps' || pathname === '/apps/' || pathname === '/store' || pathname === '/store/') {
+      return {
+        ogTitle: 'Apps · Floom',
+        description:
+          'Browse AI apps built on Floom. Run them in your browser, install them into Claude, or fork and publish your own.',
+      };
+    }
+    if (pathname === '/about' || pathname === '/about/') {
+      return {
+        ogTitle: 'About Floom',
+        description:
+          'Floom turns the thing you built on localhost into a real app with a real URL so other people can actually use it.',
+      };
+    }
+    if (pathname === '/pricing' || pathname === '/pricing/') {
+      return {
+        ogTitle: 'Pricing · Floom',
+        description:
+          'Free during beta. Self-host free forever. Paid cloud plans coming soon.',
+      };
+    }
+    if (pathname === '/install' || pathname === '/install/') {
+      return {
+        ogTitle: 'Install the Floom CLI',
+        description:
+          'One command to install the Floom CLI. Publish apps, run them locally, and link them to Claude in seconds.',
+      };
+    }
+    if (pathname === '/protocol' || pathname.startsWith('/protocol/') || pathname.startsWith('/protocol#')) {
+      return {
+        ogTitle: 'The Floom Protocol',
+        description:
+          'The open protocol + runtime for agentic work. Vibe-coding speed. Production-grade safety. Read the spec.',
+      };
+    }
+    if (pathname === '/login') {
+      return {
+        ogTitle: 'Sign in · Floom',
+        description: 'Sign in to Floom to publish, run, and manage your AI apps.',
+      };
+    }
+    if (pathname === '/signup') {
+      return {
+        ogTitle: 'Create account · Floom',
+        description: 'Create a free Floom account to publish and run AI apps.',
+      };
+    }
     return null;
   }
 
@@ -748,6 +806,45 @@ if (webDist) {
     let out = rewriteCanonical(html, pathname);
     const title = titleForPath(pathname);
     if (title) out = rewriteTitle(out, title);
+
+    // Per-route og:url so crawlers don't see every page claiming it is "/".
+    if (publicOrigin) {
+      out = out.replace(
+        /<meta property="og:url" content="[^"]*"/,
+        `<meta property="og:url" content="${publicOrigin}${pathname === '/index.html' ? '/' : pathname}"`,
+      );
+    }
+
+    // Per-route og:title + og:description + twitter equivalents. Before
+    // 2026-04-22 every non-slug page inherited the landing OG block, so
+    // every social preview read "Ship AI apps fast" regardless of page.
+    const social = socialMetaForPath(pathname);
+    if (social) {
+      const t = social.ogTitle.replace(/"/g, '&quot;');
+      const d = social.description.replace(/"/g, '&quot;').slice(0, 300);
+      out = out.replace(
+        /<meta property="og:title" content="[^"]*"/,
+        `<meta property="og:title" content="${t}"`,
+      );
+      out = out.replace(
+        /<meta property="og:description" content="[^"]*"/,
+        `<meta property="og:description" content="${d}"`,
+      );
+      out = out.replace(
+        /<meta name="twitter:title" content="[^"]*"/,
+        `<meta name="twitter:title" content="${t}"`,
+      );
+      out = out.replace(
+        /<meta name="twitter:description" content="[^"]*"/,
+        `<meta name="twitter:description" content="${d}"`,
+      );
+      // Also rewrite <meta name="description"> so SERP snippets match.
+      out = out.replace(
+        /<meta name="description" content="[^"]*"/,
+        `<meta name="description" content="${d}"`,
+      );
+    }
+
     // 2026-04-20 (about-page ship): the SPA fallback + <noscript> block in
     // index.html bake the landing H1 ("Production infrastructure for AI
     // apps that do real work."). Crawlers + curl-based verification read

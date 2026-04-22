@@ -118,7 +118,7 @@ export function CreatorPage() {
   }
 
   return (
-    <PageShell requireAuth="cloud" title="Creator dashboard | Floom">
+    <PageShell requireAuth="cloud" title="Creator dashboard | Floom" noIndex>
       <div data-testid="creator-page">
         <div
           style={{

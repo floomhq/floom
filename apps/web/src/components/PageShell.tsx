@@ -20,6 +20,9 @@ interface Props {
   title?: string;
   contentStyle?: React.CSSProperties;
   allowSignedOutShell?: boolean;
+  /** Forwarded to BaseLayout. Pages that are auth-gated and don't
+   *  belong in search results (/me/*, password reset) set this to true. */
+  noIndex?: boolean;
 }
 
 export function PageShell({
@@ -28,12 +31,14 @@ export function PageShell({
   title,
   contentStyle,
   allowSignedOutShell = false,
+  noIndex = false,
 }: Props) {
   return (
     <BaseLayout
       title={title}
       requireAuth={requireAuth}
       allowSignedOutShell={allowSignedOutShell}
+      noIndex={noIndex}
       footer={<Footer />}
       mainStyle={{
         padding: '32px 24px 120px',

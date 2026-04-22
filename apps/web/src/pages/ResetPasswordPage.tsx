@@ -68,7 +68,7 @@ export function ResetPasswordPage() {
   // Missing token: skip the form entirely and point the user back.
   if (!token) {
     return (
-      <PageShell title="Reset your password · Floom">
+      <PageShell title="Reset your password · Floom" noIndex>
         <div
           style={{ maxWidth: 440, margin: '40px auto', padding: '0 16px' }}
           data-testid="reset-password-invalid"
@@ -119,7 +119,7 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <PageShell title="Reset your password · Floom">
+    <PageShell title="Reset your password · Floom" noIndex>
       <div
         style={{ maxWidth: 440, margin: '40px auto', padding: '0 16px' }}
         data-testid="reset-password-page"

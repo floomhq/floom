@@ -48,7 +48,7 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <PageShell title="Reset your password · Floom">
+    <PageShell title="Reset your password · Floom" noIndex>
       <div
         style={{
           maxWidth: 440,

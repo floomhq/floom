@@ -73,6 +73,10 @@ export function StudioLayout({
       allowSignedOutShell={allowSignedOutShell}
       rootBackground={colors.sidebarBg}
       onStudioMenuOpen={() => setMenuOpen(true)}
+      // Every /studio/* route is auth-gated creator tooling. Keep it out
+      // of search results (robots.txt already disallows /studio/; this is
+      // belt-and-suspenders for crawlers that ignore robots.txt).
+      noIndex
       sidebar={
         <div className="studio-sidebar-wrap" style={{ display: 'contents' }}>
           <StudioSidebar

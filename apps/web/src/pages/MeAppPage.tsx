@@ -67,6 +67,7 @@ export function MeAppPage() {
       requireAuth="cloud"
       title={app ? `${app.name} · Floom` : 'App · Floom'}
       contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
+      noIndex
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 'calc(100vh - 56px)' }}>
         <MeRail activeAppSlug={slug} />
