@@ -954,6 +954,11 @@ const GUTTER: CSSProperties = {
   userSelect: 'none',
   background: '#ffffff',
   borderRight: '1px solid #e8e6e0',
+  // Stack line numbers vertically so each number sits on its own row
+  // aligned with the corresponding code line. Without this, inline
+  // <span>s collapsed onto one wrapped line ("12345678..." mashed).
+  display: 'flex',
+  flexDirection: 'column',
 };
 
 const CODE_PRE: CSSProperties = {
