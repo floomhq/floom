@@ -473,17 +473,22 @@ export async function ingestAppFromDockerImage(args: {
   } else {
     appId = newAppId();
     created = true;
+    // Manual publish-review gate (#362): docker-image ingest via MCP is
+    // user-driven, so new apps land as 'pending_review' and only show up
+    // on the public Store after an admin flips them. Re-ingesting an
+    // existing slug hits the UPDATE branch above and leaves publish_status
+    // untouched — a previously-published app keeps its slot.
     db.prepare(
       `INSERT INTO apps (
          id, slug, name, description, manifest, status, docker_image, code_path,
          category, author, icon, app_type, base_url, auth_type, auth_config,
          openapi_spec_url, openapi_spec_cached, visibility, is_async,
-         webhook_url, timeout_ms, retries, async_mode, workspace_id
+         webhook_url, timeout_ms, retries, async_mode, workspace_id, publish_status
        ) VALUES (
          ?, ?, ?, ?, ?, 'active', ?, ?,
          ?, ?, NULL, 'docker', NULL, NULL, NULL,
          NULL, NULL, ?, 0,
-         NULL, NULL, 0, NULL, ?
+         NULL, NULL, 0, NULL, ?, 'pending_review'
        )`,
     ).run(
       appId,

@@ -6,6 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { adminRouter } from './routes/admin.js';
 import { healthRouter } from './routes/health.js';
 import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
@@ -105,6 +106,9 @@ app.use('/api/memory/*', restrictedCors);
 app.use('/api/secrets/*', restrictedCors);
 app.use('/api/stripe/*', restrictedCors);
 app.use('/api/feedback/*', restrictedCors);
+// Admin surface is bearer-authed; same CORS policy as other restricted routes
+// so a misconfigured cross-origin page can't call it with credentials.
+app.use('/api/admin/*', restrictedCors);
 
 // Open surfaces (public read/run, MCP, OG, renderer bundles).
 app.use('/api/hub/*', openCors);
@@ -167,6 +171,10 @@ app.use('/mcp/app/:slug', rateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
+// Admin surface (#362 publish-review gate, more to come). Every route inside
+// is gated by FLOOM_AUTH_TOKEN bearer in its own middleware; if the env var
+// isn't set, the router replies 404 to avoid advertising its existence.
+app.route('/api/admin', adminRouter);
 // Prometheus-style metrics. Exempt from the global auth gate above; metrics
 // owns its own METRICS_TOKEN bearer auth. 404 when the env var is unset.
 app.route('/api/metrics', metricsRouter);
@@ -870,9 +878,26 @@ if (webDist) {
   }
 
   function rewriteHeadForSlug(html: string, slug: string): string {
+    // Manual publish-review gate (#362): only surface name/description in
+    // SSR meta tags for 'published' apps. Non-published apps (pending,
+    // rejected, draft) render as a generic "App · Floom" to strangers so
+    // the slug's name doesn't leak to crawlers/preview bots before a
+    // human has reviewed it. The SPA + /api/hub/:slug gating still lets
+    // the owner reach their own pending app.
     const row = db
-      .prepare('SELECT name, description FROM apps WHERE slug = ?')
-      .get(slug) as { name: string | null; description: string | null } | undefined;
+      .prepare('SELECT name, description, publish_status, visibility FROM apps WHERE slug = ?')
+      .get(slug) as
+      | {
+          name: string | null;
+          description: string | null;
+          publish_status: string | null;
+          visibility: string | null;
+        }
+      | undefined;
+    const isPubliclyListable =
+      row &&
+      row.publish_status === 'published' &&
+      (row.visibility === 'public' || row.visibility === null);
     const ogImage = `${publicOrigin}/og/${slug}.svg`;
     // 2026-04-20 (PRR #172): canonical per-slug so indexers don't fold
     // every /p/:slug back to the landing canonical.
@@ -885,7 +910,7 @@ if (webDist) {
       /<meta name="twitter:image" content="[^"]*"/,
       `<meta name="twitter:image" content="${ogImage}"`,
     );
-    if (row?.name) {
+    if (row?.name && isPubliclyListable) {
       // 2026-04-20 (P2 #149): also rewrite the document <title> so
       // non-JS crawlers see `{app_name} · Floom` for /p/:slug.
       const documentTitle = `${row.name} · Floom`;
@@ -904,7 +929,7 @@ if (webDist) {
       // what is effectively a 404-ish page. Use a generic app title.
       out = rewriteTitle(out, 'App · Floom');
     }
-    if (row?.description) {
+    if (row?.description && isPubliclyListable) {
       const desc = row.description.replace(/"/g, '&quot;').slice(0, 300);
       out = out.replace(
         /<meta property="og:description" content="[^"]*"/,

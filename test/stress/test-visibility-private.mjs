@@ -65,6 +65,9 @@ async function fetchRoute(router, method, path, body, cookie) {
 }
 
 // ---- seed apps: public + private + auth-required ----
+// Fixtures represent already-reviewed/live apps, so publish_status='published'
+// matches the migration backfill (#362). Without it, the publish-review gate
+// in GET /api/hub would hide these rows and break the visibility assertions.
 function insertApp({ slug, visibility, author }) {
   const id = `app_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const manifest = JSON.stringify({
@@ -77,8 +80,8 @@ function insertApp({ slug, visibility, author }) {
   db.prepare(
     `INSERT INTO apps
        (id, slug, name, description, manifest, status, code_path,
-        author, workspace_id, app_type, visibility)
-     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', ?, 'local', 'proxied', ?)`,
+        author, workspace_id, app_type, visibility, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', ?, 'local', 'proxied', ?, 'published')`,
   ).run(id, slug, slug, `${slug} app`, manifest, author, visibility);
   return id;
 }

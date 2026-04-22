@@ -393,9 +393,12 @@ export async function seedLaunchDemos(): Promise<{
   const existsBySlug = db.prepare(
     'SELECT id, docker_image FROM apps WHERE slug = ?',
   );
+  // Launch-demo apps are first-party showcases — always 'published'. User
+  // ingestion paths (openapi-ingest / docker-image-ingest) go through the
+  // manual review gate (publish_status='pending_review' by default).
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')`,
   );
   const updateApp = db.prepare(
     `UPDATE apps

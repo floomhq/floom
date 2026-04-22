@@ -227,6 +227,9 @@ hubRouter.get('/mine', async (c) => {
       // fetch per list item. Additive — older clients ignore these fields.
       visibility: row.visibility,
       is_async: row.is_async === 1,
+      // Manual publish-review gate (#362): surface the status so Studio
+      // can render "Pending review" pills next to freshly-ingested apps.
+      publish_status: row.publish_status,
     })),
   });
 });
@@ -532,11 +535,16 @@ hubRouter.get('/', (c) => {
 
   // Public directory: only apps with visibility='public' (or NULL for
   // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
+  // Manual publish-review gate (#362): only 'published' apps are listed.
+  // 'pending_review' / 'rejected' / 'draft' apps are hidden from the
+  // public Store regardless of visibility — the creator still sees them
+  // on /api/hub/mine.
   const sql = `SELECT apps.*, users.name AS author_name, users.email AS author_email
                  FROM apps
                  LEFT JOIN users ON apps.author = users.id
                  WHERE apps.status = 'active'
                    AND (apps.visibility = 'public' OR apps.visibility IS NULL)
+                   AND apps.publish_status = 'published'
                    ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
   const rowsAll = (category
@@ -623,6 +631,18 @@ hubRouter.get('/:slug', async (c) => {
   if (row.visibility === 'private') {
     const ctx = await resolveUserContext(c);
     if (!row.author || ctx.user_id !== row.author) {
+      return c.json({ error: 'App not found' }, 404);
+    }
+  }
+  // Manual publish-review gate (#362): non-published public/auth-required
+  // apps are only reachable by their owner. Strangers get a 404 so we
+  // don't leak that a pending_review slug exists. Private apps already
+  // passed their own owner check above and are exempt from this gate
+  // (publish_status is orthogonal to visibility).
+  if (row.visibility !== 'private' && row.publish_status !== 'published') {
+    const ctx = await resolveUserContext(c);
+    const isOwner = !!row.author && ctx.user_id === row.author;
+    if (!isOwner) {
       return c.json({ error: 'App not found' }, 404);
     }
   }

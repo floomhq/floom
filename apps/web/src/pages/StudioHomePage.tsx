@@ -310,10 +310,26 @@ function AppCard({
             {app.name}
           </div>
           {app.visibility && <VisibilityBadge value={app.visibility} />}
+          {app.publish_status && app.publish_status !== 'published' && (
+            <PublishStatusBadge value={app.publish_status} />
+          )}
         </div>
         <div style={{ fontSize: 11.5, fontFamily: 'JetBrains Mono, monospace', color: 'var(--muted)' }}>
           /p/{app.slug}
         </div>
+        {app.publish_status === 'pending_review' && (
+          <div
+            data-testid={`studio-app-card-pending-review-${app.slug}`}
+            style={{
+              marginTop: 6,
+              fontSize: 12,
+              color: '#92400e',
+              lineHeight: 1.4,
+            }}
+          >
+            Pending review — Federico will take a look before this appears on the public Store.
+          </div>
+        )}
       </div>
       <p
         style={{
@@ -432,6 +448,44 @@ function VisibilityBadge({ value }: { value: AppVisibility }) {
   return (
     <span
       data-testid={`studio-app-card-visibility-${value}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        borderRadius: 999,
+        fontSize: 10.5,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        background: tone.bg,
+        color: tone.fg,
+      }}
+    >
+      {tone.label}
+    </span>
+  );
+}
+
+/**
+ * Small text pill showing the app's publish-review state (#362). Only
+ * non-'published' states get a pill so the Studio card stays clean once
+ * an admin has approved the app. 'pending_review' is the launch case;
+ * 'rejected' / 'draft' are reserved for future flows.
+ */
+function PublishStatusBadge({
+  value,
+}: {
+  value: NonNullable<CreatorApp['publish_status']>;
+}) {
+  const tones: Record<string, { bg: string; fg: string; label: string }> = {
+    pending_review: { bg: '#fef3c7', fg: '#92400e', label: 'Pending review' },
+    rejected: { bg: '#fee2e2', fg: '#991b1b', label: 'Rejected' },
+    draft: { bg: 'var(--bg)', fg: 'var(--muted)', label: 'Draft' },
+  };
+  const tone = tones[value] || { bg: 'var(--bg)', fg: 'var(--muted)', label: value };
+  return (
+    <span
+      data-testid={`studio-app-card-publish-status-${value}`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

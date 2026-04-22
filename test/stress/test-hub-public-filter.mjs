@@ -51,11 +51,14 @@ function insertApp({ slug, description, category = 'utilities' }) {
       run: { description: 'run it', input_schema: {}, output_schema: {} },
     },
   });
+  // Fixtures represent already-reviewed/live apps, so publish_status='published'
+  // matches the migration backfill (#362). Without it, the publish-review gate
+  // in GET /api/hub would hide these rows from the public directory.
   db.prepare(
     `INSERT INTO apps
        (id, slug, name, description, manifest, status, code_path,
-        author, workspace_id, app_type, visibility, category)
-     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', 'local', 'local', 'proxied', 'public', ?)`,
+        author, workspace_id, app_type, visibility, category, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', 'local', 'local', 'proxied', 'public', ?, 'published')`,
   ).run(id, slug, slug, description, manifest, category);
 }
 

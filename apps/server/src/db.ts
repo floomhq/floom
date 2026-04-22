@@ -114,6 +114,32 @@ if (!appCols.includes('avg_run_ms')) {
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_featured_avg ON apps(featured, avg_run_ms)`);
 
+// Manual publish-review gate (#362, 2026-04-22). `publish_status` is an
+// axis independent of `visibility`:
+//   - 'draft'           — not yet submitted for review (reserved; unused in v0).
+//   - 'pending_review'  — default for every newly-created app. Not visible on
+//                         the public Store until an admin flips it.
+//   - 'published'       — admin-approved, visible on the public Store (for
+//                         apps whose visibility is also 'public').
+//   - 'rejected'        — admin declined. Hidden from the Store like pending.
+//
+// ONE-SHOT backfill: when adding this column the first time, flip every
+// pre-existing row to 'published' so currently-live apps (lead-scorer, all
+// utilities, etc.) stay visible post-migration. `visibility='private'` apps
+// (e.g. ig-nano-scout) are unaffected by the Store filter regardless of
+// publish_status because they're owner-only anyway — but we backfill them
+// to 'published' too so they keep behaving identically to before the gate
+// landed. New inserts after this migration get 'pending_review' from the
+// INSERT statements in seed.ts/openapi-ingest.ts/docker-image-ingest.ts —
+// fresh ingests from Codex or creators must be manually approved.
+if (!appCols.includes('publish_status')) {
+  db.exec(
+    `ALTER TABLE apps ADD COLUMN publish_status TEXT NOT NULL DEFAULT 'pending_review'`,
+  );
+  db.exec(`UPDATE apps SET publish_status = 'published'`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_publish_status ON apps(publish_status)`);
+
 // ---------- runs (one per app invocation, optionally bound to a chat turn) ----------
 db.exec(`
   CREATE TABLE IF NOT EXISTS runs (
@@ -831,8 +857,9 @@ db.exec(`
 // v0.4.0 cleanup sprint lands v9: chat_threads → run_threads, chat_turns → run_turns.
 // secrets-policy lands v10: app_secret_policies + app_creator_secrets.
 // triggers (unified schedule + webhook) lands v11.
+// Manual publish-review gate (#362) lands v12: apps.publish_status.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 11) {
-  db.pragma('user_version = 11');
+if (currentUserVersion < 12) {
+  db.pragma('user_version = 12');
 }

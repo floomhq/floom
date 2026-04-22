@@ -181,6 +181,13 @@ export interface AppRecord {
   // every time a run completes. NULL until we have at least one sample.
   featured: 0 | 1;
   avg_run_ms: number | null;
+  // Manual publish-review gate (#362). Independent of `visibility`.
+  // New apps default to 'pending_review' and are hidden from the public
+  // Store until an admin flips them to 'published' via
+  // POST /api/admin/apps/:slug/publish-status. 'draft' is reserved for a
+  // future creator-side flow; 'rejected' hides the app the same way
+  // 'pending_review' does.
+  publish_status: 'draft' | 'pending_review' | 'published' | 'rejected';
   created_at: string;
   updated_at: string;
 }
