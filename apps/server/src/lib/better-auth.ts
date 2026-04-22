@@ -59,11 +59,40 @@ export function isCloudMode(): boolean {
 }
 
 /**
+ * Build the list of origins Better Auth trusts for cookie-bearing requests.
+ * Also used as the allow-list of per-request `baseURL` overrides for
+ * issue #392 — only origins in this list are allowed to mint email
+ * links, so an attacker can't sneak a link pointing at evil.com through
+ * a crafted `Origin` header.
+ */
+function listTrustedOrigins(): string[] {
+  const isDev = process.env.NODE_ENV !== 'production';
+  return [
+    'https://floom.dev',
+    'https://preview.floom.dev',
+    'https://app.floom.dev',
+    ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : []),
+    ...(isDev ? ['http://localhost:5173'] : []),
+  ];
+}
+
+/**
  * Lazy singleton holder. Built on first access (after env vars are loaded).
  * Tests that flip FLOOM_CLOUD_MODE mid-run can call `_resetAuthForTests()`
  * to clear the cache.
  */
 let cachedAuth: FloomAuth | null | undefined;
+
+/**
+ * Issue #392: per-origin Better Auth instances.
+ *
+ * Historical note: an earlier per-origin Better Auth cache lived here to
+ * solve the same problem. It's been replaced by Better Auth's native
+ * dynamic baseURL (`baseURL: { allowedHosts, fallback, protocol }`) in
+ * `buildAuthOptions`, which resolves the request's origin per call and
+ * mints email links pointing at the host the user signed up from — no
+ * per-origin instance cache needed.
+ */
 
 /**
  * Build the Better Auth options object from env. Shared by `getAuth()` (which
@@ -82,7 +111,7 @@ let cachedAuth: FloomAuth | null | undefined;
 // structurally assignable to what `betterAuth(...)` expects. Kept local so
 // callers don't import Better Auth's generic BetterAuthOptions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildAuthOptions(): any {
+function buildAuthOptions(_overrideBaseURL?: string): any {
   const secret = process.env.BETTER_AUTH_SECRET;
   if (!secret || secret.length < 16) {
     throw new Error(
@@ -136,13 +165,7 @@ function buildAuthOptions(): any {
       ].filter(Boolean),
     ),
   );
-  const trustedOrigins = [
-    'https://floom.dev',
-    'https://preview.floom.dev',
-    'https://app.floom.dev',
-    ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : []),
-    ...(isDev ? ['http://localhost:5173'] : []),
-  ];
+  const trustedOrigins = listTrustedOrigins();
 
   return {
     appName: 'Floom',
@@ -353,6 +376,69 @@ export function getAuth(): FloomAuth | null {
   // by the integration test that round-trips a getSession call.
   cachedAuth = built as unknown as FloomAuth;
   return cachedAuth;
+}
+
+/**
+ * Normalize an origin string (or return null) for the per-origin auth
+ * cache. Strips any trailing path/query, lowercases the host, and
+ * rejects anything that isn't an http/https URL.
+ */
+function normalizeOrigin(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return `${u.protocol}//${u.host}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the origin a given request claims to come from. Prefers the
+ * explicit `Origin` header (set by browsers on same-site navigations +
+ * XHR), then `Referer` (set on email-link navigations), then falls back
+ * to synthesizing an origin from the `Host` header + request protocol —
+ * which is what we see when a user clicks a verify link from their
+ * inbox (no Origin, no Referer, just a GET with a Host).
+ *
+ * Exported so tests can stress the preference order.
+ */
+export function resolveRequestOrigin(req: Request): string | null {
+  const origin = normalizeOrigin(req.headers.get('origin'));
+  if (origin) return origin;
+  const referer = normalizeOrigin(req.headers.get('referer'));
+  if (referer) return referer;
+  const host = req.headers.get('host');
+  if (host) {
+    const proto =
+      req.headers.get('x-forwarded-proto') ||
+      (req.url.startsWith('https://') ? 'https' : 'http');
+    return normalizeOrigin(`${proto}://${host}`);
+  }
+  try {
+    return normalizeOrigin(new URL(req.url).origin);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue #392: return the Better Auth instance for a given request.
+ *
+ * Superseded by the dynamic `baseURL: { allowedHosts, fallback, protocol }`
+ * config on the singleton itself (see `buildAuthOptions` + commit
+ * `56ce0e0` — "derive social callback host from request"). Better Auth
+ * now resolves the per-request origin natively, so a single shared
+ * instance mints email links pointing at the correct host.
+ *
+ * This function is kept as a compatibility shim for `index.ts` and tests
+ * that already route through `getAuthForRequest(req)` — it just hands
+ * back the singleton. `_req` is intentionally unused.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function getAuthForRequest(_req: Request): FloomAuth | null {
+  return getAuth();
 }
 
 /**

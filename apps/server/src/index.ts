@@ -37,6 +37,7 @@ import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
 import {
   getAuth,
+  getAuthForRequest,
   isCloudMode,
   purgeUnverifiedAuthSessions,
   runAuthMigrations,
@@ -242,21 +243,31 @@ app.route('/api/feedback', feedbackRouter);
 // In OSS mode (the default), `getAuth()` returns null and this block is a
 // no-op. The handler owns its own basePath ("/auth") so we mount under "/" with
 // a wildcard. Better Auth handles every method itself.
+//
+// Issue #392: route every auth request through `getAuthForRequest(req)`
+// instead of the singleton. This picks the Better Auth instance whose
+// `baseURL` matches the caller's origin (floom.dev vs preview.floom.dev)
+// so verify-email and OAuth callbacks stay on the origin host.
 if (isCloudMode()) {
-  const auth = getAuth();
-  if (auth) {
+  if (getAuth()) {
     // Hono `app.on(...)` accepts a method list + path. Better Auth's
     // `handler` consumes the raw `Request` and returns a `Response`, which
     // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
-    // handler so we can (a) strip `token` from password-endpoint response
-    // bodies (#375) and (b) pad sign-in/sign-up timing to a constant floor
-    // so email-enumeration timing attacks (#376) bottom out at the same
-    // wall clock on both the duplicate and fresh-user branches. See
+    // handler so we can (a) resolve the per-origin auth instance
+    // (#396 — verify-email / OAuth callbacks stay on the origin host),
+    // (b) strip `token` from password-endpoint response bodies (#375), and
+    // (c) pad sign-in/sign-up timing to a constant floor so email-
+    // enumeration timing attacks (#376) bottom out at the same wall clock
+    // on both the duplicate and fresh-user branches. See
     // lib/auth-response-guard.ts for rationale.
     app.on(
       ['GET', 'POST', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'],
       '/auth/*',
       async (c) => {
+        const auth = getAuthForRequest(c.req.raw);
+        if (!auth) {
+          return new Response('Auth not configured', { status: 503 });
+        }
         const pathname = new URL(c.req.url).pathname;
         const padTiming = shouldPadAuthTiming(pathname);
         const startedAtMs = padTiming ? Date.now() : 0;

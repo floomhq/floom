@@ -850,6 +850,13 @@ export function specToManifest(
 interface FetchSpecOptions {
   allowPrivateNetwork?: boolean;
   redirectsRemaining?: number;
+  /**
+   * Per-request fetch timeout in ms. Defaults to 30s for the single-shot
+   * `fetchSpec` path; the multi-candidate `fetchSpecWithFallback` path
+   * (issue #389) overrides this to 2s per attempt so 5 candidates fit
+   * inside a 10s cumulative budget.
+   */
+  timeoutMs?: number;
 }
 
 // SSRF hardening (issue #378, pentest 2026-04-22).
@@ -957,9 +964,12 @@ export async function fetchSpec(
     throw new Error(`Invalid or disallowed OpenAPI URL: ${url}`);
   }
   const redirectsRemaining = options.redirectsRemaining ?? 3;
-  const timeoutMs = options.allowPrivateNetwork
-    ? TRUSTED_FETCH_TIMEOUT_MS
-    : FETCH_TIMEOUT_MS;
+  // Explicit caller override (set per-candidate by fetchSpecWithFallback to
+  // 2s) wins over the SSRF-tier default. Trusted apps.yaml ingest uses 30s,
+  // public user-supplied URLs use 10s.
+  const timeoutMs =
+    options.timeoutMs ??
+    (options.allowPrivateNetwork ? TRUSTED_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS);
   const res = await fetch(url, {
     headers: { Accept: 'application/json, application/yaml, text/plain' },
     signal: AbortSignal.timeout(timeoutMs),
@@ -1035,6 +1045,155 @@ export async function fetchSpec(
       throw new Error(`Failed to parse spec from ${url} as JSON or YAML: ${(yamlErr as Error).message}`);
     }
   }
+}
+
+// Common OpenAPI spec filenames to probe when the user pastes a URL that
+// points at an API *endpoint* rather than at the spec itself (issue #389).
+// Order matters — the most common names come first so a single-candidate
+// happy path (`/openapi.json`) resolves in one hop.
+const COMMON_SPEC_SUFFIXES = [
+  '/openapi.json',
+  '/swagger.json',
+  '/.well-known/openapi.json',
+  '/v1/openapi.json',
+] as const;
+
+/**
+ * Generate an ordered list of candidate URLs to probe when the user-supplied
+ * URL doesn't directly return a spec. Walks up the path hierarchy (strips
+ * segments from the right) and appends common spec filenames at each level,
+ * capped at 5 total candidates (including the original URL) so the total
+ * network budget stays inside 10s.
+ *
+ * Dedupes — if the input is already `https://api.example.com/openapi.json`
+ * the suffix expansion would regenerate the same URL; we skip duplicates.
+ *
+ * Exported for tests.
+ */
+export function generateSpecCandidates(inputUrl: string): string[] {
+  let u: URL;
+  try {
+    u = new URL(inputUrl);
+  } catch {
+    return [inputUrl];
+  }
+  const candidates: string[] = [inputUrl];
+  const seen = new Set<string>([inputUrl]);
+
+  // Build the walk-up path list: /v2/users/{id}/orders →
+  // ['', '/v2', '/v2/users', '/v2/users/{id}', '/v2/users/{id}/orders'].
+  // We walk from shortest (root) to longest so probing prefers the API
+  // base over the deep endpoint — specs almost always live near the root.
+  const segments = u.pathname.split('/').filter((s) => s.length > 0);
+  const pathLevels: string[] = [''];
+  for (let i = 1; i <= segments.length; i++) {
+    pathLevels.push('/' + segments.slice(0, i).join('/'));
+  }
+  pathLevels.sort((a, b) => a.length - b.length);
+
+  const MAX_CANDIDATES = 5;
+  outer: for (const suffix of COMMON_SPEC_SUFFIXES) {
+    for (const base of pathLevels) {
+      if (candidates.length >= MAX_CANDIDATES) break outer;
+      const candidate = `${u.protocol}//${u.host}${base}${suffix}`;
+      if (!seen.has(candidate)) {
+        seen.add(candidate);
+        candidates.push(candidate);
+      }
+    }
+  }
+  return candidates.slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * Error raised when none of the candidate spec URLs returned a valid
+ * OpenAPI/Swagger document. Carries the list of URLs that were actually
+ * probed so the client can render a more specific error than "couldn't
+ * detect".
+ */
+export class SpecNotFoundError extends Error {
+  code = 'spec_not_found' as const;
+  attempted: string[];
+  constructor(originalUrl: string, attempted: string[]) {
+    const fallbackCount = Math.max(0, attempted.length - 1);
+    super(
+      `No OpenAPI spec found at ${originalUrl} or at ${fallbackCount} common fallback path${fallbackCount === 1 ? '' : 's'}.`,
+    );
+    this.name = 'SpecNotFoundError';
+    this.attempted = attempted;
+  }
+}
+
+/**
+ * Try the input URL first, then fall back to common spec locations derived
+ * from it (issue #389). Returns both the parsed spec and the URL that
+ * actually resolved, so downstream code (persisted manifest, redisplayed
+ * in the UI) reflects the real spec location rather than the deep endpoint
+ * the user pasted.
+ *
+ * Budget: 2 s per candidate, up to 5 candidates, 10 s cumulative. The
+ * cumulative cap is enforced up-front — once we've spent 10 s we stop
+ * probing and raise `SpecNotFoundError` regardless of how many candidates
+ * remain.
+ */
+export async function fetchSpecWithFallback(
+  inputUrl: string,
+  options: FetchSpecOptions = {},
+): Promise<{ spec: OpenApiSpec; url: string }> {
+  const candidates = generateSpecCandidates(inputUrl);
+  const PER_CANDIDATE_MS = 2_000;
+  const TOTAL_BUDGET_MS = 10_000;
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+  const attempted: string[] = [];
+  // Track the most recent blocked-URL error so we can surface the real
+  // guard failure (e.g. "Invalid or disallowed OpenAPI URL") instead of
+  // swallowing it into a generic SpecNotFoundError. All candidates share
+  // the same host as the input URL, so if any of them is blocked by the
+  // SSRF guard, they're all blocked — we should propagate that signal.
+  let blockedErr: Error | null = null;
+  let hadNonBlockedFailure = false;
+
+  for (const candidate of candidates) {
+    if (Date.now() >= deadline) break;
+    attempted.push(candidate);
+    try {
+      const spec = await fetchSpec(candidate, { ...options, timeoutMs: PER_CANDIDATE_MS });
+      // Sanity check: did we actually get something that looks like an
+      // OpenAPI / Swagger doc? Without this an HTML 200 from the
+      // endpoint would parse as YAML (a bare string) and slip through,
+      // confusing the downstream manifest builder.
+      if (looksLikeOpenApiSpec(spec)) {
+        return { spec, url: candidate };
+      }
+      hadNonBlockedFailure = true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith('Invalid or disallowed OpenAPI URL')) {
+        blockedErr = err instanceof Error ? err : new Error(msg);
+      } else {
+        hadNonBlockedFailure = true;
+      }
+      // Fall through to the next candidate.
+    }
+  }
+  // If every failure was the SSRF guard rejecting the URL, surface that
+  // instead of the generic "not found" — the caller needs to know the URL
+  // was blocked by policy, not that the spec simply isn't there.
+  if (blockedErr && !hadNonBlockedFailure) {
+    throw blockedErr;
+  }
+  throw new SpecNotFoundError(inputUrl, attempted);
+}
+
+function looksLikeOpenApiSpec(spec: unknown): spec is OpenApiSpec {
+  if (!spec || typeof spec !== 'object') return false;
+  const s = spec as Record<string, unknown>;
+  // OpenAPI 3 uses `openapi`, Swagger 2 uses `swagger`. Either marker
+  // plus a `paths` or `info` object is enough to trust this as a real
+  // spec.
+  if (typeof s.openapi !== 'string' && typeof s.swagger !== 'string') return false;
+  if (typeof s.paths !== 'object' && typeof s.info !== 'object') return false;
+  return true;
 }
 
 /**
@@ -1405,7 +1564,13 @@ export async function detectAppFromUrl(
   requested_slug?: string,
   requested_name?: string,
 ): Promise<DetectedApp> {
-  const spec = await fetchSpec(openapi_url);
+  // Issue #389: the user may have pasted a deep endpoint URL
+  // (`https://api.example.com/v2/users/{id}/orders`) rather than the spec
+  // URL itself. fetchSpecWithFallback tries the original first and then
+  // walks up the path hierarchy with common filenames. The resolved URL
+  // is what we store as `openapi_spec_url` so the persisted manifest
+  // points at the real spec, not at the endpoint the user pasted.
+  const { spec, url: resolvedUrl } = await fetchSpecWithFallback(openapi_url);
   const derefed = await dereferenceSpec(spec);
   const info = (derefed as { info?: { title?: string; description?: string } })
     .info || {};
@@ -1417,7 +1582,7 @@ export async function detectAppFromUrl(
   const appSpec: OpenApiAppSpec = {
     slug,
     type: 'proxied',
-    openapi_spec_url: openapi_url,
+    openapi_spec_url: resolvedUrl,
     display_name: name,
     description: info.description || undefined,
     auth: 'none',
@@ -1452,7 +1617,7 @@ export async function detectAppFromUrl(
     actions,
     auth_type,
     category: null,
-    openapi_spec_url: openapi_url,
+    openapi_spec_url: resolvedUrl,
     tools_count: actions.length,
     secrets_needed: manifest.secrets_needed || [],
   };
