@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# floom — deploy AI apps to Floom from any shell or agent.
+#
+# Subcommands:
+#   init      scaffold floom.yaml in the current directory
+#   deploy    validate + publish the current app
+#   status    list your apps and recent runs
+#   auth      save an API key to ~/.floom/config.json
+#   --help    show this help
+#   --version print version
+
+set -euo pipefail
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$BIN_DIR/.." && pwd)"
+LIB_DIR="$ROOT_DIR/lib"
+
+print_help() {
+  cat <<'EOF'
+floom — deploy AI apps to Floom from any shell or agent.
+
+usage:
+  floom <command> [options]
+
+commands:
+  init              scaffold a floom.yaml in the current directory
+  deploy            validate + publish the current app (use --dry-run to preview)
+  status            list your apps and recent runs
+  auth <api-key>    save an API key to ~/.floom/config.json
+
+options:
+  --help, -h        show this help
+  --version, -v     print version
+
+docs:     https://floom.dev/docs
+examples: https://github.com/floomhq/floom/tree/main/examples
+api key:  https://floom.dev/me/settings/tokens
+EOF
+}
+
+print_version() {
+  if [[ -f "$ROOT_DIR/VERSION" ]]; then
+    cat "$ROOT_DIR/VERSION"
+  else
+    echo "unknown"
+  fi
+}
+
+CMD="${1:-}"
+if [[ $# -gt 0 ]]; then shift; fi
+
+case "$CMD" in
+  ""|-h|--help|help)
+    print_help
+    [[ "$CMD" == "" ]] && exit 1
+    exit 0 ;;
+  -v|--version|version)
+    print_version
+    exit 0 ;;
+  init)
+    exec bash "$LIB_DIR/floom-init.sh" "$@" ;;
+  deploy)
+    exec bash "$LIB_DIR/floom-deploy.sh" "$@" ;;
+  status)
+    exec bash "$LIB_DIR/floom-status.sh" "$@" ;;
+  auth)
+    exec bash "$LIB_DIR/floom-auth.sh" "$@" ;;
+  validate)
+    exec bash "$LIB_DIR/floom-validate.sh" "$@" ;;
+  api)
+    exec bash "$LIB_DIR/floom-api.sh" "$@" ;;
+  *)
+    echo "floom: unknown command '$CMD'" >&2
+    echo "run 'floom --help' for usage." >&2
+    exit 1 ;;
+esac

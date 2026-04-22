@@ -1,0 +1,98 @@
+---
+description: Deploy AI apps to Floom using the floom CLI. Apply when the user says "deploy to Floom", "publish to Floom", "floom init", "floom deploy", or "floom status".
+globs:
+  - floom.yaml
+  - "**/.floom/**"
+alwaysApply: false
+---
+
+# Floom CLI — Cursor integration
+
+Use the `floom` CLI to scaffold and deploy AI apps to Floom.
+
+Docs: https://floom.dev/docs
+Examples: https://github.com/floomhq/floom/tree/main/examples
+
+## Install (if not present)
+
+```bash
+git clone --depth 1 https://github.com/floomhq/floom.git ~/.floom/repo
+export PATH="$HOME/.floom/repo/cli/floom/bin:$PATH"
+```
+
+## Auth
+
+```bash
+floom auth <your-api-key>
+# key at https://floom.dev/me/settings/tokens
+```
+
+Or set `FLOOM_API_KEY` as an env var.
+
+## Typical workflow
+
+```bash
+# scaffold a floom.yaml
+floom init
+
+# preview the deploy request without sending
+floom deploy --dry-run
+
+# publish
+floom deploy
+
+# check your apps and recent runs
+floom status
+```
+
+## floom.yaml shape (OpenAPI app)
+
+```yaml
+name: My App
+slug: my-app
+description: One-sentence description.
+type: proxied
+openapi_spec_url: https://example.com/openapi.json
+visibility: private
+manifest_version: "2.0"
+```
+
+## floom.yaml shape (custom Python app)
+
+```yaml
+name: My App
+slug: my-app
+description: One-sentence description.
+category: custom
+runtime: python
+actions:
+  run:
+    label: Run
+    description: One-sentence description.
+    inputs:
+      - {name: input, label: Input, type: textarea, required: true}
+    outputs:
+      - {name: result, label: Result, type: text}
+python_dependencies: []
+secrets_needed: [GEMINI_API_KEY]
+manifest_version: "2.0"
+```
+
+## Slug rules
+
+- lowercase, hyphens only
+- matches `^[a-z0-9][a-z0-9-]{0,47}$`
+
+## Auth resolution order
+
+1. `FLOOM_API_KEY` env var (+ optional `FLOOM_API_URL`)
+2. `~/.floom/config.json` written by `floom auth`
+3. Legacy `~/.claude/floom-skill-config.json`
+
+## Error codes
+
+| HTTP | Meaning | Action |
+|------|---------|--------|
+| 401 | bad key | `floom auth --clear` then `floom auth <key>` |
+| 409 | slug taken | pick a different slug, update floom.yaml |
+| 5xx | server error | retry once; check https://floom.dev/status |
