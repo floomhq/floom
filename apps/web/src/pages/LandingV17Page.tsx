@@ -1,0 +1,574 @@
+/**
+ * LandingV17Page — marketing home `/` rebuilt to the v17 wireframes.
+ *
+ * Sources of truth:
+ *   /var/www/wireframes-floom/v17/landing.html            (desktop)
+ *   /var/www/wireframes-floom/v17/landing-mobile.html     (mobile)
+ *   /var/www/wireframes-floom/v17/REVISION-2026-04-22.md  (latest revisions)
+ *   /root/floom-internal/launch/v17-preview-delta-2026-04-22.md
+ *
+ * v17 deltas vs the previous CreatorHeroPage.tsx:
+ *   - Drop the "Vibe-coding speed. Production-grade safety." kicker from hero (dropped 2026-04-22).
+ *   - CTAs: [Try an app] (accent) + [Publish your app] (ink). No docs button in hero.
+ *   - Works-with belt moves DIRECTLY under CTAs with six explicit items.
+ *   - Add a compact CLI reference strip ("/floom-deploy", "floom deploy").
+ *   - Add a Publish-CTA box (accent btn + Read the protocol + "open source · MIT").
+ *   - Add biz/teams card (live preview only had the vibecoder card).
+ *   - Pricing teaser = single $0 card + 3 limit cells (no Pro/Team grid).
+ *   - Hero demo column renders <HeroDemo /> — interactive 3-state
+ *     build/deploy/use loop per HERO-DEMO-SPEC.md.
+ *
+ * The existing CreatorHeroPage.tsx is kept in the tree for reference;
+ * main.tsx wires "/" to this page.
+ */
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
+
+import { TopBar } from '../components/TopBar';
+import { PublicFooter } from '../components/public/PublicFooter';
+import { AppStripe } from '../components/public/AppStripe';
+import { FeedbackButton } from '../components/FeedbackButton';
+
+import { InlineDemo } from '../components/home/InlineDemo';
+import { WorksWithBelt } from '../components/home/WorksWithBelt';
+import { CliReference } from '../components/home/CliReference';
+import { PublishCtaBox } from '../components/home/PublishCtaBox';
+import { DualAudiences } from '../components/home/DualAudiences';
+import { PricingTeaser } from '../components/home/PricingTeaser';
+import { HeroDemo } from '../components/home/HeroDemo';
+import { SectionEyebrow } from '../components/home/SectionEyebrow';
+
+import * as api from '../api/client';
+import type { HubApp } from '../lib/types';
+import { publicHubApps } from '../lib/hub-filter';
+
+interface Stripe {
+  slug: string;
+  name: string;
+  description: string;
+  category?: string;
+}
+
+// Same showcase roster as CreatorHeroPage (see P0 launch curation #253).
+const PREFERRED_SLUGS = ['lead-scorer', 'competitor-analyzer', 'resume-screener'] as const;
+
+const FALLBACK_STRIPES: Stripe[] = [
+  {
+    slug: 'lead-scorer',
+    name: 'Lead Scorer',
+    description: 'Upload a CSV of leads + your ICP. Get fit scores, reasoning, and enriched columns.',
+    category: 'growth',
+  },
+  {
+    slug: 'competitor-analyzer',
+    name: 'Competitor Analyzer',
+    description: 'Paste competitor URLs, get positioning, pricing, and a strengths/weaknesses table.',
+    category: 'research',
+  },
+  {
+    slug: 'resume-screener',
+    name: 'Resume Screener',
+    description: 'Upload a zip of PDFs + a JD, get a ranked shortlist with reasoning per candidate.',
+    category: 'growth',
+  },
+];
+
+function pickStripes(apps: HubApp[]): Stripe[] {
+  if (apps.length === 0) return FALLBACK_STRIPES;
+  const bySlug = new Map(apps.map((app) => [app.slug, app]));
+  const picked: Stripe[] = [];
+  for (const slug of PREFERRED_SLUGS) {
+    const hit = bySlug.get(slug);
+    if (hit) picked.push({ slug: hit.slug, name: hit.name, description: hit.description, category: hit.category ?? undefined });
+  }
+  if (picked.length === PREFERRED_SLUGS.length) return picked;
+  return picked.length >= 3 ? picked : FALLBACK_STRIPES;
+}
+
+export function LandingV17Page() {
+  const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
+  const [hubCount, setHubCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    document.title = 'Ship AI apps fast · Floom';
+    api
+      .getHub()
+      .then((apps) => {
+        const visible = publicHubApps(apps);
+        setHubCount(visible.length);
+        if (visible.length > 0) setStripes(pickStripes(visible));
+      })
+      .catch(() => {
+        // Keep static roster on failure.
+      });
+  }, []);
+
+  return (
+    <div
+      className="page-root landing-v17"
+      data-testid="landing-v17"
+      style={{ minHeight: '100vh', background: 'var(--bg)' }}
+    >
+      <TopBar />
+
+      <main id="main" style={{ display: 'block' }}>
+        {/* HERO — wireframe: .hero-shell > .hero */}
+        <section
+          data-testid="hero"
+          style={{
+            position: 'relative',
+            padding: '64px 24px 40px',
+            borderBottom: '1px solid var(--line)',
+            background:
+              'linear-gradient(180deg, var(--card) 0%, var(--bg) 100%)',
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 980,
+              margin: '0 auto',
+              textAlign: 'center',
+            }}
+          >
+            {/* Launch-date eyebrow — matches wireframe .hero-eyebrow */}
+            <div
+              className="hero-eyebrow"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '5px 12px',
+                border: '1px solid var(--accent-border, #d1fae5)',
+                borderRadius: 999,
+                background: 'var(--accent-soft, #ecfdf5)',
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                fontSize: 11,
+                color: 'var(--accent)',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                marginBottom: 14,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  background: 'var(--accent)',
+                  boxShadow: '0 0 0 3px var(--accent-soft, #ecfdf5)',
+                  display: 'inline-block',
+                }}
+              />
+              Launching 27 April 2026
+            </div>
+
+            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
+            <h1
+              className="hero-headline"
+              style={{
+                fontFamily: "'DM Serif Display', Georgia, serif",
+                fontWeight: 400,
+                fontSize: 64,
+                lineHeight: 1.02,
+                letterSpacing: '-0.025em',
+                color: 'var(--ink)',
+                margin: '0 0 16px',
+                textWrap: 'balance' as unknown as 'balance',
+              }}
+            >
+              Ship AI apps <span style={{ color: 'var(--accent)' }}>fast.</span>
+            </h1>
+
+            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22). */}
+            <p
+              className="hero-sub"
+              data-testid="hero-sub-positioning"
+              style={{
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 19,
+                lineHeight: 1.45,
+                fontWeight: 400,
+                color: 'var(--muted)',
+                maxWidth: 640,
+                margin: '0 auto 28px',
+              }}
+            >
+              The protocol and runtime for agentic work.
+            </p>
+
+            {/* CTAs — [Sign up] (accent) + [Install in Claude] (ink).
+                Wireframe has "Try an app" + "Publish your app"; the brief
+                overrides with [Sign up] + [Install in Claude] for this
+                rebuild. Keeping both primary and secondary distinct. */}
+            <div
+              className="hero-ctas"
+              style={{
+                display: 'flex',
+                gap: 10,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                marginBottom: 18,
+              }}
+            >
+              <Link
+                to="/signup"
+                data-testid="hero-cta-signup"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 12,
+                  padding: '14px 22px',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  boxShadow:
+                    '0 4px 14px rgba(4,120,87,0.28), inset 0 1px 0 rgba(255,255,255,0.2)',
+                }}
+              >
+                Sign up
+                <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+              <Link
+                to="/install"
+                data-testid="hero-cta-install"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  border: '1px solid var(--ink)',
+                  borderRadius: 12,
+                  padding: '14px 22px',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Install in Claude
+              </Link>
+            </div>
+
+            {/* Hero meta chip — matches wireframe .hero-meta */}
+            <div
+              className="hero-meta"
+              style={{
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                fontSize: 11.5,
+                color: 'var(--muted)',
+                display: 'flex',
+                gap: 12,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: 'var(--accent)',
+                    display: 'inline-block',
+                  }}
+                />
+                {hubCount !== null ? `${hubCount} live apps` : '22 live apps'}
+              </span>
+              <span aria-hidden="true">&middot;</span>
+              <span>MIT-licensed core</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>Self-host in 1 command</span>
+            </div>
+          </div>
+
+          {/* Works-with belt DIRECTLY under CTAs (per Fix 5 / Fix 7). */}
+          <WorksWithBelt />
+
+          {/* CLI reference strip — "/floom-deploy" + "floom deploy". */}
+          <CliReference />
+
+          {/* Hero demo — interactive 3-state build/deploy/use loop. */}
+          <HeroDemo />
+        </section>
+
+        {/* INLINE DEMO (real lead-scorer run). Keeps the real demo on the
+            page while the interactive hero animation ships separately. */}
+        <InlineDemo />
+
+        {/* HOW IT WORKS — 3 steps */}
+        <section
+          data-testid="how-it-works"
+          style={{ padding: '72px 28px', maxWidth: 1240, margin: '0 auto' }}
+        >
+          <SectionEyebrow>How it works</SectionEyebrow>
+          <h2
+            style={{
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontWeight: 400,
+              fontSize: 34,
+              lineHeight: 1.1,
+              letterSpacing: '-0.02em',
+              textAlign: 'center',
+              margin: '0 auto 28px',
+              maxWidth: 760,
+            }}
+          >
+            From idea to shipped app in 3 steps.
+          </h2>
+          <div
+            className="steps"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 18,
+              maxWidth: 1180,
+              margin: '0 auto',
+            }}
+          >
+            {STEPS.map((s) => (
+              <div
+                key={s.num}
+                className="step"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 12,
+                  padding: '24px 22px',
+                  position: 'relative',
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                    fontSize: 11,
+                    color: 'var(--muted)',
+                    letterSpacing: '0.08em',
+                    fontWeight: 600,
+                    marginBottom: 12,
+                  }}
+                >
+                  {s.num} &middot; {s.kicker}
+                </div>
+                <h3
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    margin: '0 0 8px',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {s.title}
+                </h3>
+                <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55, margin: 0 }}>
+                  {s.body}
+                </p>
+                <div
+                  style={{
+                    marginTop: 14,
+                    paddingTop: 14,
+                    borderTop: '1px solid var(--line)',
+                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                    fontSize: 11.5,
+                    color: 'var(--muted)',
+                  }}
+                >
+                  {s.mono}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* SHOWCASE — 3 apps */}
+        <section
+          data-testid="showcase"
+          style={{
+            padding: '72px 28px',
+            maxWidth: 1240,
+            margin: '0 auto',
+            borderTop: '1px solid var(--line)',
+          }}
+        >
+          <SectionEyebrow>Showcase</SectionEyebrow>
+          <h2
+            style={{
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontWeight: 400,
+              fontSize: 34,
+              lineHeight: 1.1,
+              letterSpacing: '-0.02em',
+              textAlign: 'center',
+              margin: '0 auto 10px',
+              maxWidth: 760,
+            }}
+          >
+            Three apps Floom already runs in production.
+          </h2>
+          <p
+            style={{
+              fontSize: 15.5,
+              color: 'var(--muted)',
+              textAlign: 'center',
+              maxWidth: 620,
+              margin: '0 auto 40px',
+            }}
+          >
+            Real AI doing real work. All three deploy from a single GitHub repo.
+          </p>
+          <div style={{ display: 'grid', gap: 12, maxWidth: 820, margin: '0 auto' }}>
+            {stripes.map((s) => (
+              <AppStripe
+                key={s.slug}
+                slug={s.slug}
+                name={s.name}
+                description={s.description}
+                category={s.category}
+                variant="landing"
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* PUBLISH-CTA BOX */}
+        <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
+          <PublishCtaBox />
+        </section>
+
+        {/* DUAL AUDIENCES — makers + teams */}
+        <DualAudiences />
+
+        {/* PRICING TEASER — single $0 card */}
+        <PricingTeaser />
+
+        {/* BUILD CTA */}
+        <section
+          style={{
+            padding: '72px 28px',
+            maxWidth: 760,
+            margin: '0 auto',
+            textAlign: 'center',
+          }}
+        >
+          <h2
+            style={{
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontWeight: 400,
+              fontSize: 26,
+              lineHeight: 1.1,
+              letterSpacing: '-0.02em',
+              margin: '0 0 8px',
+            }}
+          >
+            Want to build yours?
+          </h2>
+          <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
+            The protocol is 40 lines of JSON. The docs walk you through your
+            first deploy in under 10 minutes.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <Link
+              to="/docs"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                background: 'var(--accent)',
+                color: '#fff',
+                border: '1px solid var(--accent)',
+                borderRadius: 10,
+                padding: '11px 17px',
+                fontSize: 13.5,
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              Open the docs
+            </Link>
+            <a
+              href="https://github.com/floomhq/floom"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                background: 'var(--card)',
+                color: 'var(--ink)',
+                border: '1px solid var(--line)',
+                borderRadius: 10,
+                padding: '11px 17px',
+                fontSize: 13.5,
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              Star on GitHub
+            </a>
+          </div>
+        </section>
+      </main>
+
+      <PublicFooter />
+      <FeedbackButton />
+
+      {/* Responsive tweaks: hero typography + stacking */}
+      <style>{`
+        @media (max-width: 1040px) {
+          .landing-v17 .hero-headline { font-size: 56px !important; }
+          .landing-v17 .steps { grid-template-columns: 1fr !important; gap: 14px !important; }
+        }
+        @media (max-width: 780px) {
+          .landing-v17 .hero-headline { font-size: 44px !important; }
+          .landing-v17 .hero-sub { font-size: 16px !important; }
+        }
+        @media (max-width: 640px) {
+          .landing-v17 [data-testid="hero"] { padding: 40px 16px 32px !important; }
+          .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
+          .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
+          .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
+          .landing-v17 .hero-ctas a { width: 100% !important; }
+          .landing-v17 .works-with { gap: 16px 24px !important; }
+          .landing-v17 .dual { grid-template-columns: 1fr !important; }
+          .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
+          .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+const STEPS = [
+  {
+    num: '01',
+    kicker: 'WRITE',
+    title: 'Write one JSON spec',
+    body: 'Describe inputs, outputs, and the model call. No framework. No server code.',
+    mono: 'spec.floom.json',
+  },
+  {
+    num: '02',
+    kicker: 'DEPLOY',
+    title: 'Paste your GitHub URL',
+    body: 'Floom builds, tests, and ships it to a public page, an MCP server, and a JSON API.',
+    mono: 'git push \u2192 live in ~60s',
+  },
+  {
+    num: '03',
+    kicker: 'SHARE',
+    title: 'Share a link. Install anywhere.',
+    body: 'Runs in Claude, Cursor, ChatGPT, a browser, or behind an API key.',
+    mono: 'floom.dev/a/your-app',
+  },
+];

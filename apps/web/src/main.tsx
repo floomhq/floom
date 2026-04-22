@@ -6,7 +6,13 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 // bundle only carries the homepage React tree. Trimmed initial JS from
 // 427 KB (118 KB gzip) to the landing slice; other pages stream in on
 // route change. Mobile Lighthouse Perf: 71 -> 90+.
-import { CreatorHeroPage } from './pages/CreatorHeroPage';
+// v17 landing rebuild (2026-04-22): `/` now renders LandingV17Page per the
+// wireframes at /var/www/wireframes-floom/v17/landing.html. The legacy
+// CreatorHeroPage.tsx stays on disk as reference (and is still the source
+// of the hero detect + publish flow, which will be ported into the v17
+// tree in a follow-up). Both are eager so the LCP path doesn't wait on
+// a dynamic import round-trip.
+import { LandingV17Page } from './pages/LandingV17Page';
 import { NotFoundPage } from './pages/NotFoundPage';
 const AppsDirectoryPage = lazy(() => import('./pages/AppsDirectoryPage').then(m => ({ default: m.AppsDirectoryPage })));
 const AppPermalinkPage = lazy(() => import('./pages/AppPermalinkPage').then(m => ({ default: m.AppPermalinkPage })));
@@ -198,8 +204,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       </a>
       <Suspense fallback={<RouteLoading variant="full" />}>
       <Routes>
-        {/* Creator hero */}
-        <Route path="/" element={<CreatorHeroPage />} />
+        {/* Landing v17 (2026-04-22): rebuild to wireframe parity. */}
+        <Route path="/" element={<LandingV17Page />} />
         {/* Apps directory. Mounted at both /apps (legacy canonical) and
             /store (matches the "Store" pill label Federico sees on screen).
             Nav-polish 2026-04-20: URL no longer drifts from the label. */}
