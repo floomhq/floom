@@ -978,9 +978,14 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
   const manifestDir = dirname(isAbsolute(configPath) ? configPath : resolvePath(configPath));
 
   const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
+  // Operator-declared apps (FLOOM_APPS_CONFIG) skip the publish-review gate —
+  // the operator explicitly listed them in apps.yaml, no admin approval
+  // needed. They land as 'published'. User-driven ingest (Studio /build,
+  // MCP ingest_app) routes through ingestAppFromSpec instead, which
+  // applies the 'pending_review' default.
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode)
-     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
   );
   const updateApp = db.prepare(
     `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, updated_at=datetime('now') WHERE slug=?`,
@@ -1463,17 +1468,24 @@ export async function ingestAppFromSpec(args: {
   }
 
   const appId = newAppId();
+  // Manual publish-review gate (#362): user-driven ingest (Studio /build,
+  // MCP ingest_app, and anything else that ends up here) lands as
+  // 'pending_review'. An admin flips it to 'published' via
+  // POST /api/admin/apps/:slug/publish-status before it appears on the
+  // public Store. Re-ingesting an existing app hits the UPDATE branch
+  // above and leaves publish_status alone, so a published app stays
+  // published when its spec refreshes.
   db.prepare(
     `INSERT INTO apps (
        id, slug, name, description, manifest, status, docker_image, code_path,
        category, author, icon, app_type, base_url, auth_type, auth_config,
        openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
-       timeout_ms, retries, async_mode, workspace_id
+       timeout_ms, retries, async_mode, workspace_id, publish_status
      ) VALUES (
        ?, ?, ?, ?, ?, 'active', NULL, ?,
        ?, ?, NULL, 'proxied', ?, 'none', NULL,
        ?, ?, ?, 0, NULL,
-       NULL, 0, NULL, ?
+       NULL, 0, NULL, ?, 'pending_review'
      )`,
   ).run(
     appId,

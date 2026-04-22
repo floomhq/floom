@@ -132,9 +132,12 @@ export async function seedFromFile(): Promise<{
   let secretsAdded = 0;
   let appsSkipped = 0;
 
+  // Bundled seed apps ship as 'published' — they're first-party content that
+  // already went through Federico's review. New user-ingested apps go to
+  // 'pending_review' via services/openapi-ingest.ts / docker-image-ingest.ts.
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')`,
   );
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,

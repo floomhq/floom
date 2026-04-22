@@ -431,6 +431,12 @@ export interface CreatorApp {
    * "async · ~60s per run" hint without a second fetch.
    */
   is_async?: boolean;
+  /**
+   * Manual publish-review gate (#362). Drives the "Pending review"
+   * pill on Studio app cards. Optional for backward-compat with older
+   * server builds that don't emit the field.
+   */
+  publish_status?: 'draft' | 'pending_review' | 'published' | 'rejected';
 }
 
 // ---------- v15.2: per-user encrypted secrets vault ----------
