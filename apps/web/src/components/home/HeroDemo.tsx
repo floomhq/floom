@@ -750,7 +750,7 @@ const HERO_DEMO_WRAP: CSSProperties = {
   boxShadow:
     '0 24px 60px -30px rgba(14,14,12,0.25), 0 2px 6px -2px rgba(14,14,12,0.06)',
   maxWidth: 1000,
-  margin: '40px auto 0',
+  margin: '28px auto 0',
   position: 'relative',
 };
 

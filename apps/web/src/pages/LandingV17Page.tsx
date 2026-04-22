@@ -30,7 +30,6 @@ import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 
-import { InlineDemo } from '../components/home/InlineDemo';
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
 import { CliReference } from '../components/home/CliReference';
 import { PublishCtaBox } from '../components/home/PublishCtaBox';
@@ -116,7 +115,7 @@ export function LandingV17Page() {
           data-testid="hero"
           style={{
             position: 'relative',
-            padding: '64px 24px 40px',
+            padding: '40px 24px 40px',
             borderBottom: '1px solid var(--line)',
             background:
               'linear-gradient(180deg, var(--card) 0%, var(--bg) 100%)',
@@ -129,6 +128,10 @@ export function LandingV17Page() {
               textAlign: 'center',
             }}
           >
+            {/* Works-with belt as small eyebrow ABOVE the H1
+                (Federico 2026-04-23 — "like we had before"). */}
+            <WorksWithBelt />
+
             {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
             <h1
               className="hero-headline"
@@ -215,19 +218,22 @@ export function LandingV17Page() {
             </div>
           </div>
 
-          {/* Works-with belt DIRECTLY under CTAs (per Fix 5 / Fix 7). */}
-          <WorksWithBelt />
-
-          {/* CLI reference strip — "/floom-deploy" + "floom deploy". */}
-          <CliReference />
-
-          {/* Hero demo — interactive 3-state build/deploy/use loop. */}
+          {/* Hero demo — interactive 3-state build/deploy/use loop.
+              Sits directly under the CTAs so it's visible above the fold
+              (Federico 2026-04-23 — "not visible on hero" was caused by the
+              CLI reference block pushing the demo below the fold). */}
           <HeroDemo />
         </section>
 
-        {/* INLINE DEMO (real lead-scorer run). Keeps the real demo on the
-            page while the interactive hero animation ships separately. */}
-        <InlineDemo />
+        {/* Compact CLI reference strip below the hero — smaller than the
+            original hero-inline version (Federico 2026-04-23 — moved out of
+            hero, kept below as a smaller block). */}
+        <section
+          data-testid="cli-reference-section"
+          style={{ padding: '32px 24px 8px' }}
+        >
+          <CliReference />
+        </section>
 
         {/* HOW IT WORKS — 3 steps */}
         <section
