@@ -971,8 +971,14 @@ export interface CreatedApiKey extends ApiKeyRecord {
   key: string;
 }
 
-export function listApiKeys(): Promise<ApiKeyRecord[]> {
-  return request<ApiKeyRecord[]>('/auth/api-key/list');
+export async function listApiKeys(): Promise<ApiKeyRecord[]> {
+  // Better Auth v1.6 wraps the list in { apiKeys, total }; older callers
+  // (and some envs) returned a bare array. Handle both.
+  const res = await request<
+    ApiKeyRecord[] | { apiKeys: ApiKeyRecord[]; total?: number }
+  >('/auth/api-key/list');
+  if (Array.isArray(res)) return res;
+  return res?.apiKeys ?? [];
 }
 
 export function createApiKey(name: string): Promise<CreatedApiKey> {
