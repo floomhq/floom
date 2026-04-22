@@ -6,12 +6,13 @@ import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { IntegrationLogos } from '../components/home/IntegrationLogos';
-// Goosebumps pass 2026-04-20: ArchitectureDiagram removed from landing.
-// It was dev-oriented ("ingest -> normalize -> typed manifest -> docker
-// runner -> renderer cascade") and the ICP is creators + biz users. The
-// conceptual story lives in /protocol docs where readers actually want
-// implementation detail. Landing now reads in 20s: hero -> outcomes ->
-// apps -> Why (3 cards) -> Layers (5 cards) -> self-host -> built-by.
+// Goosebumps pass 2026-04-22: the landing reads as motion + real
+// product shots first, copy second. Flow: hero -> proof row -> inline
+// demo -> featured apps -> BEFORE/AFTER split -> autoplay run video
+// (full-bleed) -> 3-step walkthrough with screenshots -> big-number
+// stat -> MCP snippet -> self-host -> built-by. The older dev-oriented
+// ArchitectureDiagram and the 5-card "What's in the box" icon grid are
+// gone; their story now lives inside the walkthrough screenshots.
 import { InlineDemo } from '../components/home/InlineDemo';
 import { WhyFloom } from '../components/home/WhyFloom';
 import { LayersGrid } from '../components/home/LayersGrid';
@@ -20,6 +21,8 @@ import { BuiltBy } from '../components/home/BuiltBy';
 import { HeroAppTiles } from '../components/home/HeroAppTiles';
 import { ProofRow } from '../components/home/ProofRow';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
+import { RunVideo } from '../components/home/RunVideo';
+import { BigNumber } from '../components/home/BigNumber';
 import * as api from '../api/client';
 import { useSession } from '../hooks/useSession';
 import { track } from '../lib/posthog';
@@ -753,7 +756,7 @@ export function CreatorHeroPage() {
               }}
             >
               <SectionEyebrow tone="accent" testid="live-apps-eyebrow">
-                Live now · open these in a browser
+                Live now
               </SectionEyebrow>
               <div
                 style={{
@@ -775,7 +778,7 @@ export function CreatorHeroPage() {
                     margin: 0,
                   }}
                 >
-                  Real apps, running right now.
+                  Apps running right now.
                 </h2>
                 <a
                   href="/apps"
@@ -786,7 +789,7 @@ export function CreatorHeroPage() {
                     fontWeight: 500,
                   }}
                 >
-                  See every live app →
+                  See all →
                 </a>
               </div>
             </header>
@@ -806,11 +809,24 @@ export function CreatorHeroPage() {
           </div>
         </section>
 
-        {/* WHY · problem / solution / proof (now with eyebrows) */}
+        {/* WHY — BEFORE/AFTER split. Goosebumps pass 2026-04-22: old 3-card
+            grid replaced with a raw-JSON terminal on the left and a real
+            Floom product-page screenshot on the right, connected by a
+            quiet arrow. Shows the transformation instead of listing it. */}
         <WhyFloom />
 
-        {/* LAYERS · what ships today (now with icon-badges) */}
+        {/* RUN VIDEO — autoplay silent loop, full-bleed. Goosebumps pass:
+            breaks the centered-card rhythm and proves the product moves. */}
+        <RunVideo />
+
+        {/* LAYERS — now a 3-step walkthrough with real product screenshots
+            (goosebumps pass 2026-04-22). Export name kept for import
+            stability. Section sits at the same position in the narrative. */}
         <LayersGrid />
+
+        {/* BIG NUMBER — oversized pull-stat. Section-shape variety beat
+            between the walkthrough and the MCP code block. */}
+        <BigNumber />
 
         {/* ARCHITECTURE removed 2026-04-20 goosebumps pass — the diagram
             was a dev-speak middle-section that broke the narrative for the
@@ -832,34 +848,61 @@ export function CreatorHeroPage() {
             padding: '72px 24px',
           }}
         >
-          <div style={{ maxWidth: 620, margin: '0 auto', textAlign: 'center' }}>
-            <SectionEyebrow testid="self-host-eyebrow">
-              For the open-source-first
-            </SectionEyebrow>
-            <h2
-              style={{
-                fontFamily: "'DM Serif Display', Georgia, serif",
-                fontWeight: 400,
-                fontSize: 36,
-                lineHeight: 1.1,
-                letterSpacing: '-0.02em',
-                color: 'var(--ink)',
-                margin: '0 0 14px',
-              }}
-            >
-              Run it on your own box.
-            </h2>
-            <p
-              style={{
-                fontSize: 15,
-                color: 'var(--muted)',
-                margin: '0 0 28px',
-                lineHeight: 1.55,
-              }}
-            >
-              One line in your terminal. Floom is open source, top to
-              bottom. Your data stays with you.
-            </p>
+          {/* Goosebumps pass 2026-04-22: asymmetric layout. Left column
+              carries the pitch, right column carries the docker line and
+              boot proof. Adds section-shape variety. */}
+          <div
+            className="self-host-grid"
+            style={{
+              maxWidth: 1080,
+              margin: '0 auto',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1.25fr',
+              gap: 56,
+              alignItems: 'center',
+            }}
+          >
+            <div style={{ textAlign: 'left' }}>
+              <SectionEyebrow testid="self-host-eyebrow">
+                Self-host · open source
+              </SectionEyebrow>
+              <h2
+                style={{
+                  fontFamily: "'DM Serif Display', Georgia, serif",
+                  fontWeight: 400,
+                  fontSize: 40,
+                  lineHeight: 1.05,
+                  letterSpacing: '-0.02em',
+                  color: 'var(--ink)',
+                  margin: '0 0 14px',
+                }}
+              >
+                Run it on your own box.
+              </h2>
+              <p
+                style={{
+                  fontSize: 15,
+                  color: 'var(--muted)',
+                  margin: '0 0 18px',
+                  lineHeight: 1.55,
+                }}
+              >
+                One line. Your data stays with you.
+              </p>
+              <a
+                href="https://github.com/floomhq/floom#self-host"
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  fontSize: 13.5,
+                  color: 'var(--muted)',
+                  textDecoration: 'underline',
+                }}
+              >
+                Self-host guide →
+              </a>
+            </div>
+
             <div
               style={{
                 background: 'var(--bg)',
@@ -871,29 +914,20 @@ export function CreatorHeroPage() {
                 fontSize: 13.5,
                 lineHeight: 1.85,
                 textAlign: 'left',
-                maxWidth: 560,
-                margin: '0 auto',
                 overflowX: 'auto',
               }}
             >
               <div>
                 <span style={{ color: 'var(--muted)' }}>$</span>{' '}
-                <span style={{ color: 'var(--ink)', fontWeight: 600 }}>docker run -p 3010:3010 floomhq/floom</span>
+                <span style={{ color: 'var(--ink)', fontWeight: 600 }}>
+                  docker run -p 3010:3010 floomhq/floom
+                </span>
               </div>
               <div style={{ color: 'var(--muted)', marginTop: 6 }}>
-                <span style={{ color: 'var(--accent)', fontWeight: 700 }}>✓</span> Floom is up. Browse the full catalog on localhost. Claude integration live.
+                <span style={{ color: 'var(--accent)', fontWeight: 700 }}>✓</span>{' '}
+                Floom is up. Full catalog on localhost.
               </div>
             </div>
-            <p style={{ marginTop: 24, fontSize: 14 }}>
-              <a
-                href="https://github.com/floomhq/floom#self-host"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: 'var(--muted)', textDecoration: 'underline' }}
-              >
-                Want the details? Read the self-host guide →
-              </a>
-            </p>
           </div>
         </section>
 
@@ -918,6 +952,9 @@ export function CreatorHeroPage() {
           .hero-headline { font-size: 48px !important; margin-bottom: 18px !important; }
           .hero-accent { font-size: 17px !important; }
           .hero-works-with { gap: 10px !important; }
+        }
+        @media (max-width: 900px) {
+          .self-host-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 24px !important; }
         }
         @media (max-width: 640px) {
           [data-testid="hero"] { padding: 52px 20px 60px !important; }

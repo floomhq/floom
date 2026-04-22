@@ -1,160 +1,176 @@
 /**
- * LayersGrid — "What's in the box."
+ * LayersGrid — 3-step walkthrough with real product screenshots.
  *
- * ICP is locked (creators + biz users, NOT devs). Previous version
- * exposed implementation details (typed manifest, docker runner,
- * OpenAPI spec, TSX renderer) that only platform engineers read
- * without confusion. Rewritten 2026-04-19 into plain-English
- * benefits, one short line per card, no code snippets.
+ * Replaces the old 5-card icon grid (2026-04-22 goosebumps pass). The
+ * icon-grid was "PowerPoint-tier" per Federico: a flat card row that
+ * showed nothing of the product. This section now demonstrates the
+ * whole flow in three screenshots, in order:
  *
- * v4 (2026-04-20): added icon-badges per card + section eyebrow.
- * Matches the v16 feature-card pattern.
+ *   01  Paste a GitHub repo      → real hero input
+ *   02  Floom builds the page    → real /p/lead-scorer page
+ *   03  Teammate clicks Run      → real run with live output
  *
- * Total visible body text under 100 words (verified via DOM).
+ * Desktop: horizontal 3-column with 01/02/03 numeric labels.
+ * Mobile : vertical stack.
+ *
+ * Assets: apps/web/public/landing-shots/step-{1-hero,2-product-page,3-run}.png
+ * (captured against preview.floom.dev at 1440x820 clip).
+ *
+ * Component name kept as `LayersGrid` so we don't churn the import graph
+ * in CreatorHeroPage. The section still sits at the same position.
  */
-import { Link2, Zap, Layout, History, Lock } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { SectionEyebrow } from './SectionEyebrow';
 
-interface Layer {
-  name: string;
-  desc: string;
-  Icon: LucideIcon;
+interface Step {
+  number: string;
+  title: string;
+  caption: string;
+  shot: string;
+  alt: string;
 }
 
-const LAYERS: Layer[] = [
+const STEPS: Step[] = [
   {
-    name: 'Paste a repo or spec',
-    desc: 'A public GitHub repo with OpenAPI, or a direct OpenAPI link.',
-    Icon: Link2,
+    number: '01',
+    title: 'Paste a GitHub repo',
+    caption: 'Any repo with an OpenAPI spec. No setup.',
+    shot: '/landing-shots/step-1-hero.png',
+    alt: 'Floom hero with a GitHub URL input',
   },
   {
-    name: 'Runs on its own',
-    desc: 'No laptop to keep open. No babysitting. It\u2019s up when you are.',
-    Icon: Zap,
+    number: '02',
+    title: 'Floom builds the page',
+    caption: 'A clean product page, ready to share.',
+    shot: '/landing-shots/step-2-product-page.png',
+    alt: 'A Floom product page for Lead Scorer',
   },
   {
-    name: 'Looks like a real app',
-    desc: 'A clean page your teammates can use. Not raw JSON.',
-    Icon: Layout,
-  },
-  {
-    name: 'See every run',
-    desc: 'Who ran what, when. Share a link to any result.',
-    Icon: History,
-  },
-  {
-    name: 'Share on your terms',
-    desc: 'Public, private, or invite-only. You decide who gets in.',
-    Icon: Lock,
+    number: '03',
+    title: 'Teammate clicks Run',
+    caption: 'They get real output, not raw JSON.',
+    shot: '/landing-shots/step-3-run.png',
+    alt: 'A Floom app run showing decoded JWT fields',
   },
 ];
 
 export function LayersGrid() {
   return (
     <section
-      data-testid="home-layers"
-      data-section="layers"
+      data-testid="home-walkthrough"
+      data-section="walkthrough"
       style={{
         background: 'var(--card)',
         borderTop: '1px solid var(--line)',
         borderBottom: '1px solid var(--line)',
-        padding: '72px 24px',
+        padding: '88px 24px',
       }}
     >
-      <div style={{ maxWidth: 1040, margin: '0 auto' }}>
-        <header style={{ textAlign: 'center', marginBottom: 36 }}>
-          <SectionEyebrow testid="layers-eyebrow">
-            What you get, out of the box
+      <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+        <header style={{ textAlign: 'center', marginBottom: 48 }}>
+          <SectionEyebrow testid="walkthrough-eyebrow">
+            Three steps, three minutes
           </SectionEyebrow>
           <h2
             style={{
               fontFamily: "'DM Serif Display', Georgia, serif",
               fontWeight: 400,
-              fontSize: 40,
-              lineHeight: 1.1,
+              fontSize: 44,
+              lineHeight: 1.05,
               letterSpacing: '-0.02em',
               color: 'var(--ink)',
-              margin: '0 0 10px',
+              margin: 0,
             }}
           >
-            What&apos;s in the box.
+            From repo to shareable app.
           </h2>
-          <p
-            style={{
-              fontSize: 15,
-              color: 'var(--muted)',
-              lineHeight: 1.55,
-              maxWidth: 520,
-              margin: '0 auto',
-            }}
-          >
-            Everything your app needs to behave like a real tool.
-          </p>
         </header>
 
         <div
-          className="layers-grid"
+          className="walkthrough-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-            gap: 14,
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 28,
           }}
         >
-          {LAYERS.map((layer) => (
+          {STEPS.map((s) => (
             <article
-              key={layer.name}
-              data-testid={`layer-${layer.name
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, '-')
-                .replace(/^-|-$/g, '')}`}
+              key={s.number}
+              data-testid={`walkthrough-step-${s.number}`}
               style={{
-                background: 'var(--bg)',
-                border: '1px solid var(--line)',
-                borderRadius: 14,
-                padding: 20,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 10,
+                gap: 14,
                 minWidth: 0,
               }}
             >
-              <span
-                aria-hidden="true"
+              <div
                 style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  background: '#ecfdf5',
-                  color: 'var(--accent)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 12,
                 }}
               >
-                <layer.Icon size={18} strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <h3
+                <span
+                  aria-hidden="true"
+                  style={{
+                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--accent)',
+                    letterSpacing: '0.08em',
+                  }}
+                >
+                  {s.number}
+                </span>
+                <h3
+                  style={{
+                    fontSize: 19,
+                    fontWeight: 700,
+                    color: 'var(--ink)',
+                    margin: 0,
+                    letterSpacing: '-0.01em',
+                    lineHeight: 1.25,
+                  }}
+                >
+                  {s.title}
+                </h3>
+              </div>
+              <div
                 style={{
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: 'var(--ink)',
-                  margin: 0,
-                  letterSpacing: '-0.01em',
-                  lineHeight: 1.25,
+                  position: 'relative',
+                  borderRadius: 14,
+                  overflow: 'hidden',
+                  border: '1px solid var(--line)',
+                  background: 'var(--bg)',
+                  aspectRatio: '16 / 10',
+                  boxShadow:
+                    '0 1px 0 rgba(0,0,0,0.02), 0 8px 24px rgba(5,150,105,0.06)',
                 }}
               >
-                {layer.name}
-              </h3>
+                <img
+                  src={s.shot}
+                  alt={s.alt}
+                  loading="lazy"
+                  decoding="async"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectPosition: 'top',
+                    display: 'block',
+                  }}
+                />
+              </div>
               <p
                 style={{
-                  fontSize: 13.5,
+                  fontSize: 14,
                   color: 'var(--muted)',
-                  lineHeight: 1.5,
+                  lineHeight: 1.55,
                   margin: 0,
                 }}
               >
-                {layer.desc}
+                {s.caption}
               </p>
             </article>
           ))}
@@ -162,11 +178,8 @@ export function LayersGrid() {
       </div>
 
       <style>{`
-        @media (max-width: 1040px) {
-          .layers-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-        }
-        @media (max-width: 640px) {
-          .layers-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        @media (max-width: 900px) {
+          .walkthrough-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 32px !important; }
         }
       `}</style>
     </section>
