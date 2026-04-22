@@ -33,6 +33,7 @@ Env vars:
 
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import json
@@ -96,14 +97,22 @@ def _log(msg: str) -> None:
     print(f"[lead-scorer] {msg}", flush=True)
 
 
-def _load_rows(data_input: str) -> list[dict[str, str]]:
-    """Accept either a filesystem path or a raw CSV string."""
-    if os.path.isfile(data_input):
+def _load_rows(data_input: Any) -> list[dict[str, str]]:
+    """Accept either a filesystem path, a raw CSV string, or a FileEnvelope dict."""
+    # File-upload envelope: the server's materialization step normally rewrites
+    # this to a path, but in some runtime paths (proxied runner, local tests,
+    # DinD race conditions) the raw envelope reaches us. Decode the base64
+    # payload to CSV text here so the upload path never silently produces an
+    # empty table.
+    if isinstance(data_input, dict) and data_input.get("__file") and data_input.get("content_b64"):
+        _log("decoding inline file envelope (base64 -> CSV text)")
+        data_input = base64.b64decode(data_input["content_b64"]).decode("utf-8")
+    if isinstance(data_input, str) and os.path.isfile(data_input):
         _log(f"reading CSV from path: {data_input}")
         with open(data_input, newline="", encoding="utf-8") as f:
             return list(csv.DictReader(f))
     _log("treating `data` as inline CSV text (no file at that path)")
-    return list(csv.DictReader(io.StringIO(data_input.strip())))
+    return list(csv.DictReader(io.StringIO(str(data_input).strip())))
 
 
 def _row_to_prompt(row: dict[str, str], icp: str) -> str:
@@ -227,7 +236,7 @@ def _build_genai():
     return client, tools
 
 
-def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
+def score(data: Any, icp: str, **_kwargs) -> dict[str, Any]:
     """
     Score each CSV row against the ICP using Gemini 3 with web search + URL context.
 

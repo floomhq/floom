@@ -105,9 +105,15 @@ def _log(msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Zip + PDF loading
 # ---------------------------------------------------------------------------
-def _load_zip_bytes(cvs_zip_input: str) -> bytes:
-    """Accept either a filesystem path or raw base64-encoded bytes."""
-    if os.path.isfile(cvs_zip_input):
+def _load_zip_bytes(cvs_zip_input: Any) -> bytes:
+    """Accept a filesystem path, raw base64 string, or a FileEnvelope dict."""
+    # File-upload envelope: when the server's materialization step doesn't
+    # run (proxied runner, local tests, DinD race), the raw envelope dict
+    # reaches us here. Decode the base64 payload straight to bytes.
+    if isinstance(cvs_zip_input, dict) and cvs_zip_input.get("__file") and cvs_zip_input.get("content_b64"):
+        _log("decoding inline file envelope (base64 -> zip bytes)")
+        return base64.b64decode(cvs_zip_input["content_b64"])
+    if isinstance(cvs_zip_input, str) and os.path.isfile(cvs_zip_input):
         _log(f"reading zip from path: {cvs_zip_input}")
         with open(cvs_zip_input, "rb") as f:
             return f.read()
@@ -284,7 +290,7 @@ def _split_must_haves(mh: Any) -> list[str]:
 
 
 def screen(
-    cvs_zip: str,
+    cvs_zip: Any,
     job_description: str,
     must_haves: Any = None,
     **_kwargs,
