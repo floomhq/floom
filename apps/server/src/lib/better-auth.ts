@@ -94,17 +94,31 @@ function buildAuthOptions(): any {
     process.env.PUBLIC_URL ||
     `http://localhost:${process.env.PORT || 3051}`;
 
-  const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
+  // `overrideUserInfoOnSignIn: true` refreshes the user's `name` + `image`
+  // (avatar) from the OAuth profile on every sign-in. Without it, a user who
+  // signed up with email+password and later clicks "Continue with Google"
+  // keeps their empty image forever because the link-account branch in
+  // better-auth 1.6.3 only touches `image` when this flag is set. See
+  // oauth2/link-account.mjs ("overrideUserInfo") and api/routes/callback.mjs
+  // ("overrideUserInfoOnSignIn: provider.options?.overrideUserInfoOnSignIn").
+  // Google/GitHub avatars are public URLs so there is no privacy cost to
+  // surfacing them.
+  const socialProviders: Record<
+    string,
+    { clientId: string; clientSecret: string; overrideUserInfoOnSignIn: boolean }
+  > = {};
   if (process.env.GITHUB_OAUTH_CLIENT_ID && process.env.GITHUB_OAUTH_CLIENT_SECRET) {
     socialProviders.github = {
       clientId: process.env.GITHUB_OAUTH_CLIENT_ID,
       clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
+      overrideUserInfoOnSignIn: true,
     };
   }
   if (process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET) {
     socialProviders.google = {
       clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
       clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      overrideUserInfoOnSignIn: true,
     };
   }
 
@@ -196,6 +210,18 @@ function buildAuthOptions(): any {
       },
     },
     socialProviders,
+    // Account linking: when an existing user clicks "Continue with Google"
+    // (or GitHub) while already signed in, better-auth calls
+    // `POST /auth/link-social` and only copies the OAuth profile (name +
+    // avatar) into the user record if this flag is set. Paired with
+    // `overrideUserInfoOnSignIn` above, which handles the implicit-linking
+    // path (same email, different provider, fresh sign-in).
+    account: {
+      accountLinking: {
+        enabled: true,
+        updateUserInfoOnLink: true,
+      },
+    },
     plugins: [
       // Magic link plugin intentionally omitted — disabled 2026-04-17.
       // UI was removed in PR #5; leaving the plugin registered kept the

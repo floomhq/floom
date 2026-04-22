@@ -3,6 +3,17 @@ interface LogoProps {
   className?: string;
   withWordmark?: boolean;
   /**
+   * Optional override for the wordmark font size (px). Defaults to 14, which
+   * reads as a compact chrome mark next to a small pennant. Brand surfaces
+   * (TopBar, splash) pass a larger value so the wordmark leads.
+   */
+  wordmarkSize?: number;
+  /**
+   * Optional override for the wordmark font weight. Defaults to 600. Bump to
+   * 650/700 when the wordmark is the primary brand anchor on a surface.
+   */
+  wordmarkWeight?: number;
+  /**
    * Visual treatment for the mark.
    *
    *   plain  — flat green "f" in a rounded square (default, unchanged
@@ -58,6 +69,8 @@ export function Logo({
   size = 28,
   className = '',
   withWordmark = false,
+  wordmarkSize = 14,
+  wordmarkWeight = 600,
   variant = 'plain',
   animate = 'none',
 }: LogoProps) {
@@ -66,11 +79,16 @@ export function Logo({
   // `font-semibold` inherited the parent 18px .brand style and drowned the
   // pennant. Federico flagged the wordmark as visually dominant; the
   // pennant should lead.
+  //
+  // 2026-04-22 header bump: the 20/14 pair read as a corner marker next to
+  // the larger center nav pill + right-side avatar chip. Callers can now
+  // pass `wordmarkSize` / `wordmarkWeight` to make the wordmark lead the
+  // brand. Default stays at 14 / 600 so nothing else shifts.
   const wordmark = withWordmark ? (
     <span
       style={{
-        fontSize: 14,
-        fontWeight: 600,
+        fontSize: wordmarkSize,
+        fontWeight: wordmarkWeight,
         letterSpacing: '-0.01em',
         color: 'var(--ink)',
       }}

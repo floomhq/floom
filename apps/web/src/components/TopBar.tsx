@@ -233,7 +233,18 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           }}
           aria-label="Floom home"
         >
-          <Logo size={compact ? 18 : 20} withWordmark={!compact} variant="glow" />
+          {/* 2026-04-22 header bump: leaf ~28px and wordmark ~19/650 so the
+              brand anchors the left side instead of reading as a corner
+              marker next to the larger center nav pill + right-side avatar
+              chip. Compact (mobile / Studio sidebar) keeps a smaller pair
+              since horizontal space is tight. */}
+          <Logo
+            size={compact ? 24 : 28}
+            withWordmark={!compact}
+            wordmarkSize={compact ? 16 : 19}
+            wordmarkWeight={650}
+            variant="glow"
+          />
         </Link>
 
         {/* Studio-only mobile menu trigger. Visible <768px AND only on
