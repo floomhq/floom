@@ -801,12 +801,33 @@ export function RunSurface({
         </div>
       )}
 
+      {/* Chat-style restructure (2026-04-21): single-column stage.
+          Idle / error → full input card owns the column, nothing below.
+          Streaming / job / done → input collapses into a thin header bar,
+          the output (stream / progress / renderer) takes the column width.
+          Replaces the v16 2fr/3fr grid (form-left / "Output will appear
+          here" right) which was the n8n / Zapier admin-surface pattern. */}
       <div className="run-surface-grid">
         <section
           className="run-surface-input"
           data-testid="run-surface-input"
+          data-collapsed={
+            state.phase === 'streaming' || state.phase === 'job' || state.phase === 'done'
+              ? 'true'
+              : 'false'
+          }
           aria-label="Input"
         >
+          <RunHeaderBar
+            app={app}
+            phase={state.phase}
+            inputs={state.inputs}
+            actionSpec={state.actionSpec}
+            job={state.job}
+            run={state.run}
+            onRunAgain={handleReset}
+            onCancel={state.job ? handleCancelJob : handleCancelStream}
+          />
           <InputCard
             app={appAsPickResult}
             actionSpec={state.actionSpec}
@@ -821,30 +842,35 @@ export function RunSurface({
           />
         </section>
 
-        <section
-          className="run-surface-output"
-          data-testid="run-surface-output"
-          aria-label="Output"
-          aria-live="polite"
-        >
-          <OutputSlot
-            app={app}
-            appAsPickResult={appAsPickResult}
-            state={state}
-            refinable={refinable}
-            onCancelJob={handleCancelJob}
-            onCancelStream={handleCancelStream}
-            onIterate={(prompt) => {
-              setState((s) => ({
-                ...s,
-                phase: 'ready',
-                inputs: { ...s.inputs, prompt },
-              }));
-              onResetInitialRun?.();
-            }}
-            onRetry={handleRun}
-          />
-        </section>
+        {(state.phase === 'streaming' ||
+          state.phase === 'job' ||
+          state.phase === 'done' ||
+          state.phase === 'error') && (
+          <section
+            className="run-surface-output"
+            data-testid="run-surface-output"
+            aria-label="Output"
+            aria-live="polite"
+          >
+            <OutputSlot
+              app={app}
+              appAsPickResult={appAsPickResult}
+              state={state}
+              refinable={refinable}
+              onCancelJob={handleCancelJob}
+              onCancelStream={handleCancelStream}
+              onIterate={(prompt) => {
+                setState((s) => ({
+                  ...s,
+                  phase: 'ready',
+                  inputs: { ...s.inputs, prompt },
+                }));
+                onResetInitialRun?.();
+              }}
+              onRetry={handleRun}
+            />
+          </section>
+        )}
       </div>
 
       <PastRunsDisclosure appSlug={app.slug} />
@@ -1131,7 +1157,9 @@ function OutputSlot({
   onRetry,
 }: OutputSlotProps) {
   if (state.phase === 'ready') {
-    return <EmptyOutputCard appName={app.name} />;
+    // Chat-style restructure (2026-04-21): idle state has no output
+    // mount — the input card owns the column until Run is pressed.
+    return null;
   }
 
   if (state.phase === 'streaming') {
@@ -1202,20 +1230,129 @@ function OutputSlot({
   );
 }
 
-function EmptyOutputCard({ appName }: { appName: string }) {
+// ── Run header bar (chat-style collapsed input) ────────────────────────────
+//
+// Chat-style restructure (2026-04-21): when a run is in-flight or done,
+// the full input card collapses and this thin header bar shows instead.
+// Pattern: AppIcon tile + status glyph (pulse/check) + short sentence
+// ("Running <app> with <input-snippet>…" or "<done summary>") + right-side
+// action (Cancel while running, Run again when done). Error phase keeps
+// the input card visible so the user can edit and retry — no header bar.
+
+interface RunHeaderBarProps {
+  app: AppDetail;
+  phase: Phase;
+  inputs: Record<string, unknown>;
+  actionSpec: ActionSpec;
+  job?: JobRecord | null;
+  run?: RunRecord;
+  onRunAgain: () => void;
+  onCancel: () => void;
+}
+
+function RunHeaderBar({
+  app,
+  phase,
+  inputs,
+  actionSpec,
+  job,
+  run,
+  onRunAgain,
+  onCancel,
+}: RunHeaderBarProps) {
+  if (phase === 'ready' || phase === 'error') return null;
+  const running = phase === 'streaming' || phase === 'job';
+  const text = running
+    ? summarizeInputSnippet(app.name, inputs, actionSpec)
+    : summarizeDoneSummary(run, job);
   return (
     <div
-      className="run-surface-card run-surface-empty-output"
-      data-testid="run-surface-empty-output"
+      className="run-surface-header-bar"
+      data-phase={phase}
+      data-testid="run-surface-header-bar"
     >
-      <div className="run-surface-empty-output-inner">
-        <div className="run-surface-empty-output-title">Output will appear here</div>
-        <div className="run-surface-empty-output-sub">
-          Fill in the form and press Run to generate a result with {appName}.
-        </div>
+      <div className="run-surface-header-bar-icon">
+        <AppIcon slug={app.slug} size={16} />
+      </div>
+      {running ? (
+        <span className="run-surface-header-bar-pulse" aria-hidden="true" />
+      ) : (
+        <svg
+          className="run-surface-header-bar-check"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M3 8.5 6.5 12 13 4.5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+      <span className="run-surface-header-bar-text">{text}</span>
+      <div className="run-surface-header-bar-actions">
+        {running ? (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onCancel}
+            data-testid="run-surface-header-bar-cancel"
+            style={{ padding: '6px 12px', fontSize: 12 }}
+          >
+            Cancel
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onRunAgain}
+            data-testid="run-surface-header-bar-run-again"
+            style={{ padding: '6px 12px', fontSize: 12 }}
+          >
+            Run again
+          </button>
+        )}
       </div>
     </div>
   );
+}
+
+function summarizeInputSnippet(
+  appName: string,
+  inputs: Record<string, unknown>,
+  spec: ActionSpec,
+): string {
+  const names = spec.inputs.length > 0 ? spec.inputs.map((i) => i.name) : Object.keys(inputs);
+  for (const n of names) {
+    const v = inputs[n];
+    if (v === undefined || v === null || v === '') continue;
+    let s: string;
+    if (typeof v === 'string') s = v;
+    else if (typeof v === 'number' || typeof v === 'boolean') s = String(v);
+    else if (Array.isArray(v)) s = `${v.length} item${v.length === 1 ? '' : 's'}`;
+    else if (typeof v === 'object' && 'name' in (v as object)) {
+      s = String((v as { name?: string }).name ?? 'file');
+    } else s = '';
+    if (!s) continue;
+    if (s.length > 36) s = `${s.slice(0, 33)}…`;
+    return `Running ${appName} with ${s}…`;
+  }
+  return `Running ${appName}…`;
+}
+
+function summarizeDoneSummary(run: RunRecord | undefined, job: JobRecord | null | undefined): string {
+  if (run?.status === 'error' || job?.status === 'failed') return 'Run failed';
+  if (run?.status === 'timeout') return 'Timed out';
+  if (job?.status === 'cancelled') return 'Cancelled';
+  const ms = run?.duration_ms;
+  if (typeof ms === 'number' && ms > 0) {
+    const s = (ms / 1000).toFixed(ms < 10_000 ? 1 : 0);
+    return `Done in ${s}s`;
+  }
+  return 'Done';
 }
 
 // ── Past runs disclosure ───────────────────────────────────────────────────
