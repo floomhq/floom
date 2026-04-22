@@ -39,6 +39,7 @@ import { runRateLimitMiddleware } from './lib/rate-limit.js';
 import { resolveUserContext } from './services/session.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
+import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
 import { securityHeaders } from './middleware/security.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
@@ -1098,6 +1099,24 @@ async function boot(): Promise<void> {
   // worker manually via `processOneJob`.
   if (process.env.FLOOM_DISABLE_JOB_WORKER !== 'true') {
     startJobWorker();
+  }
+
+  // Zombie-run recovery (#349). The run worker is fire-and-forget, so any
+  // run left in `status='running'` when this process starts is orphaned —
+  // the old worker died with it. Flip them to `error` so the client
+  // taxonomy renders a real card and /api/runs/<id> stops polling forever.
+  // Then spin up the periodic sweeper so in-flight runs that stall past
+  // the absolute timeout ceiling also get reaped.
+  try {
+    const swept = sweepZombieRuns();
+    if (swept > 0) {
+      console.log(`[runner] boot sweeper reaped ${swept} zombie run${swept === 1 ? '' : 's'}`);
+    }
+  } catch (err) {
+    console.warn(`[runner] boot sweeper failed: ${(err as Error).message}`);
+  }
+  if (process.env.FLOOM_DISABLE_ZOMBIE_SWEEPER !== 'true') {
+    startZombieRunSweeper();
   }
 
   // Start the triggers scheduler. Polls the `triggers` table every 30s

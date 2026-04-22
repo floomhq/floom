@@ -80,5 +80,35 @@ console.log('competitor-analyzer entrypoint contract');
   );
 }
 
+// Bug #350: the runtime manifest declares `urls` as a textarea (no native
+// array type in v2.0). Direct API/MCP callers send the raw string; only the
+// web UI splits client-side. The entrypoint must accept both shapes.
+{
+  const result = runCase({
+    action: 'analyze',
+    inputs: {
+      urls: 'https://n8n.io\nhttps://vercel.com',
+      your_product: 'We sell B2B sales automation software to EU mid-market teams.',
+    },
+  });
+  const parsed = parseMarker(result.stdout);
+  log('string urls (newline-separated) exits 0', result.status === 0, `status=${result.status} stderr=${result.stderr}`);
+  log('string urls parses as ok:true', parsed?.ok === true, JSON.stringify(parsed));
+  log('string urls normalizes to 2 competitors', parsed?.outputs?.competitors?.length === 2, JSON.stringify(parsed?.outputs?.competitors));
+}
+
+{
+  const result = runCase({
+    action: 'analyze',
+    inputs: {
+      urls: 'https://n8n.io, https://vercel.com',
+      your_product: 'We sell B2B sales automation software to EU mid-market teams.',
+    },
+  });
+  const parsed = parseMarker(result.stdout);
+  log('string urls (comma-separated) exits 0', result.status === 0, `status=${result.status} stderr=${result.stderr}`);
+  log('string urls (comma) normalizes to 2 competitors', parsed?.outputs?.competitors?.length === 2, JSON.stringify(parsed?.outputs?.competitors));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

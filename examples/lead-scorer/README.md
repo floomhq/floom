@@ -77,7 +77,7 @@ Output is printed to stdout. The last line is prefixed with `__FLOOM_RESULT__` (
 
 ## Sample input
 
-See [`test-input.csv`](./test-input.csv) — 10 synthetic B2B companies. Websites are placeholders (`example.com/<slug>`) so nothing real gets scraped during testing.
+See [`test-input.csv`](./test-input.csv) — 8 real B2B companies: 5 European fintech scale-ups (Ramp, Pennylane, Qonto, Payhawk, Spendesk) plus 3 deliberate misfits (industrial manufacturer, design agency, biotech). Paired with an ICP like "B2B SaaS CFOs at 100-500 employee fintechs in EU", the fit leads should score high and the misfits low — a real demo of the scorer's signal.
 
 ## Design notes
 
