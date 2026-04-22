@@ -1155,13 +1155,17 @@ function OutputSlot({
   }
 
   if (state.phase === 'error') {
+    // Issue #358: the pre-run error path (submit failed, network down,
+    // 4xx from validation that slipped past the client, etc.) used to
+    // render as a raw two-line card. Non-devs couldn't tell what to do
+    // next. FriendlyStartupError maps the raw message to a human line,
+    // offers a Try again button, and tucks the raw text into a
+    // collapsed "Show details" disclosure on a light background.
     return (
-      <div className="run-surface-card run-surface-error-card" data-testid="run-surface-error">
-        <p className="run-surface-error-title">Something went wrong</p>
-        <p className="run-surface-error-body">
-          {state.errorMessage || 'Try again.'}
-        </p>
-      </div>
+      <FriendlyStartupError
+        rawMessage={state.errorMessage || 'Try again.'}
+        onRetry={onRetry}
+      />
     );
   }
 
@@ -1214,6 +1218,122 @@ function EmptyOutputCard({ appName }: { appName: string }) {
           Fill in the form and press Run to generate a result with {appName}.
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Friendly pre-run error card (Issue #358) ────────────────────────────────
+//
+// When a run can't even start (network error, server 4xx, validation miss,
+// BYOK-but-no-key, cancel-before-stream) we land in phase=='error' and used
+// to render a raw "Something went wrong / <raw message>" card. For non-devs
+// that felt broken — and the raw error text was often unreadable.
+// humanizeStartupError() reduces common server/network patterns to a single
+// human sentence, and FriendlyStartupError wraps it with a Try again button
+// plus a collapsed "Show details" disclosure for the raw text.
+
+/**
+ * Reduce a raw pre-run error message to a one-line, non-technical summary.
+ * Intentionally pattern-based (regex on the original message) so new server
+ * shapes don't require a sweeping client update. Falls through to a generic
+ * "We couldn't start the run" when no pattern matches.
+ */
+export function humanizeStartupError(raw: string): {
+  headline: string;
+  sub: string;
+} {
+  const r = (raw || '').toLowerCase();
+  if (!r.trim()) {
+    return {
+      headline: "We couldn't start the run.",
+      sub: 'Try again in a moment.',
+    };
+  }
+  if (/cancel/.test(r)) {
+    return {
+      headline: 'Run cancelled.',
+      sub: 'Press Run when you want to try again.',
+    };
+  }
+  if (/timeout|timed out/.test(r)) {
+    return {
+      headline: "That took too long to start.",
+      sub: 'The service may be warming up. Try again in a moment.',
+    };
+  }
+  if (/network|fetch|offline|ECONN|failed to fetch/i.test(raw)) {
+    return {
+      headline: "We couldn't reach the server.",
+      sub: 'Check your connection and try again.',
+    };
+  }
+  if (/rate[- ]?limit|429/.test(r)) {
+    return {
+      headline: 'Too many runs at once.',
+      sub: 'Wait a few seconds and try again.',
+    };
+  }
+  if (/byok|api key|gemini|auth/.test(r)) {
+    return {
+      headline: 'The run needs a Gemini API key.',
+      sub: 'Add your key in settings, or try a different app.',
+    };
+  }
+  if (/missing|required|invalid input|field/.test(r)) {
+    return {
+      headline: 'Something in the form needs a value.',
+      sub: 'Check the highlighted field and try again.',
+    };
+  }
+  if (/500|502|503|504|outage|upstream/.test(r)) {
+    return {
+      headline: "The server hiccuped.",
+      sub: "This isn't your fault. Try again in a moment.",
+    };
+  }
+  return {
+    headline: "We couldn't start the run.",
+    sub: 'Try again, or open details to see the raw error.',
+  };
+}
+
+function FriendlyStartupError({
+  rawMessage,
+  onRetry,
+}: {
+  rawMessage: string;
+  onRetry: () => void;
+}) {
+  const { headline, sub } = humanizeStartupError(rawMessage);
+  return (
+    <div
+      className="run-surface-card run-surface-error-card"
+      data-testid="run-surface-error"
+      role="alert"
+    >
+      <p className="run-surface-error-title">{headline}</p>
+      <p className="run-surface-error-body">{sub}</p>
+      <div className="run-surface-error-actions">
+        <button
+          type="button"
+          className="run-surface-error-retry"
+          data-testid="run-surface-error-retry"
+          onClick={onRetry}
+        >
+          Try again
+        </button>
+      </div>
+      {rawMessage && rawMessage !== sub && (
+        <details
+          className="run-surface-error-details"
+          data-testid="run-surface-error-details"
+        >
+          <summary className="run-surface-error-details-summary">
+            Show details
+          </summary>
+          <pre className="run-surface-error-details-pre">{rawMessage}</pre>
+        </details>
+      )}
     </div>
   );
 }

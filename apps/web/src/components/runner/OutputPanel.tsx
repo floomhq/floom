@@ -507,13 +507,17 @@ function ErrorCard({
                 </div>
               )}
               {run.logs && (
+                // Issue #358: raw logs render on a light background, not the
+                // old black terminal. Keeps the mono font so copy/paste still
+                // looks "log-ish" without the dev-console vibe.
                 <pre
                   style={{
                     marginTop: 10,
                     fontFamily: "'JetBrains Mono', monospace",
                     fontSize: 11,
-                    background: 'var(--terminal-bg)',
-                    color: 'var(--terminal-ink)',
+                    background: '#f7f6f1',
+                    color: 'var(--ink)',
+                    border: `1px solid ${palette.border}`,
                     padding: 12,
                     borderRadius: 8,
                     maxHeight: 240,

@@ -626,6 +626,188 @@ body:has(.topbar-mobile-menu) {
   .run-surface-past-row { grid-template-columns: 80px 60px 1fr; gap: 8px; }
 }
 
+/* ── Run progress (Issue #358, launch-blocker 2026-04-22) ─────────────────
+   Non-developer friendly replacement for the old black-terminal streaming
+   log. Progress bar + current step label sit above a collapsed "Show
+   details" disclosure. When opened, the log pane uses a light (neutral-50)
+   background with readable mono type — NEVER the black terminal. */
+.run-progress {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+}
+.run-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.run-progress-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 0;
+}
+.run-progress-title > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-progress-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent, #047857);
+  animation: floom-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-progress-spinner { animation: none; }
+}
+.run-progress-elapsed {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+/* Indeterminate bar — a translucent track with a green travelling
+   highlight. Meets the "determinate if we know the steps, indeterminate
+   shimmer otherwise" spec; we stay on indeterminate for now because the
+   SSE stream has no structured step events. */
+.run-progress-bar {
+  position: relative;
+  height: 6px;
+  background: #f0eee8;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.run-progress-bar-fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 40%;
+  background: var(--accent, #047857);
+  border-radius: 999px;
+  animation: floom-indeterminate 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-progress-bar-fill { animation: none; width: 100%; opacity: 0.35; }
+}
+
+.run-progress-step {
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+.run-progress-hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.run-progress-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+/* Collapsed-by-default log disclosure. Light theme only — no black
+   terminal, no dark background. Inside the disclosure we use a
+   neutral-50 tinted panel with JetBrains Mono text for readability,
+   so power users can still see what's streaming. */
+.run-progress-details {
+  flex: 1;
+  min-width: 0;
+}
+.run-progress-details-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  padding: 6px 2px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.run-progress-details-summary::-webkit-details-marker { display: none; }
+.run-progress-details-summary::before {
+  content: '›';
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--muted);
+}
+.run-progress-details[open] .run-progress-details-summary::before {
+  transform: rotate(90deg);
+}
+.run-progress-details-summary:hover { color: var(--ink); }
+.run-progress-details-summary:focus-visible {
+  outline: 2px solid var(--accent, #047857);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.run-progress-log {
+  margin-top: 10px;
+  background: #f7f6f1;          /* neutral-50 tinted; readable, NOT dark */
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.run-progress-log-empty {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-style: italic;
+}
+.run-progress-log-pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.run-progress-cancel {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.12s ease, border-color 0.12s ease;
+  flex-shrink: 0;
+}
+.run-progress-cancel:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.run-progress-cancel:focus-visible {
+  outline: 2px solid var(--accent, #047857);
+  outline-offset: 2px;
+}
+
 /* ── Creator hero sections ───────────────────────────────────────────────── */
 .hero-section {
   padding: 64px 0;
