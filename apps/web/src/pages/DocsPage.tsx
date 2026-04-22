@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { TopBar } from '../components/TopBar';
@@ -9,6 +9,7 @@ import {
   extractToc,
   markdownComponents,
 } from '../components/docs/markdown';
+import { DocsSidebar, DOCS_SIDEBAR_GROUPS } from '../components/docs/DocsSidebar';
 import limitsMd from '../assets/docs/limits.md?raw';
 import securityMd from '../assets/docs/security.md?raw';
 import observabilityMd from '../assets/docs/observability.md?raw';
@@ -16,8 +17,24 @@ import workflowMd from '../assets/docs/workflow.md?raw';
 import ownershipMd from '../assets/docs/ownership.md?raw';
 import reliabilityMd from '../assets/docs/reliability.md?raw';
 import pricingMd from '../assets/docs/pricing.md?raw';
+// v17 Docs hub rebuild (2026-04-22). Four new MECE sections with real
+// content sourced from the server routes, self-host docs, and manifest
+// spec — no lorem ipsum, no "TBD".
+import mcpInstallMd from '../assets/docs/mcp-install.md?raw';
+import selfHostMd from '../assets/docs/self-host.md?raw';
+import runtimeSpecsMd from '../assets/docs/runtime-specs.md?raw';
+import cliMd from '../assets/docs/cli.md?raw';
+import apiReferenceMd from '../assets/docs/api-reference.md?raw';
 
 const DOCS = [
+  // v17 hub slugs (2026-04-22). Real routes reachable via DocsSidebar.
+  { slug: 'mcp-install', label: 'MCP install', markdown: mcpInstallMd },
+  { slug: 'cli', label: 'CLI', markdown: cliMd },
+  { slug: 'runtime-specs', label: 'Runtime specs', markdown: runtimeSpecsMd },
+  { slug: 'self-host', label: 'Self-host', markdown: selfHostMd },
+  { slug: 'api-reference', label: 'API reference', markdown: apiReferenceMd },
+  // Existing launch-week answers (kept — referenced from the sidebar
+  // Limits / Runtime / Deploy groups).
   { slug: 'limits', label: 'Runtime & limits', markdown: limitsMd },
   { slug: 'security', label: 'Security', markdown: securityMd },
   { slug: 'observability', label: 'Observability', markdown: observabilityMd },
@@ -31,6 +48,7 @@ type DocEntry = (typeof DOCS)[number];
 
 export function DocsPage() {
   const { slug } = useParams<{ slug: string }>();
+  const { pathname } = useLocation();
   const doc = DOCS.find((entry) => entry.slug === slug) as DocEntry | undefined;
   const [tocOpen, setTocOpen] = useState(false);
 
@@ -45,7 +63,8 @@ export function DocsPage() {
   const toc = useMemo(() => (doc ? extractToc(doc.markdown) : []), [doc]);
 
   if (!doc) {
-    return <Navigate to="/protocol" replace />;
+    // Unknown slug: send back to the docs landing hub (v17 behaviour).
+    return <Navigate to="/docs" replace />;
   }
 
   return (
@@ -54,129 +73,51 @@ export function DocsPage() {
 
       <main
         style={{
-          maxWidth: 1080,
+          maxWidth: 1260,
           margin: '0 auto',
-          padding: '48px 24px 80px',
+          padding: '0',
           display: 'grid',
-          gridTemplateColumns: '220px 1fr',
-          gap: 48,
+          gridTemplateColumns: '260px minmax(0, 1fr)',
+          gap: 0,
           alignItems: 'start',
         }}
       >
-        <aside
-          style={{
-            position: 'sticky',
-            top: 72,
-            display: 'block',
-          }}
-          className="protocol-toc"
-        >
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              marginBottom: 12,
-            }}
-          >
-            Docs
-          </p>
-          <nav style={{ marginBottom: 24 }}>
-            {DOCS.map((entry) => (
-              <Link
-                key={entry.slug}
-                to={`/docs/${entry.slug}`}
-                style={{
-                  display: 'block',
-                  fontSize: 13,
-                  color: entry.slug === doc.slug ? 'var(--ink)' : 'var(--muted)',
-                  textDecoration: 'none',
-                  padding: '4px 0',
-                  fontWeight: entry.slug === doc.slug ? 600 : 400,
-                }}
-              >
-                {entry.label}
-              </Link>
-            ))}
-          </nav>
+        {/* Shared v17 sidebar. Same groups on /docs and every /docs/:slug. */}
+        <DocsSidebar groups={DOCS_SIDEBAR_GROUPS} currentPath={pathname} />
 
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              marginBottom: 12,
-            }}
-          >
-            Contents
-          </p>
-          <nav>
-            {toc.map((item) => (
-              <a
-                key={item.id}
-                href={`#${item.id}`}
+        <article style={{ padding: '44px 48px 80px', minWidth: 0 }}>
+          {toc.length > 0 ? (
+            <nav style={{ marginBottom: 24 }} aria-label="On-page contents">
+              <p
                 style={{
-                  display: 'block',
-                  fontSize: 13,
+                  fontSize: 11,
+                  fontWeight: 700,
                   color: 'var(--muted)',
-                  textDecoration: 'none',
-                  padding: '4px 0',
-                  paddingLeft: item.level === 3 ? 12 : 0,
-                  fontWeight: item.level === 1 ? 600 : 400,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  marginBottom: 8,
                 }}
               >
-                {item.text}
-              </a>
-            ))}
-          </nav>
-        </aside>
-
-        <article>
-          <p
-            style={{
-              margin: '0 0 12px',
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Plain-language launch docs
-          </p>
-
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 8,
-              marginBottom: 20,
-            }}
-          >
-            {DOCS.map((entry) => (
-              <Link
-                key={entry.slug}
-                to={`/docs/${entry.slug}`}
-                style={{
-                  fontSize: 12,
-                  fontWeight: entry.slug === doc.slug ? 600 : 500,
-                  color: entry.slug === doc.slug ? 'var(--ink)' : 'var(--muted)',
-                  textDecoration: 'none',
-                  padding: '6px 10px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 999,
-                  background: entry.slug === doc.slug ? 'var(--card)' : 'var(--bg)',
-                }}
-              >
-                {entry.label}
-              </Link>
-            ))}
-          </div>
-
+                On this page
+              </p>
+              {toc.map((item) => (
+                <a
+                  key={item.id}
+                  href={`#${item.id}`}
+                  style={{
+                    display: 'inline-block',
+                    marginRight: 12,
+                    fontSize: 12,
+                    color: 'var(--muted)',
+                    textDecoration: 'none',
+                    paddingLeft: item.level === 3 ? 12 : 0,
+                  }}
+                >
+                  {item.text}
+                </a>
+              ))}
+            </nav>
+          ) : null}
           <button
             type="button"
             className="protocol-toc-toggle"
