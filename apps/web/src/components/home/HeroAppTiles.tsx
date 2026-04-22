@@ -1,24 +1,27 @@
 /**
- * HeroAppTiles — compact app chips directly under the hero CTA row.
+ * HeroAppTiles — proof-of-life cards directly under the hero CTA row.
  *
- * Purpose: proof-of-life above the fold. v11 landing put 4 apps (FlyFast,
- * OpenPaper, ...) in a card grid INSIDE the hero wrap; the 2026-04-19
- * compression pass pulled them out and left the hero as typography + form
- * only. Federico's feedback ("landing page can be improved a lot") mapped
- * directly to this loss: the hero stopped demonstrating the product.
+ * 2026-04-22 redesign ("kill PowerPoint icons"): the previous design
+ * was an icon chip + bold title + two lines of grey text with zero
+ * product preview. Federico flagged it as "PowerPoint boxes, not power
+ * apps". The redesign replaces the icon with a real product thumbnail
+ * — a 16:9 screenshot of the actual output the app produces (ranked
+ * leads table, competitor scorecard, candidate shortlist). Benchmark is
+ * the Vercel templates gallery, where every card leads with a product
+ * thumbnail, not an icon.
  *
- * 2026-04-20 landing-v4 fix (audit items 2c + 2d):
- *   - Show exactly 4 tiles at all viewports ≥ 640px. The old 5-tile
- *     layout dropped the 5th at 768–1024 via `:nth-child(n+5)` which
- *     looked like a broken grid. Four tiles with a "+N more" link in
- *     the fourth tile's footer is cleaner and doesn't change the count
- *     between breakpoints.
- *   - Clamp descriptions to 2 lines at a word boundary. The old layout
- *     had a CSS line-clamp at 2 but no content cap, so descriptions
- *     cut mid-word at narrow widths. We now hard-cap input descriptions
- *     at 80 chars at a word boundary before passing them to the tile,
- *     and still keep the CSS clamp as a safety net for unusual
- *     character widths.
+ * Thumbnails live in /public/cards/<slug>.webp and are authored from
+ * static HTML mocks under scripts/card-shots/ (see render.sh there for
+ * regeneration). Apps without a thumbnail (utility apps like JWT decode
+ * or UUID gen, which have terse zero-click output) fall back to the
+ * compact icon + text variant so the grid doesn't break.
+ *
+ * Prior doc for context:
+ * Purpose: proof-of-life above the fold. v11 landing put 4 apps in a
+ * card grid INSIDE the hero wrap; the 2026-04-19 compression pass pulled
+ * them out and left the hero as typography + form only. Federico's
+ * feedback ("landing page can be improved a lot") mapped directly to
+ * this loss: the hero stopped demonstrating the product.
  *
  * Each tile links to `/p/:slug` (same destination as the full AppStripe on
  * the featured-apps section further down).
@@ -36,39 +39,39 @@ interface HeroAppTilesProps {
   tiles: Tile[];
   /**
    * Total number of apps in the directory (used to compute the "+N
-   * more" count on the 4th tile). Defaults to `tiles.length` when not
+   * more" count on the last tile). Defaults to `tiles.length` when not
    * provided. Passed in by CreatorHeroPage so the badge reflects the
-   * real hub size, not just the 5 teaser slugs.
+   * real hub size, not just the curated roster.
    */
   totalCount?: number;
 }
 
 const DISPLAYED_TILE_COUNT = 4;
-// Hard cap on description length. Clamped at a word boundary so the
-// tile reads as a finished sentence, not an ellipsised fragment. The
-// CSS line-clamp at 2 is still enabled as a safety net for edge-case
-// widths.
-const DESCRIPTION_CAP = 80;
 
-function clampToWordBoundary(text: string, cap: number): string {
-  if (!text) return '';
-  if (text.length <= cap) return text;
-  const slice = text.slice(0, cap + 1);
-  const lastSpace = slice.lastIndexOf(' ');
-  const cut = lastSpace > cap * 0.6 ? lastSpace : cap;
-  return text.slice(0, cut).replace(/[,;:.\s]+$/, '') + '…';
+/**
+ * Slugs that have an authored product-thumbnail WebP in /public/cards/.
+ * Kept as a static set rather than a dynamic import because (a) these
+ * are the handful of showcase demos we control, (b) we want the code
+ * to fail loudly (missing image at runtime) if the asset is removed,
+ * and (c) utility apps (jwt-decode, uuid, password, json-format)
+ * deliberately fall back to the icon+text variant so we don't have to
+ * fabricate a "cool output" thumbnail for a terse zero-click utility.
+ * To add a new showcase: drop `public/cards/<slug>.webp` and append
+ * the slug here.
+ */
+const THUMBED_SLUGS = new Set([
+  'lead-scorer',
+  'competitor-analyzer',
+  'resume-screener',
+]);
+
+function hasThumb(slug: string): boolean {
+  return THUMBED_SLUGS.has(slug);
 }
 
 export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
   if (tiles.length === 0) return null;
 
-  // Show up to 4 tiles. When the roster has fewer (post-2026-04-21
-  // curation: only 3 showcase demos), render exactly that many — no
-  // ghost slots, no padding. When more apps exist, the last tile gets
-  // a "+N more" footer that links to the full directory. If the
-  // visible roster already covers the entire public hub, the overflow
-  // badge is suppressed regardless of DISPLAYED_TILE_COUNT, so we
-  // never say "+0 more" or imply hidden apps that don't exist.
   const shown = tiles.slice(0, DISPLAYED_TILE_COUNT);
   const effectiveTotal = typeof totalCount === 'number' ? totalCount : tiles.length;
   const hasHiddenApps = effectiveTotal > shown.length;
@@ -79,11 +82,11 @@ export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
       data-testid="hero-app-tiles"
       className="hero-app-tiles"
       style={{
-        marginTop: 28,
+        marginTop: 32,
         display: 'grid',
         gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))`,
-        gap: 10,
-        maxWidth: 820,
+        gap: 14,
+        maxWidth: 920,
         marginLeft: 'auto',
         marginRight: 'auto',
         textAlign: 'left',
@@ -92,6 +95,7 @@ export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
       {shown.map((t, i) => {
         const isLast = i === shown.length - 1;
         const showOverflowBadge = isLast && overflowCount > 0;
+        const thumbed = hasThumb(t.slug);
         return (
           <Link
             key={t.slug}
@@ -102,77 +106,130 @@ export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
               position: 'relative',
               display: 'flex',
               flexDirection: 'column',
-              gap: 8,
-              padding: '12px 12px',
               background: 'var(--card)',
               border: '1px solid var(--line)',
-              borderRadius: 12,
+              borderRadius: 14,
               color: 'inherit',
               textDecoration: 'none',
-              transition: 'border-color 140ms ease, transform 140ms ease',
-              minWidth: 0,
+              overflow: 'hidden',
+              transition:
+                'border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease',
             }}
             onMouseEnter={(e) => {
               const el = e.currentTarget as HTMLAnchorElement;
               el.style.borderColor = 'var(--ink)';
-              el.style.transform = 'translateY(-1px)';
+              el.style.transform = 'translateY(-2px)';
+              el.style.boxShadow = '0 8px 24px rgba(14, 14, 12, 0.08)';
             }}
             onMouseLeave={(e) => {
               const el = e.currentTarget as HTMLAnchorElement;
               el.style.borderColor = 'var(--line)';
               el.style.transform = 'translateY(0)';
+              el.style.boxShadow = 'none';
             }}
           >
-            {/* #279 launch polish (2026-04-21): radial gradient + inset
-                highlight so the chip reads as a physical pill, not a flat
-                square. Matches AppStripe's goosebumps tint. */}
-            <span
-              aria-hidden="true"
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 9,
-                background:
-                  'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
-                color: '#047857',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                boxShadow:
-                  'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
-              }}
-            >
-              <AppIcon slug={t.slug} size={18} color="#047857" />
-            </span>
+            {thumbed ? (
+              <div
+                data-testid={`hero-tile-thumb-${t.slug}`}
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  aspectRatio: '16 / 9',
+                  overflow: 'hidden',
+                  borderBottom: '1px solid var(--line)',
+                  background: '#fafaf7',
+                }}
+              >
+                <img
+                  src={`/cards/${t.slug}.webp`}
+                  alt=""
+                  aria-hidden="true"
+                  loading="eager"
+                  decoding="async"
+                  width={640}
+                  height={360}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    objectPosition: 'top',
+                    display: 'block',
+                  }}
+                />
+              </div>
+            ) : (
+              // Fallback for utility apps (jwt-decode, uuid, etc.) that
+              // don't have an authored product thumbnail. Keeps the
+              // compact icon + text shape so the grid stays coherent.
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  aspectRatio: '16 / 9',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background:
+                    'linear-gradient(180deg, #fdfdfa 0%, #f4f4ee 100%)',
+                  borderBottom: '1px solid var(--line)',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    background:
+                      'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
+                    color: '#047857',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow:
+                      'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
+                  }}
+                >
+                  <AppIcon slug={t.slug} size={22} color="#047857" />
+                </span>
+              </div>
+            )}
             <div
               style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: 'var(--ink)',
-                lineHeight: 1.25,
-                letterSpacing: '-0.005em',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                padding: '12px 14px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                minWidth: 0,
               }}
             >
-              {t.name}
-            </div>
-            <div
-              className="hero-app-tile-desc"
-              style={{
-                fontSize: 12,
-                color: 'var(--muted)',
-                lineHeight: 1.4,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-              }}
-            >
-              {clampToWordBoundary(t.description, DESCRIPTION_CAP)}
+              <div
+                style={{
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                  lineHeight: 1.25,
+                  letterSpacing: '-0.005em',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t.name}
+              </div>
+              <div
+                className="hero-app-tile-desc"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--muted)',
+                  lineHeight: 1.4,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t.description}
+              </div>
             </div>
             {showOverflowBadge && (
               <span
@@ -180,15 +237,16 @@ export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
                 style={{
                   position: 'absolute',
                   right: 10,
-                  bottom: 10,
+                  top: 10,
                   fontSize: 11,
                   color: 'var(--accent)',
                   fontFamily: "'JetBrains Mono', monospace",
                   fontWeight: 600,
                   background: 'var(--card)',
-                  padding: '2px 6px',
+                  padding: '3px 7px',
                   borderRadius: 6,
                   letterSpacing: '-0.01em',
+                  border: '1px solid var(--line)',
                 }}
               >
                 +{overflowCount} more

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+  :root {
+    --card: #ffffff;
+    --ink: #0e0e0c;
+    --muted: #585550;
+    --line: #e8e6e0;
+    --accent: #047857;
+    --accent-soft: #ecfdf5;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fafaf7;
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    width: 1280px;
+    height: 720px;
+    padding: 40px 50px;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .scene {
+    width: 100%;
+    height: 100%;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 38px 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  }
+  td { padding: 32px 18px; }
+  th { padding: 16px 18px; }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .sub { font-size: 15px; color: var(--muted); margin-top: 6px; font-weight: 500; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .pill::before {
+    content: '';
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.15);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 16px;
+  }
+  th {
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    background: #fcfcfa;
+  }
+  th:last-child, td:last-child { text-align: right; }
+  td {
+    padding: 18px;
+    border-bottom: 1px solid var(--line);
+    font-size: 16px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  tr:last-child td { border-bottom: none; }
+  .company { font-weight: 600; }
+  .company-row { display: flex; flex-direction: column; gap: 3px; }
+  .company-sub { font-size: 13px; color: var(--muted); font-weight: 400; }
+  .score {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+    height: 30px;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .score.high { background: var(--accent-soft); color: var(--accent); }
+  .score.mid  { background: #fef3c7; color: #b45309; }
+  .score.low  { background: #fef2f2; color: #b91c1c; }
+  .reason { color: var(--muted); font-size: 14px; font-weight: 400; }
+  .table-wrap {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+</style>
+</head>
+<body>
+  <div class="scene">
+    <div class="head">
+      <div>
+        <div class="title">Lead Scorer</div>
+        <div class="sub">47 leads researched with live web search · fit vs. your ICP</div>
+      </div>
+      <div class="pill">run complete</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>ICP fit reasoning</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="company-row">
+                <span class="company">Linear</span>
+                <span class="company-sub">linear.app · 250 employees</span>
+              </div>
+            </td>
+            <td class="reason">B2B SaaS, strong product-led growth, matches ICP on size and motion.</td>
+            <td><span class="score high">94</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="company-row">
+                <span class="company">Ramp</span>
+                <span class="company-sub">ramp.com · 1,100 employees</span>
+              </div>
+            </td>
+            <td class="reason">Finance vertical, larger than ICP but high buying intent signal.</td>
+            <td><span class="score high">88</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="company-row">
+                <span class="company">Vercel</span>
+                <span class="company-sub">vercel.com · 540 employees</span>
+              </div>
+            </td>
+            <td class="reason">Dev infra, technical buyer persona aligns with product surface area.</td>
+            <td><span class="score high">81</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="company-row">
+                <span class="company">Pleo</span>
+                <span class="company-sub">pleo.io · 960 employees</span>
+              </div>
+            </td>
+            <td class="reason">EU fintech, size on upper edge but mentioned buying signal last month.</td>
+            <td><span class="score mid">72</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

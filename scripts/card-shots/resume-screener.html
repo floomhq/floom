@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+  :root {
+    --card: #ffffff;
+    --ink: #0e0e0c;
+    --muted: #585550;
+    --line: #e8e6e0;
+    --accent: #047857;
+    --accent-soft: #ecfdf5;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #fafaf7;
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    width: 1280px;
+    height: 720px;
+    padding: 28px 36px;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .scene {
+    width: 100%;
+    height: 100%;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 40px 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .sub { font-size: 15px; color: var(--muted); margin-top: 6px; font-weight: 500; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 13px; font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .pill::before {
+    content: '';
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.15);
+  }
+  .list {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 42px 1fr auto;
+    align-items: center;
+    gap: 18px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .row:last-child { border-bottom: none; }
+  .rank {
+    width: 32px; height: 32px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600; font-size: 14px;
+    background: #f5f5f0;
+    color: var(--muted);
+  }
+  .row.top .rank {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .candidate { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .cand-name { font-size: 16px; font-weight: 600; letter-spacing: -0.005em; }
+  .cand-meta { font-size: 13px; color: var(--muted); font-weight: 400; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--line); display: inline-block; }
+  .cand-reason { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+  .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .match {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--ink);
+  }
+  .row.top .match { color: var(--accent); }
+  .match-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="scene">
+    <div class="head">
+      <div>
+        <div class="title">Resume Screener</div>
+        <div class="sub">34 resumes · ranked against &ldquo;Senior React Engineer&rdquo; JD with per-candidate reasoning</div>
+      </div>
+      <div class="pill">shortlist ready</div>
+    </div>
+    <div class="list">
+      <div class="row top">
+        <div class="rank">01</div>
+        <div class="candidate">
+          <div class="cand-name">Maya Chen</div>
+          <div class="cand-meta"><span>7 yrs · Stripe, Airbnb</span><span class="dot"></span><span>TypeScript, React, Next</span></div>
+          <div class="cand-reason">Shipped design systems at scale, matches ownership + autonomy signals in JD.</div>
+        </div>
+        <div class="right">
+          <div class="match">96</div>
+          <div class="match-label">match</div>
+        </div>
+      </div>
+      <div class="row top">
+        <div class="rank">02</div>
+        <div class="candidate">
+          <div class="cand-name">Daniel Okafor</div>
+          <div class="cand-meta"><span>6 yrs · Vercel, Linear</span><span class="dot"></span><span>React, Remix, Node</span></div>
+          <div class="cand-reason">Strong perf + infra instinct, missing staff-level leadership exposure.</div>
+        </div>
+        <div class="right">
+          <div class="match">91</div>
+          <div class="match-label">match</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="rank">03</div>
+        <div class="candidate">
+          <div class="cand-name">Priya Raman</div>
+          <div class="cand-meta"><span>5 yrs · Figma, Notion</span><span class="dot"></span><span>React, GraphQL, Relay</span></div>
+          <div class="cand-reason">Solid editor surface experience, lighter on testing + CI ownership.</div>
+        </div>
+        <div class="right">
+          <div class="match">83</div>
+          <div class="match-label">match</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="rank">04</div>
+        <div class="candidate">
+          <div class="cand-name">Jonas Weber</div>
+          <div class="cand-meta"><span>4 yrs · Pleo, HelloFresh</span><span class="dot"></span><span>React, Playwright</span></div>
+          <div class="cand-reason">Good product shipping cadence, less depth on real-time systems.</div>
+        </div>
+        <div class="right">
+          <div class="match">76</div>
+          <div class="match-label">match</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
