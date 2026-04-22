@@ -34,7 +34,7 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../db.js';
-import { newAppId } from '../lib/ids.js';
+import { newAppId, newSecretId } from '../lib/ids.js';
 import type { NormalizedManifest } from '../types.js';
 
 export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
@@ -402,6 +402,48 @@ export async function seedLaunchDemos(): Promise<{
     );
     added++;
     console.log(`[launch-demos] ${demo.slug}: inserted (app_id=${appId})`);
+  }
+
+  // Seed the Floom-paid Gemini key as a GLOBAL secret (app_id IS NULL).
+  // Why here: dispatchRun in services/runner.ts loads secrets from the DB
+  // `secrets` table, not from process.env. So even though
+  // GEMINI_API_KEY is present in the server container's environment (via
+  // docker-compose), the 3 launch demos were firing in dry-run mode
+  // because no matching DB row existed. Root cause #2 of the empty
+  // lead-scorer result Federico saw on 2026-04-21.
+  //
+  // Scope: global (app_id NULL) so BYOK per-call secrets from the run
+  // route still override it (see dispatchRun merge order). Only written
+  // when the env var is present — self-hosters without a key stay in
+  // dry-run, which is the honest fallback.
+  //
+  // Idempotent: INSERT OR REPLACE keeps the row fresh on re-seed so a
+  // rotated key in docker-compose takes effect on next boot.
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey && geminiKey.trim().length > 0) {
+    const existingGlobal = db
+      .prepare('SELECT id FROM secrets WHERE app_id IS NULL AND name = ?')
+      .get('GEMINI_API_KEY') as { id: string } | undefined;
+    if (existingGlobal) {
+      db.prepare('UPDATE secrets SET value = ? WHERE id = ?').run(
+        geminiKey,
+        existingGlobal.id,
+      );
+      console.log(
+        '[launch-demos] refreshed global GEMINI_API_KEY secret from env',
+      );
+    } else {
+      db.prepare(
+        'INSERT INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, NULL)',
+      ).run(newSecretId(), 'GEMINI_API_KEY', geminiKey);
+      console.log(
+        '[launch-demos] seeded global GEMINI_API_KEY secret from env',
+      );
+    }
+  } else {
+    console.log(
+      '[launch-demos] GEMINI_API_KEY env var not set — launch demos will run in dry-run mode',
+    );
   }
 
   console.log(

@@ -193,7 +193,14 @@ export async function runAppContainer(opts: {
     // Read-only bind: the app can read but never overwrite its inputs.
     // This also keeps the host-side envelope off the container FS so a
     // malicious app can't exfiltrate another run's files by reading /tmp.
-    binds.push(`${materialized.hostDir}:${CONTAINER_INPUTS_DIR}:ro`);
+    //
+    // DinD fix (2026-04-22): use `mountSource`, not `hostDir`. When the
+    // Floom server runs as a container and talks to the host daemon via
+    // /var/run/docker.sock, the server's view of the FS and the daemon's
+    // view diverge. `hostDir` is the path the server WROTE to (its own
+    // FS); `mountSource` is the matching HOST-side path the daemon can
+    // actually resolve. See resolvePathPair() in lib/file-inputs.ts.
+    binds.push(`${materialized.mountSource}:${CONTAINER_INPUTS_DIR}:ro`);
   }
   const configArg = JSON.stringify({
     action: opts.action,

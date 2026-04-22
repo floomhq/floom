@@ -44,7 +44,18 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-MODEL_ID = "gemini-3.1-pro-preview"
+# Default to the only Gemini 3+ model with free-tier quota today. Paid-tier
+# callers can override via GEMINI_MODEL env var (e.g. gemini-3-pro-preview).
+DEFAULT_MODEL_ID = "gemini-3.1-flash-lite-preview"
+
+def _resolve_model() -> str:
+    m = (os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL_ID).strip()
+    if not m.startswith("gemini-3"):
+        raise RuntimeError(
+            f"refusing to run: GEMINI_MODEL must be gemini-3.x (got '{m}')"
+        )
+    return m
+
 MAX_WORKERS = 8
 PER_CALL_TIMEOUT_S = 45
 MAX_CV_CHARS = 20_000  # truncate very long CVs to stay under token budget
@@ -180,6 +191,7 @@ def _score_with_gemini(
     jd: str,
     must_haves: list[str],
     client,
+    model_id: str,
 ) -> dict[str, Any]:
     """Single scoring call. Retries once on rate limit / JSON parse failure."""
     from google.genai import errors as genai_errors  # type: ignore
@@ -205,7 +217,7 @@ def _score_with_gemini(
     for attempt in (1, 2):
         try:
             resp = client.models.generate_content(
-                model=MODEL_ID,
+                model=model_id,
                 contents=prompt,
                 config=config,
             )
@@ -294,7 +306,7 @@ def screen(
             "ranked": [],
             "summary": "No PDFs found in the uploaded archive.",
             "dry_run": False,
-            "model": MODEL_ID,
+            "model": "n/a",
         }
     _log(f"found {len(pdfs)} PDF(s) in archive; must_haves={len(mh_list)}")
 
@@ -302,6 +314,9 @@ def screen(
     dry_run = client is None
     if dry_run:
         _log("DRY RUN: GEMINI_API_KEY missing or google-genai not installed.")
+    model_id = "dry-run" if dry_run else _resolve_model()
+    if not dry_run:
+        _log(f"using model: {model_id}")
 
     def _screen_one(idx_item: tuple[int, tuple[str, bytes]]) -> dict:
         idx, (filename, pdf_bytes) = idx_item
@@ -330,7 +345,7 @@ def screen(
             if dry_run:
                 out = _dry_run_score(cv_text, job_description, mh_list)
             else:
-                out = _score_with_gemini(cv_text, job_description, mh_list, client)
+                out = _score_with_gemini(cv_text, job_description, mh_list, client, model_id)
 
             score = out.get("score")
             if not isinstance(score, (int, float)):
@@ -404,7 +419,7 @@ def screen(
         "scored": scored,
         "failed": failed,
         "dry_run": dry_run,
-        "model": MODEL_ID if not dry_run else "dry-run",
+        "model": model_id,
         "ranked": ranked,
         "summary": summary,
     }

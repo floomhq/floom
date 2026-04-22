@@ -28,6 +28,13 @@ output_type: table
 
 secrets_needed:
   - GEMINI_API_KEY
+  # Free-tier keys have zero quota for google_search grounding. When set to
+  # "1" the app skips search grounding and relies on url_context only, which
+  # works on stock free-tier projects. See examples/competitor-analyzer/main.py.
+  - DISABLE_GOOGLE_SEARCH
+  # Allow ops to upgrade the model without rebuilding (e.g. gemini-3-pro-preview
+  # on a paid-tier key). Defaults to gemini-3.1-flash-lite-preview inside the app.
+  - GEMINI_MODEL
 
 runtime: python
 image: floom/competitor-analyzer:latest

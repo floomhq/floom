@@ -36,7 +36,9 @@ from urllib.parse import urlparse
 
 # Model is read from env so ops can upgrade free-tier (flash) → paid (pro)
 # without touching code. Hard-fail on any Gemini 2.x / non-Gemini-3 model.
-DEFAULT_MODEL = "gemini-3-flash-preview"
+# Default to the only Gemini 3+ model with free-tier quota today.
+# Paid-tier callers override via GEMINI_MODEL=gemini-3-pro-preview etc.
+DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
 MAX_WORKERS = 8
 RETRIES_PER_URL = 1  # one retry on top of the initial attempt
 
@@ -288,6 +290,18 @@ def _comparative_summary(
 # Entrypoint
 # ---------------------------------------------------------------------------
 
+def _emit(payload: dict) -> None:
+    """Write the single-line Floom result the runner parses.
+
+    The Floom runner (apps/server/src/services/runner.ts) looks for a line
+    prefixed with __FLOOM_RESULT__ and parses the JSON after it. Without the
+    prefix, successful runs get classified as "Container exited cleanly but
+    emitted no result" and the user sees an empty output pane.
+    """
+    sys.stdout.write("__FLOOM_RESULT__" + json.dumps(payload) + "\n")
+    sys.stdout.flush()
+
+
 def _read_payload() -> dict[str, Any]:
     if len(sys.argv) >= 2 and sys.argv[1] not in ("-", ""):
         return json.loads(sys.argv[1])
@@ -301,7 +315,7 @@ def main() -> int:
     try:
         payload = _read_payload()
     except json.JSONDecodeError as exc:
-        print(json.dumps({"error": f"invalid JSON: {exc}"}))
+        _emit({"ok": False, "error": f"invalid JSON: {exc}", "error_type": "runtime_error"})
         return 2
 
     inputs = payload.get("inputs") or {}
@@ -309,10 +323,10 @@ def main() -> int:
     your_product = (inputs.get("your_product") or "").strip()
 
     if not isinstance(urls_raw, list) or not urls_raw:
-        print(json.dumps({"error": "inputs.urls must be a non-empty array"}))
+        _emit({"ok": False, "error": "inputs.urls must be a non-empty array", "error_type": "runtime_error"})
         return 2
     if not your_product:
-        print(json.dumps({"error": "inputs.your_product is required"}))
+        _emit({"ok": False, "error": "inputs.your_product is required", "error_type": "runtime_error"})
         return 2
 
     # Normalize: strip, dedupe, keep order, require http(s).
@@ -332,7 +346,7 @@ def main() -> int:
         urls.append(u2)
 
     if not urls:
-        print(json.dumps({"error": "no valid URLs after normalization"}))
+        _emit({"ok": False, "error": "no valid URLs after normalization", "error_type": "runtime_error"})
         return 2
 
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -351,7 +365,7 @@ def main() -> int:
                 "model": model,
             },
         }
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        _emit({"ok": True, "outputs": result})
         return 0
 
     competitors: list[dict[str, Any]] = [None] * len(urls)  # type: ignore[list-item]
@@ -373,7 +387,7 @@ def main() -> int:
                     }
     except Exception:  # noqa: BLE001
         traceback.print_exc(file=sys.stderr)
-        print(json.dumps({"error": "internal_error"}))
+        _emit({"ok": False, "error": "internal_error", "error_type": "runtime_error", "logs": traceback.format_exc()})
         return 1
 
     failed = sum(1 for c in competitors if c.get("error"))
@@ -390,7 +404,7 @@ def main() -> int:
             "model": model,
         },
     }
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    _emit({"ok": True, "outputs": result})
     return 0
 
 
