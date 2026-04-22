@@ -216,10 +216,26 @@ export interface MaterializedInputs {
   /** The rewritten inputs tree — every FileEnvelope has been replaced
    *  with its in-container path (CONTAINER_INPUTS_DIR/<name>.<ext>). */
   inputs: Record<string, unknown>;
-  /** Absolute host path of the temp dir holding the materialized files.
-   *  Mount this into the container at CONTAINER_INPUTS_DIR as read-only.
+  /** Absolute path where the server wrote the materialized files.
+   *  This is the path as seen by the server process (i.e. inside the
+   *  server container, when Floom runs in docker-in-docker mode).
    *  Empty string when there were no file envelopes to materialize. */
   hostDir: string;
+  /** Absolute path the Docker daemon uses to source the bind mount.
+   *  In a plain (non-DinD) install this equals `hostDir`. In the
+   *  docker-in-docker launch topology (server runs as a container that
+   *  talks to the host daemon via /var/run/docker.sock), writing to
+   *  `/tmp/...` inside the server creates the file on the CONTAINER
+   *  filesystem, but the host daemon resolves the bind source against
+   *  the HOST filesystem — giving the app container an empty mount.
+   *  `FLOOM_FILE_INPUTS_HOST_DIR` (+ matching volume mount in
+   *  docker-compose.yml) lets the operator declare the host-side path
+   *  that maps to `FLOOM_FILE_INPUTS_DIR` inside the server, so the
+   *  bind source picks up the real files.
+   *  Mount this into the app container at CONTAINER_INPUTS_DIR as
+   *  read-only on HostConfig.Binds. Empty string when there were no
+   *  file envelopes to materialize. */
+  mountSource: string;
   /** Cleanup function the caller MUST invoke once the container has
    *  exited. No-op when hostDir is empty. Safe to call multiple times. */
   cleanup: () => void;
@@ -236,6 +252,23 @@ export interface MaterializedInputs {
  *     container's HostConfig.Binds.
  *   - Invoking `cleanup()` after the container exits (in a `finally`).
  */
+/**
+ * Resolve the pair of paths used to materialize file envelopes.
+ *
+ * `writeBase`  — where the SERVER process writes files (its own FS view).
+ *                Set via FLOOM_FILE_INPUTS_DIR; falls back to os.tmpdir().
+ * `mountBase`  — where the DOCKER DAEMON resolves the bind source. In a
+ *                docker-in-docker topology the daemon is on the host and
+ *                needs the HOST-side path, not the server container's path.
+ *                Set via FLOOM_FILE_INPUTS_HOST_DIR; falls back to writeBase
+ *                (correct for non-DinD installs where server is on host).
+ */
+function resolvePathPair(): { writeBase: string; mountBase: string } {
+  const writeBase = (process.env.FLOOM_FILE_INPUTS_DIR || '').trim() || tmpdir();
+  const mountBase = (process.env.FLOOM_FILE_INPUTS_HOST_DIR || '').trim() || writeBase;
+  return { writeBase, mountBase };
+}
+
 export function materializeFileInputs(
   runId: string,
   inputs: Record<string, unknown>,
@@ -249,10 +282,13 @@ export function materializeFileInputs(
     return null; // return value ignored on this pass
   });
   if (envelopeCount === 0) {
-    return { inputs, hostDir: '', cleanup: () => {} };
+    return { inputs, hostDir: '', mountSource: '', cleanup: () => {} };
   }
 
-  const hostDir = join(tmpdir(), `floom-${runId}`);
+  const { writeBase, mountBase } = resolvePathPair();
+  const dirName = `floom-${runId}`;
+  const hostDir = join(writeBase, dirName);       // server writes here
+  const mountSource = join(mountBase, dirName);   // host daemon binds this
   mkdirSync(hostDir, { recursive: true, mode: 0o700 });
 
   // Track basenames used so two file inputs that collapse to the same
@@ -290,5 +326,5 @@ export function materializeFileInputs(
     }
   };
 
-  return { inputs: rewritten, hostDir, cleanup };
+  return { inputs: rewritten, hostDir, mountSource, cleanup };
 }

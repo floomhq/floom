@@ -15,9 +15,20 @@ File inputs (file/csv) arrive as a path mounted read-only at /floom/inputs/
 (e.g. local dev before runtime plumbing ships), we also accept a raw CSV
 string in the `data` input.
 
-Model: gemini-3.1-pro-preview via google-genai (search + URL context grounding).
+Model: Gemini 3.x via google-genai. Optional web search + URL context grounding
+(enabled when the caller's project has Search Grounding quota; auto-disabled
+otherwise so the demo still works on a stock free-tier key).
 No Claude, no OpenAI, no Gemini 2.x. Fallback to dry-run (random scores) only
 if GEMINI_API_KEY is unset, and we log loudly.
+
+Env vars:
+  GEMINI_API_KEY                 - required (else dry-run mode)
+  GEMINI_MODEL                   - optional, default "gemini-3.1-flash-lite-preview".
+                                   Must start with "gemini-3" (no 2.x/1.5 allowed).
+  FLOOM_GEMINI_GROUNDING         - optional: "1" to force google_search +
+                                   url_context tools on. Default off because
+                                   Search Grounding is a paid-tier feature and
+                                   stock free-tier keys 429 on it.
 """
 
 from __future__ import annotations
@@ -33,15 +44,27 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-MODEL_ID = "gemini-3.1-pro-preview"
+# Default to the only Gemini 3+ model that ships with free-tier quota today.
+# Override with GEMINI_MODEL env var when the caller has paid-tier access.
+DEFAULT_MODEL_ID = "gemini-3.1-flash-lite-preview"
+
+def _resolve_model() -> str:
+    m = (os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL_ID).strip()
+    if not m.startswith("gemini-3"):
+        raise RuntimeError(
+            f"refusing to run: GEMINI_MODEL must be gemini-3.x (got '{m}')"
+        )
+    return m
+
 MAX_WORKERS = 8
 PER_CALL_TIMEOUT_S = 45
 
 SYSTEM_PROMPT = """You are a B2B lead qualification analyst.
 
-For the lead below, use web search and URL context tools to find:
+For the lead below, analyze the provided fields and any web evidence you have
+access to. Consider:
 - what the company does (product, industry)
-- rough employee count / stage
+- rough employee count / stage (if provided or commonly known)
 - country or HQ region
 - signals of fit with the ICP (hiring, funding, tech stack, customers)
 
@@ -128,22 +151,26 @@ def _dry_run_score(row: dict[str, str], icp: str) -> dict[str, Any]:
     }
 
 
-def _score_with_gemini(row: dict, icp: str, client, tools) -> dict[str, Any]:
+def _score_with_gemini(row: dict, icp: str, client, tools, model_id: str) -> dict[str, Any]:
     """Single scoring call. Retries once on rate limit."""
     from google.genai import errors as genai_errors  # type: ignore
     from google.genai.types import GenerateContentConfig  # type: ignore
 
     prompt = _row_to_prompt(row, icp)
-    config = GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        tools=tools,
-        temperature=0.2,
-    )
+    config_kwargs = {
+        "system_instruction": SYSTEM_PROMPT,
+        "temperature": 0.2,
+    }
+    # Only attach tools when the caller actually has grounding quota;
+    # otherwise the request 429s before it even hits the model.
+    if tools:
+        config_kwargs["tools"] = tools
+    config = GenerateContentConfig(**config_kwargs)
 
     for attempt in (1, 2):
         try:
             resp = client.models.generate_content(
-                model=MODEL_ID,
+                model=model_id,
                 contents=prompt,
                 config=config,
             )
@@ -167,22 +194,36 @@ def _score_with_gemini(row: dict, icp: str, client, tools) -> dict[str, Any]:
 
 
 def _build_genai():
-    """Create a google-genai client + search/url-context tools. Returns (client, tools) or None on missing key."""
+    """Create a google-genai client. Returns (client, tools) or None on missing key.
+
+    Grounding tools (google_search + url_context) are attached ONLY when
+    FLOOM_GEMINI_GROUNDING=1 is set. On stock free-tier keys the grounding
+    endpoints 429 with `limit: 0` because Search Grounding is paid-tier;
+    falling back to tool-less scoring keeps the demo usable on any key.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return None
     try:
         from google import genai  # type: ignore
-        from google.genai.types import Tool, GoogleSearch, UrlContext  # type: ignore
     except ImportError as exc:
         _log(f"google-genai not installed: {exc}")
         return None
 
     client = genai.Client(api_key=api_key)
-    tools = [
-        Tool(google_search=GoogleSearch()),
-        Tool(url_context=UrlContext()),
-    ]
+    tools: list = []
+    if os.environ.get("FLOOM_GEMINI_GROUNDING") == "1":
+        try:
+            from google.genai.types import Tool, GoogleSearch, UrlContext  # type: ignore
+            tools = [
+                Tool(google_search=GoogleSearch()),
+                Tool(url_context=UrlContext()),
+            ]
+            _log("grounding enabled: google_search + url_context")
+        except ImportError as exc:
+            _log(f"grounding requested but types missing: {exc}")
+    else:
+        _log("grounding disabled (set FLOOM_GEMINI_GROUNDING=1 on a paid-tier key to enable)")
     return client, tools
 
 
@@ -202,20 +243,20 @@ def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
 
     rows = _load_rows(data)
     if not rows:
-        return {
-            "total": 0,
-            "scored": 0,
-            "failed": 0,
-            "rows": [],
-            "score_distribution": {},
-            "dry_run": False,
-        }
+        # Surface a clear error instead of silently succeeding with total=0.
+        # An empty CSV is almost always a user mistake (wrong delimiter,
+        # header-only file, or a truly empty upload) and the UI shows
+        # "0 rows scored" which looks like it worked.
+        raise ValueError("CSV is empty. Add at least one lead row below the header.")
     _log(f"scoring {len(rows)} rows against ICP ({len(icp)} chars)")
 
     genai_bits = _build_genai()
     dry_run = genai_bits is None
     if dry_run:
         _log("DRY RUN: GEMINI_API_KEY missing or google-genai not installed. Returning random scores.")
+    model_id = "dry-run" if dry_run else _resolve_model()
+    if not dry_run:
+        _log(f"using model: {model_id}")
 
     def _score_one(idx_row: tuple[int, dict]) -> dict:
         idx, row = idx_row
@@ -228,7 +269,7 @@ def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
                 return {**base, "status": "error", "score": None, "reasoning": f"dry_run_failed: {exc}", "enriched_fields": {}}
         client, tools = genai_bits
         try:
-            out = _score_with_gemini(row, icp, client, tools)
+            out = _score_with_gemini(row, icp, client, tools, model_id)
             # defensive: enforce shape
             if not isinstance(out.get("score"), (int, float)):
                 raise ValueError(f"bad score field: {out!r}")
@@ -298,7 +339,7 @@ def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
         "scored": scored,
         "failed": failed,
         "dry_run": dry_run,
-        "model": MODEL_ID if not dry_run else "dry-run",
+        "model": model_id,
         "rows": ranked,
         "score_distribution": buckets,
     }
