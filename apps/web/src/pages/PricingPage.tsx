@@ -1,424 +1,696 @@
-// /pricing — honest placeholder for commercial visitors.
+// /pricing — v17 rewrite 2026-04-22.
 //
-// 2026-04-20 (pd-12 follow-up, product audit): Previously `/pricing`
-// redirected to `/`, which was a conversion dead-end for anyone who
-// arrived from HN / outbound / comparison sites hunting for cost info.
-// Floom is pre-1.0 with Stripe Connect deferred (see
-// docs/DEFERRED-UI.md §3), so there are no real plans to list. This
-// page says that plainly instead of hiding it.
-//
-// Design rules applied (from ~/.claude/skills/product/SKILL.md):
-//   - Earn trust, don't claim it: no fake anchors, no "contact sales"
-//     theatre, no countdown timers.
-//   - State limitations plainly: "no paid plans yet" goes above the
-//     fold, not buried.
-//   - Layer disclosure: three cards cover the 80%, FAQ handles the
-//     edge questions ("will self-host stay free?", "can I move?").
-//
-// Content is the source of truth. See pd-12-monetization-deferred.md
-// for the product rationale.
+// Single $0 card + 3 limit cells + spec strip + 6-question FAQ.
+// No 3-tier grid. No "Cloud Pro TBD". No "Sign in free".
+// CTA: "Create your account". Palette: bg #fafaf8, ink #0e0e0c, accent #047857.
 
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 
-const SECTION_STYLE: React.CSSProperties = {
-  maxWidth: 960,
-  margin: '0 auto',
-  padding: '56px 0',
+// ---------------------------------------------------------------------------
+// Palette tokens (inline — matches v17 wireframe variables)
+// ---------------------------------------------------------------------------
+const INK = '#0e0e0c';
+const MUTED = '#6b7280';
+const ACCENT = '#047857';
+const CARD_BG = '#ffffff';
+const STUDIO_BG = '#f3f4f2';
+const LINE = '#e5e7eb';
+const LINE_HOVER = '#d1d5db';
+
+// ---------------------------------------------------------------------------
+// Typography helpers
+// ---------------------------------------------------------------------------
+const MONO: React.CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
 };
 
-const EYEBROW_STYLE: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+const SERIF: React.CSSProperties = {
+  fontFamily: "'DM Serif Display', Georgia, serif",
+  fontWeight: 400,
+};
+
+const EYEBROW: React.CSSProperties = {
+  ...MONO,
   fontSize: 11,
   fontWeight: 700,
-  color: 'var(--muted)',
+  color: ACCENT,
   textTransform: 'uppercase',
-  letterSpacing: '0.08em',
-  margin: '0 0 12px',
-};
-
-const H1_STYLE: React.CSSProperties = {
-  fontFamily: "'DM Serif Display', Georgia, serif",
-  fontWeight: 400,
-  fontSize: 52,
-  lineHeight: 1.08,
-  letterSpacing: '-0.025em',
-  color: 'var(--ink)',
-  margin: '0 0 20px',
-  textWrap: 'balance' as unknown as 'balance',
-};
-
-const SUB_STYLE: React.CSSProperties = {
-  fontSize: 18,
-  lineHeight: 1.6,
-  color: 'var(--muted)',
-  margin: '0 auto',
-  maxWidth: 620,
-};
-
-const CARD_STYLE: React.CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 14,
-  padding: '28px 24px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 16,
-  minHeight: 360,
-};
-
-const CARD_FEATURED_STYLE: React.CSSProperties = {
-  ...CARD_STYLE,
-  borderColor: 'var(--ink)',
-  boxShadow: '0 12px 40px rgba(14,14,12,0.06)',
-};
-
-const CARD_TITLE_STYLE: React.CSSProperties = {
-  fontFamily: "'DM Serif Display', Georgia, serif",
-  fontWeight: 400,
-  fontSize: 24,
-  letterSpacing: '-0.01em',
-  color: 'var(--ink)',
-  margin: 0,
-};
-
-const PRICE_STYLE: React.CSSProperties = {
-  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 32,
-  fontWeight: 600,
-  color: 'var(--ink)',
-  letterSpacing: '-0.02em',
-  margin: 0,
-};
-
-const PRICE_NOTE_STYLE: React.CSSProperties = {
-  fontSize: 13,
-  color: 'var(--muted)',
-  margin: '2px 0 0',
-};
-
-const FEATURE_LIST_STYLE: React.CSSProperties = {
-  listStyle: 'none',
-  padding: 0,
-  margin: '8px 0',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-};
-
-const FEATURE_ITEM_STYLE: React.CSSProperties = {
-  fontSize: 14,
-  lineHeight: 1.5,
-  color: 'var(--ink)',
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: 8,
-};
-
-const CTA_PRIMARY_STYLE: React.CSSProperties = {
+  letterSpacing: '0.10em',
   display: 'inline-flex',
   alignItems: 'center',
-  justifyContent: 'center',
-  padding: '10px 18px',
-  borderRadius: 999,
-  fontSize: 14,
-  fontWeight: 600,
-  textDecoration: 'none',
-  background: 'var(--ink)',
-  color: '#fff',
-  border: '1px solid var(--ink)',
-  marginTop: 'auto',
+  gap: 8,
+  marginBottom: 12,
 };
 
-const CTA_SECONDARY_STYLE: React.CSSProperties = {
-  ...CTA_PRIMARY_STYLE,
-  background: 'transparent',
-  color: 'var(--ink)',
-  border: '1px solid var(--line)',
-};
+// ---------------------------------------------------------------------------
+// Spec strip data
+// ---------------------------------------------------------------------------
+const SPECS = [
+  { k: 'Memory', v: '512 MB' },
+  { k: 'CPU', v: '1 vCPU' },
+  { k: 'Run timeout', v: '5 min' },
+  { k: 'Max input', v: '10 MB' },
+  { k: 'Max upload', v: '10 MB' },
+];
 
-interface Plan {
-  name: string;
-  eyebrow: string;
-  price: string;
-  priceNote: string;
-  features: string[];
-  cta: { label: string; to?: string; href?: string };
-  featured?: boolean;
-}
-
-const PLANS: Plan[] = [
+// ---------------------------------------------------------------------------
+// Limit cells data
+// ---------------------------------------------------------------------------
+const LIMITS = [
   {
-    name: 'Self-host',
-    eyebrow: 'Free forever',
-    price: '$0',
-    priceNote: 'MIT licensed. Your server, your rules.',
-    features: [
-      'Same Docker image as cloud',
-      'All three surfaces: web form, MCP, HTTP',
-      'Unlimited apps and runs (your infra)',
-      'Rate limits, secret injection, renderer uploads',
-    ],
-    cta: {
-      label: 'Self-host guide',
-      href: 'https://github.com/floomhq/floom/blob/main/docs/SELF_HOST.md',
-    },
+    k: "On Floom's key",
+    v: '5 runs / app / 24h',
+    s: (
+      <>
+        Per anonymous IP or signed-in account. 10 runs / hour on public
+        permalink.{' '}
+        <strong style={{ color: INK, fontWeight: 600 }}>
+          1 concurrent run.
+        </strong>
+      </>
+    ),
   },
   {
-    name: 'Cloud',
-    eyebrow: 'Free during beta',
-    price: '$0',
-    priceNote: 'No credit card. Fair-use rate limits apply.',
-    features: [
-      'Paste a link, publish in under a minute',
-      'Shareable /p/:slug pages + MCP endpoint',
-      'Built-in auth, secrets, run history',
-      'Managed hosting on floom.dev',
-    ],
-    cta: { label: 'Sign in free', to: '/login' },
-    featured: true,
+    k: 'With your own key',
+    v: 'Unlimited runs',
+    s: (
+      <>
+        Paste a Gemini, OpenAI, or Anthropic key in /me &rarr; Secrets.
+        Encrypted, never returned.{' '}
+        <strong style={{ color: INK, fontWeight: 600 }}>
+          3 concurrent runs.
+        </strong>
+      </>
+    ),
   },
   {
-    name: 'Cloud Pro',
-    eyebrow: 'Coming soon',
-    price: 'TBD',
-    priceNote: 'For creators monetizing their apps and teams with higher limits.',
-    features: [
-      'Higher run quotas and priority workers',
-      'Creator monetization via Stripe Connect',
-      'Workspace + team seats',
-      'Email support with response SLAs',
-    ],
-    cta: {
-      label: 'Watch for updates',
-      href: 'https://github.com/floomhq/floom/releases',
-    },
+    k: 'Self-host',
+    v: 'Unlimited, free forever',
+    s: (
+      <>
+        One Docker command. MIT-licensed.{' '}
+        <strong style={{ color: INK, fontWeight: 600 }}>
+          Unlimited concurrency.
+        </strong>{' '}
+        See{' '}
+        <a
+          href="https://github.com/floomhq/floom"
+          style={{ color: ACCENT, fontWeight: 600 }}
+        >
+          self-host guide
+        </a>
+        .
+      </>
+    ),
   },
 ];
 
-interface Faq {
+// ---------------------------------------------------------------------------
+// FAQ data (6 questions from v17 wireframe — verbatim)
+// ---------------------------------------------------------------------------
+interface FaqItem {
   q: string;
   a: React.ReactNode;
 }
 
-const FAQS: Faq[] = [
+const FAQS: FaqItem[] = [
   {
-    q: 'When do paid plans launch?',
+    q: 'What happens when I hit 5 runs/app/day?',
+    a: 'You see a modal asking for your Gemini API key. Paste it once and runs use your key from then on, unlimited. Your key is stored encrypted in Floom and never returned by the API.',
+  },
+  {
+    q: 'Can I self-host Floom?',
     a: (
       <>
-        No date yet. We'll only charge once cloud limits start biting real
-        users. Track{' '}
-        <Link to="/protocol" style={{ color: 'var(--ink)' }}>
-          the protocol page
-        </Link>{' '}
-        and{' '}
-        <a
-          href="https://github.com/floomhq/floom/releases"
-          style={{ color: 'var(--ink)' }}
+        Yes, and it&rsquo;s fully free. The core runtime is MIT-licensed. Run{' '}
+        <code
+          style={{
+            ...MONO,
+            fontSize: 12,
+            color: INK,
+            background: STUDIO_BG,
+            border: `1px solid ${LINE}`,
+            borderRadius: 6,
+            padding: '2px 7px',
+          }}
         >
-          GitHub releases
+          docker run floomhq/floom-docker
+        </code>{' '}
+        on your own infra and you&rsquo;re live in under a minute. See the{' '}
+        <a
+          href="https://github.com/floomhq/floom"
+          style={{ color: ACCENT, fontWeight: 600 }}
+        >
+          self-host guide
         </a>{' '}
-        for changes.
+        for volumes and env vars.
       </>
     ),
   },
   {
-    q: 'Will self-host stay free?',
+    q: 'Why no paid plan yet?',
     a: (
       <>
-        Yes. Floom is MIT licensed. The self-host Docker image ships the same
-        code that powers <code>floom.dev</code>. We don't plan to open-core
-        core features behind a paywall.
-      </>
-    ),
-  },
-  {
-    q: 'What are the cloud rate limits today?',
-    a: (
-      <>
-        Per-IP and per-user sliding windows on run and job endpoints. The
-        defaults are tuned for interactive use. If you hit a limit, you'll
-        get a 429 with retry info; self-host removes it entirely. The exact
-        launch-week numbers live on{' '}
-        <Link to="/docs/limits" style={{ color: 'var(--ink)' }}>
-          Runtime &amp; limits
-        </Link>
+        Launch week is about usage signal, not revenue. We&rsquo;ll price Pro
+        and Team once we see where real workloads need more than BYOK. If you
+        want to be on the list for paid features early,{' '}
+        <a
+          href="mailto:team@floom.dev"
+          style={{ color: ACCENT, fontWeight: 600 }}
+        >
+          email us
+        </a>
         .
       </>
     ),
   },
   {
-    q: 'Can I move between cloud and self-host later?',
+    q: 'Is there a run timeout?',
     a: (
       <>
-        Yes. Apps are described by a portable manifest and OpenAPI spec. Point
-        a self-host instance at the same spec and it will behave the same
-        way. You don't get locked in. See{' '}
-        <Link to="/docs/ownership" style={{ color: 'var(--ink)' }}>
-          Ownership
-        </Link>
+        Yes. A single app run is capped at 5 minutes on the hosted runtime.
+        Self-host is configurable via{' '}
+        <code
+          style={{
+            ...MONO,
+            fontSize: 12,
+            color: INK,
+            background: STUDIO_BG,
+            border: `1px solid ${LINE}`,
+            borderRadius: 6,
+            padding: '2px 7px',
+          }}
+        >
+          RUNNER_TIMEOUT
+        </code>
         .
       </>
     ),
+  },
+  {
+    q: 'Do you take a cut of revenue my app makes?',
+    a: "No. Floom is the platform. If your app charges end users (it doesn't have to), that's yours. We don't see it, touch it, or take a percentage.",
+  },
+  {
+    q: 'Who owns the apps I publish?',
+    a: "You do. Apps stay under your account, exportable any time. Floom doesn't claim rights to your code or your runs.",
   },
 ];
 
+// ---------------------------------------------------------------------------
+// FaqEntry — collapsible row
+// ---------------------------------------------------------------------------
+function FaqEntry({ q, a }: FaqItem) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      style={{
+        background: CARD_BG,
+        border: `1px solid ${LINE}`,
+        borderRadius: 12,
+        padding: '18px 22px',
+        marginBottom: 10,
+      }}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          all: 'unset',
+          width: '100%',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer',
+          fontSize: 14.5,
+          fontWeight: 600,
+          color: INK,
+          lineHeight: 1.4,
+        }}
+        aria-expanded={open}
+      >
+        <span>{q}</span>
+        <span
+          style={{
+            ...MONO,
+            fontSize: 18,
+            fontWeight: 400,
+            color: MUTED,
+            flexShrink: 0,
+            marginLeft: 16,
+          }}
+          aria-hidden="true"
+        >
+          {open ? '\u2212' : '+'}
+        </span>
+      </button>
+      {open && (
+        <p
+          style={{
+            fontSize: 13.5,
+            color: MUTED,
+            lineHeight: 1.6,
+            margin: '12px 0 0',
+          }}
+        >
+          {a}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
 export function PricingPage() {
   return (
     <PageShell
       title="Pricing · Floom"
-      contentStyle={{ padding: '24px 24px 80px', maxWidth: 1040 }}
+      contentStyle={{
+        padding: '0 0 80px',
+        maxWidth: '100%',
+        background: '#fafaf8',
+      }}
     >
+      {/* ------------------------------------------------------------------ */}
+      {/* HERO                                                                 */}
+      {/* ------------------------------------------------------------------ */}
       <section
         data-testid="pricing-hero"
-        style={{ ...SECTION_STYLE, padding: '72px 0 32px', textAlign: 'center' }}
+        style={{
+          padding: '56px 28px 12px',
+          textAlign: 'center',
+          maxWidth: 820,
+          margin: '0 auto',
+        }}
       >
-        <p style={{ ...EYEBROW_STYLE, textAlign: 'center' }}>Pricing</p>
-        <h1 style={H1_STYLE}>Free today. Honest about tomorrow.</h1>
-        <p style={SUB_STYLE}>
-          Floom is pre-1.0. Cloud is free during beta, self-host is free
-          forever, and paid plans don't exist yet. When they do, we'll say so
-          here first.
-        </p>
-        <p
+        <div style={EYEBROW}>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 999,
+              background: ACCENT,
+              boxShadow: `0 0 0 3px rgba(4,120,87,0.15)`,
+              flexShrink: 0,
+            }}
+          />
+          Launch week &middot; 27 April 2026
+        </div>
+        <h1
           style={{
-            margin: '18px auto 0',
-            maxWidth: 720,
-            fontSize: 14,
-            lineHeight: 1.6,
-            color: 'var(--muted)',
+            ...SERIF,
+            fontSize: 52,
+            lineHeight: 1.05,
+            letterSpacing: '-0.025em',
+            color: INK,
+            margin: '0 0 14px',
           }}
         >
-          Launch-week specifics live in{' '}
-          <Link to="/docs/limits" style={{ color: 'var(--ink)' }}>
-            Runtime &amp; limits
-          </Link>
-          ,{' '}
-          <Link to="/docs/security" style={{ color: 'var(--ink)' }}>
-            Security
-          </Link>
-          ,{' '}
-          <Link to="/docs/ownership" style={{ color: 'var(--ink)' }}>
-            Ownership
-          </Link>
-          , and{' '}
-          <Link to="/docs/reliability" style={{ color: 'var(--ink)' }}>
-            Reliability
-          </Link>
-          .
+          Free.{' '}
+          <span style={{ color: ACCENT }}>Rate-limited, not paywalled.</span>
+        </h1>
+        <p
+          style={{
+            fontSize: 17,
+            color: MUTED,
+            margin: '0 auto',
+            lineHeight: 1.55,
+            maxWidth: 620,
+          }}
+        >
+          Every app on Floom runs for free on our Gemini key. When you hit the
+          limit, paste your own key for unlimited. Paid tiers come after launch.
         </p>
       </section>
 
+      {/* ------------------------------------------------------------------ */}
+      {/* FREE CARD                                                            */}
+      {/* ------------------------------------------------------------------ */}
       <section
-        data-testid="pricing-plans"
-        style={{ ...SECTION_STYLE, padding: '16px 0 56px' }}
+        data-testid="pricing-free-card"
+        style={{ maxWidth: 720, margin: '36px auto 48px', padding: '0 24px' }}
       >
         <div
-          className="pricing-grid"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 20,
+            background: CARD_BG,
+            border: `1px solid ${LINE}`,
+            borderRadius: 18,
+            padding: '36px 36px 30px',
+            textAlign: 'center',
+            boxShadow: '0 20px 60px -40px rgba(14,14,12,0.14)',
           }}
         >
-          {PLANS.map((plan) => (
-            <article
-              key={plan.name}
-              data-testid={`pricing-card-${plan.name.toLowerCase().replace(/\s+/g, '-')}`}
-              style={plan.featured ? CARD_FEATURED_STYLE : CARD_STYLE}
-            >
-              <header>
-                <p style={EYEBROW_STYLE}>{plan.eyebrow}</p>
-                <h2 style={CARD_TITLE_STYLE}>{plan.name}</h2>
-              </header>
-              <div>
-                <p style={PRICE_STYLE}>{plan.price}</p>
-                <p style={PRICE_NOTE_STYLE}>{plan.priceNote}</p>
+          {/* Price */}
+          <div
+            style={{
+              ...SERIF,
+              fontSize: 72,
+              lineHeight: 1,
+              letterSpacing: '-0.03em',
+              color: INK,
+              margin: '6px 0 8px',
+            }}
+          >
+            $0
+          </div>
+          <p
+            style={{
+              fontSize: 14,
+              color: MUTED,
+              margin: '0 0 18px',
+            }}
+          >
+            for everyone, until paid tiers land
+          </p>
+          <p
+            style={{
+              fontSize: 15.5,
+              color: INK,
+              lineHeight: 1.6,
+              margin: '0 auto 22px',
+              maxWidth: 560,
+            }}
+          >
+            Run any of the 22 live apps. Publish your own. No credit card, no
+            trial timer.
+          </p>
+
+          {/* Limit cells */}
+          <div
+            className="limits-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 10,
+              margin: '22px 0',
+              textAlign: 'left',
+            }}
+          >
+            {LIMITS.map((cell) => (
+              <div
+                key={cell.k}
+                style={{
+                  background: STUDIO_BG,
+                  border: `1px solid ${LINE}`,
+                  borderRadius: 12,
+                  padding: '16px',
+                }}
+              >
+                <div
+                  style={{
+                    ...MONO,
+                    fontSize: 10,
+                    color: MUTED,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    fontWeight: 600,
+                    marginBottom: 6,
+                  }}
+                >
+                  {cell.k}
+                </div>
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: INK,
+                    lineHeight: 1.25,
+                    marginBottom: 4,
+                  }}
+                >
+                  {cell.v}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    color: MUTED,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {cell.s}
+                </div>
               </div>
-              <ul style={FEATURE_LIST_STYLE}>
-                {plan.features.map((f) => (
-                  <li key={f} style={FEATURE_ITEM_STYLE}>
-                    <span aria-hidden="true" style={{ color: 'var(--muted)' }}>
-                      ·
-                    </span>
-                    <span>{f}</span>
-                  </li>
-                ))}
-              </ul>
-              {plan.cta.href ? (
-                <a
-                  href={plan.cta.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={plan.featured ? CTA_PRIMARY_STYLE : CTA_SECONDARY_STYLE}
+            ))}
+          </div>
+
+          {/* Spec strip */}
+          <div
+            className="spec-strip"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(5, 1fr)',
+              gap: 8,
+              margin: '8px 0 22px',
+              textAlign: 'left',
+            }}
+          >
+            {SPECS.map((spec) => (
+              <div
+                key={spec.k}
+                style={{
+                  background: STUDIO_BG,
+                  border: `1px solid ${LINE}`,
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                }}
+              >
+                <div
+                  style={{
+                    ...MONO,
+                    fontSize: 9.5,
+                    color: MUTED,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    fontWeight: 600,
+                    marginBottom: 3,
+                  }}
                 >
-                  {plan.cta.label}
-                </a>
-              ) : (
-                <Link
-                  to={plan.cta.to ?? '/'}
-                  style={plan.featured ? CTA_PRIMARY_STYLE : CTA_SECONDARY_STYLE}
+                  {spec.k}
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: INK,
+                  }}
                 >
-                  {plan.cta.label}
-                </Link>
-              )}
-            </article>
-          ))}
+                  {spec.v}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* CTAs */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 10,
+              marginTop: 6,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Link
+              to="/login"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '12px 24px',
+                borderRadius: 999,
+                fontSize: 15,
+                fontWeight: 600,
+                textDecoration: 'none',
+                background: ACCENT,
+                color: '#fff',
+                border: `1px solid ${ACCENT}`,
+              }}
+            >
+              Create your account
+            </Link>
+            <Link
+              to="/docs"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '12px 24px',
+                borderRadius: 999,
+                fontSize: 15,
+                fontWeight: 600,
+                textDecoration: 'none',
+                background: 'transparent',
+                color: INK,
+                border: `1px solid ${LINE_HOVER}`,
+              }}
+            >
+              Read the docs
+            </Link>
+          </div>
+
+          {/* Fine print */}
+          <p
+            style={{
+              ...MONO,
+              fontSize: 12,
+              color: MUTED,
+              marginTop: 14,
+              letterSpacing: '0.03em',
+            }}
+          >
+            no credit card &middot; no trial &middot; no paywall &middot; runs
+            logged in /me
+          </p>
         </div>
       </section>
 
+      {/* ------------------------------------------------------------------ */}
+      {/* SELF-HOST STRIP                                                      */}
+      {/* ------------------------------------------------------------------ */}
+      <section
+        data-testid="pricing-selfhost"
+        style={{ maxWidth: 820, margin: '0 auto 48px', padding: '0 24px' }}
+      >
+        <div
+          className="selfhost-inner"
+          style={{
+            background: CARD_BG,
+            border: `1px solid ${LINE}`,
+            borderRadius: 14,
+            padding: '24px 28px',
+            display: 'grid',
+            gridTemplateColumns: '1fr auto',
+            gap: 20,
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <h3
+              style={{
+                ...SERIF,
+                fontSize: 22,
+                lineHeight: 1.2,
+                color: INK,
+                margin: '0 0 6px',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              Prefer to run it yourself?
+            </h3>
+            <p
+              style={{
+                fontSize: 13.5,
+                color: MUTED,
+                lineHeight: 1.55,
+                margin: 0,
+                maxWidth: 500,
+              }}
+            >
+              The core runtime is MIT-licensed. One command, one container,
+              your infra. See{' '}
+              <a
+                href="https://github.com/floomhq/floom"
+                style={{ color: ACCENT, fontWeight: 600 }}
+              >
+                Self-host guide
+              </a>
+              .
+            </p>
+          </div>
+          <code
+            style={{
+              ...MONO,
+              fontSize: 12,
+              color: INK,
+              background: STUDIO_BG,
+              border: `1px solid ${LINE}`,
+              borderRadius: 6,
+              padding: '6px 12px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            docker run -p 3000:3000 floomhq/floom-docker
+          </code>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* LATER-PLANS LINE                                                     */}
+      {/* ------------------------------------------------------------------ */}
+      <section
+        data-testid="pricing-later-plans"
+        style={{ maxWidth: 820, margin: '0 auto 56px', padding: '0 24px' }}
+      >
+        <div
+          style={{
+            background: STUDIO_BG,
+            border: `1px dashed ${LINE_HOVER}`,
+            borderRadius: 14,
+            padding: '22px 28px',
+            textAlign: 'center',
+          }}
+        >
+          <p
+            style={{
+              fontSize: 14,
+              color: INK,
+              lineHeight: 1.6,
+              margin: 0,
+              fontWeight: 500,
+            }}
+          >
+            Paid plans coming post-launch.{' '}
+            <span style={{ color: MUTED, fontWeight: 400 }}>
+              Free forever for self-host.
+            </span>
+          </p>
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* FAQ                                                                  */}
+      {/* ------------------------------------------------------------------ */}
       <section
         data-testid="pricing-faq"
         style={{
-          ...SECTION_STYLE,
-          padding: '56px 0',
-          borderTop: '1px solid var(--line)',
-          maxWidth: 720,
+          maxWidth: 780,
+          margin: '0 auto 56px',
+          padding: '0 28px',
         }}
       >
         <h2
           style={{
-            fontFamily: "'DM Serif Display', Georgia, serif",
-            fontWeight: 400,
+            ...SERIF,
             fontSize: 28,
-            letterSpacing: '-0.01em',
-            color: 'var(--ink)',
+            textAlign: 'center',
+            letterSpacing: '-0.02em',
+            color: INK,
             margin: '0 0 24px',
           }}
         >
-          Questions people actually ask
+          Questions, answered.
         </h2>
-        <dl style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {FAQS.map((faq) => (
-            <div key={faq.q}>
-              <dt
-                style={{
-                  fontSize: 16,
-                  fontWeight: 600,
-                  color: 'var(--ink)',
-                  margin: '0 0 6px',
-                }}
-              >
-                {faq.q}
-              </dt>
-              <dd
-                style={{
-                  fontSize: 15,
-                  lineHeight: 1.65,
-                  color: 'var(--muted)',
-                  margin: 0,
-                }}
-              >
-                {faq.a}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        {FAQS.map((faq) => (
+          <FaqEntry key={faq.q} q={faq.q} a={faq.a} />
+        ))}
       </section>
 
+      {/* ------------------------------------------------------------------ */}
+      {/* Responsive overrides                                                 */}
+      {/* ------------------------------------------------------------------ */}
       <style>{`
-        @media (max-width: 720px) {
-          [data-testid="pricing-plans"] .pricing-grid {
+        @media (max-width: 700px) {
+          .limits-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .spec-strip {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .selfhost-inner {
             grid-template-columns: 1fr !important;
           }
         }
