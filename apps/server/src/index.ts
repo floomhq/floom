@@ -732,6 +732,14 @@ if (webDist) {
     // 2026-04-20 (PRR tail cleanup): /install is a public stub that links
     // to CLI install steps. Kept distinct from /me/install (dashboard).
     if (pathname === '/install' || pathname === '/install/') return 'Install the Floom CLI · Floom';
+    // PR #404 ripple (2026-04-22): SSR titles for the new Install surface.
+    // /install-in-claude is the generic 4-tab flow; /install/:slug wraps it
+    // for a specific app. Both previously 404'd in the SPA; now they're
+    // real routes and need their own crawl titles.
+    if (pathname === '/install-in-claude' || pathname === '/install-in-claude/') {
+      return 'Install in Claude · Floom';
+    }
+    if (pathname.startsWith('/install/')) return 'Install · Floom';
     // 2026-04-20 (about-page ship): /about is a real story page now (not
     // a redirect to landing). Per-route SSR title so crawlers + social
     // previews see the About title, not the landing title.
@@ -794,6 +802,25 @@ if (webDist) {
         ogTitle: 'Install the Floom CLI',
         description:
           'One command to install the Floom CLI. Publish apps, run them locally, and link them to Claude in seconds.',
+      };
+    }
+    // PR #404 ripple (2026-04-22): Install-in-Claude surface. The /install/:slug
+    // variant wraps a specific app; we don't know the slug name here without a
+    // DB hit, so a shared description works fine for preview cards. Per-slug
+    // social metadata still flows through the /p/:slug permalink path which
+    // crawlers hit from Apps listings.
+    if (pathname === '/install-in-claude' || pathname === '/install-in-claude/') {
+      return {
+        ogTitle: 'Install in Claude · Floom',
+        description:
+          'Add Floom to Claude Desktop, Claude Code, Cursor, or any MCP client. Four steps, copy-paste snippets, MCP-native.',
+      };
+    }
+    if (pathname.startsWith('/install/')) {
+      return {
+        ogTitle: 'Install this app in Claude · Floom',
+        description:
+          'One-click install for Claude Desktop, Claude Code, Cursor, and other MCP clients. Copy the snippet, drop it in your config, done.',
       };
     }
     if (pathname === '/protocol' || pathname.startsWith('/protocol/') || pathname.startsWith('/protocol#')) {

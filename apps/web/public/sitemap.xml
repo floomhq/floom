@@ -6,6 +6,7 @@
   <url><loc>https://floom.dev/pricing</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://floom.dev/protocol</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://floom.dev/install</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://floom.dev/install-in-claude</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://floom.dev/p/json-format</loc><priority>0.6</priority></url>
   <url><loc>https://floom.dev/p/base64</loc><priority>0.6</priority></url>
   <url><loc>https://floom.dev/p/hash</loc><priority>0.6</priority></url>
