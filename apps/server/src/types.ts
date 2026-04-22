@@ -649,6 +649,7 @@ export interface TriggerRecord {
   tz: string | null;
   webhook_secret: string | null;
   webhook_url_path: string | null;
+  outbound_webhook_url: string | null;
   next_run_at: number | null; // epoch ms
   last_fired_at: number | null; // epoch ms
   enabled: 0 | 1;

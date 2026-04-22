@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
+import { Link } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
@@ -29,6 +30,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   ai: 'AI',
   seo: 'SEO',
   design: 'Design',
+  renderers: 'Renderers',
 };
 
 function labelForCategory(category: string): string {
@@ -333,6 +335,74 @@ export function AppsDirectoryPage() {
                   </button>
                 ))}
             </div>
+          </div>
+        </section>
+
+        {/* RENDERERS STUB — Phase 2: custom renderer gallery.
+            Placeholder cards shown until the renderer store ships. */}
+        <section
+          data-testid="renderers-stub"
+          style={{
+            padding: '56px 24px',
+            borderBottom: '1px solid var(--line)',
+            background: 'var(--card)',
+          }}
+        >
+          <div style={{ maxWidth: 760, margin: '0 auto' }}>
+            <h2
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+                color: 'var(--ink)',
+                margin: '0 0 8px',
+              }}
+            >
+              Custom renderers
+            </h2>
+            <p
+              style={{
+                fontSize: 14,
+                color: 'var(--muted)',
+                margin: '0 0 24px',
+              }}
+            >
+              React components that transform your app's output into beautiful UIs.
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                gap: 16,
+              }}
+            >
+              {/* Placeholder renderer cards — replace with real data once wired */}
+              {[
+                { name: 'Table View', desc: 'Sortable, searchable tables' },
+                { name: 'JSON Explorer', desc: 'Syntax-highlighted JSON' },
+                { name: 'Charts', desc: 'Bar, line, pie charts' },
+              ].map((r) => (
+                <div
+                  key={r.name}
+                  style={{
+                    border: '1px solid var(--line)',
+                    borderRadius: 10,
+                    padding: 16,
+                    background: 'var(--bg)',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 4 }}>
+                    {r.name}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{r.desc}</div>
+                </div>
+              ))}
+            </div>
+            <p style={{ marginTop: 20, fontSize: 13, color: 'var(--muted)' }}>
+              Have a renderer?{' '}
+              <Link to="/studio" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+                Build one in Studio
+              </Link>
+            </p>
           </div>
         </section>
 

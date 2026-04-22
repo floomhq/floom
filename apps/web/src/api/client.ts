@@ -404,6 +404,7 @@ export interface TriggerPublic {
   cron_expression: string | null;
   tz: string | null;
   webhook_url_path: string | null;
+  outbound_webhook_url: string | null;
   webhook_secret_set: boolean;
   next_run_at: number | null;
   last_fired_at: number | null;
@@ -431,6 +432,7 @@ export function createScheduleTrigger(
     cron_expression: string;
     tz?: string;
     inputs?: Record<string, unknown>;
+    outbound_webhook_url?: string;
   },
 ): Promise<CreateTriggerResponse> {
   return request<CreateTriggerResponse>(`/api/hub/${slug}/triggers`, {

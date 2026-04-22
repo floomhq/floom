@@ -158,8 +158,22 @@ export function LayersGrid() {
               </p>
             </article>
           ))}
+</div>
+
+          {/* Phase 2 extensibility stub. Align with Phase 2 tracker:
+              "Landing + docs roadmap line: 'Triggers (Composio), webhooks, 
+              custom renderers shipping May/June.'" */}
+          <p
+            style={{
+              textAlign: 'center',
+              marginTop: 28,
+              fontSize: 13.5,
+              color: 'var(--muted)',
+            }}
+          >
+            Triggers, webhooks, and custom renderers coming June.
+          </p>
         </div>
-      </div>
 
       <style>{`
         @media (max-width: 1040px) {

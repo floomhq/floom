@@ -32,6 +32,7 @@ const CreateTriggerBody = z
     trigger_type: z.enum(['schedule', 'webhook']),
     cron_expression: z.string().min(1).max(256).optional(),
     tz: z.string().min(1).max(64).optional(),
+    outbound_webhook_url: z.string().url().optional(),
   })
   .refine(
     (data) => data.trigger_type !== 'schedule' || !!data.cron_expression,
@@ -143,6 +144,7 @@ hubTriggersRouter.post('/:slug/triggers', async (c) => {
       trigger_type: parsed.data.trigger_type,
       cron_expression: parsed.data.cron_expression || null,
       tz: parsed.data.tz || null,
+      outbound_webhook_url: parsed.data.outbound_webhook_url || null,
     });
 
     const payload: Record<string, unknown> = {

@@ -812,6 +812,67 @@ export function CreatorHeroPage() {
         {/* LAYERS · what ships today (now with icon-badges) */}
         <LayersGrid />
 
+        {/* INTEGRATIONS STUB — Phase 2: connects to 150+ tools via Composio.
+            Placeholder row shown until the integration UI ships. */}
+        <section
+          data-testid="integrations-stub"
+          data-section="integrations"
+          style={{
+            background: 'var(--bg)',
+            padding: '56px 24px',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ maxWidth: 640, margin: '0 auto' }}>
+            <SectionEyebrow testid="integrations-eyebrow">
+              What's next
+            </SectionEyebrow>
+            <p
+              style={{
+                fontSize: 15,
+                color: 'var(--muted)',
+                margin: '0 0 20px',
+              }}
+            >
+              Connect your app to Slack, Notion, GitHub, Airtable, and 150+ tools.
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 24,
+                flexWrap: 'wrap',
+              }}
+            >
+              {/* Placeholder badges — replace with real integration logos once wired */}
+              {['Slack', 'Notion', 'GitHub', 'Airtable'].map((name) => (
+                <span
+                  key={name}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: '1px solid var(--line)',
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                    background: 'var(--card)',
+                  }}
+                >
+                  {name}
+                </span>
+              ))}
+              <span
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                }}
+              >
+                + more
+              </span>
+            </div>
+          </div>
+        </section>
+
         {/* ARCHITECTURE removed 2026-04-20 goosebumps pass — the diagram
             was a dev-speak middle-section that broke the narrative for the
             creator/biz ICP. See imports for full rationale. The conceptual

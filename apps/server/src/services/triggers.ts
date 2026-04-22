@@ -122,6 +122,7 @@ export interface CreateTriggerInput {
   cron_expression?: string | null;
   tz?: string | null;
   // webhook fields are generated server-side; callers don't pass them.
+  outbound_webhook_url?: string | null;
   retry_policy?: Record<string, unknown> | null;
 }
 
@@ -140,12 +141,13 @@ export function createTrigger(input: CreateTriggerInput): TriggerRecord {
       throw new Error(`invalid cron_expression: ${check.error}`);
     }
     const next = nextCronFireMs(input.cron_expression, now, input.tz);
+    const outWebhookJson = input.outbound_webhook_url ? JSON.stringify(input.outbound_webhook_url) : null;
     db.prepare(
       `INSERT INTO triggers (
          id, app_id, user_id, workspace_id, action, inputs, trigger_type,
-         cron_expression, tz, next_run_at, enabled, retry_policy,
+         cron_expression, tz, outbound_webhook_url, next_run_at, enabled, retry_policy,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 'schedule', ?, ?, ?, 1, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, 'schedule', ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).run(
       id,
       input.app_id,
@@ -155,6 +157,7 @@ export function createTrigger(input: CreateTriggerInput): TriggerRecord {
       inputsJson,
       input.cron_expression,
       input.tz || 'UTC',
+      outWebhookJson,
       next,
       retryJson,
       now,
@@ -406,6 +409,14 @@ export function serializeTrigger(
   } catch {
     inputs = {};
   }
+  let outboundWebhookUrl: string | null = null;
+  try {
+    outboundWebhookUrl = row.outbound_webhook_url
+      ? JSON.parse(row.outbound_webhook_url)
+      : null;
+  } catch {
+    outboundWebhookUrl = null;
+  }
   return {
     id: row.id,
     app_id: row.app_id,
@@ -416,6 +427,7 @@ export function serializeTrigger(
     cron_expression: row.cron_expression,
     tz: row.tz,
     webhook_url_path: row.webhook_url_path,
+    outbound_webhook_url: outboundWebhookUrl,
     webhook_secret_set: !!row.webhook_secret,
     next_run_at: row.next_run_at,
     last_fired_at: row.last_fired_at,

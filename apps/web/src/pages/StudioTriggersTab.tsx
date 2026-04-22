@@ -332,6 +332,7 @@ function NewTriggerModal({
   const [action, setAction] = useState(defaultAction);
   const [cron, setCron] = useState('0 9 * * 1');
   const [tz, setTz] = useState('UTC');
+  const [outboundWebhook, setOutboundWebhook] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -346,12 +347,14 @@ function NewTriggerModal({
     setBusy(true);
     setErr(null);
     try {
+      const outboundUrl = outboundWebhook.trim() || undefined;
       const res =
         mode === 'schedule'
           ? await api.createScheduleTrigger(slug, {
               action,
               cron_expression: cron,
               tz,
+              outbound_webhook_url: outboundUrl,
             })
           : await api.createWebhookTrigger(slug, { action });
       onCreated(res);
@@ -453,6 +456,19 @@ function NewTriggerModal({
                 />
                 <p style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 14px' }}>
                   Any IANA zone, e.g. <code>Europe/Berlin</code>, <code>America/New_York</code>.
+                </p>
+
+                <label style={labelStyle}>Outbound webhook (optional)</label>
+                <input
+                  type="url"
+                  value={outboundWebhook}
+                  onChange={(e) => setOutboundWebhook(e.target.value)}
+                  placeholder="https://your-server.com/hook"
+                  style={inputStyle}
+                  data-testid="studio-triggers-outbound-webhook"
+                />
+                <p style={{ fontSize: 11, color: 'var(--muted)', margin: '6px 0 14px' }}>
+                  POST to this URL when the trigger fires.
                 </p>
               </>
             )}

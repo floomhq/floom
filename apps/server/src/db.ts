@@ -793,6 +793,7 @@ db.exec(`
     tz TEXT,
     webhook_secret TEXT,
     webhook_url_path TEXT,
+    outbound_webhook_url TEXT,
     next_run_at INTEGER,
     last_fired_at INTEGER,
     enabled INTEGER NOT NULL DEFAULT 1,
