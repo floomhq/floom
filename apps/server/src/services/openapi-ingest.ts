@@ -1145,6 +1145,13 @@ export async function fetchSpecWithFallback(
   const TOTAL_BUDGET_MS = 10_000;
   const deadline = Date.now() + TOTAL_BUDGET_MS;
   const attempted: string[] = [];
+  // Track the most recent blocked-URL error so we can surface the real
+  // guard failure (e.g. "Invalid or disallowed OpenAPI URL") instead of
+  // swallowing it into a generic SpecNotFoundError. All candidates share
+  // the same host as the input URL, so if any of them is blocked by the
+  // SSRF guard, they're all blocked — we should propagate that signal.
+  let blockedErr: Error | null = null;
+  let hadNonBlockedFailure = false;
 
   for (const candidate of candidates) {
     if (Date.now() >= deadline) break;
@@ -1158,9 +1165,22 @@ export async function fetchSpecWithFallback(
       if (looksLikeOpenApiSpec(spec)) {
         return { spec, url: candidate };
       }
-    } catch {
+      hadNonBlockedFailure = true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith('Invalid or disallowed OpenAPI URL')) {
+        blockedErr = err instanceof Error ? err : new Error(msg);
+      } else {
+        hadNonBlockedFailure = true;
+      }
       // Fall through to the next candidate.
     }
+  }
+  // If every failure was the SSRF guard rejecting the URL, surface that
+  // instead of the generic "not found" — the caller needs to know the URL
+  // was blocked by policy, not that the spec simply isn't there.
+  if (blockedErr && !hadNonBlockedFailure) {
+    throw blockedErr;
   }
   throw new SpecNotFoundError(inputUrl, attempted);
 }
