@@ -55,6 +55,12 @@ const ImprintPage = lazy(() => import('./pages/ImprintPage').then(m => ({ defaul
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(m => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('./pages/TermsPage').then(m => ({ default: m.TermsPage })));
 const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ default: m.CookiesPage })));
+// Launch-week docs surface (getting-started / protocol / deploy / limits).
+// Renders markdown from src/assets/docs/*.md under /docs/:slug. Unknown
+// slugs redirect to /docs/getting-started. Historic deep-links from
+// wireframes and blogs (/docs/self-host, /docs/api-reference, etc.)
+// redirect to the closest new page below.
+const DocsPage = lazy(() => import('./pages/DocsPage').then(m => ({ default: m.DocsPage })));
 import { IconSprite } from './components/IconSprite';
 import { CookieBanner } from './components/CookieBanner';
 import { RouteLoading } from './components/RouteLoading';
@@ -258,18 +264,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/browse" element={<Navigate to="/apps" replace />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/deploy" element={<Navigate to="/studio/build" replace />} />
-        <Route path="/docs" element={<Navigate to="/protocol" replace />} />
-        {/* /docs/* deep links from wireframes/blogs/external docs. Map each
-            subpath to the closest anchor on /protocol (auto-generated from
-            heading text via slugify). Changelog has no on-page section, so
-            it points at GitHub Releases via a hard redirect. */}
-        <Route path="/docs/protocol" element={<Navigate to="/protocol" replace />} />
-        <Route path="/docs/self-host" element={<Navigate to="/protocol#self-hosting" replace />} />
+        {/* Launch-week docs (getting-started / protocol / deploy / limits).
+            /docs lands on Getting Started. Four markdown pages rendered by
+            DocsPage from src/assets/docs/*.md. */}
+        <Route path="/docs" element={<Navigate to="/docs/getting-started" replace />} />
+        <Route path="/docs/getting-started" element={<DocsPage />} />
+        <Route path="/docs/protocol" element={<DocsPage />} />
+        <Route path="/docs/deploy" element={<DocsPage />} />
+        <Route path="/docs/limits" element={<DocsPage />} />
+        {/* Historic deep links — map to the closest new page or the full
+            spec. Changelog hard-redirects to GitHub Releases. */}
+        <Route path="/docs/self-host" element={<Navigate to="/docs/deploy" replace />} />
         <Route path="/docs/api-reference" element={<Navigate to="/protocol#api-surface" replace />} />
-        <Route path="/docs/rate-limits" element={<Navigate to="/protocol#plumbing-layers-auto-applied" replace />} />
+        <Route path="/docs/rate-limits" element={<Navigate to="/docs/limits" replace />} />
         <Route path="/docs/changelog" element={<ExternalRedirect to="https://github.com/floomhq/floom/releases" />} />
-        {/* Catch-all /docs/* (any other subpath wireframes advertise) falls back to /protocol. */}
-        <Route path="/docs/*" element={<Navigate to="/protocol" replace />} />
+        {/* Catch-all /docs/* (unknown subpaths) falls back to Getting Started. */}
+        <Route path="/docs/*" element={<Navigate to="/docs/getting-started" replace />} />
         <Route path="/self-host" element={<Navigate to="/#self-host" replace />} />
         {/* /onboarding advertised by v16/onboarding.html wireframe and
             linked from post-signup flows. No standalone page yet — redirect
