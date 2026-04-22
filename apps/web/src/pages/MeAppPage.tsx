@@ -16,6 +16,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { MeRail } from '../components/me/MeRail';
 import { AppIcon } from '../components/AppIcon';
+import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 import * as api from '../api/client';
 import type { AppDetail, CreatorRun } from '../lib/types';
 import { formatTime } from '../lib/time';
@@ -168,16 +169,21 @@ export function AppHeader({ app }: { app: AppDetail }) {
             </span>
           )}
         </div>
-        <p
-          style={{
-            fontSize: 13,
-            color: 'var(--muted)',
-            margin: '4px 0 0',
-            lineHeight: 1.55,
-          }}
-        >
-          {app.description}
-        </p>
+        {/* 2026-04-23: Fix #413 — render description as markdown so
+            `## Heading` and formatted creator copy display properly. */}
+        {app.description && (
+          <DescriptionMarkdown
+            description={app.description}
+            testId={`me-app-overview-desc-${app.slug}`}
+            style={{
+              fontSize: 13,
+              color: 'var(--muted)',
+              margin: '4px 0 0',
+              lineHeight: 1.55,
+              maxWidth: 'none',
+            }}
+          />
+        )}
       </div>
     </div>
   );

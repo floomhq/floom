@@ -1,5 +1,6 @@
 import type { PickResult } from '../../lib/types';
 import { AppIcon } from '../AppIcon';
+import { DescriptionMarkdown } from '../DescriptionMarkdown';
 
 interface Props {
   app: PickResult;
@@ -22,7 +23,16 @@ export function AppSuggestionCard({ app, alternatives, onRun, onDetails, onPickA
         <div className="app-suggestion-info">
           <p className="app-suggestion-name">{app.name}</p>
           <p className="app-suggestion-creator">{app.category || 'Floom app'}</p>
-          <p className="app-suggestion-desc">{app.description}</p>
+          {/* 2026-04-23: Fix #413 — description is markdown. */}
+          {app.description && (
+            <div className="app-suggestion-desc">
+              <DescriptionMarkdown
+                description={app.description}
+                testId={`app-suggestion-desc-${app.slug}`}
+                style={{ margin: 0, maxWidth: 'none', fontSize: 'inherit', color: 'inherit' }}
+              />
+            </div>
+          )}
         </div>
         <div className="app-suggestion-action">
           <button className="btn-primary" type="button" onClick={onRun}>

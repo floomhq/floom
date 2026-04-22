@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { AppIcon } from '../AppIcon';
+import { DescriptionMarkdown } from '../DescriptionMarkdown';
 
 interface AppStripeProps {
   slug: string;
@@ -163,6 +164,9 @@ export function AppStripe({ slug, name, description, meta, variant = 'landing', 
         >
           {name}
         </div>
+        {/* 2026-04-23: Fix #413 — description is markdown. Previously
+            rendered plain-text, so creator-authored markdown (e.g.
+            `## Heading`) showed up literally in the /apps directory. */}
         <div
           style={{
             marginTop: 2,
@@ -176,7 +180,17 @@ export function AppStripe({ slug, name, description, meta, variant = 'landing', 
             WebkitBoxOrient: 'vertical',
           }}
         >
-          {description}
+          <DescriptionMarkdown
+            description={description}
+            testId={`app-stripe-desc-${slug}`}
+            style={{
+              margin: 0,
+              maxWidth: 'none',
+              fontSize: 'inherit',
+              lineHeight: 'inherit',
+              color: 'inherit',
+            }}
+          />
         </div>
       </div>
 

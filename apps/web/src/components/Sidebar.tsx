@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AppDetail } from '../lib/types';
 import { AppIcon } from './AppIcon';
+import { DescriptionMarkdown } from './DescriptionMarkdown';
 
 interface Props {
   app: AppDetail | null;
@@ -56,7 +57,16 @@ export function Sidebar({ app, open, onClose }: Props) {
               {app.category && <span className="category-pill">{app.category}</span>}
             </div>
           </div>
-          <p className="sidebar-app-desc">{app.description}</p>
+          {/* 2026-04-23: Fix #413 — description supports markdown. */}
+          {app.description && (
+            <div className="sidebar-app-desc">
+              <DescriptionMarkdown
+                description={app.description}
+                testId={`sidebar-app-desc-${app.slug}`}
+                style={{ margin: 0, maxWidth: 'none' }}
+              />
+            </div>
+          )}
 
           <div className="divider" />
 

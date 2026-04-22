@@ -19,6 +19,7 @@ import { refreshMyApps, useMyApps } from '../hooks/useMyApps';
 import { useSession } from '../hooks/useSession';
 import { formatTime } from '../lib/time';
 import type { AppVisibility, CreatorApp } from '../lib/types';
+import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 
 export function StudioHomePage() {
   const { apps, error: loadError } = useMyApps();
@@ -331,7 +332,13 @@ function AppCard({
           </div>
         )}
       </div>
-      <p
+      {/* 2026-04-23: Fix #413 — app descriptions are markdown-enabled
+          (per DescriptionMarkdown component). Previously rendered as
+          plain text, so `## Heading\n` strings showed up literally in
+          Studio cards. Clamp to 2 lines with line-clamp wrapper so the
+          markdown render still respects card height. */}
+      <div
+        data-testid={`studio-app-card-desc-${app.slug}`}
         style={{
           fontSize: 13,
           color: 'var(--muted)',
@@ -344,8 +351,22 @@ function AppCard({
           minHeight: 39,
         }}
       >
-        {app.description || '(no description)'}
-      </p>
+        {app.description ? (
+          <DescriptionMarkdown
+            description={app.description}
+            testId={`studio-app-card-desc-md-${app.slug}`}
+            style={{
+              fontSize: 13,
+              color: 'var(--muted)',
+              lineHeight: 1.5,
+              margin: 0,
+              maxWidth: 'none',
+            }}
+          />
+        ) : (
+          '(no description)'
+        )}
+      </div>
       <div
         style={{
           display: 'flex',

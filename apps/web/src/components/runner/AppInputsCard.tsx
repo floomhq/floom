@@ -1,5 +1,6 @@
 import type { ActionSpec, InputSpec, PickResult } from '../../lib/types';
 import { AppIcon } from '../AppIcon';
+import { DescriptionMarkdown } from '../DescriptionMarkdown';
 
 interface Props {
   app: PickResult;
@@ -54,9 +55,19 @@ export function AppInputsCard({
               <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--ink)' }}>{app.name}</span>
               <span className="category-pill">{app.category || 'app'}</span>
             </div>
-            <p style={{ fontSize: 13, color: 'var(--muted)', margin: '4px 0 0' }}>
-              {app.description}
-            </p>
+            {/* 2026-04-23: Fix #413 — render description as markdown. */}
+            {app.description && (
+              <DescriptionMarkdown
+                description={app.description}
+                testId={`app-inputs-card-desc-${app.slug}`}
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  margin: '4px 0 0',
+                  maxWidth: 'none',
+                }}
+              />
+            )}
           </div>
         </div>
         <div className="divider" />
