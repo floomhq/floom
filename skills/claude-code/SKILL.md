@@ -32,7 +32,7 @@ floom auth --show 2>/dev/null || echo "NOT_CONFIGURED"
 If not configured, prompt the user for their API key:
 
 ```
-Get your Floom API key at https://floom.dev/me/settings/tokens, then run:
+Get your Floom API key at https://floom.dev/me/api-keys, then run:
 
   floom auth <your-api-key>
 

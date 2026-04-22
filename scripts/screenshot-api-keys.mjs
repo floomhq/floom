@@ -1,4 +1,4 @@
-// Renders the three states of /me/settings/tokens for visual verification.
+// Renders the three states of /me/api-keys for visual verification.
 // Serves the built web bundle from dist/ and intercepts /auth/api-key/*,
 // /api/session/me, /auth/sign-in/email so the page believes it's in cloud
 // mode and authenticated.
@@ -154,7 +154,7 @@ async function mockRoutes(page, state) {
 async function shoot(state, outFile) {
   const page = await context.newPage();
   await mockRoutes(page, state);
-  await page.goto(`${base}/me/settings/tokens`);
+  await page.goto(`${base}/me/api-keys`);
   // Wait for either the empty state or the keys table to render.
   await page.waitForFunction(
     () =>

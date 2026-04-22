@@ -25,7 +25,7 @@ Deploy AI apps to Floom from Cursor using the `floom` CLI.
 floom auth <your-api-key>
 ```
 
-Get your key at https://floom.dev/me/settings/tokens.
+Get your key at https://floom.dev/me/api-keys.
 
 ## Usage
 

@@ -53,7 +53,7 @@ Run once after installing:
 floom auth <your-api-key>
 ```
 
-Get your key at https://floom.dev/me/settings/tokens.
+Get your key at https://floom.dev/me/api-keys.
 
 For self-host:
 

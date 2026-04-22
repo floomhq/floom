@@ -497,6 +497,9 @@ export function MeSettingsPage() {
         )}
 
         {/* ---------- Studio tab ---------- */}
+        {/* 2026-04-23 IA shift: API keys moved out of this tab to /me/api-keys
+            (account-scoped, used for both building and running). Studio tab
+            now only holds billing + a link to Studio itself. */}
         {activeTab === 'studio' && (
           <>
             <SettingsCard id="settings-card-studio-keys">
@@ -509,24 +512,12 @@ export function MeSettingsPage() {
                   lineHeight: 1.55,
                 }}
               >
-                Use these to call Floom from the CLI, the Claude Code skill,
-                or any MCP client. Send as{' '}
-                <code
-                  style={{
-                    fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: 12,
-                    background: 'var(--bg)',
-                    padding: '1px 6px',
-                    borderRadius: 4,
-                    border: '1px solid var(--line)',
-                  }}
-                >
-                  Authorization: Bearer &lt;key&gt;
-                </code>
-                .
+                API keys now live at their own page because they&rsquo;re
+                account-scoped: you use them both to deploy from the CLI
+                and to call running apps from scripts / Claude Code.
               </p>
               <Link
-                to="/me/settings/tokens"
+                to="/me/api-keys"
                 data-testid="settings-tokens-link"
                 style={{
                   display: 'inline-flex',

@@ -78,6 +78,8 @@ export function PublicFooter() {
         <span aria-hidden="true">·</span>
         <FootLink to="/docs">Docs</FootLink>
         <span aria-hidden="true">·</span>
+        <FootLink to="/changelog">Changelog</FootLink>
+        <span aria-hidden="true">·</span>
         <FootLink to="/docs/limits">Runtime limits</FootLink>
         <span aria-hidden="true">·</span>
         <FootLink to="/docs/security">Security</FootLink>

@@ -87,10 +87,13 @@ const menuItemStyle: CSSProperties = {
   borderRadius: 6,
 };
 
-// v17 TopBar — logged-out: Apps · Pricing · Docs · Changelog + Sign in / Sign up
-//              logged-in:  same 4 + Studio · Me + avatar dropdown
+// v17 TopBar — declutter 2026-04-23 (Fede: "header nav has too many items rn").
+//   logged-out: Apps · Pricing · Docs + Sign in / Sign up
+//   logged-in:  Apps · Pricing · Docs · Studio · Me + avatar dropdown
 //
-// Replaces the old Store/Studio pill toggle pattern.
+// Changelog was demoted to the footer (still linked via PublicFooter + the
+// /changelog route stays live). Primary nav now holds 3 items for guests,
+// 5 for authed users. Replaces the old Store/Studio pill toggle pattern.
 // Mobile: hamburger collapses all links to a vertical column menu.
 export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -158,8 +161,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const isDocs =
     location.pathname.startsWith('/protocol') ||
     location.pathname.startsWith('/docs');
-  // /changelog route wired 2026-04-22 (PR #405 ripple fix).
-  const isChangelog = location.pathname === '/changelog';
   const isStudio = location.pathname.startsWith('/studio');
   const isMe = location.pathname.startsWith('/me');
 
@@ -261,15 +262,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             >
               Docs
             </Link>
-            {/* /changelog route wired 2026-04-22 via PR #405 ripple. */}
-            <Link
-              to="/changelog"
-              data-testid="topbar-changelog"
-              aria-current={isChangelog ? 'page' : undefined}
-              style={navLinkStyle(isChangelog)}
-            >
-              Changelog
-            </Link>
+            {/* Changelog demoted to footer 2026-04-23 (nav declutter). */}
             {/* Logged-in only: Studio + Me */}
             {isAuthenticated && (
               <>
@@ -414,6 +407,15 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     Studio
                   </Link>
                   <Link
+                    to="/me/api-keys"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-api-keys"
+                    style={menuItemStyle}
+                  >
+                    API keys
+                  </Link>
+                  <Link
                     to="/me/settings"
                     onClick={() => setDropOpen(false)}
                     role="menuitem"
@@ -546,17 +548,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Docs
             </Link>
 
-            {/* /changelog route wired 2026-04-22 via PR #405 ripple. */}
-            <Link
-              to="/changelog"
-              className="topbar-mobile-link"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              data-testid="topbar-mobile-changelog"
-              aria-current={isChangelog ? 'page' : undefined}
-            >
-              Changelog
-            </Link>
+            {/* Changelog demoted to footer 2026-04-23 (nav declutter). */}
 
             {isAuthenticated && (
               <>
@@ -579,6 +571,15 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   aria-current={isMe ? 'page' : undefined}
                 >
                   Me
+                </Link>
+                <Link
+                  to="/me/api-keys"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-api-keys"
+                >
+                  API keys
                 </Link>
                 <Link
                   to="/me/settings"

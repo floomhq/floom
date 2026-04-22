@@ -21,7 +21,7 @@ export PATH="$HOME/.floom/repo/cli/floom/bin:$PATH"
 floom auth <your-api-key>
 ```
 
-Key at https://floom.dev/me/settings/tokens.
+Key at https://floom.dev/me/api-keys.
 
 ## Any other agent
 

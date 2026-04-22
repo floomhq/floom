@@ -259,7 +259,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/me/runs" element={<Navigate to="/me#recent-runs" replace />} />
         <Route path="/me/runs/:runId" element={<MeRunDetailPage />} />
         <Route path="/me/settings" element={<MeSettingsPage />} />
-        <Route path="/me/settings/tokens" element={<MeSettingsTokensPage />} />
+        {/* /me/api-keys — canonical location for personal API keys
+            (Fede 2026-04-23: "API keys shouldn't sit in studio"). Keys are
+            account-scoped: users need them for both building and running.
+            /me/settings/tokens kept as a redirect so existing links/docs
+            still resolve. The underlying MeSettingsTokensPage is unchanged. */}
+        <Route path="/me/api-keys" element={<MeSettingsTokensPage />} />
+        <Route
+          path="/me/settings/tokens"
+          element={<Navigate to="/me/api-keys" replace />}
+        />
         {/* v16 studio restructure 2026-04-18: creator-context pages moved
             to /studio/*. Legacy /me/apps/:slug (owner context) redirects
             to the new Studio tree. MeAppRunPage stays under /me/apps/:slug/run

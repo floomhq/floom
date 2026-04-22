@@ -1,8 +1,11 @@
-// /pricing — v17 rewrite 2026-04-22.
+// /pricing — v17 cleanup 2026-04-23.
 //
-// Single $0 card + 3 limit cells + spec strip + 6-question FAQ.
-// No 3-tier grid. No "Cloud Pro TBD". No "Sign in free".
-// CTA: "Create your account". Palette: bg #fafaf8, ink #0e0e0c, accent #047857.
+// Previous revision nested 3 limit cards + a 5-column spec strip inside a
+// single hero card ("this looks messy", Fede 2026-04-23). This rewrite
+// collapses the hero into one clean $0 card with three stacked pricing rows
+// and a single inline spec line. One primary CTA + one secondary text link.
+// Self-host + later-plans + FAQ kept, already clean.
+// Palette: bg #fafaf8, ink #0e0e0c, accent #047857.
 
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -45,18 +48,8 @@ const EYEBROW: React.CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
-// Spec strip data
-// ---------------------------------------------------------------------------
-const SPECS = [
-  { k: 'Memory', v: '512 MB' },
-  { k: 'CPU', v: '1 vCPU' },
-  { k: 'Run timeout', v: '5 min' },
-  { k: 'Max input', v: '10 MB' },
-  { k: 'Max upload', v: '10 MB' },
-];
-
-// ---------------------------------------------------------------------------
-// Limit cells data
+// Pricing rows — three stacked options (vertical list, not nested boxes).
+// Cleanup 2026-04-23: the old 3-column nested-card grid read as visual bloat.
 // ---------------------------------------------------------------------------
 const LIMITS = [
   {
@@ -65,10 +58,7 @@ const LIMITS = [
     s: (
       <>
         Per anonymous IP or signed-in account. 10 runs / hour on public
-        permalink.{' '}
-        <strong style={{ color: INK, fontWeight: 600 }}>
-          1 concurrent run.
-        </strong>
+        permalink. 1 concurrent run.
       </>
     ),
   },
@@ -78,10 +68,7 @@ const LIMITS = [
     s: (
       <>
         Paste a Gemini, OpenAI, or Anthropic key in /me &rarr; Secrets.
-        Encrypted, never returned.{' '}
-        <strong style={{ color: INK, fontWeight: 600 }}>
-          3 concurrent runs.
-        </strong>
+        Encrypted, never returned. 3 concurrent runs.
       </>
     ),
   },
@@ -90,11 +77,7 @@ const LIMITS = [
     v: 'Unlimited, free forever',
     s: (
       <>
-        One Docker command. MIT-licensed.{' '}
-        <strong style={{ color: INK, fontWeight: 600 }}>
-          Unlimited concurrency.
-        </strong>{' '}
-        See{' '}
+        One Docker command. MIT-licensed. Unlimited concurrency. See{' '}
         <a
           href="https://github.com/floomhq/floom"
           style={{ color: ACCENT, fontWeight: 600 }}
@@ -106,6 +89,9 @@ const LIMITS = [
     ),
   },
 ];
+
+// Inline runtime-specs note (replaces the old 5-column spec strip).
+const SPECS_INLINE = '512 MB RAM \u00b7 1 vCPU \u00b7 5 min timeout \u00b7 10 MB max input/upload';
 
 // ---------------------------------------------------------------------------
 // FAQ data (6 questions from v17 wireframe — verbatim)
@@ -379,123 +365,96 @@ export function PricingPage() {
             trial timer.
           </p>
 
-          {/* Limit cells */}
+          {/* Pricing rows — stacked list, not nested cards. Simpler hierarchy. */}
           <div
-            className="limits-grid"
+            data-testid="pricing-rows"
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 10,
-              margin: '22px 0',
+              display: 'flex',
+              flexDirection: 'column',
+              margin: '20px 0 8px',
               textAlign: 'left',
+              borderTop: `1px solid ${LINE}`,
             }}
           >
             {LIMITS.map((cell) => (
               <div
                 key={cell.k}
+                data-testid={`pricing-row-${cell.k.toLowerCase().replace(/[^a-z]+/g, '-')}`}
                 style={{
-                  background: STUDIO_BG,
-                  border: `1px solid ${LINE}`,
-                  borderRadius: 12,
-                  padding: '16px',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr auto',
+                  gap: 16,
+                  alignItems: 'baseline',
+                  padding: '18px 4px',
+                  borderBottom: `1px solid ${LINE}`,
                 }}
               >
-                <div
-                  style={{
-                    ...MONO,
-                    fontSize: 10,
-                    color: MUTED,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    fontWeight: 600,
-                    marginBottom: 6,
-                  }}
-                >
-                  {cell.k}
+                <div>
+                  <div
+                    style={{
+                      fontSize: 14.5,
+                      fontWeight: 600,
+                      color: INK,
+                      lineHeight: 1.3,
+                      marginBottom: 4,
+                    }}
+                  >
+                    {cell.k}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: MUTED,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    {cell.s}
+                  </div>
                 </div>
                 <div
                   style={{
-                    fontSize: 16,
+                    fontSize: 13.5,
                     fontWeight: 600,
                     color: INK,
-                    lineHeight: 1.25,
-                    marginBottom: 4,
+                    whiteSpace: 'nowrap',
+                    ...MONO,
                   }}
                 >
                   {cell.v}
                 </div>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: MUTED,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {cell.s}
-                </div>
               </div>
             ))}
           </div>
 
-          {/* Spec strip */}
-          <div
-            className="spec-strip"
+          {/* Inline spec note — replaces the old 5-column strip. */}
+          <p
+            data-testid="pricing-specs-inline"
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(5, 1fr)',
-              gap: 8,
-              margin: '8px 0 22px',
-              textAlign: 'left',
+              ...MONO,
+              fontSize: 11.5,
+              color: MUTED,
+              margin: '16px 0 22px',
+              letterSpacing: '0.02em',
+              textAlign: 'center',
             }}
           >
-            {SPECS.map((spec) => (
-              <div
-                key={spec.k}
-                style={{
-                  background: STUDIO_BG,
-                  border: `1px solid ${LINE}`,
-                  borderRadius: 10,
-                  padding: '10px 12px',
-                }}
-              >
-                <div
-                  style={{
-                    ...MONO,
-                    fontSize: 9.5,
-                    color: MUTED,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    fontWeight: 600,
-                    marginBottom: 3,
-                  }}
-                >
-                  {spec.k}
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: INK,
-                  }}
-                >
-                  {spec.v}
-                </div>
-              </div>
-            ))}
-          </div>
+            {SPECS_INLINE}
+          </p>
 
-          {/* CTAs */}
+          {/* CTA — one primary button + one text link. */}
           <div
             style={{
               display: 'flex',
+              alignItems: 'center',
               justifyContent: 'center',
-              gap: 10,
-              marginTop: 6,
+              gap: 20,
+              marginTop: 8,
               flexWrap: 'wrap',
             }}
           >
             <Link
-              to="/login"
+              to="/signup"
+              data-testid="pricing-cta-signup"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -514,21 +473,17 @@ export function PricingPage() {
             </Link>
             <Link
               to="/docs"
+              data-testid="pricing-cta-docs"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '12px 24px',
-                borderRadius: 999,
-                fontSize: 15,
-                fontWeight: 600,
-                textDecoration: 'none',
-                background: 'transparent',
+                fontSize: 14,
+                fontWeight: 500,
                 color: INK,
-                border: `1px solid ${LINE_HOVER}`,
+                textDecoration: 'none',
+                borderBottom: `1px solid ${LINE_HOVER}`,
+                paddingBottom: 2,
               }}
             >
-              Read the docs
+              Read the docs &rarr;
             </Link>
           </div>
 
@@ -538,12 +493,11 @@ export function PricingPage() {
               ...MONO,
               fontSize: 12,
               color: MUTED,
-              marginTop: 14,
+              marginTop: 18,
               letterSpacing: '0.03em',
             }}
           >
-            no credit card &middot; no trial &middot; no paywall &middot; runs
-            logged in /me
+            no credit card &middot; no trial &middot; no paywall
           </p>
         </div>
       </section>
@@ -684,12 +638,6 @@ export function PricingPage() {
       {/* ------------------------------------------------------------------ */}
       <style>{`
         @media (max-width: 700px) {
-          .limits-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .spec-strip {
-            grid-template-columns: repeat(2, 1fr) !important;
-          }
           .selfhost-inner {
             grid-template-columns: 1fr !important;
           }

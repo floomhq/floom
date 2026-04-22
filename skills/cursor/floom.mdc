@@ -24,7 +24,7 @@ export PATH="$HOME/.floom/repo/cli/floom/bin:$PATH"
 
 ```bash
 floom auth <your-api-key>
-# key at https://floom.dev/me/settings/tokens
+# key at https://floom.dev/me/api-keys
 ```
 
 Or set `FLOOM_API_KEY` as an env var.

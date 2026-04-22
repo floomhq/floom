@@ -326,7 +326,7 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
         // services/workspaces.ts to (admin, editor, viewer) externally.
       }),
       apiKey({
-        // Programmatic-user keys: the user generates a key in /me/settings/tokens,
+        // Programmatic-user keys: the user generates a key in /me/api-keys,
         // sends it as `Authorization: Bearer <key>` (or `x-api-key: <key>`),
         // and Better Auth resolves the user automatically. Used for headless
         // integrations — Claude Code skill, CLI, scripts, MCP clients.

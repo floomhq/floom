@@ -48,7 +48,7 @@ Order of resolution:
 2. `~/.floom/config.json` with `{"api_key": "...", "api_url": "https://floom.dev"}`
 3. Legacy `~/.claude/floom-skill-config.json` (from the old Claude Code skill)
 
-Get your API key at https://floom.dev/me/settings/tokens, then:
+Get your API key at https://floom.dev/me/api-keys, then:
 
 ```bash
 floom auth sk_live_xxx

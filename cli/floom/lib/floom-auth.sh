@@ -40,7 +40,7 @@ usage:
   floom auth --show               print redacted config
   floom auth --clear              delete config
 
-Get your key at: https://floom.dev/me/settings/tokens
+Get your key at: https://floom.dev/me/api-keys
 EOF
     [[ "${1:-}" == "" ]] && exit 1
     exit 0 ;;

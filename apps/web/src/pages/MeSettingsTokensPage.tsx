@@ -1,10 +1,15 @@
-// Personal API keys — /me/settings/tokens.
+// Personal API keys — canonical at /me/api-keys (aliased at /me/settings/tokens
+// for back-compat, 2026-04-23 IA shift).
 //
-// Used for headless integrations: the Claude Code skill, the Floom CLI
-// (future), scripts, and MCP clients. Backed by Better Auth's api-key
-// plugin (see apps/server/src/lib/better-auth.ts), which auto-resolves
-// the caller from `Authorization: Bearer <key>` (or x-api-key) on any
-// /api/* route — no change to our existing auth middleware needed.
+// Moved out of the Studio-nested Settings tab because API keys are
+// account-scoped: users need them both for building (Studio) AND running
+// apps from the CLI / Claude Code skill. Putting them under /me/settings
+// behind a Studio tab implied a workspace scope that doesn't exist.
+//
+// Used for headless integrations: the Claude Code skill, the Floom CLI,
+// scripts, and MCP clients. Backed by Better Auth's api-key plugin
+// (see apps/server/src/lib/better-auth.ts), which auto-resolves the caller
+// from `Authorization: Bearer <key>` (or x-api-key) on any /api/* route.
 //
 // Three flows on this page:
 //
@@ -103,8 +108,8 @@ export function MeSettingsTokensPage() {
           aria-label="Breadcrumb"
           style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
         >
-          <Link to="/me/settings" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
-            Settings
+          <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
+            /me
           </Link>
           <span style={{ margin: '0 6px' }}>›</span>
           <span style={{ color: 'var(--ink)' }}>API keys</span>

@@ -34,7 +34,7 @@ options:
 
 docs:     https://floom.dev/docs
 examples: https://github.com/floomhq/floom/tree/main/examples
-api key:  https://floom.dev/me/settings/tokens
+api key:  https://floom.dev/me/api-keys
 EOF
 }
 
