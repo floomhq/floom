@@ -19,6 +19,7 @@ import {
   detectAppFromUrl,
   ingestAppFromUrl,
   SlugTakenError,
+  SpecNotFoundError,
 } from '../services/openapi-ingest.js';
 import {
   bundleRenderer,
@@ -133,6 +134,19 @@ hubRouter.post('/detect', async (c) => {
     );
     return c.json(detected);
   } catch (err) {
+    // Issue #389: surface a specific `spec_not_found` code (with the list
+    // of URLs we actually probed) so the client can show "We checked
+    // these 5 URLs and none returned a spec" instead of a generic error.
+    if (err instanceof SpecNotFoundError) {
+      return c.json(
+        {
+          error: err.message,
+          code: 'spec_not_found',
+          attempted: err.attempted,
+        },
+        404,
+      );
+    }
     return c.json(
       { error: (err as Error).message || 'detect_failed', code: 'detect_failed' },
       400,

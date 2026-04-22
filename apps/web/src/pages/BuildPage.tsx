@@ -90,12 +90,28 @@ export function BuildPage({
   // manually edits the input after auto-detect).
   const [heroAutoDetected, setHeroAutoDetected] = useState(false);
 
+  // Issue #391 — the publish button was silent while the request ran.
+  // `publishing` gates the button's spinner + disabled state INSIDE the
+  // review step, before `setStep('publishing')` swaps the whole surface.
+  // A separate flag (rather than reading `step`) keeps TypeScript happy:
+  // the publish button only renders when `step === 'review'`, so the
+  // narrowed type doesn't overlap with 'publishing'.
+  const [publishing, setPublishing] = useState(false);
+
   // Which ramp submitted last — controls the review heading
   const [source, setSource] = useState<'github' | 'openapi' | null>(null);
 
   // Detection result
   const [detected, setDetected] = useState<DetectedApp | null>(null);
   const [githubAttempts, setGithubAttempts] = useState<GithubDetect>(null);
+  // Issue #390 — detect button had no progress feedback. `detecting`
+  // disables the button + swaps the label to "Checking…" while the fetch
+  // is in flight; `detectSlow` flips true after 3s so we can surface the
+  // "deep paths take up to 10 s" copy for the nested-URL case (issue
+  // #389 server fix probes up to 5 candidates with a 10s cumulative
+  // budget, so a slow path can run close to the full 10s). Tracking
+  // which ramp (github/openapi) is active keeps the progress indicator
+  // scoped to the right button.
   const [detecting, setDetecting] = useState<DetectKind | null>(null);
   const [detectStatus, setDetectStatus] = useState('');
   const [detectSlow, setDetectSlow] = useState(false);
@@ -364,6 +380,27 @@ export function BuildPage({
     navigate('/signup?next=' + encodeURIComponent(next));
   }
 
+  // Issue #390: wrap both ramp submit paths with detecting/detectSlow
+  // state management so the button can show a spinner + disable + surface
+  // the "deep paths take up to 10 s" copy after 3s. A 3s threshold is
+  // long enough that a healthy detect (typically <1s) never shows the
+  // extra line, and short enough that the nested-URL fallback (which can
+  // burn the full 10s budget on issue #389) shows progress well before
+  // the request completes.
+  async function withDetectFeedback(fn: () => Promise<unknown>): Promise<void> {
+    // `runGithubDetect`/`runOpenapiDetect` already manage `detecting`
+    // (they set the DetectKind and clear it on finish). This wrapper only
+    // owns `detectSlow` — the 3s "can take up to 10 seconds" disclosure.
+    setDetectSlow(false);
+    const slowTimer = window.setTimeout(() => setDetectSlow(true), 3_000);
+    try {
+      await fn();
+    } finally {
+      window.clearTimeout(slowTimer);
+      setDetectSlow(false);
+    }
+  }
+
   async function handleGithubDetect(e: React.FormEvent) {
     e.preventDefault();
     if (sessionLoading) return;
@@ -371,7 +408,7 @@ export function BuildPage({
       redirectToDetectLogin(githubUrl);
       return;
     }
-    await runGithubDetect(githubUrl);
+    await withDetectFeedback(() => runGithubDetect(githubUrl));
   }
 
   async function handleOpenapiDetect(e: React.FormEvent) {
@@ -381,7 +418,7 @@ export function BuildPage({
       redirectToDetectLogin(openapiUrl);
       return;
     }
-    await runOpenapiDetect(openapiUrl);
+    await withDetectFeedback(() => runOpenapiDetect(openapiUrl));
   }
 
   // Auto-detect from hero-provided URL (2026-04-20 audit fix). When the
@@ -409,11 +446,13 @@ export function BuildPage({
     setHeroAutoDetected(true);
     (async () => {
       if (cancelled) return;
-      if (heroIsGithub) {
-        await runGithubDetect(heroUrl);
-      } else {
-        await runOpenapiDetect(heroUrl);
-      }
+      await withDetectFeedback(async () => {
+        if (heroIsGithub) {
+          await runGithubDetect(heroUrl);
+        } else {
+          await runOpenapiDetect(heroUrl);
+        }
+      });
     })();
     return () => {
       cancelled = true;
@@ -442,6 +481,7 @@ export function BuildPage({
       setSignupPrompt(true);
       return;
     }
+    setPublishing(true);
     setStep('publishing');
     setError(null);
     setSlugSuggestions(null);
@@ -463,11 +503,13 @@ export function BuildPage({
       // to the publisher. Flag is slug-scoped with a 10-minute TTL so
       // a stale flag doesn't fire the celebration for a later visitor.
       markJustPublished(slug);
+      setPublishing(false);
       setStep('done');
       // Redirect removed on 2026-04-17: give creators a chance to upload
       // a custom renderer (W2.2) before heading to the permalink. The
       // "Open app" button on the done step handles navigation manually.
     } catch (err) {
+      setPublishing(false);
       setStep('review');
       // Slug-taken: server returns 409 with suggestions (audit 2026-04-20,
       // Fix 2). Render the three pills above the submit button and let
@@ -485,8 +527,12 @@ export function BuildPage({
         });
         return;
       }
+      // Issue #391: surface the real server error instead of a generic
+      // "Publish failed." toast so creators can act on it (e.g. "your
+      // spec URL returned 403" vs. "unknown server error"). Fall back
+      // to the generic copy only when the server gave us nothing.
       setError({
-        message: 'Publish failed.',
+        message: humanizePublishError(err),
         details: (err as Error).message || undefined,
       });
     }
@@ -505,6 +551,7 @@ export function BuildPage({
     // set `slug` until the next render. We replicate the core publish with
     // the explicit new slug to avoid the stale-state trap.
     if (!detected) return;
+    setPublishing(true);
     setStep('publishing');
     setError(null);
     try {
@@ -524,8 +571,10 @@ export function BuildPage({
       // Issue #255: mark this slug as "just published" so the celebration
       // on /p/:slug fires for the creator, not for every later visitor.
       markJustPublished(next);
+      setPublishing(false);
       setStep('done');
     } catch (err) {
+      setPublishing(false);
       setStep('review');
       if (err instanceof api.ApiError && err.status === 409 && err.code === 'slug_taken') {
         const payload = err.payload as { suggestions?: string[] } | undefined;
@@ -540,7 +589,7 @@ export function BuildPage({
         return;
       }
       setError({
-        message: 'Publish failed.',
+        message: humanizePublishError(err),
         details: (err as Error).message || undefined,
       });
     }
@@ -755,9 +804,13 @@ export function BuildPage({
                     opacity: !githubUrl || sessionLoading || detecting !== null ? 0.55 : 1,
                     fontFamily: 'inherit',
                     flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
-                  {detecting === 'github' ? 'Detecting…' : 'Detect'}
+                  {detecting === 'github' ? <Spinner size={12} /> : null}
+                  {detecting === 'github' ? 'Checking…' : 'Detect'}
                 </button>
               </div>
               {detecting === 'github' && (
@@ -945,9 +998,15 @@ export function BuildPage({
                 type="submit"
                 data-testid="build-detect"
                 disabled={!openapiUrl || sessionLoading || detecting !== null}
-                style={primaryButton(!openapiUrl || sessionLoading || detecting !== null)}
+                style={{
+                  ...primaryButton(!openapiUrl || sessionLoading || detecting !== null),
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
               >
-                {detecting === 'openapi' ? 'Finding…' : 'Find it'}
+                {detecting === 'openapi' ? <Spinner size={13} /> : null}
+                {detecting === 'openapi' ? 'Checking…' : 'Find it'}
               </button>
               {detecting === 'openapi' && (
                 <div
@@ -956,6 +1015,21 @@ export function BuildPage({
                 >
                   {detectStatus}
                   {detectSlow ? ' Still looking, this can take up to 10 seconds.' : ''}
+                </div>
+              )}
+              {/* Issue #390: after 3 s, surface the "deep paths can take
+                  up to 10 s" copy so the user knows the fallback probe
+                  (issue #389) is still running rather than silently stuck. */}
+              {detectSlow && detecting === 'openapi' && (
+                <div
+                  data-testid="build-detect-slow"
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: 'var(--muted)',
+                  }}
+                >
+                  This can take up to 10 seconds for deep paths.
                 </div>
               )}
             </form>
@@ -1164,15 +1238,19 @@ export function BuildPage({
                     type="button"
                     onClick={handlePublish}
                     data-testid="build-publish"
-                    disabled={!name || !slug}
+                    disabled={!name || !slug || publishing}
                     style={{
-                      ...primaryButton(!name || !slug),
+                      ...primaryButton(!name || !slug || publishing),
                       background: 'var(--accent)',
                       padding: '12px 22px',
                       fontSize: 14,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
                     }}
                   >
-                    {publishButtonLabel(visibility)}
+                    {publishing ? <Spinner size={13} /> : null}
+                    {publishing ? 'Publishing…' : publishButtonLabel(visibility)}
                   </button>
                 </div>
               </div>
@@ -2187,6 +2265,60 @@ function firstSentence(text: string): string {
   // obvious (many READMEs start with a tagline that has no period).
   if (cleaned.length <= 140) return cleaned;
   return cleaned.slice(0, 140).replace(/\s+\S*$/, '') + '…';
+}
+
+// Issue #391: translate a publish failure into a user-facing message that
+// reflects what actually went wrong on the server, instead of collapsing
+// every non-409 error into a generic "Publish failed." toast. We still
+// keep the full technical details inside the <details> disclosure below
+// the message so a developer can grab the raw error when needed.
+function humanizePublishError(err: unknown): string {
+  if (err instanceof api.ApiError) {
+    // Server gave us structured copy. Prefer its `error` string (set by
+    // the hub route) verbatim — the server already knows which message
+    // is safe to show a creator (spec_not_found, rate_limited, etc.).
+    if (err.message) return err.message;
+    if (err.status === 0) {
+      return "We couldn't reach the server. Check your connection and try again.";
+    }
+    if (err.status >= 500) {
+      return 'The server returned an error. Try again in a moment.';
+    }
+    if (err.status === 403) {
+      return "You don't have permission to publish this app.";
+    }
+    return `Publish failed (HTTP ${err.status}).`;
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return 'Publish failed.';
+}
+
+// Issues #390 + #391: small inline spinner for the detect and publish
+// buttons so an in-flight request has a visible progress affordance.
+// Uses the global `floom-spin` keyframe defined in styles/globals.css —
+// duplicated from WorkspaceSwitcher's copy so BuildPage stays self-
+// contained without cross-component wiring.
+function Spinner({ size = 12 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      aria-hidden="true"
+      style={{
+        flexShrink: 0,
+        animation: 'floom-spin 0.9s linear infinite',
+      }}
+    >
+      <path d="M12 3a9 9 0 019 9" />
+    </svg>
+  );
 }
 
 function primaryButton(disabled: boolean): React.CSSProperties {
