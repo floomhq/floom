@@ -6,7 +6,7 @@ import { useRef, useState } from 'react';
 import type { InputSpec } from '../../lib/types';
 import { DEFAULT_MAX_FILE_BYTES } from '../../api/client';
 
-export const ARRAY_INPUT_NAMES = new Set<string>(['hashtags']);
+export const ARRAY_INPUT_NAMES = new Set<string>(['hashtags', 'urls']);
 
 /**
  * Fix 6 (2026-04-19): URL inputs auto-prepend `https://` when the user

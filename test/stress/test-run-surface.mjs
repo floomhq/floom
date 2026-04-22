@@ -208,6 +208,13 @@ console.log('RunSurface shell tests');
 
   const out4 = __test__.coerceInputs({ hashtags: '', prompt: '' }, spec);
   log('Coerce: empty string → empty array', Array.isArray(out4.hashtags) && out4.hashtags.length === 0);
+
+  const out5 = __test__.coerceInputs({ urls: 'https://n8n.io\nhttps://vercel.com' }, {
+    label: 'Analyze',
+    inputs: [{ name: 'urls', type: 'textarea', label: 'Competitor URLs' }],
+    outputs: [],
+  });
+  log('Coerce: urls textarea → array', Array.isArray(out5.urls) && out5.urls.length === 2 && out5.urls[1] === 'https://vercel.com');
 }
 
 // ---------- buildInitialInputs (prefill overrides) ----------

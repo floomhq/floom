@@ -45,6 +45,7 @@ import { ImageView } from './ImageView';
 import { KeyValueTable } from './KeyValueTable';
 import { Markdown } from './Markdown';
 import { RowTable } from './RowTable';
+import { ScoredRowsTable } from './ScoredRowsTable';
 import { ScalarBig } from './ScalarBig';
 import { StringList } from './StringList';
 import { TextBig } from './TextBig';
@@ -64,6 +65,7 @@ export const OUTPUT_LIBRARY: Record<string, LibraryComponent> = {
   StringList: StringList as unknown as LibraryComponent,
   KeyValueTable: KeyValueTable as unknown as LibraryComponent,
   RowTable: RowTable as unknown as LibraryComponent,
+  ScoredRowsTable: ScoredRowsTable as unknown as LibraryComponent,
   HeadlineWithMeta: HeadlineWithMeta as unknown as LibraryComponent,
 };
 
@@ -471,6 +473,11 @@ export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): Ca
         if (render.output_component === 'RowTable') {
           resolved.appSlug = appSlug;
           resolved.runId = runId;
+        }
+        if (render.output_component === 'ScoredRowsTable') {
+          resolved.appSlug = appSlug;
+          resolved.runId = runId;
+          resolved.runOutput = runOutput;
         }
         return { kind: 'library', element: <Component {...resolved} /> };
       }

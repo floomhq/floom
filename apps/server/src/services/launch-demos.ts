@@ -69,6 +69,14 @@ const DEMOS: LaunchDemo[] = [
       name: 'Lead Scorer',
       description:
         'Score CSV leads against an ICP using Gemini 3 with web search grounding.',
+      render: {
+        output_component: 'ScoredRowsTable',
+        rows_field: 'rows',
+        company_key: 'company',
+        reason_key: 'reasoning',
+        source_key: 'website',
+        score_scale: '0-100',
+      },
       runtime: 'python',
       python_dependencies: ['google-genai==1.64.0'],
       node_dependencies: {},

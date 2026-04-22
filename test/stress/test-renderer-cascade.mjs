@@ -110,6 +110,42 @@ console.log('v16 renderer cascade tests');
   log('Layer 2: previewHtml_field plucked', result.element?.props.previewHtml === '<h1>slide 1</h1>');
 }
 
+{
+  const app = {
+    slug: 'lead-scorer',
+    manifest: mkManifest({
+      render: {
+        output_component: 'ScoredRowsTable',
+        rows_field: 'rows',
+        company_key: 'company',
+        reason_key: 'reasoning',
+        source_key: 'website',
+        score_scale: '0-100',
+      },
+      outputs: [{ name: 'rows', label: 'Scored Leads', type: 'table' }],
+    }),
+  };
+  const out = {
+    total: 2,
+    scored: 2,
+    failed: 0,
+    model: 'gemini-3.1-pro-preview',
+    rows: [
+      { company: 'Acme', website: 'https://example.com', score: 91, reasoning: 'Strong fit' },
+      { company: 'Globex', website: 'https://globex.test', score: 42, reasoning: 'Mixed fit' },
+    ],
+  };
+  const result = pickRenderer({ app, action: 'go', runOutput: out, runId: 'run_demo' });
+  log('Layer 2: ScoredRowsTable picked', result.kind === 'library');
+  log(
+    'Layer 2: ScoredRowsTable component identity matches',
+    result.element?.type === OUTPUT_LIBRARY.ScoredRowsTable,
+  );
+  log('Layer 2: ScoredRowsTable gets rows array', result.element?.props.rows.length === 2);
+  log('Layer 2: ScoredRowsTable gets full run output', result.element?.props.runOutput?.total === 2);
+  log('Layer 2: ScoredRowsTable gets appSlug/runId', result.element?.props.appSlug === 'lead-scorer' && result.element?.props.runId === 'run_demo');
+}
+
 // ---------- Layer 2 miss: typo in component name falls through ----------
 
 {
