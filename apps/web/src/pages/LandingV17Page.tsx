@@ -88,7 +88,6 @@ function pickStripes(apps: HubApp[]): Stripe[] {
 
 export function LandingV17Page() {
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
-  const [hubCount, setHubCount] = useState<number | null>(null);
 
   useEffect(() => {
     document.title = 'Ship AI apps fast · Floom';
@@ -96,7 +95,6 @@ export function LandingV17Page() {
       .getHub()
       .then((apps) => {
         const visible = publicHubApps(apps);
-        setHubCount(visible.length);
         if (visible.length > 0) setStripes(pickStripes(visible));
       })
       .catch(() => {
@@ -131,40 +129,6 @@ export function LandingV17Page() {
               textAlign: 'center',
             }}
           >
-            {/* Launch-date eyebrow — matches wireframe .hero-eyebrow */}
-            <div
-              className="hero-eyebrow"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '5px 12px',
-                border: '1px solid var(--accent-border, #d1fae5)',
-                borderRadius: 999,
-                background: 'var(--accent-soft, #ecfdf5)',
-                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                fontSize: 11,
-                color: 'var(--accent)',
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                fontWeight: 600,
-                marginBottom: 14,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 999,
-                  background: 'var(--accent)',
-                  boxShadow: '0 0 0 3px var(--accent-soft, #ecfdf5)',
-                  display: 'inline-block',
-                }}
-              />
-              Launching 27 April 2026
-            </div>
-
             {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
             <h1
               className="hero-headline"
@@ -199,43 +163,20 @@ export function LandingV17Page() {
               The protocol and runtime for agentic work.
             </p>
 
-            {/* CTAs — [Sign up] (accent) + [Install in Claude] (ink).
-                Wireframe has "Try an app" + "Publish your app"; the brief
-                overrides with [Sign up] + [Install in Claude] for this
-                rebuild. Keeping both primary and secondary distinct. */}
+            {/* CTA — single [Install in Claude] (ink) pill + demoted
+                "Publish it" text link. Matches v17 minimized hero wireframe
+                (Variant B). Launch pill, stat strip, and dual CTAs removed
+                per 2026-04-22 revision (clean-like-cursor). */}
             <div
               className="hero-ctas"
               style={{
                 display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
                 gap: 10,
-                justifyContent: 'center',
-                flexWrap: 'wrap',
-                marginBottom: 18,
+                marginBottom: 4,
               }}
             >
-              <Link
-                to="/signup"
-                data-testid="hero-cta-signup"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: '1px solid var(--accent)',
-                  borderRadius: 12,
-                  padding: '14px 22px',
-                  fontSize: 15,
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  boxShadow:
-                    '0 4px 14px rgba(4,120,87,0.28), inset 0 1px 0 rgba(255,255,255,0.2)',
-                }}
-              >
-                Sign up
-                <ArrowRight size={16} aria-hidden="true" />
-              </Link>
               <Link
                 to="/install"
                 data-testid="hero-cta-install"
@@ -256,38 +197,21 @@ export function LandingV17Page() {
               >
                 Install in Claude
               </Link>
-            </div>
-
-            {/* Hero meta chip — matches wireframe .hero-meta */}
-            <div
-              className="hero-meta"
-              style={{
-                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                fontSize: 11.5,
-                color: 'var(--muted)',
-                display: 'flex',
-                gap: 12,
-                justifyContent: 'center',
-                flexWrap: 'wrap',
-              }}
-            >
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: 'var(--accent)',
-                    display: 'inline-block',
-                  }}
-                />
-                {hubCount !== null ? `${hubCount} live apps` : '22 live apps'}
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>MIT-licensed core</span>
-              <span aria-hidden="true">&middot;</span>
-              <span>Self-host in 1 command</span>
+              <Link
+                to="/signup"
+                data-testid="hero-cta-publish"
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                Already have an app? Publish it
+                <ArrowRight size={13} aria-hidden="true" />
+              </Link>
             </div>
           </div>
 
