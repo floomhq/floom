@@ -314,8 +314,19 @@ def main() -> int:
         return 2
 
     inputs = payload.get("inputs") or {}
-    urls_raw = inputs.get("urls") or []
+    urls_raw = inputs.get("urls")
     your_product = (inputs.get("your_product") or "").strip()
+
+    # Bug #350 fix: the runtime manifest declares `urls` as `textarea` because
+    # manifest v2.0 has no native array type. The web UI splits that string
+    # client-side (see apps/web/src/components/runner/InputField.tsx's
+    # ARRAY_INPUT_NAMES), but direct API/MCP callers send the raw string.
+    # Accept both shapes here so the app works end-to-end regardless of
+    # caller.
+    if isinstance(urls_raw, str):
+        urls_raw = [part.strip() for part in re.split(r"[,\n]+", urls_raw) if part.strip()]
+    elif urls_raw is None:
+        urls_raw = []
 
     if not isinstance(urls_raw, list) or not urls_raw:
         _emit(

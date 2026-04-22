@@ -568,3 +568,109 @@ async function runActionWorker(opts: {
 export function getRun(runId: string): RunRecord | undefined {
   return db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as RunRecord | undefined;
 }
+
+/**
+ * Zombie-run sweeper (#349).
+ *
+ * Every run is dispatched fire-and-forget (`void runActionWorker(...)`) from
+ * {@link dispatchRun}. If the server process crashes, is OOM-killed, or is
+ * redeployed mid-run, the inner `updateRun({..., finished: true})` call
+ * never lands and the row stays `status='running'` forever. The /p/:slug
+ * surface polls forever, the MCP caller times out client-side, and the run
+ * never graduates to `success` or `error`.
+ *
+ * Two entry points close this gap:
+ *
+ *  1. `sweepZombieRuns()` — called once on boot. Any row whose
+ *     `status='running'` at process start cannot be owned by this process
+ *     (we just started). Flip every such row to `error` with a dedicated
+ *     message so the client taxonomy can render the right card.
+ *
+ *  2. `startZombieRunSweeper()` — periodic guard. Any row whose
+ *     `status='running'` AND `started_at` is older than the absolute
+ *     runner timeout ceiling (RUNNER_TIMEOUT + generous slack) cannot
+ *     still be executing. The docker runner's own timeout would have
+ *     tripped by now. Flip it the same way.
+ *
+ * Kept deliberately conservative: the periodic sweeper's cutoff is
+ * RUNNER_TIMEOUT + 5 min slack (min 10 min total), so a healthy worker
+ * still inside `container.wait()` or streaming logs is never touched.
+ * Only genuinely dead runs are reaped.
+ */
+export function sweepZombieRuns(): number {
+  const rows = db
+    .prepare("SELECT id, started_at FROM runs WHERE status = 'running'")
+    .all() as { id: string; started_at: string }[];
+  if (rows.length === 0) return 0;
+  const nowMs = Date.now();
+  let swept = 0;
+  for (const row of rows) {
+    const startedMs = Date.parse(row.started_at + 'Z');
+    const durationMs = Number.isFinite(startedMs) ? nowMs - startedMs : null;
+    updateRun(row.id, {
+      status: 'error',
+      error:
+        'This run was interrupted while it was still processing. Try it again.',
+      error_type: 'floom_internal_error',
+      duration_ms: durationMs,
+      finished: true,
+    });
+    swept++;
+  }
+  return swept;
+}
+
+/**
+ * Periodic sweeper: every `intervalMs`, flip any `running` rows whose
+ * `started_at` predates the absolute runner timeout ceiling. The docker
+ * runner's own per-container timeout would have killed the container long
+ * before this fires, so any row still `running` past that is orphaned.
+ *
+ * `ceilingMs` defaults to RUNNER_TIMEOUT + 5 min slack, floored at 10 min.
+ * Exposed as a parameter so tests can stub shorter windows.
+ */
+export function startZombieRunSweeper(
+  intervalMs = 60_000,
+  ceilingMs?: number,
+): { stop: () => void } {
+  const runnerTimeout = Number(process.env.RUNNER_TIMEOUT || 300_000);
+  const ceiling = Math.max(ceilingMs ?? runnerTimeout + 5 * 60_000, 10 * 60_000);
+  const timer = setInterval(() => {
+    try {
+      const cutoffIso = new Date(Date.now() - ceiling)
+        .toISOString()
+        .replace('T', ' ')
+        .slice(0, 19);
+      const rows = db
+        .prepare(
+          "SELECT id, started_at FROM runs WHERE status = 'running' AND started_at < ?",
+        )
+        .all(cutoffIso) as { id: string; started_at: string }[];
+      for (const row of rows) {
+        const startedMs = Date.parse(row.started_at + 'Z');
+        const durationMs = Number.isFinite(startedMs)
+          ? Date.now() - startedMs
+          : null;
+        updateRun(row.id, {
+          status: 'error',
+          error:
+            'This run stopped reporting progress and was reaped. Try it again.',
+          error_type: 'floom_internal_error',
+          duration_ms: durationMs,
+          finished: true,
+        });
+        console.warn(
+          `[runner] zombie sweeper reaped run ${row.id} (started_at=${row.started_at})`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[runner] zombie sweeper error: ${(err as Error).message}`,
+      );
+    }
+  }, intervalMs);
+  if (typeof timer.unref === 'function') timer.unref();
+  return {
+    stop: () => clearInterval(timer),
+  };
+}
