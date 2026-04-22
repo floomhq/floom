@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import * as dns from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
 import { parse as parseYaml } from 'yaml';
 // @ts-expect-error — json-schema-merge-allof has no types on npm
 import mergeAllOf from 'json-schema-merge-allof';
@@ -851,6 +852,47 @@ interface FetchSpecOptions {
   redirectsRemaining?: number;
 }
 
+// SSRF hardening (issue #378, pentest 2026-04-22).
+//
+// Block every CIDR that could resolve to internal infra from a public caller:
+//   - IPv4 loopback 127.0.0.0/8
+//   - IPv4 "this host" 0.0.0.0/8 (pentest bypass: plain 0.0.0.0 was NOT in
+//     the old string blocklist; on Linux it binds loopback and returned
+//     "fetch failed" instead of a 403)
+//   - IPv4 link-local 169.254.0.0/16 (covers AWS/GCP 169.254.169.254 metadata)
+//   - IPv4 RFC1918 private 10/8, 172.16/12, 192.168/16
+//   - IPv4 CGNAT 100.64.0.0/10 (some infra uses it, e.g. Tailscale)
+//   - IPv4 multicast / broadcast
+//   - IPv6 loopback ::1/128
+//   - IPv6 unique-local fc00::/7 (covers fc00 + fd00)
+//   - IPv6 link-local fe80::/10
+//   - IPv6 unspecified ::/128
+//   - IPv6 IPv4-mapped ::ffff:0:0/96 (e.g. ::ffff:127.0.0.1)
+const SSRF_BLOCK_LIST = (() => {
+  const bl = new BlockList();
+  bl.addSubnet('127.0.0.0', 8, 'ipv4');
+  bl.addSubnet('0.0.0.0', 8, 'ipv4');
+  bl.addSubnet('169.254.0.0', 16, 'ipv4');
+  bl.addSubnet('10.0.0.0', 8, 'ipv4');
+  bl.addSubnet('172.16.0.0', 12, 'ipv4');
+  bl.addSubnet('192.168.0.0', 16, 'ipv4');
+  bl.addSubnet('100.64.0.0', 10, 'ipv4');
+  bl.addSubnet('224.0.0.0', 4, 'ipv4'); // multicast
+  bl.addAddress('255.255.255.255', 'ipv4'); // broadcast
+  bl.addAddress('::1', 'ipv6');
+  bl.addAddress('::', 'ipv6');
+  bl.addSubnet('fc00::', 7, 'ipv6');
+  bl.addSubnet('fe80::', 10, 'ipv6');
+  bl.addSubnet('::ffff:0:0', 96, 'ipv6'); // v4-mapped v6
+  return bl;
+})();
+
+function isBlockedIp(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 0) return true; // non-IP string: treat as unsafe
+  return SSRF_BLOCK_LIST.check(ip, family === 6 ? 'ipv6' : 'ipv4');
+}
+
 async function isSafeUrl(
   urlString: string,
   options: FetchSpecOptions = {},
@@ -861,42 +903,51 @@ async function isSafeUrl(
   } catch {
     return false;
   }
+  // Only http(s). Reject file:, gopher:, data:, ftp:, dict:, ws(s):, etc.
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
   if (!u.hostname) return false;
 
+  // Trusted operator-controlled callers (e.g. apps.yaml ingest for local
+  // sidecars) can opt out; never honor this flag for user-supplied URLs.
   if (options.allowPrivateNetwork) return true;
 
-  // localhost / loopback string check
-  if (u.hostname === 'localhost' || u.hostname.endsWith('.localhost')) return false;
-  if (/^127\.\d+\.\d+\.\d+$/.test(u.hostname) || u.hostname === '::1') return false;
-  if (/^169\.254\.\d+\.\d+$/.test(u.hostname)) return false;
+  // Reject localhost string variants upfront. DNS lookup of "localhost" on
+  // most systems returns 127.0.0.1 anyway, but some resolvers can be
+  // re-pointed (e.g. /etc/hosts rewrites), so we don't rely on DNS alone.
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host === 'ip6-localhost' || host.endsWith('.localhost')) {
+    return false;
+  }
 
-  // Resolve to prevent DNS bypass
+  // If the hostname is literally an IP, check it directly (no DNS).
+  // URL parsing strips IPv6 brackets, so `isIP` sees the raw address.
+  const literalFamily = isIP(host);
+  if (literalFamily !== 0) {
+    return !isBlockedIp(host);
+  }
+
+  // Hostname is a name — resolve to every A/AAAA record and reject if ANY
+  // resolved IP is in the blocklist. This defeats DNS rebinding at ingest
+  // time (we only fetch once here, so TOCTOU against rebind is low risk).
   try {
-    const records = await dns.lookup(u.hostname, { all: true });
+    const records = await dns.lookup(host, { all: true });
+    if (records.length === 0) return false;
     for (const record of records) {
-      if (isPrivateIp(record.address)) return false;
+      if (isBlockedIp(record.address)) return false;
     }
   } catch {
-    return false; // DNS failed
+    return false; // DNS failed — fail closed
   }
   return true;
 }
 
-function isPrivateIp(ip: string): boolean {
-  // IPv4 Private
-  if (/^10\./.test(ip)) return true;
-  if (/^192\.168\./.test(ip)) return true;
-  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
-  // IPv4 Loopback/Link-local
-  if (/^127\./.test(ip)) return true;
-  if (/^169\.254\./.test(ip)) return true;
-  // IPv6 Loopback/Private
-  if (ip === '::1') return true;
-  if (/^[fF][cdCD]/.test(ip)) return true; // fc00::/7 fd00::/8
-  if (/^[fF][eE][89aAbB]/.test(ip)) return true; // fe80::/10
-  return false;
-}
+// Response size + timeout caps for the spec fetch. OpenAPI specs are JSON/YAML
+// text; 5 MB is ~10x the size of the Stripe OpenAPI spec and leaves headroom
+// for large enterprise specs. Anything larger is almost certainly either a
+// mistake (wrong URL) or an attempt to exhaust memory.
+const MAX_SPEC_BYTES = 5 * 1024 * 1024; // 5 MB
+const FETCH_TIMEOUT_MS = 10_000; // 10 s
+const TRUSTED_FETCH_TIMEOUT_MS = 30_000; // operator-controlled apps.yaml
 
 export async function fetchSpec(
   url: string,
@@ -906,9 +957,12 @@ export async function fetchSpec(
     throw new Error(`Invalid or disallowed OpenAPI URL: ${url}`);
   }
   const redirectsRemaining = options.redirectsRemaining ?? 3;
+  const timeoutMs = options.allowPrivateNetwork
+    ? TRUSTED_FETCH_TIMEOUT_MS
+    : FETCH_TIMEOUT_MS;
   const res = await fetch(url, {
     headers: { Accept: 'application/json, application/yaml, text/plain' },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(timeoutMs),
     redirect: 'manual',
   });
   if (res.status >= 300 && res.status < 400) {
@@ -931,7 +985,46 @@ export async function fetchSpec(
   if (!res.ok) {
     throw new Error(`Failed to fetch OpenAPI spec from ${url}: HTTP ${res.status}`);
   }
-  const text = await res.text();
+
+  // Enforce a response-size cap. Content-Length is advisory (servers can
+  // omit or lie), so we also count bytes as they stream in and abort when
+  // the cap is exceeded. Unbounded res.text() would let a malicious or
+  // confused endpoint OOM the server.
+  const declared = Number(res.headers.get('content-length') || '0');
+  if (declared > MAX_SPEC_BYTES) {
+    throw new Error(
+      `OpenAPI spec at ${url} exceeds ${MAX_SPEC_BYTES} bytes (content-length=${declared})`,
+    );
+  }
+
+  const body = res.body;
+  let text: string;
+  if (!body) {
+    text = await res.text();
+    if (Buffer.byteLength(text, 'utf-8') > MAX_SPEC_BYTES) {
+      throw new Error(`OpenAPI spec at ${url} exceeds ${MAX_SPEC_BYTES} bytes`);
+    }
+  } else {
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      received += value.byteLength;
+      if (received > MAX_SPEC_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* ignore */
+        }
+        throw new Error(`OpenAPI spec at ${url} exceeds ${MAX_SPEC_BYTES} bytes`);
+      }
+      chunks.push(value);
+    }
+    text = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf-8');
+  }
   // Try JSON first, fall back to YAML
   try {
     return JSON.parse(text) as OpenApiSpec;

@@ -100,6 +100,14 @@ const IngestBody = z.object({
   visibility: z.enum(['public', 'private', 'auth-required']).optional(),
 });
 
+// SECURITY (issue #378, pentest 2026-04-22): /detect fetches a user-supplied
+// URL server-side, which is a classic SSRF primitive. Two hardenings:
+//   1. Auth gate (Cloud mode): anon callers get a 401, so the capability to
+//      "make our server fetch a URL" is not exposed to the public internet.
+//      OSS self-host keeps the legacy behavior (no auth configured = no-op).
+//   2. Private-network / loopback / link-local blocks + response size cap +
+//      timeout live in `fetchSpec` (services/openapi-ingest.ts), so every
+//      caller of fetchSpec benefits, not just /detect.
 hubRouter.post('/detect', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
