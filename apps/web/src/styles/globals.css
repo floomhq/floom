@@ -358,6 +358,21 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
+/* Tablet (641-899px): the centre pill (Store/Studio/Run) + right-side
+   nav (Docs · Sign in · Publish) collide because both sides reach
+   toward the absolute-centred pill. At 768px the overlap is ~5px with
+   "Docs" visually clipped behind the "Publish an app" CTA. See
+   launch-blocker #341. Fix: keep the mobile hamburger pattern for
+   tablet, defer full desktop TopBar to >=900px. */
+@media (min-width: 641px) and (max-width: 899px) {
+  .topbar-links-desktop {
+    display: none !important;
+  }
+  .topbar-hamburger {
+    display: flex !important;
+  }
+}
+
 /* a11y 2026-04-20: WCAG 2.5.5 touch target (44x44) for small footer
    links and cookie banner on mobile. Uses invisible padding +
    negative margin so the layout (row flow, wrap, spacing) is
@@ -753,13 +768,13 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
-/* Studio sidebar: hide below 768px. The TopBar exposes a studio-specific
+/* Studio sidebar: hide below 900px. The TopBar exposes a studio-specific
    hamburger (`.topbar-studio-toggle`) in that range that opens the
    sidebar as a left-anchored slide-in drawer (see StudioLayout.tsx).
-   Desktop >=768px: sidebar stays inline in the flex row, hamburger is
-   hidden. Nav-polish 2026-04-20: dropped the 900px breakpoint + the
-   bottom-left floating ☰ which never sat where a toggle belongs. */
-@media (max-width: 767.98px) {
+   Desktop >=900px: sidebar stays inline in the flex row, hamburger is
+   hidden. Breakpoint raised from 767.98px to 899.98px on 2026-04-22 to
+   match the TopBar nav collision fix (launch-blocker #341). */
+@media (max-width: 899.98px) {
   /* StudioSidebar uses inline `display: flex` for the desktop layout,
      so we need !important here to win specificity and hide it on
      mobile. The drawer panel below overrides this back to `flex` via
@@ -794,7 +809,11 @@ body:has(.topbar-mobile-menu) {
 .topbar-studio-toggle:hover {
   background: var(--bg);
 }
-@media (max-width: 767.98px) {
+/* Extended to 899.98px (was 767.98px) on 2026-04-22 to cover tablet
+   range where the desktop TopBar nav collides with the right-side
+   links. See launch-blocker #341. Matches the tablet override for
+   `.topbar-links-desktop` in the (641-899px) block above. */
+@media (max-width: 899.98px) {
   .topbar-studio-toggle {
     display: inline-flex;
   }
