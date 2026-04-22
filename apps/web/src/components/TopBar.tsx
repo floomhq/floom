@@ -131,8 +131,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const hamburgerRef = useRef<HTMLButtonElement>(null);
 
   const isStudio = location.pathname.startsWith('/studio');
-  // #249 (re-raised 2026-04-21): Run pill side is "active" when the
-  // user is on /apps (public run directory) or /p/:slug (a run page).
+  // Store pill stays active on /store AND on /apps (same underlying
+  // AppsDirectoryPage) AND on /p/:slug (an app run page is still a
+  // store surface). Nav cleanup 2026-04-22: the prior triplet Store ·
+  // Studio · Run was dropped because Run pointed at the same component
+  // as Store — visually and functionally redundant. The runtime
+  // surface ("what have I run") lives on /me, linked on the right.
   const isApps =
     location.pathname === '/apps' ||
     location.pathname.startsWith('/apps/') ||
@@ -269,22 +273,21 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Middle slot: Store/Studio/Run pill (every visitor),
-            nothing on /login + /signup.
+        {/* Middle slot: Store/Studio pill (every visitor), nothing on
+            /login + /signup.
             #82 (2026-04-21): the pill is absolutely centred within the
             topbar-inner container so it sits exactly on the horizontal
             midline regardless of how wide the logo or the right-side
             nav (Me · Docs · avatar) get. The previous flex-1 + center
             pattern left it optically off-centre whenever the two
             flanks had different widths, which is always.
-            #249 re-raised 2026-04-21: Federico asked "where is the
-            runtime where I can actually run my apps?" — Store + Studio
-            alone didn't show a run surface. Fix: add "Run" as a third
-            pill side linking to /apps (the public directory of
-            runnable apps). Triplet = Store (browse) · Studio (build)
-            · Run (execute), mirrors the protocol mental model. Visible
-            to everyone, not just authed users (Me is still the authed
-            dashboard on the right side). */}
+            Nav cleanup 2026-04-22: dropped the third "Run" pill side.
+            It pointed at /apps, which renders the same
+            AppsDirectoryPage as /store — the two sides were literally
+            the same page under different labels. "Where do I run my
+            apps?" is answered by /me (on the right side of the nav,
+            shows the user's run history + tiles for apps they've
+            run). */}
         {showPill && (
           <nav
             className="topbar-links topbar-links-desktop topbar-pill-nav"
@@ -313,14 +316,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 style={pillSideStyle(isStudio)}
               >
                 Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
-              </Link>
-              <Link
-                to="/apps"
-                data-testid="topbar-mode-run"
-                aria-current={isApps ? 'page' : undefined}
-                style={pillSideStyle(isApps)}
-              >
-                Run
               </Link>
             </div>
           </nav>
@@ -612,18 +607,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   }}
                 >
                   Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
-                </Link>
-                <Link
-                  to="/apps"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-mode-run"
-                  style={{
-                    ...pillSideStyle(isApps),
-                    flex: 1,
-                    padding: '8px 10px',
-                  }}
-                >
-                  Run
                 </Link>
               </div>
             )}
