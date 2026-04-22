@@ -56,6 +56,10 @@ const ImprintPage = lazy(() => import('./pages/ImprintPage').then(m => ({ defaul
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(m => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('./pages/TermsPage').then(m => ({ default: m.TermsPage })));
 const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ default: m.CookiesPage })));
+// /changelog (PR #405 ripple, 2026-04-22): TopBar advertises a Changelog
+// link in the centre nav; previously it was a dead `#` anchor. This
+// page is a minimal landing that points at GitHub Releases + Discord.
+const ChangelogPage = lazy(() => import('./pages/ChangelogPage').then(m => ({ default: m.ChangelogPage })));
 import { IconSprite } from './components/IconSprite';
 import { CookieBanner } from './components/CookieBanner';
 import { RouteLoading } from './components/RouteLoading';
@@ -306,6 +310,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             banner ("Welcome to Floom — try an app ↓"). */}
         <Route path="/onboarding" element={<Navigate to="/me?welcome=1" replace />} />
         <Route path="/pricing" element={<PricingPage />} />
+        {/* /changelog — added alongside v17 TopBar (PR #405 ripple fix). */}
+        <Route path="/changelog" element={<ChangelogPage />} />
         <Route path="/p/:slug/dashboard" element={<PSlugDashboardRedirect />} />
         {/* Legal pages. Floom, Inc. is a Delaware C-Corp. /legal is the
             canonical company-info route; /imprint is kept as a back-compat

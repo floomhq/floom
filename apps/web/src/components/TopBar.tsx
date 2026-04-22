@@ -158,7 +158,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const isDocs =
     location.pathname.startsWith('/protocol') ||
     location.pathname.startsWith('/docs');
-  // /changelog has no route yet — links to # (TODO: wire when route exists)
+  // /changelog route wired 2026-04-22 (PR #405 ripple fix).
   const isChangelog = location.pathname === '/changelog';
   const isStudio = location.pathname.startsWith('/studio');
   const isMe = location.pathname.startsWith('/me');
@@ -261,9 +261,9 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             >
               Docs
             </Link>
-            {/* TODO: wire /changelog when route exists */}
+            {/* /changelog route wired 2026-04-22 via PR #405 ripple. */}
             <Link
-              to="#"
+              to="/changelog"
               data-testid="topbar-changelog"
               aria-current={isChangelog ? 'page' : undefined}
               style={navLinkStyle(isChangelog)}
@@ -546,9 +546,9 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Docs
             </Link>
 
-            {/* TODO: wire /changelog when route exists */}
+            {/* /changelog route wired 2026-04-22 via PR #405 ripple. */}
             <Link
-              to="#"
+              to="/changelog"
               className="topbar-mobile-link"
               role="menuitem"
               onClick={() => setMenuOpen(false)}
