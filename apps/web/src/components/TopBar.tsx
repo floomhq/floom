@@ -59,7 +59,7 @@ const primaryCtaStyle: CSSProperties = {
   background: 'var(--accent)',
   color: '#fff',
   border: '1px solid var(--accent)',
-  boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
+  boxShadow: '0 4px 14px rgba(4,120,87,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
 };
 
 const menuItemStyle: CSSProperties = {

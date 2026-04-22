@@ -124,6 +124,12 @@ export function CookieBanner() {
   // collapse back to the pill.
   const isExpandedMobile = isMobile && expanded;
 
+  // Audit 2026-04-22: the banner used to sit bottom-centre, which the
+  // design audit flagged as "covers the fold on every page" — centre
+  // placement with a wide 460px pill dominated the mobile fold and still
+  // drew the eye on desktop. Anchored now to bottom-right, capped at
+  // 420px, so it reads as a small corner toast. Mobile expanded variant
+  // still spans the bottom with its close button.
   return (
     <div
       role="dialog"
@@ -132,12 +138,11 @@ export function CookieBanner() {
       data-testid="cookie-banner"
       style={{
         position: 'fixed',
-        left: 12,
-        right: 12,
-        bottom: 12,
+        right: isExpandedMobile ? 12 : 16,
+        left: isExpandedMobile ? 12 : 'auto',
+        bottom: 16,
         zIndex: 1000,
-        maxWidth: 460,
-        margin: '0 auto',
+        maxWidth: 420,
         padding: '12px 14px',
         background: 'var(--card)',
         border: '1px solid var(--line)',

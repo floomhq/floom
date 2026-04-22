@@ -131,7 +131,7 @@ input { font-family: inherit; }
 .brand:hover [role="img"],
 .brand:focus-visible [role="img"] {
   filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.55))
-          drop-shadow(0 0 16px rgba(5, 150, 105, 0.35));
+          drop-shadow(0 0 16px rgba(4, 120, 87, 0.35));
 }
 @media (prefers-reduced-motion: reduce) {
   .brand [role="img"] {
@@ -279,7 +279,7 @@ input { font-family: inherit; }
 .prompt-box:focus {
   border-color: var(--accent);
   border-width: 2px;
-  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
+  box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
 }
 
 .prompt-box-run {
@@ -512,7 +512,7 @@ input { font-family: inherit; }
   align-items: center;
   gap: 6px;
   transition: background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-  box-shadow: 0 1px 2px rgba(5, 150, 105, 0.3),
+  box-shadow: 0 1px 2px rgba(4, 120, 87, 0.3),
               inset 0 1px 0 rgba(255, 255, 255, 0.2);
   cursor: pointer;
   font-family: inherit;
@@ -521,7 +521,7 @@ input { font-family: inherit; }
 .btn-primary:hover {
   background: var(--accent-hover, #047857);
   border-color: var(--accent-hover, #047857);
-  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35),
+  box-shadow: 0 4px 14px rgba(4, 120, 87, 0.35),
               inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .btn-primary:focus-visible {
@@ -668,7 +668,7 @@ input { font-family: inherit; }
 }
 .input-field:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
+  box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
 }
 .input-field::placeholder { color: #b0ada6; }
 
@@ -889,7 +889,7 @@ input { font-family: inherit; }
 }
 .iterate-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
+  box-shadow: 0 0 0 3px rgba(4,120,87,0.12);
 }
 .iterate-input::placeholder { color: #b0ada6; }
 

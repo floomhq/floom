@@ -116,7 +116,7 @@ body {
 }
 .public-nav-link:focus-visible {
   color: var(--ink);
-  outline: 2px solid var(--accent, #059669);
+  outline: 2px solid var(--accent, #047857);
   outline-offset: 2px;
 }
 
@@ -276,7 +276,7 @@ body:has(.topbar-mobile-menu) {
   font-size: 15px;
   font-weight: 600;
   text-decoration: none;
-  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(4, 120, 87, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   min-height: 48px;
 }
 .topbar-mobile-cta:hover {
@@ -299,6 +299,55 @@ body:has(.topbar-mobile-menu) {
 
   .topbar-publish-label-tablet {
     display: inline;
+  }
+}
+
+/* ── Shared mobile safety net (Batch X, 2026-04-22) ─────────────────────
+   Blanket overflow + sizing guard that every page inherits. The per-page
+   layouts then tune on top of this. Goal: nothing escapes the viewport on
+   375-768px, no page needs its own overflow-x override. */
+@media (max-width: 768px) {
+  /* Belt-and-braces: the viewport is the scroll container, never a child.
+     globals above already sets overflow-x:clip on body, this reinforces
+     for older engines and edge cases where a child grid/table tries to
+     push width out. */
+  html, body {
+    max-width: 100vw;
+    overflow-x: clip;
+  }
+
+  /* Any media inside the app respects its column. Stops a stray wide image
+     or embedded iframe (docs diagrams, legal pages) from pushing the
+     viewport wider. */
+  img, svg, iframe, video, canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Tables: horizontally scroll inside their own column instead of
+     pushing the page. Matches the docs/limits pricing tables. */
+  table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  /* Tighten the shared topbar + main content gutter so nothing clips
+     at 375w. Wireframe.css sets the desktop gutters; this trims them
+     for phones without touching the desktop breakpoint. */
+  .topbar-inner {
+    padding: 0 16px !important;
+  }
+  .main {
+    padding-inline: 16px !important;
+  }
+  /* Belt-and-braces so the right-side cluster never ships on mobile,
+     even if a page adds its own .topbar-links variant. */
+  .topbar-links-desktop {
+    display: none !important;
+  }
+  .topbar-hamburger {
+    display: flex !important;
   }
 }
 
@@ -367,7 +416,7 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
-@media (min-width: 641px) {
+@media (min-width: 769px) {
   .topbar-hamburger {
     display: none !important;
   }
@@ -566,7 +615,7 @@ body:has(.topbar-mobile-menu) {
 }
 .run-surface-past-status-success { color: var(--accent); border-color: var(--accent-border, var(--line)); }
 .run-surface-past-status-error, .run-surface-past-status-timeout {
-  color: #9a3a19; border-color: #e7d0c9;
+  color: var(--danger, #c44a2b); border-color: var(--danger-border, #f0d5c9);
 }
 .run-surface-past-snippet {
   color: var(--muted);
