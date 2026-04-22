@@ -238,7 +238,12 @@ const FAQS: Faq[] = [
       <>
         Per-IP and per-user sliding windows on run and job endpoints. The
         defaults are tuned for interactive use. If you hit a limit, you'll
-        get a 429 with retry info; self-host removes it entirely.
+        get a 429 with retry info; self-host removes it entirely. The exact
+        launch-week numbers live on{' '}
+        <Link to="/docs/limits" style={{ color: 'var(--ink)' }}>
+          Runtime &amp; limits
+        </Link>
+        .
       </>
     ),
   },
@@ -248,7 +253,11 @@ const FAQS: Faq[] = [
       <>
         Yes. Apps are described by a portable manifest and OpenAPI spec. Point
         a self-host instance at the same spec and it will behave the same
-        way. You don't get locked in.
+        way. You don't get locked in. See{' '}
+        <Link to="/docs/ownership" style={{ color: 'var(--ink)' }}>
+          Ownership
+        </Link>
+        .
       </>
     ),
   },
@@ -270,6 +279,33 @@ export function PricingPage() {
           Floom is pre-1.0. Cloud is free during beta, self-host is free
           forever, and paid plans don't exist yet. When they do, we'll say so
           here first.
+        </p>
+        <p
+          style={{
+            margin: '18px auto 0',
+            maxWidth: 720,
+            fontSize: 14,
+            lineHeight: 1.6,
+            color: 'var(--muted)',
+          }}
+        >
+          Launch-week specifics live in{' '}
+          <Link to="/docs/limits" style={{ color: 'var(--ink)' }}>
+            Runtime &amp; limits
+          </Link>
+          ,{' '}
+          <Link to="/docs/security" style={{ color: 'var(--ink)' }}>
+            Security
+          </Link>
+          ,{' '}
+          <Link to="/docs/ownership" style={{ color: 'var(--ink)' }}>
+            Ownership
+          </Link>
+          , and{' '}
+          <Link to="/docs/reliability" style={{ color: 'var(--ink)' }}>
+            Reliability
+          </Link>
+          .
         </p>
       </section>
 

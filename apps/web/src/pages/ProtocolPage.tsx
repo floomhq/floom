@@ -74,10 +74,10 @@ function CopyCodeButton({ code }: { code: string }) {
         right: 10,
         fontSize: 11,
         padding: '3px 10px',
-        background: 'rgba(255,255,255,0.1)',
-        border: '1px solid rgba(255,255,255,0.15)',
+        background: 'var(--card)',
+        border: '1px solid var(--line)',
         borderRadius: 6,
-        color: copied ? '#7bffc0' : 'rgba(255,255,255,0.6)',
+        color: copied ? 'var(--accent)' : 'var(--muted)',
         cursor: 'pointer',
         fontFamily: 'inherit',
         transition: 'color 0.15s',
@@ -257,8 +257,9 @@ function ProxiedVsHosted() {
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
-              background: 'var(--terminal-bg, #0e0e0c)',
-              color: 'var(--terminal-ink, #d4d4c8)',
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
               fontFamily: 'JetBrains Mono, monospace',
               fontSize: 11.5,
               padding: '16px',
@@ -274,10 +275,10 @@ function ProxiedVsHosted() {
               style={{
                 position: 'absolute', top: 8, right: 8,
                 fontSize: 10, padding: '2px 8px',
-                background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
                 borderRadius: 4,
-                color: copiedLeft ? '#7bffc0' : 'rgba(255,255,255,0.5)',
+                color: copiedLeft ? 'var(--accent)' : 'var(--muted)',
                 cursor: 'pointer', fontFamily: 'inherit', transition: 'color 0.15s',
               }}
             >
@@ -302,8 +303,9 @@ function ProxiedVsHosted() {
           </div>
           <div style={{ position: 'relative' }}>
             <pre style={{
-              background: 'var(--terminal-bg, #0e0e0c)',
-              color: 'var(--terminal-ink, #d4d4c8)',
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
               fontFamily: 'JetBrains Mono, monospace',
               fontSize: 11.5,
               padding: '16px',
@@ -319,10 +321,10 @@ function ProxiedVsHosted() {
               style={{
                 position: 'absolute', top: 8, right: 8,
                 fontSize: 10, padding: '2px 8px',
-                background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
                 borderRadius: 4,
-                color: copiedRight ? '#7bffc0' : 'rgba(255,255,255,0.5)',
+                color: copiedRight ? 'var(--accent)' : 'var(--muted)',
                 cursor: 'pointer', fontFamily: 'inherit', transition: 'color 0.15s',
               }}
             >
@@ -386,14 +388,20 @@ const markdownComponents = {
   ),
   strong: ({ children }: { children?: React.ReactNode }) => <strong>{children}</strong>,
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      style={{ color: 'var(--accent)', textDecoration: 'underline' }}
-    >
-      {children}
-    </a>
+    href && href.startsWith('/') ? (
+      <Link to={href} style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+        {children}
+      </Link>
+    ) : (
+      <a
+        href={href}
+        target={href && href.startsWith('#') ? undefined : '_blank'}
+        rel={href && href.startsWith('#') ? undefined : 'noreferrer'}
+        style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+      >
+        {children}
+      </a>
+    )
   ),
   // Inline code + code blocks. react-markdown passes `inline=false` on
   // block code and `inline=true` (or omitted) on backtick inline code.
@@ -423,8 +431,9 @@ const markdownComponents = {
       <div style={{ position: 'relative', margin: '16px 0' }}>
         <pre
           style={{
-            background: 'var(--terminal-bg, #0e0e0c)',
-            color: 'var(--terminal-ink, #d4d4c8)',
+            background: 'var(--bg)',
+            color: 'var(--ink)',
+            border: '1px solid var(--line)',
             fontFamily: 'JetBrains Mono, monospace',
             fontSize: 12,
             padding: '20px 16px',
@@ -615,12 +624,12 @@ export function ProtocolPage() {
                 The protocol is open.
               </p>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
-                Self-host, fork, or contribute. Runtime packages in the monorepo.
+                Self-host, fork, or contribute. Runtime and docs live in the main repo.
               </p>
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <a
-                href="https://github.com/floomhq/floom-monorepo"
+                href="https://github.com/floomhq/floom"
                 target="_blank"
                 rel="noreferrer"
                 style={{
@@ -661,6 +670,39 @@ export function ProtocolPage() {
             </div>
           </div>
 
+          <div style={{ marginTop: 24 }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
+              Quick answers
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {[
+                { label: 'Runtime & limits', to: '/docs/limits' },
+                { label: 'Security', to: '/docs/security' },
+                { label: 'Observability', to: '/docs/observability' },
+                { label: 'Workflow', to: '/docs/workflow' },
+                { label: 'Ownership', to: '/docs/ownership' },
+                { label: 'Reliability', to: '/docs/reliability' },
+                { label: 'Pricing', to: '/docs/pricing' },
+              ].map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--accent)',
+                    textDecoration: 'none',
+                    padding: '4px 10px',
+                    border: '1px solid var(--line)',
+                    borderRadius: 6,
+                    background: 'var(--bg)',
+                  }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
           {/* Example manifests */}
           <div style={{ marginTop: 32 }}>
             <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>
@@ -695,17 +737,18 @@ export function ProtocolPage() {
             style={{
               marginTop: 32,
               padding: '16px 20px',
-              background: 'var(--terminal-bg, #0e0e0c)',
-              color: 'var(--terminal-ink, #d4d4c8)',
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+              border: '1px solid var(--line)',
               borderRadius: 10,
               fontFamily: 'JetBrains Mono, monospace',
               fontSize: 12,
               lineHeight: 1.8,
             }}
           >
-            <span style={{ color: 'rgba(255,255,255,0.4)' }}># Self-host Floom</span>
+            <span style={{ color: 'var(--muted)' }}># Self-host Floom</span>
             {'\n'}
-            <span style={{ color: 'rgba(255,255,255,0.4)' }}>$</span> docker run -p 3051:3051 ghcr.io/floomhq/floom-monorepo:latest
+            <span style={{ color: 'var(--muted)' }}>$</span> docker run -p 3051:3051 ghcr.io/floomhq/floom-monorepo:latest
           </div>
         </article>
       </main>

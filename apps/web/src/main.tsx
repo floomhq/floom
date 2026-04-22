@@ -12,6 +12,7 @@ const AppsDirectoryPage = lazy(() => import('./pages/AppsDirectoryPage').then(m 
 const AppPermalinkPage = lazy(() => import('./pages/AppPermalinkPage').then(m => ({ default: m.AppPermalinkPage })));
 const PublicRunPermalinkPage = lazy(() => import('./pages/PublicRunPermalinkPage').then(m => ({ default: m.PublicRunPermalinkPage })));
 const ProtocolPage = lazy(() => import('./pages/ProtocolPage').then(m => ({ default: m.ProtocolPage })));
+const DocsPage = lazy(() => import('./pages/DocsPage').then(m => ({ default: m.DocsPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then(m => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
@@ -264,10 +265,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             heading text via slugify). Changelog has no on-page section, so
             it points at GitHub Releases via a hard redirect. */}
         <Route path="/docs/protocol" element={<Navigate to="/protocol" replace />} />
+        <Route path="/docs/secrets" element={<Navigate to="/docs/security" replace />} />
+        <Route path="/docs/rate-limits" element={<Navigate to="/docs/limits" replace />} />
+        <Route path="/docs/publishing" element={<Navigate to="/docs/workflow#publishing-flow" replace />} />
         <Route path="/docs/self-host" element={<Navigate to="/protocol#self-hosting" replace />} />
         <Route path="/docs/api-reference" element={<Navigate to="/protocol#api-surface" replace />} />
-        <Route path="/docs/rate-limits" element={<Navigate to="/protocol#plumbing-layers-auto-applied" replace />} />
         <Route path="/docs/changelog" element={<ExternalRedirect to="https://github.com/floomhq/floom/releases" />} />
+        <Route path="/docs/:slug" element={<DocsPage />} />
         {/* Catch-all /docs/* (any other subpath wireframes advertise) falls back to /protocol. */}
         <Route path="/docs/*" element={<Navigate to="/protocol" replace />} />
         <Route path="/self-host" element={<Navigate to="/#self-host" replace />} />

@@ -51,15 +51,27 @@ Every Floom app gets:
 - Run history + audit log
 - (Coming soon) Access control, staging environments, version control, per-app databases, OAuth, payment / billing
 
+## Plain-language launch docs
+
+If you want the operational answers first:
+
+- [/docs/limits](/docs/limits) for runtime caps, rate limits, concurrency, and scale path
+- [/docs/security](/docs/security) for sandboxing, secrets, and BYOK
+- [/docs/observability](/docs/observability) for logs, metrics, and error tracking
+- [/docs/workflow](/docs/workflow) for CI, preview deploys, rollback, and publishing flow
+- [/docs/ownership](/docs/ownership) for self-host and lock-in questions
+- [/docs/reliability](/docs/reliability) for the current launch-week SLA stance
+- [/docs/pricing](/docs/pricing) for cloud beta and monetization status
+
 ## Self-hosting
 
 Floom is MIT licensed. Floom.dev is the hosted flagship, but you can run the full stack yourself.
 
 **Via Docker** (one command):
 ```bash
-docker run -p 3000:3000 \
+docker run -p 3051:3051 \
   -e OPENAI_API_KEY=... \
-  ghcr.io/floomhq/floom:latest
+  ghcr.io/floomhq/floom-monorepo:latest
 ```
 
 **Same runtime on cloud and self-host.** v1 runs Docker everywhere. v1.1 adds Cloud Run scale-to-zero on floom.dev (invisible to creators, manifest format unchanged).

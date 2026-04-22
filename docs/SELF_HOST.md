@@ -57,9 +57,9 @@ Open `http://localhost:3051` in your browser or point an MCP client at `http://l
 | `FLOOM_JOB_POLL_MS` | `1000` | Interval in ms at which the background worker polls the async job queue. Lower = faster pickup, more CPU |
 | `FLOOM_DISABLE_JOB_WORKER` | — | When set to `true`, the background worker does not start. Used by tests that drive the worker deterministically |
 | `FLOOM_RATE_LIMIT_DISABLED` | — | When `true`, skips all rate limits (tests, admin tooling). Otherwise every run endpoint enforces the caps below |
-| `FLOOM_RATE_LIMIT_IP_PER_HOUR` | `20` | Max runs per IP per hour for anonymous callers across all apps |
-| `FLOOM_RATE_LIMIT_USER_PER_HOUR` | `200` | Max runs per authenticated user per hour across all apps |
-| `FLOOM_RATE_LIMIT_APP_PER_HOUR` | `50` | Max runs per (IP, app) pair per hour. Prevents one hot app from draining a visitor's IP budget |
+| `FLOOM_RATE_LIMIT_IP_PER_HOUR` | `150` | Max runs per IP per hour for anonymous callers across all apps |
+| `FLOOM_RATE_LIMIT_USER_PER_HOUR` | `300` | Max runs per authenticated user per hour across all apps |
+| `FLOOM_RATE_LIMIT_APP_PER_HOUR` | `500` | Max runs per (IP, app) pair per hour. Prevents one hot app from draining a visitor's IP budget |
 | `FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY` | `10` | Max MCP `ingest_app` calls per user per day (anon: per IP). Stops scripted gallery spam |
 | `FLOOM_STORE_HIDE_SLUGS` | — | Comma-separated slugs to suppress from the public `/api/hub` (store) feed. Use to temporarily hide a published app without deleting it, e.g. while rotating upstream credentials. The `/api/hub/:slug` detail endpoint still serves the record so deep links keep working. Example: `FLOOM_STORE_HIDE_SLUGS=flyfast,legacy-app` |
 | `OPENAI_API_KEY` | — | Optional. Enables embedding-based app search. Without it, search falls back to keyword matching |
@@ -231,10 +231,10 @@ so a single hostile caller cannot drain a creator's upstream budget:
 
 | Endpoint | Anon (per IP) | Authed (per user) | Per (IP, app) |
 |----------|---------------|-------------------|----------------|
-| `POST /api/run` | 20/hr | 200/hr | 50/hr |
-| `POST /api/:slug/run` | 20/hr | 200/hr | 50/hr |
-| `POST /api/:slug/jobs` | 20/hr | 200/hr | 50/hr |
-| `POST /mcp/app/:slug` | 20/hr | 200/hr | 50/hr |
+| `POST /api/run` | 150/hr | 300/hr | 500/hr |
+| `POST /api/:slug/run` | 150/hr | 300/hr | 500/hr |
+| `POST /api/:slug/jobs` | 150/hr | 300/hr | 500/hr |
+| `POST /mcp/app/:slug` | 150/hr | 300/hr | 500/hr |
 | `POST /mcp` — `ingest_app` tool | 10/day (per IP) | 10/day (per user) | — |
 
 When a cap is exceeded the response is HTTP `429` with a `Retry-After` header
