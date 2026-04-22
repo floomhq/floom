@@ -204,7 +204,7 @@ function Arrow() {
 
 const PROXIED_YAML = `name: stripe
 type: proxied
-openapi_spec_url: https://docs.stripe.com/api/openapi.json
+openapi_spec_url: https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
 base_url: https://api.stripe.com
 auth: bearer
 secrets: [STRIPE_SECRET_KEY]`;

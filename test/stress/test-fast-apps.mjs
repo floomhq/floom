@@ -23,6 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,8 +31,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
 
-const FLOOM_PORT = 14411; // test-unique port, avoids preview server on 3051
-const FAST_APPS_PORT = 14412; // test-unique sidecar port
+const FLOOM_PORT = await getFreePort();
+const FAST_APPS_PORT = await getFreePort();
 const TMP_DATA = mkdtempSync(join(tmpdir(), 'floom-fast-apps-'));
 
 let passed = 0;
@@ -79,6 +80,25 @@ async function waitForCondition(fn, timeoutMs) {
     await new Promise((r) => setTimeout(r, 150));
   }
   return false;
+}
+
+async function getFreePort(host = '127.0.0.1') {
+  return await new Promise((resolve, reject) => {
+    const server = createNetServer();
+    server.on('error', reject);
+    server.listen(0, host, () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Could not allocate a TCP port')));
+        return;
+      }
+      const { port } = address;
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve(port);
+      });
+    });
+  });
 }
 
 async function runApp(slug, inputs) {

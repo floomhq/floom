@@ -108,7 +108,7 @@ Two shapes, same surfaces.
 # Proxied — wrap an existing API
 name: stripe
 type: proxied
-openapi_spec_url: https://docs.stripe.com/api/openapi.json
+openapi_spec_url: https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
 base_url: https://api.stripe.com
 auth: bearer
 secrets: [STRIPE_SECRET_KEY]
@@ -151,7 +151,7 @@ everything else is parked until those are battle-tested.
 
 ## Community
 
-- File an issue: [github.com/floomhq/floom/issues](https://github.com/floomhq/floom/issues)
+- Support and usage questions: see [SUPPORT.md](./SUPPORT.md)
 - Security reports: see [SECURITY.md](./SECURITY.md)
 - Contribute: see [CONTRIBUTING.md](./CONTRIBUTING.md)
 

@@ -156,6 +156,7 @@ hubRouter.post('/ingest', async (c) => {
       visibility: parsed.data.visibility,
       workspace_id: ctx.workspace_id,
       author_user_id: ctx.user_id,
+      allowPrivateNetwork: ctx.workspace_id === 'local' && ctx.user_id === 'local',
     });
     // Perf fix (2026-04-20): bust the /api/hub 5s cache so the newly
     // ingested (or re-ingested) app shows up in the public directory

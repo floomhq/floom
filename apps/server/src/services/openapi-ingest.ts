@@ -846,7 +846,14 @@ export function specToManifest(
   };
 }
 
-async function isSafeUrl(urlString: string): Promise<boolean> {
+interface FetchSpecOptions {
+  allowPrivateNetwork?: boolean;
+}
+
+async function isSafeUrl(
+  urlString: string,
+  options: FetchSpecOptions = {},
+): Promise<boolean> {
   let u: URL;
   try {
     u = new URL(urlString);
@@ -855,7 +862,9 @@ async function isSafeUrl(urlString: string): Promise<boolean> {
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
   if (!u.hostname) return false;
-  
+
+  if (options.allowPrivateNetwork) return true;
+
   // localhost / loopback string check
   if (u.hostname === 'localhost' || u.hostname.endsWith('.localhost')) return false;
   if (/^127\.\d+\.\d+\.\d+$/.test(u.hostname) || u.hostname === '::1') return false;
@@ -888,8 +897,11 @@ function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-export async function fetchSpec(url: string): Promise<OpenApiSpec> {
-  if (!(await isSafeUrl(url))) {
+export async function fetchSpec(
+  url: string,
+  options: FetchSpecOptions = {},
+): Promise<OpenApiSpec> {
+  if (!(await isSafeUrl(url, options))) {
     throw new Error(`Invalid or disallowed OpenAPI URL: ${url}`);
   }
   const res = await fetch(url, {
@@ -992,7 +1004,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       if (appSpec.openapi_spec_url) {
         console.log(`[openapi-ingest] fetching spec for ${appSpec.slug}: ${appSpec.openapi_spec_url}`);
         try {
-          spec = await fetchSpec(appSpec.openapi_spec_url);
+          spec = await fetchSpec(appSpec.openapi_spec_url, {
+            allowPrivateNetwork: true,
+          });
         } catch (err) {
           console.warn(
             `[openapi-ingest] could not fetch spec for ${appSpec.slug}: ${(err as Error).message}. Skipping ingest for this app.`,
@@ -1342,13 +1356,16 @@ export async function ingestAppFromUrl(args: {
   workspace_id: string;
   author_user_id: string;
   visibility?: 'public' | 'private' | 'auth-required';
+  allowPrivateNetwork?: boolean;
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const { openapi_url } = args;
   if (!openapi_url || !/^https?:\/\//i.test(openapi_url)) {
     throw new Error('openapi_url must be an http(s) URL');
   }
 
-  const spec = await fetchSpec(openapi_url);
+  const spec = await fetchSpec(openapi_url, {
+    allowPrivateNetwork: args.allowPrivateNetwork,
+  });
   return ingestAppFromSpec({ ...args, spec });
 }
 

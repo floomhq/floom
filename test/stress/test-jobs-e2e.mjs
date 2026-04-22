@@ -156,6 +156,7 @@ const floom = spawn(
       DATA_DIR: tmpDataDir,
       FLOOM_APPS_CONFIG: appsYamlPath,
       FLOOM_JOB_POLL_MS: '250', // speed up worker polling in tests
+      FLOOM_FAST_APPS: 'false', // keep the jobs fixture isolated from sidecar boot/ports
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true, // own process group so cleanup can SIGKILL it

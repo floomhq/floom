@@ -42,6 +42,6 @@ docs(self-host): correct monorepo image path
 
 ## Questions
 
-Open a GitHub discussion or email team@floom.dev.
+See [SUPPORT.md](./SUPPORT.md) for the current support paths. Use GitHub issues for public bugs, docs gaps, and feature requests; use `team@floom.dev` for private matters.
 
 By contributing you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md) and that your work is licensed under the MIT license.

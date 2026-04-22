@@ -608,7 +608,12 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           });
         } else if (openapi_url) {
           // Prefer URL path — ingestAppFromUrl fetches + dereferences.
-          result = await ingestAppFromUrl({ ...common, openapi_url });
+          result = await ingestAppFromUrl({
+            ...common,
+            openapi_url,
+            allowPrivateNetwork:
+              ctx.workspace_id === 'local' && ctx.user_id === 'local',
+          });
         } else {
           // Inline spec path. Accept any JSON object and let
           // dereferenceSpec + specToManifest validate shape downstream.
