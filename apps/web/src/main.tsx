@@ -19,6 +19,11 @@ const AppPermalinkPage = lazy(() => import('./pages/AppPermalinkPage').then(m =>
 const PublicRunPermalinkPage = lazy(() => import('./pages/PublicRunPermalinkPage').then(m => ({ default: m.PublicRunPermalinkPage })));
 const ProtocolPage = lazy(() => import('./pages/ProtocolPage').then(m => ({ default: m.ProtocolPage })));
 const DocsPage = lazy(() => import('./pages/DocsPage').then(m => ({ default: m.DocsPage })));
+// v17 Docs hub rebuild (2026-04-22). Replaces the /docs → /protocol
+// redirect with a dedicated landing page that shares a sidebar with every
+// /docs/:slug detail page. MCP install, self-host, and runtime-specs
+// content moved from wireframe to live markdown.
+const DocsLandingPage = lazy(() => import('./pages/DocsLandingPage').then(m => ({ default: m.DocsLandingPage })));
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then(m => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
@@ -307,21 +312,23 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/browse" element={<Navigate to="/apps" replace />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/deploy" element={<Navigate to="/studio/build" replace />} />
-        <Route path="/docs" element={<Navigate to="/protocol" replace />} />
-        {/* /docs/* deep links from wireframes/blogs/external docs. Map each
-            subpath to the closest anchor on /protocol (auto-generated from
-            heading text via slugify). Changelog has no on-page section, so
-            it points at GitHub Releases via a hard redirect. */}
+        {/* v17 Docs hub (2026-04-22). /docs is now a real landing page with
+            sidebar nav + welcome content + MCP install trio + self-host snippet
+            + runtime specs table. Previous revision redirected here to /protocol. */}
+        <Route path="/docs" element={<DocsLandingPage />} />
+        {/* /docs/* deep links from wireframes/blogs/external docs. Some subpaths
+            used to redirect into /protocol anchors — now that /docs/self-host and
+            /docs/api-reference exist as real pages, those redirects are gone.
+            Changelog has no on-page section, so it still points at GitHub Releases
+            via a hard redirect. */}
         <Route path="/docs/protocol" element={<Navigate to="/protocol" replace />} />
         <Route path="/docs/secrets" element={<Navigate to="/docs/security" replace />} />
         <Route path="/docs/rate-limits" element={<Navigate to="/docs/limits" replace />} />
         <Route path="/docs/publishing" element={<Navigate to="/docs/workflow#publishing-flow" replace />} />
-        <Route path="/docs/self-host" element={<Navigate to="/protocol#self-hosting" replace />} />
-        <Route path="/docs/api-reference" element={<Navigate to="/protocol#api-surface" replace />} />
         <Route path="/docs/changelog" element={<ExternalRedirect to="https://github.com/floomhq/floom/releases" />} />
         <Route path="/docs/:slug" element={<DocsPage />} />
-        {/* Catch-all /docs/* (any other subpath wireframes advertise) falls back to /protocol. */}
-        <Route path="/docs/*" element={<Navigate to="/protocol" replace />} />
+        {/* Catch-all /docs/* (any other subpath wireframes advertise) falls back to the docs landing. */}
+        <Route path="/docs/*" element={<Navigate to="/docs" replace />} />
         <Route path="/self-host" element={<Navigate to="/#self-host" replace />} />
         {/* /onboarding advertised by v16/onboarding.html wireframe and
             linked from post-signup flows. No standalone page yet — redirect
