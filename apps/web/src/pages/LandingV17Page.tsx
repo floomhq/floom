@@ -15,8 +15,8 @@
  *   - Add a Publish-CTA box (accent btn + Read the protocol + "open source · MIT").
  *   - Add biz/teams card (live preview only had the vibecoder card).
  *   - Pricing teaser = single $0 card + 3 limit cells (no Pro/Team grid).
- *   - Hero demo column renders <HeroDemoPlaceholder /> — real interactive
- *     demo ships in a follow-up PR per HERO-DEMO-SPEC.md.
+ *   - Hero demo column renders <HeroDemo /> — interactive 3-state
+ *     build/deploy/use loop per HERO-DEMO-SPEC.md.
  *
  * The existing CreatorHeroPage.tsx is kept in the tree for reference;
  * main.tsx wires "/" to this page.
@@ -36,7 +36,7 @@ import { CliReference } from '../components/home/CliReference';
 import { PublishCtaBox } from '../components/home/PublishCtaBox';
 import { DualAudiences } from '../components/home/DualAudiences';
 import { PricingTeaser } from '../components/home/PricingTeaser';
-import { HeroDemoPlaceholder } from '../components/home/HeroDemoPlaceholder';
+import { HeroDemo } from '../components/home/HeroDemo';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
 
 import * as api from '../api/client';
@@ -297,8 +297,8 @@ export function LandingV17Page() {
           {/* CLI reference strip — "/floom-deploy" + "floom deploy". */}
           <CliReference />
 
-          {/* Hero demo placeholder — real component in follow-up PR. */}
-          <HeroDemoPlaceholder />
+          {/* Hero demo — interactive 3-state build/deploy/use loop. */}
+          <HeroDemo />
         </section>
 
         {/* INLINE DEMO (real lead-scorer run). Keeps the real demo on the
