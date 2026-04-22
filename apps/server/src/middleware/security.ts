@@ -1,7 +1,8 @@
 // Security headers middleware (P1 hardening, GitHub #126).
 //
 // Applies a strict-but-shippable Content-Security-Policy, plus HSTS,
-// Referrer-Policy, and X-Content-Type-Options, to every response.
+// Referrer-Policy, X-Content-Type-Options, Permissions-Policy, and the
+// Cross-Origin-* isolation family, to every response.
 //
 // Scope decisions:
 //   - `default-src 'self'` locks everything to same-origin by default.
@@ -11,11 +12,21 @@
 //     index.html, which we removed in the same PR.
 //     `application/ld+json` is a data block, not executable, so it's
 //     exempt from script-src.
-//   - `style-src 'self' 'unsafe-inline'` — Tailwind compiles to a single
-//     CSS file but React inline `style={{ ... }}` props emit inline
-//     styles that CSP treats as `style-src-attr`. Tightening further
-//     requires a nonce on every render which is not practical today;
-//     tracked as a follow-up.
+//   - `style-src 'self' https://fonts.googleapis.com` — NO `'unsafe-inline'`
+//     (pentest MED #380). We split into the two sub-directives so the
+//     stricter rule applies to `<style>`/`<link rel=stylesheet>` while
+//     React's runtime `style={{ ... }}` props continue to work:
+//     * `style-src-elem 'self' https://fonts.googleapis.com` — stylesheets
+//       must come from same-origin or Google Fonts. No inline `<style>`
+//       tags permitted (Vite's production build doesn't emit any).
+//     * `style-src-attr 'unsafe-inline'` — allows `style="..."` attributes
+//       only. 1,100+ React components use `style={{...}}` props across
+//       the codebase; nonce/hash per-render is infeasible at SPA scale
+//       and the attack surface is narrower than full `style-src
+//       'unsafe-inline'` (injected inline `<style>` tags are now blocked).
+//     This satisfies the pentest finding: no `'unsafe-inline'` in the
+//     fallback `style-src` directive. Attribute-level injection is a
+//     smaller residual surface tracked as a longer-term follow-up.
 //   - `img-src 'self' data: https:` — OG images, external icon CDNs
 //     (SimpleIcons, svgl, favicons), and data: for inline SVG sprites.
 //   - `connect-src 'self' https://api.github.com` — same-origin API
@@ -25,12 +36,8 @@
 //     need to allowlist `https://*.ingest.sentry.io` here.
 //   - `font-src 'self' https://fonts.gstatic.com` — Google Fonts is
 //     loaded via `fonts.googleapis.com` (stylesheet, matched by
-//     style-src) which in turn references `fonts.gstatic.com` for the
-//     woff2 files. Both need to be allowed.
-//     (style-src already allows `https://fonts.googleapis.com` via the
-//     explicit host below.)
-//   - `style-src` also allows `https://fonts.googleapis.com` for the
-//     external font stylesheet link.
+//     style-src-elem) which in turn references `fonts.gstatic.com` for
+//     the woff2 files. Both need to be allowed.
 //   - `frame-src 'self'` — the custom-renderer iframe lives same-origin
 //     at /renderer/:slug/frame.html. No third-party frames.
 //   - `frame-ancestors 'none'` — clickjacking defense. Replaces the
@@ -40,6 +47,28 @@
 //     rewriting relative URLs.
 //   - `form-action 'self'` — forms can only submit to same origin.
 //   - `object-src 'none'` — blocks <object>/<embed>/<applet> entirely.
+//
+// Cross-origin isolation family (pentest MED #379):
+//   - `Permissions-Policy` — disables powerful features we don't use
+//     (camera, microphone, geolocation) plus `interest-cohort` (FLoC
+//     opt-out).
+//   - `Cross-Origin-Opener-Policy: same-origin` — blocks Spectre-style
+//     cross-origin window handle leaks. Google OAuth popup flow still
+//     works because the popup is same-origin (we open
+//     `/auth/sign-in/social` on our own domain and Better Auth handles
+//     the redirect server-side); the COOP check happens between the
+//     opener and the opened window, not between the popup and Google.
+//   - `Cross-Origin-Resource-Policy: same-site` — our own assets are
+//     protected from cross-origin `<img src>` / `<script src>` embeds
+//     from unrelated domains. `same-site` (not `same-origin`) is chosen
+//     so preview.floom.dev, app.floom.dev, and floom.dev can still
+//     cross-reference each other's assets on the .floom.dev tree.
+//   - `Cross-Origin-Embedder-Policy: credentialless` — enables
+//     cross-origin isolation without requiring every embedded image to
+//     carry `Cross-Origin-Resource-Policy: cross-origin`. We
+//     intentionally do NOT use `require-corp` because it would break
+//     third-party images that don't set CORP headers (SimpleIcons,
+//     favicons, user-supplied avatars).
 //
 // Exempt routes:
 //   - `/renderer/:slug/frame.html` ships its own stricter CSP (see
@@ -55,7 +84,11 @@ import type { MiddlewareHandler } from 'hono';
 export const TOP_LEVEL_CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  // Fallback directive: no unsafe-inline. Both style-src-elem and
+  // style-src-attr below override this for their respective surfaces.
+  "style-src 'self' https://fonts.googleapis.com",
+  "style-src-elem 'self' https://fonts.googleapis.com",
+  "style-src-attr 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https://api.github.com",
@@ -65,6 +98,11 @@ export const TOP_LEVEL_CSP = [
   "form-action 'self'",
   "object-src 'none'",
 ].join('; ');
+
+/** Permissions-Policy header value. Disables powerful features Floom
+ * doesn't use, plus FLoC (`interest-cohort`). */
+export const PERMISSIONS_POLICY =
+  'camera=(), microphone=(), geolocation=(), interest-cohort=()';
 
 /** Paths that own their own CSP and must not be overwritten here. */
 const CSP_EXEMPT_PREFIXES = ['/renderer/'];
@@ -79,6 +117,10 @@ function ownsCsp(pathname: string): boolean {
  *   - Strict-Transport-Security
  *   - Referrer-Policy
  *   - X-Content-Type-Options
+ *   - Permissions-Policy (pentest MED #379)
+ *   - Cross-Origin-Opener-Policy (pentest MED #379)
+ *   - Cross-Origin-Resource-Policy (pentest MED #379)
+ *   - Cross-Origin-Embedder-Policy (pentest MED #379)
  *
  * Hono's middleware runs after `next()`, so by the time we set headers the
  * response object is already populated. We never clobber a downstream
@@ -97,6 +139,25 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   );
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  // Pentest MED #379 — cross-origin isolation family + permissions gate.
+  // Safe to apply to every response (JSON/HTML/SSE). Routes that need
+  // different values (e.g. OAuth popups needing COOP=unsafe-none) can
+  // override by setting the header before `next()` returns; we only set
+  // when no downstream value is present.
+  c.res.headers.set('Permissions-Policy', PERMISSIONS_POLICY);
+  if (!c.res.headers.get('Cross-Origin-Opener-Policy')) {
+    c.res.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  }
+  if (!c.res.headers.get('Cross-Origin-Resource-Policy')) {
+    c.res.headers.set('Cross-Origin-Resource-Policy', 'same-site');
+  }
+  if (!c.res.headers.get('Cross-Origin-Embedder-Policy')) {
+    // `credentialless` — NOT `require-corp`. require-corp would reject
+    // cross-origin images (SimpleIcons, favicons, user avatars) that
+    // don't ship a CORP header of their own.
+    c.res.headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
+  }
 
   // CSP: skip routes that set their own (renderer frame) and skip when a
   // route already set a CSP header explicitly.

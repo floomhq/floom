@@ -228,15 +228,35 @@ function buildAuthOptions(): any {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
     },
-    // HttpOnly + Secure (in cloud) + SameSite=Lax. Better Auth defaults to
-    // HttpOnly+SameSite=Lax already; we just pin the session cookie name to
-    // a Floom-prefixed value so it doesn't collide with the W2.1 device cookie.
+    // Cookie hardening (pentest MED #382):
+    //   - `defaultCookieAttributes.sameSite: 'strict'` applies to every
+    //     Better Auth cookie, including the `session_token` we care about
+    //     most. Strict mode means the session cookie is never sent on a
+    //     cross-site top-level navigation, neutralising the login-CSRF
+    //     variant the pentest flagged (attacker-initiated link follows
+    //     that ride an existing session).
+    //   - The OAuth state cookies (`state`, `oauth_state`) must remain
+    //     `SameSite=Lax`. The Google/GitHub callback is a cross-site 302
+    //     top-level navigation; with `Strict` the browser would drop the
+    //     state cookie and Better Auth would reject the callback with a
+    //     state-mismatch error, breaking OAuth sign-in entirely. We
+    //     override those two cookies via `advanced.cookies.<name>.attributes`
+    //     which takes precedence over `defaultCookieAttributes` (per-cookie
+    //     attributes spread last in better-auth/src/cookies/index.ts).
+    //   - `cookiePrefix: 'floom'` so our session cookie name doesn't
+    //     collide with the W2.1 device cookie.
     advanced: {
       cookiePrefix: 'floom',
       defaultCookieAttributes: {
-        sameSite: 'lax',
+        sameSite: 'strict',
         secure: true,
         httpOnly: true,
+      },
+      cookies: {
+        // OAuth state cookies must remain `lax` so the provider-to-Floom
+        // 302 callback still carries them. See rationale above.
+        state: { attributes: { sameSite: 'lax' } },
+        oauth_state: { attributes: { sameSite: 'lax' } },
       },
     },
     socialProviders,

@@ -8,7 +8,7 @@
 const { Hono } = await import(
   '../../apps/server/node_modules/hono/dist/index.js'
 );
-const { securityHeaders, TOP_LEVEL_CSP } = await import(
+const { securityHeaders, TOP_LEVEL_CSP, PERMISSIONS_POLICY } = await import(
   '../../apps/server/src/middleware/security.ts'
 );
 
@@ -83,6 +83,50 @@ app.get('/renderer/foo/frame.html', (c) => {
   log(
     'landing: referrer policy',
     res.headers.get('referrer-policy') === 'strict-origin-when-cross-origin',
+  );
+
+  // Pentest MED #380 — style-src no longer carries 'unsafe-inline'.
+  log(
+    "landing: style-src has NO 'unsafe-inline' (fallback)",
+    /style-src [^;]*'self'/.test(csp) &&
+      !/style-src [^;]*'unsafe-inline'/.test(csp),
+    `got=${csp}`,
+  );
+  log(
+    'landing: style-src-elem restricts stylesheets',
+    csp.includes("style-src-elem 'self' https://fonts.googleapis.com"),
+  );
+  log(
+    "landing: style-src-attr allows inline (React style={{}} compat)",
+    csp.includes("style-src-attr 'unsafe-inline'"),
+  );
+
+  // Pentest MED #379 — Permissions-Policy + Cross-Origin isolation family.
+  log(
+    'landing: Permissions-Policy applied',
+    res.headers.get('permissions-policy') === PERMISSIONS_POLICY,
+    `got=${res.headers.get('permissions-policy')}`,
+  );
+  log(
+    'landing: Permissions-Policy disables camera/mic/geo/FLoC',
+    (res.headers.get('permissions-policy') || '').includes('camera=()') &&
+      (res.headers.get('permissions-policy') || '').includes('microphone=()') &&
+      (res.headers.get('permissions-policy') || '').includes('geolocation=()') &&
+      (res.headers.get('permissions-policy') || '').includes(
+        'interest-cohort=()',
+      ),
+  );
+  log(
+    'landing: Cross-Origin-Opener-Policy = same-origin',
+    res.headers.get('cross-origin-opener-policy') === 'same-origin',
+  );
+  log(
+    'landing: Cross-Origin-Resource-Policy = same-site',
+    res.headers.get('cross-origin-resource-policy') === 'same-site',
+  );
+  log(
+    'landing: Cross-Origin-Embedder-Policy = credentialless (not require-corp)',
+    res.headers.get('cross-origin-embedder-policy') === 'credentialless',
   );
 }
 
