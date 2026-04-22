@@ -42,6 +42,7 @@ import {
   runAuthMigrations,
 } from './lib/better-auth.js';
 import { sanitizeAuthResponse } from './lib/auth-response.js';
+import { padToFloor, shouldPadAuthTiming } from './lib/auth-response-guard.js';
 import { runRateLimitMiddleware } from './lib/rate-limit.js';
 import { resolveUserContext } from './services/session.js';
 import { startJobWorker } from './services/worker.js';
@@ -246,11 +247,26 @@ if (isCloudMode()) {
   if (auth) {
     // Hono `app.on(...)` accepts a method list + path. Better Auth's
     // `handler` consumes the raw `Request` and returns a `Response`, which
-    // is exactly what `c.req.raw` and `c.body()` provide.
+    // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
+    // handler so we can (a) strip `token` from password-endpoint response
+    // bodies (#375) and (b) pad sign-in/sign-up timing to a constant floor
+    // so email-enumeration timing attacks (#376) bottom out at the same
+    // wall clock on both the duplicate and fresh-user branches. See
+    // lib/auth-response-guard.ts for rationale.
     app.on(
       ['GET', 'POST', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'],
       '/auth/*',
-      async (c) => sanitizeAuthResponse(c.req.raw, await auth.handler(c.req.raw)),
+      async (c) => {
+        const pathname = new URL(c.req.url).pathname;
+        const padTiming = shouldPadAuthTiming(pathname);
+        const startedAtMs = padTiming ? Date.now() : 0;
+        const raw = await auth.handler(c.req.raw);
+        const res = await sanitizeAuthResponse(c.req.raw, raw);
+        if (padTiming) {
+          await padToFloor(startedAtMs);
+        }
+        return res;
+      },
     );
     console.log('[auth] FLOOM_CLOUD_MODE=true — Better Auth mounted at /auth/*');
   }
