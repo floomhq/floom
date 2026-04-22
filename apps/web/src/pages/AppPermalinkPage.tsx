@@ -843,86 +843,55 @@ export function AppPermalinkPage() {
           )}
         </section>
 
-        {/* v16 tab bar: Run is default, everything else is opt-in. This
-            replaces the previous "scroll past marketing to reach the run
-            surface" layout. Shared-run URLs (?run=<id>) land here already. */}
-        <div
-          role="tablist"
-          aria-label="App content"
-          data-testid="permalink-tabs"
+        {/* Chat-style restructure (2026-04-21): Run is the page, not a
+            tab. The old primary 4-tab strip (Run/About/Install/Source)
+            pushed the form behind a click for no reason — the single
+            column below owns the stage. About / Install / Source live as
+            a quiet chip row BELOW Run for visitors who want docs.
+            Legacy testid `permalink-tab-run` kept as a hidden button so
+            e2e selectors still resolve. ?tab=<id> deep-links still work. */}
+        <button
+          type="button"
+          data-testid="permalink-tab-run"
+          onClick={() => {
+            setActiveTab('run');
+            setSearchParams((prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete('tab');
+              return next;
+            }, { replace: true });
+          }}
           style={{
-            display: 'flex',
-            gap: 2,
-            borderBottom: '1px solid var(--line)',
-            marginBottom: 24,
-            overflowX: 'auto',
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0, 0, 0, 0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          Run
+        </button>
+
+        {/* Run section (DEFAULT, always rendered). No card chrome: the
+            inner RunSurface is a centered max-720 single column and owns
+            all visual framing. min-height prevents CLS during phase
+            transitions. */}
+        <section
+          id="run"
+          ref={runSurfaceRef}
+          data-testid="tab-content-run-primary"
+          data-surface="run"
+          style={{
+            marginBottom: 32,
+            minHeight: 320,
           }}
         >
-          {(
-            [
-              { id: 'run', label: 'Run' },
-              { id: 'about', label: 'About' },
-              { id: 'install', label: 'Install' },
-              { id: 'source', label: 'Source' },
-            ] as Array<{ id: PTab; label: string }>
-          ).map((t) => {
-            const isOn = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={isOn}
-                data-testid={`permalink-tab-${t.id}`}
-                data-state={isOn ? 'active' : 'inactive'}
-                onClick={() => {
-                  setActiveTab(t.id);
-                  setSearchParams((prev) => {
-                    const next = new URLSearchParams(prev);
-                    if (t.id === 'run') next.delete('tab');
-                    else next.set('tab', t.id);
-                    return next;
-                  }, { replace: true });
-                }}
-                style={{
-                  padding: '10px 16px',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border: 'none',
-                  background: 'transparent',
-                  color: isOn ? 'var(--accent)' : 'var(--muted)',
-                  borderBottom: isOn ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Run tab (DEFAULT). CLS fix (2026-04-18): min-height so the
-            output card's empty state → streaming → done transitions do
-            not push footer content around above the fold. */}
-        {activeTab === 'run' && (
-          <section
-            id="run"
-            ref={runSurfaceRef}
-            data-testid="tab-content-run-primary"
-            data-surface="run"
-            className="run-surface"
-            style={{
-              background: 'var(--card)',
-              border: '1px solid var(--line)',
-              borderRadius: 14,
-              padding: '28px 24px',
-              marginBottom: 32,
-              minHeight: 320,
-            }}
-          >
             {initialRunLoading ? (
               <div
                 data-testid="shared-run-loading"
@@ -1031,9 +1000,68 @@ export function AppPermalinkPage() {
               </>
             )}
           </section>
-        )}
 
-        {/* About tab */}
+        {/* Quiet chip row (chat-style restructure 2026-04-21). Demoted
+            About / Install / Source from primary tabs. Clicking an
+            already-active chip toggles back to Run. Legacy testid
+            `permalink-tabs` preserved so analytics + e2e still wire up. */}
+        <nav
+          aria-label="More about this app"
+          data-testid="permalink-tabs"
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            margin: '8px 0 28px',
+            justifyContent: 'center',
+          }}
+        >
+          {(
+            [
+              { id: 'about', label: 'About' },
+              { id: 'install', label: 'Install' },
+              { id: 'source', label: 'Source' },
+            ] as Array<{ id: PTab; label: string }>
+          ).map((t) => {
+            const isOn = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                data-testid={`permalink-tab-${t.id}`}
+                data-state={isOn ? 'active' : 'inactive'}
+                aria-pressed={isOn}
+                onClick={() => {
+                  // Toggle: clicking an active chip returns to Run.
+                  const nextTab: PTab = isOn ? 'run' : t.id;
+                  setActiveTab(nextTab);
+                  setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    if (nextTab === 'run') next.delete('tab');
+                    else next.set('tab', nextTab);
+                    return next;
+                  }, { replace: true });
+                }}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  border: `1px solid ${isOn ? 'var(--accent)' : 'var(--line)'}`,
+                  borderRadius: 999,
+                  background: isOn ? 'var(--accent-soft, rgba(5,150,105,0.08))' : 'transparent',
+                  color: isOn ? 'var(--accent)' : 'var(--muted)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* About section (opt-in) */}
         {activeTab === 'about' && (
         <>
         {/* How it works strip */}

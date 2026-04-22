@@ -407,21 +407,73 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
-/* ── RunSurface (v16): one-surface shell replacing chat-turn framing ────── */
-.run-surface { display: flex; flex-direction: column; gap: 20px; }
+/* ── RunSurface (2026-04-21): chat-style single column ─────────────────────
+   Replaces the v16 2fr/3fr grid (input-left / "Output will appear here"
+   right). Idle: the input card owns the stage. Running/Done: the input
+   collapses into a thin header bar and the output takes the column width.
+   Share-link contract and testids are preserved. */
+.run-surface {
+  display: flex; flex-direction: column; gap: 20px;
+  max-width: 720px; margin: 0 auto; width: 100%;
+}
 .run-surface-grid {
-  display: grid;
-  grid-template-columns: 2fr 3fr;
-  gap: 24px;
-  align-items: start;
+  display: flex; flex-direction: column; gap: 16px;
 }
-/* Stack on mobile or when the creator opts in via render_hint: 'stacked'. */
-@media (max-width: 1023px) {
-  .run-surface-grid { grid-template-columns: 1fr; }
-}
-.run-surface-stacked .run-surface-grid { grid-template-columns: 1fr; }
+.run-surface-stacked .run-surface-grid { gap: 16px; }
 
 .run-surface-input, .run-surface-output { min-width: 0; }
+
+/* When the input section is collapsed, the full card disappears and the
+   thin header bar becomes visible. The form stays mounted so state is
+   preserved for refine / run-again. */
+.run-surface-input[data-collapsed="true"] .run-surface-card { display: none; }
+.run-surface-input[data-collapsed="true"] .run-surface-header-bar { display: flex; }
+
+.run-surface-header-bar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+.run-surface-header-bar[data-phase="done"] {
+  background: var(--accent-soft, rgba(5, 150, 105, 0.08));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.run-surface-header-bar-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink); flex-shrink: 0;
+}
+.run-surface-header-bar-pulse {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--accent);
+  animation: rs-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.run-surface-header-bar-check {
+  width: 14px; height: 14px; color: var(--accent);
+  flex-shrink: 0;
+}
+@keyframes rs-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+.run-surface-header-bar-text {
+  font-size: 13px; color: var(--ink); font-weight: 500;
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.run-surface-header-bar-meta {
+  font-size: 12px; color: var(--muted);
+  flex-shrink: 0;
+}
+.run-surface-header-bar-actions {
+  display: flex; gap: 8px; flex-shrink: 0;
+}
 
 .run-surface-card {
   background: var(--card);
