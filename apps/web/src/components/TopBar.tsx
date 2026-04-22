@@ -3,157 +3,106 @@ import type { CSSProperties } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Logo } from './Logo';
 import { useSession, clearSession } from '../hooks/useSession';
-import { useMyApps } from '../hooks/useMyApps';
 import * as api from '../api/client';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface Props {
   onSignIn?: () => void;
   /**
-   * Upgrade 4 (2026-04-19): shrink the TopBar when a run is active on
-   * /p/:slug so the output card has more vertical real estate. Reduces
-   * height (56 -> 40), tightens padding, hides the wordmark on desktop.
+   * Compact mode: shrink the TopBar when a run is active on /p/:slug so the
+   * output card has more vertical real estate. Reduces height (56->40),
+   * tightens padding, hides the wordmark on desktop.
    * Wired by the parent page via route state — see AppPermalinkPage.
    */
   compact?: boolean;
   /**
    * Studio-only mobile hamburger. When set, renders a second hamburger
-   * button (visible <768px only, hidden on desktop) that opens the
-   * Studio sidebar drawer. Fires when the user taps it. StudioLayout
-   * wires this up; store pages leave it undefined. Added 2026-04-20
-   * nav-polish pass — replaces the bottom-left floating ☰ that never
-   * belonged in the chrome.
+   * button (visible <768px only, hidden on desktop) that opens the Studio
+   * sidebar drawer. Fires when the user taps it. StudioLayout wires this up;
+   * store pages leave it undefined.
    */
   onStudioMenuOpen?: () => void;
 }
 
-const navBaseStyle: CSSProperties = {
+// v17 palette
+const INK = '#0e0e0c';
+const MUTED = '#585550';
+const ACCENT = '#047857';
+const BG = '#fafaf8';
+
+const navLinkBase: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: '8px 10px',
-  borderRadius: 999,
+  padding: '7px 10px',
+  borderRadius: 6,
+  fontSize: 13,
+  fontWeight: 500,
+  lineHeight: 1,
+  textDecoration: 'none',
+  color: MUTED,
+  transition: 'color 0.12s',
+};
+
+function navLinkStyle(active: boolean): CSSProperties {
+  return { ...navLinkBase, color: active ? INK : MUTED, fontWeight: active ? 600 : 500 };
+}
+
+const signInStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '7px 14px',
+  borderRadius: 6,
+  fontSize: 13,
+  fontWeight: 500,
+  lineHeight: 1,
+  textDecoration: 'none',
+  color: INK,
+  border: '1px solid rgba(14,14,12,0.18)',
+  background: BG,
+  transition: 'border-color 0.12s',
+};
+
+const signUpStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '7px 14px',
+  borderRadius: 6,
   fontSize: 13,
   fontWeight: 600,
   lineHeight: 1,
   textDecoration: 'none',
-  color: 'var(--muted)',
-  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-};
-
-const secondaryCtaStyle: CSSProperties = {
-  ...navBaseStyle,
-  border: '1px solid var(--line)',
-  color: 'var(--ink)',
-  background: 'rgba(255,255,255,0.72)',
-  padding: '8px 14px',
-};
-
-// Goosebumps pass 2026-04-20: primary nav CTA is brand green so the eye
-// tracks "Publish an app" as the single primary action. Black-on-white was
-// generic; green ties the CTA to the brand system (accent-700 #047857) and
-// matches the hero "Publish your app" submit button exactly.
-const primaryCtaStyle: CSSProperties = {
-  ...navBaseStyle,
-  padding: 'var(--topbar-publish-padding, 9px 16px)',
-  background: 'var(--accent)',
   color: '#fff',
-  border: '1px solid var(--accent)',
-  boxShadow: '0 4px 14px rgba(4,120,87,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
+  background: INK,
+  border: '1px solid ' + INK,
+  transition: 'opacity 0.12s',
 };
 
 const menuItemStyle: CSSProperties = {
   display: 'block',
   padding: '8px 12px',
   fontSize: 13,
-  color: 'var(--ink)',
+  color: INK,
   textDecoration: 'none',
   borderRadius: 6,
 };
 
-// Mode-toggle pill. Replaces the scattered "| Studio" breadcrumb + "← Store"
-// CTA pattern that used to live in the studio branch of this TopBar (and
-// confused Federico — two competing back affordances on /studio/build).
+// v17 TopBar — logged-out: Apps · Pricing · Docs · Changelog + Sign in / Sign up
+//              logged-in:  same 4 + Studio · Me + avatar dropdown
 //
-// Rendered for authenticated users on every surface: both sides always
-// visible, current side highlighted black-on-white. Clicking the inactive
-// side switches modes. No back arrows, no breadcrumbs — the pill IS the
-// mode indicator.
-const pillWrapStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: 3,
-  borderRadius: 999,
-  border: '1px solid var(--line)',
-  background: 'var(--card)',
-  gap: 0,
-};
-function pillSideStyle(active: boolean): CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '6px 14px',
-    borderRadius: 999,
-    fontSize: 13,
-    fontWeight: 600,
-    lineHeight: 1,
-    textDecoration: 'none',
-    color: active ? '#fff' : 'var(--muted)',
-    background: active ? 'var(--ink)' : 'transparent',
-    transition: 'background 0.15s, color 0.15s',
-  };
-}
-
-// MVP TopBar — one header, one pattern.
-//
-// After the 2026-04-20 nav unification: same shape on every surface.
-// Logo (home) | Store/Studio pill toggle (authed only) | profile or
-// sign-in. No context-specific breadcrumbs, no back arrows in the
-// header, no hidden "← Creator dashboard" inside page bodies.
-//
-// Loading / OSS mode shows "Sign in" + "Publish an app" instead of the
-// pill; the logged-in cloud user gets the pill + avatar dropdown.
-//
-// Mobile: hamburger menu keeps the same links plus a sign-in / sign-out
-// entry.
+// Replaces the old Store/Studio pill toggle pattern.
+// Mobile: hamburger collapses all links to a vertical column menu.
 export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
   const { data, isAuthenticated, refresh } = useSession();
-  const { apps: myApps } = useMyApps();
   const navigate = useNavigate();
   const location = useLocation();
   const dropRef = useRef<HTMLDivElement>(null);
-  // a11y 2026-04-20: ref on the hamburger so we can return focus to it
-  // when the mobile menu closes via Escape. Without this, SR/keyboard
-  // users lose focus context after dismissing the menu.
   const hamburgerRef = useRef<HTMLButtonElement>(null);
 
-  const isStudio = location.pathname.startsWith('/studio');
-  // Store pill stays active on /store AND on /apps (same underlying
-  // AppsDirectoryPage) AND on /p/:slug (an app run page is still a
-  // store surface). Nav cleanup 2026-04-22: the prior triplet Store ·
-  // Studio · Run was dropped because Run pointed at the same component
-  // as Store — visually and functionally redundant. The runtime
-  // surface ("what have I run") lives on /me, linked on the right.
-  const isApps =
-    location.pathname === '/apps' ||
-    location.pathname.startsWith('/apps/') ||
-    location.pathname.startsWith('/p/');
   const isLoginPage =
     location.pathname === '/login' || location.pathname === '/signup';
-  const ownedAppCount = myApps?.length ?? 0;
-  const deployHref = isAuthenticated ? '/studio/build' : '/signup?next=%2Fstudio%2Fbuild';
-
-  // Nav-polish 2026-04-20: pill is now visible to EVERY visitor, authed
-  // or not. Federico's call: showing "Store | Studio" to logged-out
-  // users advertises Studio as a destination, drives signup. Anon users
-  // clicking Studio land on /studio's anon landing (which auth-gates to
-  // /login via BaseLayout), so the click still has a safe destination.
-  // Hidden only on /login and /signup so the auth flow is visually
-  // quiet.
-  const showPill = !isLoginPage;
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -169,9 +118,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
     setMenuOpen(false);
   }, [location.pathname, location.hash]);
 
-  // a11y 2026-04-20: Escape closes the mobile menu and returns focus to
-  // the hamburger button. Without this, keyboard users had no way to
-  // dismiss the overlay once open.
+  // a11y: Escape closes mobile menu and returns focus to hamburger
   useEffect(() => {
     if (!menuOpen) return;
     function onKey(e: KeyboardEvent) {
@@ -188,7 +135,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
     try {
       await api.signOut();
     } catch {
-      // ignore network errors — still clear client state.
+      // ignore network errors — still clear client state
     }
     clearSession();
     await refresh();
@@ -199,6 +146,22 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const user = data?.user;
   const userLabel = user?.name || user?.email?.split('@')[0] || 'user';
   const userInitial = userLabel.charAt(0).toUpperCase();
+
+  // Active-state helpers
+  const isApps =
+    location.pathname === '/apps' ||
+    location.pathname === '/store' ||
+    location.pathname.startsWith('/apps/') ||
+    location.pathname.startsWith('/store/') ||
+    location.pathname.startsWith('/p/');
+  const isPricing = location.pathname === '/pricing';
+  const isDocs =
+    location.pathname.startsWith('/protocol') ||
+    location.pathname.startsWith('/docs');
+  // /changelog route wired 2026-04-22 (PR #405 ripple fix).
+  const isChangelog = location.pathname === '/changelog';
+  const isStudio = location.pathname.startsWith('/studio');
+  const isMe = location.pathname.startsWith('/me');
 
   return (
     <header
@@ -213,18 +176,9 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           maxWidth: 1180,
           gap: compact ? 10 : 16,
           padding: compact ? '0 20px' : undefined,
-          // #82 (2026-04-21): make the inner container a positioning
-          // context so the centred pill can sit absolutely in the
-          // middle, independent of left/right column widths. Without
-          // this, unequal sides (logo on the left vs Me+Docs+avatar on
-          // the right) visually shifted the pill off-centre.
-          position: 'relative',
         }}
       >
-        {/* Logo: always links home. No context-specific destination,
-            no breadcrumb alongside. Federico's audit: "floom | Studio"
-            next to the logo looked like a breadcrumb competing with the
-            back arrow. Killed. */}
+        {/* Logo */}
         <Link
           to="/"
           className="brand"
@@ -232,7 +186,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             display: 'inline-flex',
             alignItems: 'center',
             textDecoration: 'none',
-            color: 'var(--ink)',
+            color: INK,
             flexShrink: 0,
           }}
           aria-label="Floom home"
@@ -240,13 +194,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           <Logo size={compact ? 18 : 20} withWordmark={!compact} variant="glow" />
         </Link>
 
-        {/* Studio-only mobile menu trigger. Visible <768px AND only on
-            /studio/* (onStudioMenuOpen is undefined everywhere else).
-            Replaces the bottom-left floating ☰ that used to live in
-            StudioLayout — that affordance was invisible on the TopBar
-            and confused Federico. Now it sits right where a sidebar
-            toggle belongs: next to the logo, in the header.
-            CSS `.topbar-studio-toggle` hides it >=768px. */}
+        {/* Studio-only mobile sidebar toggle */}
         {onStudioMenuOpen && (
           <button
             type="button"
@@ -273,24 +221,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Middle slot: Store/Studio pill (every visitor), nothing on
-            /login + /signup.
-            #82 (2026-04-21): the pill is absolutely centred within the
-            topbar-inner container so it sits exactly on the horizontal
-            midline regardless of how wide the logo or the right-side
-            nav (Me · Docs · avatar) get. The previous flex-1 + center
-            pattern left it optically off-centre whenever the two
-            flanks had different widths, which is always.
-            Nav cleanup 2026-04-22: dropped the third "Run" pill side.
-            It pointed at /apps, which renders the same
-            AppsDirectoryPage as /store — the two sides were literally
-            the same page under different labels. "Where do I run my
-            apps?" is answered by /me (on the right side of the nav,
-            shows the user's run history + tiles for apps they've
-            run). */}
-        {showPill && (
+        {/* Centre nav: Apps · Pricing · Docs · Changelog. Hidden on /login + /signup. */}
+        {!isLoginPage && (
           <nav
-            className="topbar-links topbar-links-desktop topbar-pill-nav"
+            className="topbar-links topbar-links-desktop topbar-centre-nav"
             aria-label="Primary"
             style={{
               position: 'absolute',
@@ -298,95 +232,98 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               top: '50%',
               transform: 'translate(-50%, -50%)',
               pointerEvents: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 2,
             }}
           >
-            <div style={pillWrapStyle} role="group" aria-label="Switch section">
-              <Link
-                to="/store"
-                data-testid="topbar-mode-store"
-                aria-current={!isStudio && !isApps ? 'page' : undefined}
-                style={pillSideStyle(!isStudio && !isApps)}
-              >
-                Store
-              </Link>
-              <Link
-                to="/studio"
-                data-testid="topbar-mode-studio"
-                aria-current={isStudio ? 'page' : undefined}
-                style={pillSideStyle(isStudio)}
-              >
-                Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
-              </Link>
-            </div>
+            <Link
+              to="/apps"
+              data-testid="topbar-apps"
+              aria-current={isApps ? 'page' : undefined}
+              style={navLinkStyle(isApps)}
+            >
+              Apps
+            </Link>
+            <Link
+              to="/pricing"
+              data-testid="topbar-pricing"
+              aria-current={isPricing ? 'page' : undefined}
+              style={navLinkStyle(isPricing)}
+            >
+              Pricing
+            </Link>
+            <Link
+              to="/protocol"
+              data-testid="topbar-docs"
+              aria-current={isDocs ? 'page' : undefined}
+              style={navLinkStyle(isDocs)}
+            >
+              Docs
+            </Link>
+            {/* /changelog route wired 2026-04-22 via PR #405 ripple. */}
+            <Link
+              to="/changelog"
+              data-testid="topbar-changelog"
+              aria-current={isChangelog ? 'page' : undefined}
+              style={navLinkStyle(isChangelog)}
+            >
+              Changelog
+            </Link>
+            {/* Logged-in only: Studio + Me */}
+            {isAuthenticated && (
+              <>
+                <Link
+                  to="/studio"
+                  data-testid="topbar-studio"
+                  aria-current={isStudio ? 'page' : undefined}
+                  style={navLinkStyle(isStudio)}
+                >
+                  Studio
+                </Link>
+                <Link
+                  to="/me"
+                  data-testid="topbar-me"
+                  aria-current={isMe ? 'page' : undefined}
+                  style={navLinkStyle(isMe)}
+                >
+                  Me
+                </Link>
+              </>
+            )}
           </nav>
         )}
 
+        {/* Right side: Sign in + Sign up (anon) or avatar dropdown (authed) */}
         <div
           className="topbar-links topbar-links-desktop"
           style={{
-            gap: 'var(--topbar-right-gap, 10px)',
+            gap: 8,
             marginLeft: 'auto',
             alignItems: 'center',
           }}
         >
-          {/* #82 + #249 (2026-04-21): Me + Docs as first-class nav peers
-              on the right side. Spec: "Store · Studio (N) · Me · Docs"
-              across every route. "Me" answers Federico's #249 question
-              "where is the runtime where I can actually run my apps?"
-              — /me is the signed-in runtime surface (apps you've run +
-              run history). Docs sits next to it because it's the other
-              always-available destination. Authed users only for Me;
-              Docs is visible to everyone so anonymous visitors can
-              still reach the protocol spec. Hidden on /login + /signup
-              so the auth flow stays quiet. */}
-          {!isLoginPage && isAuthenticated && (
-            <Link
-              to="/me"
-              data-testid="topbar-me"
-              aria-current={location.pathname.startsWith('/me') ? 'page' : undefined}
-              style={{
-                ...navBaseStyle,
-                color: location.pathname.startsWith('/me') ? 'var(--ink)' : 'var(--muted)',
-              }}
-            >
-              Me
-            </Link>
-          )}
-          {!isLoginPage && (
-            <Link
-              to="/protocol"
-              data-testid="topbar-docs"
-              aria-current={location.pathname.startsWith('/protocol') ? 'page' : undefined}
-              style={{
-                ...navBaseStyle,
-                color: location.pathname.startsWith('/protocol') ? 'var(--ink)' : 'var(--muted)',
-              }}
-            >
-              Docs
-            </Link>
-          )}
-
           {!isAuthenticated && !isLoginPage && (
             <>
               <Link
                 to="/login"
                 data-testid="topbar-signin"
-                style={secondaryCtaStyle}
+                style={signInStyle}
               >
                 Sign in
               </Link>
               <Link
-                to={deployHref}
-                style={primaryCtaStyle}
+                to="/signup"
+                data-testid="topbar-signup"
+                style={signUpStyle}
               >
-                <span className="topbar-publish-label-full">Publish an app</span>
-                <span className="topbar-publish-label-tablet">Publish</span>
+                Sign up
               </Link>
             </>
           )}
 
           {isAuthenticated && data && (
-            <div ref={dropRef} style={{ position: 'relative', marginLeft: 2 }}>
+            <div ref={dropRef} style={{ position: 'relative' }}>
               <button
                 type="button"
                 onClick={() => setDropOpen((v) => !v)}
@@ -397,9 +334,9 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   alignItems: 'center',
                   gap: 8,
                   padding: '4px 10px 4px 4px',
-                  border: '1px solid var(--line)',
+                  border: '1px solid rgba(14,14,12,0.14)',
                   borderRadius: 999,
-                  background: 'var(--card)',
+                  background: BG,
                   cursor: 'pointer',
                   fontFamily: 'inherit',
                 }}
@@ -423,7 +360,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                       width: 24,
                       height: 24,
                       borderRadius: '50%',
-                      background: 'var(--accent)',
+                      background: ACCENT,
                       color: '#fff',
                       display: 'flex',
                       alignItems: 'center',
@@ -436,7 +373,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     {userInitial}
                   </span>
                 )}
-                <span style={{ fontSize: 13, color: 'var(--ink)' }} className="topbar-user-label">
+                <span
+                  style={{ fontSize: 13, color: INK }}
+                  className="topbar-user-label"
+                >
                   {userLabel}
                 </span>
               </button>
@@ -448,11 +388,11 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     position: 'absolute',
                     top: 'calc(100% + 6px)',
                     right: 0,
-                    background: 'var(--card)',
-                    border: '1px solid var(--line)',
+                    background: BG,
+                    border: '1px solid rgba(14,14,12,0.12)',
                     borderRadius: 8,
                     minWidth: 200,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
+                    boxShadow: '0 4px 16px rgba(14,14,12,0.08)',
                     padding: 4,
                     zIndex: 50,
                   }}
@@ -466,6 +406,14 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     My dashboard
                   </Link>
                   <Link
+                    to="/studio"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    style={menuItemStyle}
+                  >
+                    Studio
+                  </Link>
+                  <Link
                     to="/me/settings"
                     onClick={() => setDropOpen(false)}
                     role="menuitem"
@@ -474,7 +422,11 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     Settings
                   </Link>
                   <div
-                    style={{ height: 1, background: 'var(--line)', margin: '4px 0' }}
+                    style={{
+                      height: 1,
+                      background: 'rgba(14,14,12,0.08)',
+                      margin: '4px 0',
+                    }}
                     aria-hidden="true"
                   />
                   <button
@@ -489,7 +441,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                       width: '100%',
                       textAlign: 'left',
                       cursor: 'pointer',
-                      color: 'var(--ink)',
+                      color: INK,
                       fontFamily: 'inherit',
                     }}
                   >
@@ -501,14 +453,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           )}
         </div>
 
-        {/* Global mobile hamburger. Hidden on /studio/* because the
-            studio-toggle on the left becomes the single mobile menu
-            entry there — tapping it opens one unified drawer with
-            studio nav + global items (see StudioLayout). Without this
-            gate we'd render two side-by-side hamburgers on mobile
-            /studio, which Federico's audit flagged as cluttered.
-            CSS hook: `.topbar` with `data-context="studio"` hides the
-            right hamburger on mobile. */}
+        {/* Global mobile hamburger. Hidden on /studio/* (studio-toggle takes over). */}
         {!onStudioMenuOpen && (
           <button
             ref={hamburgerRef}
@@ -526,11 +471,9 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
         )}
       </div>
 
+      {/* Mobile menu drawer */}
       {menuOpen && (
         <>
-          {/* Scrim: tap-outside-to-close + lock body scroll when open.
-              Rendered before the drawer so the drawer sits on top. The
-              scrim itself is what catches the backdrop click. */}
           <div
             className="topbar-mobile-scrim"
             role="presentation"
@@ -568,63 +511,28 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               </button>
             </div>
 
-            {/* Authed users see a compact mode switch up top so the
-                pill has a mobile equivalent. The rest of the drawer
-                mirrors the desktop primary destinations. */}
-            {showPill && (
-              <div
-                role="group"
-                aria-label="Switch mode"
-                style={{
-                  margin: '4px 20px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: 3,
-                  borderRadius: 999,
-                  border: '1px solid var(--line)',
-                  background: 'var(--card)',
-                }}
-              >
-                <Link
-                  to="/store"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-mode-store"
-                  style={{
-                    ...pillSideStyle(!isStudio && !isApps),
-                    flex: 1,
-                    padding: '8px 10px',
-                  }}
-                >
-                  Store
-                </Link>
-                <Link
-                  to="/studio"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-mode-studio"
-                  style={{
-                    ...pillSideStyle(isStudio),
-                    flex: 1,
-                    padding: '8px 10px',
-                  }}
-                >
-                  Studio{ownedAppCount > 0 ? ` (${ownedAppCount})` : ''}
-                </Link>
-              </div>
-            )}
-
-            {/* Rescue 2026-04-21 (Fix 2): Apps is the primary destination on
-                mobile. Make it the first item, biggest font, with a leading
-                icon so the eye locks onto it immediately. Federico's audit:
-                "mobile menu is broken, don't find app store on mobile fast". */}
+            {/* Primary nav links — column list matching desktop labels */}
             <Link
               to="/apps"
               className="topbar-mobile-link topbar-mobile-link-primary"
               role="menuitem"
               onClick={() => setMenuOpen(false)}
               data-testid="topbar-mobile-apps"
+              aria-current={isApps ? 'page' : undefined}
             >
               <MobileAppsIcon />
               <span>Apps</span>
+            </Link>
+
+            <Link
+              to="/pricing"
+              className="topbar-mobile-link"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+              data-testid="topbar-mobile-pricing"
+              aria-current={isPricing ? 'page' : undefined}
+            >
+              Pricing
             </Link>
 
             <Link
@@ -632,28 +540,55 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               className="topbar-mobile-link"
               role="menuitem"
               onClick={() => setMenuOpen(false)}
+              data-testid="topbar-mobile-docs"
+              aria-current={isDocs ? 'page' : undefined}
             >
               Docs
             </Link>
+
+            {/* /changelog route wired 2026-04-22 via PR #405 ripple. */}
+            <Link
+              to="/changelog"
+              className="topbar-mobile-link"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+              data-testid="topbar-mobile-changelog"
+              aria-current={isChangelog ? 'page' : undefined}
+            >
+              Changelog
+            </Link>
+
             {isAuthenticated && (
-              <Link
-                to="/me"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-              >
-                Me
-              </Link>
-            )}
-            {isAuthenticated && (
-              <Link
-                to="/me/settings"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-              >
-                Settings
-              </Link>
+              <>
+                <Link
+                  to="/studio"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-studio"
+                  aria-current={isStudio ? 'page' : undefined}
+                >
+                  Studio
+                </Link>
+                <Link
+                  to="/me"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-me"
+                  aria-current={isMe ? 'page' : undefined}
+                >
+                  Me
+                </Link>
+                <Link
+                  to="/me/settings"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Settings
+                </Link>
+              </>
             )}
 
             {!isAuthenticated && !isLoginPage && (
@@ -662,24 +597,21 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 className="topbar-mobile-link"
                 role="menuitem"
                 onClick={() => setMenuOpen(false)}
+                data-testid="topbar-mobile-signin"
               >
                 Sign in
               </Link>
             )}
 
-            {/* Publish an app — green primary CTA, NOT a text link. Shown
-                to both authed + anon (deployHref routes unauthed users
-                through /signup first). Authed users get the full Studio
-                link above instead of the CTA if they already own apps. */}
-            {(!isAuthenticated || ownedAppCount === 0) && (
+            {!isAuthenticated && (
               <Link
-                to={deployHref}
+                to="/signup"
                 className="topbar-mobile-cta"
                 role="menuitem"
                 onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-publish"
+                data-testid="topbar-mobile-signup"
               >
-                Publish an app
+                Sign up
               </Link>
             )}
 
@@ -704,7 +636,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
 }
 
 // Grid-of-squares glyph leading the primary Apps row in the mobile menu.
-// Kept inline so we don't have to thread a new icon id through IconSprite.
 function MobileAppsIcon() {
   return (
     <svg
