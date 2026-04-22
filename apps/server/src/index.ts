@@ -680,7 +680,11 @@ if (webDist) {
   // see the per-app card.
   const pSlugPattern = /^\/p\/([a-z0-9][a-z0-9-]*)\/?$/;
   const publicOrigin = process.env.PUBLIC_ORIGIN || PUBLIC_URL || '';
-  const defaultOgImage = `${publicOrigin}/og-image.png`;
+  // 2026-04-22 (PR #400 ripple): consolidate on /og-main.png as the single
+  // source of truth. Earlier, SSR pointed at /og-image.png and index.html
+  // pointed at /og-main.png, so the served asset depended on whether SSR
+  // ran. Unify everything on /og-main.png and delete the dup PNGs.
+  const defaultOgImage = `${publicOrigin}/og-main.png`;
 
   // 2026-04-20 (P2 #149): SSR title drift. Previously every route returned
   // the same landing <title> at SSR because client-side `document.title`
