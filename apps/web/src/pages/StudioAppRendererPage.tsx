@@ -8,17 +8,19 @@ import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader } from './MeAppPage';
 import { CustomRendererPanel } from '../components/CustomRendererPanel';
 import * as api from '../api/client';
-import type { AppDetail } from '../lib/types';
+import type { AppDetail, CreatorRun, RendererMeta } from '../lib/types';
 
 export function StudioAppRendererPage() {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
   const [app, setApp] = useState<AppDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [latestSuccessfulRun, setLatestSuccessfulRun] = useState<CreatorRun | null>(null);
 
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
+    setLatestSuccessfulRun(null);
     api
       .getApp(slug)
       .then((res) => !cancelled && setApp(res))
@@ -28,6 +30,17 @@ export function StudioAppRendererPage() {
         if (status === 404) return nav('/studio', { replace: true });
         if (status === 403) return nav(`/p/${slug}`, { replace: true });
         setError((err as Error).message || 'Failed to load app');
+      });
+    api
+      .getAppRuns(slug, 20)
+      .then((res) => {
+        if (cancelled) return;
+        const next =
+          res.runs.find((run) => run.status === 'success' && run.outputs !== null) || null;
+        setLatestSuccessfulRun(next);
+      })
+      .catch(() => {
+        if (!cancelled) setLatestSuccessfulRun(null);
       });
     return () => {
       cancelled = true;
@@ -77,9 +90,10 @@ export function StudioAppRendererPage() {
               maxWidth: 620,
             }}
           >
-            Upload an HTML file that receives your action's JSON output via
-            a sandboxed iframe. Overrides the automatic renderer cascade
-            (Markdown / TextBig / CodeBlock / FileDownload).
+            Upload a TSX/React renderer, compile it, and verify the saved
+            output here before leaving Studio. The preview uses your latest
+            successful run when available, or a deterministic sample output
+            when the app has no run history yet.
           </p>
           <div
             style={{
@@ -87,10 +101,18 @@ export function StudioAppRendererPage() {
               border: '1px solid var(--line)',
               borderRadius: 12,
               padding: 20,
-              maxWidth: 720,
+              maxWidth: 960,
             }}
           >
-            <CustomRendererPanel slug={app.slug} />
+            <CustomRendererPanel
+              slug={app.slug}
+              initial={app.renderer ?? null}
+              app={app}
+              previewRun={latestSuccessfulRun}
+              onChange={(next: RendererMeta | null) =>
+                setApp((current) => (current ? { ...current, renderer: next } : current))
+              }
+            />
           </div>
         </>
       )}

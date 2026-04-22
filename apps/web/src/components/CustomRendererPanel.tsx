@@ -11,14 +11,24 @@
 // fails the default OutputPanel is used as a fallback so a broken renderer
 // never blocks a run.
 
-import { useEffect, useState } from 'react';
-import type { RendererMeta } from '../lib/types';
+import { useEffect, useMemo, useState } from 'react';
+import type { AppDetail, CreatorRun, RendererMeta } from '../lib/types';
 import * as api from '../api/client';
+import {
+  buildRendererPreviewPick,
+  buildRendererPreviewRun,
+  creatorRunToPreviewRun,
+} from '../lib/renderer-preview';
+import { formatTime } from '../lib/time';
+import { CustomRendererHost } from './runner/CustomRendererHost';
+import { OutputPanel } from './runner/OutputPanel';
 
 interface Props {
   slug: string;
   initial?: RendererMeta | null;
   onChange?: (meta: RendererMeta | null) => void;
+  app?: AppDetail | null;
+  previewRun?: CreatorRun | null;
 }
 
 const STARTER_TEMPLATE = `// Floom custom renderer — receives the run output as props.
@@ -62,17 +72,50 @@ const OUTPUT_SHAPES = [
   'audio',
 ] as const;
 
-export function CustomRendererPanel({ slug, initial, onChange }: Props) {
+export function CustomRendererPanel({
+  slug,
+  initial,
+  onChange,
+  app,
+  previewRun,
+}: Props) {
   const [source, setSource] = useState<string>(STARTER_TEMPLATE);
   const [outputShape, setOutputShape] = useState<string>(initial?.output_shape || 'object');
   const [meta, setMeta] = useState<RendererMeta | null>(initial ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     setMeta(initial ?? null);
-    if (initial?.output_shape) setOutputShape(initial.output_shape);
+    setOutputShape(initial?.output_shape || 'object');
+    setDirty(false);
   }, [initial]);
+
+  const previewApp = useMemo(() => {
+    if (!app) return null;
+    return {
+      ...app,
+      renderer: meta ? { ...meta, output_shape: outputShape } : null,
+    };
+  }, [app, meta, outputShape]);
+
+  const previewPick = useMemo(
+    () => (previewApp ? buildRendererPreviewPick(previewApp) : null),
+    [previewApp],
+  );
+
+  const resolvedPreviewRun = useMemo(() => {
+    if (!previewApp) return null;
+    return previewRun
+      ? creatorRunToPreviewRun(previewApp, previewRun)
+      : buildRendererPreviewRun(previewApp, outputShape);
+  }, [outputShape, previewApp, previewRun]);
+
+  const previewSummary = useMemo(() => {
+    if (previewRun) return `Latest successful output · ${formatTime(previewRun.started_at)}`;
+    return `Sample ${outputShape} output`;
+  }, [outputShape, previewRun]);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -84,6 +127,7 @@ export function CustomRendererPanel({ slug, initial, onChange }: Props) {
     const text = await file.text();
     setSource(text);
     setError(null);
+    setDirty(true);
   }
 
   async function handleUpload() {
@@ -99,6 +143,7 @@ export function CustomRendererPanel({ slug, initial, onChange }: Props) {
       };
       setMeta(nextMeta);
       onChange?.(nextMeta);
+      setDirty(false);
     } catch (err) {
       setError((err as Error).message || 'Upload failed.');
     } finally {
@@ -114,6 +159,7 @@ export function CustomRendererPanel({ slug, initial, onChange }: Props) {
       await api.deleteRenderer(slug);
       setMeta(null);
       onChange?.(null);
+      setDirty(false);
     } catch (err) {
       setError((err as Error).message || 'Delete failed.');
     } finally {
@@ -210,7 +256,10 @@ export function CustomRendererPanel({ slug, initial, onChange }: Props) {
 
       <textarea
         value={source}
-        onChange={(e) => setSource(e.target.value)}
+        onChange={(e) => {
+          setSource(e.target.value);
+          setDirty(true);
+        }}
         data-testid="renderer-source"
         spellCheck={false}
         style={{
@@ -270,6 +319,104 @@ export function CustomRendererPanel({ slug, initial, onChange }: Props) {
           </button>
         )}
       </div>
+
+      {previewApp && previewPick && resolvedPreviewRun && (
+        <section
+          data-testid="renderer-preview-card"
+          style={{
+            marginTop: 18,
+            borderTop: '1px solid var(--line)',
+            paddingTop: 18,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+                Preview
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.5 }}>
+                {meta
+                  ? dirty
+                    ? 'Preview stays on the last compiled renderer until you recompile.'
+                    : 'Preview shows the saved renderer bundle in the same sandbox users get.'
+                  : 'Compile a renderer to replace the default output panel shown below.'}
+              </p>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
+              <span
+                data-testid="renderer-preview-mode"
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  background: meta ? '#e6f4ea' : 'var(--bg)',
+                  border: meta ? '1px solid #c6e7cf' : '1px solid var(--line)',
+                  color: meta ? '#1a7f37' : 'var(--muted)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                {meta ? 'Saved renderer' : 'Default output'}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--muted)',
+                  letterSpacing: 0.2,
+                }}
+              >
+                {previewSummary}
+              </span>
+            </div>
+          </div>
+
+          <div
+            data-testid="renderer-preview-surface"
+            style={{
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              background: 'var(--bg)',
+              padding: 16,
+            }}
+          >
+            {previewApp.renderer ? (
+              <CustomRendererHost
+                slug={previewApp.slug}
+                run={resolvedPreviewRun}
+                sourceHash={previewApp.renderer.source_hash}
+              >
+                <OutputPanel
+                  app={previewPick}
+                  appDetail={previewApp}
+                  run={resolvedPreviewRun}
+                />
+              </CustomRendererHost>
+            ) : (
+              <OutputPanel
+                app={previewPick}
+                appDetail={previewApp}
+                run={resolvedPreviewRun}
+              />
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
