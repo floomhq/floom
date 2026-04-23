@@ -1,25 +1,25 @@
 /**
  * LandingV17Page — marketing home `/` rebuilt to the v17 wireframes.
  *
+ * 2026-04-27 waitlist-reality rewrite:
+ *   floom.dev (production) is waitlist-only for the build/deploy flow, but
+ *   the 3 featured apps (Lead Scorer, Resume Ranker, Competitor Analyzer)
+ *   are live and runnable today. preview.floom.dev keeps the full flow.
+ *   This file is re-framed so it never visually promises "instant deploy"
+ *   on prod while still being exciting:
+ *     - Hero CTAs: [Try an app] primary, [Join the waitlist] secondary.
+ *     - Hero demo: 2-state (build -> use) driven by `DEPLOY_ENABLED` flag.
+ *     - New "Try these 3 apps" row right under the hero demo.
+ *     - "Deploy your own" collapses into the waitlist CTA.
+ *     - Every deploy/publish CTA across the page reacts to DEPLOY_ENABLED.
+ *   When `VITE_DEPLOY_ENABLED=true` (preview + post-launch), copy reverts
+ *   to the original Deploy-forward phrasing.
+ *
  * Sources of truth:
  *   /var/www/wireframes-floom/v17/landing.html            (desktop)
  *   /var/www/wireframes-floom/v17/landing-mobile.html     (mobile)
  *   /var/www/wireframes-floom/v17/REVISION-2026-04-22.md  (latest revisions)
  *   /root/floom-internal/launch/v17-preview-delta-2026-04-22.md
- *
- * v17 deltas vs the previous CreatorHeroPage.tsx:
- *   - Drop the "Vibe-coding speed. Production-grade safety." kicker from hero (dropped 2026-04-22).
- *   - CTAs: [Try an app] (accent) + [Publish your app] (ink). No docs button in hero.
- *   - Works-with belt moves DIRECTLY under CTAs with six explicit items.
- *   - Add a compact CLI reference strip ("/floom-deploy", "floom deploy").
- *   - Add a Publish-CTA box (accent btn + Read the protocol + "open source · MIT").
- *   - Add biz/teams card (live preview only had the vibecoder card).
- *   - Pricing teaser = single $0 card + 3 limit cells (no Pro/Team grid).
- *   - Hero demo column renders <HeroDemo /> — interactive 3-state
- *     build/deploy/use loop per HERO-DEMO-SPEC.md.
- *
- * The existing CreatorHeroPage.tsx is kept in the tree for reference;
- * main.tsx wires "/" to this page.
  */
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -37,6 +37,10 @@ import { DualAudiences } from '../components/home/DualAudiences';
 import { PricingTeaser } from '../components/home/PricingTeaser';
 import { HeroDemo } from '../components/home/HeroDemo';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
+import { TryTheseApps } from '../components/home/TryTheseApps';
+
+import { DEPLOY_ENABLED } from '../lib/launchFlags';
+import { WaitlistModal, openWaitlist } from '../components/waitlist/WaitlistModal';
 
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
@@ -139,7 +143,12 @@ export function LandingV17Page() {
                 (Federico 2026-04-23 — "like we had before"). */}
             <WorksWithBelt />
 
-            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
+            {/* H1 — "AI apps you can ship as easily as you write a prompt."
+                (2026-04-27 waitlist-reality pick, see PR body for rationale).
+                The old "Ship AI apps fast." is still true on preview but on
+                prod the ship-verb needs softening when Deploy is gated; this
+                reframe keeps the excitement ("as easily as you write a
+                prompt") while letting the page tell the whole truth below. */}
             <h1
               className="hero-headline"
               style={{
@@ -153,10 +162,10 @@ export function LandingV17Page() {
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
-              Ship AI apps <span style={{ color: 'var(--accent)' }}>fast.</span>
+              AI apps you can <span style={{ color: 'var(--accent)' }}>ship</span>
+              {' '}as easily as you write a prompt.
             </h1>
 
-            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22). */}
             <p
               className="hero-sub"
               data-testid="hero-sub-positioning"
@@ -173,27 +182,28 @@ export function LandingV17Page() {
               The protocol and runtime for agentic work.
             </p>
 
-            {/* CTA — action-oriented pair matching the demo's Build -> Deploy
-                -> Run flow (Federico 2026-04-23). Primary [Run this in
-                Claude] ink pill -> /install surfaces the install-in-claude
-                path, which is what "run anywhere" actually means to a user.
-                Secondary [Deploy] text link -> /signup covers the builder
-                ICP. NOT "Install in Claude", NOT "Start building free", NOT
-                "Deploy your first app" — Federico excluded those explicitly
-                because they either split audiences or bury the verb. */}
+            {/* CTA — waitlist-reality pair.
+                Primary: [Try an app] -> /store (directs into the 3 live
+                  featured apps; the hero demo itself is running one).
+                Secondary: [Join the waitlist] opens the waitlist modal so
+                  makers who want to ship their OWN app are captured at the
+                  right emotional moment. Reverts to the Deploy-forward pair
+                  when DEPLOY_ENABLED flips on. */}
             <div
               className="hero-ctas"
               style={{
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: 'row',
                 alignItems: 'center',
-                gap: 10,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
                 marginBottom: 4,
               }}
             >
               <Link
-                to="/install"
-                data-testid="hero-cta-run-in-claude"
+                to="/apps"
+                data-testid="hero-cta-try-app"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -209,40 +219,60 @@ export function LandingV17Page() {
                   textDecoration: 'none',
                 }}
               >
-                Run this in Claude
+                Try an app
+                <ArrowRight size={15} aria-hidden="true" />
               </Link>
-              <Link
-                to="/signup"
-                data-testid="hero-cta-deploy"
-                style={{
-                  fontSize: 13,
-                  color: 'var(--muted)',
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                Deploy your own
-                <ArrowRight size={13} aria-hidden="true" />
-              </Link>
+
+              {DEPLOY_ENABLED ? (
+                <Link
+                  to="/signup"
+                  data-testid="hero-cta-deploy"
+                  style={HERO_GHOST_STYLE}
+                >
+                  Deploy your own
+                  <ArrowRight size={14} aria-hidden="true" />
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="hero-cta-waitlist"
+                  onClick={() => openWaitlist('hero')}
+                  style={{ ...HERO_GHOST_STYLE, cursor: 'pointer' }}
+                >
+                  Join the waitlist to build your own
+                  <ArrowRight size={14} aria-hidden="true" />
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Hero demo — interactive 3-state build/deploy/use loop.
-              Sits directly under the CTAs. Sized to 580px (Cursor-style,
-              Federico 2026-04-23): top ~120-150px is visible above the fold
-              at 1440x900, rest scrolls into view. Bigger canvas = more
-              cinematic, no squishing to fit the viewport. */}
+          {/* Hero demo — morphing canvas. `build -> use` (2-state) by default
+              under waitlist; flips to the full `build -> deploy -> use` loop
+              on preview / post-launch via DEPLOY_ENABLED. The Use state
+              shows Lead Scorer (the most universally appealing of the three
+              featured apps) returning a real fit score. */}
           <HeroDemo />
+
+          {/* "Deploy your own" — compact tile directly under the demo.
+              This is where the Deploy moment narrative lives now that the
+              demo itself no longer animates it. One sentence + waitlist CTA
+              on prod; swaps to a plain Deploy CTA when DEPLOY_ENABLED is on. */}
+          <DeployYourOwnTile />
         </section>
 
-        {/* Compact CLI reference strip below the hero — smaller than the
-            original hero-inline version (Federico 2026-04-23 — moved out of
-            hero, kept below as a smaller block). */}
+        {/* "Try these 3 apps" — 3 side-by-side cards of the live featured
+            apps. Placed strategically just below the hero, BEFORE the "how
+            it works" narrative, so the page delivers a usable product (not
+            a promise) in the first scroll. 2026-04-27 launch-strategy pivot. */}
+        <TryTheseApps />
+
+        {/* Compact CLI reference strip below the hero. Docs/informational —
+            not an action CTA, so it stays put regardless of DEPLOY_ENABLED
+            (the slash command IS the integration even while the public deploy
+            flow is gated — self-hosters and MCP builders use it today). */}
         <section
           data-testid="cli-reference-section"
-          style={{ padding: '32px 24px 8px' }}
+          style={{ padding: '16px 24px 8px' }}
         >
           <CliReference />
         </section>
@@ -331,55 +361,62 @@ export function LandingV17Page() {
           </div>
         </section>
 
-        {/* SHOWCASE — 3 apps */}
-        <section
-          data-testid="showcase"
-          style={{
-            padding: '72px 28px',
-            maxWidth: 1240,
-            margin: '0 auto',
-            borderTop: '1px solid var(--line)',
-          }}
-        >
-          <SectionEyebrow>Showcase</SectionEyebrow>
-          <h2
+        {/* SHOWCASE (vertical stripes) — kept only when DEPLOY_ENABLED.
+            On waitlist-prod the 3 featured apps are already surfaced as the
+            top-of-page <TryTheseApps /> cards, so this section duplicates
+            them. On preview / post-launch it reappears because the "three
+            apps Floom runs in production" narrative reinforces the deploy
+            claim. 2026-04-27 launch-reality pivot. */}
+        {DEPLOY_ENABLED && (
+          <section
+            data-testid="showcase"
             style={{
-              fontFamily: "'DM Serif Display', Georgia, serif",
-              fontWeight: 400,
-              fontSize: 34,
-              lineHeight: 1.1,
-              letterSpacing: '-0.02em',
-              textAlign: 'center',
-              margin: '0 auto 10px',
-              maxWidth: 760,
+              padding: '72px 28px',
+              maxWidth: 1240,
+              margin: '0 auto',
+              borderTop: '1px solid var(--line)',
             }}
           >
-            Three apps Floom already runs in production.
-          </h2>
-          <p
-            style={{
-              fontSize: 15.5,
-              color: 'var(--muted)',
-              textAlign: 'center',
-              maxWidth: 620,
-              margin: '0 auto 40px',
-            }}
-          >
-            Real AI doing real work. All three deploy from a single GitHub repo.
-          </p>
-          <div style={{ display: 'grid', gap: 12, maxWidth: 820, margin: '0 auto' }}>
-            {stripes.map((s) => (
-              <AppStripe
-                key={s.slug}
-                slug={s.slug}
-                name={s.name}
-                description={s.description}
-                category={s.category}
-                variant="landing"
-              />
-            ))}
-          </div>
-        </section>
+            <SectionEyebrow>Showcase</SectionEyebrow>
+            <h2
+              style={{
+                fontFamily: "'DM Serif Display', Georgia, serif",
+                fontWeight: 400,
+                fontSize: 34,
+                lineHeight: 1.1,
+                letterSpacing: '-0.02em',
+                textAlign: 'center',
+                margin: '0 auto 10px',
+                maxWidth: 760,
+              }}
+            >
+              Three apps Floom already runs in production.
+            </h2>
+            <p
+              style={{
+                fontSize: 15.5,
+                color: 'var(--muted)',
+                textAlign: 'center',
+                maxWidth: 620,
+                margin: '0 auto 40px',
+              }}
+            >
+              Real AI doing real work. All three deploy from a single GitHub repo.
+            </p>
+            <div style={{ display: 'grid', gap: 12, maxWidth: 820, margin: '0 auto' }}>
+              {stripes.map((s) => (
+                <AppStripe
+                  key={s.slug}
+                  slug={s.slug}
+                  name={s.name}
+                  description={s.description}
+                  category={s.category}
+                  variant="landing"
+                />
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* PUBLISH-CTA BOX */}
         <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
@@ -392,7 +429,10 @@ export function LandingV17Page() {
         {/* PRICING TEASER — single $0 card */}
         <PricingTeaser />
 
-        {/* BUILD CTA */}
+        {/* FINAL CTA — docs + GitHub stay put (informational CTAs, not
+            deploy promises). Where there was previously an implicit "deploy
+            your first app" framing, the copy now leans on "join the waitlist"
+            on prod. Reverts when DEPLOY_ENABLED is on. */}
         <section
           style={{
             padding: '72px 28px',
@@ -411,13 +451,38 @@ export function LandingV17Page() {
               margin: '0 0 8px',
             }}
           >
-            Want to build yours?
+            {DEPLOY_ENABLED ? 'Want to build yours?' : 'Want to build your own?'}
           </h2>
           <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
-            The protocol is 40 lines of JSON. The docs walk you through your
-            first deploy in under 10 minutes.
+            {DEPLOY_ENABLED
+              ? 'The protocol is 40 lines of JSON. The docs walk you through your first deploy in under 10 minutes.'
+              : 'The protocol is 40 lines of JSON and open source today. Join the waitlist to deploy on the hosted runtime, or self-host right now with one Docker command.'}
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {DEPLOY_ENABLED ? null : (
+              <button
+                type="button"
+                data-testid="final-cta-waitlist"
+                onClick={() => openWaitlist('final-cta')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  border: '1px solid var(--ink)',
+                  borderRadius: 10,
+                  padding: '11px 17px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: "'Inter', system-ui, sans-serif",
+                }}
+              >
+                Join the waitlist
+              </button>
+            )}
             <Link
               to="/docs"
               style={{
@@ -464,6 +529,7 @@ export function LandingV17Page() {
 
       <PublicFooter />
       <FeedbackButton />
+      <WaitlistModal />
 
       {/* Responsive tweaks: hero typography + stacking */}
       <style>{`
@@ -480,8 +546,8 @@ export function LandingV17Page() {
           .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
           .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
           .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
-          .landing-v17 .hero-ctas a { width: 100% !important; }
-          .landing-v17 .works-with { gap: 16px 24px !important; }
+          .landing-v17 .hero-ctas a, .landing-v17 .hero-ctas button { width: 100% !important; }
+          .landing-v17 .works-with { gap: 6px 12px !important; }
           .landing-v17 .dual { grid-template-columns: 1fr !important; }
           .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
           .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
@@ -490,6 +556,139 @@ export function LandingV17Page() {
     </div>
   );
 }
+
+/**
+ * Hero secondary CTA — ghost button. Pulled out of the JSX so both the
+ * Deploy-forward and waitlist variants render identically. Sized a notch
+ * smaller than the primary ink pill so the hierarchy is obvious.
+ */
+const HERO_GHOST_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  background: 'var(--card)',
+  color: 'var(--ink)',
+  border: '1px solid var(--line)',
+  borderRadius: 999,
+  padding: '12px 18px',
+  fontSize: 14,
+  fontWeight: 500,
+  textDecoration: 'none',
+  fontFamily: "'Inter', system-ui, sans-serif",
+} as const;
+
+/**
+ * DeployYourOwnTile — compact "deploy the next app" block under the hero
+ * demo. Replaces what the old hero demo used to show as its Deploy state
+ * (the `/floomit` slash command and live URL line). Single sentence +
+ * waitlist CTA; flips to a direct Deploy CTA when DEPLOY_ENABLED is on.
+ */
+function DeployYourOwnTile() {
+  if (DEPLOY_ENABLED) {
+    return (
+      <div data-testid="deploy-your-own-tile" style={DEPLOY_TILE_STYLE}>
+        <div style={DEPLOY_TILE_TEXT}>
+          <strong style={DEPLOY_TILE_STRONG}>Deploy your own.</strong>
+          <span style={DEPLOY_TILE_MUTED}>
+            One slash command in Claude Code or{' '}
+            <code style={DEPLOY_TILE_CODE}>floom deploy</code> from any terminal
+            &mdash; live in ~60 seconds.
+          </span>
+        </div>
+        <Link to="/signup" data-testid="deploy-tile-cta" style={DEPLOY_TILE_BTN}>
+          Deploy your app
+          <ArrowRight size={14} aria-hidden="true" />
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="deploy-your-own-tile" style={DEPLOY_TILE_STYLE}>
+      <div style={DEPLOY_TILE_TEXT}>
+        <strong style={DEPLOY_TILE_STRONG}>Deploy your own.</strong>
+        <span style={DEPLOY_TILE_MUTED}>
+          The public build-and-deploy flow is rolling out in waves. Join the
+          waitlist and we&rsquo;ll let you in as soon as your slot opens.
+        </span>
+      </div>
+      <button
+        type="button"
+        data-testid="deploy-tile-waitlist"
+        onClick={() => openWaitlist('deploy-your-own-tile')}
+        style={{ ...DEPLOY_TILE_BTN, cursor: 'pointer' }}
+      >
+        Join the waitlist
+        <ArrowRight size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+const DEPLOY_TILE_STYLE = {
+  marginTop: 24,
+  maxWidth: 1080,
+  marginLeft: 'auto',
+  marginRight: 'auto',
+  background: 'var(--card)',
+  border: '1px solid var(--line)',
+  borderRadius: 14,
+  padding: '16px 20px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 16,
+  flexWrap: 'wrap' as const,
+  justifyContent: 'space-between',
+  textAlign: 'left' as const,
+};
+
+const DEPLOY_TILE_TEXT = {
+  display: 'flex',
+  flexDirection: 'column' as const,
+  gap: 2,
+  minWidth: 260,
+  flex: 1,
+};
+
+const DEPLOY_TILE_STRONG = {
+  fontFamily: "'DM Serif Display', Georgia, serif",
+  fontSize: 18,
+  fontWeight: 400,
+  color: 'var(--ink)',
+  letterSpacing: '-0.01em',
+};
+
+const DEPLOY_TILE_MUTED = {
+  fontSize: 13.5,
+  color: 'var(--muted)',
+  lineHeight: 1.5,
+};
+
+const DEPLOY_TILE_CODE = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 12,
+  background: 'var(--studio)',
+  padding: '1px 6px',
+  borderRadius: 4,
+  color: 'var(--ink)',
+};
+
+const DEPLOY_TILE_BTN = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  background: 'var(--ink)',
+  color: '#fff',
+  border: '1px solid var(--ink)',
+  borderRadius: 999,
+  padding: '10px 18px',
+  fontSize: 13.5,
+  fontWeight: 600,
+  textDecoration: 'none',
+  fontFamily: "'Inter', system-ui, sans-serif",
+  flexShrink: 0,
+};
 
 const STEPS = [
   {

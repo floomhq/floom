@@ -9,6 +9,9 @@ import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
+import { DEPLOY_ENABLED } from '../../lib/launchFlags';
+import { openWaitlist } from '../waitlist/WaitlistModal';
+
 const WRAP_STYLE: CSSProperties = {
   background: 'linear-gradient(180deg, var(--card), var(--studio))',
   border: '1px solid var(--line)',
@@ -94,22 +97,43 @@ const BTN_SECONDARY: CSSProperties = {
 };
 
 export function PublishCtaBox() {
+  // 2026-04-27 launch-reality: this block used to headline "Publish your own
+  // app" with a direct-to-signup CTA. Prod Deploy is now behind the waitlist
+  // so the primary CTA swaps to "Join the waitlist" (opens modal). The
+  // supporting copy also drops "Live in ~60 seconds" which is only honest
+  // on preview today. Reverts automatically when `DEPLOY_ENABLED` flips on.
+  const waitlistMode = !DEPLOY_ENABLED;
+
   return (
     <div data-testid="publish-cta-box" className="publish-cta" style={WRAP_STYLE}>
       <div>
         <div style={EYEBROW_STYLE}>For makers</div>
-        <h3 style={H3_STYLE}>Publish your own app.</h3>
+        <h3 style={H3_STYLE}>
+          {waitlistMode ? 'Deploy your own app.' : 'Publish your own app.'}
+        </h3>
         <p style={P_STYLE}>
-          Paste a GitHub URL or OpenAPI spec. Floom turns it into a public
-          page, an MCP server, and a JSON API. Live in ~60 seconds. Free on
-          the hosted runtime, or self-host with one Docker command.
+          {waitlistMode
+            ? 'Paste a GitHub URL or OpenAPI spec — Floom turns it into a public page, an MCP server, and a JSON API. Public deploy is rolling out in waves: join the waitlist to get your slot. Free on the hosted runtime, or self-host today with one Docker command.'
+            : 'Paste a GitHub URL or OpenAPI spec. Floom turns it into a public page, an MCP server, and a JSON API. Live in ~60 seconds. Free on the hosted runtime, or self-host with one Docker command.'}
         </p>
       </div>
       <div style={STACK_STYLE}>
-        <Link to="/signup" style={BTN_ACCENT}>
-          Publish your app
-          <ArrowRight size={16} aria-hidden="true" />
-        </Link>
+        {waitlistMode ? (
+          <button
+            type="button"
+            data-testid="publish-cta-waitlist"
+            onClick={() => openWaitlist('publish-cta-box')}
+            style={{ ...BTN_ACCENT, cursor: 'pointer' }}
+          >
+            Join the waitlist
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        ) : (
+          <Link to="/signup" data-testid="publish-cta-deploy" style={BTN_ACCENT}>
+            Publish your app
+            <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+        )}
         <Link to="/docs" style={BTN_SECONDARY}>
           Read the protocol
         </Link>

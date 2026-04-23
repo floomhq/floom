@@ -1,7 +1,15 @@
 /**
  * HeroDemo (v3 — 2026-04-23 morphing canvas).
  *
- * Spec (Federico, 2026-04-23):
+ * Launch-day state (2026-04-27, waitlist reality):
+ *   On production (floom.dev) Deploy is gated behind the waitlist. The hero
+ *   cannot visually promise "one slash-command → live app" to every visitor.
+ *   So the state machine auto-plays `build → use` only, where Use shows one
+ *   of the 3 already-live store apps (Lead Scorer). `DEPLOY_ENABLED` (from
+ *   `lib/launchFlags`) flips the machine back to the full `build → deploy →
+ *   use` choreography on preview.floom.dev and once the public rollout ships.
+ *
+ * Original spec (Federico, 2026-04-23):
  *   Three states, ONE morphing canvas. Not 3 cards. Build and Deploy share
  *   the same Claude-Code-style editor surface (Deploy is a continuation, not
  *   a reset — it appends `/floomit` to the prior Build output). Use then
@@ -57,12 +65,24 @@ import {
   type CSSProperties,
 } from 'react';
 
+import { DEPLOY_ENABLED } from '../../lib/launchFlags';
+
 // -----------------------------------------------------------------------------
 // State machine
 // -----------------------------------------------------------------------------
 type DemoState = 'build' | 'deploy' | 'use';
 
-const STATES: DemoState[] = ['build', 'deploy', 'use'];
+/**
+ * Waitlist-reality default (DEPLOY_ENABLED=false): auto-play `build -> use`.
+ * The tracker collapses to 2 pills and the editor jumps directly from the
+ * typed handler code into the live Use surface — no slash-command, no
+ * progress bar, no "live at floom.dev/p/..." line. Production Deploy is
+ * gated on waitlist so we don't animate it. On preview / post-launch
+ * (`DEPLOY_ENABLED=true`) the original 3-state loop returns.
+ */
+const STATES: DemoState[] = DEPLOY_ENABLED
+  ? ['build', 'deploy', 'use']
+  : ['build', 'use'];
 
 /**
  * State durations in milliseconds. Use is intentionally the longest — it's
@@ -292,7 +312,7 @@ export function HeroDemo() {
 
   const ariaLabel = useMemo(() => {
     const step = STATES.indexOf(state) + 1;
-    return `Step ${step} of 3: ${state}`;
+    return `Step ${step} of ${STATES.length}: ${state}`;
   }, [state]);
 
   // Build + Deploy share the editor surface; only Use flips to the run
@@ -343,13 +363,20 @@ function Tracker({
   onJump: (s: DemoState) => void;
   reducedMotion: boolean;
 }) {
-  // Dot sits at the center of the active pill (3 equal columns).
+  const count = STATES.length;
+  // Dot sits at the center of the active pill (N equal columns — 2 on the
+  // waitlist loop, 3 on the full loop).
   const idx = STATES.indexOf(state);
-  const dotLeft = `calc(${(idx + 0.5) * (100 / 3)}% - 3px)`;
+  const dotLeft = `calc(${(idx + 0.5) * (100 / count)}% - 3px)`;
 
   return (
     <div style={TRACKER_WRAP}>
-      <div style={TRACKER_PILLS}>
+      <div
+        style={{
+          ...TRACKER_PILLS,
+          gridTemplateColumns: `repeat(${count}, 1fr)`,
+        }}
+      >
         {STATES.map((s, i) => {
           const on = s === state;
           return (
@@ -570,9 +597,18 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
             {isBuild && !reducedMotion && codeCap >= HANDLER_CODE.length && (
               <div style={{ ...TERMINAL_LINE, color: '#8b8680' }}>
                 <span style={PROMPT_SIGN}>&gt;</span>
-                <span>
-                  type <span style={{ color: '#e2c48b' }}>/floomit</span> to deploy
-                </span>
+                {DEPLOY_ENABLED ? (
+                  <span>
+                    type <span style={{ color: '#e2c48b' }}>/floomit</span> to deploy
+                  </span>
+                ) : (
+                  // Waitlist reality: don't dangle a verb we can't fulfil on
+                  // prod. Show the payoff-facing line instead — the next
+                  // state transition flips to the live Lead Scorer app.
+                  <span>
+                    ready &middot; <span style={{ color: '#7fe3a9' }}>running live</span>
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -652,12 +688,22 @@ function RunSurface({
   return (
     <div style={surfaceStyle} aria-hidden={!active}>
       <div style={RUN_WRAP}>
-        {/* Deployed-via cue — connects to the previous state */}
+        {/* Context cue above the payoff card. On the full deploy loop this
+            connects Use back to Deploy ("Just deployed via /floomit"). On
+            the waitlist-reality 2-state loop it instead tells the visitor
+            "this app is already live" so the 'try this right now' framing
+            lands. */}
         <div style={RUN_CONTEXT}>
           <span style={RUN_CONTEXT_DOT} aria-hidden="true" />
-          <span>
-            Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
-          </span>
+          {DEPLOY_ENABLED ? (
+            <span>
+              Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
+            </span>
+          ) : (
+            <span>
+              Live at <code style={RUN_CONTEXT_CODE}>floom.dev/p/lead-scorer</code>
+            </span>
+          )}
         </div>
 
         {/* ONE primary card, centered; consumer-style */}

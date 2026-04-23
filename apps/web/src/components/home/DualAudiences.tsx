@@ -10,6 +10,9 @@ import { Check } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { SectionEyebrow } from './SectionEyebrow';
 
+import { DEPLOY_ENABLED } from '../../lib/launchFlags';
+import { openWaitlist } from '../waitlist/WaitlistModal';
+
 interface Bullet {
   text: string;
 }
@@ -19,6 +22,7 @@ interface AudienceCardProps {
   title: string;
   lede: string;
   bullets: Bullet[];
+  /** `to` can be a route OR the sentinel `'waitlist'` to open the modal. */
   primary: { label: string; to: string; kind: 'ink' | 'accent' };
   secondary: { label: string; to: string };
 }
@@ -123,9 +127,20 @@ function AudienceCard({ eyebrow, title, lede, bullets, primary, secondary }: Aud
         ))}
       </ul>
       <div style={CTA_ROW_STYLE}>
-        <Link to={primary.to} style={btnStyle(primary.kind)}>
-          {primary.label}
-        </Link>
+        {primary.to === 'waitlist' ? (
+          <button
+            type="button"
+            data-testid="dual-audience-primary-waitlist"
+            onClick={() => openWaitlist('dual-audiences')}
+            style={{ ...btnStyle(primary.kind), cursor: 'pointer' }}
+          >
+            {primary.label}
+          </button>
+        ) : (
+          <Link to={primary.to} style={btnStyle(primary.kind)}>
+            {primary.label}
+          </Link>
+        )}
         <Link to={secondary.to} style={btnStyle('secondary')}>
           {secondary.label}
         </Link>
@@ -169,7 +184,14 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
             { text: 'Auto-generated landing page and MCP install' },
             { text: "Free tier runs on Floom's Gemini key" },
           ]}
-          primary={{ label: 'Deploy your first app', to: '/signup', kind: 'ink' }}
+          // 2026-04-27 waitlist-reality: prod Deploy is gated. Primary CTA
+          // opens the waitlist modal (sentinel `to: 'waitlist'`). Flips to
+          // signup once DEPLOY_ENABLED.
+          primary={
+            DEPLOY_ENABLED
+              ? { label: 'Deploy your first app', to: '/signup', kind: 'ink' }
+              : { label: 'Join the waitlist', to: 'waitlist', kind: 'ink' }
+          }
           secondary={{ label: 'Read the protocol', to: '/docs' }}
         />
         <AudienceCard

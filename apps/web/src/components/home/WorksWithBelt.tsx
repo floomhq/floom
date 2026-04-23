@@ -55,43 +55,70 @@ const McpMark = (
   </svg>
 );
 
-// Trimmed 2026-04-23 per Federico: cut Claude Desktop + ChatGPT, keep 4
-// items so the belt reads as an eyebrow, not a feature block, and stays
-// no wider than the H1 "Ship AI apps fast." text below it.
-const ITEMS: Item[] = [
+// 2026-04-27 waitlist-rewrite: reorder + restructure so the belt leads with
+// the real claim — "any MCP client" — and demotes the three named agents to
+// *examples* of that universe. Previously all four items rendered as equals,
+// which implied Floom only runs inside those four surfaces. The promise is
+// broader than that, and the belt should say so.
+const EXAMPLE_ITEMS: Item[] = [
   { label: 'Claude Code', mark: ClaudeMark },
   { label: 'Cursor', mark: CursorMark },
   { label: 'Codex CLI', mark: OpenAIMark },
-  { label: 'Any MCP client', mark: McpMark },
 ];
 
-// Small eyebrow row, sits ABOVE the H1. maxWidth is tuned to stay strictly
-// inside the visible width of the H1 "Ship AI apps fast." text (64px DM
-// Serif Display, ~460px rendered) so the eyebrow never runs wider than
-// the headline it precedes.
-// No "Works with" lead text (dropped 2026-04-23 when trimming to 4 items) —
-// the icons and labels carry the meaning on their own, and dropping the
-// lead lets the whole belt sit comfortably inside the H1 width below.
+// Small eyebrow row, sits ABOVE the H1. maxWidth tuned to stay inside the
+// visible width of the H1 below (64px DM Serif Display, ~460px rendered) so
+// the belt never runs wider than the headline.
 const WRAP_STYLE: CSSProperties = {
-  maxWidth: 460,
+  maxWidth: 520,
   margin: '0 auto 24px',
   padding: '0 12px',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 6,
 };
 
-const ROW_STYLE: CSSProperties = {
+const LEAD_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  fontSize: 13,
+  fontWeight: 600,
+  color: 'var(--ink)',
+  letterSpacing: '-0.005em',
+};
+
+const LEAD_MARK: CSSProperties = {
+  color: 'var(--accent)',
+  display: 'inline-flex',
+  alignItems: 'center',
+};
+
+const EXAMPLES_ROW: CSSProperties = {
   display: 'flex',
   flexWrap: 'wrap',
   justifyContent: 'center',
   alignItems: 'center',
-  gap: '8px 18px',
-  margin: '0 auto',
+  gap: '6px 14px',
+  margin: 0,
+};
+
+const EXAMPLES_PREFIX: CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 10.5,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: 'var(--muted)',
+  fontWeight: 600,
+  opacity: 0.85,
 };
 
 const ITEM_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 6,
-  fontSize: 12.5,
+  gap: 5,
+  fontSize: 12,
   color: 'var(--muted)',
   fontWeight: 500,
   opacity: 0.85,
@@ -100,8 +127,18 @@ const ITEM_STYLE: CSSProperties = {
 export function WorksWithBelt() {
   return (
     <div data-testid="works-with-belt" style={WRAP_STYLE}>
-      <div className="works-with" style={ROW_STYLE}>
-        {ITEMS.map((item) => (
+      {/* LEAD — the real promise. Any MCP client is the primary claim. */}
+      <div className="works-with-lead" style={LEAD_STYLE}>
+        <span aria-hidden="true" style={LEAD_MARK}>
+          {McpMark}
+        </span>
+        <span>Works with any MCP client</span>
+      </div>
+
+      {/* EXAMPLES — small, clearly marked as examples, not the full list. */}
+      <div className="works-with" style={EXAMPLES_ROW}>
+        <span style={EXAMPLES_PREFIX}>e.g.</span>
+        {EXAMPLE_ITEMS.map((item) => (
           <span key={item.label} className="ww-item" style={ITEM_STYLE}>
             <span
               aria-hidden="true"
