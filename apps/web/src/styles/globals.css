@@ -21,6 +21,12 @@
 /* a new scroll container, unlike hidden).                              */
 html {
   overflow: visible !important;
+  /* --cookie-banner-height is set by CookieBanner.tsx via ResizeObserver
+     whenever the consent strip is mounted. Driven off one source of truth
+     so any layout that needs the current reservation (sticky anchors,
+     scroll-into-view offsets) can read it too. Fallback 0 keeps the page
+     flush when the banner isn't visible. */
+  padding-bottom: var(--cookie-banner-height, 0px);
 }
 body {
   overflow-x: clip !important;

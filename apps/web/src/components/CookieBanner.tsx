@@ -13,8 +13,22 @@
 // `setConsent` AND inlines `initBrowserSentry` / `initPostHog` (on "Accept
 // all") and their close equivalents (on the "all" -> "essential" downgrade)
 // so the choice applies in the same session without a reload.
+//
+// Root-padding sizing (audit 2026-04-24): the old implementation reserved
+// a hardcoded 84px on `<html>`. That fit a single-line banner at ≥1200px
+// but under-reserved at medium widths (buttons + long copy wrap to two
+// lines, banner grows to ~110px) and dramatically under-reserved when the
+// mobile strip is expanded (content stacks, can be 150–180px tall). On
+// /pricing and /docs this surfaced as the banner covering the `$0` card
+// spec line and the 3-column install grid mid-scroll. Fix: measure the
+// banner with ResizeObserver on every mount / resize and publish the value
+// to a CSS custom property `--cookie-banner-height` on <html>. Root
+// padding then becomes `var(--cookie-banner-height, 0px)`, set once in
+// globals.css. This keeps the two concerns (height measurement vs. page
+// reservation) decoupled so any layout can also read the var directly
+// (e.g. sticky anchors, scroll-into-view offsets).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getConsent, setConsent, type Consent } from '../lib/consent';
 import { initBrowserSentry, closeBrowserSentry } from '../lib/sentry';
@@ -23,8 +37,13 @@ import { initPostHog, closePostHog } from '../lib/posthog';
 /** Viewport width below this uses the collapsed mobile pill first. */
 const MOBILE_BREAKPOINT = 768;
 
-/** Reserve space on the document root so content isn’t hidden behind the strip. */
-const STRIP_RESERVE_PX = 84;
+/**
+ * Minimum height reserved even while the banner is measuring. Avoids a
+ * 1-frame flash where content jumps up into the banner's area before the
+ * ResizeObserver fires. Matches the desktop single-line case so the
+ * initial reservation is already close to the final value.
+ */
+const INITIAL_RESERVE_PX = 72;
 
 function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = useState(false);
@@ -43,6 +62,7 @@ export function CookieBanner() {
   const [visible, setVisible] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const isMobile = useIsMobile();
+  const stripRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (getConsent() === null) setVisible(true);
@@ -50,17 +70,59 @@ export function CookieBanner() {
 
   const showStrip = visible && (!isMobile || expanded);
 
+  // Publish the banner's live height to the document root as
+  // `--cookie-banner-height`. globals.css reads this variable to reserve
+  // room on <html> (and any layout can read it for scroll offsets). When
+  // the strip isn't mounted the variable is cleared so padding collapses
+  // to the `0px` fallback.
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    if (showStrip) {
-      document.documentElement.style.paddingBottom = `${STRIP_RESERVE_PX}px`;
+    const root = document.documentElement;
+    if (!showStrip) {
+      root.style.removeProperty('--cookie-banner-height');
+      return undefined;
+    }
+
+    const node = stripRef.current;
+    if (!node) {
+      // Strip will mount this render; set an initial reserve so the first
+      // paint doesn't flash content under an unmeasured banner.
+      root.style.setProperty('--cookie-banner-height', `${INITIAL_RESERVE_PX}px`);
       return () => {
-        document.documentElement.style.paddingBottom = '';
+        root.style.removeProperty('--cookie-banner-height');
       };
     }
-    document.documentElement.style.paddingBottom = '';
-    return undefined;
-  }, [showStrip]);
+
+    const applyHeight = () => {
+      const h = Math.ceil(node.getBoundingClientRect().height);
+      if (h > 0) {
+        root.style.setProperty('--cookie-banner-height', `${h}px`);
+      }
+    };
+    applyHeight();
+
+    // ResizeObserver handles button wrap, text reflow and the mobile
+    // expanded stack. Falls back silently on very old browsers (iOS <13.4)
+    // that lack it — users there keep the INITIAL_RESERVE_PX reservation,
+    // which is still better than the old hardcoded 84px because
+    // --cookie-banner-height now drives all consumers from one source.
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(applyHeight);
+      observer.observe(node);
+    }
+
+    // Also re-apply on viewport resize (covers orientation change, which
+    // may not trigger a content resize on the banner itself if text
+    // wrapping already consumed the width).
+    window.addEventListener('resize', applyHeight);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', applyHeight);
+      root.style.removeProperty('--cookie-banner-height');
+    };
+  }, [showStrip, expanded, isMobile]);
 
   if (!visible) return null;
 
@@ -113,6 +175,7 @@ export function CookieBanner() {
 
   return (
     <div
+      ref={stripRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="cookie-banner-title"
