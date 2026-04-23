@@ -174,6 +174,15 @@ export function LandingV17Page() {
                 the same time: DM Serif Display out, Inter 800 with
                 tight tracking in — see wireframe.css rationale on
                 --font-display. */}
+            {/* Accent on "fast." lifted from the v17 landing wireframe
+                (v17-wireframes/v17/landing.html line 146). Giving the
+                punch word the green accent color sharpens the hero
+                without adding any new element — the headline's rhythm
+                is intact, but the eye now lands on the promise word,
+                not the mass of "Ship AI apps". Federico 2026-04-25
+                "hero could still be cleaner" — this is the single
+                highest-leverage visual pop on the page that doesn't
+                require layout surgery. */}
             <h1
               className="hero-headline"
               style={{
@@ -183,18 +192,21 @@ export function LandingV17Page() {
                 lineHeight: 1.0,
                 letterSpacing: '-0.04em',
                 color: 'var(--ink)',
-                margin: '0 0 18px',
+                margin: '0 0 16px',
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
-              Ship AI apps fast.
+              Ship AI apps <span style={{ color: 'var(--accent)' }}>fast.</span>
             </h1>
 
             {/* Subtitle. Single line. The old hero carried a second
                 "For founders, solo devs, and small teams" line underneath
                 this one; Federico 2026-04-24 asked to drop it — one
                 subtitle is enough, and the protocol-runtime framing
-                covers the intended audience implicitly. */}
+                covers the intended audience implicitly. 2026-04-25 —
+                tightened margin-bottom (32 -> 24) so the CTAs don't
+                float far below the sub; same intent as the H1 margin
+                trim above. */}
             <p
               className="hero-sub"
               data-testid="hero-sub-positioning"
@@ -205,7 +217,7 @@ export function LandingV17Page() {
                 fontWeight: 400,
                 color: 'var(--muted)',
                 maxWidth: 640,
-                margin: '0 auto 32px',
+                margin: '0 auto 24px',
               }}
             >
               The protocol and runtime for agentic work.
