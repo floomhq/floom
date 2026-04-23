@@ -1442,9 +1442,12 @@ export function humanizeStartupError(raw: string): {
     };
   }
   if (/network|fetch|offline|ECONN|failed to fetch/i.test(raw)) {
+    // Audit 2026-04-24: softened from "Check your connection and try again."
+    // On Render free-tier cold starts this message fires even when the
+    // user's connection is fine — the API is just waking up.
     return {
       headline: "We couldn't reach the server.",
-      sub: 'Check your connection and try again.',
+      sub: 'It might be waking up. Wait a few seconds, then Run again.',
     };
   }
   if (/rate[- ]?limit|429/.test(r)) {

@@ -107,22 +107,58 @@ export function AppsDirectoryPage() {
     resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  const loadHub = useCallback(() => {
-    setLoading(true);
-    setHubError(null);
-    getHub()
-      .then((rows) => {
-        setApps(rows);
-        setLoading(false);
-      })
-      .catch(() => {
-        setHubError("Couldn't load apps");
-        setLoading(false);
-      });
+  // Audit 2026-04-24 (local-repro of /apps with API offline): the old
+  // error path surfaced "Couldn't load apps — Check your connection and try
+  // again" on the *first* failed fetch. That read as a hard failure and
+  // blamed the user's connection, but the most common cause is a transient
+  // Render cold-start / brief rate-limit on our side. We now retry once
+  // silently after a short backoff before showing any error chrome. If the
+  // second attempt also fails, the error state reads as a gentle "still
+  // trying" rather than a terminal "we're broken".
+  const AUTO_RETRY_DELAY_MS = 1800;
+
+  const loadHub = useCallback((opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) {
+      setLoading(true);
+      setHubError(null);
+    }
+    let cancelled = false;
+    const attempt = (isRetry: boolean): Promise<void> =>
+      getHub().then(
+        (rows) => {
+          if (cancelled) return;
+          setApps(rows);
+          setLoading(false);
+          setHubError(null);
+        },
+        () => {
+          if (cancelled) return;
+          if (!isRetry) {
+            // Silent first-retry: keep the skeleton visible so the user
+            // sees uninterrupted loading, not a flash of "error → loading".
+            return new Promise<void>((resolve) => {
+              setTimeout(() => {
+                if (cancelled) {
+                  resolve();
+                  return;
+                }
+                attempt(true).then(resolve);
+              }, AUTO_RETRY_DELAY_MS);
+            });
+          }
+          setHubError("Apps are taking a moment to load");
+          setLoading(false);
+        },
+      );
+    void attempt(false);
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    loadHub();
+    const cancel = loadHub();
+    return cancel;
   }, [loadHub]);
 
   const sortedApps = useMemo(() => {
@@ -390,6 +426,13 @@ export function AppsDirectoryPage() {
                 ))}
               </div>
             ) : hubError ? (
+              // Audit 2026-04-24: softened tone. Previously "Couldn't load
+              // apps / Check your connection" (blame-y, alarmist). Now:
+              // - reuses the skeleton background so the page doesn't feel
+              //   "broken" — just slow,
+              // - gives the user a non-blaming explanation (the API may be
+              //   waking up on Render cold start),
+              // - keeps the Retry button as a forced refresh.
               <div
                 data-testid="apps-hub-error"
                 style={{
@@ -411,7 +454,7 @@ export function AppsDirectoryPage() {
                   {hubError}
                 </p>
                 <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 18px', lineHeight: 1.55 }}>
-                  Check your connection and try again.
+                  The directory API might be waking up. Give it a second, or tap Retry.
                 </p>
                 <button
                   type="button"

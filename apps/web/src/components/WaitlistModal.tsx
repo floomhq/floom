@@ -136,7 +136,8 @@ export function WaitlistModal({
           setError('Something went wrong on our end. Please try again.');
         }
       } else {
-        setError('Network error. Check your connection and try again.');
+        // Audit 2026-04-24: softened "Check your connection" wording.
+        setError("Couldn't submit. Give it a moment and try again.");
       }
     } finally {
       setSubmitting(false);

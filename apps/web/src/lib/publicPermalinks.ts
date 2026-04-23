@@ -9,11 +9,15 @@ export function classifyPermalinkLoadError(error: unknown): PermalinkLoadOutcome
   return status === 404 ? 'not_found' : 'retryable';
 }
 
+// Audit 2026-04-24: dropped the user-blaming "Check your connection"
+// suffix. The most common cause of a failed /p/:slug or /r/:runId fetch
+// is our API cold-starting on Render, not the user's network. Copy now
+// signals transience without accusation.
 export function getPermalinkLoadErrorMessage(target: 'app' | 'run'): string {
   if (target === 'run') {
-    return "We couldn't open this shared run right now. Check your connection and try again.";
+    return "This shared run is taking a moment to load. Try refreshing in a few seconds.";
   }
-  return "We couldn't load this app right now. Check your connection and try again.";
+  return "This app is taking a moment to load. Try refreshing in a few seconds.";
 }
 
 export function getRunStartErrorMessage(

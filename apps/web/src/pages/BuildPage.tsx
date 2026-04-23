@@ -2934,7 +2934,10 @@ function humanizePublishError(err: unknown): string {
     // is safe to show a creator (spec_not_found, rate_limited, etc.).
     if (err.message) return err.message;
     if (err.status === 0) {
-      return "We couldn't reach the server. Check your connection and try again.";
+      // Audit 2026-04-24: softened from "Check your connection" since the
+      // API may be cold-starting on Render rather than the user's network
+      // actually being broken.
+      return "We couldn't reach the server. It might be waking up — try again in a few seconds.";
     }
     if (err.status >= 500) {
       return 'The server returned an error. Try again in a moment.';
@@ -3067,7 +3070,8 @@ function BuildPageWaitlistPanel() {
           setError('Something went wrong on our end. Please try again.');
         }
       } else {
-        setError('Network error. Check your connection and try again.');
+        // Audit 2026-04-24: softened "Check your connection" wording.
+        setError("Couldn't submit. Give it a moment and try again.");
       }
     } finally {
       setSubmitting(false);
