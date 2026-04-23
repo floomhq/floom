@@ -60,23 +60,35 @@ function buildPythonDockerfile(manifest: NormalizedManifest): string {
     extraAptPkgs.length > 0
       ? `RUN apt-get update && apt-get install -y --no-install-recommends git ${extraAptPkgs.join(' ')} && rm -rf /var/lib/apt/lists/*`
       : `RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*`;
+  // Sandbox hardening: create a non-root `app` user (uid 1000) and drop to it
+  // after COPY. HostConfig also enforces --user 1000:1000 as a defense in
+  // depth, but baking USER into the image means the entrypoint starts
+  // non-root even if HostConfig is misconfigured by a future change.
   return `FROM python:3.12-slim
 ${aptInstall}
+RUN useradd -m -u 1000 -s /bin/sh app
 WORKDIR /app
 COPY . /app/
 ${pipInstall}
+RUN chown -R app:app /app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+USER 1000
 ENTRYPOINT ["python", "/app/_entrypoint.py"]
 `;
 }
 
 function buildNodeDockerfile(): string {
+  // Sandbox hardening: node:22-slim already ships a `node` user (uid 1000).
+  // Switch to it after install. HostConfig adds --user 1000:1000 defense-in-
+  // depth regardless.
   return `FROM node:22-slim
 WORKDIR /app
 COPY . /app/
 RUN if [ -f package.json ]; then npm install --omit=dev; fi
+RUN chown -R node:node /app
 ENV NODE_ENV=production
+USER 1000
 ENTRYPOINT ["node", "--experimental-strip-types", "/app/_entrypoint.mjs"]
 `;
 }
@@ -217,6 +229,11 @@ export async function runAppContainer(opts: {
         name: `floom-chat-run-${opts.runId}`,
         Cmd: [configArg],
         Env: env,
+        // Force non-root inside the container even if the image's USER is
+        // root (defense in depth — Dockerfiles above also set USER 1000).
+        // Format is "uid:gid"; 1000:1000 is the conventional first unpriv
+        // user on both debian-slim and node-slim bases we build from.
+        User: '1000:1000',
         HostConfig: {
           AutoRemove: false,
           Memory: memoryBytes,
@@ -224,7 +241,25 @@ export async function runAppContainer(opts: {
           NanoCpus: Math.floor(cpus * 1e9),
           NetworkMode: network,
           Binds: binds,
-          ReadonlyRootfs: false,
+          // Sandbox hardening (2026-04-23, CSO P1-1):
+          //   no-new-privileges — blocks setuid escalation inside container
+          //     (e.g. a malicious binary calling setuid to regain root).
+          //   CapDrop ALL            — user apps are HTTP handlers; they
+          //     need zero Linux capabilities. Dropping all eliminates
+          //     net_raw, sys_admin, etc. Outbound TCP via the userspace
+          //     runtime still works because it doesn't require capabilities.
+          //   ReadonlyRootfs         — root FS is read-only. Writable area
+          //     is only the /tmp tmpfs below (64 MB, noexec). Prevents
+          //     persistence attacks and most container-escape primers.
+          //   Tmpfs /tmp             — writable scratch space that vanishes
+          //     when the container exits. Sized at 64 MB; apps that need
+          //     more should request an explicit volume via manifest.
+          //   PidsLimit 256          — fork-bomb protection.
+          SecurityOpt: ['no-new-privileges:true'],
+          CapDrop: ['ALL'],
+          ReadonlyRootfs: true,
+          Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=64m' },
+          PidsLimit: 256,
         },
         AttachStdout: true,
         AttachStderr: true,

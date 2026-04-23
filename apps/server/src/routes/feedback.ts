@@ -156,15 +156,37 @@ feedbackRouter.post('/', async (c) => {
 /**
  * GET /api/feedback — admin list. Returns 403 unless the caller matches
  * FLOOM_FEEDBACK_ADMIN_KEY. For now, exposed only for local debugging.
+ *
+ * Security (CSO P1-5, 2026-04-23): the admin key must be presented via
+ * `Authorization: Bearer <key>` or `X-Admin-Key: <key>`. Query-string
+ * delivery is rejected with 401 — putting secrets in URLs leaks them to
+ * nginx access logs, browser history, the Referer header if the admin
+ * clicks a link from the JSON response, and upstream CDN/APM logs
+ * (Sentry breadcrumbs, Cloudflare). The old `?admin_key=` path is NOT
+ * silently ignored — we explicitly 401 so the bad usage is discoverable.
  */
 feedbackRouter.get('/', async (c) => {
   const adminKey = process.env.FLOOM_FEEDBACK_ADMIN_KEY;
   if (!adminKey) {
     return c.json({ error: 'Admin key not configured', code: 'admin_disabled' }, 403);
   }
+  // Reject admin keys in the URL query string. Fail loud — we want the
+  // client to fix the call, not to silently accept the worse credential
+  // transport. Also reject on any non-empty query param even if the
+  // value doesn't match, so rotating secrets over a leaked URL isn't
+  // misinterpreted as "still works."
+  if (c.req.query('admin_key')) {
+    return c.json(
+      {
+        error: 'Admin key must be sent via Authorization: Bearer or X-Admin-Key header, never in the URL.',
+        code: 'admin_key_in_query',
+      },
+      401,
+    );
+  }
   const presented =
     c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ||
-    c.req.query('admin_key') ||
+    c.req.header('x-admin-key') ||
     '';
   if (presented !== adminKey) {
     return c.json({ error: 'Unauthorized', code: 'unauthorized' }, 401);
