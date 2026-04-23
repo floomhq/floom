@@ -652,6 +652,7 @@ export function AppPermalinkPage() {
               smoke stay green. */}
           <section
             data-testid="permalink-hero"
+            className="permalink-hero-row"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -677,7 +678,7 @@ export function AppPermalinkPage() {
             >
               <AppIcon slug={app.slug} size={22} />
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="permalink-hero-title" style={{ flex: 1, minWidth: 0 }}>
               <h1
                 style={{
                   fontSize: 17,
@@ -713,6 +714,7 @@ export function AppPermalinkPage() {
               )}
             </div>
             <div
+              className="permalink-hero-actions"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -723,6 +725,7 @@ export function AppPermalinkPage() {
             >
               <span
                 data-testid="hero-version-meta"
+                className="permalink-hero-version-meta"
                 style={{
                   fontSize: 10.5,
                   color: 'var(--muted)',

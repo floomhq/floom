@@ -991,6 +991,26 @@ body:has(.topbar-mobile-menu) {
   .social-proof-row {
     gap: 16px;
   }
+  /* /p/:slug v17 hero: on narrow viewports the right cluster
+     (version meta + Schedule + Share) gets clipped off the right edge
+     because the title eats the flex row. Push the cluster below the
+     title so Share stays fully tappable, and hide the long mono
+     version meta (redundant with the About tab). */
+  .permalink-hero-row {
+    padding: 16px 18px 14px !important;
+  }
+  .permalink-hero-title {
+    flex: 1 1 100% !important;
+    min-width: 0 !important;
+  }
+  .permalink-hero-actions {
+    flex: 1 1 100% !important;
+    justify-content: flex-start !important;
+    margin-top: 4px;
+  }
+  .permalink-hero-version-meta {
+    display: none !important;
+  }
 }
 
 /* Hide the v15 MeRail sidebar on narrow viewports — at <720px the 260px

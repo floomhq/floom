@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-// MCP admin surface: /mcp (ingest_app, list_apps, search_apps, get_app).
+// MCP admin surface: /mcp (ingest_app, ingest_hint, detect_inline,
+// list_apps, search_apps, get_app). ingest_hint + detect_inline were
+// added as the proactive-recovery companion to ingest_app so MCP clients
+// (Claude Desktop, Cursor, Claude Code) can self-serve the "I need to
+// generate a spec" case without bouncing back to the web UI.
 // Verifies tool discovery, input validation, auth gating on ingest, successful
 // ingest from URL + inline JSON, duplicate-slug guard, and precedence vs the
 // per-app /mcp/app/:slug handler.
@@ -117,7 +121,8 @@ try {
   ({ mcpRouter } = await import('../../apps/server/dist/routes/mcp.js'));
 
   // ===================================================================
-  // 1. tools/list — four tools at /mcp root
+  // 1. tools/list — six tools at /mcp root
+  // (ingest_app, ingest_hint, detect_inline, list_apps, search_apps, get_app)
   // ===================================================================
   const list = await callAdmin({
     jsonrpc: '2.0',
@@ -128,12 +133,19 @@ try {
   const tools = list.json?.result?.tools || [];
   log('POST /mcp returns HTTP 200', list.status === 200);
   log('tools/list returns a JSON-RPC envelope', list.json?.jsonrpc === '2.0');
-  log('tools/list returns four tools', tools.length === 4, `got ${tools.length}`);
+  log('tools/list returns six tools', tools.length === 6, `got ${tools.length}`);
   const toolNames = tools.map((t) => t.name).sort();
+  const expectedTools = [
+    'detect_inline',
+    'get_app',
+    'ingest_app',
+    'ingest_hint',
+    'list_apps',
+    'search_apps',
+  ];
   log(
-    'tools include ingest_app, list_apps, search_apps, get_app',
-    JSON.stringify(toolNames) ===
-      JSON.stringify(['get_app', 'ingest_app', 'list_apps', 'search_apps']),
+    'tools include ingest_app, ingest_hint, detect_inline, list_apps, search_apps, get_app',
+    JSON.stringify(toolNames) === JSON.stringify(expectedTools),
     JSON.stringify(toolNames),
   );
 
