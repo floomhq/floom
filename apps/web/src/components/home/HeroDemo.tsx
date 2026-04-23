@@ -71,7 +71,10 @@ const STATES: DemoState[] = ['build', 'deploy', 'use'];
  */
 const STATE_DURATION: Record<DemoState, number> = {
   build: 3000,
-  deploy: 3200,
+  // Deploy is intentionally the longest non-Use state — viewers should fully
+  // register the DEPLOYED moment (label flip + URL line + pulse) before the
+  // canvas morphs to Use. Previously 3.2s — too short to feel celebratory.
+  deploy: 4400,
   use: 4000,
 };
 
@@ -513,17 +516,51 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
                 {slashChars >= SLASH.length && (
                   <div style={DEPLOY_BLOCK}>
                     <div style={DEPLOY_PROGRESS_ROW}>
-                      <span style={DEPLOY_LABEL}>DEPLOYING</span>
+                      {/* Label flips from DEPLOYING to DEPLOYED ✓ on completion
+                          — the celebration moment. Green-accent + small scale
+                          pulse so the eye lands here. */}
+                      <span
+                        style={{
+                          ...DEPLOY_LABEL,
+                          color: deployUrl ? '#7fe3a9' : '#8b8680',
+                          transform: deployUrl ? 'scale(1.04)' : 'scale(1)',
+                          transition: reducedMotion
+                            ? 'none'
+                            : 'color .2s ease, transform .35s cubic-bezier(0.22, 1.4, 0.36, 1)',
+                        }}
+                        data-hd="deploy-label"
+                      >
+                        {deployUrl ? 'DEPLOYED \u2713' : 'DEPLOYING'}
+                      </span>
                       <span style={DEPLOY_PCT}>{deployProgress}%</span>
                     </div>
                     <div style={DEPLOY_BAR_TRACK}>
                       <div style={{ ...DEPLOY_BAR_FILL, width: `${deployProgress}%` }} />
                     </div>
                     {deployUrl && (
-                      <div style={DEPLOY_URL_LINE}>
-                        <span style={{ color: '#7fe3a9', fontWeight: 600 }}>OK</span>
-                        <span style={{ color: '#d8d4cc' }}>Live at</span>
-                        <span style={{ color: '#7fb3e3' }}>floom.dev/p/lead-scorer</span>
+                      <div
+                        style={{
+                          ...DEPLOY_URL_LINE,
+                          opacity: deployUrl ? 1 : 0,
+                          transform: deployUrl ? 'translateY(0)' : 'translateY(3px)',
+                          transition: reducedMotion
+                            ? 'none'
+                            : 'opacity .28s ease, transform .3s cubic-bezier(0.22, 0.9, 0.28, 1)',
+                        }}
+                      >
+                        {/* Pulsing green live indicator — "the service is live right now" */}
+                        <span style={LIVE_DOT_WRAP} aria-hidden="true">
+                          <span
+                            style={{
+                              ...LIVE_DOT,
+                              animation: reducedMotion ? 'none' : 'hd-live-pulse 1.6s ease-out infinite',
+                            }}
+                          />
+                          <span style={LIVE_DOT_CORE} />
+                        </span>
+                        <span style={DEPLOY_URL_META}>Deployed in 1.2s</span>
+                        <span style={DEPLOY_URL_SEP}>&middot;</span>
+                        <span style={DEPLOY_URL_TEXT}>floom.dev/p/lead-scorer</span>
                       </div>
                     )}
                   </div>
@@ -701,22 +738,30 @@ function RunSurface({
 // Styles
 // -----------------------------------------------------------------------------
 const SCOPED_CSS = `
-  [data-testid="hero-demo"] .tok-kw{color:#e2c48b}
-  [data-testid="hero-demo"] .tok-fn{color:#8ec6e3}
-  [data-testid="hero-demo"] .tok-str{color:#9cd29d}
-  [data-testid="hero-demo"] .tok-cm{color:#7a7671;font-style:italic}
-  [data-testid="hero-demo"] .tok-pn{color:#d8d4cc}
-  [data-testid="hero-demo"] .tok-vr{color:#e8d9b2}
+  [data-testid="hero-demo"] .tok-kw{color:#b4481a;font-weight:600}
+  [data-testid="hero-demo"] .tok-fn{color:#1561a3;font-weight:600}
+  [data-testid="hero-demo"] .tok-str{color:#157a4a}
+  [data-testid="hero-demo"] .tok-cm{color:#8b8680;font-style:italic}
+  [data-testid="hero-demo"] .tok-pn{color:#2a2825}
+  [data-testid="hero-demo"] .tok-vr{color:#2a2825}
   @keyframes hd-blink{50%{opacity:0}}
   @keyframes hd-dot-bounce{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
-  @media (max-width:720px){
+  @keyframes hd-live-pulse{
+    0%{transform:scale(1);opacity:.6}
+    70%{transform:scale(2.4);opacity:0}
+    100%{transform:scale(2.4);opacity:0}
+  }
+  @media (max-width:860px){
     [data-testid="hero-demo"] [data-hd="editor-grid"]{grid-template-columns:1fr}
     [data-testid="hero-demo"] [data-hd="sidebar"]{display:none}
   }
 `;
 
 const WRAP_STYLE: CSSProperties = {
-  maxWidth: 720,
+  // Federico 2026-04-23: "wider and bigger" (previously 720px — felt small
+  // vs. the hero text). 1080px gives Cursor-style visual weight while still
+  // fitting a 1200px content column on desktop. Mobile collapses via CSS.
+  maxWidth: 1080,
   margin: '28px auto 0',
   borderRadius: 24,
   background: 'var(--card, #ffffff)',
@@ -768,15 +813,17 @@ const TRACKER_DOT: CSSProperties = {
   background: 'var(--accent, #047857)',
 };
 
-// Fixed-height canvas — the morphing surface. Bumped to 580px on 2026-04-23
-// (Federico: "like cursor, the visual demo doesn't have to fit on the hero
-// in full"). Larger demo = more cinematic; the bottom of the canvas falls
-// below the fold at 1440x900 and the user scrolls to see the payoff state.
+// Fixed-height canvas — the morphing surface. 580px (PR #427: Federico
+// "like cursor, the visual demo doesn't have to fit on the hero in full";
+// larger demo = more cinematic, bottom falls below fold on 1440x900).
+// Combined with wrap maxWidth 1080 from this PR for proportional weight.
 const CANVAS_STYLE: CSSProperties = {
   position: 'relative',
   height: 580,
   overflow: 'hidden',
-  background: '#1a1816',
+  // Warm paper tone — the visible background around the panels. Brand rule:
+  // never pure black on hero demo surfaces. See feedback_terminal_never_black.md.
+  background: '#faf8f3',
 };
 
 const SURFACE_STYLE: CSSProperties = {
@@ -784,28 +831,30 @@ const SURFACE_STYLE: CSSProperties = {
   inset: 0,
 };
 
+// Cream paper editor — Linear/Raycast/Arc vibe, not a black hacker terminal.
+// Federico 2026-04-23 + feedback_terminal_never_black.md.
 const EDITOR_GRID: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '140px 1fr',
+  gridTemplateColumns: '160px 1fr',
   height: '100%',
-  background: '#1a1816',
-  color: '#d8d4cc',
+  background: '#faf8f3',
+  color: '#2a2825',
   fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace",
 };
 
 const SIDEBAR_STYLE: CSSProperties = {
-  borderRight: '1px solid #2a2825',
+  borderRight: '1px solid #ece8de',
   padding: '14px 10px',
   fontSize: 11,
   color: '#8b8680',
-  background: '#15130f',
+  background: '#f0ede5',
 };
 
 const SIDEBAR_SECTION: CSSProperties = {
   fontSize: 10,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
-  color: '#6a665f',
+  color: '#a8a49b',
   marginBottom: 10,
   paddingLeft: 4,
 };
@@ -814,17 +863,19 @@ const SIDEBAR_ITEM: CSSProperties = {
   padding: '3px 8px',
   borderRadius: 4,
   lineHeight: 1.8,
-  color: '#a8a49b',
+  color: '#6a665f',
 };
 
 const SIDEBAR_ITEM_ACTIVE: CSSProperties = {
-  background: '#2a2825',
-  color: '#e8e6e0',
+  background: '#ece8de',
+  color: '#0e0e0c',
 };
 
 const MAIN_PANE: CSSProperties = {
   display: 'grid',
-  gridTemplateRows: '1fr 140px',
+  // Terminal row bumped to 170px so DEPLOYED + URL line breathe inside the
+  // taller 500px canvas.
+  gridTemplateRows: '1fr 170px',
   minHeight: 0,
 };
 
@@ -837,21 +888,21 @@ const EDITOR_PANE: CSSProperties = {
 
 const TAB_ROW: CSSProperties = {
   display: 'flex',
-  background: '#15130f',
-  borderBottom: '1px solid #2a2825',
+  background: '#f0ede5',
+  borderBottom: '1px solid #ece8de',
   flexShrink: 0,
 };
 
 const TAB_STYLE: CSSProperties = {
   padding: '7px 14px',
   fontSize: 11,
-  color: '#8b8680',
-  borderRight: '1px solid #2a2825',
+  color: '#6a665f',
+  borderRight: '1px solid #ece8de',
 };
 
 const TAB_ACTIVE: CSSProperties = {
-  background: '#1a1816',
-  color: '#e8e6e0',
+  background: '#faf8f3',
+  color: '#0e0e0c',
 };
 
 const GUTTER_WRAP: CSSProperties = {
@@ -863,33 +914,35 @@ const GUTTER_WRAP: CSSProperties = {
 };
 
 const GUTTER: CSSProperties = {
-  color: '#4a4842',
+  color: '#c4c1b8',
   textAlign: 'right',
-  padding: '10px 8px 10px 0',
-  fontSize: 11,
+  padding: '12px 8px 12px 0',
+  fontSize: 11.5,
   userSelect: 'none',
-  borderRight: '1px solid #2a2825',
+  borderRight: '1px solid #ece8de',
   display: 'flex',
   flexDirection: 'column',
-  lineHeight: 1.65,
+  lineHeight: 1.7,
 };
 
 const CODE_PRE: CSSProperties = {
-  padding: '10px 14px',
+  padding: '12px 16px',
   margin: 0,
   whiteSpace: 'pre',
   overflow: 'hidden',
   fontFamily: 'inherit',
-  fontSize: 11.5,
-  lineHeight: 1.65,
-  color: '#d8d4cc',
+  // Bumped from 11.5 -> 12.5 for the wider canvas; easier to read at the
+  // new 1080px hero size.
+  fontSize: 12.5,
+  lineHeight: 1.7,
+  color: '#2a2825',
 };
 
 const CARET_STYLE: CSSProperties = {
   display: 'inline-block',
   width: 7,
-  height: 13,
-  background: '#e8e6e0',
+  height: 14,
+  background: '#0e0e0c',
   verticalAlign: -2,
   animation: 'hd-blink 1s steps(2) infinite',
   marginLeft: 2,
@@ -900,17 +953,21 @@ const CARET_DARK: CSSProperties = {
   background: '#e2c48b',
 };
 
+// Terminal is the ONE dark panel — Floom warm dark neutral (#1b1a17), NOT
+// pure black. Creates visual separation from the cream code editor above
+// without being a generic hacker-aesthetic black box. Brand rule:
+// feedback_terminal_never_black.md (Federico 2026-04-23).
 const TERMINAL_PANE: CSSProperties = {
-  background: '#0f0d0b',
-  borderTop: '1px solid #2a2825',
-  padding: '10px 14px',
-  fontSize: 11.5,
-  lineHeight: 1.65,
-  color: '#d8d4cc',
+  background: '#1b1a17',
+  borderTop: '1px solid #ece8de',
+  padding: '12px 16px',
+  fontSize: 12.5,
+  lineHeight: 1.7,
+  color: '#e8e6e0',
   overflow: 'hidden',
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
+  gap: 4,
 };
 
 const TERMINAL_LINE: CSSProperties = {
@@ -926,21 +983,22 @@ const PROMPT_SIGN: CSSProperties = {
 };
 
 const DEPLOY_BLOCK: CSSProperties = {
-  marginTop: 4,
+  marginTop: 6,
 };
 
 const DEPLOY_PROGRESS_ROW: CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
-  marginBottom: 4,
+  marginBottom: 5,
 };
 
 const DEPLOY_LABEL: CSSProperties = {
   color: '#8b8680',
-  fontSize: 10.5,
-  letterSpacing: '0.08em',
-  fontWeight: 600,
+  fontSize: 11,
+  letterSpacing: '0.1em',
+  fontWeight: 700,
+  transformOrigin: 'left center',
 };
 
 const DEPLOY_PCT: CSSProperties = {
@@ -950,7 +1008,7 @@ const DEPLOY_PCT: CSSProperties = {
 };
 
 const DEPLOY_BAR_TRACK: CSSProperties = {
-  height: 3,
+  height: 4,
   background: '#2a2825',
   borderRadius: 2,
   overflow: 'hidden',
@@ -958,15 +1016,63 @@ const DEPLOY_BAR_TRACK: CSSProperties = {
 
 const DEPLOY_BAR_FILL: CSSProperties = {
   height: '100%',
-  background: '#7fe3a9',
+  background: 'linear-gradient(90deg, #7fe3a9 0%, #5dd39a 100%)',
   transition: 'width .05s linear',
 };
 
+// Federico 2026-04-23: "highlight the deployment enough ... clearer that it
+// was just deployed". Upgraded URL line hierarchy: pulsing live dot +
+// elapsed time meta + URL rendered like a link (stronger color + weight).
 const DEPLOY_URL_LINE: CSSProperties = {
-  marginTop: 6,
+  marginTop: 9,
   display: 'flex',
+  alignItems: 'center',
   gap: 8,
+  fontSize: 12.5,
+};
+
+const LIVE_DOT_WRAP: CSSProperties = {
+  position: 'relative',
+  display: 'inline-flex',
+  width: 8,
+  height: 8,
+  flexShrink: 0,
+};
+
+// Outer ripple — pulses outward using hd-live-pulse keyframes.
+const LIVE_DOT: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  borderRadius: '50%',
+  background: '#7fe3a9',
+};
+
+// Solid core that stays put.
+const LIVE_DOT_CORE: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  borderRadius: '50%',
+  background: '#7fe3a9',
+  boxShadow: '0 0 8px rgba(127, 227, 169, 0.6)',
+};
+
+const DEPLOY_URL_META: CSSProperties = {
+  color: '#a8a49b',
   fontSize: 11.5,
+  letterSpacing: '0.01em',
+};
+
+const DEPLOY_URL_SEP: CSSProperties = {
+  color: '#5a564f',
+};
+
+const DEPLOY_URL_TEXT: CSSProperties = {
+  color: '#9fcbef',
+  fontWeight: 600,
+  textDecoration: 'underline',
+  textDecorationColor: 'rgba(159, 203, 239, 0.35)',
+  textUnderlineOffset: 3,
+  letterSpacing: '0.01em',
 };
 
 // Run surface ----------------------------------------------------------------
