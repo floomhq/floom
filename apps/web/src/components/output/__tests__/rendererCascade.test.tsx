@@ -1,0 +1,87 @@
+/**
+ * Renderer cascade unit tests (Issue #470). Run: pnpm --filter @floom/web test
+ */
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import type { ActionSpec, NormalizedManifest } from '../../../lib/types';
+import { OUTPUT_LIBRARY, pickRenderer } from '../rendererCascade';
+
+function mkManifest(opts: {
+  outputs: ActionSpec['outputs'];
+  render?: NonNullable<NormalizedManifest['render']>;
+}): NormalizedManifest {
+  return {
+    name: 'Test App',
+    description: 't',
+    actions: {
+      go: {
+        label: 'Go',
+        inputs: [],
+        outputs: opts.outputs,
+      },
+    },
+    runtime: 'python',
+    python_dependencies: [],
+    node_dependencies: {},
+    secrets_needed: [],
+    manifest_version: '2.0',
+    ...(opts.render ? { render: opts.render } : {}),
+  };
+}
+
+test('competitor-style output: table + summary + model → RowTable then Markdown, model not promoted alone', () => {
+  const app = {
+    slug: 'competitor-analyzer',
+    manifest: mkManifest({
+      outputs: [
+        { name: 'competitors', label: 'Competitor Table', type: 'table' },
+        { name: 'summary', label: 'Comparative Summary', type: 'markdown' },
+        { name: 'model', label: 'Model', type: 'text' },
+      ],
+    }),
+  };
+  const out = {
+    competitors: [{ name: 'Linear', pricing: '$8/seat' }, { name: 'Notion' }],
+    summary: 'Linear is faster...',
+    model: 'gemini-2.5-pro',
+  };
+  const result = pickRenderer({ app, action: 'go', runOutput: out, runId: 'r1' });
+  assert.equal(result.kind, 'auto');
+  assert.equal(result.element?.props?.className, 'floom-auto-composite-output');
+  const children = result.element?.props?.children;
+  const rowTable = Array.isArray(children) ? children[0] : null;
+  const wrap = Array.isArray(children) ? children[1] : null;
+  assert.equal(rowTable?.type, OUTPUT_LIBRARY.RowTable);
+  assert.equal(rowTable?.props?.rows.length, 2);
+  assert.equal(rowTable?.props?.appSlug, 'competitor-analyzer');
+  assert.equal(rowTable?.props?.runId, 'r1');
+  assert.equal(wrap?.props?.style?.marginTop, 16);
+  assert.equal(wrap?.props?.children?.props?.content, 'Linear is faster...');
+});
+
+test('rows_field hint prefers that table when multiple json/table outputs exist', () => {
+  const app = {
+    slug: 'x',
+    manifest: mkManifest({
+      render: { rows_field: 'rows' },
+      outputs: [
+        { name: 'items', label: 'Items', type: 'json' },
+        { name: 'rows', label: 'Rows', type: 'table' },
+        { name: 'summary', label: 'Summary', type: 'text' },
+      ],
+    }),
+  };
+  const out = {
+    items: [{ n: 1 }, { n: 2 }],
+    rows: [{ a: 'one' }],
+    summary: 'Narrative.',
+  };
+  const result = pickRenderer({ app, action: 'go', runOutput: out });
+  assert.equal(result.kind, 'auto');
+  const children = result.element?.props?.children;
+  const rowTable = Array.isArray(children) ? children[0] : null;
+  assert.equal(rowTable?.type, OUTPUT_LIBRARY.RowTable);
+  assert.equal(rowTable?.props?.rows.length, 1);
+  assert.equal(rowTable?.props?.rows[0].a, 'one');
+});

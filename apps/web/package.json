@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/components/output/__tests__/rendererCascade.test.tsx"
   },
   "dependencies": {
     "@sentry/react": "^10.49.0",
