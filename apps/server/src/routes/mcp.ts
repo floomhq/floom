@@ -1,5 +1,6 @@
 // MCP endpoints for Floom.
-//   /mcp           — admin surface (ingest_app, list_apps, search_apps, get_app)
+//   /mcp           — admin surface (ingest_app, ingest_hint, detect_inline,
+//                    list_apps, search_apps, get_app)
 //   /mcp/search    — gallery-wide semantic search
 //   /mcp/app/:slug — per-app MCP (one tool per action)
 //
@@ -17,6 +18,8 @@ import { dispatchRun, getRun } from '../services/runner.js';
 import { createJob } from '../services/jobs.js';
 import { pickApps } from '../services/embeddings.js';
 import {
+  buildIngestHint,
+  detectAppFromInlineSpec,
   ingestAppFromSpec,
   ingestAppFromUrl,
 } from '../services/openapi-ingest.js';
@@ -663,6 +666,122 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
                 {
                   error: errorCode,
                   message: (err as Error).message || 'Ingest failed',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // ---- ingest_hint ----------------------------------------------------
+  //
+  // Proactive recovery companion for `ingest_app`. When an agent (Claude
+  // in Cursor, Claude Desktop, any MCP client) tries to call ingest_app
+  // and the repo doesn't have an OpenAPI spec, it calls ingest_hint to
+  // learn exactly what file Floom needs, get a prompt it can run in the
+  // user's repo, and the direct upload URL to submit the generated spec
+  // back to. This closes the "ingest failed, user stuck" loop without
+  // human intervention.
+  //
+  // No auth gate: returns static metadata + a prompt string, never
+  // issues an outbound fetch — so not an SSRF primitive.
+  server.registerTool(
+    'ingest_hint',
+    {
+      title: 'Ingest hint: what Floom needs to publish an app',
+      description:
+        'Returns a structured recovery shape when `ingest_app` fails (or proactively, before calling it). Use this when the repo/URL the user gave you does not have an obvious OpenAPI spec. The response includes: the exact filenames Floom looks for, the minimal spec shape, a ready-to-paste prompt you can run in the user\'s repo to generate `openapi.yaml`, and the upload URL where you can POST the generated spec back to Floom to complete detection without re-entering the URL.',
+      inputSchema: {
+        input_url: z
+          .string()
+          .min(1)
+          .max(2048)
+          .describe(
+            'The repo URL, owner/repo ref, or OpenAPI URL the user provided. Example: "federicodeponte/openblog" or "https://github.com/acme/api".',
+          ),
+        attempted: z
+          .array(z.string().max(2048))
+          .max(40)
+          .optional()
+          .describe(
+            'Paths the caller already probed (raw.githubusercontent URLs etc.). Forwarded back in `paths_tried` so the response names them exactly.',
+          ),
+      },
+    },
+    async ({ input_url, attempted }) => {
+      const hint = buildIngestHint({
+        input_url,
+        attempted,
+        baseUrl,
+      });
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(hint, null, 2) },
+        ],
+      };
+    },
+  );
+
+  // ---- detect_inline --------------------------------------------------
+  //
+  // Agent workflow: after `ingest_hint` gave the caller a ready prompt
+  // and they generated an openapi.yaml in the user's repo, they can
+  // submit the spec CONTENTS here to run detection without needing the
+  // file to be pushed + publicly reachable yet. Mirrors
+  // POST /api/hub/detect/inline.
+  server.registerTool(
+    'detect_inline',
+    {
+      title: 'Detect app from inline OpenAPI spec',
+      description:
+        'Run app detection against a spec supplied inline (JSON object or YAML/JSON string). Useful after `ingest_hint` when the caller just generated the spec and wants to preview the detected actions before committing + pushing it. Returns the same shape as `ingest_app`\'s detect preview (slug, name, actions, auth_type, tools_count, secrets_needed).',
+      inputSchema: {
+        openapi_spec: z
+          .union([z.record(z.unknown()), z.string().min(1).max(2 * 1024 * 1024)])
+          .describe(
+            'OpenAPI 3.x (or Swagger 2.0) spec, either as a pre-parsed object or as a raw YAML/JSON string. YAML is parsed via the `yaml` package.',
+          ),
+        name: z
+          .string()
+          .min(1)
+          .max(120)
+          .optional()
+          .describe('Display name override. Defaults to spec.info.title.'),
+        slug: z
+          .string()
+          .min(1)
+          .max(48)
+          .regex(/^[a-z0-9][a-z0-9-]*$/)
+          .optional()
+          .describe('URL slug override. Defaults to slugify(name).'),
+      },
+    },
+    async ({ openapi_spec, name, slug }) => {
+      try {
+        const detected = await detectAppFromInlineSpec(
+          openapi_spec as never,
+          slug,
+          name,
+        );
+        return {
+          content: [
+            { type: 'text' as const, text: JSON.stringify(detected, null, 2) },
+          ],
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  error: (err as Error).message || 'detect_inline_failed',
+                  hint_url: `${baseUrl}/api/hub/detect/hint`,
                 },
                 null,
                 2,
