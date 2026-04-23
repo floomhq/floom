@@ -1,5 +1,6 @@
 // Seed the local SQLite DB from apps/server/src/db/seed.json on boot.
-// Idempotent: re-runs on every startup, but only inserts missing rows.
+// Idempotent: re-runs on every startup; new rows insert, existing rows refresh
+// catalog fields from seed.json so manifest edits propagate without manual SQL.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,12 +133,25 @@ export async function seedFromFile(): Promise<{
   let secretsAdded = 0;
   let appsSkipped = 0;
 
-  // Bundled seed apps ship as 'published' — they're first-party content that
-  // already went through Federico's review. New user-ingested apps go to
-  // 'pending_review' via services/openapi-ingest.ts / docker-image-ingest.ts.
-  const insertApp = db.prepare(
+  // Bundled seed apps ship as 'published' on first insert — they're first-party
+  // content that already went through Federico's review. New user-ingested apps
+  // go to 'pending_review' via services/openapi-ingest.ts / docker-image-ingest.ts.
+  // ON CONFLICT refreshes seed-owned fields only; we do not overwrite
+  // publish_status, stars, featured, hero, etc.
+  const upsertApp = db.prepare(
     `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')`,
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')
+     ON CONFLICT(slug) DO UPDATE SET
+       name = excluded.name,
+       description = excluded.description,
+       manifest = excluded.manifest,
+       status = excluded.status,
+       docker_image = excluded.docker_image,
+       code_path = excluded.code_path,
+       category = excluded.category,
+       author = excluded.author,
+       icon = excluded.icon,
+       updated_at = datetime('now')`,
   );
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
@@ -171,27 +185,22 @@ export async function seedFromFile(): Promise<{
         continue;
       }
 
-      let appId: string;
-      if (!existing) {
-        appId = newAppId();
-        insertApp.run(
-          appId,
-          app.slug,
-          app.name,
-          app.description,
-          JSON.stringify(app.manifest),
-          app.docker_image,
-          // code_path is unused when docker_image is already set; we store
-          // a placeholder so the NOT NULL constraint is satisfied.
-          `reused:${app.marketplace_app_id}`,
-          app.category,
-          app.author,
-          app.icon,
-        );
-        appsAdded++;
-      } else {
-        appId = existing.id;
-      }
+      const appId = existing ? existing.id : newAppId();
+      upsertApp.run(
+        appId,
+        app.slug,
+        app.name,
+        app.description,
+        JSON.stringify(app.manifest),
+        app.docker_image,
+        // code_path is unused when docker_image is already set; we store
+        // a placeholder so the NOT NULL constraint is satisfied.
+        `reused:${app.marketplace_app_id}`,
+        app.category,
+        app.author,
+        app.icon,
+      );
+      if (!existing) appsAdded++;
 
       // Per-app secrets
       const perApp = seed.per_app_secrets[app.slug] || {};
