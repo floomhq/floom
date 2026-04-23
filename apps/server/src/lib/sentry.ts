@@ -15,6 +15,7 @@
 //     handlers. Both are safe to call whether Sentry is enabled or not.
 
 import * as Sentry from '@sentry/node';
+import { SERVER_VERSION } from './server-version.js';
 
 const SECRET_KEY_PATTERN = /(password|token|api[_-]?key|authorization|secret|cookie)/i;
 
@@ -50,9 +51,19 @@ export function initSentry(): void {
   if (initialized) return;
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return; // no-op when unconfigured
+  // `SENTRY_ENVIRONMENT` lets operators override when NODE_ENV doesn't
+  // match the Sentry-side environment label (e.g. 'preview' vs 'production'
+  // both running NODE_ENV=production).
+  const environment =
+    process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development';
+  // Tag the release so Sentry can group issues by deploy. `SENTRY_RELEASE`
+  // wins if set (CI can inject a git sha); otherwise we fall back to the
+  // server's package.json version so every event has some release tag.
+  const release = process.env.SENTRY_RELEASE || `floom-server@${SERVER_VERSION}`;
   Sentry.init({
     dsn,
-    environment: process.env.NODE_ENV || 'development',
+    environment,
+    release,
     tracesSampleRate: 0.1,
     beforeSend(event) {
       // Scrub request + extra payloads. Sentry's default scrubbing handles
@@ -64,7 +75,9 @@ export function initSentry(): void {
     },
   });
   initialized = true;
-  console.log('[sentry] initialized (environment=' + (process.env.NODE_ENV || 'development') + ')');
+  console.log(
+    `[sentry] initialized (environment=${environment}, release=${release})`,
+  );
 }
 
 export function sentryEnabled(): boolean {
