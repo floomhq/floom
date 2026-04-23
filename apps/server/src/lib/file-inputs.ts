@@ -273,7 +273,12 @@ export function materializeFileInputs(
   }
 
   const { hostDir, mountSource } = resolveMaterializedDirs(runId);
-  mkdirSync(hostDir, { recursive: true, mode: 0o700 });
+  // Mode 0o755 on the dir and 0o644 on files below so the sandboxed
+  // container (runs as --user 1000:1000 per P1 docker hardening) can
+  // read its own inputs. The dir is a per-run, Floom-managed ephemeral
+  // path that is rm -rf'd in cleanup(); nothing else on the host should
+  // be traversing /tmp/floom/inputs/<runId>/ uninvited.
+  mkdirSync(hostDir, { recursive: true, mode: 0o755 });
 
   // Track basenames used so two file inputs that collapse to the same
   // safe basename don't overwrite each other.
@@ -294,7 +299,7 @@ export function materializeFileInputs(
 
     const hostPath = join(hostDir, basename);
     const bytes = decodeEnvelope(path, envelope);
-    writeFileSync(hostPath, bytes, { mode: 0o600 });
+    writeFileSync(hostPath, bytes, { mode: 0o644 });
 
     return `${CONTAINER_INPUTS_DIR}/${basename}`;
   });

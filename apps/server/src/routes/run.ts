@@ -18,6 +18,7 @@ import { extractIp } from '../lib/rate-limit.js';
 import {
   byokRequiredResponse,
   decideByok,
+  hashUserAgent,
   isByokGated,
   recordFreeRun,
 } from '../lib/byok-gate.js';
@@ -251,7 +252,14 @@ runRouter.post('/', async (c) => {
   const perCallSecrets: Record<string, string> = {};
   if (isByokGated(row.slug) && !bypassBecauseAdmin) {
     const ip = extractIp(c);
-    const decision = decideByok(ip, row.slug, userApiKey !== null);
+    // Defense-in-depth against pure-IP bypass (CSO P1-2, 2026-04-23): the
+    // (ip + UA-hash) combo makes two browsers behind the same NAT get
+    // separate budgets, and the subnet-burst detector inside decideByok
+    // tightens the limit to 1 free run for a /24 under attack. Not a
+    // silver bullet; a headless bot rotating both IP AND UA from a proxy
+    // pool can still exhaust, but this raises the cost meaningfully.
+    const uaHash = hashUserAgent(c.req.header('user-agent'));
+    const decision = decideByok(ip, row.slug, userApiKey !== null, undefined, uaHash);
     if (decision.block) {
       return c.json(
         byokRequiredResponse(row.slug, decision.usage, decision.limit),
@@ -268,7 +276,13 @@ runRouter.post('/', async (c) => {
       // Free path: count this run against the 24h budget BEFORE dispatch so
       // a burst of 6 concurrent requests can't all slip through the
       // usage<5 check.
-      recordFreeRun(ip, row.slug);
+      recordFreeRun(ip, row.slug, undefined, uaHash);
+      if (decision.tightened) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[byok-gate] subnet burst tightened limit ip=${ip} slug=${row.slug}`,
+        );
+      }
     }
   }
 
@@ -614,7 +628,8 @@ slugRunRouter.post('/', async (c) => {
   const perCallSecretsSlug: Record<string, string> = {};
   if (isByokGated(row.slug) && !bypassBecauseAdminSlug) {
     const ip = extractIp(c);
-    const decision = decideByok(ip, row.slug, userApiKeySlug !== null);
+    const uaHashSlug = hashUserAgent(c.req.header('user-agent'));
+    const decision = decideByok(ip, row.slug, userApiKeySlug !== null, undefined, uaHashSlug);
     if (decision.block) {
       return c.json(
         byokRequiredResponse(row.slug, decision.usage, decision.limit),
@@ -624,7 +639,13 @@ slugRunRouter.post('/', async (c) => {
     if (userApiKeySlug) {
       perCallSecretsSlug.GEMINI_API_KEY = userApiKeySlug;
     } else {
-      recordFreeRun(ip, row.slug);
+      recordFreeRun(ip, row.slug, undefined, uaHashSlug);
+      if (decision.tightened) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[byok-gate] subnet burst tightened limit ip=${ip} slug=${row.slug}`,
+        );
+      }
     }
   }
 
