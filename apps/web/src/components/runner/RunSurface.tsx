@@ -1399,17 +1399,21 @@ function PastRunsDisclosure({ appSlug }: { appSlug: string }) {
           // Clicking navigates to /p/:slug?run=<id> which hydrates via
           // the shared-run path.
           <ul className="run-surface-past-list" data-testid="run-surface-past-list">
-            {runs.slice(0, 5).map((r) => (
+            {runs.slice(0, 5).map((r) => {
+              const inputPeek = summarizeInputs(r.inputs);
+              const outputPeek = summarizeOutputs(r.outputs, r.status, r.error);
+              const oneLine = `Input: ${inputPeek || '—'} · Output: ${outputPeek || '—'}`;
+              return (
               <li key={r.id}>
                 <Link
                   to={buildPublicRunPath(r.id)}
                   data-testid={`run-surface-past-row-${r.id}`}
                   className="run-surface-past-row"
+                  title={oneLine}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
-                    flexWrap: 'wrap',
+                    gap: 10,
                     padding: '10px 12px',
                     borderBottom: '1px solid var(--line)',
                     textDecoration: 'none',
@@ -1430,29 +1434,11 @@ function PastRunsDisclosure({ appSlug }: { appSlug: string }) {
                     }}
                   />
                   <span
-                    className="run-surface-past-input"
+                    className="run-surface-past-preview-line"
                     style={{
-                      fontSize: 13,
+                      fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                      fontSize: 12,
                       color: 'var(--ink)',
-                      maxWidth: 260,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {summarizeInputs(r.inputs)}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    style={{ color: 'var(--muted)', fontSize: 12 }}
-                  >
-                    &rarr;
-                  </span>
-                  <span
-                    className="run-surface-past-output"
-                    style={{
-                      fontSize: 13,
-                      color: 'var(--muted)',
                       flex: 1,
                       minWidth: 0,
                       overflow: 'hidden',
@@ -1460,14 +1446,13 @@ function PastRunsDisclosure({ appSlug }: { appSlug: string }) {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {summarizeOutputs(r.outputs, r.status, r.error)}
+                    {oneLine}
                   </span>
                   <span
                     className="run-surface-past-when"
                     style={{
                       fontSize: 11,
                       color: 'var(--muted)',
-                      marginLeft: 'auto',
                       flexShrink: 0,
                     }}
                   >
@@ -1475,7 +1460,8 @@ function PastRunsDisclosure({ appSlug }: { appSlug: string }) {
                   </span>
                 </Link>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
