@@ -19,7 +19,7 @@
 //   3. Why headless: the standardization/security/speed argument
 //   4. What Floom isn't: three negations
 //   5. Who's behind it: Federico + Floom Inc + OSS commitment
-//   + Footer CTA band: "Paste your thing" → /studio/build
+//   + Footer CTA band: "Paste your app" → /studio/build
 
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -158,8 +158,15 @@ export function AboutPage() {
               )
             }
           />
+          {/* Tag copy 2026-04-24 (audit): was "Biz users". Rendered uppercase
+              with letter-spacing it read as "BIZ USERS" / "BIG USERS" and was
+              ambiguous on first glance (business? frequent? corporate?).
+              Swapped to "Users" to pair cleanly with "Vibecoders" above —
+              one short noun per card, same grammatical weight. Internal ICP
+              notes elsewhere in the codebase still say "biz users" for
+              clarity; the customer-facing label is what moves here. */}
           <WhoCard
-            tag="Biz users"
+            tag="Users"
             title="People who need to use AI tools at work, not build them."
             body={
               <>
@@ -275,8 +282,11 @@ export function AboutPage() {
           padding: '64px 0 24px',
         }}
       >
+        {/* Copy 2026-04-24 (audit): "Paste your thing" reads too informal
+            for the trust section. "Paste your app" names what you're
+            actually pasting and keeps the short imperative rhythm. */}
         <h2 style={{ ...H2_STYLE, margin: '0 0 12px' }}>
-          {deployEnabled ? 'Paste your thing. Share the link.' : 'Paste your thing. Run it everywhere.'}
+          {deployEnabled ? 'Paste your app. Share the link.' : 'Paste your app. Run it everywhere.'}
         </h2>
         <p
           style={{
@@ -315,7 +325,7 @@ export function AboutPage() {
               letterSpacing: '-0.005em',
             }}
           >
-            Paste your thing → Studio
+            Paste your app → Studio
           </Link>
         ) : (
           <button

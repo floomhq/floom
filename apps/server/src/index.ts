@@ -1032,11 +1032,11 @@ if (webDist) {
         "Floom exists for one reason: to turn your code into a real app with a real URL so other people can actually use it.";
       out = out.replace(
         /<div style="display:none" data-spa-fallback>[\s\S]*?<\/div>/,
-        `<div style="display:none" data-spa-fallback>\n        <h1>${aboutH1}</h1>\n        <p>${aboutSub}</p>\n        <p><a href="/studio/build">Paste your thing</a> &middot; <a href="/">Home</a></p>\n      </div>`,
+        `<div style="display:none" data-spa-fallback>\n        <h1>${aboutH1}</h1>\n        <p>${aboutSub}</p>\n        <p><a href="/studio/build">Paste your app</a> &middot; <a href="/">Home</a></p>\n      </div>`,
       );
       out = out.replace(
         /<noscript>[\s\S]*?<\/noscript>/,
-        `<noscript>\n      <h1>${aboutH1}</h1>\n      <p>${aboutSub}</p>\n      <p><a href="/studio/build">Paste your thing</a> &middot; <a href="/">Home</a></p>\n    </noscript>`,
+        `<noscript>\n      <h1>${aboutH1}</h1>\n      <p>${aboutSub}</p>\n      <p><a href="/studio/build">Paste your app</a> &middot; <a href="/">Home</a></p>\n    </noscript>`,
       );
     }
     return out;
