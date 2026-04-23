@@ -22,7 +22,6 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Star } from 'lucide-react';
 import { AppIcon } from '../AppIcon';
 import { DescriptionMarkdown } from '../DescriptionMarkdown';
-import { categoryTint } from '../../lib/categoryTint';
 import type { HubApp } from '../../lib/types';
 
 export interface AppGridProps {
@@ -68,65 +67,23 @@ function labelForCategory(cat: string): string {
   );
 }
 
-// Category badge palette. Per-category soft color so HIRING / GROWTH /
-// RESEARCH read distinct at a glance instead of a wall of identical
-// neutral pills. Restrained: only four buckets, all soft-tinted
-// backgrounds with AA-contrast text. Unknown categories fall back to
-// a neutral line pill so we never invent a color we don't own.
-interface BadgePalette {
-  bg: string;
-  border: string;
-  fg: string;
-}
-const BADGE_EMERALD: BadgePalette = {
-  bg: '#ecfdf5',
-  border: '#a7f3d0',
-  fg: '#047857',
-};
-const BADGE_AMBER: BadgePalette = {
-  bg: '#fffaf0',
-  border: '#fde68a',
-  fg: '#b45309',
-};
-const BADGE_BLUE: BadgePalette = {
-  bg: '#eff6ff',
-  border: '#bfdbfe',
-  fg: '#1d4ed8',
-};
-const BADGE_SLATE: BadgePalette = {
-  bg: '#f1f5f9',
-  border: '#e2e8f0',
-  fg: '#475569',
-};
-
-const CATEGORY_BADGE: Record<string, BadgePalette> = {
-  hiring: BADGE_BLUE,
-  hr: BADGE_BLUE,
-  recruiting: BADGE_BLUE,
-  growth: BADGE_EMERALD,
-  marketing: BADGE_EMERALD,
-  sales: BADGE_EMERALD,
-  seo: BADGE_EMERALD,
-  research: BADGE_AMBER,
-  ai: BADGE_AMBER,
-  analytics: BADGE_AMBER,
-  writing: BADGE_AMBER,
-  content: BADGE_AMBER,
-  design: BADGE_AMBER,
-  'developer-tools': BADGE_SLATE,
-  'developer_tools': BADGE_SLATE,
-  developer: BADGE_SLATE,
-  productivity: BADGE_SLATE,
-  utilities: BADGE_SLATE,
-  'open-data': BADGE_SLATE,
-  'open_data': BADGE_SLATE,
-  travel: BADGE_SLATE,
-};
-
-function badgePaletteFor(category: string | null | undefined): BadgePalette | null {
-  if (!category) return null;
-  return CATEGORY_BADGE[category] ?? null;
-}
+// Category badge palette — single restrained neutral across ALL cards
+// (2026-04-24 per Federico: "for app cards: i really want to refrain
+// from using many colours"). We used to ship 4 buckets (emerald / amber
+// / blue / slate) which painted HIRING / GROWTH / RESEARCH in distinct
+// pastel hues — alongside the pastel-tinted thumbnail band and output
+// strip, the grid read as a rainbow. The restraint is: one chip style
+// for every category, one band tint for every card, one output-strip
+// style for every card. Brand green stays the ONLY accent, reserved
+// for the "Run →" CTA, HERO badge text, hot-star glyph, output-strip
+// dot, and the hover border (via `var(--ink)`).
+const CARD_NEUTRAL = {
+  bg: '#f5f5f3',       // warm light neutral — band + icon tiles + output strip
+  fg: '#1b1a17',       // warm dark neutral — icons inside tiles
+  chipBg: 'rgba(255,255,255,0.92)',
+  chipBorder: 'var(--line)',
+  chipFg: 'var(--muted)',
+} as const;
 
 function formatRuns(n: number): string {
   if (n >= 1000) {
@@ -229,13 +186,11 @@ function AppGridCard({
   variant?: 'default' | 'featured';
   suppressHeroBadge?: boolean;
 }) {
-  const tint = categoryTint(app.category);
   const stars = app.stars ?? 0;
   const runs7d = app.runs_7d ?? 0;
   const isHot = stars >= 100;
   const hero = !!app.hero && !suppressHeroBadge;
   const thumbnail = app.thumbnail_url ?? null;
-  const badge = badgePaletteFor(app.category);
   const isFeatured = variant === 'featured';
   const thumbHeight = isFeatured ? 140 : 120;
   const titleSize = isFeatured ? 16 : 15;
@@ -291,7 +246,7 @@ function AppGridCard({
         data-testid={`app-grid-thumb-${app.slug}`}
         style={{
           height: thumbHeight,
-          background: thumbnail ? 'var(--bg)' : tint.bg,
+          background: thumbnail ? 'var(--bg)' : CARD_NEUTRAL.bg,
           boxShadow: thumbnail ? undefined : 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
           position: 'relative',
           overflow: 'hidden',
@@ -318,11 +273,11 @@ function AppGridCard({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: tint.fg,
+              color: CARD_NEUTRAL.fg,
             }}
             aria-hidden="true"
           >
-            <AppIcon slug={app.slug} size={isFeatured ? 52 : 44} color={tint.fg} />
+            <AppIcon slug={app.slug} size={isFeatured ? 52 : 44} color={CARD_NEUTRAL.fg} />
           </div>
         )}
 
@@ -339,13 +294,13 @@ function AppGridCard({
               right: 10,
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
               fontSize: 10,
-              color: badge ? badge.fg : 'var(--muted)',
+              color: CARD_NEUTRAL.chipFg,
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
               padding: '3px 8px',
-              border: `1px solid ${badge ? badge.border : 'var(--line)'}`,
+              border: `1px solid ${CARD_NEUTRAL.chipBorder}`,
               borderRadius: 4,
-              background: badge ? badge.bg : 'rgba(255,255,255,0.92)',
+              background: CARD_NEUTRAL.chipBg,
               fontWeight: 600,
               boxShadow: '0 1px 2px rgba(15,23,42,0.06)',
               backdropFilter: 'saturate(1.2)',
@@ -392,17 +347,17 @@ function AppGridCard({
             width: 32,
             height: 32,
             borderRadius: 9,
-            background: tint.bg,
+            background: CARD_NEUTRAL.bg,
             boxShadow: 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: tint.fg,
+            color: CARD_NEUTRAL.fg,
             flexShrink: 0,
             marginTop: 1,
           }}
         >
-          <AppIcon slug={app.slug} size={18} color={tint.fg} />
+          <AppIcon slug={app.slug} size={18} color={CARD_NEUTRAL.fg} />
         </span>
         <h3
           data-testid={`app-grid-title-${app.slug}`}
@@ -523,14 +478,14 @@ function AppGridCard({
             margin: '0 14px 12px',
             padding: '8px 10px',
             borderRadius: 8,
-            background: tint.bg,
+            background: CARD_NEUTRAL.bg,
             boxShadow: 'inset 0 0 0 1px rgba(15,23,42,0.05)',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             fontSize: 11.5,
-            color: tint.fg,
+            color: CARD_NEUTRAL.fg,
             fontWeight: 600,
             letterSpacing: '0.01em',
             minWidth: 0,
@@ -542,9 +497,8 @@ function AppGridCard({
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: tint.fg,
+              background: 'var(--accent, #047857)',
               flexShrink: 0,
-              opacity: 0.7,
             }}
           />
           <span
