@@ -5,7 +5,7 @@ for a self-hosted or cloud-hosted Floom deployment. Every piece below is
 optional and ships "off by default" in the open-source build: setting the
 right environment variables is all it takes to light them up.
 
-Four things get wired in this document:
+Five things get wired in this document:
 
 1. **Sentry error tracking** (server + browser) with secret scrubbing.
 2. **Source-map upload** so browser stacks are readable, not minified soup.
@@ -13,6 +13,25 @@ Four things get wired in this document:
    server stops answering.
 4. **App-level Discord alerts** for 5xx bursts, unhandled rejections, and
    repeated-429 abuse signals (set `DISCORD_ALERTS_WEBHOOK_URL`, section 4).
+5. **PostHog product analytics** (frontend only, consent-gated) for the
+   launch funnel: landings → publishes → runs (set `VITE_POSTHOG_KEY`,
+   section 5).
+
+### Consent gate (GDPR Art. 6(1)(a))
+
+The two **frontend** telemetry SDKs — browser Sentry and PostHog — are
+third-party processors. Events leave the EU and land in their ingest
+pipelines. They stay fully dark until the user picks **"Accept all"** in
+the cookie banner. "Essential only" keeps both SDKs quiet: no DSN call,
+no transport spin-up, no PII leak on first paint. The gate lives in
+[`apps/web/src/lib/consent.ts`](../apps/web/src/lib/consent.ts); the
+banner calls `setConsent` and inlines `initBrowserSentry()` + `initPostHog()`
+on upgrade and `closeBrowserSentry()` + `closePostHog()` on downgrade so
+the choice applies mid-session without a reload.
+
+The **backend** Sentry integration is NOT consent-gated — server errors
+don't carry user PII through the scrubbed payload, and operators need
+crash visibility regardless of individual consent choices.
 
 ---
 
@@ -285,6 +304,70 @@ from a self-hosted box.
 
 ---
 
+## 5. PostHog product analytics (frontend)
+
+PostHog tracks the launch funnel so we can see which step of the
+landing → publish → run chain is dropping visitors. It runs **only** in
+the browser bundle, only after the user consents, and only for a closed
+list of events (no autocapture, no session replay, no PII beyond the
+Better Auth user id).
+
+The tracked events (hard-coded in
+[`apps/web/src/lib/posthog.ts`](../apps/web/src/lib/posthog.ts)):
+
+| Event | Fires when |
+|---|---|
+| `landing_viewed` | Pageview on `/` |
+| `publish_clicked` | "Publish your app" CTA tap |
+| `publish_succeeded` | App was created (ingest returned 200) |
+| `signup_completed` | Better Auth `/sign-up/email` returned 200 |
+| `signin_completed` | Better Auth `/sign-in/email` returned 200 |
+| `run_triggered` | User invoked an app |
+| `run_succeeded` | Run finished 2xx |
+| `run_failed` | Run finished non-2xx |
+| `share_link_opened` | Someone landed on a `/r/:runId` permalink |
+
+### Setup
+
+1. Create a project at [posthog.com](https://posthog.com) (free tier:
+   1M events/month). Prefer the EU cloud for data residency.
+2. Copy the project API key.
+3. Add to the **build-time** env (PostHog runs in the browser bundle,
+   same build-time constraint as `VITE_SENTRY_DSN`):
+
+   ```bash
+   # /opt/floom-mcp-preview/.env
+   VITE_POSTHOG_KEY=phc_xxxxxxxxxxxxxxxxxxxx
+   VITE_POSTHOG_HOST=https://eu.i.posthog.com   # or us.i.posthog.com
+   ```
+
+4. Rebuild the image so Vite bakes the key into the bundle:
+
+   ```bash
+   docker build \
+     --build-arg VITE_POSTHOG_KEY=$VITE_POSTHOG_KEY \
+     --build-arg VITE_POSTHOG_HOST=$VITE_POSTHOG_HOST \
+     -t floom-preview-local:$(date +%Y%m%d-%H%M)-posthog \
+     -f docker/Dockerfile .
+   ```
+
+5. Verify — open the site in a fresh incognito window, accept all
+   cookies in the banner, reload, check PostHog → Activity. A
+   `landing_viewed` event should appear within seconds.
+
+### Consent behaviour
+
+`initPostHog()` is called unconditionally at boot but is a **hard no-op**
+unless `getConsent() === 'all'` AND the key is set. On upgrade
+("Essential only" → "Accept all") the banner calls `initPostHog()` inline
+so the choice applies in the same session. On downgrade
+("Accept all" → "Essential only") `closePostHog()` calls
+`posthog.opt_out_capturing()` + `posthog.reset()` so future events are
+dropped and the `distinct_id` is cleared. Events already in flight at
+the network layer cannot be recalled — documented on `/cookies`.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -297,3 +380,5 @@ from a self-hosted box.
 | Heartbeat alerts keep firing on healthy target | Look at exit code of `curl -s -o /dev/null -w '%{http_code}' <target>` from the Hetzner box — cert or network issue. |
 | `[discord-alerts] disabled` in boot logs | `DISCORD_ALERTS_WEBHOOK_URL` is missing or doesn't start with `https://discord.com/api/webhooks/`. Fix the env var, restart. |
 | Discord alerts never fire despite `[discord-alerts] enabled` | The per-title debounce is 60s. Trigger a NEW error class, or wait a minute. If still nothing, `curl -X POST` the webhook by hand to verify it works. |
+| PostHog events not appearing | Consent gate is the most common cause. Open DevTools → Application → Local Storage, confirm `floom.cookie-consent = all`. If `essential`, click "Cookie settings" in the footer and upgrade. If consent is `all` but still no events, `VITE_POSTHOG_KEY` likely wasn't set at build time — rebuild the image. |
+| Frontend Sentry not capturing errors | Same consent gate applies. Confirm `floom.cookie-consent = all` in localStorage, then confirm `VITE_SENTRY_DSN` was set at build time (Network tab → search for requests to `*.ingest.sentry.io`). |
