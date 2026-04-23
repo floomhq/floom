@@ -108,6 +108,17 @@ export function BuildPage({
   // the publish button only renders when `step === 'review'`, so the
   // narrowed type doesn't overlap with 'publishing'.
   const [publishing, setPublishing] = useState(false);
+  // Issue #391 — step-by-step status copy rendered inline under the
+  // Publish button AND in the full publishing surface. The server doesn't
+  // emit SSE/progress events for the ingest pipeline yet, so we cycle
+  // through the real backend stages on a heuristic timer (1.5s each).
+  // Stages map to the actual ingestApp path: normalize manifest → register
+  // app → warm the renderer. The label freezes on the last stage if the
+  // request is still in flight after ~4.5s, and `publishSucceeded` flips
+  // the copy to "Published ✓" for a brief success flash before the
+  // `done` surface takes over.
+  const [publishStatus, setPublishStatus] = useState('');
+  const [publishSucceeded, setPublishSucceeded] = useState(false);
 
   // Which ramp submitted last — controls the review heading
   const [source, setSource] = useState<'github' | 'openapi' | null>(null);
@@ -115,6 +126,11 @@ export function BuildPage({
   // Detection result
   const [detected, setDetected] = useState<DetectedApp | null>(null);
   const [githubAttempts, setGithubAttempts] = useState<GithubDetect>(null);
+  // Issue #390 — brief "Found N operations ✓" success flash before we
+  // swap the ramp surface for the review card. ~700 ms so the user reads
+  // the outcome instead of seeing the button silently disappear. Cleared
+  // when `step` leaves 'ramp'.
+  const [detectSucceeded, setDetectSucceeded] = useState<string | null>(null);
   // Issue #390 — detect button had no progress feedback. `detecting`
   // disables the button + swaps the label to "Checking…" while the fetch
   // is in flight; `detectSlow` flips true after 3s so we can surface the
@@ -229,6 +245,29 @@ export function BuildPage({
     const id = window.setTimeout(() => setDetectSlow(true), 3000);
     return () => window.clearTimeout(id);
   }, [detecting]);
+
+  // Issue #391 — heuristic progress ticker for the Publish button.
+  // No server-side SSE yet, so we cycle through the three real ingest
+  // stages every 1.5 s: "Packaging app", "Saving to the directory",
+  // "Warming the renderer". The last stage sticks if the request runs
+  // long. `publishSucceeded` freezes the ticker on "Published ✓" until
+  // the 'done' surface takes over.
+  useEffect(() => {
+    if (!publishing) return;
+    if (publishSucceeded) return;
+    const stages = [
+      'Packaging app…',
+      'Saving to the directory…',
+      'Warming the renderer…',
+    ];
+    let i = 0;
+    setPublishStatus(stages[0]);
+    const id = window.setInterval(() => {
+      i = Math.min(i + 1, stages.length - 1);
+      setPublishStatus(stages[i]);
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [publishing, publishSucceeded]);
 
   /** Parses a GitHub URL into { owner, repo } or null if it doesn't match.
    *  Issue #90: also accepts bare `owner/repo` via normalizeGithubUrl. */
@@ -423,6 +462,10 @@ export function BuildPage({
         setSlug(result.slug);
         setDescription(result.description);
         setSource('github');
+        // Issue #390: brief success flash before we swap to the review
+        // surface. Reads the outcome in one glance so the user knows
+        // the detect actually worked and the jump isn't a crash.
+        await flashDetectSuccess(result.actions.length);
         setStep('review');
         setDetecting(null);
         setDetectStatus('');
@@ -462,6 +505,9 @@ export function BuildPage({
       setSlug(result.slug);
       setDescription(result.description);
       setSource('openapi');
+      // Issue #390: brief "Detected ✓ N operations" flash before the
+      // review surface takes over (see runGithubDetect).
+      await flashDetectSuccess(result.actions.length);
       setStep('review');
       setDetecting(null);
       setDetectStatus('');
@@ -502,6 +548,19 @@ export function BuildPage({
     const next =
       '/studio/build?ingest_url=' + encodeURIComponent(handoff);
     navigate('/signup?next=' + encodeURIComponent(next));
+  }
+
+  // Issue #390: brief success acknowledgement before we unmount the
+  // ramp surface. Without this the button vanishes the moment the API
+  // returns, which reads as a page reload instead of a confirmation.
+  // ~700 ms is long enough to read ("Detected ✓ 3 operations") without
+  // feeling like a delay.
+  async function flashDetectSuccess(count: number) {
+    const label = `Detected ✓ ${count} ${count === 1 ? 'operation' : 'operations'}`;
+    setDetectStatus(label);
+    setDetectSucceeded(label);
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+    setDetectSucceeded(null);
   }
 
   // Issue #390: wrap both ramp submit paths with detecting/detectSlow
@@ -606,6 +665,8 @@ export function BuildPage({
       return;
     }
     setPublishing(true);
+    setPublishSucceeded(false);
+    setPublishStatus('Packaging app…');
     setStep('publishing');
     setError(null);
     setSlugSuggestions(null);
@@ -627,13 +688,24 @@ export function BuildPage({
       // to the publisher. Flag is slug-scoped with a 10-minute TTL so
       // a stale flag doesn't fire the celebration for a later visitor.
       markJustPublished(slug);
+      // Issue #391: brief "Published ✓" confirmation before swapping to
+      // the done surface. ~800 ms — short enough to feel tight, long
+      // enough to register as success. Pairs with the ticker useEffect
+      // which freezes once publishSucceeded flips true.
+      setPublishSucceeded(true);
+      setPublishStatus('Published ✓');
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
       setPublishing(false);
+      setPublishStatus('');
+      setPublishSucceeded(false);
       setStep('done');
       // Redirect removed on 2026-04-17: give creators a chance to upload
       // a custom renderer (W2.2) before heading to the permalink. The
       // "Open app" button on the done step handles navigation manually.
     } catch (err) {
       setPublishing(false);
+      setPublishStatus('');
+      setPublishSucceeded(false);
       setStep('review');
       // Slug-taken: server returns 409 with suggestions (audit 2026-04-20,
       // Fix 2). Render the three pills above the submit button and let
@@ -676,6 +748,8 @@ export function BuildPage({
     // the explicit new slug to avoid the stale-state trap.
     if (!detected) return;
     setPublishing(true);
+    setPublishSucceeded(false);
+    setPublishStatus('Packaging app…');
     setStep('publishing');
     setError(null);
     try {
@@ -695,10 +769,17 @@ export function BuildPage({
       // Issue #255: mark this slug as "just published" so the celebration
       // on /p/:slug fires for the creator, not for every later visitor.
       markJustPublished(next);
+      setPublishSucceeded(true);
+      setPublishStatus('Published ✓');
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
       setPublishing(false);
+      setPublishStatus('');
+      setPublishSucceeded(false);
       setStep('done');
     } catch (err) {
       setPublishing(false);
+      setPublishStatus('');
+      setPublishSucceeded(false);
       setStep('review');
       if (err instanceof api.ApiError && err.status === 409 && err.code === 'slug_taken') {
         const payload = err.payload as { suggestions?: string[] } | undefined;
@@ -926,7 +1007,10 @@ export function BuildPage({
                 <button
                   type="submit"
                   data-testid="build-github-detect"
-                  disabled={!githubUrl || sessionLoading || detecting !== null}
+                  disabled={
+                    !githubUrl || sessionLoading || detecting !== null || detectSucceeded !== null
+                  }
+                  aria-busy={detecting === 'github'}
                   style={{
                     padding: '8px 14px',
                     background: 'var(--accent)',
@@ -936,8 +1020,13 @@ export function BuildPage({
                     fontSize: 12,
                     fontWeight: 600,
                     cursor:
-                      !githubUrl || sessionLoading || detecting !== null ? 'not-allowed' : 'pointer',
-                    opacity: !githubUrl || sessionLoading || detecting !== null ? 0.55 : 1,
+                      !githubUrl || sessionLoading || detecting !== null || detectSucceeded !== null
+                        ? 'not-allowed'
+                        : 'pointer',
+                    opacity:
+                      !githubUrl || sessionLoading || detecting !== null || detectSucceeded !== null
+                        ? 0.55
+                        : 1,
                     fontFamily: 'inherit',
                     flexShrink: 0,
                     display: 'inline-flex',
@@ -946,16 +1035,29 @@ export function BuildPage({
                   }}
                 >
                   {detecting === 'github' ? <Spinner size={12} /> : null}
-                  {detecting === 'github' ? 'Checking…' : 'Detect'}
+                  {detecting === 'github'
+                    ? detectSlow
+                      ? 'Detecting OpenAPI spec…'
+                      : 'Detecting…'
+                    : 'Detect'}
                 </button>
               </div>
-              {detecting === 'github' && (
+              {(detecting === 'github' || detectSucceeded) && (
                 <div
                   data-testid="build-github-progress"
-                  style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    fontSize: 12,
+                    color: detectSucceeded ? 'var(--accent)' : 'var(--muted)',
+                    fontWeight: detectSucceeded ? 600 : 400,
+                    marginBottom: 10,
+                  }}
                 >
-                  {detectStatus}
-                  {detectSlow ? ' Still looking, this can take up to 10 seconds.' : ''}
+                  {detectSucceeded || detectStatus}
+                  {!detectSucceeded && detectSlow
+                    ? ' Still looking, this can take up to 10 seconds.'
+                    : ''}
                 </div>
               )}
               <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
@@ -1090,30 +1192,51 @@ export function BuildPage({
               <button
                 type="submit"
                 data-testid="build-detect"
-                disabled={!openapiUrl || sessionLoading || detecting !== null}
+                disabled={
+                  !openapiUrl || sessionLoading || detecting !== null || detectSucceeded !== null
+                }
+                aria-busy={detecting === 'openapi'}
                 style={{
-                  ...primaryButton(!openapiUrl || sessionLoading || detecting !== null),
+                  ...primaryButton(
+                    !openapiUrl ||
+                      sessionLoading ||
+                      detecting !== null ||
+                      detectSucceeded !== null,
+                  ),
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 8,
                 }}
               >
                 {detecting === 'openapi' ? <Spinner size={13} /> : null}
-                {detecting === 'openapi' ? 'Checking…' : 'Find it'}
+                {detecting === 'openapi'
+                  ? detectSlow
+                    ? 'Detecting OpenAPI spec…'
+                    : 'Detecting…'
+                  : 'Find it'}
               </button>
-              {detecting === 'openapi' && (
+              {(detecting === 'openapi' || detectSucceeded) && (
                 <div
                   data-testid="build-openapi-progress"
-                  style={{ fontSize: 12, color: 'var(--muted)', marginTop: 10 }}
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    fontSize: 12,
+                    color: detectSucceeded ? 'var(--accent)' : 'var(--muted)',
+                    fontWeight: detectSucceeded ? 600 : 400,
+                    marginTop: 10,
+                  }}
                 >
-                  {detectStatus}
-                  {detectSlow ? ' Still looking, this can take up to 10 seconds.' : ''}
+                  {detectSucceeded || detectStatus}
+                  {!detectSucceeded && detectSlow
+                    ? ' Still looking, this can take up to 10 seconds.'
+                    : ''}
                 </div>
               )}
               {/* Issue #390: after 3 s, surface the "deep paths can take
                   up to 10 s" copy so the user knows the fallback probe
                   (issue #389) is still running rather than silently stuck. */}
-              {detectSlow && detecting === 'openapi' && (
+              {detectSlow && detecting === 'openapi' && !detectSucceeded && (
                 <div
                   data-testid="build-detect-slow"
                   style={{
@@ -1332,6 +1455,7 @@ export function BuildPage({
                     onClick={handlePublish}
                     data-testid="build-publish"
                     disabled={!name || !slug || publishing}
+                    aria-busy={publishing}
                     style={{
                       ...primaryButton(!name || !slug || publishing),
                       background: 'var(--accent)',
@@ -1345,6 +1469,26 @@ export function BuildPage({
                     {publishing ? <Spinner size={13} /> : null}
                     {publishing ? 'Publishing…' : publishButtonLabel(visibility)}
                   </button>
+                  {/* Issue #391: inline status line below the Publish
+                      button so the brief window between click and the
+                      full 'publishing' surface isn't silent. The same
+                      status feeds the full surface below (see
+                      step === 'publishing'). */}
+                  {publishing && publishStatus && (
+                    <div
+                      data-testid="build-publish-progress"
+                      role="status"
+                      aria-live="polite"
+                      style={{
+                        marginTop: 10,
+                        fontSize: 12,
+                        color: publishSucceeded ? 'var(--accent)' : 'var(--muted)',
+                        fontWeight: publishSucceeded ? 600 : 400,
+                      }}
+                    >
+                      {publishStatus}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1647,8 +1791,65 @@ export function BuildPage({
         )}
 
         {step === 'publishing' && (
-          <div data-testid="build-step-publishing" style={{ padding: 40, textAlign: 'center' }}>
-            <p style={{ fontSize: 14, color: 'var(--muted)' }}>Publishing...</p>
+          <div
+            data-testid="build-step-publishing"
+            role="status"
+            aria-live="polite"
+            aria-busy={!publishSucceeded}
+            style={{ padding: 40, textAlign: 'center' }}
+          >
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+                padding: '14px 18px',
+                borderRadius: 12,
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                color: 'var(--ink)',
+                fontSize: 14,
+                fontWeight: 500,
+                minWidth: 240,
+              }}
+            >
+              {publishSucceeded ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 20,
+                    height: 20,
+                    borderRadius: 999,
+                    background: '#e6f4ea',
+                    color: '#1a7f37',
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M3 8l3 3 7-7"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+              ) : (
+                <Spinner size={14} />
+              )}
+              <span style={{ color: publishSucceeded ? '#1a7f37' : 'var(--ink)' }}>
+                {publishStatus || 'Publishing…'}
+              </span>
+            </div>
+            {!publishSucceeded && (
+              <p style={{ marginTop: 14, fontSize: 12.5, color: 'var(--muted)' }}>
+                This usually takes a few seconds.
+              </p>
+            )}
           </div>
         )}
 
