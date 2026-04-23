@@ -85,16 +85,22 @@ app.get('/renderer/foo/frame.html', (c) => {
     res.headers.get('referrer-policy') === 'strict-origin-when-cross-origin',
   );
 
-  // Pentest MED #380 — style-src no longer carries 'unsafe-inline'.
+  // 2026-04-24: We re-allow 'unsafe-inline' for style-src-elem because
+  // the app has 18 React components that render JSX `<style>{`@media…`}</style>`
+  // blocks for responsive layout. Stripping unsafe-inline (pentest MED #380)
+  // silently killed every one of those media queries — mobile /apps
+  // stacked 4 tiles into 73.5px columns, /p/:slug mobile grid broke, etc.
+  // Tracking issue for migrating the JSX <style> tags to static CSS
+  // modules in docs/ops/security-headers.md; once that migration lands
+  // we can re-strip 'unsafe-inline' from style-src-elem.
   log(
-    "landing: style-src has NO 'unsafe-inline' (fallback)",
-    /style-src [^;]*'self'/.test(csp) &&
-      !/style-src [^;]*'unsafe-inline'/.test(csp),
+    "landing: style-src-elem includes 'unsafe-inline' (JSX <style> compat)",
+    /style-src-elem [^;]*'unsafe-inline'/.test(csp),
     `got=${csp}`,
   );
   log(
-    'landing: style-src-elem restricts stylesheets',
-    csp.includes("style-src-elem 'self' https://fonts.googleapis.com"),
+    'landing: style-src-elem keeps same-origin + Google Fonts',
+    csp.includes("style-src-elem 'self' https://fonts.googleapis.com 'unsafe-inline'"),
   );
   log(
     "landing: style-src-attr allows inline (React style={{}} compat)",

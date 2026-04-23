@@ -12,21 +12,27 @@
 //     index.html, which we removed in the same PR.
 //     `application/ld+json` is a data block, not executable, so it's
 //     exempt from script-src.
-//   - `style-src 'self' https://fonts.googleapis.com` — NO `'unsafe-inline'`
-//     (pentest MED #380). We split into the two sub-directives so the
-//     stricter rule applies to `<style>`/`<link rel=stylesheet>` while
-//     React's runtime `style={{ ... }}` props continue to work:
-//     * `style-src-elem 'self' https://fonts.googleapis.com` — stylesheets
-//       must come from same-origin or Google Fonts. No inline `<style>`
-//       tags permitted (Vite's production build doesn't emit any).
+//   - `style-src 'self' https://fonts.googleapis.com 'unsafe-inline'`.
+//     We split into the two sub-directives:
+//     * `style-src-elem 'self' https://fonts.googleapis.com 'unsafe-inline'`
+//       — stylesheets must come from same-origin or Google Fonts, and we
+//       also allow runtime `<style>` tags. 18 React components across the
+//       app render JSX `<style>{`@media ...`}</style>` tags to carry their
+//       responsive behaviour (AppGrid, AppPermalinkPage, PricingPage,
+//       AboutPage, LandingV17Page, HeroAppTiles, LayersGrid, ProofRow,
+//       etc.). Before 2026-04-24 we had `'unsafe-inline'` stripped from
+//       this directive (pentest MED #380), which silently killed EVERY
+//       one of those `@media` rules — mobile `/apps` stacked 4 tiles in a
+//       73.5px-wide column, `/p/:slug` mobile grid was broken, etc. The
+//       responsive regression is far worse than the pentest finding it
+//       was meant to close, so we've reinstated `'unsafe-inline'` here
+//       and filed a follow-up (tracked in docs/ops/security-headers.md)
+//       to migrate those inline `<style>` blocks into static CSS modules.
+//       Once that migration lands, we can re-remove `'unsafe-inline'` from
+//       `style-src-elem`.
 //     * `style-src-attr 'unsafe-inline'` — allows `style="..."` attributes
 //       only. 1,100+ React components use `style={{...}}` props across
-//       the codebase; nonce/hash per-render is infeasible at SPA scale
-//       and the attack surface is narrower than full `style-src
-//       'unsafe-inline'` (injected inline `<style>` tags are now blocked).
-//     This satisfies the pentest finding: no `'unsafe-inline'` in the
-//     fallback `style-src` directive. Attribute-level injection is a
-//     smaller residual surface tracked as a longer-term follow-up.
+//       the codebase; nonce/hash per-render is infeasible at SPA scale.
 //   - `img-src 'self' data: https:` — OG images, external icon CDNs
 //     (SimpleIcons, svgl, favicons), and data: for inline SVG sprites.
 //   - `connect-src 'self' https://api.github.com` — same-origin API
@@ -94,10 +100,12 @@ import type { MiddlewareHandler } from 'hono';
 export const TOP_LEVEL_CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  // Fallback directive: no unsafe-inline. Both style-src-elem and
-  // style-src-attr below override this for their respective surfaces.
-  "style-src 'self' https://fonts.googleapis.com",
-  "style-src-elem 'self' https://fonts.googleapis.com",
+  // Style policies: we allow inline <style> tags until the JSX-<style>
+  // responsive blocks (18 files) are migrated to static CSS modules.
+  // See docs/ops/security-headers.md for the tracking item and the
+  // block comment above for the full rationale.
+  "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
+  "style-src-elem 'self' https://fonts.googleapis.com 'unsafe-inline'",
   "style-src-attr 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data: https://fonts.gstatic.com",

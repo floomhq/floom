@@ -3,7 +3,9 @@
 // brand + "Your apps (N)" list + "+ New app" CTA. When a slug is active,
 // expand a per-app sub-tree (Overview / Runs / Secrets / Access /
 // Renderer / Analytics). Footer pinned: Settings · Billing (stub) · Back
-// to Store.
+// to floom.dev. (Formerly "Back to Store" — we rebranded /store to
+// /apps and the nav label to "Apps", so the Studio footer now reads
+// "Back to floom.dev" which matches the home route anyway.)
 //
 // Styled to match the darker creator surface (#F5F5F1 background).
 //
@@ -224,7 +226,7 @@ export function StudioSidebar({
           data-testid="studio-sidebar-back-to-store"
           style={{ ...footerLink(false), marginTop: 6 }}
         >
-          ← Back to Store
+          ← Back to floom.dev
         </Link>
         {user && !signedOutPreview && (
           <div

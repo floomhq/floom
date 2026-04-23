@@ -8,16 +8,24 @@
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 
+// Code blocks use fixed dark chrome so the install commands are legible on
+// both light and dark themes. The previous implementation did
+// `color: var(--ink, #e6e6e6)`, and because `--ink` IS defined site-wide
+// (to `#1c1a14` in light mode), the CSS var fallback never applied —
+// that painted near-black text on a near-black background and the three
+// install snippets on /install rendered as solid black rectangles.
+// Fix: hardcode the code-block foreground/border colors here; the block
+// is intentionally dark regardless of theme to read like a terminal.
 const codeBlockStyle: React.CSSProperties = {
-  background: 'var(--surface-2, #0d0f14)',
-  color: 'var(--ink, #e6e6e6)',
+  background: '#0d0f14',
+  color: '#e6e6e6',
   padding: '14px 16px',
   borderRadius: 10,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 13,
   lineHeight: 1.5,
   overflowX: 'auto',
-  border: '1px solid var(--border, rgba(255,255,255,0.08))',
+  border: '1px solid rgba(255,255,255,0.08)',
   margin: '8px 0 20px',
 };
 
