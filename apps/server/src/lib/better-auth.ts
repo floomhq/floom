@@ -113,9 +113,9 @@ let cachedAuth: FloomAuth | null | undefined;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildAuthOptions(_overrideBaseURL?: string): any {
   const secret = process.env.BETTER_AUTH_SECRET;
-  if (!secret || secret.length < 16) {
+  if (!secret || secret.length < 32) {
     throw new Error(
-      'FLOOM_CLOUD_MODE=true requires BETTER_AUTH_SECRET to be at least 16 chars long. ' +
+      'FLOOM_CLOUD_MODE=true requires BETTER_AUTH_SECRET to be at least 32 chars long. ' +
         'Generate with: openssl rand -hex 32',
     );
   }

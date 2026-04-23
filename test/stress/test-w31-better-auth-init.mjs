@@ -92,7 +92,7 @@ try {
 }
 log(
   'getAuth: cloud + short secret → clear error',
-  /at least 16/.test(threw || ''),
+  /at least 32/.test(threw || ''),
 );
 
 // ---- 8. Valid secret returns a real instance ----
