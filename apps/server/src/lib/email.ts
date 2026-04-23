@@ -130,29 +130,127 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function baseLayout(body: string): string {
-  // Minimal inline-CSS layout. No images, no trackers.
+// ─────────────────────────────────────────────────────────────────────────
+// Branded email chrome
+//
+// Email clients are a mess. Gmail strips <style> tags, Outlook on Windows
+// ignores half the CSS spec, dark-mode clients invert colors unpredictably.
+// So every template is a <table>-based layout with inline styles and no
+// external assets — the chrome below matches the floom.dev look-and-feel
+// without depending on images (Gmail's image-block-by-default would hide
+// any logo we shipped as an <img>).
+//
+// Palette matches `apps/web/src/styles/globals.css` tokens:
+//   --bg:     #f8f5ef   (cream page background)
+//   --card:   #ffffff   (email card)
+//   --line:   #eceae3   (borders / rules)
+//   --ink:    #1c1a14   (primary text)
+//   --muted:  #6b6659   (secondary text)
+//   --accent: #0a9d63   (green dot, link hovers in body)
+//
+// Typography mirrors the site pairing: Georgia as a web-safe stand-in for
+// Fraunces on display copy, system sans for running text.
+// ─────────────────────────────────────────────────────────────────────────
+
+const EMAIL_BG = '#f8f5ef';
+const EMAIL_CARD = '#ffffff';
+const EMAIL_LINE = '#eceae3';
+const EMAIL_INK = '#1c1a14';
+const EMAIL_MUTED = '#6b6659';
+const EMAIL_ACCENT = '#0a9d63';
+const SERIF = "Georgia, 'Times New Roman', serif";
+const SANS =
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+interface BaseLayoutOpts {
+  /** Serif display heading that leads the email. */
+  heading: string;
+  /** Main body HTML, already escaped where needed. */
+  body: string;
+  /** Optional preheader — the inbox-preview snippet shown next to the
+   *  subject line. Hidden in the rendered email. */
+  preheader?: string;
+}
+
+/**
+ * Wrap a template body in the shared Floom email chrome.
+ *
+ * Structure:
+ *   1. Hidden preheader (inbox preview text)
+ *   2. Brand bar — green dot + "floom" wordmark, no images
+ *   3. Serif H1 heading that the caller provides
+ *   4. Body HTML from the template
+ *   5. Sign-off + muted footer (address, support email, reply-hint)
+ */
+function baseLayout({ heading, body, preheader }: BaseLayoutOpts): string {
+  const preheaderBlock = preheader
+    ? `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>`
+    : '';
+
   return `<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Floom</title></head>
-<body style="margin:0;padding:0;background:#fafaf7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fafaf7;padding:40px 0;">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>Floom</title>
+</head>
+<body style="margin:0;padding:0;background:${EMAIL_BG};font-family:${SANS};color:${EMAIL_INK};-webkit-font-smoothing:antialiased;">
+${preheaderBlock}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${EMAIL_BG};padding:32px 16px;">
 <tr><td align="center">
-<table width="560" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:1px solid #eceae3;border-radius:10px;padding:32px;">
-<tr><td>
-<div style="font-size:18px;font-weight:700;letter-spacing:-0.2px;color:#111;margin-bottom:24px;">Floom</div>
-${body}
-<hr style="border:none;border-top:1px solid #eceae3;margin:32px 0 16px;">
-<div style="font-size:12px;color:#77736a;line-height:1.5;">
-Floom, Inc. &middot; Wilmington, DE<br>
-Questions? <a href="mailto:hello@floom.dev" style="color:#77736a;text-decoration:underline;">hello@floom.dev</a>
-</div>
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
+
+<tr><td style="padding:4px 4px 20px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0">
+<tr>
+<td style="vertical-align:middle;padding-right:8px;">
+<div style="width:10px;height:10px;border-radius:50%;background:${EMAIL_ACCENT};"></div>
+</td>
+<td style="vertical-align:middle;font-family:${SANS};font-size:15px;font-weight:600;color:${EMAIL_INK};letter-spacing:-0.01em;">
+floom
+</td>
+</tr>
+</table>
 </td></tr>
+
+<tr><td style="background:${EMAIL_CARD};border:1px solid ${EMAIL_LINE};border-radius:12px;padding:40px 36px;">
+<h1 style="margin:0 0 20px;font-family:${SERIF};font-size:26px;line-height:1.25;font-weight:600;letter-spacing:-0.01em;color:${EMAIL_INK};">${heading}</h1>
+${body}
+</td></tr>
+
+<tr><td style="padding:24px 4px 4px;font-family:${SANS};font-size:12px;line-height:1.6;color:${EMAIL_MUTED};">
+Floom, Inc. &middot; Wilmington, DE<br>
+Questions or feedback? Just reply to this email, or write <a href="mailto:hello@floom.dev" style="color:${EMAIL_MUTED};text-decoration:underline;">hello@floom.dev</a>.
+</td></tr>
+
 </table>
 </td></tr>
 </table>
 </body>
 </html>`;
+}
+
+/** Primary CTA button — same chrome across every template. */
+function ctaButton(href: string, label: string): string {
+  const safeHref = escapeHtml(href);
+  const safeLabel = escapeHtml(label);
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;"><tr><td style="border-radius:8px;background:${EMAIL_INK};"><a href="${safeHref}" style="display:inline-block;background:${EMAIL_INK};color:#ffffff;text-decoration:none;padding:13px 22px;border-radius:8px;font-family:${SANS};font-size:14px;font-weight:600;letter-spacing:-0.005em;">${safeLabel}</a></td></tr></table>`;
+}
+
+/** Muted "paste this link" fallback line that sits under every CTA. */
+function fallbackLink(href: string): string {
+  const safe = escapeHtml(href);
+  return `<p style="font-family:${SANS};font-size:13px;line-height:1.55;margin:0 0 16px;color:${EMAIL_MUTED};">Or paste this link into your browser:<br><a href="${safe}" style="color:${EMAIL_MUTED};word-break:break-all;">${safe}</a></p>`;
+}
+
+function bodyParagraph(html: string): string {
+  return `<p style="font-family:${SANS};font-size:15px;line-height:1.6;margin:0 0 16px;color:${EMAIL_INK};">${html}</p>`;
+}
+
+function mutedParagraph(html: string): string {
+  return `<p style="font-family:${SANS};font-size:13px;line-height:1.55;margin:16px 0 0;color:${EMAIL_MUTED};">${html}</p>`;
 }
 
 export interface ResetPasswordTemplateInput {
@@ -169,15 +267,18 @@ export function renderResetPasswordEmail(input: ResetPasswordTemplateInput): {
 } {
   const subject = 'Reset your Floom password';
   const greeting = input.name ? `Hi ${escapeHtml(input.name)},` : 'Hi,';
-  const safeUrl = escapeHtml(input.resetUrl);
 
-  const body = `
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px;">${greeting}</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 20px;">We got a request to reset the password on your Floom account. Click the button below to choose a new one.</p>
-<p style="margin:24px 0;"><a href="${safeUrl}" style="display:inline-block;background:#111;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">Reset password</a></p>
-<p style="font-size:13px;line-height:1.55;margin:0 0 16px;color:#44413a;">Or paste this link into your browser:<br><a href="${safeUrl}" style="color:#44413a;word-break:break-all;">${safeUrl}</a></p>
-<p style="font-size:12px;line-height:1.55;margin:16px 0 0;color:#77736a;">If you didn't request this, ignore this email. The link expires in 1 hour.</p>
-`;
+  const body = [
+    bodyParagraph(greeting),
+    bodyParagraph(
+      'We got a request to reset the password on your Floom account. Click the button below to choose a new one.',
+    ),
+    ctaButton(input.resetUrl, 'Reset password'),
+    fallbackLink(input.resetUrl),
+    mutedParagraph(
+      "If you didn't request this, ignore this email. The link expires in 1 hour.",
+    ),
+  ].join('\n');
 
   const text = [
     input.name ? `Hi ${input.name},` : 'Hi,',
@@ -193,7 +294,16 @@ export function renderResetPasswordEmail(input: ResetPasswordTemplateInput): {
     'hello@floom.dev',
   ].join('\n');
 
-  return { subject, html: baseLayout(body), text };
+  return {
+    subject,
+    html: baseLayout({
+      heading: 'Reset your password',
+      body,
+      preheader:
+        'Set a new password on your Floom account. Link valid for one hour.',
+    }),
+    text,
+  };
 }
 
 export interface VerificationTemplateInput {
@@ -208,15 +318,18 @@ export function renderVerificationEmail(input: VerificationTemplateInput): {
 } {
   const subject = 'Verify your Floom email';
   const greeting = input.name ? `Hi ${escapeHtml(input.name)},` : 'Hi,';
-  const safeUrl = escapeHtml(input.verifyUrl);
 
-  const body = `
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px;">${greeting}</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 20px;">Click the button below to verify your email and finish setting up your Floom account.</p>
-<p style="margin:24px 0;"><a href="${safeUrl}" style="display:inline-block;background:#111;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">Verify email</a></p>
-<p style="font-size:13px;line-height:1.55;margin:0 0 16px;color:#44413a;">Or paste this link into your browser:<br><a href="${safeUrl}" style="color:#44413a;word-break:break-all;">${safeUrl}</a></p>
-<p style="font-size:12px;line-height:1.55;margin:16px 0 0;color:#77736a;">If you did not create this account, you can ignore this email.</p>
-`;
+  const body = [
+    bodyParagraph(greeting),
+    bodyParagraph(
+      'Click the button below to verify your email and finish setting up your Floom account.',
+    ),
+    ctaButton(input.verifyUrl, 'Verify email'),
+    fallbackLink(input.verifyUrl),
+    mutedParagraph(
+      'If you did not create this account, you can ignore this email.',
+    ),
+  ].join('\n');
 
   const text = [
     input.name ? `Hi ${input.name},` : 'Hi,',
@@ -231,7 +344,16 @@ export function renderVerificationEmail(input: VerificationTemplateInput): {
     'hello@floom.dev',
   ].join('\n');
 
-  return { subject, html: baseLayout(body), text };
+  return {
+    subject,
+    html: baseLayout({
+      heading: 'Verify your email',
+      body,
+      preheader:
+        'One click to confirm this is your address and finish setup.',
+    }),
+    text,
+  };
 }
 
 export interface WelcomeTemplateInput {
@@ -247,14 +369,17 @@ export function renderWelcomeEmail(input: WelcomeTemplateInput): {
   const subject = 'Welcome to Floom';
   const greeting = input.name ? `Hi ${escapeHtml(input.name)},` : 'Hi,';
   const buildUrl = `${input.publicUrl.replace(/\/+$/, '')}/studio/build`;
-  const safeBuild = escapeHtml(buildUrl);
 
-  const body = `
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px;">${greeting}</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 20px;">Your account is live. Your first app is one URL paste away.</p>
-<p style="margin:24px 0;"><a href="${safeBuild}" style="display:inline-block;background:#111;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">Build your first app</a></p>
-<p style="font-size:13px;line-height:1.55;margin:0 0 8px;color:#44413a;">If you get stuck, just reply to this email.</p>
-`;
+  const body = [
+    bodyParagraph(greeting),
+    bodyParagraph(
+      'Your account is live. Your first app is one URL paste away — point Floom at a GitHub repo or an OpenAPI spec and it does the rest.',
+    ),
+    ctaButton(buildUrl, 'Build your first app'),
+    mutedParagraph(
+      'Stuck? Just reply to this email. A human reads every one.',
+    ),
+  ].join('\n');
 
   const text = [
     input.name ? `Hi ${input.name},` : 'Hi,',
@@ -262,11 +387,84 @@ export function renderWelcomeEmail(input: WelcomeTemplateInput): {
     'Your account is live. Your first app is one URL paste away:',
     buildUrl,
     '',
-    'If you get stuck, just reply to this email.',
+    'Stuck? Just reply to this email. A human reads every one.',
     '',
     'Floom, Inc. · Wilmington, DE',
     'hello@floom.dev',
   ].join('\n');
 
-  return { subject, html: baseLayout(body), text };
+  return {
+    subject,
+    html: baseLayout({
+      heading: 'Welcome to Floom',
+      body,
+      preheader:
+        'Your account is live. Paste a repo, ship an app — your first one is on us.',
+    }),
+    text,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Waitlist confirmation
+//
+// Previously rendered inline inside `apps/server/src/routes/waitlist.ts`
+// with a duplicated (and subtly drifted) copy of baseLayout. Moved here
+// so every Floom email ships the same chrome and so the waitlist email
+// can get a real CTA instead of being a wall of prose.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface WaitlistConfirmationTemplateInput {
+  /** Public origin the "Browse the live apps" CTA should point at. */
+  publicUrl: string;
+}
+
+export function renderWaitlistConfirmationEmail(
+  input: WaitlistConfirmationTemplateInput,
+): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const subject = "You're on the Floom waitlist";
+  const appsUrl = `${input.publicUrl.replace(/\/+$/, '')}/apps`;
+
+  const body = [
+    bodyParagraph('Thanks for signing up.'),
+    bodyParagraph(
+      "You're on the waitlist for publishing to floom.dev. We're rolling it out in small batches — we'll email you the moment your slot opens.",
+    ),
+    bodyParagraph(
+      "In the meantime, the featured apps on floom.dev are free to run, no signup required. Lead Scorer, Resume Screener, and Competitor Analyzer are good first stops.",
+    ),
+    ctaButton(appsUrl, 'Browse the live apps'),
+    mutedParagraph(
+      "Got something specific you want to ship? Hit reply and tell us — we read every response and it genuinely shapes the waitlist order.",
+    ),
+  ].join('\n');
+
+  const text = [
+    'Thanks for signing up.',
+    '',
+    "You're on the waitlist for publishing to floom.dev. We're rolling it out in small batches — we'll email you the moment your slot opens.",
+    '',
+    'In the meantime, the featured apps on floom.dev are free to run, no signup required:',
+    appsUrl,
+    '',
+    "Got something specific you want to ship? Hit reply and tell us — we read every response and it genuinely shapes the waitlist order.",
+    '',
+    'Floom, Inc. · Wilmington, DE',
+    'hello@floom.dev',
+  ].join('\n');
+
+  return {
+    subject,
+    html: baseLayout({
+      heading: "You're on the list",
+      body,
+      preheader:
+        "We're rolling out Publish in small batches. While you wait, three apps are free to run right now.",
+    }),
+    text,
+  };
 }
