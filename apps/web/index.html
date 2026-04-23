@@ -6,9 +6,14 @@
     <meta name="theme-color" content="#047857" />
     <meta name="color-scheme" content="light" />
 
-    <title>Ship AI apps fast · Floom</title>
-    <meta name="description" content="Ship AI apps fast. The protocol + runtime for agentic work. Vibe-coding speed. Production-grade safety. Paste your app's link and get a Claude tool, a page to share, a command-line, and a clean URL your teammates can hit. Sign-in, history, and all the boring stuff are handled." />
-    <link rel="canonical" href="/" />
+    <!-- These are fallback defaults for the landing page and for any
+         surface (crawler, social preview) that reads the HTML before the
+         SPA hydrates. <PageHead /> in apps/web/src/components/PageHead.tsx
+         updates every route at render time (issue #172: canonical URL
+         must reflect the current route, not /). -->
+    <title>AI apps you can ship as easily as you write a prompt · Floom</title>
+    <meta name="description" content="Floom is the protocol and runtime for agentic work. Paste your app's link and get a Claude tool, a page to share, a command-line, and a clean URL your teammates can hit. Sign-in, history, and all the boring stuff are handled." />
+    <link rel="canonical" href="https://floom.dev/" />
 
     <link rel="icon" type="image/svg+xml" href="/floom-mark.svg" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
@@ -19,19 +24,19 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Floom" />
     <meta property="og:url" content="https://floom.dev/" />
-    <meta property="og:title" content="Ship AI apps fast · Floom" />
-    <meta property="og:description" content="The protocol + runtime for agentic work. Vibe-coding speed. Production-grade safety. Works with Claude, Cursor, ChatGPT, Codex CLI, and any MCP client." />
+    <meta property="og:title" content="AI apps you can ship as easily as you write a prompt · Floom" />
+    <meta property="og:description" content="The protocol and runtime for agentic work. Works with Claude, Cursor, ChatGPT, Codex CLI, and any MCP client." />
     <meta property="og:image" content="https://floom.dev/og-main.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Floom. Ship AI apps fast. Works with Claude, Cursor, ChatGPT, Codex CLI, any MCP client." />
+    <meta property="og:image:alt" content="Floom — AI apps you can ship as easily as you write a prompt." />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@floomhq" />
-    <meta name="twitter:title" content="Ship AI apps fast · Floom" />
-    <meta name="twitter:description" content="The protocol + runtime for agentic work. Vibe-coding speed. Production-grade safety. Works with Claude, Cursor, ChatGPT, Codex CLI, and any MCP client." />
+    <meta name="twitter:title" content="AI apps you can ship as easily as you write a prompt · Floom" />
+    <meta name="twitter:description" content="The protocol and runtime for agentic work. Works with Claude, Cursor, ChatGPT, Codex CLI, and any MCP client." />
     <meta name="twitter:image" content="https://floom.dev/og-main.png" />
-    <meta name="twitter:image:alt" content="Floom. Ship AI apps fast. Works with Claude, Cursor, ChatGPT, Codex CLI, any MCP client." />
+    <meta name="twitter:image:alt" content="Floom — AI apps you can ship as easily as you write a prompt." />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -51,8 +56,8 @@
       "name": "Floom",
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Any",
-      "description": "Ship AI apps fast. The protocol + runtime for agentic work. Vibe-coding speed. Production-grade safety. Paste your app's link and get a Claude tool, a page to share, a command-line, a chat interface, and a clean URL your teammates can hit. Sign-in, history, and all the boring stuff are built in. Open source and free to run on your own machine, or use Floom Cloud.",
-      "url": "/",
+      "description": "Floom is the protocol and runtime for agentic work. Paste your app's link and get a Claude tool, a page to share, a command-line, a chat interface, and a clean URL your teammates can hit. Sign-in, history, and all the boring stuff are built in. Open source and free to run on your own machine, or use Floom Cloud.",
+      "url": "https://floom.dev/",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "author": { "@type": "Person", "name": "Federico De Ponte", "url": "https://github.com/federicodeponte" }
     }
@@ -63,17 +68,15 @@
       <!-- SPA fallback. Rendered before React hydrates so crawlers and curl
            see the locked hero copy. Matches landing.floom.dev exactly. -->
       <div style="display:none" data-spa-fallback>
-        <h1>Ship AI apps fast.</h1>
-        <p>The protocol + runtime for agentic work.</p>
-        <p><strong>Vibe-coding speed. Production-grade safety.</strong></p>
+        <h1>AI apps you can ship as easily as you write a prompt.</h1>
+        <p>The protocol and runtime for agentic work.</p>
         <p>Paste your app's link. Get a Claude tool, a page to share, a command-line, a chat interface, and a clean URL. Sign-in, history, and all the boring stuff are built in.</p>
         <p><a href="/apps">Try an app</a> &middot; <a href="/build">Publish an app</a></p>
       </div>
     </div>
     <noscript>
-      <h1>Ship AI apps fast.</h1>
-      <p>The protocol + runtime for agentic work.</p>
-      <p><strong>Vibe-coding speed. Production-grade safety.</strong></p>
+      <h1>AI apps you can ship as easily as you write a prompt.</h1>
+      <p>The protocol and runtime for agentic work.</p>
       <p>Paste your app's link. Get a Claude tool, a page to share, a command-line, a chat interface, and a clean URL. Sign-in, history, and all the boring stuff are built in.</p>
       <p><a href="/apps">Try an app</a> &middot; <a href="/build">Publish an app</a></p>
     </noscript>

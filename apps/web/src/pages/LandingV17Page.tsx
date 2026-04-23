@@ -30,6 +30,7 @@ import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 
+import { PageHead } from '../components/PageHead';
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
 import { CliReference } from '../components/home/CliReference';
 import { PublishCtaBox } from '../components/home/PublishCtaBox';
@@ -115,6 +116,10 @@ export function LandingV17Page() {
       data-testid="landing-v17"
       style={{ minHeight: '100vh', background: 'var(--bg)' }}
     >
+      <PageHead
+        title="AI apps you can ship as easily as you write a prompt · Floom"
+        description="Floom is the protocol and runtime for agentic work. Paste your app's link and get a Claude tool, a page to share, a command-line, and a clean URL your teammates can hit."
+      />
       <TopBar />
 
       <main id="main" style={{ display: 'block' }}>

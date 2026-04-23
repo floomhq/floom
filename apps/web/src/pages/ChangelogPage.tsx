@@ -79,7 +79,10 @@ const PILL_SECONDARY_STYLE: React.CSSProperties = {
 
 export function ChangelogPage() {
   return (
-    <PageShell>
+    <PageShell
+      title="Changelog · Floom"
+      description="Ship notes from the Floom team. Platform features, protocol changes, and apps that recently went live."
+    >
       <section style={SECTION_STYLE}>
         <p style={EYEBROW_STYLE}>CHANGELOG</p>
         <h1 style={H1_STYLE}>What's new in Floom</h1>

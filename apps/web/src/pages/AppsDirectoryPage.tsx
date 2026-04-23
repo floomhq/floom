@@ -12,6 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppGrid } from '../components/public/AppGrid';
 import { FeedbackButton } from '../components/FeedbackButton';
+import { PageHead } from '../components/PageHead';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
 import { isPubliclyListed } from '../lib/hub-filter';
@@ -121,7 +122,6 @@ export function AppsDirectoryPage() {
   }, []);
 
   useEffect(() => {
-    document.title = 'Apps · Floom';
     loadHub();
   }, [loadHub]);
 
@@ -194,6 +194,10 @@ export function AppsDirectoryPage() {
       data-testid="apps-directory"
       style={{ minHeight: '100vh', background: 'var(--bg)' }}
     >
+      <PageHead
+        title="Apps · Floom"
+        description="Browse AI apps on Floom. Each one runs as a Claude tool, a shareable page, a command-line, and a clean HTTP endpoint."
+      />
       <TopBar />
 
       <main>

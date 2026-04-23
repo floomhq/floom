@@ -356,6 +356,10 @@ export function AppPermalinkPage() {
     setMeta('og:description', app.description, true);
     setMeta('og:url', `${window.location.origin}/p/${app.slug}`, true);
     setMeta('og:type', 'website', true);
+    // Canonical URL — every /p/:slug permalink on floom.dev should self-
+    // reference, not inherit the landing page's canonical (issue #172).
+    const canon = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (canon) canon.setAttribute('href', `https://floom.dev/p/${app.slug}`);
     // Per-app dynamic OG card (served by /og/:slug.svg on the same origin).
     setMeta('og:image', `${window.location.origin}/og/${app.slug}.svg`, true);
     setMeta('twitter:image', `${window.location.origin}/og/${app.slug}.svg`);

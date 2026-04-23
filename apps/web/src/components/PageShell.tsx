@@ -18,6 +18,10 @@ interface Props {
   children: ReactNode;
   requireAuth?: 'cloud' | 'any' | null;
   title?: string;
+  /** Meta description for this route. Forwarded to BaseLayout which
+   *  updates <meta name="description"> + og:description + twitter:description
+   *  on mount / route change. */
+  description?: string;
   contentStyle?: React.CSSProperties;
   allowSignedOutShell?: boolean;
   /** Forwarded to BaseLayout. Pages that are auth-gated and don't
@@ -29,6 +33,7 @@ export function PageShell({
   children,
   requireAuth = null,
   title,
+  description,
   contentStyle,
   allowSignedOutShell = false,
   noIndex = false,
@@ -36,6 +41,7 @@ export function PageShell({
   return (
     <BaseLayout
       title={title}
+      description={description}
       requireAuth={requireAuth}
       allowSignedOutShell={allowSignedOutShell}
       noIndex={noIndex}
