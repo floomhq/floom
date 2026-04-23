@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Logo } from './Logo';
 import { useSession, clearSession } from '../hooks/useSession';
+import { useMyApps } from '../hooks/useMyApps';
 import * as api from '../api/client';
 import { readDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
@@ -101,7 +102,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
   const { data, isAuthenticated, refresh } = useSession();
+  const { apps: myApps } = useMyApps();
   const deployEnabled = useMemo(() => readDeployEnabled(), []);
+  const studioNavLabel =
+    isAuthenticated && myApps && myApps.length > 0
+      ? `Studio (${myApps.length})`
+      : 'Studio';
   const navigate = useNavigate();
   const location = useLocation();
   const dropRef = useRef<HTMLDivElement>(null);
@@ -307,7 +313,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   aria-current={isStudio ? 'page' : undefined}
                   style={navLinkStyle(isStudio)}
                 >
-                  Studio
+                  {studioNavLabel}
                 </Link>
                 <Link
                   to="/me"
@@ -439,7 +445,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     role="menuitem"
                     style={menuItemStyle}
                   >
-                    Studio
+                    {studioNavLabel}
                   </Link>
                   <Link
                     to="/me/api-keys"
@@ -630,7 +636,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   data-testid="topbar-mobile-studio"
                   aria-current={isStudio ? 'page' : undefined}
                 >
-                  Studio
+                  {studioNavLabel}
                 </Link>
                 <Link
                   to="/me"
