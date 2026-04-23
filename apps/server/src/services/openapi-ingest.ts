@@ -1090,10 +1090,139 @@ export async function fetchSpec(
 // happy path (`/openapi.json`) resolves in one hop.
 const COMMON_SPEC_SUFFIXES = [
   '/openapi.json',
+  '/openapi.yaml',
+  '/openapi.yml',
   '/swagger.json',
+  '/swagger.yaml',
+  '/swagger.yml',
   '/.well-known/openapi.json',
   '/v1/openapi.json',
 ] as const;
+
+/**
+ * Filenames we try under a repo root when the caller pastes a GitHub URL.
+ * Order matters: JSON first (cheaper to parse), YAML second (more common in
+ * the wild). Keep this list short — every entry becomes a probe.
+ */
+const GITHUB_SPEC_FILENAMES = [
+  'openapi.json',
+  'openapi.yaml',
+  'openapi.yml',
+  'swagger.json',
+  'swagger.yaml',
+  'swagger.yml',
+] as const;
+
+/**
+ * Branch names we fall back to when the user's GitHub URL doesn't pin one
+ * explicitly (`/tree/<branch>/...`). `main` first (modern default), `master`
+ * second (older repos). We only probe one extra branch to stay inside the
+ * 10s total budget after accounting for spec-filename fanout.
+ */
+const GITHUB_DEFAULT_BRANCHES = ['main', 'master'] as const;
+
+/**
+ * Parse a pasted GitHub *web* URL (github.com/...) into its components so we
+ * can rewrite it into raw.githubusercontent.com probes. Returns `null` for
+ * non-GitHub URLs, gist URLs, marketplace URLs, or anything that doesn't
+ * match `github.com/<owner>/<repo>[/...]`.
+ *
+ * Handles all of these shapes:
+ *   - https://github.com/owner/repo
+ *   - https://github.com/owner/repo.git
+ *   - https://github.com/owner/repo/                    (trailing slash)
+ *   - https://github.com/owner/repo/tree/<branch>
+ *   - https://github.com/owner/repo/tree/<branch>/<dir>
+ *   - https://github.com/owner/repo/blob/<branch>/<path/to/spec.yaml>
+ *
+ * When a `blob` URL points directly at a spec file, we return it as a
+ * single `directSpecRawUrl` so the caller probes that file first.
+ *
+ * Exported for tests.
+ */
+export function parseGithubWebUrl(inputUrl: string): {
+  owner: string;
+  repo: string;
+  branch: string | null;
+  subdir: string;
+  directSpecRawUrl: string | null;
+} | null {
+  let u: URL;
+  try {
+    u = new URL(inputUrl);
+  } catch {
+    return null;
+  }
+  if (u.hostname !== 'github.com' && u.hostname !== 'www.github.com') {
+    return null;
+  }
+  const parts = u.pathname.split('/').filter((s) => s.length > 0);
+  if (parts.length < 2) return null;
+
+  const owner = parts[0];
+  let repo = parts[1];
+  if (repo.endsWith('.git')) repo = repo.slice(0, -4);
+
+  // Reject owner/repo values that look like known non-repo paths.
+  const RESERVED_OWNERS = new Set(['marketplace', 'topics', 'apps', 'orgs', 'settings', 'notifications']);
+  if (RESERVED_OWNERS.has(owner)) return null;
+
+  let branch: string | null = null;
+  let subdir = '';
+  let directSpecRawUrl: string | null = null;
+
+  if (parts.length >= 4 && (parts[2] === 'tree' || parts[2] === 'blob')) {
+    branch = parts[3];
+    const rest = parts.slice(4);
+    if (parts[2] === 'blob' && rest.length > 0) {
+      directSpecRawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${rest.join('/')}`;
+      subdir = rest.slice(0, -1).join('/');
+    } else {
+      subdir = rest.join('/');
+    }
+  }
+
+  return { owner, repo, branch, subdir, directSpecRawUrl };
+}
+
+/**
+ * Turn a parsed GitHub URL into the ordered list of raw.githubusercontent.com
+ * candidate URLs we probe. If the user pointed directly at a spec file with
+ * a `/blob/` URL, that exact raw URL leads. Otherwise we try the subdir (if
+ * any) first, then the repo root, for each of the candidate filenames. If
+ * the user didn't pin a branch, we probe `main` first and `master` second.
+ */
+export function buildGithubRawCandidates(
+  parsed: NonNullable<ReturnType<typeof parseGithubWebUrl>>,
+  maxCandidates = 5,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (url: string) => {
+    if (out.length >= maxCandidates) return;
+    if (seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+
+  if (parsed.directSpecRawUrl) push(parsed.directSpecRawUrl);
+
+  const { owner, repo, branch, subdir } = parsed;
+  const branchList = branch ? [branch] : GITHUB_DEFAULT_BRANCHES;
+
+  // Try subdir first (if any), then repo root. Files in priority order.
+  const pathPrefixes = subdir ? [subdir, ''] : [''];
+  for (const br of branchList) {
+    for (const prefix of pathPrefixes) {
+      for (const file of GITHUB_SPEC_FILENAMES) {
+        const path = prefix ? `${prefix}/${file}` : file;
+        push(`https://raw.githubusercontent.com/${owner}/${repo}/${br}/${path}`);
+        if (out.length >= maxCandidates) return out;
+      }
+    }
+  }
+  return out;
+}
 
 /**
  * Generate an ordered list of candidate URLs to probe when the user-supplied
@@ -1105,9 +1234,25 @@ const COMMON_SPEC_SUFFIXES = [
  * Dedupes — if the input is already `https://api.example.com/openapi.json`
  * the suffix expansion would regenerate the same URL; we skip duplicates.
  *
+ * Special case: GitHub *web* URLs (github.com/owner/repo or /tree/<branch>/...)
+ * are rewritten into raw.githubusercontent.com candidates. The github.com
+ * HTML page itself is never a spec, so including it in the probe list just
+ * burns a candidate slot on a guaranteed miss. (Fix 2026-04-23: openblog
+ * regression — pasted https://github.com/<o>/<r>, spec lived at
+ * raw.githubusercontent.com/<o>/<r>/main/openapi.json, we probed
+ * github.com/<o>/<r>/openapi.json which always 404s.)
+ *
  * Exported for tests.
  */
 export function generateSpecCandidates(inputUrl: string): string[] {
+  // GitHub short-circuit: rewrite github.com web URLs → raw.githubusercontent.
+  const gh = parseGithubWebUrl(inputUrl);
+  if (gh) {
+    const cands = buildGithubRawCandidates(gh);
+    if (cands.length > 0) return cands;
+    // Fall through to generic path walk if parse produced nothing usable.
+  }
+
   let u: URL;
   try {
     u = new URL(inputUrl);
