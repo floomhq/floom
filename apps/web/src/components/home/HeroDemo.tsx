@@ -1,19 +1,33 @@
 /**
  * HeroDemo (v3 — 2026-04-23 morphing canvas).
  *
- * Launch-day state (2026-04-27, waitlist reality):
- *   On production (floom.dev) Deploy is gated behind the waitlist. The hero
- *   cannot visually promise "one slash-command → live app" to every visitor.
- *   So the state machine auto-plays `build → use` only, where Use shows one
- *   of the 3 already-live store apps (Lead Scorer). `DEPLOY_ENABLED` (from
- *   `lib/launchFlags`) flips the machine back to the full `build → deploy →
- *   use` choreography on preview.floom.dev and once the public rollout ships.
+ * 2026-04-27 launch-reality refresh (supersedes the earlier 2-state
+ * collapse):
+ *   - All THREE tabs (Build / Deploy / Use) stay present and selectable
+ *     regardless of `DEPLOY_ENABLED`. Gating the public Deploy flow is
+ *     agent 9's concern; the hero demo is a visual explainer of the
+ *     product, not a live deploy button.
+ *   - Background: no more black. The entire canvas, editor surface,
+ *     sidebar, terminal, and Deploy chrome run on the cream/paper palette
+ *     (`#faf8f3` / `#f8f5ef` / `#ffffff`) — the landing-brand surface, not
+ *     the hacker-terminal one. Lineage: Vikas 70b5068.
+ *   - Deploy fills the frame: Deploy is no longer a small strip at the
+ *     bottom of the shared editor terminal. It gets a dedicated two-pane
+ *     layout — a left "publish checklist" column + the completed editor
+ *     on the right — so the tab feels as full-bleed as Build and Use.
+ *     Lineage: Fede c2703ad WIP snapshot.
+ *   - Use tab has room to breathe: card sits in a generous 20/28px padded
+ *     surface with a taller result slot, no cramped thumbnail feel.
  *
- * Original spec (Federico, 2026-04-23):
+ * Spec (Federico, 2026-04-23):
  *   Three states, ONE morphing canvas. Not 3 cards. Build and Deploy share
- *   the same Claude-Code-style editor surface (Deploy is a continuation, not
- *   a reset — it appends `/floomit` to the prior Build output). Use then
- *   flips to a consumer ChatGPT-style surface for the payoff.
+ *   the same Claude-Code-style editor surface on the original spec (Deploy
+ *   is a continuation, not a reset — it appends `/floomit` to the prior
+ *   Build output). On the 2026-04-27 refresh, Deploy extends the canvas
+ *   into a full-frame "publish" layout (still a continuation — code is
+ *   kept visible on the right; the left column is the new deploy-timeline
+ *   view). Use then flips to a consumer ChatGPT-style surface for the
+ *   payoff.
  *
  *   Canvas is a fixed 580px tall container (bumped from 420 on 2026-04-23 —
  *   Cursor-style "demo doesn't have to fit above fold"). No height jumps
@@ -65,24 +79,19 @@ import {
   type CSSProperties,
 } from 'react';
 
-import { DEPLOY_ENABLED } from '../../lib/launchFlags';
-
 // -----------------------------------------------------------------------------
 // State machine
 // -----------------------------------------------------------------------------
 type DemoState = 'build' | 'deploy' | 'use';
 
 /**
- * Waitlist-reality default (DEPLOY_ENABLED=false): auto-play `build -> use`.
- * The tracker collapses to 2 pills and the editor jumps directly from the
- * typed handler code into the live Use surface — no slash-command, no
- * progress bar, no "live at floom.dev/p/..." line. Production Deploy is
- * gated on waitlist so we don't animate it. On preview / post-launch
- * (`DEPLOY_ENABLED=true`) the original 3-state loop returns.
+ * Always three states. The hero demo is an explainer of the product shape;
+ * whether public self-serve deploy is live (preview) or gated on waitlist
+ * (prod) is an orthogonal concern handled by agent 9 at the CTA layer.
+ * Collapsing to 2 states here was the wrong primitive — the demo stays
+ * Build -> Deploy -> Use unconditionally, and the CTAs do the truth-telling.
  */
-const STATES: DemoState[] = DEPLOY_ENABLED
-  ? ['build', 'deploy', 'use']
-  : ['build', 'use'];
+const STATES: DemoState[] = ['build', 'deploy', 'use'];
 
 /**
  * State durations in milliseconds. Use is intentionally the longest — it's
@@ -312,14 +321,14 @@ export function HeroDemo() {
 
   const ariaLabel = useMemo(() => {
     const step = STATES.indexOf(state) + 1;
-    return `Step ${step} of ${STATES.length}: ${state}`;
+    return `Step ${step} of 3: ${state}`;
   }, [state]);
 
-  // Build + Deploy share the editor surface; only Use flips to the run
-  // surface. editorActive stays true across the Build->Deploy transition
-  // so the typed code stays visible.
-  const editorActive = state === 'build' || state === 'deploy';
-
+  // 2026-04-27 refresh: each of the 3 surfaces owns the full canvas when
+  // active. Previously Build + Deploy shared one editor surface where
+  // Deploy content only rendered inside a 170px terminal strip at the
+  // bottom — that made Deploy feel half-empty vs Build / Use. Now Deploy
+  // gets its own 2-pane full-canvas surface.
   return (
     <div
       data-testid="hero-demo"
@@ -336,9 +345,13 @@ export function HeroDemo() {
 
       <div style={CANVAS_STYLE}>
         <EditorSurface
-          state={state}
+          active={state === 'build'}
           cycle={cycle}
-          active={editorActive}
+          reducedMotion={reducedMotion}
+        />
+        <DeploySurface
+          active={state === 'deploy'}
+          cycle={cycle}
           reducedMotion={reducedMotion}
         />
         <RunSurface
@@ -363,20 +376,13 @@ function Tracker({
   onJump: (s: DemoState) => void;
   reducedMotion: boolean;
 }) {
-  const count = STATES.length;
-  // Dot sits at the center of the active pill (N equal columns — 2 on the
-  // waitlist loop, 3 on the full loop).
+  // Dot sits at the center of the active pill (3 equal columns).
   const idx = STATES.indexOf(state);
-  const dotLeft = `calc(${(idx + 0.5) * (100 / count)}% - 3px)`;
+  const dotLeft = `calc(${(idx + 0.5) * (100 / 3)}% - 3px)`;
 
   return (
     <div style={TRACKER_WRAP}>
-      <div
-        style={{
-          ...TRACKER_PILLS,
-          gridTemplateColumns: `repeat(${count}, 1fr)`,
-        }}
-      >
+      <div style={TRACKER_PILLS}>
         {STATES.map((s, i) => {
           const on = s === state;
           return (
@@ -412,68 +418,16 @@ function Tracker({
 }
 
 // -----------------------------------------------------------------------------
-// EditorSurface — dark Claude-Code style shared by Build and Deploy
+// EditorSurface — Build state only. Cream Claude-Code style.
 // -----------------------------------------------------------------------------
 interface EditorProps {
-  state: DemoState;
-  cycle: number;
   active: boolean;
+  cycle: number;
   reducedMotion: boolean;
 }
 
-function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
-  const isBuild = state === 'build';
-  const isDeploy = state === 'deploy';
-
-  // Build: type the handler body into the editor pane.
-  const codeChars = useTypewriter(HANDLER_CODE, isBuild, cycle, 14, reducedMotion);
-
-  // Deploy: keep the full code visible (don't reset during Deploy state).
-  const codeCap = isDeploy ? HANDLER_CODE.length : codeChars;
-
-  // Deploy: type `/floomit` in the terminal once Deploy becomes active.
-  const slashChars = useTypewriter(SLASH, isDeploy, cycle, 45, reducedMotion);
-
-  // Deploy: progress bar sweep 0 -> 100 after slash command finishes.
-  const [deployProgress, setDeployProgress] = useState(0);
-  const [deployUrl, setDeployUrl] = useState(false);
-  useEffect(() => {
-    if (!isDeploy) {
-      setDeployProgress(0);
-      setDeployUrl(false);
-      return;
-    }
-    if (reducedMotion) {
-      setDeployProgress(100);
-      setDeployUrl(true);
-      return;
-    }
-    setDeployProgress(0);
-    setDeployUrl(false);
-    const waitForSlash = SLASH.length * 45 + 120;
-    const sweepMs = 1500;
-    const start = performance.now() + waitForSlash;
-    let raf: number | null = null;
-    const step = (now: number) => {
-      const t = (now - start) / sweepMs;
-      if (t < 0) {
-        raf = requestAnimationFrame(step);
-        return;
-      }
-      if (t >= 1) {
-        setDeployProgress(100);
-        setDeployUrl(true);
-        return;
-      }
-      const eased = 1 - Math.pow(1 - t, 2);
-      setDeployProgress(Math.round(eased * 100));
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [isDeploy, cycle, reducedMotion]);
+function EditorSurface({ active, cycle, reducedMotion }: EditorProps) {
+  const codeCap = useTypewriter(HANDLER_CODE, active, cycle, 14, reducedMotion);
 
   const tokens = useMemo(() => tokenizePython(HANDLER_CODE), []);
   const lineCount = useMemo(
@@ -481,7 +435,6 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
     [codeCap],
   );
 
-  // Surface transition: 6px translateY + 180ms opacity fade
   const surfaceStyle: CSSProperties = {
     ...SURFACE_STYLE,
     opacity: active ? 1 : 0,
@@ -495,7 +448,6 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
   return (
     <div style={surfaceStyle} aria-hidden={!active}>
       <div style={EDITOR_GRID} data-hd="editor-grid">
-        {/* Slim file tree — 2-level container depth */}
         <aside style={SIDEBAR_STYLE} aria-hidden="true" data-hd="sidebar">
           <div style={SIDEBAR_SECTION}>lead-scorer</div>
           <div style={{ ...SIDEBAR_ITEM, ...SIDEBAR_ITEM_ACTIVE }}>handler.py</div>
@@ -503,7 +455,6 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
           <div style={SIDEBAR_ITEM}>README.md</div>
         </aside>
 
-        {/* Main pane: editor on top, terminal on bottom */}
         <div style={MAIN_PANE}>
           <div style={EDITOR_PANE}>
             <div style={TAB_ROW}>
@@ -517,7 +468,7 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
               </div>
               <pre style={CODE_PRE}>
                 {renderTokens(tokens, codeCap)}
-                {isBuild && !reducedMotion && codeCap < HANDLER_CODE.length && (
+                {active && !reducedMotion && codeCap < HANDLER_CODE.length && (
                   <span style={CARET_STYLE} aria-hidden="true" />
                 )}
               </pre>
@@ -527,90 +478,224 @@ function EditorSurface({ state, cycle, active, reducedMotion }: EditorProps) {
           <div style={TERMINAL_PANE}>
             <div style={TERMINAL_LINE}>
               <span style={PROMPT_SIGN}>&gt;</span>
-              <span style={{ opacity: 0.7 }}>claude code &middot; lead-scorer</span>
+              <span style={{ color: '#8b8680' }}>claude code &middot; lead-scorer</span>
             </div>
-            {isDeploy && (
-              <>
-                <div style={TERMINAL_LINE}>
-                  <span style={PROMPT_SIGN}>&gt;</span>
-                  <span style={{ color: '#e2c48b' }}>
-                    {SLASH.slice(0, slashChars)}
-                  </span>
-                  {!reducedMotion && slashChars < SLASH.length && (
-                    <span style={CARET_DARK} aria-hidden="true" />
-                  )}
-                </div>
-                {slashChars >= SLASH.length && (
-                  <div style={DEPLOY_BLOCK}>
-                    <div style={DEPLOY_PROGRESS_ROW}>
-                      {/* Label flips from DEPLOYING to DEPLOYED ✓ on completion
-                          — the celebration moment. Green-accent + small scale
-                          pulse so the eye lands here. */}
-                      <span
-                        style={{
-                          ...DEPLOY_LABEL,
-                          color: deployUrl ? '#7fe3a9' : '#8b8680',
-                          transform: deployUrl ? 'scale(1.04)' : 'scale(1)',
-                          transition: reducedMotion
-                            ? 'none'
-                            : 'color .2s ease, transform .35s cubic-bezier(0.22, 1.4, 0.36, 1)',
-                        }}
-                        data-hd="deploy-label"
-                      >
-                        {deployUrl ? 'DEPLOYED \u2713' : 'DEPLOYING'}
-                      </span>
-                      <span style={DEPLOY_PCT}>{deployProgress}%</span>
-                    </div>
-                    <div style={DEPLOY_BAR_TRACK}>
-                      <div style={{ ...DEPLOY_BAR_FILL, width: `${deployProgress}%` }} />
-                    </div>
-                    {deployUrl && (
-                      <div
-                        style={{
-                          ...DEPLOY_URL_LINE,
-                          opacity: deployUrl ? 1 : 0,
-                          transform: deployUrl ? 'translateY(0)' : 'translateY(3px)',
-                          transition: reducedMotion
-                            ? 'none'
-                            : 'opacity .28s ease, transform .3s cubic-bezier(0.22, 0.9, 0.28, 1)',
-                        }}
-                      >
-                        {/* Pulsing green live indicator — "the service is live right now" */}
-                        <span style={LIVE_DOT_WRAP} aria-hidden="true">
-                          <span
-                            style={{
-                              ...LIVE_DOT,
-                              animation: reducedMotion ? 'none' : 'hd-live-pulse 1.6s ease-out infinite',
-                            }}
-                          />
-                          <span style={LIVE_DOT_CORE} />
-                        </span>
-                        <span style={DEPLOY_URL_META}>Deployed in 1.2s</span>
-                        <span style={DEPLOY_URL_SEP}>&middot;</span>
-                        <span style={DEPLOY_URL_TEXT}>floom.dev/p/lead-scorer</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-            {isBuild && !reducedMotion && codeCap >= HANDLER_CODE.length && (
+            {active && !reducedMotion && codeCap >= HANDLER_CODE.length && (
               <div style={{ ...TERMINAL_LINE, color: '#8b8680' }}>
                 <span style={PROMPT_SIGN}>&gt;</span>
-                {DEPLOY_ENABLED ? (
-                  <span>
-                    type <span style={{ color: '#e2c48b' }}>/floomit</span> to deploy
-                  </span>
-                ) : (
-                  // Waitlist reality: don't dangle a verb we can't fulfil on
-                  // prod. Show the payoff-facing line instead — the next
-                  // state transition flips to the live Lead Scorer app.
-                  <span>
-                    ready &middot; <span style={{ color: '#7fe3a9' }}>running live</span>
-                  </span>
-                )}
+                <span>
+                  type <span style={{ color: '#b45309', fontWeight: 600 }}>/floomit</span> to deploy
+                </span>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// DeploySurface — full-canvas publish view
+// -----------------------------------------------------------------------------
+/**
+ * Owns the entire canvas when Deploy is active. Layout:
+ *
+ *   ┌────────────────────┬──────────────────────────┐
+ *   │ PUBLISHING          │  (right) code preview    │
+ *   │   $ /floomit        │  — keeps the Build code  │
+ *   │   ✓ build container │    visible as context,   │
+ *   │   ✓ upload bundle   │    so Deploy reads as a  │
+ *   │   ✓ verify runtime  │    continuation of the   │
+ *   │   ✓ register route  │    previous beat.        │
+ *   │                     │                          │
+ *   │ DEPLOYED ✓          │                          │
+ *   │ floom.dev/p/...     │                          │
+ *   └────────────────────┴──────────────────────────┘
+ *
+ * Every element lives on the cream palette — no heavy black strip like the
+ * previous implementation.
+ */
+const DEPLOY_STEPS = [
+  'build container',
+  'upload bundle',
+  'verify runtime',
+  'register route',
+] as const;
+
+function DeploySurface({
+  active,
+  cycle,
+  reducedMotion,
+}: {
+  active: boolean;
+  cycle: number;
+  reducedMotion: boolean;
+}) {
+  const slashChars = useTypewriter(SLASH, active, cycle, 45, reducedMotion);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!active) {
+      setStepIndex(0);
+      setProgress(0);
+      setDone(false);
+      return;
+    }
+    if (reducedMotion) {
+      setStepIndex(DEPLOY_STEPS.length);
+      setProgress(100);
+      setDone(true);
+      return;
+    }
+    setStepIndex(0);
+    setProgress(0);
+    setDone(false);
+    const waitForSlash = SLASH.length * 45 + 180;
+    const perStep = 380; // ~4 steps in ~1.5s
+    const sweepMs = DEPLOY_STEPS.length * perStep;
+    const start = performance.now() + waitForSlash;
+    let raf: number | null = null;
+    const step = (now: number) => {
+      const t = (now - start) / sweepMs;
+      if (t < 0) {
+        raf = requestAnimationFrame(step);
+        return;
+      }
+      if (t >= 1) {
+        setProgress(100);
+        setStepIndex(DEPLOY_STEPS.length);
+        setDone(true);
+        return;
+      }
+      const eased = 1 - Math.pow(1 - t, 2);
+      setProgress(Math.round(eased * 100));
+      setStepIndex(Math.min(DEPLOY_STEPS.length, Math.floor(t * DEPLOY_STEPS.length) + 1));
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [active, cycle, reducedMotion]);
+
+  const tokens = useMemo(() => tokenizePython(HANDLER_CODE), []);
+  const lineCount = useMemo(() => countLines(HANDLER_CODE, HANDLER_CODE.length), []);
+
+  const surfaceStyle: CSSProperties = {
+    ...SURFACE_STYLE,
+    opacity: active ? 1 : 0,
+    pointerEvents: active ? 'auto' : 'none',
+    transform: active ? 'translateY(0)' : 'translateY(6px)',
+    transition: reducedMotion
+      ? 'none'
+      : 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1)',
+  };
+
+  return (
+    <div style={surfaceStyle} aria-hidden={!active}>
+      <div style={DEPLOY_GRID} data-hd="deploy-grid">
+        {/* Left column: the publish timeline, full-height. */}
+        <div style={DEPLOY_LEFT}>
+          <div style={DEPLOY_HEADER_ROW}>
+            <span style={DEPLOY_HEADER_LABEL}>
+              {done ? 'DEPLOYED' : 'PUBLISHING'}
+            </span>
+            <span style={DEPLOY_HEADER_PCT}>{progress}%</span>
+          </div>
+
+          <div style={DEPLOY_SLASH_ROW}>
+            <span style={DEPLOY_PROMPT}>$</span>
+            <span style={DEPLOY_SLASH_TEXT}>
+              {SLASH.slice(0, slashChars)}
+            </span>
+            {active && !reducedMotion && slashChars < SLASH.length && (
+              <span style={DEPLOY_CARET} aria-hidden="true" />
+            )}
+          </div>
+
+          <div style={DEPLOY_BAR_TRACK_WRAP}>
+            <div style={DEPLOY_BAR_TRACK}>
+              <div style={{ ...DEPLOY_BAR_FILL, width: `${progress}%` }} />
+            </div>
+          </div>
+
+          <ul style={DEPLOY_STEPS_LIST}>
+            {DEPLOY_STEPS.map((label, i) => {
+              const isComplete = stepIndex > i;
+              const isActive = stepIndex === i + 1 && !isComplete;
+              const inFlight = !isComplete && !isActive;
+              return (
+                <li
+                  key={label}
+                  style={{
+                    ...DEPLOY_STEP_ITEM,
+                    opacity: inFlight ? 0.45 : 1,
+                    transition: reducedMotion ? 'none' : 'opacity .2s ease',
+                  }}
+                >
+                  <span
+                    style={{
+                      ...DEPLOY_STEP_MARK,
+                      background: isComplete ? '#d1fae5' : isActive ? '#fef3c7' : '#f0ede5',
+                      color: isComplete ? '#047857' : isActive ? '#b45309' : '#a8a49b',
+                      borderColor: isComplete ? '#a7f3d0' : isActive ? '#fde68a' : '#e8e6e0',
+                    }}
+                  >
+                    {isComplete ? '\u2713' : isActive ? '\u2022' : '\u00a0'}
+                  </span>
+                  <span style={DEPLOY_STEP_LABEL}>{label}</span>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div
+            style={{
+              ...DEPLOY_URL_CARD,
+              opacity: done ? 1 : 0,
+              transform: done ? 'translateY(0)' : 'translateY(4px)',
+              transition: reducedMotion
+                ? 'none'
+                : 'opacity .25s ease, transform .3s cubic-bezier(0.22, 0.9, 0.28, 1)',
+            }}
+            aria-hidden={!done}
+          >
+            <span style={LIVE_DOT_WRAP} aria-hidden="true">
+              <span
+                style={{
+                  ...LIVE_DOT,
+                  animation:
+                    reducedMotion || !done
+                      ? 'none'
+                      : 'hd-live-pulse 1.6s ease-out infinite',
+                }}
+              />
+              <span style={LIVE_DOT_CORE} />
+            </span>
+            <div style={DEPLOY_URL_TEXT_WRAP}>
+              <div style={DEPLOY_URL_MAIN}>floom.dev/p/lead-scorer</div>
+              <div style={DEPLOY_URL_META_CARD}>Deployed in 1.2s &middot; HTTPS &middot; edge</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: keep the code visible as context. Dimmed + read-only. */}
+        <div style={DEPLOY_RIGHT}>
+          <div style={TAB_ROW}>
+            <div style={{ ...TAB_STYLE, ...TAB_ACTIVE }}>handler.py</div>
+          </div>
+          <div style={{ ...GUTTER_WRAP, flex: 1 }}>
+            <div style={GUTTER}>
+              {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => (
+                <span key={i}>{i + 1}</span>
+              ))}
+            </div>
+            <pre style={{ ...CODE_PRE, opacity: 0.85 }}>
+              {renderTokens(tokens, HANDLER_CODE.length)}
+            </pre>
           </div>
         </div>
       </div>
@@ -688,22 +773,15 @@ function RunSurface({
   return (
     <div style={surfaceStyle} aria-hidden={!active}>
       <div style={RUN_WRAP}>
-        {/* Context cue above the payoff card. On the full deploy loop this
-            connects Use back to Deploy ("Just deployed via /floomit"). On
-            the waitlist-reality 2-state loop it instead tells the visitor
-            "this app is already live" so the 'try this right now' framing
-            lands. */}
+        {/* Context cue above the payoff card — connects Use back to Deploy
+            ("Just deployed via /floomit"). Continuity matters: the demo
+            tells a complete 3-beat story and this line is the bridge from
+            Deploy's payoff moment into the live app. */}
         <div style={RUN_CONTEXT}>
           <span style={RUN_CONTEXT_DOT} aria-hidden="true" />
-          {DEPLOY_ENABLED ? (
-            <span>
-              Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
-            </span>
-          ) : (
-            <span>
-              Live at <code style={RUN_CONTEXT_CODE}>floom.dev/p/lead-scorer</code>
-            </span>
-          )}
+          <span>
+            Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
+          </span>
         </div>
 
         {/* ONE primary card, centered; consumer-style */}
@@ -800,6 +878,11 @@ const SCOPED_CSS = `
   @media (max-width:860px){
     [data-testid="hero-demo"] [data-hd="editor-grid"]{grid-template-columns:1fr}
     [data-testid="hero-demo"] [data-hd="sidebar"]{display:none}
+    [data-testid="hero-demo"] [data-hd="deploy-grid"]{grid-template-columns:1fr}
+    [data-testid="hero-demo"] [data-hd="deploy-grid"] > :last-child{display:none}
+  }
+  @media (max-width:480px){
+    [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{padding:20px 18px;gap:14px}
   }
 `;
 
@@ -994,22 +1077,17 @@ const CARET_STYLE: CSSProperties = {
   marginLeft: 2,
 };
 
-const CARET_DARK: CSSProperties = {
-  ...CARET_STYLE,
-  background: '#e2c48b',
-};
-
-// Terminal is the ONE dark panel — Floom warm dark neutral (#1b1a17), NOT
-// pure black. Creates visual separation from the cream code editor above
-// without being a generic hacker-aesthetic black box. Brand rule:
-// feedback_terminal_never_black.md (Federico 2026-04-23).
+// Terminal now runs on the cream palette (2026-04-27 refresh): the
+// previous warm-dark panel still read as "black" next to the rest of the
+// landing. Paper-white surface with a subtle top border separates it from
+// the editor without introducing a dark block. feedback_terminal_never_black.md.
 const TERMINAL_PANE: CSSProperties = {
-  background: '#1b1a17',
+  background: '#f8f5ef',
   borderTop: '1px solid #ece8de',
   padding: '12px 16px',
   fontSize: 12.5,
   lineHeight: 1.7,
-  color: '#e8e6e0',
+  color: '#2a2825',
   overflow: 'hidden',
   display: 'flex',
   flexDirection: 'column',
@@ -1024,64 +1102,179 @@ const TERMINAL_LINE: CSSProperties = {
 };
 
 const PROMPT_SIGN: CSSProperties = {
-  color: '#5a8b6a',
+  color: '#047857',
   fontWeight: 600,
 };
 
-const DEPLOY_BLOCK: CSSProperties = {
-  marginTop: 6,
+// Deploy surface (full-canvas, 2-column). All styles live on the cream /
+// paper palette. Separation from the editor comes from the vertical split,
+// not a dark strip.
+const DEPLOY_GRID: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1.1fr 1fr',
+  height: '100%',
+  background: '#faf8f3',
+  fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace",
+  color: '#2a2825',
 };
 
-const DEPLOY_PROGRESS_ROW: CSSProperties = {
+const DEPLOY_LEFT: CSSProperties = {
   display: 'flex',
+  flexDirection: 'column',
+  padding: '28px 32px',
+  gap: 18,
+  borderRight: '1px solid #ece8de',
+  background: '#faf8f3',
+  minHeight: 0,
+};
+
+const DEPLOY_HEADER_ROW: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
   justifyContent: 'space-between',
-  alignItems: 'center',
-  marginBottom: 5,
 };
 
-const DEPLOY_LABEL: CSSProperties = {
-  color: '#8b8680',
+const DEPLOY_HEADER_LABEL: CSSProperties = {
   fontSize: 11,
-  letterSpacing: '0.1em',
+  letterSpacing: '0.14em',
   fontWeight: 700,
-  transformOrigin: 'left center',
+  color: '#6a665f',
+  textTransform: 'uppercase',
 };
 
-const DEPLOY_PCT: CSSProperties = {
-  color: '#e8e6e0',
-  fontSize: 11,
+const DEPLOY_HEADER_PCT: CSSProperties = {
+  fontSize: 13,
+  color: '#2a2825',
   fontVariantNumeric: 'tabular-nums',
+  fontWeight: 600,
+};
+
+const DEPLOY_SLASH_ROW: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  fontSize: 14,
+  background: '#f0ede5',
+  border: '1px solid #e8e6e0',
+  borderRadius: 10,
+  padding: '10px 14px',
+};
+
+const DEPLOY_PROMPT: CSSProperties = {
+  color: '#047857',
+  fontWeight: 700,
+};
+
+const DEPLOY_SLASH_TEXT: CSSProperties = {
+  color: '#b45309',
+  fontWeight: 600,
+};
+
+const DEPLOY_CARET: CSSProperties = {
+  display: 'inline-block',
+  width: 8,
+  height: 16,
+  background: '#b45309',
+  verticalAlign: -2,
+  animation: 'hd-blink 1s steps(2) infinite',
+};
+
+const DEPLOY_BAR_TRACK_WRAP: CSSProperties = {
+  paddingTop: 2,
 };
 
 const DEPLOY_BAR_TRACK: CSSProperties = {
   height: 4,
-  background: '#2a2825',
+  background: '#ece8de',
   borderRadius: 2,
   overflow: 'hidden',
 };
 
 const DEPLOY_BAR_FILL: CSSProperties = {
   height: '100%',
-  background: 'linear-gradient(90deg, #7fe3a9 0%, #5dd39a 100%)',
+  background: 'linear-gradient(90deg, #047857 0%, #059669 100%)',
   transition: 'width .05s linear',
 };
 
-// Federico 2026-04-23: "highlight the deployment enough ... clearer that it
-// was just deployed". Upgraded URL line hierarchy: pulsing live dot +
-// elapsed time meta + URL rendered like a link (stronger color + weight).
-const DEPLOY_URL_LINE: CSSProperties = {
-  marginTop: 9,
+const DEPLOY_STEPS_LIST: CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+};
+
+const DEPLOY_STEP_ITEM: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  fontSize: 12.5,
+  gap: 12,
+  fontSize: 13,
+  color: '#2a2825',
+};
+
+const DEPLOY_STEP_MARK: CSSProperties = {
+  width: 22,
+  height: 22,
+  borderRadius: '50%',
+  border: '1px solid #e8e6e0',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 12,
+  fontWeight: 700,
+  flexShrink: 0,
+};
+
+const DEPLOY_STEP_LABEL: CSSProperties = {
+  fontSize: 13,
+  letterSpacing: '0.01em',
+};
+
+const DEPLOY_URL_CARD: CSSProperties = {
+  marginTop: 'auto',
+  background: '#ffffff',
+  border: '1px solid #d1fae5',
+  borderRadius: 14,
+  padding: '14px 18px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 14,
+  boxShadow: '0 6px 20px -12px rgba(4, 120, 87, 0.25)',
+};
+
+const DEPLOY_URL_TEXT_WRAP: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 2,
+};
+
+const DEPLOY_URL_MAIN: CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 14,
+  fontWeight: 600,
+  color: '#047857',
+  letterSpacing: '0.01em',
+};
+
+const DEPLOY_URL_META_CARD: CSSProperties = {
+  fontFamily: "'Inter', system-ui, sans-serif",
+  fontSize: 11.5,
+  color: '#6a665f',
+};
+
+const DEPLOY_RIGHT: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  background: '#faf8f3',
 };
 
 const LIVE_DOT_WRAP: CSSProperties = {
   position: 'relative',
   display: 'inline-flex',
-  width: 8,
-  height: 8,
+  width: 10,
+  height: 10,
   flexShrink: 0,
 };
 
@@ -1090,7 +1283,7 @@ const LIVE_DOT: CSSProperties = {
   position: 'absolute',
   inset: 0,
   borderRadius: '50%',
-  background: '#7fe3a9',
+  background: '#047857',
 };
 
 // Solid core that stays put.
@@ -1098,36 +1291,20 @@ const LIVE_DOT_CORE: CSSProperties = {
   position: 'absolute',
   inset: 0,
   borderRadius: '50%',
-  background: '#7fe3a9',
-  boxShadow: '0 0 8px rgba(127, 227, 169, 0.6)',
-};
-
-const DEPLOY_URL_META: CSSProperties = {
-  color: '#a8a49b',
-  fontSize: 11.5,
-  letterSpacing: '0.01em',
-};
-
-const DEPLOY_URL_SEP: CSSProperties = {
-  color: '#5a564f',
-};
-
-const DEPLOY_URL_TEXT: CSSProperties = {
-  color: '#9fcbef',
-  fontWeight: 600,
-  textDecoration: 'underline',
-  textDecorationColor: 'rgba(159, 203, 239, 0.35)',
-  textUnderlineOffset: 3,
-  letterSpacing: '0.01em',
+  background: '#047857',
+  boxShadow: '0 0 10px rgba(4, 120, 87, 0.45)',
 };
 
 // Run surface ----------------------------------------------------------------
+// 2026-04-27: Use-tab previously felt cramped (the app output slot was too
+// small). Added vertical room to the wrap + card + result slot so the Lead
+// Scorer preview reads as an actual product, not a thumbnail.
 const RUN_WRAP: CSSProperties = {
   height: '100%',
-  padding: '20px 28px',
+  padding: '32px 48px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 18,
   background: '#ffffff',
   color: '#0e0e0c',
   fontFamily: "'Inter', system-ui, sans-serif",
@@ -1164,11 +1341,11 @@ const RUN_CARD: CSSProperties = {
   flex: 1,
   background: '#fafaf8',
   border: '1px solid #e8e6e0',
-  borderRadius: 14,
-  padding: '18px 20px',
+  borderRadius: 16,
+  padding: '28px 32px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 20,
   minHeight: 0,
 };
 
@@ -1236,7 +1413,8 @@ const RUN_BUTTON: CSSProperties = {
 };
 
 const RUN_RESULT_SLOT: CSSProperties = {
-  minHeight: 90,
+  flex: 1,
+  minHeight: 140,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'flex-start',
