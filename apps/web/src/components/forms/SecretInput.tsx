@@ -66,9 +66,9 @@ export const SecretInput = forwardRef<HTMLInputElement, SecretInputProps>(
           }}
         >
           {revealed ? (
-            <EyeOff size={18} strokeWidth={1.75} />
+            <EyeOff size={18} strokeWidth={1.75} aria-hidden />
           ) : (
-            <Eye size={18} strokeWidth={1.75} />
+            <Eye size={18} strokeWidth={1.75} aria-hidden />
           )}
         </button>
       </div>

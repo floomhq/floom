@@ -13,6 +13,7 @@ const AUTH_PARAM_ANCHORED =
 
 export function credentialInputNameLooksSensitive(rawName: string): boolean {
   if (!rawName) return false;
+  if (/password|secret|credential/i.test(rawName)) return true;
   const name = rawName.replace(/^(header|cookie)_/i, '');
   const lower = name.toLowerCase();
 
