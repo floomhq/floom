@@ -2,7 +2,7 @@
   "_comment": "Pre-generated golden responses for the /p/resume-screener demo sample inputs. If the user submits the exact sample (canonical hash below matches), main.py returns this blob in <500ms. Any other input falls through to a live Gemini Flash call. Regenerate with `python3 scripts/gen-demo-cache.py` after changing the sample assets or canonical_input().",
   "generated_with": "gemini-3.1-pro-preview",
   "entries": {
-    "eb13e421792394c7fd3a8274004484bad39534252ccc439ce0194ce76aad85db": {
+    "a2a4b0ece0a11d69afe061933cc3ea553d452cda1aad5800d2df3368a9471739": {
       "total": 3,
       "scored": 3,
       "failed": 0,
@@ -11,17 +11,31 @@
       "model": "gemini-3.1-pro-preview",
       "ranked": [
         {
+          "#": 3,
+          "filename": "03-dirk-backend.pdf",
+          "redacted_id": "cv-2838b7a3",
+          "status": "ok",
+          "score": 95,
+          "reasoning": "Dirk is a highly qualified candidate with 7 years of production Python experience, specifically utilizing the exact requested stack of FastAPI, PostgreSQL, and AWS. He has proven experience mentoring junior engineers and handling high-throughput data pipelines, evidenced by his work with Kafka and Debezium at N26 processing 100k events/sec. While he lacks explicit experience designing scoring models or working with LLMs, his deep expertise in distributed systems and database optimization makes him an excellent fit for the core responsibilities.",
+          "match_summary": "Exceptional alignment with the core stack (Python, FastAPI, Postgres, AWS) and proven experience mentoring engineers and building high-throughput data pipelines at scale.",
+          "gaps": [
+            "No explicit experience designing scoring models",
+            "No past experience with LLM products"
+          ],
+          "must_have_pass": true
+        },
+        {
           "#": 1,
           "filename": "01-alice-backend.pdf",
           "redacted_id": "cv-f24fdfd2",
           "status": "ok",
-          "score": 60,
-          "reasoning": "Alice has 8 years of highly relevant Python backend experience, perfectly matching the required stack of FastAPI, Postgres, Redis, and AWS. She also brings strong high-throughput pipeline experience from her roles at Stripe and Plaid. However, she is based in San Francisco (UTC-8), which falls completely outside the required UTC-3 to UTC+3 timezone window.",
-          "match_summary": "Exceptional technical fit with 8 years of Python, Postgres, and AWS experience, plus a proven track record building high-throughput APIs at top-tier companies.",
+          "score": 65,
+          "reasoning": "Alice possesses 8 years of highly relevant Python and Postgres experience, perfectly matching the required tech stack including FastAPI, Redis, and AWS. She has demonstrated experience with high-throughput pipelines at Stripe and Plaid. However, she is located in San Francisco (UTC-8), which falls outside the required UTC-3 to UTC+3 timezone window, failing a hard must-have.",
+          "match_summary": "Exceptional technical fit with 8 years of Python/Postgres experience and a strong background in high-throughput APIs and FastAPI.",
           "gaps": [
-            "Based in San Francisco (UTC-8), which is outside the required UTC-3 to UTC+3 timezone",
-            "No explicit engineering mentoring experience mentioned",
-            "No experience with LLM products"
+            "Located in San Francisco (UTC-8), outside the required UTC-3 to UTC+3 timezone",
+            "No explicit mention of engineering mentorship",
+            "No LLM experience"
           ],
           "must_have_pass": false
         },
@@ -31,36 +45,21 @@
           "redacted_id": "cv-7747237b",
           "status": "ok",
           "score": 15,
-          "reasoning": "Bob is primarily a Node.js and React full-stack engineer, explicitly stating only 2 years of intermediate Python experience rather than the required 5+ years. He is located in Seattle (UTC-8), which falls completely outside the required EU-friendly timezone of UTC-3 to UTC+3. Furthermore, his Postgres experience is limited to data migration scripts rather than core production backend services, and he lacks FastAPI experience.",
-          "match_summary": "Bob has strong engineering experience at reputable companies (Notion, Zapier) and some exposure to Python ETL jobs.",
+          "reasoning": "Bob is primarily a Node.js and React full-stack engineer with only 2 years of intermediate Python experience, falling well short of the 5+ years required. He is located in Seattle (UTC-8), which is outside the required EU-friendly timezone (UTC-3 to UTC+3). Furthermore, his database experience is heavily MongoDB-focused, lacking the deep production Postgres expertise needed for this backend role.",
+          "match_summary": "Bob has strong engineering experience at reputable companies like Notion and Zapier, including some exposure to Python ETL jobs.",
           "gaps": [
-            "Less than 5 years of Python experience (only 2 years listed)",
-            "Located in Seattle (outside UTC-3 to UTC+3 requirement)",
-            "Lacks production Postgres experience (mostly MongoDB)",
+            "Lacks 5+ years of Python experience (only has 2 years)",
+            "Located in Seattle (UTC-8), outside the required UTC-3 to UTC+3 timezone",
+            "Lacks deep production Postgres experience (primarily uses MongoDB)",
             "No FastAPI experience"
-          ],
-          "must_have_pass": false
-        },
-        {
-          "#": 3,
-          "filename": "03-carol-datascience.pdf",
-          "redacted_id": "cv-3ff1d45e",
-          "status": "ok",
-          "score": 10,
-          "reasoning": "Carol is a Data Scientist with 4 years of applied ML experience, lacking the required backend engineering background. She explicitly notes having no production API ownership and lacks experience with FastAPI, Postgres, Redis, and AWS. Furthermore, she is located in Boston (UTC-5), which falls outside the required UTC-3 to UTC+3 timezone window.",
-          "match_summary": "Carol has strong statistical modeling and Python data science skills, which could be tangentially useful for the scoring model design aspect of the role.",
-          "gaps": [
-            "No production backend or API development experience",
-            "No Postgres, FastAPI, Redis, or AWS experience",
-            "Located in Boston (UTC-5), outside the required UTC-3 to UTC+3 timezone"
           ],
           "must_have_pass": false
         }
       ],
-      "summary": "Screened 3 CV(s) against the JD. 3 scored, 0 failed. Top candidate: cv-f24fdfd2 (60/100)."
+      "summary": "Screened 3 CV(s) against the JD. 3 scored, 0 failed. Top candidate: cv-2838b7a3 (95/100)."
     }
   },
   "_debug": {
-    "canonical": "{\"cvs_zip_sha256\":\"0253fb2d6f9b12cd688c4b381e2130bd269926fece28b0d10627af2858c50263\",\"job_description\":\"Senior Backend Engineer (Remote EU). 5+ years building production Python services. Responsibilities: own the ingestion pipeline, design the scoring model, mentor two engineers. Stack: Python 3.12, FastAPI, Postgres, Redis, AWS. Nice-to-have: past experience with LLM products or high-throughput ETL.\",\"must_haves\":[\"5+ years Python\",\"Production Postgres experience\",\"Remote-friendly timezone (UTC-3 to UTC+3)\"]}"
+    "canonical": "{\"cvs_zip_sha256\":\"335f8381588c30e4e5553c50696499775a894c9f7c9961ed2a7ba2495b865219\",\"job_description\":\"Senior Backend Engineer (Remote EU). 5+ years building production Python services. Responsibilities: own the ingestion pipeline, design the scoring model, mentor two engineers. Stack: Python 3.12, FastAPI, Postgres, Redis, AWS. Nice-to-have: past experience with LLM products or high-throughput ETL.\",\"must_haves\":[\"5+ years Python\",\"Production Postgres experience\",\"Remote-friendly timezone (UTC-3 to UTC+3)\"]}"
   }
 }
