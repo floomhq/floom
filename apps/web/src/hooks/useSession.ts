@@ -85,6 +85,28 @@ export function getCachedSession(): SessionMePayload | null {
 }
 
 /**
+ * Launch-2026-04-27 feature flag. Returns the server's `deploy_enabled`
+ * bit (from GET /api/session/me). Semantics:
+ *   - `true`  → full Deploy flow is available. Render the original
+ *                "Deploy" / "Publish" CTAs.
+ *   - `false` → waitlist mode. Every Deploy CTA swaps to "Join waitlist".
+ *   - `null`  → session not yet loaded. Call sites should treat this as
+ *                "show nothing deploy-related" or a neutral placeholder
+ *                to avoid flickering from deploy-UI to waitlist-UI.
+ *
+ * We deliberately default to the *safe* state (waitlist) when the
+ * server response is malformed or missing the field, so a stale client
+ * bundle on an updated server never accidentally exposes the deploy UI.
+ */
+export function useDeployEnabled(): boolean | null {
+  const { data, loading, error } = useSession();
+  if (loading && !data) return null;
+  if (error) return false;
+  if (!data) return null;
+  return data.deploy_enabled === true;
+}
+
+/**
  * Clear the cached session. Called on logout.
  */
 export function clearSession(): void {

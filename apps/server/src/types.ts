@@ -437,6 +437,13 @@ export interface SessionMePayload {
     google: boolean;
     github: boolean;
   };
+  // Feature flag (launch 2026-04-27). When false, every Deploy / Publish
+  // call-to-action in the web UI swaps to a waitlist affordance that
+  // POSTs to /api/waitlist. When true, the original flow is intact.
+  // Controlled by the server-side DEPLOY_ENABLED env var (default false).
+  // preview.floom.dev sets it to true; floom.dev sets it to false until
+  // the GA cutover.
+  deploy_enabled: boolean;
 }
 
 export interface AppMemoryRecord {

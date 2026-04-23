@@ -16,7 +16,7 @@ import { runRouter, slugRunRouter, meRouter } from './routes/run.js';
 import { jobsRouter } from './routes/jobs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { rendererRouter } from './routes/renderer.js';
-import { deployWaitlistRouter } from './routes/deploy-waitlist.js';
+import { waitlistRouter } from './routes/waitlist.js';
 import { memoryRouter, secretsRouter } from './routes/memory.js';
 import { connectionsRouter } from './routes/connections.js';
 import { workspacesRouter, sessionRouter } from './routes/workspaces.js';
@@ -204,7 +204,12 @@ app.route('/renderer', rendererRouter);
 // Dynamic social preview images for /p/:slug and the main landing.
 // Public, no auth. See routes/og.ts for format details.
 app.route('/og', ogRouter);
-app.route('/api/deploy-waitlist', deployWaitlistRouter);
+// Deploy waitlist (launch 2026-04-27). Mounted at the canonical
+// /api/waitlist and kept mounted at the legacy /api/deploy-waitlist
+// so any marketing form that already POSTs to the old path keeps
+// working during the cutover.
+app.route('/api/waitlist', waitlistRouter);
+app.route('/api/deploy-waitlist', waitlistRouter);
 // W2.1: per-user state
 app.route('/api/memory', memoryRouter);
 app.route('/api/secrets', secretsRouter);

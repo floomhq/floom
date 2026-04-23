@@ -5,10 +5,13 @@
  * Addresses the v17 delta: live preview only showed one audience card
  * (vibecoders). The wireframe locks TWO audiences: makers + teams.
  */
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { SectionEyebrow } from './SectionEyebrow';
+import { useDeployEnabled } from '../../hooks/useSession';
+import { WaitlistModal } from '../WaitlistModal';
 
 interface Bullet {
   text: string;
@@ -19,7 +22,20 @@ interface AudienceCardProps {
   title: string;
   lede: string;
   bullets: Bullet[];
-  primary: { label: string; to: string; kind: 'ink' | 'accent' };
+  /**
+   * Primary CTA. When `onClick` is set, the primary slot renders as a
+   * <button> (used by the waitlist override). Otherwise it renders a
+   * <Link> to the `to` path. `to` is still passed so the button can
+   * fall back to routing if, e.g. the caller wants both. Only one of
+   * (onClick, to) is acted on per render.
+   */
+  primary: {
+    label: string;
+    to: string;
+    kind: 'ink' | 'accent';
+    onClick?: () => void;
+    testid?: string;
+  };
   secondary: { label: string; to: string };
 }
 
@@ -123,9 +139,28 @@ function AudienceCard({ eyebrow, title, lede, bullets, primary, secondary }: Aud
         ))}
       </ul>
       <div style={CTA_ROW_STYLE}>
-        <Link to={primary.to} style={btnStyle(primary.kind)}>
-          {primary.label}
-        </Link>
+        {primary.onClick ? (
+          <button
+            type="button"
+            onClick={primary.onClick}
+            data-testid={primary.testid}
+            style={{
+              ...btnStyle(primary.kind),
+              cursor: 'pointer',
+              font: 'inherit',
+            }}
+          >
+            {primary.label}
+          </button>
+        ) : (
+          <Link
+            to={primary.to}
+            data-testid={primary.testid}
+            style={btnStyle(primary.kind)}
+          >
+            {primary.label}
+          </Link>
+        )}
         <Link to={secondary.to} style={btnStyle('secondary')}>
           {secondary.label}
         </Link>
@@ -139,6 +174,12 @@ interface DualAudiencesProps {
 }
 
 export function DualAudiences(_: DualAudiencesProps = {}) {
+  // Launch flag. When DEPLOY_ENABLED=false, the makers card's primary
+  // CTA swaps from "Deploy your first app → /signup" to a "Join
+  // waitlist" button that opens WaitlistModal in-place.
+  const deployEnabled = useDeployEnabled();
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const waitlistMode = deployEnabled === false;
   return (
     <section
       data-testid="dual-audiences"
@@ -169,7 +210,22 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
             { text: 'Auto-generated landing page and MCP install' },
             { text: "Free tier runs on Floom's Gemini key" },
           ]}
-          primary={{ label: 'Deploy your first app', to: '/signup', kind: 'ink' }}
+          primary={
+            waitlistMode
+              ? {
+                  label: 'Join waitlist',
+                  to: '/waitlist',
+                  kind: 'ink',
+                  onClick: () => setWaitlistOpen(true),
+                  testid: 'dual-audience-waitlist',
+                }
+              : {
+                  label: 'Deploy your first app',
+                  to: '/signup',
+                  kind: 'ink',
+                  testid: 'dual-audience-deploy',
+                }
+          }
           secondary={{ label: 'Read the protocol', to: '/docs' }}
         />
         <AudienceCard
@@ -185,6 +241,11 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
           secondary={{ label: 'See pricing', to: '/pricing' }}
         />
       </div>
+      <WaitlistModal
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
+        source="dual-audiences"
+      />
     </section>
   );
 }

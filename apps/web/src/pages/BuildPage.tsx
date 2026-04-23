@@ -14,7 +14,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { CustomRendererPanel } from '../components/CustomRendererPanel';
-import { useSession } from '../hooks/useSession';
+import { useSession, useDeployEnabled } from '../hooks/useSession';
+import { ApiError } from '../api/client';
 import * as api from '../api/client';
 import type { IngestHint } from '../api/client';
 import type { DetectedApp } from '../lib/types';
@@ -60,6 +61,15 @@ export function BuildPage({
   layout: Layout = PageShell,
   postPublishHref,
 }: BuildPageProps = {}) {
+  // Launch flag (2026-04-27). When DEPLOY_ENABLED=false on the server
+  // we render a waitlist panel instead of the builder. We deliberately
+  // do NOT early-return before the state/effect hooks below: React's
+  // rules of hooks forbid changing the hook call order across renders,
+  // and `deployEnabled` transitions null→true|false once the session
+  // loads. Running the full state machine silently is cheap — none of
+  // it mounts DOM until we render — and gating the final JSX return
+  // keeps the hook order stable.
+  const deployEnabled = useDeployEnabled();
   const [searchParams] = useSearchParams();
   const editSlug = searchParams.get('edit');
   // Landing hero hands off the pasted URL via /studio/build?ingest_url=<url>.
@@ -707,6 +717,18 @@ export function BuildPage({
         details: (err as Error).message || undefined,
       });
     }
+  }
+
+  // Gate the full builder UI behind the launch flag. When waitlist mode
+  // is on, every hook above still ran (to keep the hook order stable),
+  // but we never render the ramp/review/publish DOM — we swap in a
+  // waitlist panel using the same Layout chrome.
+  if (deployEnabled === false) {
+    return (
+      <Layout title="Join the waitlist | Floom">
+        <BuildPageWaitlistPanel />
+      </Layout>
+    );
   }
 
   return (
@@ -2788,5 +2810,193 @@ function FileIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+// ---------- Waitlist mode panel (launch 2026-04-27) ----------
+
+// Rendered inside BuildPage when DEPLOY_ENABLED=false. Same email-
+// capture UX as WaitlistModal / WaitlistPage, scoped to the /studio
+// build surface so the user sees *why* there's no publish flow.
+// Kept in this file (rather than a fresh component) so it shares the
+// same visual density as the rest of the build surface and doesn't
+// need a standalone data-testid / story.
+const WAITLIST_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function BuildPageWaitlistPanel() {
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!WAITLIST_EMAIL_RE.test(trimmed)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      await api.submitWaitlist({ email: trimmed, source: 'studio-deploy' });
+      setSuccess(true);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 429) {
+          setError('Too many signups from this network. Try again in an hour.');
+        } else if (err.status === 400) {
+          setError('That email looked invalid to the server. Double-check and retry.');
+        } else {
+          setError('Something went wrong on our end. Please try again.');
+        }
+      } else {
+        setError('Network error. Check your connection and try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      data-testid="build-waitlist-panel"
+      style={{
+        maxWidth: 520,
+        margin: '48px auto',
+        padding: 32,
+        background: 'var(--card)',
+        border: '1px solid var(--line)',
+        borderRadius: 12,
+      }}
+    >
+      <h1
+        style={{
+          fontFamily: "'DM Serif Display', Georgia, serif",
+          fontSize: 32,
+          fontWeight: 400,
+          letterSpacing: '-0.02em',
+          lineHeight: 1.15,
+          margin: '0 0 12px',
+          color: 'var(--ink)',
+        }}
+      >
+        Publishing is on the waitlist.
+      </h1>
+      <p
+        style={{
+          fontSize: 15,
+          lineHeight: 1.6,
+          color: 'var(--muted)',
+          margin: '0 0 20px',
+        }}
+      >
+        Floom is rolling out Deploy in small batches for the launch week
+        of April 27, 2026. Drop your email and we&rsquo;ll let you know
+        when your slot opens. In the meantime the featured apps are free
+        to run — no signup required.
+      </p>
+      {success ? (
+        <div
+          data-testid="build-waitlist-success"
+          style={{
+            padding: 16,
+            background: 'var(--bg)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            fontSize: 14,
+            lineHeight: 1.5,
+            color: 'var(--ink)',
+          }}
+        >
+          You&rsquo;re on the list. We&rsquo;ll email you when a slot opens.
+          <div style={{ marginTop: 12 }}>
+            <Link
+              to="/apps"
+              style={{
+                fontSize: 13,
+                color: 'var(--ink)',
+                textDecoration: 'underline',
+              }}
+            >
+              Browse the store →
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          <label
+            htmlFor="build-waitlist-email"
+            style={{
+              display: 'block',
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--muted)',
+              marginBottom: 6,
+            }}
+          >
+            Email
+          </label>
+          <input
+            id="build-waitlist-email"
+            type="email"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) setError(null);
+            }}
+            placeholder="you@example.com"
+            autoComplete="email"
+            spellCheck={false}
+            disabled={submitting}
+            data-testid="build-waitlist-email"
+            aria-label="Email address"
+            style={{
+              width: '100%',
+              padding: 12,
+              border: `1px solid ${error ? 'var(--danger, #e5484d)' : 'var(--line)'}`,
+              borderRadius: 8,
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+              fontSize: 14,
+              boxSizing: 'border-box',
+              marginBottom: error ? 6 : 14,
+            }}
+          />
+          {error && (
+            <div
+              data-testid="build-waitlist-error"
+              role="alert"
+              style={{
+                fontSize: 12,
+                color: 'var(--danger, #e5484d)',
+                marginBottom: 10,
+              }}
+            >
+              {error}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={submitting}
+            data-testid="build-waitlist-submit"
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              border: 'none',
+              borderRadius: 8,
+              background: 'var(--ink)',
+              color: 'var(--card)',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: submitting ? 'default' : 'pointer',
+              opacity: submitting ? 0.7 : 1,
+            }}
+          >
+            {submitting ? 'Joining…' : 'Join waitlist'}
+          </button>
+        </form>
+      )}
+    </div>
   );
 }
