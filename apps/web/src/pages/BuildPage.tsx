@@ -16,6 +16,7 @@ import { PageShell } from '../components/PageShell';
 import { CustomRendererPanel } from '../components/CustomRendererPanel';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
+import type { IngestHint } from '../api/client';
 import type { DetectedApp } from '../lib/types';
 import {
   buildGithubSpecCandidates,
@@ -122,6 +123,22 @@ export function BuildPage({
   const [githubError, setGithubError] = useState<
     'private' | 'no-openapi' | 'unreachable' | 'repo-not-found' | null
   >(null);
+  // Proactive recovery (MEMORY: feedback_ingestion_be_helpful.md). When
+  // the GitHub ramp errors out, we fetch a structured hint from
+  // POST /api/hub/detect/hint and render three recovery paths (paste
+  // direct URL, paste spec contents, copy a prompt for Claude). This
+  // replaces the old dead-end error card.
+  const [ingestHint, setIngestHint] = useState<IngestHint | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
+  // Which recovery path is open (accordion-style: one at a time).
+  const [recoveryMode, setRecoveryMode] = useState<
+    'none' | 'direct-url' | 'paste-contents' | 'prompt'
+  >('none');
+  const [directSpecUrl, setDirectSpecUrl] = useState('');
+  const [pastedSpec, setPastedSpec] = useState('');
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
   // Slug-taken recovery (audit 2026-04-20, Fix 2). When the publish
   // request 409s with `slug_taken`, the server returns three suggestions
   // (numeric / version / random suffix). We surface them as clickable
@@ -263,14 +280,109 @@ export function BuildPage({
    * misled users into checking their spec instead of the URL. Now a
    * real 404 on the repo shows a dedicated "repo not found" error.
    */
+  // Fetch a structured recovery hint for the failed GitHub/OpenAPI ramp.
+  // Never throws — swallowed errors just leave hint=null and the UI
+  // falls back to the generic recovery block with shared defaults.
+  async function loadIngestHint(inputUrl: string, attempted: string[]) {
+    setHintLoading(true);
+    try {
+      const hint = await api.fetchIngestHint(inputUrl, attempted);
+      setIngestHint(hint);
+    } catch {
+      setIngestHint(null);
+    } finally {
+      setHintLoading(false);
+    }
+  }
+
+  // Try the user's direct spec URL (paste recovery path).
+  async function handleDirectSpecUrl() {
+    if (!directSpecUrl.trim()) return;
+    setRecoveryError(null);
+    setRecoveryBusy(true);
+    try {
+      const result = await api.detectApp(
+        directSpecUrl.trim(),
+        name || undefined,
+        slug || undefined,
+      );
+      setDetected(result);
+      setName(result.name);
+      setSlug(result.slug);
+      setDescription(result.description);
+      setSource('openapi');
+      setStep('review');
+      setGithubError(null);
+      setIngestHint(null);
+      setRecoveryMode('none');
+    } catch (e) {
+      setRecoveryError(
+        (e as Error).message ||
+          "Couldn't fetch that URL. Make sure it's a public openapi.yaml / openapi.json.",
+      );
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
+  // Submit pasted spec contents (JSON or YAML string).
+  async function handlePastedSpec() {
+    const content = pastedSpec.trim();
+    if (!content) return;
+    setRecoveryError(null);
+    setRecoveryBusy(true);
+    try {
+      const result = await api.detectAppInline(
+        content,
+        name || undefined,
+        slug || undefined,
+      );
+      setDetected(result);
+      setName(result.name);
+      setSlug(result.slug);
+      setDescription(result.description);
+      setSource('openapi');
+      setStep('review');
+      setGithubError(null);
+      setIngestHint(null);
+      setRecoveryMode('none');
+    } catch (e) {
+      setRecoveryError(
+        (e as Error).message ||
+          "That doesn't look like a valid OpenAPI spec. It needs to declare openapi: 3.x and at least one path.",
+      );
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }
+
+  async function handleCopyPrompt() {
+    const prompt = ingestHint?.ready_prompt;
+    if (!prompt) return;
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 2000);
+    } catch {
+      // clipboard API blocked — fall through, user can still select text
+      setPromptCopied(false);
+    }
+  }
+
   async function runGithubDetect(inputUrl: string): Promise<boolean> {
     setError(null);
     setGithubError(null);
+    setIngestHint(null);
+    setRecoveryMode('none');
+    setRecoveryError(null);
+    setDirectSpecUrl('');
+    setPastedSpec('');
     setDetecting('github');
     setDetectStatus('Checking GitHub repo…');
     const parsed = parseGithubUrl(inputUrl);
     if (!parsed) {
       setGithubError('unreachable');
+      void loadIngestHint(inputUrl, []);
       setDetecting(null);
       setDetectStatus('');
       return false;
@@ -282,6 +394,7 @@ export function BuildPage({
     const existence = await checkGithubRepoExists(parsed.owner, parsed.repo);
     if (existence.state === 'not-found') {
       setGithubError('repo-not-found');
+      void loadIngestHint(inputUrl, []);
       setDetecting(null);
       setDetectStatus('');
       return false;
@@ -311,6 +424,7 @@ export function BuildPage({
     // Repo confirmed to exist (or unknown) but no OpenAPI spec at any of
     // the candidate paths. Show the no-openapi hint.
     setGithubError('no-openapi');
+    void loadIngestHint(inputUrl, candidates);
     setDetecting(null);
     setDetectStatus('');
     return false;
@@ -826,75 +940,32 @@ export function BuildPage({
                 Works with any public repo. Private repos coming soon.
               </div>
 
-              {/* Error states */}
+              {/* Proactive recovery block (MEMORY:
+                  feedback_ingestion_be_helpful.md). Replaces the prior
+                  dead-end ErrorCard. Always surfaces three actions:
+                  (1) paste a direct spec URL, (2) paste spec contents,
+                  (3) copy a prompt for Claude. The server-backed hint
+                  provides repo context + ready prompt + upload URL. */}
               {githubError && (
-                <div
-                  data-testid={`github-error-${githubError}`}
-                  style={{
-                    marginTop: 16,
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                    gap: 12,
-                  }}
-                >
-                  {githubError === 'no-openapi' && (
-                    <ErrorCard
-                      severity="red"
-                      title="We couldn't find your app file"
-                      copy="Floom needs a public openapi.yaml, openapi.yml, openapi.json, or swagger file. Paste the direct file link if it lives in a subfolder."
-                    />
-                  )}
-                  {githubError === 'private' && (
-                    <ErrorCard
-                      severity="amber"
-                      title="This repo looks private"
-                      copy="We can't reach it without permission. Make the repo public, or paste the direct link to your openapi.yaml below."
-                    />
-                  )}
-                  {githubError === 'unreachable' && (
-                    <ErrorCard
-                      severity="amber"
-                      title="That doesn't look like a GitHub URL"
-                      copy="Paste a full URL like https://github.com/owner/repo."
-                    />
-                  )}
-                  {githubError === 'repo-not-found' && (
-                    <ErrorCard
-                      severity="amber"
-                      title="This repo doesn't exist or isn't public"
-                      copy="Double-check the URL. Make sure you're pasting a public GitHub repo like https://github.com/owner/repo."
-                    />
-                  )}
-                  {githubError !== 'repo-not-found' && githubAttempts && githubAttempts.attemptedUrls.length > 0 && (
-                    <details
-                      style={{
-                        background: 'var(--bg)',
-                        border: '1px solid var(--line)',
-                        borderRadius: 10,
-                        padding: '10px 12px',
-                        fontSize: 12,
-                      }}
-                    >
-                      <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontWeight: 500 }}>
-                        Paths we tried ({githubAttempts.attemptedUrls.length})
-                      </summary>
-                      <ul
-                        style={{
-                          margin: '8px 0 0',
-                          padding: '0 0 0 16px',
-                          color: 'var(--muted)',
-                          fontSize: 11,
-                          fontFamily: 'JetBrains Mono, monospace',
-                          lineHeight: 1.7,
-                        }}
-                      >
-                        {githubAttempts.attemptedUrls.map((u) => (
-                          <li key={u}>{formatGithubCandidate(u)}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </div>
+                <RecoveryBlock
+                  testid={`github-error-${githubError}`}
+                  kind={githubError}
+                  hint={ingestHint}
+                  hintLoading={hintLoading}
+                  pathsTriedFallback={githubAttempts?.attemptedUrls || []}
+                  recoveryMode={recoveryMode}
+                  setRecoveryMode={setRecoveryMode}
+                  directSpecUrl={directSpecUrl}
+                  setDirectSpecUrl={setDirectSpecUrl}
+                  pastedSpec={pastedSpec}
+                  setPastedSpec={setPastedSpec}
+                  onDirectSubmit={handleDirectSpecUrl}
+                  onPasteSubmit={handlePastedSpec}
+                  onCopyPrompt={handleCopyPrompt}
+                  promptCopied={promptCopied}
+                  busy={recoveryBusy}
+                  error={recoveryError}
+                />
               )}
             </form>
 
@@ -1736,55 +1807,401 @@ function RampCard({
   );
 }
 
-function ErrorCard({
-  severity,
-  title,
-  copy,
+// ErrorCard (red / amber bordered card) was replaced by RecoveryBlock
+// below (MEMORY: feedback_ingestion_be_helpful.md + CLAUDE.md anti-pattern
+// "No colored left borders on cards"). The old component has been removed
+// in full — keep this note here so the next agent doesn't reintroduce it.
+
+// -----------------------------------------------------------------------
+// Proactive ingest recovery block
+// -----------------------------------------------------------------------
+//
+// Replaces the old dead-end ErrorCard shown when a GitHub/OpenAPI ramp
+// fails. Surfaces three actions side-by-side, all backed by the
+// server's /api/hub/detect/hint response:
+//
+//   1. Paste direct URL  -> retries /api/hub/detect with the new URL
+//   2. Paste contents    -> posts to /api/hub/detect/inline (JSON or YAML)
+//   3. Copy prompt       -> one-paste instruction for Claude/Cursor
+//
+// MEMORY: feedback_ingestion_be_helpful.md — ingest failures must guide
+// the user to a fix, never render a dead-end "couldn't find your app"
+// card. This component is the gate.
+function RecoveryBlock({
+  testid,
+  kind,
+  hint,
+  hintLoading,
+  pathsTriedFallback,
+  recoveryMode,
+  setRecoveryMode,
+  directSpecUrl,
+  setDirectSpecUrl,
+  pastedSpec,
+  setPastedSpec,
+  onDirectSubmit,
+  onPasteSubmit,
+  onCopyPrompt,
+  promptCopied,
+  busy,
+  error,
 }: {
-  severity: 'amber' | 'red';
-  title: string;
-  copy: string;
+  testid: string;
+  kind: 'private' | 'no-openapi' | 'unreachable' | 'repo-not-found';
+  hint: IngestHint | null;
+  hintLoading: boolean;
+  pathsTriedFallback: string[];
+  recoveryMode: 'none' | 'direct-url' | 'paste-contents' | 'prompt';
+  setRecoveryMode: (
+    m: 'none' | 'direct-url' | 'paste-contents' | 'prompt',
+  ) => void;
+  directSpecUrl: string;
+  setDirectSpecUrl: (v: string) => void;
+  pastedSpec: string;
+  setPastedSpec: (v: string) => void;
+  onDirectSubmit: () => void;
+  onPasteSubmit: () => void;
+  onCopyPrompt: () => void;
+  promptCopied: boolean;
+  busy: boolean;
+  error: string | null;
 }) {
-  const color = severity === 'amber' ? '#b45309' : '#991b1b';
-  const bg = severity === 'amber' ? '#fef3c7' : '#fee2e2';
+  const repoLabel = hint?.repo
+    ? `${hint.repo.owner}/${hint.repo.repo}`
+    : null;
+
+  // Title + subtitle are authored per kind — the hint.message is a good
+  // fallback when the kind doesn't map cleanly.
+  let title: string;
+  let subtitle: string;
+  if (kind === 'no-openapi' && repoLabel) {
+    title = `We reached ${repoLabel}, but didn't find an OpenAPI spec`;
+    subtitle =
+      'Drop an openapi.yaml at the repo root, point us at its URL, or ask Claude to generate one.';
+  } else if (kind === 'no-openapi') {
+    title = "We couldn't find an OpenAPI spec in that repo";
+    subtitle =
+      hint?.message ||
+      'Drop an openapi.yaml at the repo root, point us at its URL, or ask Claude to generate one.';
+  } else if (kind === 'repo-not-found') {
+    title = "This repo doesn't exist or isn't public";
+    subtitle =
+      'Double-check the URL, or skip the repo and paste your spec directly below.';
+  } else if (kind === 'private') {
+    title = 'This repo looks private';
+    subtitle =
+      "We can't reach it. Make it public, paste the spec URL, or upload the contents below.";
+  } else {
+    title = "That doesn't look like a reachable URL";
+    subtitle =
+      'Paste a GitHub repo URL, a direct openapi.yaml link, or use one of the options below.';
+  }
+
+  const pathsTried =
+    hint?.paths_tried && hint.paths_tried.length > 0
+      ? hint.paths_tried
+      : pathsTriedFallback;
+
   return (
     <div
+      data-testid={testid}
       style={{
+        marginTop: 16,
         background: 'var(--card)',
         border: '1px solid var(--line)',
-        borderLeft: `3px solid ${color}`,
-        borderRadius: 10,
-        padding: 14,
+        borderRadius: 12,
+        padding: 18,
       }}
     >
-      <div
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 6,
-          background: bg,
-          color,
-          marginBottom: 8,
-        }}
-      >
-        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
         {title}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.55 }}>{copy}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.55, marginBottom: 14 }}>
+        {subtitle}
+      </div>
+
+      {pathsTried.length > 0 && (
+        <details
+          style={{
+            background: 'var(--bg)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            padding: '8px 12px',
+            fontSize: 12,
+            marginBottom: 14,
+          }}
+        >
+          <summary style={{ cursor: 'pointer', color: 'var(--muted)', fontWeight: 500 }}>
+            Paths we checked ({pathsTried.length})
+          </summary>
+          <ul
+            style={{
+              margin: '8px 0 0',
+              padding: '0 0 0 16px',
+              color: 'var(--muted)',
+              fontSize: 11,
+              fontFamily: 'JetBrains Mono, monospace',
+              lineHeight: 1.7,
+              maxHeight: 180,
+              overflowY: 'auto',
+            }}
+          >
+            {pathsTried.map((u) => (
+              <li key={u}>
+                {u.replace('https://raw.githubusercontent.com/', '').replace('https://', '')}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {/* Three action buttons: open one panel at a time. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 8,
+          marginBottom: recoveryMode === 'none' ? 0 : 14,
+        }}
+      >
+        <RecoveryActionButton
+          label="Paste spec URL"
+          description="Direct link to openapi.yaml"
+          active={recoveryMode === 'direct-url'}
+          onClick={() =>
+            setRecoveryMode(recoveryMode === 'direct-url' ? 'none' : 'direct-url')
+          }
+        />
+        <RecoveryActionButton
+          label="Paste spec contents"
+          description="Upload YAML or JSON"
+          active={recoveryMode === 'paste-contents'}
+          onClick={() =>
+            setRecoveryMode(
+              recoveryMode === 'paste-contents' ? 'none' : 'paste-contents',
+            )
+          }
+        />
+        <RecoveryActionButton
+          label="Ask Claude to generate"
+          description="Copy a prompt for your agent"
+          active={recoveryMode === 'prompt'}
+          onClick={() => setRecoveryMode(recoveryMode === 'prompt' ? 'none' : 'prompt')}
+        />
+      </div>
+
+      {recoveryMode === 'direct-url' && (
+        <div>
+          <input
+            type="text"
+            value={directSpecUrl}
+            onChange={(e) => setDirectSpecUrl(e.target.value)}
+            placeholder="https://example.com/openapi.yaml"
+            disabled={busy}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              border: '1px solid var(--line)',
+              borderRadius: 8,
+              fontSize: 13,
+              marginBottom: 8,
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+            }}
+          />
+          <button
+            type="button"
+            disabled={busy || !directSpecUrl.trim()}
+            onClick={onDirectSubmit}
+            style={{
+              padding: '8px 16px',
+              background: 'var(--ink)',
+              color: 'var(--bg)',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: busy || !directSpecUrl.trim() ? 'not-allowed' : 'pointer',
+              opacity: busy || !directSpecUrl.trim() ? 0.5 : 1,
+            }}
+          >
+            {busy ? 'Detecting…' : 'Detect from this URL'}
+          </button>
+        </div>
+      )}
+
+      {recoveryMode === 'paste-contents' && (
+        <div>
+          <textarea
+            value={pastedSpec}
+            onChange={(e) => setPastedSpec(e.target.value)}
+            placeholder="# Paste your openapi.yaml / openapi.json here"
+            disabled={busy}
+            rows={10}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              border: '1px solid var(--line)',
+              borderRadius: 8,
+              fontSize: 12,
+              marginBottom: 8,
+              background: 'var(--bg)',
+              color: 'var(--ink)',
+              fontFamily: 'JetBrains Mono, monospace',
+              resize: 'vertical',
+            }}
+          />
+          <button
+            type="button"
+            disabled={busy || !pastedSpec.trim()}
+            onClick={onPasteSubmit}
+            style={{
+              padding: '8px 16px',
+              background: 'var(--ink)',
+              color: 'var(--bg)',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: busy || !pastedSpec.trim() ? 'not-allowed' : 'pointer',
+              opacity: busy || !pastedSpec.trim() ? 0.5 : 1,
+            }}
+          >
+            {busy ? 'Parsing…' : 'Detect from pasted spec'}
+          </button>
+        </div>
+      )}
+
+      {recoveryMode === 'prompt' && (
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--muted)',
+              marginBottom: 8,
+              lineHeight: 1.55,
+            }}
+          >
+            Paste this into Claude Code / Cursor in your repo. It'll generate an
+            openapi.yaml, commit it, and then you can re-run detect above.
+          </div>
+          <pre
+            style={{
+              background: 'var(--bg)',
+              border: '1px solid var(--line)',
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 11.5,
+              fontFamily: 'JetBrains Mono, monospace',
+              whiteSpace: 'pre-wrap',
+              maxHeight: 260,
+              overflowY: 'auto',
+              color: 'var(--ink)',
+              marginBottom: 8,
+            }}
+          >
+            {hintLoading
+              ? 'Loading prompt…'
+              : hint?.ready_prompt ||
+                "I need to publish my API to Floom. Please add an openapi.yaml at the repo root declaring openapi: 3.0.0, info.title, info.version, servers[], and one entry under paths for each public endpoint. Commit and push."}
+          </pre>
+          <button
+            type="button"
+            onClick={onCopyPrompt}
+            disabled={!hint?.ready_prompt}
+            style={{
+              padding: '8px 16px',
+              background: promptCopied ? '#10b981' : 'var(--ink)',
+              color: 'var(--bg)',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: hint?.ready_prompt ? 'pointer' : 'not-allowed',
+              opacity: hint?.ready_prompt ? 1 : 0.5,
+            }}
+          >
+            {promptCopied ? 'Copied' : 'Copy prompt'}
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: '8px 12px',
+            background: '#fee2e2',
+            color: '#991b1b',
+            border: '1px solid #fecaca',
+            borderRadius: 8,
+            fontSize: 12,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {hint && (
+        <div
+          style={{
+            marginTop: 14,
+            fontSize: 11,
+            color: 'var(--muted)',
+            lineHeight: 1.55,
+          }}
+        >
+          Agent-callable API:{' '}
+          <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            POST {hint.upload_url.replace(/^https?:\/\/[^/]+/, '')}
+          </code>
+          {' · '}
+          <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+            POST {hint.detect_url.replace(/^https?:\/\/[^/]+/, '')}
+          </code>
+        </div>
+      )}
     </div>
+  );
+}
+
+function RecoveryActionButton({
+  label,
+  description,
+  active,
+  onClick,
+}: {
+  label: string;
+  description: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        textAlign: 'left',
+        padding: '10px 12px',
+        background: active ? 'var(--ink)' : 'var(--bg)',
+        color: active ? 'var(--bg)' : 'var(--ink)',
+        border: `1px solid ${active ? 'var(--ink)' : 'var(--line)'}`,
+        borderRadius: 10,
+        cursor: 'pointer',
+        transition: 'all 0.15s',
+      }}
+    >
+      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 2 }}>{label}</div>
+      <div
+        style={{
+          fontSize: 11,
+          color: active ? 'rgba(255,255,255,0.7)' : 'var(--muted)',
+          lineHeight: 1.4,
+        }}
+      >
+        {description}
+      </div>
+    </button>
   );
 }
 
