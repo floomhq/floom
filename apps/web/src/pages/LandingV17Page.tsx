@@ -3,7 +3,7 @@
  *
  * 2026-04-27 waitlist-reality rewrite:
  *   floom.dev (production) is waitlist-only for the build/deploy flow, but
- *   the 3 featured apps (Lead Scorer, Resume Ranker, Competitor Analyzer)
+ *   the 3 featured apps (Lead Scorer, Resume Screener, Competitor Analyzer)
  *   are live and runnable today. preview.floom.dev keeps the full flow.
  *   This file is re-framed so it never visually promises "instant deploy"
  *   on prod while still being exciting:

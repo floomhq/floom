@@ -2,7 +2,7 @@
  * TryTheseApps — launch-hero app card row (waitlist-reality landing).
  *
  * Shows the 3 apps that are live + runnable on production today
- * (Resume Ranker / Lead Scorer / Competitor Analyzer) as side-by-side
+ * (Resume Screener / Lead Scorer / Competitor Analyzer) as side-by-side
  * cards right below the hero demo. This is the "proof of life" moment
  * now that Deploy is gated behind the waitlist: the visitor can't ship
  * their own app yet, but they can run these three in one click.
@@ -50,7 +50,7 @@ const DEFAULT_CARDS: TryAppCardData[] = [
   },
   {
     slug: 'resume-screener',
-    name: 'Resume Ranker',
+    name: 'Resume Screener',
     description: 'Zip of PDFs + a JD. Get a ranked shortlist with reasoning.',
     category: 'HIRING',
   },
