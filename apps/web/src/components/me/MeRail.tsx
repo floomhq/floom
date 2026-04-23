@@ -13,7 +13,6 @@
 
 import { Link } from 'react-router-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { Logo } from '../Logo';
 import { AppIcon } from '../AppIcon';
 import { useMyApps } from '../../hooks/useMyApps';
 import { useSession } from '../../hooks/useSession';
@@ -86,23 +85,6 @@ export function MeRail({
           gap: 14,
         }}
       >
-        <Link
-          to="/"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            textDecoration: 'none',
-            color: 'var(--ink)',
-            fontWeight: 700,
-            fontSize: 15,
-            padding: '0 6px',
-          }}
-        >
-          <Logo size={22} />
-          <span>floom</span>
-        </Link>
-
         {onNewThread ? (
           <button
             type="button"
