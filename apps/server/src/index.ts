@@ -60,6 +60,12 @@ import { securityHeaders } from './middleware/security.js';
 import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
+// Side-effect import: instantiates the adapter bundle at module load so
+// misconfigured env vars fail fast at boot (before any request is served).
+// The bundle is exported from `adapters/index.ts`; route modules import
+// `adapters` from there rather than `src/index.ts` to avoid an import
+// cycle with this bootstrap file. See docs/adapters.md.
+import './adapters/index.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
