@@ -53,12 +53,12 @@ import { getLaunchDemoExampleTextInputs } from '../lib/app-examples';
 // directory lives in examples/ are linked; stub-only apps (floom.yaml with
 // no server code) were removed in the 2026-04-17 bloat cut.
 const GITHUB_REPOS: Record<string, string> = {
-  'blast-radius': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/blast-radius',
-  'claude-wrapped': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/claude-wrapped',
-  'dep-check': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/dep-check',
-  'hook-stats': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/hook-stats',
-  'session-recall': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/session-recall',
-  'ig-nano-scout': 'https://github.com/floomhq/floom-monorepo/tree/main/examples/ig-nano-scout',
+  'blast-radius': 'https://github.com/floomhq/floom/tree/main/examples/blast-radius',
+  'claude-wrapped': 'https://github.com/floomhq/floom/tree/main/examples/claude-wrapped',
+  'dep-check': 'https://github.com/floomhq/floom/tree/main/examples/dep-check',
+  'hook-stats': 'https://github.com/floomhq/floom/tree/main/examples/hook-stats',
+  'session-recall': 'https://github.com/floomhq/floom/tree/main/examples/session-recall',
+  'ig-nano-scout': 'https://github.com/floomhq/floom/tree/main/examples/ig-nano-scout',
 };
 
 export function AppPermalinkPage() {
