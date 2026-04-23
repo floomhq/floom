@@ -220,6 +220,13 @@ export function LoginPage() {
             top of each other and looked redundant. The right-column
             value-pitch block (below) keeps its small brand mark since
             it's a separate visual unit. */}
+        {/* v17 parity 2026-04-24: display-font hero (Inter 800 tight-tracked
+            per wireframe.css --font-display decision — the wireframes.floom.dev
+            site still renders DM Serif Display but that font was dropped in
+            the 2026-04-24 audit). Copy follows wireframes/v17/login.html:
+            "Sign in to Floom" + "One account. Run apps, ship apps, all in
+            one place." — same message on signup tab, the wireframe notes
+            call out this is intentionally one combined page. */}
         <h1
           style={{
             fontFamily: 'var(--font-display)',
@@ -232,11 +239,11 @@ export function LoginPage() {
             textAlign: 'center',
           }}
         >
-          {mode === 'signin' ? 'Welcome to Floom' : 'Create your Floom account'}
+          {mode === 'signin' ? 'Sign in to Floom' : 'Create your Floom account'}
         </h1>
         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
           {mode === 'signin'
-            ? 'Use your email and password.'
+            ? 'One account. Run apps, ship apps, all in one place.'
             : deployEnabled
               ? 'One account. Run apps, connect tools, publish your own.'
               : 'One account. Run apps, save history, and manage runs.'}
@@ -412,6 +419,48 @@ export function LoginPage() {
             </div>
           </>
         )}
+
+        {/* v17 parity 2026-04-24: BYOK callout. Wireframes/v17/login.html
+            puts this directly in the auth card so the self-host / BYOK
+            expectation is set before first run. Uses the accent-soft
+            gradient + lock icon from the wireframe spec, in the warm
+            tinted-neutral palette (no pure black) per design rules. */}
+        <div
+          data-testid="login-byok-callout"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            background: 'linear-gradient(180deg, var(--card), var(--accent-soft, #ecfdf5))',
+            border: '1px solid var(--accent-border, #d1fae5)',
+            borderRadius: 10,
+            padding: '12px 14px',
+            margin: '0 0 16px',
+            fontSize: 12,
+            color: 'var(--ink)',
+            lineHeight: 1.55,
+          }}
+        >
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.75}
+            aria-hidden="true"
+            style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }}
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" />
+            <path d="M7 11 V7 a5 5 0 0 1 10 0 v4" />
+          </svg>
+          <span>
+            {mode === 'signup' ? 'On signup, save ' : 'Save '}your own{' '}
+            <code style={byokKeyStyle}>GEMINI_API_KEY</code> or{' '}
+            <code style={byokKeyStyle}>OPENAI_API_KEY</code> once — every app on Floom
+            can use it. Your keys stay encrypted, never logged.
+          </span>
+        </div>
 
         <form onSubmit={handlePasswordSubmit}>
           {mode === 'signup' && (
@@ -664,6 +713,18 @@ const primaryButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
   marginTop: 12,
   boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
+};
+
+// Inline code chip for env-var names in the BYOK callout. Small, neutral,
+// monospace — reads as a token the user will paste later, not as decoration.
+const byokKeyStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 11,
+  background: 'var(--card)',
+  padding: '1px 5px',
+  borderRadius: 4,
+  border: '1px solid var(--line)',
+  color: 'var(--ink)',
 };
 
 // Full-width, outlined, white-bg button matching the login-page surface.
