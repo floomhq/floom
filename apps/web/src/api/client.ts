@@ -179,6 +179,60 @@ export function clearUserGeminiKey(): void {
   }
 }
 
+/**
+ * Shape returned by GET /api/:slug/quota (apps/server/src/routes/run.ts).
+ *
+ * Two variants:
+ *   - `gated: false` → this slug is NOT in BYOK_GATED_SLUGS; the UI should
+ *     hide the free-runs strip entirely (no per-IP budget applies).
+ *   - `gated: true`  → the 3 launch-demo slugs. Fields tell the UI how
+ *     many free runs remain in the rolling 24h window for this caller.
+ *     `has_user_key_hint` is a server-side echo of whether we saw a
+ *     non-empty X-User-Api-Key header on the request; the authoritative
+ *     "do I have a key saved" check still lives in the browser via
+ *     readUserGeminiKey(), because the server never persists user keys.
+ */
+export interface AppQuota {
+  gated: boolean;
+  slug: string;
+  usage?: number;
+  limit?: number;
+  remaining?: number;
+  window_ms?: number;
+  has_user_key_hint?: boolean;
+}
+
+/**
+ * Read-only peek at the caller's BYOK free-run budget for an app.
+ * Polling this endpoint does NOT record a run; the server guarantees
+ * that only POST /api/run advances the counter. Safe to call from
+ * useEffect / useSWR.
+ *
+ * Errors: resolves to `{ gated: false, slug }` on any HTTP or network
+ * failure so the UI strip silently hides instead of showing a broken
+ * loading state (the feature is an enhancement, not a hard requirement).
+ */
+export async function getAppQuota(slug: string): Promise<AppQuota> {
+  try {
+    const encoded = encodeURIComponent(slug);
+    const headers: Record<string, string> = {};
+    // Mirror startRun(): if the user has saved a key, send it so the
+    // server echoes has_user_key_hint:true and the UI can skip the
+    // "add your key" CTA for callers who already have one. The header
+    // is a read-only hint in this request path — the server does NOT
+    // record anything just because the header is present.
+    const userKey = readUserGeminiKey();
+    if (userKey) headers['X-User-Api-Key'] = userKey;
+    const res = await request<AppQuota>(`/api/${encoded}/quota`, {
+      method: 'GET',
+      headers,
+    });
+    return res;
+  } catch {
+    return { gated: false, slug };
+  }
+}
+
 export async function startRun(
   appSlug: string,
   inputs: Record<string, unknown>,

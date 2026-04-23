@@ -21,6 +21,14 @@ import { SecretInput } from './forms/SecretInput';
 export interface BYOKModalProps {
   open: boolean;
   /**
+   * Why the modal is open. Changes the heading + copy, nothing else —
+   * save path and storage are identical. Added 2026-04-25 so FreeRunsStrip
+   * can open the modal before the user hits 429.
+   *   - `exhausted` (default): post-429, "Free runs used up"
+   *   - `proactive`: user clicked "Use your own key" while budget remains
+   */
+  mode?: 'exhausted' | 'proactive';
+  /**
    * Parsed payload from the 429 response body. Fields come straight from
    * apps/server/src/lib/byok-gate.ts::byokRequiredResponse. Safe to pass
    * null — the modal renders sensible fallbacks.
@@ -34,14 +42,21 @@ export interface BYOKModalProps {
   } | null;
   onClose: () => void;
   /**
-   * Called after the user has saved a key. The caller should immediately
-   * retry the original run — the newly-written key will be attached on
-   * the next startRun() call.
+   * Called after the user has saved a key. The caller decides what to do
+   * next: in `exhausted` mode RunSurface auto-retries the run; in
+   * `proactive` mode it just closes the modal — the user meant to pre-
+   * configure, not to re-run a failed request.
    */
   onSaved: () => void;
 }
 
-export function BYOKModal({ open, payload, onClose, onSaved }: BYOKModalProps) {
+export function BYOKModal({
+  open,
+  mode = 'exhausted',
+  payload,
+  onClose,
+  onSaved,
+}: BYOKModalProps) {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -108,8 +123,11 @@ export function BYOKModal({ open, payload, onClose, onSaved }: BYOKModalProps) {
             marginBottom: 12,
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>
-            Free runs used up
+          <h2
+            data-testid="byok-modal-heading"
+            style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}
+          >
+            {mode === 'proactive' ? 'Use your own Gemini key' : 'Free runs used up'}
           </h2>
           <button
             type="button"
@@ -139,9 +157,20 @@ export function BYOKModal({ open, payload, onClose, onSaved }: BYOKModalProps) {
             color: 'var(--muted)',
           }}
         >
-          You used all {limit} free runs of <code>{slug}</code> today. Paste
-          your own Gemini API key to keep going — it stays in your browser,
-          we never log or store it.
+          {mode === 'proactive' ? (
+            <>
+              Bring your own Gemini API key to run <code>{slug}</code>{' '}
+              without the {limit}-runs-per-day free cap. The key stays in
+              your browser — we never log or store it, and it's only sent
+              with your next run on this app.
+            </>
+          ) : (
+            <>
+              You used all {limit} free runs of <code>{slug}</code> today.
+              Paste your own Gemini API key to keep going — it stays in
+              your browser, we never log or store it.
+            </>
+          )}
         </p>
 
         <form onSubmit={handleSave}>

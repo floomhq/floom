@@ -13,7 +13,7 @@ import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
 import { pickRouter } from './routes/pick.js';
 import { threadRouter } from './routes/thread.js';
-import { runRouter, slugRunRouter, meRouter } from './routes/run.js';
+import { runRouter, slugRunRouter, slugQuotaRouter, meRouter } from './routes/run.js';
 import { jobsRouter } from './routes/jobs.js';
 import { mcpRouter } from './routes/mcp.js';
 import { rendererRouter } from './routes/renderer.js';
@@ -254,6 +254,14 @@ app.route('/mcp', mcpRouter);
 app.route('/api/:slug/run', slugRunRouter);
 // Async job queue: POST/GET /api/:slug/jobs[/:job_id][/cancel]
 app.route('/api/:slug/jobs', jobsRouter);
+// Read-only BYOK quota peek: GET /api/:slug/quota
+// Returns { gated, slug, usage, limit, remaining, window_ms, has_user_key_hint }
+// for the 3 BYOK-gated demo slugs, or { gated: false } otherwise. Used by
+// the app page's free-runs strip so the user sees "3 of 5 today" without
+// having to hit POST /api/run and parse the 429 payload. No rate-limit
+// middleware — this is a cheap read that shouldn't burn request budget.
+app.use('/api/:slug/quota', openCors);
+app.route('/api/:slug/quota', slugQuotaRouter);
 // Custom renderer bundles (W2.2): GET /renderer/:slug/bundle.js + /meta
 // Public by default; no auth gate because bundles contain no secrets (they
 // run in the user's browser and fetch data via the already-authed /api routes).

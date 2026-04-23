@@ -683,6 +683,79 @@ slugRunRouter.post('/', async (c) => {
   return c.json({ run_id: runId, status: 'pending' });
 });
 
+// ---------- /api/:slug/quota : read-only peek at the BYOK free-run budget ----------
+//
+// Launch-week product need (2026-04-25): on `/p/:slug` we want to tell the
+// user, BEFORE they click Run:
+//
+//   "Free runs · 3 of 5 today — Floom covers the first 5 today, then bring
+//   your own Gemini key."
+//
+// The information already exists server-side in byok-gate.ts (peekUsage +
+// decideByok read the in-memory sliding window), but the only way to learn
+// your remaining quota was to hit POST /api/run and get a 429 back. That
+// worked for the "user tries to run" case but gave us no way to render a
+// live counter in the UI.
+//
+// This endpoint exposes the same numbers read-only. It NEVER records a run,
+// so polling it is free. Response shape:
+//
+//   - Gated slug:     { gated: true, slug, usage, limit, remaining,
+//                       window_ms, has_user_key_hint }
+//   - Non-gated slug: { gated: false, slug }
+//   - Unknown slug:   404 `{ error: 'App not found: <slug>' }`
+//
+// `has_user_key_hint` is a server-echo of whether the caller sent a
+// non-empty X-User-Api-Key header. Purely informational for the UI — the
+// authoritative "do I have a key saved" check lives in the browser
+// (readUserGeminiKey), because the server never persists user keys.
+//
+// Security:
+//   - No auth required: same public surface as POST /api/run for gated slugs.
+//   - Does NOT record a sighting in the subnet-burst detector — we don't
+//     want legitimate counter-polling to trip the abuse heuristic.
+//   - Returns 200 even when the caller would be blocked by BYOK (remaining: 0).
+//     Blocking happens on POST /api/run as today.
+export const slugQuotaRouter = new Hono<{ Variables: { slug: string } }>();
+
+slugQuotaRouter.get('/', async (c) => {
+  // Hono's param typing on a generic router is `string | undefined`; a
+  // request that somehow matched the route without a slug would be a
+  // framework bug, but typing forces us to narrow so the downstream
+  // helpers (isByokGated, decideByok) receive a guaranteed string.
+  const slug = c.req.param('slug');
+  if (!slug) return c.json({ error: 'slug is required' }, 400);
+  const row = db.prepare('SELECT slug FROM apps WHERE slug = ?').get(slug) as
+    | { slug: string }
+    | undefined;
+  if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
+
+  if (!isByokGated(slug)) {
+    // Non-gated apps don't have a per-IP free budget; the UI should hide
+    // the counter strip entirely. We still return 200 so the client can
+    // call the endpoint on every app page without branching on status
+    // codes — `gated === false` is the signal to hide the strip.
+    return c.json({ gated: false, slug });
+  }
+
+  const ip = extractIp(c);
+  const uaHash = hashUserAgent(c.req.header('user-agent'));
+  const hasUserKey = extractUserApiKey(c) !== null;
+  // decideByok is read-only; it does NOT push a sighting into the
+  // subnet-burst detector. Safe to call from a counter-polling endpoint.
+  const decision = decideByok(ip, slug, hasUserKey, undefined, uaHash);
+  const remaining = Math.max(0, decision.limit - decision.usage);
+  return c.json({
+    gated: true,
+    slug,
+    usage: decision.usage,
+    limit: decision.limit,
+    remaining,
+    window_ms: 24 * 60 * 60 * 1000,
+    has_user_key_hint: hasUserKey,
+  });
+});
+
 // ---------- /api/me/runs : per-user run history ----------
 // Returns the caller's run history scoped by (workspace_id, user_id) in
 // cloud mode and by (workspace_id, device_id) in OSS mode. Joins `apps`

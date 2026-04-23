@@ -44,6 +44,7 @@ import * as api from '../../api/client';
 import { ApiError } from '../../api/client';
 import { buildPublicRunPath, getRunStartErrorMessage } from '../../lib/publicPermalinks';
 import { BYOKModal } from '../BYOKModal';
+import { FreeRunsStrip, useFreeRunsRefresher } from './FreeRunsStrip';
 
 export interface RunSurfaceResult {
   runId: string;
@@ -386,7 +387,13 @@ export function RunSurface({
   // for the 3 demo slugs (lead-scorer / competitor-analyzer / resume-screener)
   // we pop this modal so the user can paste their own Gemini key and retry.
   // See apps/server/src/lib/byok-gate.ts and api/client.ts::startRun.
+  //
+  // 2026-04-25: the modal now supports a `proactive` mode, opened from
+  // the new FreeRunsStrip so a user can supply their key BEFORE the 6th
+  // run instead of being stopped by a surprise 429. Only the copy and
+  // heading differ — the save/retry flow is identical.
   const [byokOpen, setByokOpen] = useState(false);
+  const [byokMode, setByokMode] = useState<'exhausted' | 'proactive'>('exhausted');
   const [byokPayload, setByokPayload] = useState<{
     slug?: string;
     usage?: number;
@@ -394,6 +401,11 @@ export function RunSurface({
     get_key_url?: string;
     message?: string;
   } | null>(null);
+
+  // Bump on BYOK-modal close so the FreeRunsStrip refetches the quota
+  // and re-reads localStorage for the user-key presence. No-op when the
+  // slug isn't gated — the strip renders nothing in that case.
+  const freeRunsRefresher = useFreeRunsRefresher();
 
   const handleInputChange = useCallback((name: string, value: unknown) => {
     setState((s) => {
@@ -624,6 +636,7 @@ export function RunSurface({
         (e.payload as { error?: string }).error === 'byok_required'
       ) {
         setByokPayload(e.payload as typeof byokPayload);
+        setByokMode('exhausted');
         setByokOpen(true);
         setState((s) => ({ ...s, phase: s.hasRun ? 'done' : 'ready' }));
         return;
@@ -761,6 +774,29 @@ export function RunSurface({
         </div>
       )}
 
+      {/* Free-runs strip (2026-04-25): visible BYOK status for the 3
+          launch demo slugs. Renders nothing for every other app, so it's
+          safe to mount unconditionally. See FreeRunsStrip.tsx for the
+          state-machine rationale (remaining / exhausted / user-key). */}
+      <FreeRunsStrip
+        slug={app.slug}
+        refreshKey={freeRunsRefresher.refreshKey}
+        onOpenBYOK={() => {
+          setByokPayload({
+            slug: app.slug,
+            // Proactive-mode defaults — the modal's "exhausted" copy
+            // keys off byokMode, not off payload numbers, so usage=0 /
+            // limit=5 here are only used if the modal ever renders
+            // numeric copy (it currently does not in proactive mode).
+            usage: 0,
+            limit: 5,
+            get_key_url: 'https://aistudio.google.com/app/apikey',
+          });
+          setByokMode('proactive');
+          setByokOpen(true);
+        }}
+      />
+
       {/* Upgrade 2 (2026-04-19): action tab strip for multi-action apps.
           Hidden on single-action apps to preserve the current layout.
           Each tab swaps the input card + POST target action. */}
@@ -885,12 +921,23 @@ export function RunSurface({
 
       <BYOKModal
         open={byokOpen}
+        mode={byokMode}
         payload={byokPayload}
-        onClose={() => setByokOpen(false)}
+        onClose={() => {
+          setByokOpen(false);
+          // Refresh the strip so a cancelled proactive flow re-reads
+          // the current localStorage state (no-op if nothing changed).
+          freeRunsRefresher.bump();
+        }}
         onSaved={() => {
           setByokOpen(false);
-          // Retry: startRun picks up the saved key on the next call.
-          void handleRun();
+          freeRunsRefresher.bump();
+          if (byokMode === 'exhausted') {
+            // Exhausted flow → retry the run that just failed. In
+            // proactive mode the user might only want to save the key
+            // and start filling inputs; don't auto-launch a run.
+            void handleRun();
+          }
         }}
       />
     </div>
