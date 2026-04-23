@@ -699,10 +699,15 @@ export function BuildPage({
       setPublishing(false);
       setPublishStatus('');
       setPublishSucceeded(false);
+      // Studio build: land on the app hub after publish (issue #101).
+      if (postPublishHref) {
+        navigate(postPublishHref(slug));
+        return;
+      }
       setStep('done');
-      // Redirect removed on 2026-04-17: give creators a chance to upload
-      // a custom renderer (W2.2) before heading to the permalink. The
-      // "Open app" button on the done step handles navigation manually.
+      // Non-Studio build: give creators a chance to upload a custom
+      // renderer (W2.2) before heading to the permalink. The "Open app"
+      // button on the done step handles navigation manually.
     } catch (err) {
       setPublishing(false);
       setPublishStatus('');
@@ -776,6 +781,10 @@ export function BuildPage({
       setPublishing(false);
       setPublishStatus('');
       setPublishSucceeded(false);
+      if (postPublishHref) {
+        navigate(postPublishHref(next));
+        return;
+      }
       setStep('done');
     } catch (err) {
       setPublishing(false);
