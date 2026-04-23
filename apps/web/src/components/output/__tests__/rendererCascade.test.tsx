@@ -6,6 +6,9 @@ import { test } from 'node:test';
 
 import type { ActionSpec, NormalizedManifest } from '../../../lib/types';
 import { OUTPUT_LIBRARY, pickRenderer } from '../rendererCascade';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { RowTable } from '../RowTable';
+import React from 'react';
 
 function mkManifest(opts: {
   outputs: ActionSpec['outputs'];
@@ -84,4 +87,43 @@ test('rows_field hint prefers that table when multiple json/table outputs exist'
   assert.equal(rowTable?.type, OUTPUT_LIBRARY.RowTable);
   assert.equal(rowTable?.props?.rows.length, 1);
   assert.equal(rowTable?.props?.rows[0].a, 'one');
+});
+
+test('RowTable renders string[] cells as a bullet list (not stringified JSON)', () => {
+  // Competitor-analyzer / resume-screener regression: fields like
+  // `strengths`, `weaknesses`, `source_citations`, `gaps` are string[],
+  // and used to render as `["Exceptional performance with...` with visible
+  // brackets and trailing ellipsis. They now render as <ul><li>…</li></ul>.
+  const rows = [
+    {
+      company: 'Linear',
+      strengths: [
+        'Exceptional performance with instant navigation',
+        'Opinionated project management model',
+        'Tight keyboard shortcuts and power-user UX',
+      ],
+      weaknesses: ['Limited reporting for managers'],
+    },
+  ];
+  const html = renderToStaticMarkup(
+    React.createElement(RowTable, { rows, appSlug: 'competitor-analyzer', runId: 'r1' }),
+  );
+  // Bullets rendered as <ul><li>…
+  assert.ok(
+    /<ul[^>]*>\s*<li/.test(html),
+    'string[] cells should render a <ul><li> bullet list',
+  );
+  assert.ok(
+    html.includes('Exceptional performance with instant navigation'),
+    'bullet items should contain the raw string',
+  );
+  // No visible JSON brackets or trailing ellipsis from the old renderer.
+  assert.ok(
+    !html.includes('[&quot;Exceptional'),
+    'cells should not stringify string[] into JSON-with-quotes',
+  );
+  assert.ok(
+    !html.includes('Exceptional performance with instant navigation&quot;,&quot;'),
+    'cells should not leave a comma-separated JSON blob in the table cell',
+  );
 });

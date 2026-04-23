@@ -3,9 +3,16 @@
 // keys from the first 10 rows as columns, caps at 50 rows, and shows a
 // "+ N more" note below when truncated.
 //
-// Values render as text. Nested objects/arrays collapse to a one-line
-// JSON preview — if you need to inspect nested structure, use the
-// JsonRaw fallback's "Show raw" disclosure.
+// Cell rendering:
+//  - strings / numbers / booleans render inline.
+//  - `string[]` fields render as a vertical bullet list, truncated with
+//    a "+ N more" affordance past STRING_LIST_PREVIEW (the competitor-
+//    analyzer `strengths`/`weaknesses`/`source_citations` case, plus the
+//    resume-screener `gaps` case). No per-app hardcoding: detection is
+//    runtime shape only.
+//  - other nested objects/arrays collapse to a one-line JSON preview
+//    and expose a "Show raw" disclosure via JsonRaw elsewhere.
+import { useState } from 'react';
 import { CopyButton } from './CopyButton';
 
 export interface RowTableProps {
@@ -69,17 +76,107 @@ function deriveColumns(rows: Array<Record<string, unknown>>, max: number): strin
   return Array.from(keys);
 }
 
-function renderCell(value: unknown): string {
+/**
+ * Max bullet items visible before "Show N more" folds the tail. Picked
+ * to match the most common LLM output shape for fields like `strengths`
+ * / `weaknesses` / `source_citations` / `gaps` (3-5 bullets per row).
+ */
+const STRING_LIST_PREVIEW = 5;
+
+function isArrayOfStrings(v: unknown): v is string[] {
+  return (
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.every((item) => typeof item === 'string')
+  );
+}
+
+function formatScalar(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') {
     return Number.isInteger(value) ? value.toLocaleString('en-US') : String(value);
   }
   if (typeof value === 'string') return value;
-  // Nested — collapse to a one-line JSON preview so the table doesn't
-  // blow up.
+  // Nested object / non-string array — collapse to a one-line JSON
+  // preview so the table doesn't blow up.
   const s = JSON.stringify(value);
   return s.length > 80 ? s.slice(0, 77) + '...' : s;
+}
+
+/**
+ * Cell renderer. Strings / numbers / booleans render as plain text.
+ * `string[]` fields — the common LLM-output shape for bullets like
+ * `strengths`, `weaknesses`, `source_citations`, `gaps` — render as an
+ * inline vertical bullet list instead of a stringified JSON blob. Any
+ * other nested value collapses to a one-line JSON preview.
+ */
+function StringListCell({ items }: { items: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items : items.slice(0, STRING_LIST_PREVIEW);
+  const extra = items.length - visible.length;
+  return (
+    <div>
+      <ul
+        style={{
+          margin: 0,
+          paddingLeft: 18,
+          lineHeight: 1.5,
+        }}
+      >
+        {visible.map((item, i) => (
+          <li key={i} style={{ marginBottom: 2, wordBreak: 'break-word' }}>
+            {item}
+          </li>
+        ))}
+      </ul>
+      {extra > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          style={{
+            marginTop: 4,
+            padding: 0,
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--muted)',
+            cursor: 'pointer',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 11,
+            textDecoration: 'underline',
+          }}
+        >
+          Show {extra} more
+        </button>
+      )}
+      {expanded && items.length > STRING_LIST_PREVIEW && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          style={{
+            marginTop: 4,
+            padding: 0,
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--muted)',
+            cursor: 'pointer',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 11,
+            textDecoration: 'underline',
+          }}
+        >
+          Show less
+        </button>
+      )}
+    </div>
+  );
+}
+
+function renderCell(value: unknown): JSX.Element | string {
+  if (isArrayOfStrings(value)) {
+    return <StringListCell items={value} />;
+  }
+  return formatScalar(value);
 }
 
 export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runId }: RowTableProps) {

@@ -8,6 +8,15 @@
 // Plain scalars render inline.
 import { useState } from 'react';
 import { CopyButton } from './CopyButton';
+import { StringList } from './StringList';
+
+function isArrayOfStrings(v: unknown): v is string[] {
+  return (
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.every((item) => typeof item === 'string')
+  );
+}
 
 export interface KeyValueTableProps {
   entries: Array<[string, unknown]>;
@@ -96,7 +105,8 @@ export function KeyValueTable({ entries, label }: KeyValueTableProps) {
 
 function Row({ k, v }: { k: string; v: unknown }) {
   const [expanded, setExpanded] = useState(false);
-  const nested = isNested(v);
+  const stringList = isArrayOfStrings(v);
+  const nested = !stringList && isNested(v);
 
   return (
     <tr style={{ borderTop: '1px solid var(--line)' }}>
@@ -121,7 +131,15 @@ function Row({ k, v }: { k: string; v: unknown }) {
           wordBreak: 'break-word',
         }}
       >
-        {nested ? (
+        {stringList ? (
+          // Inline bullet list for `string[]` fields — no click-to-expand
+          // needed for short lists. Reuses the StringList component so the
+          // chip/bullet heuristic stays consistent with the top-level
+          // renderer.
+          <div style={{ marginTop: 2 }}>
+            <StringList items={v as string[]} maxItems={10} />
+          </div>
+        ) : nested ? (
           <div>
             <button
               type="button"
