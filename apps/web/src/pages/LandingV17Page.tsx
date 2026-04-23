@@ -39,6 +39,7 @@ import { PricingTeaser } from '../components/home/PricingTeaser';
 import { HeroDemo } from '../components/home/HeroDemo';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
 import { TryTheseApps } from '../components/home/TryTheseApps';
+import { ManifestoBand } from '../components/landing/ManifestoBand';
 
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
@@ -307,6 +308,16 @@ export function LandingV17Page() {
               on prod; swaps to a plain Deploy CTA when DEPLOY_ENABLED is on. */}
           <DeployYourOwnTile onWaitlist={() => setWaitlistOpen(true)} />
         </section>
+
+        {/* MANIFESTO BAND — vision-forward block under the hero.
+            Federico 2026-04-24: "we need to say clearly we are building
+            infra for agentic work. more big vision talk, rn it feels like
+            a tool". Direction A, Option 2 (hybrid): the benefit-forward
+            hero ("Ship AI apps fast.") stays as the wedge, this band adds
+            the philosophy ("Infrastructure for agentic work."). Placed
+            between hero and TryTheseApps so the page reads: promise -> why
+            we exist -> proof. */}
+        <ManifestoBand />
 
         {/* "Try these 3 apps" — 3 side-by-side cards of the live featured
             apps. Placed strategically just below the hero, BEFORE the "how
