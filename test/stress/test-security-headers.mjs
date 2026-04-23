@@ -164,5 +164,70 @@ app.get('/renderer/foo/frame.html', (c) => {
   );
 }
 
+// Test 4 (pentest LOW #383) — route-set Referrer-Policy / HSTS / nosniff wins
+// over the middleware default. This is the "single source of truth that
+// still respects route overrides" contract.
+{
+  const routeApp = new Hono();
+  routeApp.use('*', securityHeaders);
+  routeApp.get('/override', (c) =>
+    new Response('ok', {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain',
+        'Referrer-Policy': 'no-referrer',
+        'Strict-Transport-Security': 'max-age=0',
+        'X-Content-Type-Options': 'custom-probe',
+      },
+    }),
+  );
+  const res = await routeApp.request('/override');
+  log(
+    'override: Referrer-Policy route value wins',
+    res.headers.get('referrer-policy') === 'no-referrer',
+    `got=${res.headers.get('referrer-policy')}`,
+  );
+  log(
+    'override: HSTS route value wins',
+    res.headers.get('strict-transport-security') === 'max-age=0',
+    `got=${res.headers.get('strict-transport-security')}`,
+  );
+  log(
+    'override: nosniff route value wins',
+    res.headers.get('x-content-type-options') === 'custom-probe',
+    `got=${res.headers.get('x-content-type-options')}`,
+  );
+  // No comma-joined duplicates from `append`-style header plumbing.
+  log(
+    'override: Referrer-Policy not comma-joined (no dup)',
+    !(res.headers.get('referrer-policy') || '').includes(','),
+  );
+  log(
+    'override: HSTS not comma-joined (no dup)',
+    !(res.headers.get('strict-transport-security') || '').includes(','),
+  );
+}
+
+// Test 5 (pentest LOW #384) — X-Frame-Options is NOT emitted anywhere.
+// CSP `frame-ancestors 'none'` supersedes it on every supported browser.
+{
+  const res1 = await app.request('/landing');
+  const res2 = await app.request('/api/health');
+  const res3 = await app.request('/renderer/foo/frame.html');
+  log(
+    'landing: no X-Frame-Options (CSP frame-ancestors supersedes)',
+    res1.headers.get('x-frame-options') === null,
+    `got=${res1.headers.get('x-frame-options')}`,
+  );
+  log(
+    'api: no X-Frame-Options',
+    res2.headers.get('x-frame-options') === null,
+  );
+  log(
+    'renderer frame: no X-Frame-Options',
+    res3.headers.get('x-frame-options') === null,
+  );
+}
+
 console.log(`\n  ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
