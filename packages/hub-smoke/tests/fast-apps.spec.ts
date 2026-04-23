@@ -7,9 +7,27 @@ import { applyFastFixtures, fastAppSlugs } from './fixtures';
  */
 for (const slug of fastAppSlugs()) {
   test(`@fast ${slug}: permalink loads and run succeeds`, async ({ page }) => {
-    await page.goto(`/p/${slug}`, { waitUntil: 'domcontentloaded' });
+    // `data-testid="run-surface"` mounts only after GET /api/hub/:slug succeeds
+    // (AppPermalinkPage keeps a skeleton until then). Waiting on
+    // `domcontentloaded` alone races hydration + API latency on cold preview.
+    const hubPath = `/api/hub/${slug}`;
+    const hubJson = page.waitForResponse(
+      (res) => {
+        if (res.request().method() !== 'GET' || res.status() !== 200) return false;
+        try {
+          const path = new URL(res.url()).pathname;
+          return path === hubPath || path === `${hubPath}/`;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 60_000 },
+    );
 
-    await expect(page.getByTestId('run-surface')).toBeVisible({ timeout: 30_000 });
+    await page.goto(`/p/${slug}`, { waitUntil: 'load', timeout: 60_000 });
+    await hubJson;
+
+    await page.getByTestId('run-surface').waitFor({ state: 'visible', timeout: 30_000 });
 
     const notFound = page.getByRole('heading', { name: /not found/i });
     if ((await notFound.count()) > 0) {

@@ -16,11 +16,6 @@ jobs:
   fast-apps:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # For PRs the job runs against a shared `preview.floom.dev` that every
-    # branch's tests hit, so a preview regression from one merge cascades to
-    # every open PR. Don't let that block launch merges. On scheduled and
-    # manual runs the job stays required. Tracked in issue #473.
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +32,18 @@ jobs:
       - name: Install Chromium
         working-directory: packages/hub-smoke
         run: pnpm exec playwright install --with-deps chromium
+
+      - name: Prewarm shared preview
+        run: |
+          set -e
+          export BASE_URL="${BASE_URL:-https://preview.floom.dev}"
+          echo "Prewarming ${BASE_URL} ..."
+          curl -fsS --max-time 30 "$BASE_URL/api/health" >/dev/null
+          # Edge/HTML cache: same host the Playwright job will use first.
+          curl -fsS --max-time 30 -o /dev/null "$BASE_URL/p/uuid" || true
+
+        env:
+          BASE_URL: ${{ vars.FLOOM_HUB_SMOKE_URL }}
 
       - name: Fast seven (anon)
         working-directory: packages/hub-smoke
