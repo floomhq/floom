@@ -95,8 +95,14 @@ export function FeedbackButton() {
             bottom: 12px !important;
             right: auto !important;
             left: 12px !important;
-            padding: 7px 10px !important;
+            display: inline-flex !important;
+            min-width: 44px !important;
+            min-height: 44px !important;
+            padding: 10px 12px !important;
             font-size: 12px !important;
+            box-sizing: border-box !important;
+            justify-content: center !important;
+            align-items: center !important;
           }
           [data-testid="feedback-trigger"] .feedback-trigger-label {
             display: none;

@@ -556,7 +556,7 @@ export function LandingV17Page() {
           .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
           .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
           .landing-v17 .hero-ctas a, .landing-v17 .hero-ctas button { width: 100% !important; }
-          .landing-v17 .hero-ctas a[data-testid="hero-cta-try-app"] { padding: 14px 20px !important; }
+          .landing-v17 .hero-ctas a[data-testid="hero-cta-try-app"] { padding: 14px 20px !important; min-height: 44px !important; box-sizing: border-box !important; }
           .landing-v17 .hero-ctas a[data-testid="hero-cta-deploy"] { padding: 10px 12px !important; min-height: 44px !important; justify-content: center !important; }
           .landing-v17 .hero-ctas button[data-testid="hero-cta-waitlist"] { padding: 10px 12px !important; min-height: 44px !important; justify-content: center !important; }
           .landing-v17 .works-with { gap: 16px 24px !important; }

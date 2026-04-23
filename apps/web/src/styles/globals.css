@@ -445,6 +445,45 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
+/* Primary CTAs: WCAG 2.5.5 min 44×44px (touch). Scoped to ≤640px; desktop
+   sizes unchanged. */
+@media (max-width: 640px) {
+  [data-testid="me-first-run-browse-card"] a,
+  [data-testid="me-apps-browse"] {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+  }
+  [data-testid="me-first-run-browse-card"] a {
+    padding: 12px 18px !important;
+  }
+  [data-testid="me-apps-browse"] {
+    padding: 10px 8px;
+  }
+  [data-testid="me-signed-out-shell"] a {
+    min-height: 44px;
+    align-items: center;
+  }
+  [data-testid^="studio-open-"] {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+  [data-testid="studio-new-app-cta"],
+  [data-testid="studio-new-app-waitlist"],
+  [data-testid="studio-empty-waitlist"] {
+    min-height: 44px;
+    min-width: 44px;
+    box-sizing: border-box;
+  }
+  .me-sidebar-item {
+    min-height: 44px;
+  }
+}
+
 /* ── Protocol page responsive TOC ────────────────────────────────────────── */
 @media (max-width: 768px) {
   .protocol-toc {
