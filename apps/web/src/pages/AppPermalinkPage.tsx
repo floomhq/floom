@@ -1468,13 +1468,31 @@ export function AppPermalinkPage() {
               flexWrap: 'wrap',
             }}
           >
+            {/* v17 app-page.html alignment (2026-04-25): when the user is
+                on the default Run tab, the bottom chip row shows only the
+                three SECONDARY surfaces (About / Install / Source) — per
+                wireframe line 382-397 ("About this app", "Install in
+                Claude", "Source"). The "Run" chip appears only when a
+                secondary tab is active, so the user has an explicit
+                "← back to Run" affordance.
+                Rationale: on the Run tab, the whole frame IS the Run
+                surface, so an additional "Run" pill that points to the
+                state you're already in reads as noise. Matches the
+                wireframe's 3-chip row exactly in the idle/running/complete
+                states, and keeps navigation clear when you've drilled
+                into About/Install/Source. */}
             {(
               [
-                { id: 'run', label: 'Run' },
-                { id: 'about', label: 'About this app' },
-                { id: 'install', label: 'Install in Claude' },
-                { id: 'source', label: 'Source' },
-              ] as Array<{ id: PTab; label: string }>
+                // Run chip is conditionally included below — only when
+                // an alternate tab is active, so it acts as a "return"
+                // affordance rather than a redundant selector.
+                ...(activeTab === 'run'
+                  ? []
+                  : [{ id: 'run' as PTab, label: 'Run' }]),
+                { id: 'about' as PTab, label: 'About this app' },
+                { id: 'install' as PTab, label: 'Install in Claude' },
+                { id: 'source' as PTab, label: 'Source' },
+              ]
             ).map((t) => {
               const isOn = activeTab === t.id;
               return (
