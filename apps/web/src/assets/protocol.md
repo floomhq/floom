@@ -34,12 +34,12 @@ run: uvicorn my_app.server:app --port 8000
 
 ## What gets generated automatically
 
-From the OpenAPI spec, Floom derives:
+Write the spec once. Floom turns it into four things your users actually touch:
 
-- **MCP server**: each OpenAPI operation becomes an MCP tool, with the operation's parameters as the tool's inputs and the response schema as the output.
-- **HTTP API**: Floom proxies requests to the underlying service, injecting secrets at runtime and enforcing rate limits / access control.
-- **Web**: inputs are rendered as a form (typed by the OpenAPI schema) and outputs are piped through a built-in renderer. Long-running operations stream output.
-- **Typed SDKs**: openapi-generator spits out clients in any language.
+- **Agent-callable tools** (MCP server). MCP — Model Context Protocol — is how agents like Claude, Cursor, and ChatGPT discover and call external tools. Every operation in your spec becomes one tool your agent can call, using the spec's parameters as inputs and the response schema as structured output.
+- **A web UI** that users can run without any agent. Floom reads the spec's input types and renders the right form controls automatically (a date picker for a date, a file uploader for a file, a text area for a long string). Output flows through a built-in renderer; long-running operations stream their progress live so the page doesn't just spin.
+- **An HTTP API** that anyone — your own code, another team's service, a curl command — can hit. Floom handles the auth tokens, rate limits, and keeps secrets out of your codebase.
+- **Client libraries in any language** (TypeScript, Python, Go, Java, Rust, …). We use [openapi-generator](https://openapi-generator.tech/) — a standard tool that reads your spec and outputs a ready-to-install SDK — so your users can `pip install` or `npm install` and skip the raw HTTP step entirely.
 
 ## Plumbing layers (auto-applied)
 
@@ -112,10 +112,14 @@ GET  /api/health                    -> { ok: true, ... }
 
 ## MCP surface
 
-Each app exposes a per-app MCP server at `/mcp/app/{slug}`. The MCP server uses HTTP+SSE transport (MCP spec 2024-11-05). Tools are generated from the OpenAPI spec: each operation becomes one MCP tool, with the operation's parameters mapped to JSON Schema properties.
+Each app exposes its own MCP server at `/mcp/app/{slug}` that agents like Claude, Cursor, and ChatGPT can connect to directly — point them at the URL, they discover the tools, your users can say "run this" in plain English.
+
+Under the hood we speak the current MCP standard (version 2024-11-05, transported over HTTP with server-sent events — SSE — for the push channel). You don't have to know any of this to use Floom; we only call it out here so the few people writing their own MCP clients can verify compatibility.
+
+Tools are generated straight from your OpenAPI spec: one operation → one tool, with each parameter mapped to a JSON Schema field the agent can fill.
 
 ```
-GET  /mcp/app/stripe          -> SSE stream (MCP notifications)
+GET  /mcp/app/stripe          -> SSE stream (server-sent events — MCP notifications push here)
 POST /mcp/app/stripe          -> MCP JSON-RPC (tool calls, initialize, etc.)
 ```
 
