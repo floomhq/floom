@@ -482,6 +482,17 @@ body:has(.topbar-mobile-menu) {
   .me-sidebar-item {
     min-height: 44px;
   }
+  /* /about: long serif H1 on narrow viewports (audit #315) */
+  [data-testid="about-hero"] h1 {
+    font-size: 34px !important;
+    line-height: 1.1 !important;
+    max-width: 100%;
+    overflow-wrap: break-word;
+  }
+  [data-testid="apps-directory"] .apps-headline {
+    font-size: 34px !important;
+    line-height: 1.1 !important;
+  }
 }
 
 /* ── Protocol page responsive TOC ────────────────────────────────────────── */

@@ -493,9 +493,10 @@ export function ProtocolPage() {
           margin: '0 auto',
           padding: '48px 24px 80px',
           display: 'grid',
-          gridTemplateColumns: '220px 1fr',
+          gridTemplateColumns: 'minmax(0, 220px) minmax(0, 1fr)',
           gap: 48,
           alignItems: 'start',
+          minWidth: 0,
         }}
       >
         {/* Left: Table of Contents (desktop) */}
