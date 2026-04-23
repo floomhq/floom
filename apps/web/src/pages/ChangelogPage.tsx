@@ -11,6 +11,7 @@
 // When we have a real changelog surface we'll replace this with a
 // proper list view; until then, this is the honest answer.
 import { PageShell } from '../components/PageShell';
+import { PageHead } from '../components/PageHead';
 
 const SECTION_STYLE: React.CSSProperties = {
   maxWidth: 720,
@@ -79,7 +80,13 @@ const PILL_SECONDARY_STYLE: React.CSSProperties = {
 
 export function ChangelogPage() {
   return (
-    <PageShell>
+    <PageShell title="Changelog · Floom">
+      <PageHead
+        title="Changelog · Floom"
+        ogTitle="What's new in Floom"
+        description="Floom ships frequently. Follow GitHub Releases for tagged builds and Discord for day-to-day updates."
+        pathname="/changelog"
+      />
       <section style={SECTION_STYLE}>
         <p style={EYEBROW_STYLE}>CHANGELOG</p>
         <h1 style={H1_STYLE}>What's new in Floom</h1>

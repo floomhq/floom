@@ -7,7 +7,7 @@
 // "Connected" success panel so users know what to look for.
 
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { applyPublicMarketingMeta } from '../lib/publicPageMeta';
 
@@ -640,6 +640,7 @@ const TABS: Array<{ id: ClientTab; label: string; sub: string; icon: React.React
 export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
   const [activeTab, setActiveTab] = useState<ClientTab>('desktop');
   const navigate = useNavigate();
+  const { pathname: locationPath } = useLocation();
 
   const slug = app?.slug ?? null;
   const appName = app?.name ?? 'Floom apps';
@@ -653,15 +654,17 @@ export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
         ogTitle: 'Install this app in Claude · Floom',
         description:
           'One-click install for Claude Desktop, Claude Code, Cursor, and other MCP clients. Copy the snippet, drop it in your config, done.',
+        pathname: locationPath,
       });
     } else {
       applyPublicMarketingMeta({
         ogTitle: 'Install in Claude · Floom',
         description:
           'Add Floom to Claude Desktop, Claude Code, Cursor, or any MCP client. Four steps, copy-paste snippets, MCP-native.',
+        pathname: locationPath,
       });
     }
-  }, [app]);
+  }, [app, locationPath]);
 
   return (
     <PageShell title={pageTitle} contentStyle={{ padding: 0, maxWidth: '100%' }}>
