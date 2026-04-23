@@ -890,11 +890,39 @@ const SSRF_BLOCK_LIST_V4 = (() => {
   bl.addSubnet('10.0.0.0', 8, 'ipv4');
   bl.addSubnet('172.16.0.0', 12, 'ipv4');
   bl.addSubnet('192.168.0.0', 16, 'ipv4');
-  bl.addSubnet('100.64.0.0', 10, 'ipv4');
+  bl.addSubnet('100.64.0.0', 10, 'ipv4'); // CGNAT (covers Alibaba 100.100.100.200 IMDS)
   bl.addSubnet('224.0.0.0', 4, 'ipv4'); // multicast
+  // 240.0.0.0/4 "reserved for future use" (class E). Not publicly routable, so
+  // any URL pointing here is either a typo or an SSRF probe. Added 2026-04-23
+  // as part of #378 verification pass — was a gap in the original #378 fix.
+  bl.addSubnet('240.0.0.0', 4, 'ipv4');
   bl.addAddress('255.255.255.255', 'ipv4'); // broadcast
   return bl;
 })();
+
+// Explicit internal-hostname blocklist. These exist-by-convention names bypass
+// the "resolve and check IP" path when DNS is misconfigured (e.g. a resolver
+// that returns 127.0.0.53 for .local mDNS, or a corporate split-horizon
+// resolver that returns an internal VIP for *.cluster.local). Fail fast
+// before we ever issue a fetch so the error is clear and consistent.
+const BLOCKED_INTERNAL_HOSTS: ReadonlySet<string> = new Set([
+  // GCP / Kubernetes metadata
+  'metadata',
+  'metadata.google.internal',
+  'metadata.internal',
+  // Azure IMDS
+  'metadata.azure.com',
+  // AWS EC2 IMDS convenience name (numeric 169.254.169.254 already blocked)
+  'instance-data',
+  'instance-data.ec2.internal',
+]);
+
+const BLOCKED_INTERNAL_SUFFIXES: readonly string[] = [
+  '.internal',
+  '.local',
+  '.localdomain',
+  '.cluster.local',
+];
 
 const SSRF_BLOCK_LIST_V6 = (() => {
   const bl = new BlockList();
@@ -958,13 +986,27 @@ async function isSafeUrl(
   // Reject localhost string variants upfront. DNS lookup of "localhost" on
   // most systems returns 127.0.0.1 anyway, but some resolvers can be
   // re-pointed (e.g. /etc/hosts rewrites), so we don't rely on DNS alone.
-  const host = u.hostname.toLowerCase();
+  const raw = u.hostname.toLowerCase();
+  // Strip IPv6 brackets BEFORE the isIP check. WHATWG URL keeps brackets in
+  // `hostname` (e.g. `[::1]`), which makes `isIP()` return 0 and would cause
+  // every literal IPv6 URL to fall through to DNS lookup — a fragile path
+  // that only fails-closed because `dns.lookup('[::1]')` happens to error.
+  // Stripping brackets lets the BlockList catch literal v6 addresses directly.
+  const host =
+    raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1, -1) : raw;
   if (host === 'localhost' || host === 'ip6-localhost' || host.endsWith('.localhost')) {
     return false;
   }
 
+  // Explicit cloud-metadata / internal hostname blocklist. Belt-and-braces:
+  // even if a local resolver returns a public-looking IP for these names,
+  // we never want to fetch them from the public detect path (#378).
+  if (BLOCKED_INTERNAL_HOSTS.has(host)) return false;
+  for (const suffix of BLOCKED_INTERNAL_SUFFIXES) {
+    if (host.endsWith(suffix)) return false;
+  }
+
   // If the hostname is literally an IP, check it directly (no DNS).
-  // URL parsing strips IPv6 brackets, so `isIP` sees the raw address.
   const literalFamily = isIP(host);
   if (literalFamily !== 0) {
     return !isBlockedIp(host);
