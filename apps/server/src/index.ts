@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import type { MiddlewareHandler } from 'hono';
 import { logger } from 'hono/logger';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -86,7 +87,7 @@ const trustedOrigins = [
     : []),
 ].filter((o): o is string => Boolean(o));
 
-const restrictedCors = cors({
+const restrictedCorsInner = cors({
   origin: (origin) => {
     if (!origin) return ''; // same-origin, no CORS header needed
     return trustedOrigins.includes(origin) ? origin : '';
@@ -95,6 +96,28 @@ const restrictedCors = cors({
   allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
 });
+
+/**
+ * Pentest LOW #385 — gate `Access-Control-Allow-Credentials: true` on an
+ * actual `Access-Control-Allow-Origin` match.
+ *
+ * Hono's `cors({ credentials: true, ... })` always stamps ACAC=true on
+ * every response regardless of whether the request `Origin` ended up in
+ * our trusted list. Browsers only honour ACAC when ACAO is also set, so
+ * the header was functionally inert on untrusted origins — but the
+ * pentest flagged it as a landmine: a future tweak that reflects
+ * `Origin` blindly (or allows `*`) would silently open cross-origin
+ * credentialed fetches. Strip ACAC whenever ACAO didn't make it onto
+ * the response so there's never a dangling `credentials=true` header.
+ */
+const restrictedCors: MiddlewareHandler = async (c, next) => {
+  const maybeResponse = await restrictedCorsInner(c, next);
+  const headers = maybeResponse ? maybeResponse.headers : c.res.headers;
+  if (!headers.get('Access-Control-Allow-Origin')) {
+    headers.delete('Access-Control-Allow-Credentials');
+  }
+  return maybeResponse;
+};
 
 // Open CORS for public run/hub/MCP surfaces. No credentials so cookies don't
 // ride along — server-to-server callers should use bearer tokens.
