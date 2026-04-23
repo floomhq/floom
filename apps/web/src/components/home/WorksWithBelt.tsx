@@ -4,10 +4,9 @@
  * had before"). Compact row, real SVG brand marks where they exist.
  *
  * Logo sourcing (priority per /root/.claude/projects/-root/memory/logos.md):
- *   1. SimpleIcons — Anthropic, Claude, Cursor, OpenAI (ChatGPT is an OpenAI
- *      product, so the OpenAI hexagonal knot is the correct real mark).
+ *   1. SimpleIcons — Claude, Cursor, OpenAI (real brand marks).
  *   2. Codex CLI — no SimpleIcons entry; it's an OpenAI product, we reuse
- *      the OpenAI mark so the mark tells the truth. (Duplicate-but-real beats
+ *      the OpenAI mark so the mark tells the truth. (Real-but-shared beats
  *      invented-monogram.)
  *   3. Any MCP client — the MCP spec has no finalised logo; use a neutral
  *      dashed protocol-ring glyph per logos.md rule "neutral icon or plain
@@ -25,13 +24,6 @@ interface Item {
   mark: ReactNode;
 }
 
-// SimpleIcons Anthropic mark (real brand path, viewBox 0 0 24 24).
-const AnthropicMark = (
-  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-    <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/>
-  </svg>
-);
-
 // SimpleIcons Claude mark (real brand path, viewBox 0 0 24 24).
 const ClaudeMark = (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
@@ -47,8 +39,8 @@ const CursorMark = (
 );
 
 // SimpleIcons OpenAI mark (real brand path, viewBox 0 0 24 24).
-// Used for both ChatGPT and Codex CLI — both are OpenAI products so the
-// real OpenAI mark is truthful rather than invented glyphs.
+// Used for Codex CLI — it's an OpenAI product so the real OpenAI mark is
+// truthful rather than an invented glyph.
 const OpenAIMark = (
   <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
     <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/>
@@ -63,19 +55,25 @@ const McpMark = (
   </svg>
 );
 
+// Trimmed 2026-04-23 per Federico: cut Claude Desktop + ChatGPT, keep 4
+// items so the belt reads as an eyebrow, not a feature block, and stays
+// no wider than the H1 "Ship AI apps fast." text below it.
 const ITEMS: Item[] = [
-  { label: 'Claude Desktop', mark: AnthropicMark },
   { label: 'Claude Code', mark: ClaudeMark },
   { label: 'Cursor', mark: CursorMark },
-  { label: 'ChatGPT', mark: OpenAIMark },
   { label: 'Codex CLI', mark: OpenAIMark },
   { label: 'Any MCP client', mark: McpMark },
 ];
 
-// Small eyebrow row, sits ABOVE the H1. Tighter than before so it reads as
-// an eyebrow, not a feature block.
+// Small eyebrow row, sits ABOVE the H1. maxWidth is tuned to stay strictly
+// inside the visible width of the H1 "Ship AI apps fast." text (64px DM
+// Serif Display, ~460px rendered) so the eyebrow never runs wider than
+// the headline it precedes.
+// No "Works with" lead text (dropped 2026-04-23 when trimming to 4 items) —
+// the icons and labels carry the meaning on their own, and dropping the
+// lead lets the whole belt sit comfortably inside the H1 width below.
 const WRAP_STYLE: CSSProperties = {
-  maxWidth: 820,
+  maxWidth: 460,
   margin: '0 auto 24px',
   padding: '0 12px',
 };
@@ -85,18 +83,8 @@ const ROW_STYLE: CSSProperties = {
   flexWrap: 'wrap',
   justifyContent: 'center',
   alignItems: 'center',
-  gap: '8px 20px',
+  gap: '8px 18px',
   margin: '0 auto',
-};
-
-const LEAD_STYLE: CSSProperties = {
-  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10.5,
-  color: 'var(--muted)',
-  letterSpacing: '0.12em',
-  textTransform: 'uppercase',
-  fontWeight: 600,
-  marginRight: 4,
 };
 
 const ITEM_STYLE: CSSProperties = {
@@ -113,7 +101,6 @@ export function WorksWithBelt() {
   return (
     <div data-testid="works-with-belt" style={WRAP_STYLE}>
       <div className="works-with" style={ROW_STYLE}>
-        <span style={LEAD_STYLE}>Works with</span>
         {ITEMS.map((item) => (
           <span key={item.label} className="ww-item" style={ITEM_STYLE}>
             <span
