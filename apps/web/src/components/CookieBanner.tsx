@@ -105,10 +105,11 @@ export function CookieBanner() {
   const isExpandedMobile = isMobile && expanded;
 
   // Audit 2026-04-22: the banner used to sit bottom-centre, which the
-  // design audit flagged as "covers the fold on every page". Anchored
-  // now to bottom-right, capped at 420px, so it reads as a small corner
-  // toast. Mobile expanded variant still spans the bottom with its
-  // close button.
+  // design audit flagged as "covers the fold on every page". Later
+  // (#104, 2026-04-24) desktop was moved to bottom-left: bottom-right
+  // at 1440px sat over the hero / HeroDemo "try" affordances and the
+  // feedback trigger; a left-anchored toast keeps the right edge clear.
+  // Mobile expanded variant still spans the bottom with its close button.
   return (
     <div
       role="dialog"
@@ -117,8 +118,8 @@ export function CookieBanner() {
       data-testid="cookie-banner"
       style={{
         position: 'fixed',
-        right: isExpandedMobile ? 12 : 16,
-        left: isExpandedMobile ? 12 : 'auto',
+        right: isExpandedMobile ? 12 : 'auto',
+        left: isExpandedMobile ? 12 : 16,
         bottom: 16,
         zIndex: 1000,
         maxWidth: 420,

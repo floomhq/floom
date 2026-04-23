@@ -259,7 +259,7 @@ export function AppsDirectoryPage() {
                 type="text"
                 value={rawSearch}
                 onChange={(e) => setRawSearch(e.target.value)}
-                placeholder="hash a string · search flights · audit a website · generate uuid…"
+                placeholder="Search apps…"
                 aria-label="Search apps"
                 data-testid="apps-search"
                 style={{

@@ -109,7 +109,10 @@ export function NotFoundPage() {
               zIndex: 2,
               display: 'flex',
               flexWrap: 'wrap',
-              gap: 10,
+              /* #94: former pentagon/absolute layout was replaced with this
+                 flex row + wrap. gap applies to both axes so wrapped rows
+                 never touch (320–428px mobile and 1440px+ desktop). */
+              gap: 12,
             }}
           >
             <Link to="/" className="pill" data-testid="not-found-pill-home" style={{ textDecoration: 'none' }}>
