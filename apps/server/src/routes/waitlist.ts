@@ -23,7 +23,7 @@
 import { Hono } from 'hono';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db.js';
-import { sendEmail } from '../lib/email.js';
+import { renderWaitlistConfirmationEmail, sendEmail } from '../lib/email.js';
 import { extractIp, isRateLimitDisabled } from '../lib/rate-limit.js';
 import { hasValidAdminBearer } from '../lib/auth.js';
 
@@ -217,52 +217,13 @@ export function insertWaitlistSignup(opts: {
   }
 }
 
-function renderConfirmationEmail(): {
-  subject: string;
-  html: string;
-  text: string;
-} {
-  const subject = "You're on the Floom waitlist";
-  const text = [
-    'Thanks for signing up.',
-    '',
-    "You're on the Floom waitlist. We'll email you when your slot opens.",
-    '',
-    'In the meantime you can still run the featured apps on floom.dev',
-    "(lead scoring, competitor analysis, resume screening) — they're",
-    'free, no signup required.',
-    '',
-    '— Floom team',
-    '',
-    'Floom, Inc. · Wilmington, DE',
-    'hello@floom.dev',
-  ].join('\n');
-  const html = `<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>Floom waitlist</title></head>
-<body style="margin:0;padding:0;background:#fafaf7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fafaf7;padding:40px 0;">
-<tr><td align="center">
-<table width="560" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:1px solid #eceae3;border-radius:10px;padding:32px;">
-<tr><td>
-<div style="font-size:18px;font-weight:700;letter-spacing:-0.2px;color:#111;margin-bottom:24px;">Floom</div>
-<p style="font-size:15px;line-height:1.55;margin:0 0 16px;">Thanks for signing up.</p>
-<p style="font-size:15px;line-height:1.55;margin:0 0 20px;">You&rsquo;re on the Floom waitlist. We&rsquo;ll email you when your slot opens.</p>
-<p style="font-size:14px;line-height:1.55;margin:0 0 8px;color:#44413a;">In the meantime, the featured apps on <a href="https://floom.dev" style="color:#111;">floom.dev</a> are free to run &mdash; no signup required.</p>
-<p style="font-size:14px;line-height:1.55;margin:24px 0 0;color:#44413a;">&mdash; Floom team</p>
-<hr style="border:none;border-top:1px solid #eceae3;margin:32px 0 16px;">
-<div style="font-size:12px;color:#77736a;line-height:1.5;">
-Floom, Inc. &middot; Wilmington, DE<br>
-Questions? <a href="mailto:hello@floom.dev" style="color:#77736a;text-decoration:underline;">hello@floom.dev</a>
-</div>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
-  return { subject, html, text };
-}
+// The confirmation email renderer lives in `lib/email.ts` alongside every
+// other transactional template so they all share the same branded chrome
+// (green-dot logo bar, serif headings, muted footer with reply hint). We
+// used to ship a hand-rolled duplicate layout here that had drifted away
+// from the others — no CTA, no greeting, system sans-serif display text.
+// Keeping the helper colocated with the other templates is the only way
+// to stop that drift.
 
 waitlistRouter.post('/', async (c) => {
   let body: {
@@ -331,7 +292,13 @@ waitlistRouter.post('/', async (c) => {
   // on it: Resend can be slow (>1s) and the signup must feel instant.
   // The spec explicitly allows persist-without-send when RESEND_API_KEY
   // is missing; lib/email.ts already logs a warning + stdout-fallbacks.
-  const { subject, html, text } = renderConfirmationEmail();
+  const publicUrl =
+    process.env.PUBLIC_URL ||
+    process.env.BETTER_AUTH_URL ||
+    'https://floom.dev';
+  const { subject, html, text } = renderWaitlistConfirmationEmail({
+    publicUrl,
+  });
   void sendEmail({ to: email, subject, html, text }).catch((err) => {
     // Never let email delivery cascade into a signup failure.
     // eslint-disable-next-line no-console
