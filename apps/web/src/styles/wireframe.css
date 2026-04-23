@@ -784,8 +784,6 @@ input { font-family: inherit; }
 .terminal-cancel:hover { background: rgba(255,255,255,0.26); color: #fff; }
 
 /* Terminal token colors — 4 colors only */
-.t-floom   { color: #818cf8; } /* indigo-400 — floom/app namespace tags */
-.t-app     { color: #818cf8; } /* indigo-400 — same as floom */
 .t-key     { color: rgba(241,239,233,0.8); } /* warm-white/80 — JSON keys */
 .t-str     { color: #86efac; } /* green-400 — string values */
 .t-num     { color: rgba(241,239,233,0.8); } /* warm-white/80 — numbers */
