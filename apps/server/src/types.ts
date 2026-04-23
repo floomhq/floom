@@ -387,7 +387,20 @@ export interface SessionContext {
 // W3.1: workspaces + members API types
 // =====================================================================
 
-export type WorkspaceRole = 'admin' | 'editor' | 'viewer';
+/**
+ * Real membership roles persisted in `workspace_members.role`.
+ */
+export type WorkspaceMemberRole = 'admin' | 'editor' | 'viewer';
+
+/**
+ * Public-facing role on the `/api/session/me` payload. Always reflects a
+ * real membership role when the caller is authenticated; for
+ * unauthenticated guests in cloud mode it falls through to the sentinel
+ * `'guest'` so frontend checks that only look at `role === 'admin'`
+ * can't accidentally grant admin to an anonymous visitor (pentest LOW
+ * #387).
+ */
+export type WorkspaceRole = WorkspaceMemberRole | 'guest';
 
 export interface WorkspaceInviteRecord {
   id: string;

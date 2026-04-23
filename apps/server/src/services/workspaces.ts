@@ -23,6 +23,7 @@ import type {
   SessionMePayload,
   WorkspaceInviteRecord,
   WorkspaceMemberRecord,
+  WorkspaceMemberRole,
   WorkspaceRecord,
   WorkspaceRole,
 } from '../types.js';
@@ -32,7 +33,7 @@ import type {
 // enough that stale invites don't pile up.
 const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-const ROLES: WorkspaceRole[] = ['admin', 'editor', 'viewer'];
+const ROLES: WorkspaceMemberRole[] = ['admin', 'editor', 'viewer'];
 
 export class WorkspaceNotFoundError extends Error {
   constructor(workspace_id: string) {
@@ -49,7 +50,7 @@ export class NotAMemberError extends Error {
 }
 
 export class InsufficientRoleError extends Error {
-  constructor(required: WorkspaceRole, actual: WorkspaceRole) {
+  constructor(required: WorkspaceMemberRole, actual: WorkspaceMemberRole) {
     super(`requires ${required} role, caller has ${actual}`);
     this.name = 'InsufficientRoleError';
   }
@@ -83,7 +84,7 @@ export class CannotRemoveLastAdminError extends Error {
   }
 }
 
-function isValidRole(role: string): role is WorkspaceRole {
+function isValidRole(role: string): role is WorkspaceMemberRole {
   return (ROLES as string[]).includes(role);
 }
 
@@ -98,7 +99,10 @@ function generateToken(): string {
 /**
  * Look up a user's role in a workspace. Returns null if not a member.
  */
-function getMemberRole(workspace_id: string, user_id: string): WorkspaceRole | null {
+function getMemberRole(
+  workspace_id: string,
+  user_id: string,
+): WorkspaceMemberRole | null {
   const row = db
     .prepare(
       `SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
@@ -116,8 +120,8 @@ function getMemberRole(workspace_id: string, user_id: string): WorkspaceRole | n
 function assertRole(
   ctx: SessionContext,
   workspace_id: string,
-  required: WorkspaceRole,
-): WorkspaceRole {
+  required: WorkspaceMemberRole,
+): WorkspaceMemberRole {
   if (
     ctx.user_id === DEFAULT_USER_ID &&
     workspace_id === DEFAULT_WORKSPACE_ID
@@ -129,7 +133,11 @@ function assertRole(
     throw new NotAMemberError(ctx.user_id, workspace_id);
   }
   // admin > editor > viewer
-  const rank: Record<WorkspaceRole, number> = { admin: 3, editor: 2, viewer: 1 };
+  const rank: Record<WorkspaceMemberRole, number> = {
+    admin: 3,
+    editor: 2,
+    viewer: 1,
+  };
   if (rank[role] < rank[required]) {
     throw new InsufficientRoleError(required, role);
   }
@@ -351,7 +359,7 @@ export function changeRole(
   ctx: SessionContext,
   workspace_id: string,
   target_user_id: string,
-  new_role: WorkspaceRole,
+  new_role: WorkspaceMemberRole,
 ): MemberWithUser {
   assertRole(ctx, workspace_id, 'admin');
   if (!isValidRole(new_role)) {
@@ -437,7 +445,7 @@ export function inviteByEmail(
   ctx: SessionContext,
   workspace_id: string,
   email: string,
-  role: WorkspaceRole = 'editor',
+  role: WorkspaceMemberRole = 'editor',
 ): InviteResult {
   assertRole(ctx, workspace_id, 'admin');
   if (!isValidRole(role)) {
@@ -627,12 +635,37 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
     getActiveWorkspaceId(ctx.user_id) ||
     memberships[0]?.workspace.id ||
     DEFAULT_WORKSPACE_ID;
-  const active = memberships.find((m) => m.workspace.id === activeId) || {
-    workspace: db
-      .prepare('SELECT * FROM workspaces WHERE id = ?')
-      .get(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
-    role: 'admin' as WorkspaceRole,
-  };
+  // Pentest LOW #387 — an unauthenticated visitor in cloud mode is bound
+  // to the synthetic local user/workspace purely for tenant isolation;
+  // the workspace_members row is auto-inserted at boot with
+  // `role='admin'` so local OSS operators are admin of their own box.
+  // For cloud visitors that same row makes `/api/session/me` return
+  // `role: 'admin'` — a landmine for any frontend gate that checks
+  // `role === 'admin'` without also asserting `is_local === false`.
+  //
+  // Treat a request as "guest" iff cloud mode is on AND the session
+  // resolver fell through to the synthetic local user (no Better Auth
+  // session). In that case, advertise `role: 'guest'` and an empty
+  // workspaces list. Server-side authorization must NEVER trust this
+  // field — routes call `assertRole(ctx, workspace_id, ...)` against
+  // the DB instead. The field is a UX hint only.
+  const isGuest =
+    cloud_mode &&
+    ctx.user_id === DEFAULT_USER_ID &&
+    !ctx.is_authenticated;
+  const active: { workspace: WorkspaceRecord; role: WorkspaceRole } = isGuest
+    ? {
+        workspace: db
+          .prepare('SELECT * FROM workspaces WHERE id = ?')
+          .get(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
+        role: 'guest',
+      }
+    : memberships.find((m) => m.workspace.id === activeId) || {
+        workspace: db
+          .prepare('SELECT * FROM workspaces WHERE id = ?')
+          .get(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
+        role: 'admin',
+      };
   const userRow = db
     .prepare('SELECT id, email, name FROM users WHERE id = ?')
     .get(ctx.user_id) as { id: string; email: string | null; name: string | null } | undefined;
@@ -671,12 +704,17 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
       name: active.workspace.name,
       role: active.role,
     },
-    workspaces: memberships.map((m) => ({
-      id: m.workspace.id,
-      slug: m.workspace.slug,
-      name: m.workspace.name,
-      role: m.role,
-    })),
+    // Pentest LOW #387 — guests see an empty workspace list. The synthetic
+    // local workspace is a tenant-isolation backstop, not something the UI
+    // should render as an available option.
+    workspaces: isGuest
+      ? []
+      : memberships.map((m) => ({
+          id: m.workspace.id,
+          slug: m.workspace.slug,
+          name: m.workspace.name,
+          role: m.role,
+        })),
     cloud_mode,
     // Gate OAuth buttons on the client. A provider is enabled iff both
     // env vars are set on the server. In OSS mode we still return both
