@@ -13,7 +13,7 @@
 // We detect that via /api/session/me (cloud_mode: false) and render a
 // banner letting the user know they can use the local account.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { useSession, refreshSession } from '../hooks/useSession';
@@ -24,7 +24,7 @@ import {
   type AuthErrorAction,
 } from '../lib/authErrors';
 import { track, identifyFromSession } from '../lib/posthog';
-import { useDeployEnabled } from '../lib/flags';
+import { readDeployEnabled } from '../lib/flags';
 
 type Mode = 'signin' | 'signup';
 
@@ -35,7 +35,7 @@ export function LoginPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data, isAuthenticated } = useSession();
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
   const routeMode = getModeFromLocation(location.pathname, searchParams);
   const [mode, setMode] = useState<Mode>(routeMode);
   const [email, setEmail] = useState('');

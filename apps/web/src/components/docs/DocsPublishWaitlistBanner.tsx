@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { useDeployEnabled } from '../../lib/flags';
+import { useCallback, useMemo, useState } from 'react';
+import { readDeployEnabled } from '../../lib/flags';
 
 const STORAGE_KEY = 'floom:docs-publish-waitlist-banner-dismissed';
 
@@ -17,7 +17,7 @@ function readDismissed(): boolean {
  * Dismissal persists for the browser tab session (sessionStorage).
  */
 export function DocsPublishWaitlistBanner() {
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
   const [dismissed, setDismissed] = useState(readDismissed);
 
   const onDismiss = useCallback(() => {

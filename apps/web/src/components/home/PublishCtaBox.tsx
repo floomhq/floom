@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import type { CSSProperties } from 'react';
-import { useDeployEnabled } from '../../hooks/useSession';
+import { useDeployEnabled } from '../../lib/flags';
 import { WaitlistModal } from '../WaitlistModal';
 
 const WRAP_STYLE: CSSProperties = {

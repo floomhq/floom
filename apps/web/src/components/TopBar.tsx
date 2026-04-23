@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Logo } from './Logo';
 import { useSession, clearSession } from '../hooks/useSession';
 import * as api from '../api/client';
-import { useDeployEnabled } from '../lib/flags';
+import { readDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -101,7 +101,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
   const { data, isAuthenticated, refresh } = useSession();
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
   const navigate = useNavigate();
   const location = useLocation();
   const dropRef = useRef<HTMLDivElement>(null);

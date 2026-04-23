@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Logo } from '../components/Logo';
 import { PublicFooter } from '../components/public/PublicFooter';
-import { useDeployEnabled } from '../lib/flags';
+import { readDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 
 /**
@@ -45,7 +45,7 @@ function useNoIndexMeta() {
 export function NotFoundPage() {
   useNoIndexMeta();
   const navigate = useNavigate();
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
 
   return (
     <div className="page-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>

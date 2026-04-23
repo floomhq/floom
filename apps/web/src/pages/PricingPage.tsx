@@ -10,7 +10,7 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
-import { useDeployEnabled } from '../lib/flags';
+import { readDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 
 // ---------------------------------------------------------------------------
@@ -270,7 +270,7 @@ function FaqEntry({ q, a }: FaqItem) {
 // Main page
 // ---------------------------------------------------------------------------
 export function PricingPage() {
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
   const faqs = useMemo(
     () => [...FAQS, ownershipFaq(deployEnabled)],
     [deployEnabled],

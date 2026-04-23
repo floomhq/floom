@@ -24,7 +24,8 @@ import { StudioSignedOutState } from '../components/studio/StudioSignedOutState'
 import { Sparkline } from '../components/studio/Sparkline';
 import * as api from '../api/client';
 import { refreshMyApps, useMyApps } from '../hooks/useMyApps';
-import { useSession, useDeployEnabled } from '../hooks/useSession';
+import { useSession } from '../hooks/useSession';
+import { useDeployEnabled } from '../lib/flags';
 import { formatTime } from '../lib/time';
 import type { AppVisibility, CreatorApp } from '../lib/types';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';

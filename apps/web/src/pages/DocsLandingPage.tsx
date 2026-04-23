@@ -12,13 +12,13 @@
 
 import { Link, useLocation } from 'react-router-dom';
 import type { CSSProperties } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { DocsSidebar, DOCS_SIDEBAR_GROUPS } from '../components/docs/DocsSidebar';
 import { DocsPublishWaitlistBanner } from '../components/docs/DocsPublishWaitlistBanner';
-import { useDeployEnabled } from '../lib/flags';
+import { readDeployEnabled } from '../lib/flags';
 
 // ── Styles ────────────────────────────────────────────────────────────────
 
@@ -275,7 +275,7 @@ const discordFootStyle: CSSProperties = {
 
 export function DocsLandingPage() {
   const { pathname } = useLocation();
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
 
   useEffect(() => {
     document.title = 'Floom docs';

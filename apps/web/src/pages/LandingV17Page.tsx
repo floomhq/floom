@@ -39,12 +39,10 @@ import { HeroDemo } from '../components/home/HeroDemo';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
 import { TryTheseApps } from '../components/home/TryTheseApps';
 
-import { DEPLOY_ENABLED } from '../lib/launchFlags';
-
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
-import { useDeployEnabled } from '../hooks/useSession';
+import { DEPLOY_ENABLED, useDeployEnabled } from '../lib/flags';
 import { WaitlistModal } from '../components/WaitlistModal';
 
 interface Stripe {

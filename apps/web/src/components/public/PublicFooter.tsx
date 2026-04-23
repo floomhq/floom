@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useDeployEnabled } from '../../lib/flags';
+import { readDeployEnabled } from '../../lib/flags';
 import { waitlistHref } from '../../lib/waitlistCta';
 
 // Landing visual audit 2026-04-18 finding: PublicFooter only had Docs +
@@ -38,7 +39,7 @@ function FootLink({ children, to, href }: { children: React.ReactNode; to?: stri
 }
 
 export function PublicFooter() {
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
 
   return (
     <footer

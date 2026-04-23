@@ -10,7 +10,7 @@ import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { SectionEyebrow } from './SectionEyebrow';
-import { useDeployEnabled } from '../../hooks/useSession';
+import { useDeployEnabled } from '../../lib/flags';
 import { WaitlistModal } from '../WaitlistModal';
 
 interface Bullet {

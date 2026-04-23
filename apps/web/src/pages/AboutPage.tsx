@@ -21,9 +21,10 @@
 //   5. Who's behind it: Federico + Floom Inc + OSS commitment
 //   + Footer CTA band: "Paste your thing" → /studio/build
 
+import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
-import { useDeployEnabled } from '../lib/flags';
+import { readDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 
 // ── Shared styles ─────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ const MUTED_BODY_STYLE: React.CSSProperties = {
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export function AboutPage() {
-  const deployEnabled = useDeployEnabled();
+  const deployEnabled = useMemo(() => readDeployEnabled(), []);
   const navigate = useNavigate();
 
   return (
