@@ -14,4 +14,8 @@ COPY main.py /app/main.py
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Drop root. python:3.12-slim has no non-root user by default, so use a numeric
+# UID the runtime can chown or bind-mount against without a /etc/passwd entry.
+USER 1000
+
 ENTRYPOINT ["python", "/app/main.py"]

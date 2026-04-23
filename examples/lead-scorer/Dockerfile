@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY main.py /app/main.py
 
+# Drop root. python:3.12-slim has no non-root user by default, so use a numeric
+# UID the runtime can chown or bind-mount against without a /etc/passwd entry.
+USER 1000
+
 # The Floom Docker runner spawns the container with argv[1] = JSON config and
 # expects the last stdout line prefixed with __FLOOM_RESULT__. See
 # apps/server/src/lib/entrypoint.py.
