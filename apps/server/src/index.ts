@@ -1134,6 +1134,22 @@ if (webDist) {
       });
     }
 
+    // 2026-04-24 (SEO #348): /apps/<slug> and /store/<slug> are legacy
+    // patterns that funnel into /p/<slug> client-side. On the server we
+    // return a real 301 so crawlers don't index both URLs and users who
+    // follow old backlinks from tweets/LinkedIn land on the canonical
+    // permalink without a flash of 404 copy. Listing paths (exact /apps
+    // and /store) stay on the directory page — only deep slug paths
+    // redirect.
+    const legacyAppsMatch = pathname.match(/^\/(?:apps|store)\/([a-z0-9][a-z0-9-]*)\/?$/);
+    if (legacyAppsMatch && legacyAppsMatch[1]) {
+      const target = `/p/${legacyAppsMatch[1]}`;
+      return new Response(null, {
+        status: 301,
+        headers: { location: target, 'cache-control': 'public, max-age=3600' },
+      });
+    }
+
     // 2026-04-20 (PRR tail cleanup): /spec and /spec/* were linked from the
     // wireframes/sitemap but returned 404 because the real route is /protocol.
     // Redirect every /spec/* (including /spec/protocol.md) to /protocol so
