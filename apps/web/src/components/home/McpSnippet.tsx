@@ -163,6 +163,8 @@ export function McpSnippet() {
             fontSize: 13.5,
             lineHeight: 1.7,
             overflowX: 'auto',
+            maxWidth: '100%',
+            minWidth: 0,
           }}
         >
           <button
@@ -192,7 +194,15 @@ export function McpSnippet() {
             {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
             {copied ? 'Copied' : 'Copy'}
           </button>
-          <pre style={{ margin: 0, whiteSpace: 'pre', color: 'var(--ink)' }}>
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: 'pre',
+              color: 'var(--ink)',
+              maxWidth: '100%',
+              overflowX: 'auto',
+            }}
+          >
             {renderHighlightedJson(SNIPPET)}
           </pre>
         </div>

@@ -86,12 +86,15 @@ export function NotFoundPage() {
         </div>
 
         <div
+          className="not-found-inner"
           style={{
             position: 'relative',
             zIndex: 1,
             maxWidth: 560,
             margin: '0 auto',
             padding: '300px 24px 40px',
+            boxSizing: 'border-box',
+            width: '100%',
           }}
         >
           <h1 className="headline" style={{ fontSize: 48, margin: '0 0 14px' }}>
@@ -148,6 +151,17 @@ export function NotFoundPage() {
           pills. Reuse PublicFooter so 404 exposes the same trust links
           (Docs / GitHub / Privacy / Terms / Cookies) as the landing. */}
       <PublicFooter />
+      <style>{`
+        @media (max-width: 640px) {
+          .not-found-inner {
+            padding: 200px 16px 32px !important;
+          }
+          .not-found-inner .headline {
+            font-size: 36px !important;
+            word-break: break-word;
+          }
+        }
+      `}</style>
     </div>
   );
 }

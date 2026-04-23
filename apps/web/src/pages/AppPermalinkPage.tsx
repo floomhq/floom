@@ -1533,7 +1533,7 @@ export function AppPermalinkPage() {
           [data-testid="permalink-hero"] .permalink-hero-actions { width: 100%; justify-content: flex-start; gap: 8px; }
           [data-testid="hero-version-meta"] { flex-wrap: wrap; row-gap: 4px; }
           [data-testid="permalink-tabs"] { padding: 12px 14px !important; gap: 8px !important; }
-          [data-testid="permalink-tabs"] button { min-height: 40px; }
+          [data-testid="permalink-tabs"] button { min-height: 44px; }
           [data-testid="permalink-page"] section[data-testid="how-it-works"] { grid-template-columns: 1fr !important; margin-bottom: 28px !important; }
         }
       `}</style>
