@@ -1,0 +1,179 @@
+{
+  "_comment": "Pre-generated golden responses for the /p/lead-scorer demo sample inputs. If the user submits the exact sample (canonical hash below matches), main.py returns this blob in <500ms. Any other input falls through to a live Gemini Flash call. Regenerate with `python3 scripts/gen-demo-cache.py` after changing the sample assets or canonical_input().",
+  "generated_with": "gemini-3.1-pro-preview",
+  "entries": {
+    "4cac5b617727ee3609a277b69505a7cfe17aaec35b07099aa6a86425227eef10": {
+      "total": 8,
+      "scored": 8,
+      "failed": 0,
+      "dry_run": false,
+      "cache_hit": false,
+      "model": "gemini-3.1-pro-preview",
+      "rows": [
+        {
+          "#": 4,
+          "company": "Payhawk",
+          "website": "https://payhawk.com",
+          "industry": "fintech",
+          "country": "UK",
+          "employee_count": "400",
+          "title": "CFO",
+          "contact_name": "Hristo Borisov",
+          "status": "ok",
+          "score": 85,
+          "reasoning": "Payhawk is a strong fit as a European B2B SaaS fintech with approximately 476 employees and $240M in funding, perfectly matching the growth-stage company criteria. However, the lead data contains an error: Hristo Borisov is the CEO and Co-Founder, not the CFO, which slightly impacts the persona match.",
+          "enriched_fields": {
+            "industry": "Fintech",
+            "employee_range": "400-500",
+            "country": "UK",
+            "signal": "Raised $240M in funding"
+          }
+        },
+        {
+          "#": 5,
+          "company": "Spendesk",
+          "website": "https://spendesk.com",
+          "industry": "fintech",
+          "country": "FR",
+          "employee_count": "500",
+          "title": "CFO",
+          "contact_name": "Rodolphe Ardant",
+          "status": "ok",
+          "score": 75,
+          "reasoning": "Spendesk perfectly matches the company ICP as a growth-stage B2B SaaS fintech in France with roughly 350 employees and strong signals like a $114M Series C round. However, the score is reduced because Rodolphe Ardant is actually the CEO and Founder, whereas the ICP specifically targets CFOs (their actual Group CFO is Julien Lafouge).",
+          "enriched_fields": {
+            "industry": "Fintech",
+            "employee_range": "100-500",
+            "country": "FR",
+            "signal": "Raised $114M Series C"
+          }
+        },
+        {
+          "#": 2,
+          "company": "Pennylane",
+          "website": "https://pennylane.com",
+          "industry": "fintech",
+          "country": "FR",
+          "employee_count": "700",
+          "title": "CFO",
+          "contact_name": "Arthur Waller",
+          "status": "ok",
+          "score": 40,
+          "reasoning": "Pennylane is a French B2B accounting SaaS and fintech that recently raised a €175M Series E in January 2026. While they have strong funding and hiring signals, they score lower because their employee count of over 1,000 significantly exceeds the target ICP size of 100-500. Additionally, Arthur Waller is the CEO and Co-Founder, not the CFO.",
+          "enriched_fields": {
+            "industry": "Fintech",
+            "employee_range": "1000+",
+            "country": "FR",
+            "signal": "Raised €175M Series E in Jan 2026"
+          }
+        },
+        {
+          "#": 3,
+          "company": "Qonto",
+          "website": "https://qonto.com",
+          "industry": "fintech",
+          "country": "FR",
+          "employee_count": "1500",
+          "title": "CFO",
+          "contact_name": "Alexandre Prot",
+          "status": "ok",
+          "score": 25,
+          "reasoning": "Qonto is an EU-based fintech with strong growth and active hiring, matching the industry and region criteria. However, with over 1,600 employees, they significantly exceed the target company size of 100-500 employees. Additionally, Alexandre Prot is the CEO and Co-Founder, not the CFO, making this contact a poor fit for the specific buyer persona.",
+          "enriched_fields": {
+            "industry": "Fintech",
+            "employee_range": "1000-5000",
+            "country": "FR",
+            "signal": "Disqualified due to company size (1,600+ employees) and incorrect persona"
+          }
+        },
+        {
+          "#": 1,
+          "company": "Ramp",
+          "website": "https://ramp.com",
+          "industry": "fintech",
+          "country": "US",
+          "employee_count": "900",
+          "title": "CFO",
+          "contact_name": "Karim Atiyeh",
+          "status": "ok",
+          "score": 15,
+          "reasoning": "Ramp is a fintech with strong recent funding ($300M Series E in Nov 2025), but it is headquartered in the US, missing the targeted EU region. Additionally, the company exceeds the 100-500 employee limit with over 1,000 employees, and Karim Atiyeh is actually the CTO, not the CFO.",
+          "enriched_fields": {
+            "industry": "Fintech",
+            "employee_range": "1000-5000",
+            "country": "US",
+            "signal": "Raised $300M Series E in Nov 2025"
+          }
+        },
+        {
+          "#": 6,
+          "company": "OakRidge Manufacturing",
+          "website": "https://oakridgemfg.com",
+          "industry": "industrial",
+          "country": "US",
+          "employee_count": "2800",
+          "title": "Controller",
+          "contact_name": "Mike Johnson",
+          "status": "ok",
+          "score": 0,
+          "reasoning": "OakRidge Manufacturing is a custom cabinetry and woodworking shop based in Canada with approximately 20 employees. This completely misses the ICP criteria, which targets 100-500 employee B2B SaaS fintechs located in the EU.",
+          "enriched_fields": {
+            "industry": "Manufacturing",
+            "employee_range": "10-50",
+            "country": "CA",
+            "signal": "Disqualified: Local cabinetry manufacturer"
+          }
+        },
+        {
+          "#": 7,
+          "company": "Papermint Studio",
+          "website": "https://papermintstudio.co",
+          "industry": "design agency",
+          "country": "UK",
+          "employee_count": "12",
+          "title": "Director",
+          "contact_name": "Sophie Clarke",
+          "status": "ok",
+          "score": 0,
+          "reasoning": "Papermint Studio is a small design agency with only 12 employees, falling far below the target size of 100-500 employees. The company operates in the design industry rather than the targeted fintech sector, and the contact is a Director rather than a CFO or finance leader.",
+          "enriched_fields": {
+            "industry": "Design Agency",
+            "employee_range": "1-50",
+            "country": "UK",
+            "signal": "Disqualified: Wrong industry and company size"
+          }
+        },
+        {
+          "#": 8,
+          "company": "Kernel Biotech",
+          "website": "https://kernelbio.com",
+          "industry": "biotech",
+          "country": "US",
+          "employee_count": "220",
+          "title": "CFO",
+          "contact_name": "Dr. Sam Patel",
+          "status": "ok",
+          "score": 0,
+          "reasoning": "The provided website (kernelbio.com) is a parked domain, and the company cannot be verified as an active US business. Even based on the provided data, the lead is a US-based biotech company, which completely misses the ICP's target of EU-based fintechs.",
+          "enriched_fields": {
+            "industry": "Biotech",
+            "employee_range": "100-500",
+            "country": "US",
+            "signal": "Parked domain"
+          }
+        }
+      ],
+      "score_distribution": {
+        "80-100": 1,
+        "60-79": 1,
+        "40-59": 1,
+        "20-39": 1,
+        "0-19": 4,
+        "unscored": 0
+      }
+    }
+  },
+  "_debug": {
+    "canonical": "{\"data_sha256\":\"38a5c1a9f768160d0239391bf7fcab1e209375026543309dce3293907e92a7f4\",\"icp\":\"B2B SaaS CFOs at 100-500 employee fintechs in EU. Looking for finance leaders at growth-stage companies with recent funding or hiring signals.\"}"
+  }
+}

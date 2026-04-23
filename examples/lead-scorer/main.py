@@ -15,14 +15,22 @@ File inputs (file/csv) arrive as a path mounted read-only at /floom/inputs/
 (e.g. local dev before runtime plumbing ships), we also accept a raw CSV
 string in the `data` input.
 
-Model: gemini-3.1-pro-preview via google-genai (search + URL context grounding).
-No Claude, no OpenAI, no Gemini 2.x. Fallback to dry-run (random scores) only
-if GEMINI_API_KEY is unset, and we log loudly.
+Model: gemini-3-flash-preview by default (fast, demo-grade). Override with
+GEMINI_MODEL env var or `model` input (e.g. `gemini-3.1-pro-preview` for
+deeper reasoning). No Claude, no OpenAI, no Gemini 2.x — enforced in code.
+Fallback to dry-run (random scores) only if GEMINI_API_KEY is unset.
+
+Sample-input cache: if the canonical input hash matches an entry in
+`sample-cache.json`, return the frozen golden output immediately (<500ms).
+Any other input falls through to a live Gemini call. See `canonical_input`
+below for the hashing contract and `sample-cache.json` for the baked-in
+responses.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -31,11 +39,16 @@ import sys
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
-MODEL_ID = "gemini-3.1-pro-preview"
+DEFAULT_MODEL_ID = "gemini-3-flash-preview"
 MAX_WORKERS = 8
 PER_CALL_TIMEOUT_S = 45
+
+# Path to the pre-generated golden cache. Lives next to this file so the
+# container image bundles it automatically.
+SAMPLE_CACHE_PATH = Path(__file__).parent / "sample-cache.json"
 
 SYSTEM_PROMPT = """You are a B2B lead qualification analyst.
 
@@ -73,6 +86,35 @@ def _log(msg: str) -> None:
     print(f"[lead-scorer] {msg}", flush=True)
 
 
+def _resolve_model(model_override: str | None = None) -> str:
+    """Resolve the Gemini model. Env > explicit override > default. Enforce gemini-3.x.
+
+    Precedence:
+      1. GEMINI_MODEL env var (operator override)
+      2. `model` input (creator override)
+      3. DEFAULT_MODEL_ID
+    """
+    m = (os.environ.get("GEMINI_MODEL") or model_override or DEFAULT_MODEL_ID).strip()
+    if not m.startswith("gemini-3"):
+        raise SystemExit(
+            f"refusing to run: model must be gemini-3.x (got '{m}')"
+        )
+    return m
+
+
+def _read_data_bytes(data_input: str) -> bytes:
+    """Return the raw bytes of the CSV input, whether it's a path or inline text.
+
+    Used by `canonical_input` to hash the actual CSV content, so the cache
+    keys remain stable whether the Floom runtime mounts a file or a direct
+    caller passes the CSV string.
+    """
+    if os.path.isfile(data_input):
+        with open(data_input, "rb") as f:
+            return f.read()
+    return data_input.encode("utf-8")
+
+
 def _load_rows(data_input: str) -> list[dict[str, str]]:
     """Accept either a filesystem path or a raw CSV string."""
     if os.path.isfile(data_input):
@@ -81,6 +123,52 @@ def _load_rows(data_input: str) -> list[dict[str, str]]:
             return list(csv.DictReader(f))
     _log("treating `data` as inline CSV text (no file at that path)")
     return list(csv.DictReader(io.StringIO(data_input.strip())))
+
+
+# ---------------------------------------------------------------------------
+# Sample-input cache (the "instant" demo path)
+# ---------------------------------------------------------------------------
+def canonical_input(data: str, icp: str) -> str:
+    """Deterministic string representation of the inputs.
+
+    Contract:
+      - CSV content is read as bytes (file path OR inline) and SHA-256'd to
+        collapse large fixtures to a short, stable hex digest.
+      - `icp` is stripped of leading/trailing whitespace and all internal
+        newlines collapsed to single `\\n` (so cosmetic re-wrapping doesn't
+        invalidate the cache).
+      - The two parts are JSON-encoded with `sort_keys=True` so dict key
+        ordering is never a source of drift.
+
+    Returns a canonical JSON string; callers hash that string to get a
+    cache key. Keeping canonicalization distinct from hashing makes it
+    easy to debug a missed cache hit (just print the canonical string).
+    """
+    csv_bytes = _read_data_bytes(data)
+    csv_hash = hashlib.sha256(csv_bytes).hexdigest()
+    icp_normalized = "\n".join(
+        line.rstrip() for line in icp.strip().splitlines() if line.strip()
+    )
+    payload = {"data_sha256": csv_hash, "icp": icp_normalized}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _input_hash(data: str, icp: str) -> str:
+    return hashlib.sha256(canonical_input(data, icp).encode("utf-8")).hexdigest()
+
+
+def _load_sample_cache() -> dict[str, Any]:
+    """Load the frozen golden cache, or {} if the file is missing."""
+    if not SAMPLE_CACHE_PATH.is_file():
+        return {}
+    try:
+        with open(SAMPLE_CACHE_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"sample-cache.json unreadable ({exc}); ignoring")
+        return {}
+    entries = raw.get("entries") if isinstance(raw, dict) else None
+    return entries or {}
 
 
 def _row_to_prompt(row: dict[str, str], icp: str) -> str:
@@ -128,7 +216,7 @@ def _dry_run_score(row: dict[str, str], icp: str) -> dict[str, Any]:
     }
 
 
-def _score_with_gemini(row: dict, icp: str, client, tools) -> dict[str, Any]:
+def _score_with_gemini(row: dict, icp: str, client, tools, model: str) -> dict[str, Any]:
     """Single scoring call. Retries once on rate limit."""
     from google.genai import errors as genai_errors  # type: ignore
     from google.genai.types import GenerateContentConfig  # type: ignore
@@ -143,7 +231,7 @@ def _score_with_gemini(row: dict, icp: str, client, tools) -> dict[str, Any]:
     for attempt in (1, 2):
         try:
             resp = client.models.generate_content(
-                model=MODEL_ID,
+                model=model,
                 contents=prompt,
                 config=config,
             )
@@ -186,19 +274,39 @@ def _build_genai():
     return client, tools
 
 
-def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
+def score(data: str, icp: str, model: str | None = None, **_kwargs) -> dict[str, Any]:
     """
     Score each CSV row against the ICP using Gemini 3 with web search + URL context.
 
     Args:
-      data: path to a CSV file (/floom/inputs/data.csv) OR a raw CSV string.
-      icp:  free-text ICP description.
+      data:  path to a CSV file (/floom/inputs/data.csv) OR a raw CSV string.
+      icp:   free-text ICP description.
+      model: optional Gemini model override. Defaults to env GEMINI_MODEL
+             or DEFAULT_MODEL_ID (gemini-3-flash-preview). Must be gemini-3.x.
 
     Returns:
-      {total, scored, failed, rows: [...], score_distribution: {...}, dry_run: bool}
+      {total, scored, failed, rows: [...], score_distribution: {...}, dry_run: bool,
+       cache_hit: bool, model: str}
     """
     if not icp or not icp.strip():
         raise ValueError("icp is required")
+
+    resolved_model = _resolve_model(model)
+
+    # Fast path: if the input exactly matches a baked-in sample, return the
+    # pre-generated golden in <500ms. The golden was produced with
+    # gemini-3.1-pro-preview for higher quality than a live Flash call.
+    cache = _load_sample_cache()
+    h = _input_hash(data, icp)
+    if h in cache:
+        _log(f"cache hit for input_hash={h[:12]}... (instant response)")
+        cached = dict(cache[h])  # shallow copy so we don't mutate the loaded dict
+        cached["cache_hit"] = True
+        cached["dry_run"] = False
+        # Preserve the golden's model field (pro-generated) so the UI chip
+        # shows the truthful source of the cached output.
+        cached.setdefault("model", "gemini-3.1-pro-preview (cached)")
+        return cached
 
     rows = _load_rows(data)
     if not rows:
@@ -209,8 +317,10 @@ def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
             "rows": [],
             "score_distribution": {},
             "dry_run": False,
+            "cache_hit": False,
+            "model": resolved_model,
         }
-    _log(f"scoring {len(rows)} rows against ICP ({len(icp)} chars)")
+    _log(f"scoring {len(rows)} rows against ICP ({len(icp)} chars) with {resolved_model}")
 
     genai_bits = _build_genai()
     dry_run = genai_bits is None
@@ -228,7 +338,7 @@ def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
                 return {**base, "status": "error", "score": None, "reasoning": f"dry_run_failed: {exc}", "enriched_fields": {}}
         client, tools = genai_bits
         try:
-            out = _score_with_gemini(row, icp, client, tools)
+            out = _score_with_gemini(row, icp, client, tools, resolved_model)
             # defensive: enforce shape
             if not isinstance(out.get("score"), (int, float)):
                 raise ValueError(f"bad score field: {out!r}")
@@ -298,7 +408,8 @@ def score(data: str, icp: str, **_kwargs) -> dict[str, Any]:
         "scored": scored,
         "failed": failed,
         "dry_run": dry_run,
-        "model": MODEL_ID if not dry_run else "dry-run",
+        "cache_hit": False,
+        "model": resolved_model if not dry_run else "dry-run",
         "rows": ranked,
         "score_distribution": buckets,
     }
