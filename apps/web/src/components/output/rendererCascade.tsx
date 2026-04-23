@@ -180,7 +180,30 @@ function findAction(app: Pick<AppDetail, 'manifest'>, actionKey?: string): Actio
 
 // ---------- Layer 3a: schema-driven auto-pick (unchanged pre-v16) ----
 
-function autoPick(outputs: OutputSpec[], runOutput: unknown): ReactElement | null {
+interface AutoPickCtx {
+  appSlug?: string;
+  runId?: string;
+}
+
+/**
+ * When a manifest declares both a `json` / `table` output (array of rows) and a
+ * prose field like `summary`, we must not let the summary short-circuit alone:
+ * Issue #343 / #470 / #471 — users only saw the paragraph and thought the run
+ * failed or "had no table". Render the table first, then the markdown field.
+ */
+function pluckMarkdownSidecar(outObj: Record<string, unknown>): string | null {
+  for (const name of MARKDOWN_FIELD_NAMES) {
+    const v = outObj[name];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return null;
+}
+
+function autoPick(
+  outputs: OutputSpec[],
+  runOutput: unknown,
+  ctx?: AutoPickCtx,
+): ReactElement | null {
   if (!runOutput || typeof runOutput !== 'object') return null;
   const outObj = runOutput as Record<string, unknown>;
 
@@ -200,7 +223,34 @@ function autoPick(outputs: OutputSpec[], runOutput: unknown): ReactElement | nul
     }
   }
 
-  // 2. Markdown-style text → Markdown (keeps PR #7 behaviour)
+  // 2. Declared json / table + row array + optional summary/report (Issue #471)
+  for (const spec of outputs) {
+    if (spec.type !== 'json' && spec.type !== 'table') continue;
+    const raw = outObj[spec.name];
+    if (!isArrayOfFlatObjects(raw) || raw.length === 0) continue;
+    const md = pluckMarkdownSidecar(outObj);
+    const table = (
+      <RowTable
+        rows={raw}
+        label={spec.label}
+        appSlug={ctx?.appSlug}
+        runId={ctx?.runId}
+      />
+    );
+    if (md) {
+      return (
+        <div className="floom-auto-composite-output">
+          {table}
+          <div style={{ marginTop: 16 }}>
+            <Markdown content={md} />
+          </div>
+        </div>
+      );
+    }
+    return table;
+  }
+
+  // 3. Markdown-style text → Markdown (keeps PR #7 behaviour)
   for (const name of MARKDOWN_FIELD_NAMES) {
     const v = outObj[name];
     if (typeof v === 'string' && v.length > 0) {
@@ -208,7 +258,7 @@ function autoPick(outputs: OutputSpec[], runOutput: unknown): ReactElement | nul
     }
   }
 
-  // 3. Single string output → code vs text. Language-shaped values
+  // 4. Single string output → code vs text. Language-shaped values
   //    (json / xml) go to CodeBlock regardless of length because
   //    collapsing structure onto one line defeats the point. Short
   //    plain strings → TextBig. Fall through otherwise so the legacy
@@ -489,7 +539,7 @@ export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): Ca
 
   const actionSpec = findAction(app, action);
   const outputs = actionSpec?.outputs ?? [];
-  const auto = autoPick(outputs, runOutput);
+  const auto = autoPick(outputs, runOutput, { appSlug, runId });
   if (auto) {
     return { kind: 'auto', element: auto };
   }

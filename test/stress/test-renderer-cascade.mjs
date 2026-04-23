@@ -10,6 +10,7 @@
 //   - Layer 2 miss (typo in component name) → falls through to Layer 3
 //   - Layer 2 miss (missing *_field reference) → falls through to Layer 3
 //   - Layer 3: auto-pick html → FileDownload
+//   - Layer 3: json/table row array + summary → RowTable + Markdown (Issue #471)
 //   - Layer 3: auto-pick markdown/summary/report → Markdown
 //   - Layer 3: short string → TextBig
 //   - Layer 3: code-like string with language hint → CodeBlock
@@ -188,6 +189,50 @@ console.log('v16 renderer cascade tests');
   const result = pickRenderer({ app, action: 'go', runOutput: out });
   log('Auto-pick: html type → FileDownload', result.element?.type === OUTPUT_LIBRARY.FileDownload);
   log('Auto-pick: previewHtml set from html field', result.element?.props.previewHtml === '<h1>Hello</h1>');
+}
+
+{
+  // Issue #471 / #470: manifest lists json (rows) + summary; must not show
+  // summary-only Markdown (hides the table).
+  const app = {
+    slug: 'resume-screener',
+    manifest: mkManifest({
+      outputs: [
+        { name: 'ranked', label: 'Ranked Candidates', type: 'json' },
+        { name: 'summary', label: 'Summary', type: 'text' },
+        { name: 'model', label: 'Model', type: 'text' },
+      ],
+    }),
+  };
+  const out = {
+    total: 2,
+    scored: 2,
+    ranked: [
+      { filename: 'a.pdf', score: 90, status: 'ok', redacted_id: 'cv-abc' },
+      { filename: 'b.pdf', score: 40, status: 'ok', redacted_id: 'cv-def' },
+    ],
+    summary: 'Screened 2 CV(s). Top: cv-abc.',
+    model: 'gemini-3.1-pro-preview',
+  };
+  const result = pickRenderer({
+    app,
+    action: 'screen',
+    runOutput: out,
+    runId: 'run_resume_test',
+  });
+  const children = result.element?.props?.children;
+  const rowTable = Array.isArray(children) ? children[0] : null;
+  const wrap = Array.isArray(children) ? children[1] : null;
+  log('Auto-pick: json rows + summary → kind auto', result.kind === 'auto');
+  log('Auto-pick: composite outer is div.floom-auto-composite-output', result.element?.props?.className === 'floom-auto-composite-output');
+  log('Auto-pick: RowTable is first child', rowTable?.type === OUTPUT_LIBRARY.RowTable);
+  log('Auto-pick: RowTable gets runId for CSV', rowTable?.props?.runId === 'run_resume_test');
+  log('Auto-pick: RowTable gets app slug', rowTable?.props?.appSlug === 'resume-screener');
+  log('Auto-pick: Markdown is nested under marginTop wrapper', wrap?.props?.style?.marginTop === 16);
+  log(
+    'Auto-pick: summary text passed to Markdown',
+    wrap?.props?.children?.props?.content === 'Screened 2 CV(s). Top: cv-abc.',
+  );
 }
 
 {
