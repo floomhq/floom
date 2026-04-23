@@ -4,7 +4,10 @@ Floom is the production layer for AI apps that do real work. This spec defines h
 
 ## One spec, every surface
 
-A tool becomes a Floom app by providing an **OpenAPI spec**, either as a URL (proxied mode) or embedded in a repo (hosted mode). From that spec, Floom derives every agent-callable surface and wraps it in a full production layer.
+In v17, a tool becomes a Floom app by landing an **OpenAPI contract** through a supported ingest path. A **GitHub repository URL** runs in hosted mode: Floom reads `apps.yaml` and/or an OpenAPI file at the repo root and runs the app. An **OpenAPI spec URL** runs in proxied mode: we fetch the contract and forward to your existing origin. The same spec drives the web form, MCP tools, HTTP API, and clients—**GitHub** is the recommended starting point when you can use a repo so Floom owns the runtime, while **OpenAPI URL** is the escape hatch for an API you already host.
+
+- **GitHub repo URL (hosted):** public repo; Floom reads `apps.yaml` and/or an OpenAPI file from the root.
+- **OpenAPI URL (proxied):** paste a public spec URL; Floom uses it in proxied mode against your `base_url`.
 
 ## The manifest
 
