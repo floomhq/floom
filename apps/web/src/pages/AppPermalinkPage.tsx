@@ -761,7 +761,45 @@ export function AppPermalinkPage() {
                   flexWrap: 'wrap',
                 }}
               >
-                <span data-testid="hero-version">v{app.version ?? '0.1.0'}</span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    textTransform: 'none',
+                    letterSpacing: 0,
+                  }}
+                >
+                  <span
+                    title="Published release of this app"
+                    style={{
+                      padding: '2px 7px',
+                      borderRadius: 999,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      color: 'var(--muted)',
+                      background: 'var(--bg)',
+                      border: '1px solid var(--line)',
+                      fontFamily:
+                        'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+                    }}
+                  >
+                    App version
+                  </span>
+                  <span
+                    data-testid="hero-version"
+                    style={{
+                      fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                      fontSize: 10.5,
+                      color: 'var(--muted)',
+                      letterSpacing: '0.06em',
+                    }}
+                  >
+                    v{app.version ?? '0.1.0'}
+                  </span>
+                </span>
                 <span aria-hidden="true">·</span>
                 <span data-testid="hero-version-status">{app.version_status ?? 'stable'}</span>
                 {heroHandle && (
