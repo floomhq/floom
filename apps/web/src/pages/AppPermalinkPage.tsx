@@ -1379,6 +1379,25 @@ export function AppPermalinkPage() {
           Link copied
         </div>
       )}
+
+      {/* Mobile polish for /p/:slug. The hero row already wraps; these
+          just tighten paddings, let the title wrap (no more mid-word
+          ellipsis on narrow screens), make tab chips tap-friendly, and
+          keep the meta-row from pushing content off-screen. */}
+      <style>{`
+        @media (max-width: 640px) {
+          [data-testid="permalink-page"] { padding: 16px 14px 64px !important; }
+          [data-testid="permalink-page"] .app-page-frame { border-radius: 14px !important; }
+          [data-testid="permalink-hero"] { padding: 14px 16px 12px !important; gap: 10px !important; }
+          [data-testid="permalink-hero"] h1 { white-space: normal !important; font-size: 18px !important; }
+          [data-testid="hero-description"] { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+          [data-testid="permalink-hero"] .permalink-hero-actions { width: 100%; justify-content: flex-start; gap: 8px; }
+          [data-testid="hero-version-meta"] { flex-wrap: wrap; row-gap: 4px; }
+          [data-testid="permalink-tabs"] { padding: 12px 14px !important; gap: 8px !important; }
+          [data-testid="permalink-tabs"] button { min-height: 40px; }
+          [data-testid="permalink-page"] section[data-testid="how-it-works"] { grid-template-columns: 1fr !important; margin-bottom: 28px !important; }
+        }
+      `}</style>
     </div>
   );
 }

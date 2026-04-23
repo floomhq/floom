@@ -26,6 +26,14 @@ import type { HubApp } from '../../lib/types';
 
 export interface AppGridProps {
   apps: HubApp[];
+  /**
+   * Card rendering variant.
+   *   - "default": standard /apps directory card.
+   *   - "featured": slightly taller thumbnail + stronger title (used by
+   *     landing "Try these" shelves that want a hero row of cards).
+   * Defaults to "default" so existing call-sites keep their look.
+   */
+  variant?: 'default' | 'featured';
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -122,6 +130,66 @@ function paletteFor(category: string | null | undefined): Tint {
   return CATEGORY_TINT[category] || TINT_EMERALD;
 }
 
+// Category badge palette. Per-category soft color so HIRING / GROWTH /
+// RESEARCH read distinct at a glance instead of a wall of identical
+// neutral pills. Restrained: only four buckets, all soft-tinted
+// backgrounds with AA-contrast text. Unknown categories fall back to
+// a neutral line pill so we never invent a color we don't own.
+interface BadgePalette {
+  bg: string;
+  border: string;
+  fg: string;
+}
+const BADGE_EMERALD: BadgePalette = {
+  bg: '#ecfdf5',
+  border: '#a7f3d0',
+  fg: '#047857',
+};
+const BADGE_AMBER: BadgePalette = {
+  bg: '#fffaf0',
+  border: '#fde68a',
+  fg: '#b45309',
+};
+const BADGE_BLUE: BadgePalette = {
+  bg: '#eff6ff',
+  border: '#bfdbfe',
+  fg: '#1d4ed8',
+};
+const BADGE_SLATE: BadgePalette = {
+  bg: '#f1f5f9',
+  border: '#e2e8f0',
+  fg: '#475569',
+};
+
+const CATEGORY_BADGE: Record<string, BadgePalette> = {
+  hiring: BADGE_BLUE,
+  hr: BADGE_BLUE,
+  recruiting: BADGE_BLUE,
+  growth: BADGE_EMERALD,
+  marketing: BADGE_EMERALD,
+  sales: BADGE_EMERALD,
+  seo: BADGE_EMERALD,
+  research: BADGE_AMBER,
+  ai: BADGE_AMBER,
+  analytics: BADGE_AMBER,
+  writing: BADGE_AMBER,
+  content: BADGE_AMBER,
+  design: BADGE_AMBER,
+  'developer-tools': BADGE_SLATE,
+  'developer_tools': BADGE_SLATE,
+  developer: BADGE_SLATE,
+  productivity: BADGE_SLATE,
+  utilities: BADGE_SLATE,
+  'open-data': BADGE_SLATE,
+  'open_data': BADGE_SLATE,
+  travel: BADGE_SLATE,
+};
+
+function badgePaletteFor(category: string | null | undefined): BadgePalette | null {
+  if (!category) return null;
+  return CATEGORY_BADGE[category] ?? null;
+}
+
 function formatRuns(n: number): string {
   if (n >= 1000) {
     const k = n / 1000;
@@ -132,7 +200,7 @@ function formatRuns(n: number): string {
   return String(n);
 }
 
-export function AppGrid({ apps }: AppGridProps) {
+export function AppGrid({ apps, variant = 'default' }: AppGridProps) {
   return (
     <div
       data-testid="apps-grid"
@@ -144,35 +212,53 @@ export function AppGrid({ apps }: AppGridProps) {
       className="app-grid"
     >
       {apps.map((app) => (
-        <AppGridCard key={app.slug} app={app} />
+        <AppGridCard key={app.slug} app={app} variant={variant} />
       ))}
       <style>{`
         @media (max-width: 1024px) {
           .app-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
         }
         @media (max-width: 760px) {
-          .app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
         }
         @media (max-width: 480px) {
-          .app-grid { grid-template-columns: 1fr !important; }
+          .app-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+        }
+        /* Keyboard-focus ring on cards (hover is already wired via JS).
+           Uses the brand accent so it reads clearly against the card. */
+        [data-testid^="app-grid-card-"]:focus-visible {
+          outline: 2px solid var(--accent, #047857);
+          outline-offset: 2px;
+          border-color: var(--ink) !important;
         }
       `}</style>
     </div>
   );
 }
 
-function AppGridCard({ app }: { app: HubApp }) {
+function AppGridCard({
+  app,
+  variant = 'default',
+}: {
+  app: HubApp;
+  variant?: 'default' | 'featured';
+}) {
   const tint = paletteFor(app.category);
   const stars = app.stars ?? 0;
   const runs7d = app.runs_7d ?? 0;
   const isHot = stars >= 100;
   const hero = !!app.hero;
   const thumbnail = app.thumbnail_url ?? null;
+  const badge = badgePaletteFor(app.category);
+  const isFeatured = variant === 'featured';
+  const thumbHeight = isFeatured ? 140 : 120;
+  const titleSize = isFeatured ? 16 : 15;
 
   return (
     <Link
       to={`/p/${app.slug}`}
       data-testid={`app-grid-card-${app.slug}`}
+      aria-label={`${app.name} — open app`}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -197,12 +283,13 @@ function AppGridCard({ app }: { app: HubApp }) {
         el.style.boxShadow = 'none';
       }}
     >
-      {/* THUMBNAIL. 120px tall per wireframe. Real PNG if we have one,
-          otherwise the gradient fallback with the AppIcon glyph big. */}
+      {/* THUMBNAIL. Gradient tile + centered AppIcon (or real PNG when
+          we have one). HERO badge floats in the top-right corner of
+          the thumbnail so it never collides with the stats row. */}
       <div
         data-testid={`app-grid-thumb-${app.slug}`}
         style={{
-          height: 120,
+          height: thumbHeight,
           background: thumbnail ? 'var(--bg)' : tint.gradient,
           boxShadow: thumbnail ? undefined : tint.ring,
           position: 'relative',
@@ -234,13 +321,41 @@ function AppGridCard({ app }: { app: HubApp }) {
             }}
             aria-hidden="true"
           >
-            <AppIcon slug={app.slug} size={44} color={tint.fg} />
+            <AppIcon slug={app.slug} size={isFeatured ? 52 : 44} color={tint.fg} />
           </div>
+        )}
+
+        {hero && (
+          <span
+            data-testid={`app-grid-hero-${app.slug}`}
+            style={{
+              position: 'absolute',
+              top: 10,
+              right: 10,
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontSize: 10,
+              color: 'var(--accent, #047857)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              padding: '3px 8px',
+              border: '1px solid var(--accent-border, #a7f3d0)',
+              borderRadius: 4,
+              background: 'rgba(255,255,255,0.92)',
+              fontWeight: 700,
+              backdropFilter: 'saturate(1.2)',
+              boxShadow: '0 1px 2px rgba(15,23,42,0.06)',
+            }}
+          >
+            HERO
+          </span>
         )}
       </div>
 
-      {/* TITLE ROW: icon + name + stars/runs · HERO tag */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 14px 6px' }}>
+      {/* TITLE ROW: small app icon + name. Title wraps up to 2 lines —
+          never truncates mid-word. min-height reserves 2 lines so card
+          heights stay aligned across the grid even when some names are
+          single-word. */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 14px 8px' }}>
         <span
           aria-hidden="true"
           style={{
@@ -254,87 +369,84 @@ function AppGridCard({ app }: { app: HubApp }) {
             justifyContent: 'center',
             color: tint.fg,
             flexShrink: 0,
+            marginTop: 1,
           }}
         >
           <AppIcon slug={app.slug} size={18} color={tint.fg} />
         </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h3
-            data-testid={`app-grid-title-${app.slug}`}
-            style={{
-              fontSize: 14.5,
-              fontWeight: 600,
-              lineHeight: 1.3,
-              margin: 0,
-              color: 'var(--ink)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {app.name}
-          </h3>
-          <div
-            data-testid={`app-grid-stats-${app.slug}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              marginTop: 2,
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-              fontSize: 11,
-              color: 'var(--muted)',
-              lineHeight: 1.3,
-            }}
-          >
-            <span
-              data-testid={`app-grid-stars-${app.slug}`}
-              data-hot={isHot ? 'true' : 'false'}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 3,
-                color: isHot ? 'var(--accent, #059669)' : 'var(--muted)',
-                fontWeight: isHot ? 600 : 500,
-              }}
-              aria-label={`${stars} stars${isHot ? ' (hot)' : ''}`}
-            >
-              <Star
-                size={11}
-                fill={isHot ? 'currentColor' : 'none'}
-                strokeWidth={1.75}
-              />
-              {stars}
-            </span>
-            <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
-            <span data-testid={`app-grid-runs-${app.slug}`}>
-              {formatRuns(runs7d)} runs · 7d
-            </span>
-          </div>
-        </div>
-        {hero && (
-          <span
-            data-testid={`app-grid-hero-${app.slug}`}
-            style={{
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-              fontSize: 10,
-              color: 'var(--accent, #059669)',
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-              padding: '2px 7px',
-              border: '1px solid var(--accent-border, #a7f3d0)',
-              borderRadius: 4,
-              background: 'var(--accent-soft, #ecfdf5)',
-              fontWeight: 700,
-              flexShrink: 0,
-            }}
-          >
-            HERO
-          </span>
-        )}
+        <h3
+          data-testid={`app-grid-title-${app.slug}`}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: titleSize,
+            fontWeight: 600,
+            lineHeight: 1.25,
+            margin: 0,
+            color: 'var(--ink)',
+            overflow: 'hidden',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            wordBreak: 'break-word',
+            minHeight: `calc(${titleSize}px * 1.25 * 2)`,
+          }}
+        >
+          {app.name}
+        </h3>
       </div>
 
-      {/* DESCRIPTION: 2-line clamp to hold card height across the grid */}
+      {/* STATS ROW: stands on its own so HERO / title / runs never
+          collide. tabular-nums so counts align; flex-wrap in case a
+          narrow mobile column is tighter than expected. */}
+      <div
+        data-testid={`app-grid-stats-${app.slug}`}
+        style={{
+          padding: '0 14px',
+          display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          rowGap: 2,
+          columnGap: 8,
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 11,
+          color: 'var(--muted)',
+          lineHeight: 1.3,
+          fontVariantNumeric: 'tabular-nums',
+          marginBottom: 8,
+        }}
+      >
+        <span
+          data-testid={`app-grid-stars-${app.slug}`}
+          data-hot={isHot ? 'true' : 'false'}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 3,
+            color: isHot ? 'var(--accent, #047857)' : 'var(--muted)',
+            fontWeight: isHot ? 600 : 500,
+          }}
+          aria-label={`${stars} stars${isHot ? ' (hot)' : ''}`}
+        >
+          <Star
+            size={11}
+            fill={isHot ? 'currentColor' : 'none'}
+            strokeWidth={1.75}
+          />
+          {stars}
+        </span>
+        <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
+        <span data-testid={`app-grid-runs-${app.slug}`}>
+          {formatRuns(runs7d)} runs
+        </span>
+        <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
+        <span>7d</span>
+      </div>
+
+      {/* DESCRIPTION: 3-line clamp so the first value sentence is
+          readable even when the creator's opening is a generic noun
+          phrase. min-height reserves 3 lines of height for consistent
+          card rhythm across the grid. */}
       <div
         data-testid={`app-grid-desc-${app.slug}`}
         style={{
@@ -344,11 +456,10 @@ function AppGridCard({ app }: { app: HubApp }) {
           lineHeight: 1.5,
           overflow: 'hidden',
           display: '-webkit-box',
-          WebkitLineClamp: 2,
+          WebkitLineClamp: 3,
           WebkitBoxOrient: 'vertical',
-          minHeight: 39,
-          marginBottom: 10,
-          marginTop: 2,
+          minHeight: 'calc(13px * 1.5 * 3)',
+          marginBottom: 12,
         }}
       >
         <DescriptionMarkdown
@@ -364,7 +475,7 @@ function AppGridCard({ app }: { app: HubApp }) {
         />
       </div>
 
-      {/* FOOTER: category pill + Run → */}
+      {/* FOOTER: category pill (colored per bucket) + Run → */}
       <div
         style={{
           marginTop: 'auto',
@@ -373,21 +484,24 @@ function AppGridCard({ app }: { app: HubApp }) {
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 8,
+          minHeight: 44,
         }}
       >
         {app.category ? (
           <span
             data-testid={`app-grid-category-${app.slug}`}
+            data-category={app.category}
             style={{
               fontFamily: "'JetBrains Mono', ui-monospace, monospace",
               fontSize: 10,
-              color: 'var(--muted)',
+              color: badge ? badge.fg : 'var(--muted)',
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
-              padding: '2px 7px',
-              border: '1px solid var(--line)',
+              padding: '3px 8px',
+              border: `1px solid ${badge ? badge.border : 'var(--line)'}`,
               borderRadius: 4,
-              background: 'var(--bg)',
+              background: badge ? badge.bg : 'var(--bg)',
+              fontWeight: 600,
             }}
           >
             {labelForCategory(app.category)}
@@ -396,13 +510,14 @@ function AppGridCard({ app }: { app: HubApp }) {
           <span />
         )}
         <span
+          className="app-grid-cta"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 4,
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: 600,
-            color: 'var(--accent, #059669)',
+            color: 'var(--accent, #047857)',
           }}
         >
           Run

@@ -476,15 +476,33 @@ export function LandingV17Page() {
           .landing-v17 .hero-sub { font-size: 16px !important; }
         }
         @media (max-width: 640px) {
-          .landing-v17 [data-testid="hero"] { padding: 40px 16px 32px !important; }
+          .landing-v17 [data-testid="hero"] { padding: 24px 16px 28px !important; }
           .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
           .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
           .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
           .landing-v17 .hero-ctas a { width: 100% !important; }
+          .landing-v17 .hero-ctas a[data-testid="hero-cta-run-in-claude"] { padding: 14px 20px !important; }
+          .landing-v17 .hero-ctas a[data-testid="hero-cta-deploy"] { padding: 10px 12px !important; min-height: 44px !important; justify-content: center !important; }
           .landing-v17 .works-with { gap: 16px 24px !important; }
           .landing-v17 .dual { grid-template-columns: 1fr !important; }
           .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
           .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
+          /* Shrink sections so 28px side padding + 34px H2 don't blow out
+             the 375px viewport. Applies to every landing section that uses
+             the default 72px/28px padding. */
+          .landing-v17 main > section { padding-left: 20px !important; padding-right: 20px !important; }
+          .landing-v17 main > section { padding-top: 48px !important; padding-bottom: 48px !important; }
+          .landing-v17 [data-testid="hero"] { padding-top: 24px !important; padding-bottom: 28px !important; }
+          .landing-v17 [data-testid="cli-reference-section"] { padding-top: 24px !important; padding-bottom: 8px !important; }
+          /* Serif H2 across the page: scale down so long headlines don't
+             overflow on narrow screens. 34->26, 28->24. */
+          .landing-v17 main > section h2 { font-size: 26px !important; letter-spacing: -0.015em !important; }
+          .landing-v17 [data-testid="pricing-teaser"] h2 { font-size: 24px !important; }
+          /* Pricing card padding tightens so the $0 number stays centered. */
+          .landing-v17 [data-testid="pricing-teaser"] > div > div:nth-child(2) { padding: 24px 18px 22px !important; }
+          /* Build CTA buttons: stack full width and stay tap-friendly. */
+          .landing-v17 main > section:last-of-type > div { flex-direction: column !important; align-items: stretch !important; }
+          .landing-v17 main > section:last-of-type > div a { width: 100% !important; min-height: 44px !important; padding: 12px 18px !important; }
         }
       `}</style>
     </div>

@@ -465,6 +465,16 @@ export function AppsDirectoryPage() {
       <style>{`
         @media (max-width: 640px) {
           .apps-headline { font-size: 30px !important; }
+          /* Directory hero: tighten padding on mobile so the search
+             pill isn't pushed below the fold. Also bump the input
+             font-size to 16px so iOS Safari stops auto-zooming when
+             the field gains focus (it zooms anything <16px). */
+          [data-testid="apps-directory"] main > section:first-of-type { padding: 40px 16px 24px !important; }
+          [data-testid="apps-search"] { font-size: 16px !important; }
+          /* Category chip strip: tighter gap, still wraps. */
+          [data-testid="apps-chips"] { gap: 6px !important; }
+          /* Results section: smaller gutter, smaller bottom padding. */
+          [data-testid="apps-directory"] main > section:nth-of-type(2) { padding: 0 16px 48px !important; }
         }
         /* Mirror AppGrid breakpoints so the loading skeleton collapses the
            same way as the real grid: 4 → 3 → 2 → 1. Keeps grid shape stable

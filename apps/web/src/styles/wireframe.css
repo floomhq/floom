@@ -1626,6 +1626,40 @@ input { font-family: inherit; }
   }
 }
 
+/* ── Mobile polish (launch 2026-04-23) ─────────────────────
+   Shared, low-risk mobile tweaks that apply across every page:
+   * Form inputs: bump to 16px font-size so iOS Safari stops
+     auto-zooming on focus. Also bump tap target height to 44px
+     per WCAG AA (the 40px desktop height is under-tap on
+     touch). Kept desktop unchanged.
+   * Textareas: match the 16px font-size rule.
+   * Long strings (URLs, tokens) inside prose should wrap so they
+     can't blow out layout on a 320-375px viewport.
+   Scoped to ≤640px so desktop rendering is untouched. */
+@media (max-width: 640px) {
+  .input-field {
+    font-size: 16px;
+    min-height: 44px;
+  }
+  textarea.input-field {
+    min-height: 88px;
+  }
+  /* Defensive wrap for long unbreakable strings in content prose.
+     We can't rely on every component to set overflow-wrap, and a
+     single un-wrapped URL on /p/:slug or /docs bricks the layout. */
+  .page-root p,
+  .page-root li,
+  .page-root pre,
+  .page-root code {
+    overflow-wrap: anywhere;
+  }
+  /* Legal / long-text pages: keep generous line-height on small
+     screens so imprint / privacy / terms stay readable. */
+  .page-root .prose-legal {
+    line-height: 1.65;
+  }
+}
+
 /* ── Reduced motion ──────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   * {
