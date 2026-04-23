@@ -323,24 +323,16 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       cookiePrefix: 'floom',
       defaultCookieAttributes: {
         sameSite: 'strict',
-        // Secure is determined by the serving hostname, not NODE_ENV.
-        // This means a local HTTPS tunnel (ngrok, etc.) gets Secure=true
-        // automatically, and the flag stays false only when the host is
-        // literally localhost/127.0.0.1 where browsers waive the requirement.
+        // Pentest MED #382 — Secure must be set unconditionally. Browsers
+        // (Chrome, Firefox, Safari) exempt `localhost` and `127.0.0.1` from
+        // the HTTPS requirement even with `Secure`, so local dev still
+        // works. Any non-localhost host should already be HTTPS; a
+        // plaintext-over-HTTP deploy is a misconfiguration we don't want
+        // to silently paper over by stripping `Secure` off the session
+        // cookie. Tunnels (ngrok, cloudflared) are HTTPS, so this is safe.
         // OAuth state cookies (see `cookies` block below) override sameSite
         // to `lax` so the cross-site provider callback still carries them.
-        secure: (() => {
-          const host =
-            process.env.BETTER_AUTH_URL ||
-            process.env.PUBLIC_URL ||
-            'http://localhost';
-          try {
-            const { hostname } = new URL(host);
-            return hostname !== 'localhost' && hostname !== '127.0.0.1';
-          } catch {
-            return false;
-          }
-        })(),
+        secure: true,
         httpOnly: true,
       },
       cookies: {
