@@ -185,10 +185,29 @@ export function LandingV17Page() {
                 fontWeight: 400,
                 color: 'var(--muted)',
                 maxWidth: 640,
-                margin: '0 auto 28px',
+                margin: '0 auto 12px',
               }}
             >
               The protocol and runtime for agentic work.
+            </p>
+            {/* Target-user line (#297). Placed under the subhead so the hero
+                answers "who is this for" without muddying the protocol tagline
+                above. Exact copy from Federico's spec — do not rewrite. */}
+            <p
+              className="hero-target"
+              data-testid="hero-target-audience"
+              style={{
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 14,
+                lineHeight: 1.4,
+                fontWeight: 500,
+                color: 'var(--muted)',
+                maxWidth: 560,
+                margin: '0 auto 28px',
+                opacity: 0.85,
+              }}
+            >
+              For founders, solo devs, and small teams building internal AI tools.
             </p>
 
             {/* CTA — waitlist-reality pair.
