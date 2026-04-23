@@ -92,7 +92,10 @@ function CopyCodeButton({ code }: { code: string }) {
 
 function FlowDiagram() {
   return (
-    <div className="protocol-flow-diagram" style={{ marginBottom: 36 }}>
+    <div
+      className="protocol-flow-diagram"
+      style={{ marginBottom: 36, maxWidth: '100%', minWidth: 0, height: 'auto' }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '0 0 16px' }}>
         <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           How it works
@@ -106,6 +109,7 @@ function FlowDiagram() {
         </p>
       </div>
       <div
+        className="protocol-flow-diagram-inner"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -113,6 +117,9 @@ function FlowDiagram() {
           flexWrap: 'nowrap',
           overflowX: 'auto',
           paddingBottom: 4,
+          maxWidth: '100%',
+          minWidth: 0,
+          height: 'auto',
         }}
       >
         {/* Input box */}
@@ -266,6 +273,8 @@ function ProxiedVsHosted() {
               margin: 0,
               lineHeight: 1.8,
               overflowX: 'auto',
+              maxWidth: '100%',
+              boxSizing: 'border-box',
             }}>
               {PROXIED_YAML}
             </pre>
@@ -312,6 +321,8 @@ function ProxiedVsHosted() {
               margin: 0,
               lineHeight: 1.8,
               overflowX: 'auto',
+              maxWidth: '100%',
+              boxSizing: 'border-box',
             }}>
               {HOSTED_YAML}
             </pre>
@@ -428,7 +439,7 @@ const markdownComponents = {
       );
     }
     return (
-      <div style={{ position: 'relative', margin: '16px 0' }}>
+      <div style={{ position: 'relative', margin: '16px 0', minWidth: 0, maxWidth: '100%' }}>
         <pre
           style={{
             background: 'var(--bg)',
@@ -442,6 +453,8 @@ const markdownComponents = {
             lineHeight: 1.6,
             margin: 0,
             whiteSpace: 'pre',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
           <code className={className}>{raw}</code>

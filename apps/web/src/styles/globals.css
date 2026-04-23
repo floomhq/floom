@@ -962,15 +962,30 @@ body:has(.topbar-mobile-menu) {
   padding: 24px;
   margin-bottom: 40px;
   overflow-x: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.protocol-flow-diagram-inner {
+  -webkit-overflow-scrolling: touch;
 }
 @media (max-width: 640px) {
   .protocol-flow-scroll-hint { display: block !important; }
+  .protocol-flow-diagram {
+    padding: 16px 12px;
+  }
+  .protocol-flow-diagram-inner {
+    /* Keep horizontal pan; a bit more room for the flow boxes on narrow screens */
+    padding-bottom: 8px;
+  }
 }
 .protocol-comparison-2col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   margin: 16px 0;
+}
+.protocol-comparison-2col > div {
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
