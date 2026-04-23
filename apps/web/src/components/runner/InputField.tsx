@@ -469,7 +469,17 @@ function FileInputControl({
                 }}
                 style={{
                   marginTop: 10,
-                  padding: '5px 10px',
+                  /* Tap-target fix (2026-04-23, issue #562):
+                     the desktop button was 22px tall (5px + 11px font +
+                     5px), well under the WCAG 2.5.5 recommended 44px
+                     minimum. Bump padding + min-height so touch users
+                     can reliably hit it; desktop still reads as a
+                     small pill thanks to the 11px font-size. */
+                  padding: '10px 14px',
+                  minHeight: 44,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   fontSize: 11,
                   fontWeight: 500,
                   color: 'var(--accent, #228b22)',

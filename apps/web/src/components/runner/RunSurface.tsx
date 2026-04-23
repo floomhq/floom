@@ -1087,7 +1087,14 @@ function InputCard({
                   alignItems: 'center',
                   gap: 4,
                   marginTop: 8,
-                  padding: '6px 2px',
+                  /* Tap-target fix (2026-04-23, issue #562):
+                     the disclosure was 6px + 13px font + 6px = ~28px
+                     tall, below the WCAG 2.5.5 minimum of 44px. Bump
+                     vertical padding and min-height so the touch
+                     surface is reliable; widen horizontal padding so
+                     the arrow and label don't hug the edge. */
+                  padding: '10px 8px',
+                  minHeight: 44,
                   background: 'transparent',
                   border: 'none',
                   color: 'var(--muted)',

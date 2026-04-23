@@ -1565,14 +1565,34 @@ export function AppPermalinkPage() {
       {/* Mobile polish for /p/:slug. The hero row already wraps; these
           just tighten paddings, let the title wrap (no more mid-word
           ellipsis on narrow screens), make tab chips tap-friendly, and
-          keep the meta-row from pushing content off-screen. */}
+          keep the meta-row from pushing content off-screen.
+
+          Mobile-audit fix (2026-04-23, issues #560/#561/#562):
+          * hero-description was clamped to 2 lines via -webkit-line-clamp,
+            but the mobile override ALSO set `overflow: visible`, which
+            disables the clamp. Result: description overflowed vertically
+            and the capability-chips sibling ("Runtime: python",
+            "Secrets: GEMINI_API_KEY") rendered on top of lines 3+.
+            Fix: pin `overflow: hidden` with the clamp so the description
+            truncates cleanly and chips sit below.
+          * capability chips now get an explicit top margin on mobile so
+            there's always air between them and the description (prevents
+            the visual overlap even if the clamp ever relaxes). */}
       <style>{`
         @media (max-width: 640px) {
           [data-testid="permalink-page"] { padding: 16px 14px 64px !important; }
           [data-testid="permalink-page"] .app-page-frame { border-radius: 14px !important; }
           [data-testid="permalink-hero"] { padding: 14px 16px 12px !important; gap: 10px !important; }
           [data-testid="permalink-hero"] h1 { white-space: normal !important; font-size: 18px !important; }
-          [data-testid="hero-description"] { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+          [data-testid="hero-description"] {
+            white-space: normal !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            display: -webkit-box !important;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+          }
+          [data-testid="permalink-capability-chips"] { margin-top: 10px !important; }
           [data-testid="permalink-hero"] .permalink-hero-actions { width: 100%; justify-content: flex-start; gap: 8px; }
           [data-testid="hero-version-meta"] { flex-wrap: wrap; row-gap: 4px; }
           [data-testid="permalink-tabs"] { padding: 12px 14px !important; gap: 8px !important; }

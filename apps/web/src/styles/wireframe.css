@@ -1664,6 +1664,22 @@ input { font-family: inherit; }
   textarea.input-field {
     min-height: 88px;
   }
+  /* iOS auto-zoom defense (issue #563, 2026-04-23): any text-entry
+     control with a computed font-size under 16px triggers an automatic
+     zoom-in when it receives focus on iOS Safari. That zoom is sticky
+     until the user manually zooms back out, which breaks every form on
+     mobile. The .input-field rule above only covers the design-system
+     class; many surfaces (WaitlistModal, StudioAppPage, FeedbackButton,
+     SecretInput, the Studio iterate input, login fields, etc.) use a
+     plain <input>/<textarea>/<select> without that class. Bump them
+     globally on mobile, but EXCLUDE non-text controls where a 16px
+     font-size would change layout (checkbox, radio, file, range, color,
+     submit, button, image, reset, hidden). */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]):not([type="submit"]):not([type="button"]):not([type="image"]):not([type="reset"]):not([type="hidden"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
   /* Defensive wrap for long unbreakable strings in content prose.
      We can't rely on every component to set overflow-wrap, and a
      single un-wrapped URL on /p/:slug or /docs bricks the layout. */
