@@ -9,6 +9,7 @@
 //   POST   /api/hub/:slug/renderer      — upload a creator TSX renderer
 //   DELETE /api/hub/:slug/renderer      — drop the custom renderer, fall back to default
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { z } from 'zod';
 import { mkdtempSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,6 +17,8 @@ import { join } from 'node:path';
 import { db } from '../db.js';
 import { resolveUserContext } from '../services/session.js';
 import {
+  buildIngestHint,
+  detectAppFromInlineSpec,
   detectAppFromUrl,
   ingestAppFromUrl,
   SlugTakenError,
@@ -137,18 +140,138 @@ hubRouter.post('/detect', async (c) => {
     // Issue #389: surface a specific `spec_not_found` code (with the list
     // of URLs we actually probed) so the client can show "We checked
     // these 5 URLs and none returned a spec" instead of a generic error.
+    //
+    // MEMORY (feedback_ingestion_be_helpful.md): every error path must
+    // include a `hint_url` pointing at /detect/hint. The frontend uses it
+    // to render a proactive recovery block (paste URL, paste contents,
+    // ask-Claude prompt) instead of a dead-end error string.
+    const hintUrl = `${resolveBaseUrlFromRequest(c)}/api/hub/detect/hint`;
     if (err instanceof SpecNotFoundError) {
       return c.json(
         {
           error: err.message,
           code: 'spec_not_found',
           attempted: err.attempted,
+          hint_url: hintUrl,
         },
         404,
       );
     }
     return c.json(
-      { error: (err as Error).message || 'detect_failed', code: 'detect_failed' },
+      {
+        error: (err as Error).message || 'detect_failed',
+        code: 'detect_failed',
+        hint_url: hintUrl,
+      },
+      400,
+    );
+  }
+});
+
+// -----------------------------------------------------------------------
+// POST /api/hub/detect/hint
+//   Proactive recovery endpoint (MEMORY: feedback_ingestion_be_helpful.md).
+//   When /api/hub/detect fails (spec_not_found, unreachable, etc.), the
+//   client should NOT render a dead-end error — it calls /hint and shows:
+//     - what we looked for
+//     - a one-paste prompt for a coding agent
+//     - an upload URL for the generated spec
+//     - a direct-URL re-detect endpoint
+//   Intentionally no auth gate: the response is static metadata + a prompt
+//   string, not an SSRF primitive.
+//
+// Body (all optional except input_url):
+//   {
+//     input_url: string,     // the repo or URL the user pasted
+//     attempted?: string[]   // paths the frontend already probed
+//   }
+const HintBody = z.object({
+  input_url: z.string().min(1).max(2048),
+  attempted: z.array(z.string().max(2048)).max(40).optional(),
+});
+
+function resolveBaseUrlFromRequest(c: Context): string {
+  // Prefer x-forwarded-proto + x-forwarded-host so we return the public
+  // Floom URL (preview.floom.dev, floom.dev, localhost:3010, self-host),
+  // not an internal hostname like the docker service name.
+  const proto = c.req.header('x-forwarded-proto') || 'https';
+  const host =
+    c.req.header('x-forwarded-host') || c.req.header('host') || 'floom.dev';
+  return `${proto}://${host}`;
+}
+
+hubRouter.post('/detect/hint', async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = HintBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() },
+      400,
+    );
+  }
+  const hint = buildIngestHint({
+    input_url: parsed.data.input_url,
+    attempted: parsed.data.attempted,
+    baseUrl: resolveBaseUrlFromRequest(c),
+  });
+  return c.json(hint);
+});
+
+// -----------------------------------------------------------------------
+// POST /api/hub/detect/inline
+//   The "paste contents / upload spec" recovery path and the endpoint a
+//   coding agent POSTs a freshly-generated spec to. Body:
+//     { openapi_spec: object | string, name?: string, slug?: string }
+//   Same auth gate as /detect — inline specs don't issue outbound
+//   fetches so SSRF isn't a concern, but we keep the cloud auth gate for
+//   symmetry with the rest of the detect/ingest flow.
+const InlineDetectBody = z.object({
+  openapi_spec: z.union([z.record(z.any()), z.string().min(1).max(2 * 1024 * 1024)]),
+  name: z.string().min(1).max(120).optional(),
+  slug: z
+    .string()
+    .min(1)
+    .max(48)
+    .regex(/^[a-z0-9][a-z0-9-]*$/)
+    .optional(),
+});
+
+hubRouter.post('/detect/inline', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = InlineDetectBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() },
+      400,
+    );
+  }
+  try {
+    const detected = await detectAppFromInlineSpec(
+      parsed.data.openapi_spec,
+      parsed.data.slug,
+      parsed.data.name,
+    );
+    return c.json(detected);
+  } catch (err) {
+    return c.json(
+      {
+        error: (err as Error).message || 'inline_detect_failed',
+        code: 'inline_detect_failed',
+        hint_url: `${resolveBaseUrlFromRequest(c)}/api/hub/detect/hint`,
+      },
       400,
     );
   }
