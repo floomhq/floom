@@ -515,10 +515,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
               type: 'text' as const,
               text: JSON.stringify(
                 {
-                  error: 'auth_required',
-                  code: 'auth_required',
-                  message:
+                  error:
                     'Authentication required. Sign in (or supply a valid session cookie / bearer token) and retry.',
+                  code: 'auth_required',
                   hint: AUTH_HINT_CLOUD,
                   docs_url: AUTH_DOCS_URL,
                 },

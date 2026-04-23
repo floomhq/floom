@@ -408,7 +408,7 @@ try {
   );
   log(
     'cloud-mode unauth ingest error code is auth_required',
-    unauthPayload?.error === 'auth_required',
+    unauthPayload?.code === 'auth_required',
     JSON.stringify(unauthPayload),
   );
   log(

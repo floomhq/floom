@@ -416,6 +416,21 @@ webhookDb
       `body=${serialized}`,
     );
   }
+  // Uniform operator-secret absence check — matches feedback/metrics coverage.
+  // The signature check uses the per-trigger `webhook_secret` DB column; the
+  // adjacent operator env is `FLOOM_AUTH_TOKEN`. Neither the column name, the
+  // env name, nor the actual seeded secret value may appear in the 401 body.
+  for (const needle of [
+    'webhook_secret',
+    'FLOOM_AUTH_TOKEN',
+    'shared-secret-value',
+  ]) {
+    log(
+      `webhook 401 body does not leak "${needle}"`,
+      !serialized.includes(needle),
+      `body=${serialized}`,
+    );
+  }
 }
 
 // ---------- 7. metrics 401 shape ----------
@@ -530,6 +545,20 @@ const mcpMod = await import(
     payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : null;
   } catch {}
   log('mcp payload.code === auth_required', payload && payload.code === 'auth_required');
+  // Uniform shape: `error` is a human-readable message (not the machine code).
+  // Round 2 left the MCP payload with `error: 'auth_required'` + an extra
+  // `message` field, breaking the `{error, code, hint, docs_url}` contract
+  // used everywhere else. Assert the normalized shape.
+  log(
+    'mcp payload.error is a human message (not the machine code)',
+    payload && typeof payload.error === 'string' && payload.error !== 'auth_required' && payload.error.length > 10,
+    `error=${payload && payload.error}`,
+  );
+  log(
+    'mcp payload has no extra `message` field (uniform shape)',
+    payload && payload.message === undefined,
+    `message=${payload && payload.message}`,
+  );
   log(
     'mcp payload.hint mentions `floom auth`',
     payload && typeof payload.hint === 'string' && payload.hint.includes('floom auth'),
@@ -543,6 +572,17 @@ const mcpMod = await import(
   );
   const serialized = rawPayload || '';
   for (const needle of FORBIDDEN_LEAK) {
+    log(
+      `mcp ingest_app payload does not leak "${needle}"`,
+      !serialized.includes(needle),
+      `payload=${serialized}`,
+    );
+  }
+  // Uniform operator-env absence check — matches feedback/metrics coverage.
+  // The MCP Cloud-mode auth gate is driven by operator-only env vars
+  // (`FLOOM_CLOUD_MODE`, `BETTER_AUTH_SECRET`). Their names must never
+  // appear in the agent-facing payload.
+  for (const needle of ['BETTER_AUTH_SECRET', 'FLOOM_CLOUD_MODE']) {
     log(
       `mcp ingest_app payload does not leak "${needle}"`,
       !serialized.includes(needle),
