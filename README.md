@@ -12,6 +12,7 @@
     <a href="https://github.com/floomhq/floom/pkgs/container/floom-monorepo"><img src="https://img.shields.io/badge/ghcr.io-floom--monorepo-0969da" alt="Docker image"/></a>
     <a href="https://github.com/floomhq/floom/commits/main"><img src="https://img.shields.io/github/last-commit/floomhq/floom" alt="Last commit"/></a>
     <a href="https://floom.dev"><img src="https://img.shields.io/badge/live-floom.dev-22c55e" alt="Live at floom.dev"/></a>
+    <a href="./docs/ax-scores"><img src="https://img.shields.io/badge/AX-pending-lightgrey" alt="Agent Experience score"/></a>
   </p>
 
   <p>
