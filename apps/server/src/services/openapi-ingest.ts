@@ -853,7 +853,7 @@ interface FetchSpecOptions {
   /**
    * Per-request fetch timeout in ms. Defaults to 30s for the single-shot
    * `fetchSpec` path; the multi-candidate `fetchSpecWithFallback` path
-   * (issue #389) overrides this to 2s per attempt so 5 candidates fit
+   * (issue #389) overrides this to 1.25s per attempt so 8 candidates fit
    * inside a 10s cumulative budget.
    */
   timeoutMs?: number;
@@ -1100,18 +1100,58 @@ const COMMON_SPEC_SUFFIXES = [
 ] as const;
 
 /**
+ * Directory-index filenames. Only probed when the user's URL ends in `/`
+ * — a trailing slash is the semantic signal that the path is a directory
+ * whose index file may BE the spec (e.g. `/docs/` serving
+ * `/docs/index.yaml`). Probed BEFORE the generic suffix fan-out so the
+ * one-hop happy path stays fast.
+ */
+const DIRECTORY_INDEX_SUFFIXES = [
+  '/index.yaml',
+  '/index.json',
+  '/index.yml',
+] as const;
+
+/**
+ * Extensions we recognize as "this URL points directly at a spec file". When
+ * the input URL's pathname ends in one of these, we skip using the full path
+ * as a base for suffix fan-out — appending `/openapi.json` to
+ * `https://api.example.com/v2/openapi.json` yields a guaranteed-404
+ * `/v2/openapi.json/openapi.json`, which just burns a candidate slot.
+ */
+const SPEC_FILE_EXTENSIONS = ['.json', '.yaml', '.yml'] as const;
+
+/**
+ * Common subdirectories where publishers stash an OpenAPI spec inside an
+ * otherwise-docs repo. Probed when the user pastes a bare GitHub repo URL
+ * (no `/blob/` or `/tree/<branch>/<subdir>`). Covers Redocly-style layouts
+ * (`openapi/openapi.yaml`), API-design monorepos (`docs/openapi.yaml`),
+ * and OAS example repos (`spec/openapi.yaml`). Kept short — each entry
+ * multiplies the candidate fan-out.
+ */
+const COMMON_REPO_SPEC_SUBDIRS = ['openapi', 'docs', 'api', 'spec'] as const;
+
+/**
  * Filenames we try under a repo root when the caller pastes a GitHub URL.
- * Order matters: JSON first (cheaper to parse), YAML second (more common in
- * the wild). Keep this list short — every entry becomes a probe.
+ * Order matters: YAML first (what most public repos ship — see Redocly,
+ * museum-openapi-example, Stripe, GitHub's own API spec), JSON second
+ * (still common for generated specs), .yml last (Docker/npm flavor).
+ * Keep this list short — every entry becomes a probe.
  */
 const GITHUB_SPEC_FILENAMES = [
-  'openapi.json',
   'openapi.yaml',
+  'openapi.json',
   'openapi.yml',
-  'swagger.json',
   'swagger.yaml',
+  'swagger.json',
   'swagger.yml',
 ] as const;
+
+/** Return true iff the URL's pathname ends in a recognized spec extension. */
+function urlLooksLikeSpecFile(u: URL): boolean {
+  const path = u.pathname.toLowerCase();
+  return SPEC_FILE_EXTENSIONS.some((ext) => path.endsWith(ext));
+}
 
 /**
  * Branch names we fall back to when the user's GitHub URL doesn't pin one
@@ -1122,10 +1162,10 @@ const GITHUB_SPEC_FILENAMES = [
 const GITHUB_DEFAULT_BRANCHES = ['main', 'master'] as const;
 
 /**
- * Parse a pasted GitHub *web* URL (github.com/...) into its components so we
- * can rewrite it into raw.githubusercontent.com probes. Returns `null` for
- * non-GitHub URLs, gist URLs, marketplace URLs, or anything that doesn't
- * match `github.com/<owner>/<repo>[/...]`.
+ * Parse a pasted GitHub URL (either web `github.com/...` OR raw
+ * `raw.githubusercontent.com/...`) into its components so we can rewrite
+ * it into raw.githubusercontent.com probes. Returns `null` for non-GitHub
+ * URLs, gist URLs, marketplace URLs, or anything that doesn't match.
  *
  * Handles all of these shapes:
  *   - https://github.com/owner/repo
@@ -1134,9 +1174,11 @@ const GITHUB_DEFAULT_BRANCHES = ['main', 'master'] as const;
  *   - https://github.com/owner/repo/tree/<branch>
  *   - https://github.com/owner/repo/tree/<branch>/<dir>
  *   - https://github.com/owner/repo/blob/<branch>/<path/to/spec.yaml>
+ *   - https://raw.githubusercontent.com/owner/repo/<branch>/<path/to/spec.yaml>
  *
- * When a `blob` URL points directly at a spec file, we return it as a
- * single `directSpecRawUrl` so the caller probes that file first.
+ * When the URL points directly at a spec file (either `/blob/...` on
+ * github.com or any raw URL with a spec-file extension), we return it as a
+ * `directSpecRawUrl` so the caller probes that file first.
  *
  * Exported for tests.
  */
@@ -1153,6 +1195,34 @@ export function parseGithubWebUrl(inputUrl: string): {
   } catch {
     return null;
   }
+
+  // Raw domain: `raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>`.
+  // We treat this the same as a `/blob/<branch>/<path>` GitHub URL so the
+  // downstream candidate builder probes sibling filenames and parent
+  // directories within the repo — instead of fanning out to domain-level
+  // garbage like `https://raw.githubusercontent.com/openapi.json` (which
+  // the generic walk-up logic would otherwise generate because the host
+  // has no meaningful "root").
+  if (u.hostname === 'raw.githubusercontent.com') {
+    const parts = u.pathname.split('/').filter((s) => s.length > 0);
+    if (parts.length < 4) return null;
+    const owner = parts[0];
+    const repo = parts[1];
+    const branch = parts[2];
+    const rest = parts.slice(3);
+    const last = rest[rest.length - 1] || '';
+    const isFile = SPEC_FILE_EXTENSIONS.some((ext) =>
+      last.toLowerCase().endsWith(ext),
+    );
+    return {
+      owner,
+      repo,
+      branch,
+      subdir: isFile ? rest.slice(0, -1).join('/') : rest.join('/'),
+      directSpecRawUrl: isFile ? inputUrl : null,
+    };
+  }
+
   if (u.hostname !== 'github.com' && u.hostname !== 'www.github.com') {
     return null;
   }
@@ -1187,14 +1257,26 @@ export function parseGithubWebUrl(inputUrl: string): {
 
 /**
  * Turn a parsed GitHub URL into the ordered list of raw.githubusercontent.com
- * candidate URLs we probe. If the user pointed directly at a spec file with
- * a `/blob/` URL, that exact raw URL leads. Otherwise we try the subdir (if
- * any) first, then the repo root, for each of the candidate filenames. If
- * the user didn't pin a branch, we probe `main` first and `master` second.
+ * candidate URLs we probe. Priority:
+ *   1. Direct spec URL if the user pointed at a specific file (`/blob/...`
+ *      on github.com, or any raw URL ending in `.yaml`/`.json`/`.yml`).
+ *   2. The user's subdir (when pinned via `/tree/<branch>/<subdir>` or
+ *      implied by the raw URL), probed for every filename variant.
+ *   3. For bare repo URLs (no subdir declared): common spec subdirs
+ *      (`openapi/`, `docs/`, `api/`, `spec/`) with the primary filenames
+ *      — covers Redocly-style repos where the spec lives in a subfolder
+ *      (issue #389).
+ *   4. Repo root, for every filename variant.
+ *   5. Repeat 2–4 for `master` if the user didn't pin a branch.
+ *
+ * Cap defaults to 8 (up from 5) because step 3 legitimately needs more
+ * slots for bare-repo probes. The per-candidate fetch timeout is still
+ * bounded by `fetchSpecWithFallback`, and the cumulative budget stops the
+ * walk once we blow past 10s.
  */
 export function buildGithubRawCandidates(
   parsed: NonNullable<ReturnType<typeof parseGithubWebUrl>>,
-  maxCandidates = 5,
+  maxCandidates = 8,
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -1210,8 +1292,24 @@ export function buildGithubRawCandidates(
   const { owner, repo, branch, subdir } = parsed;
   const branchList = branch ? [branch] : GITHUB_DEFAULT_BRANCHES;
 
-  // Try subdir first (if any), then repo root. Files in priority order.
-  const pathPrefixes = subdir ? [subdir, ''] : [''];
+  // Build the list of path prefixes to probe, in priority order:
+  //   - When the user declared a subdir (via `/tree/<b>/<d>` or a raw URL
+  //     under `<b>/<d>/…`), probe it first — they told us where to look.
+  //   - Then always probe the repo root. Most repos (openblog, GitHub's
+  //     own API spec, Stripe) ship the spec at the root, so this is the
+  //     dominant happy path.
+  //   - Finally, for BARE-repo URLs (no subdir declared), sweep the
+  //     common spec subdirs (`openapi/`, `docs/`, `api/`, `spec/`).
+  //     Covers Redocly-style repos where the spec lives one level deep
+  //     (issue #389). We don't second-guess a user who explicitly
+  //     pointed at a subdir.
+  const pathPrefixes: string[] = [];
+  if (subdir) pathPrefixes.push(subdir);
+  pathPrefixes.push('');
+  if (!subdir) {
+    for (const d of COMMON_REPO_SPEC_SUBDIRS) pathPrefixes.push(d);
+  }
+
   for (const br of branchList) {
     for (const prefix of pathPrefixes) {
       for (const file of GITHUB_SPEC_FILENAMES) {
@@ -1228,24 +1326,30 @@ export function buildGithubRawCandidates(
  * Generate an ordered list of candidate URLs to probe when the user-supplied
  * URL doesn't directly return a spec. Walks up the path hierarchy (strips
  * segments from the right) and appends common spec filenames at each level,
- * capped at 5 total candidates (including the original URL) so the total
- * network budget stays inside 10s.
+ * capped at 8 total candidates (including the original URL) so the total
+ * network budget stays inside ~10s at 1.25s/candidate (see
+ * `fetchSpecWithFallback`).
  *
  * Dedupes — if the input is already `https://api.example.com/openapi.json`
  * the suffix expansion would regenerate the same URL; we skip duplicates.
  *
- * Special case: GitHub *web* URLs (github.com/owner/repo or /tree/<branch>/...)
- * are rewritten into raw.githubusercontent.com candidates. The github.com
- * HTML page itself is never a spec, so including it in the probe list just
- * burns a candidate slot on a guaranteed miss. (Fix 2026-04-23: openblog
- * regression — pasted https://github.com/<o>/<r>, spec lived at
- * raw.githubusercontent.com/<o>/<r>/main/openapi.json, we probed
- * github.com/<o>/<r>/openapi.json which always 404s.)
+ * Special cases:
+ *   - GitHub web URLs (`github.com/owner/repo`, `/tree/<branch>/...`) and
+ *     raw URLs (`raw.githubusercontent.com/owner/repo/<branch>/<path>`) are
+ *     rewritten via `buildGithubRawCandidates` — neither a github.com HTML
+ *     page nor a domain-root probe on the raw CDN can ever serve a spec,
+ *     so those candidate slots would be pure waste. (Fix 2026-04-23:
+ *     openblog + issue #389.)
+ *   - When the input URL's path already ends in a spec extension
+ *     (`.json`/`.yaml`/`.yml`), we drop the full path from the suffix
+ *     fan-out base set. Otherwise we'd probe
+ *     `/api/v3/openapi.json/openapi.json` which is a guaranteed 404 that
+ *     burns a candidate slot.
  *
  * Exported for tests.
  */
 export function generateSpecCandidates(inputUrl: string): string[] {
-  // GitHub short-circuit: rewrite github.com web URLs → raw.githubusercontent.
+  // GitHub short-circuit: rewrite github.com web + raw URLs → probed raw.
   const gh = parseGithubWebUrl(inputUrl);
   if (gh) {
     const cands = buildGithubRawCandidates(gh);
@@ -1261,27 +1365,50 @@ export function generateSpecCandidates(inputUrl: string): string[] {
   }
   const candidates: string[] = [inputUrl];
   const seen = new Set<string>([inputUrl]);
+  const MAX_CANDIDATES = 8;
+  const push = (candidate: string) => {
+    if (candidates.length >= MAX_CANDIDATES) return false;
+    if (seen.has(candidate)) return true;
+    seen.add(candidate);
+    candidates.push(candidate);
+    return true;
+  };
 
   // Build the walk-up path list: /v2/users/{id}/orders →
   // ['', '/v2', '/v2/users', '/v2/users/{id}', '/v2/users/{id}/orders'].
-  // We walk from shortest (root) to longest so probing prefers the API
-  // base over the deep endpoint — specs almost always live near the root.
+  // We sort shortest-first so probing prefers the API base over the deep
+  // endpoint — specs almost always live near the root.
   const segments = u.pathname.split('/').filter((s) => s.length > 0);
+  const inputLooksLikeFile = urlLooksLikeSpecFile(u);
   const pathLevels: string[] = [''];
-  for (let i = 1; i <= segments.length; i++) {
+  // If the input already points at a spec file, exclude the full depth
+  // from the fan-out bases. Including it yields silly candidates like
+  // `/api/v3/openapi.json/openapi.json` that always 404. We still keep
+  // the parent directories so we can probe sibling filenames
+  // (`/api/v3/openapi.yaml` when the user pasted `.json`).
+  const maxDepth = inputLooksLikeFile ? segments.length - 1 : segments.length;
+  for (let i = 1; i <= maxDepth; i++) {
     pathLevels.push('/' + segments.slice(0, i).join('/'));
   }
   pathLevels.sort((a, b) => a.length - b.length);
 
-  const MAX_CANDIDATES = 5;
+  // Trailing-slash heuristic: `https://api.example.com/docs/` is a
+  // directory URL, so we try `/docs/index.{yaml,json,yml}` FIRST (at the
+  // user's declared path, which is the most likely location). This gives
+  // index-style hosting a chance inside the 8-candidate budget before
+  // the generic openapi/swagger sweep claims every slot.
+  const inputEndsInSlash = u.pathname.endsWith('/');
+  if (inputEndsInSlash && segments.length > 0) {
+    const deepest = '/' + segments.join('/');
+    for (const suffix of DIRECTORY_INDEX_SUFFIXES) {
+      if (!push(`${u.protocol}//${u.host}${deepest}${suffix}`)) break;
+    }
+  }
+
   outer: for (const suffix of COMMON_SPEC_SUFFIXES) {
     for (const base of pathLevels) {
-      if (candidates.length >= MAX_CANDIDATES) break outer;
       const candidate = `${u.protocol}//${u.host}${base}${suffix}`;
-      if (!seen.has(candidate)) {
-        seen.add(candidate);
-        candidates.push(candidate);
-      }
+      if (!push(candidate)) break outer;
     }
   }
   return candidates.slice(0, MAX_CANDIDATES);
@@ -1313,17 +1440,18 @@ export class SpecNotFoundError extends Error {
  * in the UI) reflects the real spec location rather than the deep endpoint
  * the user pasted.
  *
- * Budget: 2 s per candidate, up to 5 candidates, 10 s cumulative. The
+ * Budget: 1.25 s per candidate, up to 8 candidates, 10 s cumulative. The
  * cumulative cap is enforced up-front — once we've spent 10 s we stop
  * probing and raise `SpecNotFoundError` regardless of how many candidates
- * remain.
+ * remain. 8 × 1.25 s = 10 s, so the cap is the real gate in the
+ * pathological all-timeout case.
  */
 export async function fetchSpecWithFallback(
   inputUrl: string,
   options: FetchSpecOptions = {},
 ): Promise<{ spec: OpenApiSpec; url: string }> {
   const candidates = generateSpecCandidates(inputUrl);
-  const PER_CANDIDATE_MS = 2_000;
+  const PER_CANDIDATE_MS = 1_250;
   const TOTAL_BUDGET_MS = 10_000;
   const deadline = Date.now() + TOTAL_BUDGET_MS;
   const attempted: string[] = [];
