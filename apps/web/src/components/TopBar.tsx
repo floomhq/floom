@@ -200,7 +200,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             color: INK,
             flexShrink: 0,
           }}
-          aria-label="Floom home"
+          aria-label="floom — home"
         >
           <Logo size={compact ? 18 : 20} withWordmark={!compact} variant="glow" />
         </Link>
