@@ -23,7 +23,10 @@ const codeBlockStyle: React.CSSProperties = {
 
 export function InstallPage() {
   return (
-    <PageShell title="Install the Floom CLI · Floom">
+    <PageShell
+      title="Install the Floom CLI · Floom"
+      description="Install the Floom command-line in one line. Publish apps, tail runs, and manage your Floom deployments from your terminal."
+    >
       <main
         data-testid="install-page"
         style={{ maxWidth: 720, margin: '40px auto', padding: '0 24px' }}

@@ -279,6 +279,7 @@ export function PricingPage() {
   return (
     <PageShell
       title="Pricing · Floom"
+      description="Floom Cloud is free during the launch waitlist. Self-hosting is always free and MIT-licensed. Paid tiers with per-app metering, team features, and SLAs are on the roadmap."
       contentStyle={{
         padding: '0 0 80px',
         maxWidth: '100%',

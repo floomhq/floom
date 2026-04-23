@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, Navigate, useLocation, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { FeedbackButton } from '../components/FeedbackButton';
+import { PageHead } from '../components/PageHead';
 import {
   extractToc,
   markdownComponents,
@@ -50,29 +51,56 @@ const DOCS = [
 
 type DocEntry = (typeof DOCS)[number];
 
+/**
+ * Lift the first real paragraph from a markdown doc and trim it to ~160
+ * chars for <meta name="description">. Strips code fences, headings,
+ * list markers, and link syntax. Falls back to a generic sentence that
+ * names the page, so empty or code-fence-first docs still get something.
+ */
+function extractDescription(md: string, label: string): string {
+  const fallback = `${label} reference on Floom — protocol, runtime, and launch notes.`;
+  if (!md) return fallback;
+  const stripped = md
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^---[\s\S]*?---\n/m, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('|'))
+    .join(' ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!stripped) return fallback;
+  if (stripped.length <= 160) return stripped;
+  const clipped = stripped.slice(0, 157);
+  const lastSpace = clipped.lastIndexOf(' ');
+  return (lastSpace > 100 ? clipped.slice(0, lastSpace) : clipped) + '…';
+}
+
 export function DocsPage() {
   const { slug } = useParams<{ slug: string }>();
   const { pathname } = useLocation();
   const doc = DOCS.find((entry) => entry.slug === slug) as DocEntry | undefined;
   const [tocOpen, setTocOpen] = useState(false);
 
-  useEffect(() => {
-    if (!doc) return undefined;
-    document.title = `${doc.label} · Floom Docs`;
-    return () => {
-      document.title = 'Floom: production layer for AI apps';
-    };
-  }, [doc]);
-
   const toc = useMemo(() => (doc ? extractToc(doc.markdown) : []), [doc]);
 
   if (!doc) {
-    // Unknown slug: send back to the docs landing hub (v17 behaviour).
     return <Navigate to="/docs" replace />;
   }
 
+  // Lift a ~160-char description from the first markdown paragraph so each
+  // /docs/:slug page has a meaningful <meta description> instead of
+  // inheriting the landing page copy.
+  const description = extractDescription(doc.markdown, doc.label);
+
   return (
     <div className="page-root" data-testid={`docs-${doc.slug}-page`}>
+      <PageHead
+        title={`${doc.label} · Floom Docs`}
+        description={description}
+      />
       <TopBar />
       <DocsPublishWaitlistBanner />
 

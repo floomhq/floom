@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Logo } from '../components/Logo';
+import { PageHead } from '../components/PageHead';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { readDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
@@ -49,6 +50,10 @@ export function NotFoundPage() {
 
   return (
     <div className="page-root" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <PageHead
+        title="Page not found · Floom"
+        description="This page doesn't exist on Floom. Head back to the homepage or try the app directory."
+      />
       <TopBar />
       <main
         className="main"

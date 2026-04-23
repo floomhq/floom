@@ -81,6 +81,7 @@ export function AboutPage() {
   return (
     <PageShell
       title="About Floom · Get that thing off localhost fast"
+      description="Floom is the protocol and runtime for agentic work — built so vibecoders and business users can ship AI apps without wiring auth, rate limits, sandboxing, or MCP tooling themselves."
       contentStyle={{ padding: '24px 24px 80px', maxWidth: 960 }}
     >
       {/* 1. Hero */}

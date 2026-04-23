@@ -29,8 +29,13 @@ interface Props {
   /** Auth gate. 'cloud' = redirect unauthenticated cloud users to /login.
    *  null = no gate. */
   requireAuth?: 'cloud' | 'any' | null;
-  /** Document title. */
+  /** Document title. Also mirrored into og:title / twitter:title. */
   title?: string;
+  /** Meta description (~140–160 chars). Mirrored into og:description /
+   *  twitter:description. When undefined, whatever index.html shipped is
+   *  left in place. Added 2026-04-24 for SEO pass (issue #172, #316,
+   *  #317, #324). */
+  description?: string;
   /** Extra styles merged onto <main>. */
   mainStyle?: CSSProperties;
   /** When true, cloud-mode signed-out users see a preview of the shell
@@ -63,6 +68,7 @@ export function BaseLayout({
   footer,
   requireAuth = null,
   title,
+  description,
   mainStyle,
   allowSignedOutShell = false,
   rootBackground,
@@ -93,9 +99,42 @@ export function BaseLayout({
     }
   }, [allowSignedOutShell, requireAuth, data, loading, navigate, location.pathname, location.search]);
 
+  // Per-route head tags. An SPA inherits whatever index.html shipped,
+  // which means the landing page's title + canonical URL bleed onto
+  // every deep route. Here we patch the tags that actually matter for
+  // SEO + social preview on every navigation:
+  //   <title>, description, canonical, og:*, twitter:*.
+  // og:image stays on whatever global default index.html defined
+  // (pages can override by stamping their own <meta> tag separately).
   useEffect(() => {
+    if (typeof document === 'undefined') return;
     if (title) document.title = title;
-  }, [title]);
+
+    const site = 'https://floom.dev';
+    // Strip trailing slash (except root) so /about/ and /about collapse
+    // onto the same canonical — mirrors Google's own canonicalisation.
+    const rawPath = location.pathname || '/';
+    const path = rawPath.length > 1 && rawPath.endsWith('/') ? rawPath.slice(0, -1) : rawPath;
+    const url = `${site}${path}`;
+
+    const setAttr = (sel: string, attr: 'content' | 'href', value: string) => {
+      const el = document.head.querySelector(sel) as HTMLElement | null;
+      if (el) el.setAttribute(attr, value);
+    };
+
+    setAttr('link[rel="canonical"]', 'href', url);
+    setAttr('meta[property="og:url"]', 'content', url);
+
+    if (title) {
+      setAttr('meta[property="og:title"]', 'content', title);
+      setAttr('meta[name="twitter:title"]', 'content', title);
+    }
+    if (description) {
+      setAttr('meta[name="description"]', 'content', description);
+      setAttr('meta[property="og:description"]', 'content', description);
+      setAttr('meta[name="twitter:description"]', 'content', description);
+    }
+  }, [title, description, location.pathname]);
 
   // noindex meta for auth-gated pages (Studio, /me/*, password reset).
   // Belt-and-suspenders with robots.txt — crawlers that skip robots.txt

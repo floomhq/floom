@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { FeedbackButton } from '../components/FeedbackButton';
+import { PageHead } from '../components/PageHead';
 // Import the protocol markdown at build time via Vite ?raw
 import protocolMd from '../assets/protocol.md?raw';
 
@@ -476,15 +477,12 @@ export function ProtocolPage() {
   const toc = useRef<TocItem[]>(extractToc(protocolMd));
   const [tocOpen, setTocOpen] = useState(false);
 
-  useEffect(() => {
-    document.title = 'The Floom Protocol';
-    return () => {
-      document.title = 'Floom: production layer for AI apps';
-    };
-  }, []);
-
   return (
     <div className="page-root" data-testid="protocol-page">
+      <PageHead
+        title="The Floom Protocol · Floom"
+        description="How Floom turns one OpenAPI spec into an MCP server, a web UI, an HTTP API, and typed client SDKs — with secrets, rate limits, and audit logs wired in."
+      />
       <TopBar />
 
       <main

@@ -139,7 +139,10 @@ export function WaitlistPage() {
   };
 
   return (
-    <PageShell>
+    <PageShell
+      title="Join the Floom waitlist"
+      description="Floom Cloud is rolling out in waves. Tell us what you'd deploy first and we'll let you in as soon as we can."
+    >
       <section style={SECTION_STYLE}>
         <div style={EYEBROW_STYLE}>Waitlist</div>
         <h1 style={H1_STYLE}>Join the Floom waitlist.</h1>

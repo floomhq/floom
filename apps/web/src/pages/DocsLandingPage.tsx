@@ -12,10 +12,11 @@
 
 import { Link, useLocation } from 'react-router-dom';
 import type { CSSProperties } from 'react';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
 import { FeedbackButton } from '../components/FeedbackButton';
+import { PageHead } from '../components/PageHead';
 import { DocsSidebar, DOCS_SIDEBAR_GROUPS } from '../components/docs/DocsSidebar';
 import { DocsPublishWaitlistBanner } from '../components/docs/DocsPublishWaitlistBanner';
 import { readDeployEnabled } from '../lib/flags';
@@ -277,15 +278,12 @@ export function DocsLandingPage() {
   const { pathname } = useLocation();
   const deployEnabled = useMemo(() => readDeployEnabled(), []);
 
-  useEffect(() => {
-    document.title = 'Floom docs';
-    return () => {
-      document.title = 'Floom: production layer for AI apps';
-    };
-  }, []);
-
   return (
     <div className="page-root" data-testid="docs-landing-page">
+      <PageHead
+        title="Docs · Floom"
+        description="Everything you need to ship an AI app on Floom: quickstart, protocol, operations, billing, and self-hosting."
+      />
       <TopBar />
       <DocsPublishWaitlistBanner />
 
