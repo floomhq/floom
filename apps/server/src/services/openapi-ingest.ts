@@ -875,7 +875,14 @@ interface FetchSpecOptions {
 //   - IPv6 link-local fe80::/10
 //   - IPv6 unspecified ::/128
 //   - IPv6 IPv4-mapped ::ffff:0:0/96 (e.g. ::ffff:127.0.0.1)
-const SSRF_BLOCK_LIST = (() => {
+// IMPORTANT: BlockList rules are indexed by family. A mixed block-list that
+// adds `::ffff:0:0/96` under family 'ipv6' poisons the IPv4 code path —
+// `check(publicV4, 'ipv4')` returns true for every IPv4 address, including
+// GitHub's. That was the regression that broke ingest of public repos like
+// federicodeponte/openblog. Fix: keep v4 and v6 rules in separate BlockLists
+// and handle v4-mapped v6 addresses by extracting the embedded v4 and running
+// it against the v4 list.
+const SSRF_BLOCK_LIST_V4 = (() => {
   const bl = new BlockList();
   bl.addSubnet('127.0.0.0', 8, 'ipv4');
   bl.addSubnet('0.0.0.0', 8, 'ipv4');
@@ -886,18 +893,48 @@ const SSRF_BLOCK_LIST = (() => {
   bl.addSubnet('100.64.0.0', 10, 'ipv4');
   bl.addSubnet('224.0.0.0', 4, 'ipv4'); // multicast
   bl.addAddress('255.255.255.255', 'ipv4'); // broadcast
+  return bl;
+})();
+
+const SSRF_BLOCK_LIST_V6 = (() => {
+  const bl = new BlockList();
   bl.addAddress('::1', 'ipv6');
   bl.addAddress('::', 'ipv6');
   bl.addSubnet('fc00::', 7, 'ipv6');
   bl.addSubnet('fe80::', 10, 'ipv6');
-  bl.addSubnet('::ffff:0:0', 96, 'ipv6'); // v4-mapped v6
   return bl;
 })();
+
+// Matches IPv4-mapped IPv6 in two valid forms: dotted (`::ffff:127.0.0.1`)
+// and hex (`::ffff:7f00:1`). We extract the embedded v4 and run it against
+// the v4 block list so neither form is a bypass vector.
+const MAPPED_V4_DOTTED_RE = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i;
+const MAPPED_V4_HEX_RE = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i;
+
+function extractMappedIpv4(ip: string): string | null {
+  const dotted = MAPPED_V4_DOTTED_RE.exec(ip);
+  if (dotted) return dotted[1];
+  const hex = MAPPED_V4_HEX_RE.exec(ip);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    if (Number.isFinite(hi) && Number.isFinite(lo)) {
+      return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    }
+  }
+  return null;
+}
 
 function isBlockedIp(ip: string): boolean {
   const family = isIP(ip);
   if (family === 0) return true; // non-IP string: treat as unsafe
-  return SSRF_BLOCK_LIST.check(ip, family === 6 ? 'ipv6' : 'ipv4');
+  if (family === 4) return SSRF_BLOCK_LIST_V4.check(ip, 'ipv4');
+  // family === 6
+  const mapped = extractMappedIpv4(ip);
+  if (mapped && isIP(mapped) === 4) {
+    return SSRF_BLOCK_LIST_V4.check(mapped, 'ipv4');
+  }
+  return SSRF_BLOCK_LIST_V6.check(ip, 'ipv6');
 }
 
 async function isSafeUrl(
@@ -1618,6 +1655,293 @@ export async function detectAppFromUrl(
     auth_type,
     category: null,
     openapi_spec_url: resolvedUrl,
+    tools_count: actions.length,
+    secrets_needed: manifest.secrets_needed || [],
+  };
+}
+
+// ---------------------------------------------------------------------
+// Proactive ingest hint (MEMORY: feedback_ingestion_be_helpful.md)
+// ---------------------------------------------------------------------
+//
+// When a user pastes a repo URL that doesn't have an obvious OpenAPI spec,
+// rather than returning a dead-end "We couldn't find your app file" error
+// we return a structured hint that:
+//   1. Tells the caller WHAT was tried (probed URLs)
+//   2. Tells the caller WHAT we need (filename + shape)
+//   3. Gives a READY-TO-PASTE prompt that a coding agent (Claude/Cursor)
+//      can send into the user's repo so the agent drops the file in
+//   4. Exposes an upload URL where the generated spec can be submitted
+//      back to Floom to complete detect + ingest without human handholding
+//
+// This hint is also the response body of POST /api/hub/detect/hint and
+// is wrapped as an MCP admin tool so Claude-in-Cursor can call it directly.
+
+export type IngestHintStatus =
+  | 'spec_found'
+  | 'repo_no_spec'
+  | 'not_a_github_repo'
+  | 'unreachable';
+
+export interface IngestHintInput {
+  /** The exact URL or `owner/repo` ref the user pasted. */
+  input_url: string;
+  /** Paths we already tried that returned no spec. Optional. */
+  attempted?: string[];
+  /** Public base URL of this Floom instance (for upload_url construction). */
+  baseUrl: string;
+}
+
+export interface IngestHint {
+  status: IngestHintStatus;
+  input_url: string;
+  /** Parsed `{owner, repo}` if the input resolves to a GitHub ref. */
+  repo: { owner: string; repo: string; canonical_url: string } | null;
+  /** Filenames Floom considers a valid OpenAPI spec, in priority order. */
+  required_files: string[];
+  /**
+   * Minimal description of what the spec must declare for Floom to ingest
+   * it. Intentionally small — a one-page spec is enough for detection.
+   */
+  required_shape: {
+    openapi: string;
+    info: { title: string; version: string };
+    servers: Array<{ url: string }>;
+    /** At least one path with one operation. */
+    paths_example: string;
+  };
+  /** Raw paths we probed (if the caller reported any). */
+  paths_tried: string[];
+  /**
+   * A prompt the user can paste into Claude/Cursor in their repo. The
+   * coding agent reads their API, writes an openapi.yaml, and commits.
+   */
+  ready_prompt: string;
+  /**
+   * URL an agent (or the frontend) can POST the generated spec to. Body:
+   * `{ openapi_spec: object | string, name?: string, slug?: string }`.
+   * Returns a DetectedApp, same shape as /api/hub/detect.
+   */
+  upload_url: string;
+  /**
+   * Fallback: an agent may prefer to POST the URL of the newly-added spec
+   * file instead of the body. This is the standard /api/hub/detect route.
+   */
+  detect_url: string;
+  /**
+   * Human-friendly message the UI renders above the action buttons. Short,
+   * actionable, never a dead-end.
+   */
+  message: string;
+}
+
+// The filenames we recognize, in priority order. Keep in sync with the
+// COMMON_OPENAPI_PATHS list in apps/web/src/lib/githubUrl.ts — this is
+// the server-side source of truth, the frontend list is just the probe
+// fan-out.
+export const INGEST_HINT_REQUIRED_FILES = [
+  'openapi.yaml',
+  'openapi.yml',
+  'openapi.json',
+  'swagger.yaml',
+  'swagger.yml',
+  'swagger.json',
+];
+
+const INGEST_HINT_REQUIRED_SHAPE: IngestHint['required_shape'] = {
+  openapi: '3.0.0',
+  info: { title: 'Your API', version: '1.0.0' },
+  servers: [{ url: 'https://api.example.com' }],
+  paths_example: '/items: { get: { summary, responses: { "200": ... } } }',
+};
+
+// Narrow GitHub-ref parser kept local to avoid pulling the web helper
+// into the server build. Accepts owner/repo, github.com/owner/repo, and
+// https://github.com/owner/repo[.git].
+const INGEST_HINT_GH_OWNER_REPO = /^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9._-]+?)(?:\.git)?$/;
+const INGEST_HINT_GH_URL = /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:[/?#]|$)/i;
+
+function parseRepoFromInput(
+  input: string,
+): { owner: string; repo: string; canonical_url: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+
+  const urlMatch = trimmed.match(INGEST_HINT_GH_URL);
+  if (urlMatch) {
+    return {
+      owner: urlMatch[1],
+      repo: urlMatch[2],
+      canonical_url: `https://github.com/${urlMatch[1]}/${urlMatch[2]}`,
+    };
+  }
+  const bareMatch = trimmed.match(INGEST_HINT_GH_OWNER_REPO);
+  if (bareMatch && !bareMatch[1].includes('.')) {
+    return {
+      owner: bareMatch[1],
+      repo: bareMatch[2],
+      canonical_url: `https://github.com/${bareMatch[1]}/${bareMatch[2]}`,
+    };
+  }
+  return null;
+}
+
+function buildReadyPrompt(
+  repo: { owner: string; repo: string; canonical_url: string } | null,
+  inputUrl: string,
+): string {
+  const repoLine = repo
+    ? `I'm in the repo ${repo.owner}/${repo.repo}.`
+    : `I need to publish the API at ${inputUrl} to Floom.`;
+  return [
+    repoLine,
+    '',
+    'Floom needs an OpenAPI 3.0 spec at the repo root so it can auto-detect',
+    'operations and ship an agent UI. Please:',
+    '',
+    '1. Read the existing routes / handlers in this codebase.',
+    '2. Generate an `openapi.yaml` at the repo root that declares:',
+    '   - `openapi: 3.0.0`',
+    '   - `info.title`, `info.version`',
+    '   - `servers: [{ url: <the production base URL> }]`',
+    '   - one entry under `paths:` for each public endpoint, with request',
+    '     params, request body schema (if any), and response schema for the',
+    '     200/success case. Use `$ref: "#/components/schemas/..."` for reuse.',
+    '   - any auth schemes under `components.securitySchemes` (bearer / apiKey).',
+    '3. Keep it minimal but complete. One endpoint with a clear request/response',
+    '   is better than ten half-specified ones.',
+    '4. Commit and push.',
+    '',
+    'Once pushed, Floom will fetch `<repo>/raw/main/openapi.yaml` and detect',
+    'the app automatically. No extra config required.',
+  ].join('\n');
+}
+
+/**
+ * Build a structured hint for the /build ramp's "no spec found" branch.
+ * Never throws — always returns a hint, even if the input is a dead URL.
+ * Callers must respect the MEMORY rule in feedback_ingestion_be_helpful.md:
+ * rendering any ingest error without wiring this hint into the UI is a
+ * regression.
+ */
+export function buildIngestHint(input: IngestHintInput): IngestHint {
+  const repo = parseRepoFromInput(input.input_url);
+  const pathsTried = Array.isArray(input.attempted)
+    ? input.attempted.filter((s) => typeof s === 'string').slice(0, 40)
+    : [];
+
+  let status: IngestHintStatus;
+  let message: string;
+  if (!repo && !/^https?:\/\//i.test(input.input_url)) {
+    status = 'not_a_github_repo';
+    message =
+      'Paste a GitHub repo URL (e.g. github.com/you/your-api), or a direct link to an openapi.yaml / openapi.json.';
+  } else if (repo) {
+    status = pathsTried.length > 0 ? 'repo_no_spec' : 'repo_no_spec';
+    message = `We looked for an OpenAPI spec in ${repo.owner}/${repo.repo} but didn't find one at the paths we checked. Drop an \`openapi.yaml\` at the repo root (or point us at its URL) and we'll auto-detect.`;
+  } else {
+    status = 'unreachable';
+    message =
+      "We couldn't fetch an OpenAPI spec from that URL. Paste a direct link to an openapi.yaml / openapi.json, upload the contents, or ask a coding agent to generate one from your repo.";
+  }
+
+  const base = input.baseUrl.replace(/\/+$/, '');
+  return {
+    status,
+    input_url: input.input_url,
+    repo,
+    required_files: [...INGEST_HINT_REQUIRED_FILES],
+    required_shape: INGEST_HINT_REQUIRED_SHAPE,
+    paths_tried: pathsTried,
+    ready_prompt: buildReadyPrompt(repo, input.input_url),
+    upload_url: `${base}/api/hub/detect/inline`,
+    detect_url: `${base}/api/hub/detect`,
+    message,
+  };
+}
+
+/**
+ * Detect an app from an OpenAPI spec that's been pasted / uploaded
+ * inline rather than fetched by URL. Used by POST /api/hub/detect/inline
+ * (the "paste contents" recovery path) and by the MCP `ingest_hint`
+ * follow-up: after a coding agent generates a spec, it can submit the
+ * body here to get a DetectedApp back without needing a public URL.
+ *
+ * Accepts either a pre-parsed object or a JSON/YAML string. Runs the
+ * full dereference + manifest pipeline, so the returned shape is
+ * identical to `detectAppFromUrl`.
+ */
+export async function detectAppFromInlineSpec(
+  spec: OpenApiSpec | string,
+  requested_slug?: string,
+  requested_name?: string,
+): Promise<DetectedApp> {
+  let parsed: OpenApiSpec;
+  if (typeof spec === 'string') {
+    const trimmed = spec.trim();
+    if (!trimmed) throw new Error('openapi_spec is empty');
+    // Try JSON first (fast path), then YAML. The yaml package is already
+    // in deps via json-schema-ref-parser, so we reuse it.
+    try {
+      parsed = JSON.parse(trimmed) as OpenApiSpec;
+    } catch {
+      const YAML = await import('yaml');
+      parsed = YAML.parse(trimmed) as OpenApiSpec;
+    }
+  } else {
+    parsed = spec;
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('openapi_spec must be a valid OpenAPI/Swagger document');
+  }
+  if (!looksLikeOpenApiSpec(parsed)) {
+    throw new Error(
+      'openapi_spec must declare `openapi: 3.x` (or Swagger 2 `swagger: "2.0"`) and include at least one path',
+    );
+  }
+  const derefed = await dereferenceSpec(parsed);
+  const info = (derefed as { info?: { title?: string; description?: string } })
+    .info || {};
+  const name = requested_name || info.title || 'Untitled app';
+  const slug = slugify(requested_slug || name);
+
+  const appSpec: OpenApiAppSpec = {
+    slug,
+    type: 'proxied',
+    // No URL when inline — runtime uses spec.servers[] for base URL.
+    openapi_spec_url: '',
+    display_name: name,
+    description: info.description || undefined,
+    auth: 'none',
+  };
+  const manifest = specToManifest(derefed, appSpec, deriveSecretsFromSpec(derefed));
+  const actions = Object.entries(manifest.actions).map(([k, v]) => ({
+    name: k,
+    label: v.label,
+    description: v.description,
+  }));
+
+  const schemes = collectSecuritySchemes(derefed);
+  let auth_type: string | null = null;
+  for (const scheme of Object.values(schemes)) {
+    if (scheme?.type === 'http' && scheme?.scheme === 'bearer') {
+      auth_type = 'bearer';
+      break;
+    }
+    if (scheme?.type === 'apiKey') {
+      auth_type = 'apikey';
+      break;
+    }
+  }
+
+  return {
+    slug,
+    name,
+    description: appSpec.description || info.description || manifest.description || '',
+    actions,
+    auth_type,
+    category: null,
+    openapi_spec_url: '',
     tools_count: actions.length,
     secrets_needed: manifest.secrets_needed || [],
   };

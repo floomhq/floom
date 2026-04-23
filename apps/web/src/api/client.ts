@@ -755,6 +755,49 @@ export function detectApp(
   });
 }
 
+// Proactive ingest recovery (MEMORY: feedback_ingestion_be_helpful.md).
+// When detect fails, the UI calls fetchIngestHint with the URL the user
+// pasted + the paths already tried, and renders the recovery block
+// (paste direct URL, paste contents, generate-with-Claude prompt).
+export interface IngestHint {
+  status: 'spec_found' | 'repo_no_spec' | 'not_a_github_repo' | 'unreachable';
+  input_url: string;
+  repo: { owner: string; repo: string; canonical_url: string } | null;
+  required_files: string[];
+  required_shape: {
+    openapi: string;
+    info: { title: string; version: string };
+    servers: Array<{ url: string }>;
+    paths_example: string;
+  };
+  paths_tried: string[];
+  ready_prompt: string;
+  upload_url: string;
+  detect_url: string;
+  message: string;
+}
+
+export function fetchIngestHint(
+  input_url: string,
+  attempted?: string[],
+): Promise<IngestHint> {
+  return request('/api/hub/detect/hint', {
+    method: 'POST',
+    body: JSON.stringify({ input_url, attempted }),
+  });
+}
+
+export function detectAppInline(
+  openapi_spec: object | string,
+  name?: string,
+  slug?: string,
+): Promise<DetectedApp> {
+  return request('/api/hub/detect/inline', {
+    method: 'POST',
+    body: JSON.stringify({ openapi_spec, name, slug }),
+  });
+}
+
 export function ingestApp(body: {
   openapi_url: string;
   name?: string;
