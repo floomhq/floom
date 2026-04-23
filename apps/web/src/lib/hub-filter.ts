@@ -42,6 +42,17 @@ export function isTestFixture(app: HubApp): boolean {
  *
  * To re-surface an app publicly, add it to SHOWCASE_SLUGS. The
  * `featured` DB flag no longer grants public listing on its own.
+ *
+ * Self-host bypass (2026-04-22, Federico: "apps don't load on local
+ * Docker"): this curation is specifically for the hosted floom.dev /
+ * preview.floom.dev launch storefront. On a self-hosted Floom instance
+ * (cloud_mode === false server-side, surfaced via `/api/session/me`)
+ * the allowlist is bypassed entirely — the operator sees every app
+ * they've ingested, seeded, or published, minus test fixtures. Without
+ * this carve-out a fresh self-host box renders "0 apps" on /apps even
+ * though the 7 fast-apps utility sidecar and any ingested apps are
+ * healthy and callable by permalink. The empty grid reads as a broken
+ * install.
  */
 const SHOWCASE_SLUGS = new Set<string>([
   'lead-scorer',
@@ -49,16 +60,39 @@ const SHOWCASE_SLUGS = new Set<string>([
   'resume-screener',
 ]);
 
-export function isPubliclyListed(app: HubApp): boolean {
+export interface HubFilterOptions {
+  /**
+   * True when the frontend is rendered from a self-hosted Floom
+   * instance (server reports `cloud_mode: false` on `/api/session/me`).
+   * Bypasses the SHOWCASE allowlist so the operator sees every app on
+   * their instance — the allowlist is a floom.dev-only launch-week
+   * curation and hiding the operator's own apps is never what they
+   * want. Test fixtures are still filtered regardless of mode.
+   */
+  selfHost?: boolean;
+}
+
+export function isPubliclyListed(
+  app: HubApp,
+  opts: HubFilterOptions = {},
+): boolean {
   if (isTestFixture(app)) return false;
+  if (opts.selfHost) return true;
   return SHOWCASE_SLUGS.has(app.slug);
 }
 
 /**
- * Public-facing hub list: the three showcase demos only. Every other
- * app is hidden from landing + /apps until explicitly allowlisted
- * (SHOWCASE_SLUGS). Direct permalinks (/p/:slug) still resolve.
+ * Public-facing hub list. Default (hosted floom.dev) behavior: the
+ * three showcase demos only. On self-host (`opts.selfHost === true`):
+ * everything except test fixtures, so the operator's fast-apps and
+ * ingested apps render on landing + /apps.
+ *
+ * Direct permalinks (`/p/:slug`) resolve regardless of this filter —
+ * it only governs what the public grid / landing shows.
  */
-export function publicHubApps(apps: HubApp[]): HubApp[] {
-  return apps.filter(isPubliclyListed);
+export function publicHubApps(
+  apps: HubApp[],
+  opts: HubFilterOptions = {},
+): HubApp[] {
+  return apps.filter((a) => isPubliclyListed(a, opts));
 }

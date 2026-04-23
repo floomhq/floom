@@ -146,6 +146,10 @@ export function CreatorHeroPage() {
   const [publishStatus, setPublishStatus] = useState('');
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const cloudMode = sessionData?.cloud_mode === true;
+  // Self-host bypass for the launch-week SHOWCASE allowlist (see
+  // lib/hub-filter.ts). On a self-hosted instance (`cloud_mode: false`)
+  // show every app the operator has, not just the three hosted demos.
+  const selfHost = sessionData?.cloud_mode === false;
 
   useEffect(() => {
     document.title = 'Ship AI apps fast · Floom';
@@ -154,15 +158,16 @@ export function CreatorHeroPage() {
       .then((apps) => {
         // Filter QA/test fixtures so the landing "N apps running right
         // now" matches the /apps directory header count. Single source
-        // of truth: lib/hub-filter.ts.
-        const visible = publicHubApps(apps);
+        // of truth: lib/hub-filter.ts. Self-host bypasses the hosted
+        // SHOWCASE allowlist.
+        const visible = publicHubApps(apps, { selfHost });
         setHubCount(visible.length);
         if (visible.length > 0) setStripes(pickStripes(visible));
       })
       .catch(() => {
         // Keep the static roster on failure.
       });
-  }, []);
+  }, [selfHost]);
 
   // P0 curation (#253): FALLBACK_STRIPES are authored from the manifests
   // directly, so the old LAUNCH_APPS enrichment (opendraft/openpaper/...)

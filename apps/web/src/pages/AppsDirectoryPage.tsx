@@ -16,6 +16,7 @@ import { PageHead } from '../components/PageHead';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
 import { isPubliclyListed } from '../lib/hub-filter';
+import { useSession } from '../hooks/useSession';
 
 const ALL = 'all';
 
@@ -65,6 +66,15 @@ export function AppsDirectoryPage() {
   const [loading, setLoading] = useState(true);
   const [hubError, setHubError] = useState<string | null>(null);
   const [rawSearch, setRawSearch] = useState('');
+  // Self-host bypass for the launch-week SHOWCASE allowlist. See
+  // lib/hub-filter.ts HubFilterOptions. `cloud_mode === false` on
+  // `/api/session/me` means this instance is self-hosted; show every
+  // registered app (minus test fixtures) instead of the hosted
+  // three-demo curation. Fixes the "apps don't load" report on local
+  // Docker where the allowlist rendered an empty grid even though the
+  // fast-apps sidecar and any ingested apps were healthy.
+  const { data: sessionData } = useSession();
+  const selfHost = sessionData?.cloud_mode === false;
   // Category filter is URL-backed so browser back/forward and shared URLs
   // restore the filtered view (#100). ALL is the implicit default — we
   // only write `?category=<slug>` to the URL when the user picks a
@@ -162,18 +172,20 @@ export function AppsDirectoryPage() {
   }, [loadHub]);
 
   const sortedApps = useMemo(() => {
-    return apps.filter(isPubliclyListed).sort((a, b) => {
-      if ((a.featured ?? false) !== (b.featured ?? false)) {
-        return a.featured ? -1 : 1;
-      }
-      if (a.avg_run_ms != null || b.avg_run_ms != null) {
-        if (a.avg_run_ms == null) return 1;
-        if (b.avg_run_ms == null) return -1;
-        if (a.avg_run_ms !== b.avg_run_ms) return a.avg_run_ms - b.avg_run_ms;
-      }
-      return a.name.localeCompare(b.name);
-    });
-  }, [apps]);
+    return apps
+      .filter((app) => isPubliclyListed(app, { selfHost }))
+      .sort((a, b) => {
+        if ((a.featured ?? false) !== (b.featured ?? false)) {
+          return a.featured ? -1 : 1;
+        }
+        if (a.avg_run_ms != null || b.avg_run_ms != null) {
+          if (a.avg_run_ms == null) return 1;
+          if (b.avg_run_ms == null) return -1;
+          if (a.avg_run_ms !== b.avg_run_ms) return a.avg_run_ms - b.avg_run_ms;
+        }
+        return a.name.localeCompare(b.name);
+      });
+  }, [apps, selfHost]);
 
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>([[ALL, sortedApps.length]]);
@@ -499,6 +511,26 @@ export function AppsDirectoryPage() {
                 <p style={{ fontSize: 16, margin: 0 }}>
                   No apps in the directory yet.
                 </p>
+                {selfHost && (
+                  // Self-host-specific hint: a fresh `docker compose up`
+                  // without `/var/run/docker.sock` mounted seeds the 7
+                  // fast-apps utility sidecar but skips the 3 launch
+                  // demos (they need docker to build). If the operator
+                  // still sees zero, point them at SELF_HOST.md so they
+                  // can either mount the sock or ingest their own apps.
+                  <p style={{ fontSize: 13, margin: '12px 0 0' }}>
+                    Mount <code>/var/run/docker.sock</code> to seed the
+                    launch demos, or ingest an OpenAPI URL from{' '}
+                    <a href="/build" style={{ color: 'var(--accent)' }}>
+                      /build
+                    </a>
+                    .{' '}
+                    <a href="/docs/self-host" style={{ color: 'var(--accent)' }}>
+                      Self-host guide
+                    </a>
+                    .
+                  </p>
+                )}
               </div>
             ) : filteredApps.length === 0 ? (
               <div

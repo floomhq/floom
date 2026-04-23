@@ -44,6 +44,7 @@ import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
 import { DEPLOY_ENABLED, useDeployEnabled } from '../lib/flags';
+import { useSession } from '../hooks/useSession';
 import { WaitlistModal } from '../components/WaitlistModal';
 
 interface Stripe {
@@ -95,6 +96,12 @@ export function LandingV17Page() {
   // "Deploy your own" hero link swaps to a "Join waitlist" button that
   // opens WaitlistModal instead of navigating to /signup.
   const deployEnabled = useDeployEnabled();
+  const { data: sessionData } = useSession();
+  // Self-host bypass for the launch-week SHOWCASE allowlist (see
+  // lib/hub-filter.ts). cloud_mode === false on `/api/session/me`
+  // means we're rendering from a self-hosted instance — show every
+  // app the operator has, not just the three hosted demos.
+  const selfHost = sessionData?.cloud_mode === false;
   const [waitlistOpen, setWaitlistOpen] = useState(false);
 
   useEffect(() => {
@@ -107,13 +114,13 @@ export function LandingV17Page() {
     api
       .getHub()
       .then((apps) => {
-        const visible = publicHubApps(apps);
+        const visible = publicHubApps(apps, { selfHost });
         if (visible.length > 0) setStripes(pickStripes(visible));
       })
       .catch(() => {
         // Keep static roster on failure.
       });
-  }, []);
+  }, [selfHost]);
 
   return (
     <div
