@@ -356,6 +356,77 @@ hubRouter.get('/:slug/runs', async (c) => {
   });
 });
 
+// GET /api/hub/:slug/runs-by-day?days=7 — creator sparkline series.
+//
+// Returns a zero-filled daily count of runs for this app over the last
+// N days (1..90, default 7). Shape: `{ days: [{date:'YYYY-MM-DD', count:N}, ...] }`
+// with `days.length === N`, ordered oldest → newest. Zero days are
+// emitted explicitly so the client can render a bar with `min-height:2px`
+// rather than skipping the day (which would distort the axis).
+//
+// Ownership: same rule as /:slug/runs — creator-only, with the legacy
+// OSS-local escape hatch for self-hosters. Unlike /:slug/runs, we do
+// NOT further scope by user_id/device_id: a 7-day count across every
+// caller is not sensitive (no inputs / outputs, just counts) and is
+// what the creator actually wants to see on their /studio card. The
+// sparkline spec (v17 wireframe `studio-my-apps.html`) shows cross-
+// caller activity — that's the whole point of "my app has traction".
+//
+// Wireframe parity (2026-04-23): drives the per-card 7-bar sparkline
+// on /studio, replacing the single `run_count` + `last_run_at` pair
+// that couldn't show temporal shape.
+hubRouter.get('/:slug/runs-by-day', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const slug = c.req.param('slug');
+  const daysParam = Number(c.req.query('days') || 7);
+  const days = Math.max(1, Math.min(90, Number.isFinite(daysParam) ? Math.floor(daysParam) : 7));
+
+  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!app) return c.json({ error: 'App not found' }, 404);
+
+  // Ownership check mirrors /:slug/runs exactly (issue #124 semantics).
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
+  const isOwner =
+    (!!app.author && app.author === ctx.user_id) ||
+    (isOssLocal && app.workspace_id === 'local');
+  if (!isOwner) {
+    return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
+  }
+
+  // Aggregate by UTC calendar day. SQLite's date() function truncates
+  // a datetime to 'YYYY-MM-DD'. We bound the scan with a lower bound
+  // so a creator with a 100k-row runs table doesn't pay a full-scan.
+  // `started_at` is the run's creation timestamp (see runs schema in
+  // db.ts) and is always set — it's indexed via idx_runs_app which
+  // makes `app_id = ? AND started_at >= ?` a fast index scan.
+  const windowStart = `date('now', '-${days - 1} days')`;
+  const rows = db
+    .prepare(
+      `SELECT date(started_at) AS day, COUNT(*) AS count
+         FROM runs
+        WHERE app_id = ?
+          AND date(started_at) >= ${windowStart}
+        GROUP BY day
+        ORDER BY day ASC`,
+    )
+    .all(app.id) as Array<{ day: string; count: number }>;
+
+  // Zero-fill: build the full N-day window and populate from the
+  // sparse result. Using UTC to match the SQLite `date()` truncation.
+  const counts = new Map<string, number>(rows.map((r) => [r.day, r.count]));
+  const out: Array<{ date: string; count: number }> = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
+    const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+    out.push({ date: key, count: counts.get(key) ?? 0 });
+  }
+
+  return c.json({ slug: app.slug, days: out });
+});
+
 hubRouter.delete('/:slug', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
@@ -564,7 +635,19 @@ hubRouter.get('/', (c) => {
   // 'pending_review' / 'rejected' / 'draft' apps are hidden from the
   // public Store regardless of visibility — the creator still sees them
   // on /api/hub/mine.
-  const sql = `SELECT apps.*, users.name AS author_name, users.email AS author_email
+  // Wireframe parity (2026-04-23): `runs_7d` is a correlated subquery
+  // against the runs table, aggregated at read time. No staleness window,
+  // no separate column. The 5-second /api/hub in-memory cache absorbs
+  // the repeated cost in practice. `stars`, `hero`, `thumbnail_url` are
+  // plain row columns (see db.ts migration 2026-04-23).
+  const sql = `SELECT apps.*,
+                      users.name AS author_name,
+                      users.email AS author_email,
+                      (
+                        SELECT COUNT(*) FROM runs
+                         WHERE runs.app_id = apps.id
+                           AND date(runs.started_at) >= date('now','-6 days')
+                      ) AS runs_7d
                  FROM apps
                  LEFT JOIN users ON apps.author = users.id
                  WHERE apps.status = 'active'
@@ -575,7 +658,11 @@ hubRouter.get('/', (c) => {
   const rowsAll = (category
     ? db.prepare(sql).all(category)
     : db.prepare(sql).all()) as Array<
-    AppRecord & { author_name: string | null; author_email: string | null }
+    AppRecord & {
+      author_name: string | null;
+      author_email: string | null;
+      runs_7d: number;
+    }
   >;
 
   // Apply FLOOM_STORE_HIDE_SLUGS server-side filter first. This is the
@@ -613,6 +700,19 @@ hubRouter.get('/', (c) => {
       // stays nullable because an app that has never run has no average.
       featured: row.featured === 1,
       avg_run_ms: row.avg_run_ms,
+      // Wireframe parity (2026-04-23) — v17 store.html card fields.
+      //   thumbnail_url: 640x360 PNG; null means the client renders the
+      //     gradient fallback tile.
+      //   stars: non-negative int. `hot_star` on the wireframe is any
+      //     app with stars>=100; that's a pure render-time decision.
+      //   hero: boolean mapped from SQLite 0/1, flips the accent "HERO"
+      //     tag on the card.
+      //   runs_7d: count of runs started in the last 7 UTC days
+      //     (correlated subquery in SELECT). Always a non-negative int.
+      thumbnail_url: row.thumbnail_url ?? null,
+      stars: row.stars ?? 0,
+      hero: row.hero === 1,
+      runs_7d: row.runs_7d ?? 0,
       // Optional annotation for self-host blocked apps. Present only when
       // the manifest explicitly declares a blocked_reason. Surfaced on the
       // store card as a warning pill so users know the app is not

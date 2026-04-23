@@ -126,6 +126,25 @@ export interface HubApp {
    */
   avg_run_ms?: number | null;
   /**
+   * Wireframe parity (2026-04-23) — v17 `store.html` card fields.
+   *
+   * thumbnail_url: 640x360 PNG; null means render the gradient fallback
+   *   tile (AppIcon on a category tint). Added so we don't block launch
+   *   on hand-authored screenshots.
+   * stars: non-negative integer, seeded 0. The "hot" treatment on the
+   *   wireframe (accent-filled star) triggers at stars >= 100 — that's
+   *   a render-time decision, no separate flag.
+   * hero: when true, the card shows the accent "HERO" tag. Distinct
+   *   from `featured` (which only affects sort order).
+   * runs_7d: count of runs started in the last 7 UTC days. Drives the
+   *   "NNN runs · 7d" label per card. Always a non-negative int; zero
+   *   is fine (the wireframe has zero-run cards too).
+   */
+  thumbnail_url?: string | null;
+  stars?: number;
+  hero?: boolean;
+  runs_7d?: number;
+  /**
    * Optional: if the app is blocked in this self-host environment
    * (e.g. `flyfast` pending internal flight-search infra), the reason is
    * surfaced here and rendered as a warning pill on the store card.

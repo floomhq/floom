@@ -396,9 +396,15 @@ export async function seedLaunchDemos(): Promise<{
   // Launch-demo apps are first-party showcases — always 'published'. User
   // ingestion paths (openapi-ingest / docker-image-ingest) go through the
   // manual review gate (publish_status='pending_review' by default).
+  //
+  // Wireframe parity (2026-04-23): seed hero=1 on the 3 AI demo apps so
+  // the /apps grid renders the accent "HERO" tag per v17 store.html. All
+  // three slugs in DEMOS are the AI demos (lead-scorer, competitor-
+  // analyzer, resume-screener) so a blanket hero=1 is correct here; if
+  // a non-hero demo is added later, gate this on demo.slug.
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status, hero)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published', 1)`,
   );
   const updateApp = db.prepare(
     `UPDATE apps
@@ -411,6 +417,7 @@ export async function seedLaunchDemos(): Promise<{
            category = ?,
            author = ?,
            icon = ?,
+           hero = 1,
            updated_at = datetime('now')
      WHERE id = ?`,
   );

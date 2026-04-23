@@ -188,6 +188,14 @@ export interface AppRecord {
   // future creator-side flow; 'rejected' hides the app the same way
   // 'pending_review' does.
   publish_status: 'draft' | 'pending_review' | 'published' | 'rejected';
+  // Store-catalog wireframe parity (2026-04-23). `thumbnail_url` is the
+  // 640x360 card image (null = render gradient fallback tile). `stars` is
+  // a non-negative counter seeded 0 until reviews aggregation populates
+  // it. `hero` is the boolean that drives the accent "HERO" tag on the
+  // card; independent of `featured` which controls sort.
+  thumbnail_url: string | null;
+  stars: number;
+  hero: 0 | 1;
   created_at: string;
   updated_at: string;
 }

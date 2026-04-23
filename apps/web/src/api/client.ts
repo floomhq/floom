@@ -102,6 +102,19 @@ export function getApp(slug: string): Promise<AppDetail> {
   return request<AppDetail>(`/api/hub/${slug}`);
 }
 
+/**
+ * Sparkline source: 7-day (or N-day) daily run counts for one of the
+ * caller's apps. Creator-only; non-owners get 403. Zero-filled so
+ * `days.length === days_param`, oldest → newest. Drives the per-card
+ * sparkline on /studio (v17 wireframe `studio-my-apps.html`).
+ */
+export function getAppRunsByDay(
+  slug: string,
+  days = 7,
+): Promise<{ slug: string; days: Array<{ date: string; count: number }> }> {
+  return request(`/api/hub/${slug}/runs-by-day?days=${days}`);
+}
+
 export function pickApps(prompt: string, limit = 3): Promise<{ apps: PickResult[] }> {
   return request('/api/pick', {
     method: 'POST',

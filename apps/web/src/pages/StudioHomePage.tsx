@@ -7,6 +7,13 @@
 // one OR build new". Per-app analytics live on /studio/:slug; this
 // page is the index, nothing more.
 //
+// 2026-04-23 wireframe-parity pass: per-card sparkline is back (v17
+// `studio-my-apps.html` requires it). This time the sparkline is a
+// lean 7-bar strip (24px tall, 2px min bars) driven by REAL run data
+// from GET /api/hub/:slug/runs-by-day — not a fabricated series. The
+// hero stats row + ACTIVE/IDLE pills stay out. Scope: the sparkline,
+// nothing else. See components/studio/Sparkline.tsx.
+//
 // Preserved: app cards (name, slug, description, total runs, last run),
 // the "+ New app" CTA, the empty state, and the delete-confirm dialog.
 
@@ -14,6 +21,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { StudioSignedOutState } from '../components/studio/StudioSignedOutState';
+import { Sparkline } from '../components/studio/Sparkline';
 import * as api from '../api/client';
 import { refreshMyApps, useMyApps } from '../hooks/useMyApps';
 import { useSession } from '../hooks/useSession';
@@ -367,6 +375,11 @@ function AppCard({
           '(no description)'
         )}
       </div>
+      {/* 2026-04-23 wireframe parity: per-card 7-day sparkline. Bars
+          come from GET /api/hub/:slug/runs-by-day?days=7 (zero-filled
+          server-side). Muted when the app has never run so the
+          flat-empty strip reads as absence not failure. */}
+      <Sparkline slug={app.slug} days={7} muted={app.run_count === 0} />
       <div
         style={{
           display: 'flex',

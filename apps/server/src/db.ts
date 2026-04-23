@@ -140,6 +140,37 @@ if (!appCols.includes('publish_status')) {
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_publish_status ON apps(publish_status)`);
 
+// Store-catalog wireframe parity (2026-04-23). v17 `store.html` shows
+// each card with a 120px thumbnail, a star count, a runs-7d count, and
+// an optional HERO accent tag. Three of these are net-new columns —
+// `runs_7d` is derived at read time from the runs table, not stored,
+// so no column for it. All three new columns are nullable/zero-default
+// so older rows (and test fixtures) stay valid.
+//
+// - thumbnail_url: relative or absolute URL to a 640x360 PNG. Null =
+//   render the gradient fallback tile (AppIcon on a category tint) so
+//   launch doesn't block on manual screenshot authoring. Option 2 of
+//   the brief; Option 1 (headless-screenshot at seed time) is a
+//   follow-up when we have creator-UI for thumbnail uploads.
+// - stars: non-negative integer. Seeded 0 for every app; admins / a
+//   future reviews aggregation will backfill. Hot-star threshold
+//   (>=100, per wireframe) is a pure render-time decision — no
+//   separate column.
+// - hero: boolean flag (0/1). Distinct from `featured`: `featured`
+//   controls sort (pinned first), `hero` controls the accent "HERO"
+//   tag on the card chrome. The wireframe has lead-scorer flagged as
+//   HERO but all three AI demos can wear the tag; we set it at seed
+//   time below in services/launch-demos.ts.
+if (!appCols.includes('thumbnail_url')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN thumbnail_url TEXT`);
+}
+if (!appCols.includes('stars')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN stars INTEGER NOT NULL DEFAULT 0`);
+}
+if (!appCols.includes('hero')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN hero INTEGER NOT NULL DEFAULT 0`);
+}
+
 // ---------- runs (one per app invocation, optionally bound to a chat turn) ----------
 db.exec(`
   CREATE TABLE IF NOT EXISTS runs (

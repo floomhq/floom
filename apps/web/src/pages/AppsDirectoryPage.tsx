@@ -9,7 +9,7 @@ import {
 import { Search } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
-import { AppStripe } from '../components/public/AppStripe';
+import { AppGrid } from '../components/public/AppGrid';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
@@ -336,22 +336,30 @@ export function AppsDirectoryPage() {
           </div>
         </section>
 
-        {/* APP LIST · thin stripes, single column.
-            CLS fix (2026-04-18): reserve vertical space for the list area
-            so the loading-to-rendered transition does not shift subsequent
-            content. 600px fits ~6 stripes above the fold on desktop; the
-            real grid extends this naturally. */}
+        {/* APP LIST · 4-column thumbnail grid (v17 store.html).
+            CLS fix (2026-04-18): reserve vertical space for the list area so
+            the loading-to-rendered transition does not shift subsequent
+            content. 600px fits ~2 grid rows above the fold on desktop; the
+            real grid extends this naturally.
+            Container widened to 1180px (2026-04-23) to host the 4-col grid —
+            the old 760px max-width was calibrated for the single-column
+            stripe variant. */}
         <section ref={resultsRef} style={{ padding: '0 24px 80px', minHeight: 600 }}>
-          <div style={{ maxWidth: 760, margin: '0 auto' }}>
+          <div style={{ maxWidth: 1180, margin: '0 auto' }}>
             {loading ? (
               <div
-                style={{ display: 'grid', gap: 12 }}
+                className="apps-grid-skeleton"
                 data-testid="apps-list-skeleton"
                 aria-busy="true"
                 aria-label="Loading apps"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gap: 16,
+                }}
               >
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <AppStripeSkeleton key={i} />
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <AppGridSkeleton key={i} />
                 ))}
               </div>
             ) : hubError ? (
@@ -445,21 +453,7 @@ export function AppsDirectoryPage() {
                 </button>
               </div>
             ) : (
-              <div
-                style={{ display: 'grid', gap: 12 }}
-                data-testid="apps-list"
-              >
-                {filteredApps.map((app) => (
-                  <AppStripe
-                    key={app.slug}
-                    slug={app.slug}
-                    name={app.name}
-                    description={app.description}
-                    category={app.category ?? undefined}
-                    variant="apps"
-                  />
-                ))}
-              </div>
+              <AppGrid apps={filteredApps} />
             )}
           </div>
         </section>
@@ -471,6 +465,18 @@ export function AppsDirectoryPage() {
       <style>{`
         @media (max-width: 640px) {
           .apps-headline { font-size: 30px !important; }
+        }
+        /* Mirror AppGrid breakpoints so the loading skeleton collapses the
+           same way as the real grid: 4 → 3 → 2 → 1. Keeps grid shape stable
+           across the load transition. */
+        @media (max-width: 1024px) {
+          .apps-grid-skeleton { grid-template-columns: repeat(3, 1fr) !important; }
+        }
+        @media (max-width: 760px) {
+          .apps-grid-skeleton { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+        @media (max-width: 480px) {
+          .apps-grid-skeleton { grid-template-columns: 1fr !important; }
         }
         @keyframes apps-skeleton-shimmer {
           0% { background-position: -200px 0; }
@@ -500,14 +506,13 @@ function chipStyle(active: boolean): CSSProperties {
 }
 
 /**
- * Placeholder row shown while the hub fetch is pending.
+ * Placeholder card shown while the hub fetch is pending.
  *
- * Matches AppStripe's "apps" variant: same padding, same 42px icon tile,
- * same two-line title + description stack. This keeps the first-paint
- * shape stable so the real rows land without a layout shift, and stops
- * us from briefly showing the error card before the fetch resolves.
+ * Matches AppGrid's card shape: 120px thumbnail slot + title row + 2-line
+ * description + footer strip. Keeps the first-paint shape stable so the
+ * real cards land without a layout shift.
  */
-function AppStripeSkeleton() {
+function AppGridSkeleton() {
   const shimmer: CSSProperties = {
     background:
       'linear-gradient(90deg, var(--line) 0%, rgba(0,0,0,0.04) 50%, var(--line) 100%)',
@@ -521,35 +526,30 @@ function AppStripeSkeleton() {
       aria-hidden="true"
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 18,
-        padding: '20px 22px',
+        flexDirection: 'column',
         background: 'var(--card)',
         border: '1px solid var(--line)',
         borderRadius: 14,
+        overflow: 'hidden',
       }}
     >
-      <span
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: 12,
-          flexShrink: 0,
-          ...shimmer,
-        }}
-      />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ height: 14, width: '38%', ...shimmer }} />
-        <div style={{ height: 12, width: '78%', marginTop: 10, ...shimmer }} />
+      <div style={{ height: 120, ...shimmer, borderRadius: 0 }} />
+      <div style={{ padding: '14px 16px 16px' }}>
+        <div style={{ height: 14, width: '58%', ...shimmer }} />
+        <div style={{ height: 12, width: '90%', marginTop: 10, ...shimmer }} />
+        <div style={{ height: 12, width: '72%', marginTop: 6, ...shimmer }} />
+        <div
+          style={{
+            marginTop: 14,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <div style={{ height: 18, width: 70, borderRadius: 999, ...shimmer }} />
+          <div style={{ height: 12, width: 42, ...shimmer }} />
+        </div>
       </div>
-      <div
-        style={{
-          width: 20,
-          height: 14,
-          flexShrink: 0,
-          ...shimmer,
-        }}
-      />
     </div>
   );
 }
