@@ -95,7 +95,9 @@ rendererRouter.get('/:slug/bundle.js', (c) => {
     headers: {
       'content-type': 'application/javascript; charset=utf-8',
       'cache-control': 'public, max-age=60, must-revalidate',
-      'x-content-type-options': 'nosniff',
+      // `X-Content-Type-Options: nosniff` is set centrally by
+      // `middleware/security.ts` (pentest LOW #383 — single source of
+      // truth). Don't emit it here too.
       'x-floom-renderer-hash': bundle.sourceHash,
       'x-floom-renderer-shape': bundle.outputShape,
     },
@@ -118,7 +120,6 @@ rendererRouter.get('/:slug/frame.html', (c) => {
   if (!bundle) {
     return c.text('renderer_not_found', 404, {
       'content-security-policy': FRAME_CSP,
-      'x-content-type-options': 'nosniff',
     });
   }
   const safeSlug = encodeURIComponent(slug);
@@ -147,7 +148,10 @@ rendererRouter.get('/:slug/frame.html', (c) => {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-cache',
       'content-security-policy': FRAME_CSP,
-      'x-content-type-options': 'nosniff',
+      // `Referrer-Policy: no-referrer` is stricter than the top-level
+      // default; the middleware respects route-set values after pentest
+      // LOW #383. `X-Content-Type-Options: nosniff` is emitted by the
+      // middleware — we don't duplicate it.
       // Redundant with sandbox `allow-scripts` (no allow-same-origin) but
       // good defense in depth in case frame.html is opened directly.
       'x-frame-options': 'SAMEORIGIN',

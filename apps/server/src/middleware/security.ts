@@ -72,10 +72,20 @@
 //
 // Exempt routes:
 //   - `/renderer/:slug/frame.html` ships its own stricter CSP (see
-//     routes/renderer.ts FRAME_CSP). We don't overwrite it.
+//     routes/renderer.ts FRAME_CSP) plus a stricter `Referrer-Policy:
+//     no-referrer`. We don't overwrite either.
 //   - `/api/*` and `/mcp/*` return JSON/SSE which browsers don't
 //     interpret as HTML, so CSP is effectively a no-op there. We still
 //     set the other headers (HSTS, nosniff) on every response.
+//
+// Single source of truth (pentest LOW #383):
+//   This middleware is the only place Floom emits HSTS / nosniff /
+//   Referrer-Policy. If the deployment fronts the app with a reverse
+//   proxy (nginx, Cloudflare) that also injects these headers, strip
+//   them from the proxy config — otherwise the browser receives two
+//   comma-joined values, the second HSTS tail ("…") is missing
+//   `preload`, and we fail the HSTS preload list check. See
+//   `docs/ops/security-headers.md` for the nginx snippet to remove.
 
 import type { MiddlewareHandler } from 'hono';
 
@@ -131,21 +141,37 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
 
   const pathname = new URL(c.req.url).pathname;
 
-  // HSTS, nosniff, referrer — safe to apply everywhere. Browsers ignore
-  // HSTS on non-HTTPS responses so setting it in dev is harmless.
-  c.res.headers.set(
-    'Strict-Transport-Security',
-    'max-age=31536000; includeSubDomains; preload',
-  );
-  c.res.headers.set('X-Content-Type-Options', 'nosniff');
-  c.res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Pentest LOW #383 — this middleware is the single source of truth for
+  // HSTS / nosniff / Referrer-Policy. A route that wants a stricter value
+  // (e.g. the renderer frame.html setting `Referrer-Policy: no-referrer`)
+  // is respected: we only fill in defaults when nothing has been set. If
+  // an upstream reverse proxy (nginx) also injects these headers, remove
+  // the proxy emission — otherwise Fetch API's `append`-behaving proxy
+  // produces literal `foo, foo` duplicates. The app is authoritative.
+  //
+  // Browsers ignore HSTS on non-HTTPS responses so setting it in dev is
+  // harmless.
+  if (!c.res.headers.get('Strict-Transport-Security')) {
+    c.res.headers.set(
+      'Strict-Transport-Security',
+      'max-age=31536000; includeSubDomains; preload',
+    );
+  }
+  if (!c.res.headers.get('X-Content-Type-Options')) {
+    c.res.headers.set('X-Content-Type-Options', 'nosniff');
+  }
+  if (!c.res.headers.get('Referrer-Policy')) {
+    c.res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  }
 
   // Pentest MED #379 — cross-origin isolation family + permissions gate.
   // Safe to apply to every response (JSON/HTML/SSE). Routes that need
   // different values (e.g. OAuth popups needing COOP=unsafe-none) can
   // override by setting the header before `next()` returns; we only set
   // when no downstream value is present.
-  c.res.headers.set('Permissions-Policy', PERMISSIONS_POLICY);
+  if (!c.res.headers.get('Permissions-Policy')) {
+    c.res.headers.set('Permissions-Policy', PERMISSIONS_POLICY);
+  }
   if (!c.res.headers.get('Cross-Origin-Opener-Policy')) {
     c.res.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   }
@@ -158,6 +184,12 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
     // don't ship a CORP header of their own.
     c.res.headers.set('Cross-Origin-Embedder-Policy', 'credentialless');
   }
+
+  // Pentest LOW #384 — frame-ancestors in CSP supersedes X-Frame-Options
+  // on every browser still in support (Chrome 76+, Firefox 103+, Safari
+  // 17+). Middleware does not emit XFO; routes that need legacy framing
+  // behaviour can opt in explicitly, but new code should rely on the CSP
+  // `frame-ancestors` directive instead.
 
   // CSP: skip routes that set their own (renderer frame) and skip when a
   // route already set a CSP header explicitly.
