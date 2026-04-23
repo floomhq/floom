@@ -878,7 +878,9 @@ export function getAppRuns(
 }
 
 export function deleteApp(slug: string): Promise<{ ok: true }> {
-  return request(`/api/hub/${slug}`, { method: 'DELETE' });
+  return request(`/api/me/apps/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  });
 }
 
 // Issue #129 (2026-04-19): owner can flip visibility between public and

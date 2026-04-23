@@ -336,15 +336,7 @@ export function CreatorPage() {
                     type="button"
                     onClick={() => setConfirmSlug(a.slug)}
                     data-testid={`creator-delete-${a.slug}`}
-                    style={{
-                      ...secondaryBtnStyle,
-                      borderColor: '#f4b7b1',
-                      color: '#c2321f',
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      border: '1px solid #f4b7b1',
-                      fontFamily: 'inherit',
-                    }}
+                    style={{ ...secondaryBtnStyle, cursor: 'pointer' }}
                   >
                     Delete
                   </button>
@@ -384,7 +376,7 @@ export function CreatorPage() {
                 Delete {confirmSlug}?
               </h3>
               <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
-                This removes the app from the store. All run history remains.
+                Removes the app from the store and drops run history. Cannot be undone.
                 Type the slug <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>{confirmSlug}</code> to confirm.
               </p>
               <input
@@ -431,15 +423,15 @@ export function CreatorPage() {
                   data-testid="creator-delete-submit"
                   style={{
                     padding: '8px 16px',
-                    background: '#c2321f',
-                    color: '#fff',
-                    border: 'none',
+                    background: 'transparent',
+                    color: '#a02818',
+                    border: '1px solid #c2321f',
                     borderRadius: 8,
                     fontSize: 13,
                     fontWeight: 600,
                     cursor: confirmInput === confirmSlug && !deleting ? 'pointer' : 'not-allowed',
                     fontFamily: 'inherit',
-                    opacity: confirmInput === confirmSlug && !deleting ? 1 : 0.6,
+                    opacity: confirmInput === confirmSlug && !deleting ? 1 : 0.5,
                   }}
                 >
                   {deleting ? 'Deleting...' : 'Delete forever'}

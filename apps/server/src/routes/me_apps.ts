@@ -23,12 +23,18 @@
 //     AES-256-GCM encrypted under the creator's workspace DEK via the
 //     same envelope scheme that user_secrets uses.
 //
+//   DELETE /api/me/apps/:slug
+//     Creator-only. Removes the app row (hard-delete; cascades per db.ts).
+//     Non-owners and unknown slugs both receive 404 so callers cannot
+//     probe for app existence.
+//
 // All routes require an authenticated caller in cloud mode. In OSS
 // mode the synthetic local user is automatically the creator of every
 // locally-seeded app, so the ownership check passes naturally.
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db.js';
+import { deleteAppRecordById } from '../services/app_delete.js';
 import { resolveUserContext } from '../services/session.js';
 import * as creatorSecrets from '../services/app_creator_secrets.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
@@ -309,6 +315,35 @@ meAppsRouter.delete('/:slug/creator-secrets/:key', async (c) => {
   } catch (err) {
     return c.json(
       { error: (err as Error).message, code: 'creator_secret_delete_failed' },
+      500,
+    );
+  }
+});
+
+/**
+ * DELETE /api/me/apps/:slug — delete the entire app (Studio + manage-my-apps).
+ *
+ * Ownership matches other routes here (`isOwner`, including the OSS
+ * local escape hatch). Missing slug or non-owner: same 404 as each other
+ * so the response does not reveal whether a slug is registered.
+ */
+meAppsRouter.delete('/:slug', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+
+  const slug = c.req.param('slug') || '';
+  const app = loadApp(slug);
+  if (!app || !isOwner(app, ctx)) {
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+
+  try {
+    deleteAppRecordById(app.id);
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json(
+      { error: (err as Error).message, code: 'app_delete_failed' },
       500,
     );
   }
