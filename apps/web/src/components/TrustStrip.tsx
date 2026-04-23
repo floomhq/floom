@@ -38,7 +38,7 @@ export function TrustStrip() {
       >
         Built in SF by Federico De Ponte and contributors.{' '}
         <a
-          href="https://github.com/floomhq/floom-monorepo"
+          href="https://github.com/floomhq/floom"
           target="_blank"
           rel="noreferrer"
           style={{ color: 'inherit', textDecoration: 'underline' }}
