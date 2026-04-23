@@ -1320,42 +1320,96 @@ function EmptyOutputCard({
 function EmptyOutputSkeleton({ outputType }: { outputType: OutputType | undefined }) {
   const commonWrap: React.CSSProperties = {
     marginTop: 18,
-    opacity: 0.45,
+    opacity: 0.55,
     pointerEvents: 'none',
   };
   if (outputType === 'table') {
+    // v17 app-page.html alignment (2026-04-25): the wireframe shows a
+    // real <table> preview — a faint header band (upper-case micro-copy),
+    // five body rows with animated-looking skeleton "bars" of varying
+    // widths. Previous version used a 3×3 grid of em-dashes which read
+    // as "data not yet loaded" rather than "here's the SHAPE of what
+    // you'll get". We don't know the real column names at this stage
+    // (OutputSpec has no `columns` field), so the header row uses
+    // generic "Result" / "Score" labels as visual placeholders. The
+    // bar widths mirror the wireframe (80% / 65% / 72% / 58%) so the
+    // mock looks hand-crafted, not programmatically uniform.
+    const rowWidths = ['100%', '80%', '65%', '72%', '58%'];
+    const thStyle: React.CSSProperties = {
+      padding: '7px 10px',
+      borderBottom: '1px solid var(--line)',
+      textAlign: 'left',
+      fontSize: 10,
+      fontWeight: 600,
+      color: 'var(--muted)',
+      textTransform: 'uppercase',
+      letterSpacing: '0.06em',
+      background: 'var(--bg)',
+    };
+    const tdSkel: React.CSSProperties = {
+      padding: '8px 10px',
+      borderBottom: '1px solid var(--line)',
+    };
+    const barStyle: React.CSSProperties = {
+      display: 'inline-block',
+      height: 9,
+      borderRadius: 4,
+      background: 'var(--line)',
+    };
     return (
-      <div role="presentation" style={commonWrap}>
-        <div
+      <div
+        role="presentation"
+        style={{
+          ...commonWrap,
+          border: '1px solid var(--line)',
+          borderRadius: 10,
+          overflow: 'hidden',
+          background: 'var(--card)',
+        }}
+      >
+        <table
           style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: 0,
-            border: '1px dashed var(--line)',
-            borderRadius: 8,
-            overflow: 'hidden',
-            background: 'var(--card, transparent)',
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: 12,
           }}
         >
-          {Array.from({ length: 9 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                padding: '8px 10px',
-                borderRight:
-                  (i + 1) % 3 === 0 ? 'none' : '1px dashed var(--line)',
-                borderBottom:
-                  i < 6 ? '1px dashed var(--line)' : 'none',
-                fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-                fontSize: 11,
-                color: 'var(--muted)',
-                textAlign: 'center',
-              }}
-            >
-              —
-            </div>
-          ))}
-        </div>
+          <thead>
+            <tr>
+              <th style={thStyle}>Result</th>
+              <th style={{ ...thStyle, width: 60, textAlign: 'right' }}>
+                Score
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rowWidths.map((w, i) => (
+              <tr key={i}>
+                <td
+                  style={{
+                    ...tdSkel,
+                    // Last row omits the bottom border to match the wireframe's
+                    // flush-to-the-table-edge look.
+                    borderBottom:
+                      i === rowWidths.length - 1 ? 'none' : tdSkel.borderBottom,
+                  }}
+                >
+                  <span style={{ ...barStyle, width: w }} />
+                </td>
+                <td
+                  style={{
+                    ...tdSkel,
+                    textAlign: 'right',
+                    borderBottom:
+                      i === rowWidths.length - 1 ? 'none' : tdSkel.borderBottom,
+                  }}
+                >
+                  <span style={{ ...barStyle, width: 32 }} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
