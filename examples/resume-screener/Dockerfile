@@ -14,6 +14,9 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY main.py /app/main.py
+# sample-cache.json is the baked-in golden for the /p/resume-screener demo
+# input. Bundled into the image so cache hits work offline.
+COPY sample-cache.json /app/sample-cache.json
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

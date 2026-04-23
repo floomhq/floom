@@ -8,12 +8,14 @@ Third Floom demo app (alongside [lead-scorer](../lead-scorer) and the forthcomin
 
 1. Unpacks the uploaded zip, finds every `.pdf` at the top level.
 2. Extracts text from each PDF in parallel (ThreadPoolExecutor, 8 workers) using `pypdf`.
-3. For every CV, asks Gemini 3 (`gemini-3.1-pro-preview`) to score it 0-100 against the JD, cite concrete evidence, list gaps, and mark `must_have_pass`.
+3. For every CV, asks Gemini 3 (`gemini-3-flash-preview` by default; `GEMINI_MODEL=gemini-3.1-pro-preview` to upgrade) to score it 0-100 against the JD, cite concrete evidence, list gaps, and mark `must_have_pass`.
 4. Sorts by `must_have_pass` (passes first), then score desc.
 5. Bad PDFs are flagged `pdf_parse_failed` and kept in the output; they do not crash the run.
 6. Candidate names and contact info are redacted from stdout logs (each CV gets a short `cv-<hash>` id).
 
 No web search, no URL context. Everything is in the CVs.
+
+**Instant sample responses:** The baked-in `sample-cache.json` returns a pre-generated Pro-quality response in under 500ms when the user submits the exact sample shown on `/p/resume-screener`. Any other input hits Flash live. See [cache regeneration](#regenerating-the-sample-cache).
 
 ## Inputs
 
@@ -48,7 +50,8 @@ The Floom v2.0 manifest (`apps/server/src/services/manifest.ts`) currently accep
 Plus:
 
 - `summary` — one-line natural-language recap.
-- `model` — `gemini-3.1-pro-preview` (or `dry-run`).
+- `model` — resolved Gemini model (e.g. `gemini-3-flash-preview`, `gemini-3.1-pro-preview (cached)`, or `dry-run`).
+- `cache_hit` — `true` when the response came from `sample-cache.json`.
 - `total / scored / failed / dry_run` — counters.
 
 ## Secrets
@@ -141,6 +144,18 @@ PostgreSQL
 
 One failed CV never aborts the other screenings.
 
+## Regenerating the sample cache
+
+`sample-cache.json` freezes a Pro-quality response for the exact pre-filled sample on `/p/resume-screener`. When the user submits that exact input (same zip bytes + same JD + same must-haves), the app returns the cached blob in <500ms.
+
+Regenerate after changing `apps/web/public/examples/resume-screener/sample-cvs.zip`, the JD, or the must-haves in `apps/web/src/lib/app-examples.ts`:
+
+```bash
+GEMINI_API_KEY=... python3 scripts/gen-demo-cache.py resume-screener
+```
+
+The canonical contract lives in `canonical_input()` in `main.py`: SHA-256 of the zip bytes + whitespace-normalized JD + sorted must-haves list, JSON-encoded with sorted keys.
+
 ## Files
 
 - `main.py` — the app (exports `screen(...)` for Floom entrypoint + `_cli()` for standalone Docker).
@@ -148,3 +163,4 @@ One failed CV never aborts the other screenings.
 - `Dockerfile` — standalone image. Floom's managed build path generates its own Dockerfile (see `apps/server/src/services/docker.ts`); this one is for direct `docker run`.
 - `requirements.txt` — `pypdf`, `google-genai`.
 - `sample-cvs/` — three fake CVs + a pre-packaged `cvs.zip`.
+- `sample-cache.json` — pre-generated golden for the exact `/p/resume-screener` sample input (instant demo responses).

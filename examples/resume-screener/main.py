@@ -21,9 +21,16 @@ Schema note: the Floom manifest v2.0 InputType set is
 no nested items/pdf. So instead of `cvs: array of file/pdf`, we accept a
 single zip (`cvs_zip: file`) and unpack it in the container.
 
-Model: gemini-3.1-pro-preview via google-genai. No web search or URL context
-(everything is in the CVs already). No Claude, no OpenAI, no Gemini 2.x.
-Falls back to dry-run deterministic scoring if GEMINI_API_KEY is unset.
+Model: gemini-3-flash-preview by default (fast, demo-grade). Override with
+GEMINI_MODEL env var or `model` input (e.g. `gemini-3.1-pro-preview` for
+deeper reasoning). No web search or URL context (everything is in the CVs
+already). No Claude, no OpenAI, no Gemini 2.x — enforced in code. Falls
+back to dry-run deterministic scoring if GEMINI_API_KEY is unset.
+
+Sample-input cache: if the canonical input hash matches an entry in
+`sample-cache.json`, return the frozen golden output (generated with
+gemini-3.1-pro-preview) in <500ms. Any other input falls through to a
+live Flash call. See canonical_input() below for the hashing contract.
 
 Privacy: candidate names and contact info are redacted from stdout logs.
 """
@@ -42,12 +49,17 @@ import time
 import traceback
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
-MODEL_ID = "gemini-3.1-pro-preview"
+DEFAULT_MODEL_ID = "gemini-3-flash-preview"
 MAX_WORKERS = 8
 PER_CALL_TIMEOUT_S = 45
 MAX_CV_CHARS = 20_000  # truncate very long CVs to stay under token budget
+
+# Sample-input cache: lives next to main.py so the container image bundles
+# it automatically. Contains sha256(canonical_input) → golden output.
+SAMPLE_CACHE_PATH = Path(__file__).parent / "sample-cache.json"
 
 SYSTEM_PROMPT = """You are a senior technical recruiter screening candidate CVs.
 
@@ -89,6 +101,84 @@ def _redact(name: str) -> str:
 
 def _log(msg: str) -> None:
     print(f"[resume-screener] {msg}", flush=True)
+
+
+def _resolve_model(model_override: str | None = None) -> str:
+    """Resolve the Gemini model. Env > explicit override > default. gemini-3.x only."""
+    m = (os.environ.get("GEMINI_MODEL") or model_override or DEFAULT_MODEL_ID).strip()
+    if not m.startswith("gemini-3"):
+        raise SystemExit(
+            f"refusing to run: model must be gemini-3.x (got '{m}')"
+        )
+    return m
+
+
+def _split_must_haves_static(mh: Any) -> list[str]:
+    """Accept a list OR a textarea string (one per line). Public helper so
+    canonical_input() and screen() share the exact same list."""
+    if mh is None or mh == "":
+        return []
+    if isinstance(mh, list):
+        return [str(x).strip() for x in mh if str(x).strip()]
+    return [line.strip() for line in str(mh).splitlines() if line.strip()]
+
+
+def _read_zip_bytes_for_hash(cvs_zip_input: str) -> bytes:
+    """Return the raw zip bytes (path OR base64), used by canonical_input()
+    so cache keys are stable whether the runtime mounts a file or a direct
+    caller passes a base64 string."""
+    if os.path.isfile(cvs_zip_input):
+        with open(cvs_zip_input, "rb") as f:
+            return f.read()
+    try:
+        return base64.b64decode(cvs_zip_input)
+    except Exception:
+        # Not a path, not valid base64: hash the raw string so we still get
+        # a deterministic key (the run itself will fail downstream).
+        return cvs_zip_input.encode("utf-8")
+
+
+def canonical_input(cvs_zip: str, job_description: str, must_haves: Any = None) -> str:
+    """Deterministic string representation of the inputs.
+
+    Contract:
+      - zip content is read as bytes (path OR base64) and SHA-256'd.
+      - job_description is stripped + internal whitespace collapsed to
+        single spaces (typo-indifferent).
+      - must_haves is parsed via _split_must_haves_static; list is SORTED
+        (order-independent, since must-haves are a set, not a sequence).
+      - JSON-encoded with sort_keys=True, separators minimized.
+    """
+    zip_bytes = _read_zip_bytes_for_hash(cvs_zip)
+    zip_hash = hashlib.sha256(zip_bytes).hexdigest()
+    jd_normalized = re.sub(r"\s+", " ", job_description.strip())
+    mh_list = sorted(_split_must_haves_static(must_haves))
+    payload = {
+        "cvs_zip_sha256": zip_hash,
+        "job_description": jd_normalized,
+        "must_haves": mh_list,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _input_hash(cvs_zip: str, job_description: str, must_haves: Any = None) -> str:
+    return hashlib.sha256(
+        canonical_input(cvs_zip, job_description, must_haves).encode("utf-8")
+    ).hexdigest()
+
+
+def _load_sample_cache() -> dict[str, Any]:
+    """Load the frozen golden cache, or {} if the file is missing."""
+    if not SAMPLE_CACHE_PATH.is_file():
+        return {}
+    try:
+        with open(SAMPLE_CACHE_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"sample-cache.json unreadable ({exc}); ignoring")
+        return {}
+    entries = raw.get("entries") if isinstance(raw, dict) else None
+    return entries or {}
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +270,7 @@ def _score_with_gemini(
     jd: str,
     must_haves: list[str],
     client,
+    model: str,
 ) -> dict[str, Any]:
     """Single scoring call. Retries once on rate limit / JSON parse failure."""
     from google.genai import errors as genai_errors  # type: ignore
@@ -205,7 +296,7 @@ def _score_with_gemini(
     for attempt in (1, 2):
         try:
             resp = client.models.generate_content(
-                model=MODEL_ID,
+                model=model,
                 contents=prompt,
                 config=config,
             )
@@ -275,6 +366,7 @@ def screen(
     cvs_zip: str,
     job_description: str,
     must_haves: Any = None,
+    model: str | None = None,
     **_kwargs,
 ) -> dict[str, Any]:
     """Screen every PDF in the zip against the JD. Returns a ranked list."""
@@ -282,6 +374,21 @@ def screen(
         raise ValueError("job_description is required")
     if not cvs_zip:
         raise ValueError("cvs_zip is required (path to a .zip of PDFs)")
+
+    resolved_model = _resolve_model(model)
+
+    # Fast path: if the inputs exactly match a baked-in sample, return the
+    # golden in <500ms. Golden was produced with gemini-3.1-pro-preview for
+    # higher quality than a live Flash call. Any other input falls through.
+    cache = _load_sample_cache()
+    h = _input_hash(cvs_zip, job_description, must_haves)
+    if h in cache:
+        _log(f"cache hit for input_hash={h[:12]}... (instant response)")
+        cached = dict(cache[h])
+        cached["cache_hit"] = True
+        cached["dry_run"] = False
+        cached.setdefault("model", "gemini-3.1-pro-preview (cached)")
+        return cached
 
     mh_list = _split_must_haves(must_haves)
     zip_bytes = _load_zip_bytes(cvs_zip)
@@ -294,9 +401,10 @@ def screen(
             "ranked": [],
             "summary": "No PDFs found in the uploaded archive.",
             "dry_run": False,
-            "model": MODEL_ID,
+            "cache_hit": False,
+            "model": resolved_model,
         }
-    _log(f"found {len(pdfs)} PDF(s) in archive; must_haves={len(mh_list)}")
+    _log(f"found {len(pdfs)} PDF(s) in archive; must_haves={len(mh_list)} model={resolved_model}")
 
     client = _build_genai()
     dry_run = client is None
@@ -330,7 +438,7 @@ def screen(
             if dry_run:
                 out = _dry_run_score(cv_text, job_description, mh_list)
             else:
-                out = _score_with_gemini(cv_text, job_description, mh_list, client)
+                out = _score_with_gemini(cv_text, job_description, mh_list, client, resolved_model)
 
             score = out.get("score")
             if not isinstance(score, (int, float)):
@@ -404,7 +512,8 @@ def screen(
         "scored": scored,
         "failed": failed,
         "dry_run": dry_run,
-        "model": MODEL_ID if not dry_run else "dry-run",
+        "cache_hit": False,
+        "model": resolved_model if not dry_run else "dry-run",
         "ranked": ranked,
         "summary": summary,
     }
