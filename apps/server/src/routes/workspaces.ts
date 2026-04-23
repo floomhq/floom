@@ -37,7 +37,7 @@ import {
 } from '../services/workspaces.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
-import type { WorkspaceRole } from '../types.js';
+import type { WorkspaceMemberRole } from '../types.js';
 
 export const workspacesRouter = new Hono();
 export const sessionRouter = new Hono();
@@ -290,7 +290,7 @@ workspacesRouter.patch('/:id/members/:user_id', async (c) => {
     );
   }
   try {
-    const updated = ws.changeRole(ctx, id, target, parsed.data.role as WorkspaceRole);
+    const updated = ws.changeRole(ctx, id, target, parsed.data.role as WorkspaceMemberRole);
     return c.json({ member: updated });
   } catch (err) {
     const m = mapError(err);
@@ -354,7 +354,7 @@ workspacesRouter.post('/:id/members/invite', async (c) => {
       ctx,
       id,
       parsed.data.email,
-      parsed.data.role as WorkspaceRole,
+      parsed.data.role as WorkspaceMemberRole,
     );
     return c.json(result, 201);
   } catch (err) {
