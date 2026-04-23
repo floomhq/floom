@@ -435,15 +435,7 @@ function EditorSurface({ active, cycle, reducedMotion }: EditorProps) {
     [codeCap],
   );
 
-  const surfaceStyle: CSSProperties = {
-    ...SURFACE_STYLE,
-    opacity: active ? 1 : 0,
-    pointerEvents: active ? 'auto' : 'none',
-    transform: active ? 'translateY(0)' : 'translateY(6px)',
-    transition: reducedMotion
-      ? 'none'
-      : 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1)',
-  };
+  const surfaceStyle = makeSurfaceStyle(active, reducedMotion);
 
   return (
     <div style={surfaceStyle} aria-hidden={!active}>
@@ -584,15 +576,7 @@ function DeploySurface({
   const tokens = useMemo(() => tokenizePython(HANDLER_CODE), []);
   const lineCount = useMemo(() => countLines(HANDLER_CODE, HANDLER_CODE.length), []);
 
-  const surfaceStyle: CSSProperties = {
-    ...SURFACE_STYLE,
-    opacity: active ? 1 : 0,
-    pointerEvents: active ? 'auto' : 'none',
-    transform: active ? 'translateY(0)' : 'translateY(6px)',
-    transition: reducedMotion
-      ? 'none'
-      : 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1)',
-  };
+  const surfaceStyle = makeSurfaceStyle(active, reducedMotion);
 
   return (
     <div style={surfaceStyle} aria-hidden={!active}>
@@ -760,14 +744,8 @@ function RunSurface({
   const score = useCountUp(87, resultReady, 700, reducedMotion);
 
   const surfaceStyle: CSSProperties = {
-    ...SURFACE_STYLE,
+    ...makeSurfaceStyle(active, reducedMotion),
     background: '#ffffff',
-    opacity: active ? 1 : 0,
-    pointerEvents: active ? 'auto' : 'none',
-    transform: active ? 'translateY(0)' : 'translateY(6px)',
-    transition: reducedMotion
-      ? 'none'
-      : 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1)',
   };
 
   // Reasons fade in staggered after the score lands so the right column
@@ -1046,6 +1024,31 @@ const SURFACE_STYLE: CSSProperties = {
   position: 'absolute',
   inset: 0,
 };
+
+// 2026-04-24 bug 2 fix (tab-switch overlay): previously each surface only
+// faded via opacity + pointerEvents while staying in the compositor
+// stack, so the outgoing surface visibly bled through the incoming one
+// during the 180ms crossfade — most notably the new Lead Scorer input /
+// output grid on top of a still-rendered Deploy code panel. We now also
+// toggle `visibility` with a delayed transition: `visible` flips
+// immediately on enter (0s delay so the incoming fade reads sharply),
+// and flips to `hidden` 180ms after leave so the inactive surface cleanly
+// drops out of paint once its fade-out completes. Shared helper — three
+// surfaces used to hand-roll the same style block.
+function makeSurfaceStyle(active: boolean, reducedMotion: boolean): CSSProperties {
+  return {
+    ...SURFACE_STYLE,
+    opacity: active ? 1 : 0,
+    visibility: active ? 'visible' : 'hidden',
+    pointerEvents: active ? 'auto' : 'none',
+    transform: active ? 'translateY(0)' : 'translateY(6px)',
+    transition: reducedMotion
+      ? 'none'
+      : active
+        ? 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1), visibility 0s'
+        : 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1), visibility 0s linear .18s',
+  };
+}
 
 // Cream paper editor — Linear/Raycast/Arc vibe, not a black hacker terminal.
 // Federico 2026-04-23 + feedback_terminal_never_black.md.
