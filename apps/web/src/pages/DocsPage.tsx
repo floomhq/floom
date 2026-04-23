@@ -26,9 +26,12 @@ import selfHostMd from '../assets/docs/self-host.md?raw';
 import runtimeSpecsMd from '../assets/docs/runtime-specs.md?raw';
 import cliMd from '../assets/docs/cli.md?raw';
 import apiReferenceMd from '../assets/docs/api-reference.md?raw';
+import quickstartMd from '../assets/docs/quickstart.md?raw';
 
 const DOCS = [
   // v17 hub slugs (2026-04-22). Real routes reachable via DocsSidebar.
+  // Quickstart is the canonical "first app in 5 min" walkthrough (#306).
+  { slug: 'quickstart', label: 'Quickstart', markdown: quickstartMd },
   { slug: 'mcp-install', label: 'MCP install', markdown: mcpInstallMd },
   { slug: 'cli', label: 'CLI', markdown: cliMd },
   { slug: 'runtime-specs', label: 'Runtime specs', markdown: runtimeSpecsMd },

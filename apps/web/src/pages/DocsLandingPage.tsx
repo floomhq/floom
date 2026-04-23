@@ -317,6 +317,10 @@ export function DocsLandingPage() {
           </p>
 
           <div style={quickStartStyle}>
+            <Link to="/docs/quickstart" style={pillStyle}>
+              Quickstart
+              <span style={pillKeyStyle}>5 min</span>
+            </Link>
             <Link to="/docs/cli" style={pillStyle}>
               Install CLI
               <span style={pillKeyStyle}>curl install.sh</span>

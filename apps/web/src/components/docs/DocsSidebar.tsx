@@ -149,9 +149,9 @@ export const DOCS_SIDEBAR_GROUPS: DocsSidebarGroup[] = [
     heading: 'Getting started',
     links: [
       { to: '/docs', label: 'Welcome' },
+      { to: '/docs/quickstart', label: 'Quickstart', tag: 'NEW' },
       { to: '/docs/cli', label: 'Install the CLI' },
-      { to: '/docs/mcp-install', label: 'Install in Claude / Cursor', tag: 'NEW' },
-      { to: '/docs/workflow', label: 'Run your first app' },
+      { to: '/docs/mcp-install', label: 'Install in Claude / Cursor' },
     ],
   },
   {
