@@ -434,22 +434,33 @@ function AppCard({
         <span aria-hidden="true">·</span>
         <span>{app.last_run_at ? `last ${formatTime(app.last_run_at)}` : 'never run'}</span>
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <Link
-          to={`/studio/${app.slug}`}
-          style={primaryBtnStyle}
-          data-testid={`studio-open-${app.slug}`}
-        >
-          Open
-        </Link>
-        <Link to={`/p/${app.slug}`} style={secondaryBtnStyle}>
-          View
-        </Link>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 6,
+          justifyContent: 'space-between',
+          rowGap: 8,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0 }}>
+          <Link
+            to={`/studio/${app.slug}`}
+            style={primaryBtnStyle}
+            data-testid={`studio-open-${app.slug}`}
+          >
+            Open
+          </Link>
+          <Link to={`/p/${app.slug}`} style={secondaryBtnStyle}>
+            View
+          </Link>
+        </div>
         <button
           type="button"
           onClick={onDelete}
           data-testid={`studio-delete-${app.slug}`}
-          style={dangerBtnStyle}
+          style={studioDeleteTertiaryStyle}
           aria-label={`Delete ${app.name}`}
         >
           Delete
@@ -489,18 +500,20 @@ const secondaryBtnStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const dangerBtnStyle: React.CSSProperties = {
-  padding: '7px 12px',
-  background: 'transparent',
-  border: '1px solid #f4b7b1',
-  borderRadius: 6,
+/** Tertiary — demoted vs Open / View (issue #110). */
+const studioDeleteTertiaryStyle: React.CSSProperties = {
+  padding: '4px 8px',
   fontSize: 12,
-  color: '#c2321f',
+  color: 'var(--muted)',
+  background: 'transparent',
+  border: 'none',
   fontFamily: 'inherit',
   cursor: 'pointer',
-  flex: 1,
-  textAlign: 'center',
+  textDecoration: 'underline',
+  textDecorationColor: 'rgba(88, 85, 80, 0.35)',
+  textUnderlineOffset: '2px',
   whiteSpace: 'nowrap',
+  flexShrink: 0,
 };
 
 /**

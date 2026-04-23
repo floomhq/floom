@@ -312,31 +312,42 @@ export function CreatorPage() {
                   <span>·</span>
                   <span>{a.last_run_at ? `last ${formatTime(a.last_run_at)}` : 'never run'}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <Link
-                    to={`/creator/${a.slug}`}
-                    style={secondaryBtnStyle}
-                    data-testid={`creator-activity-${a.slug}`}
-                  >
-                    Activity
-                  </Link>
-                  <Link
-                    to={`/build?edit=${a.slug}`}
-                    style={secondaryBtnStyle}
-                  >
-                    Edit
-                  </Link>
-                  <Link
-                    to={`/p/${a.slug}`}
-                    style={secondaryBtnStyle}
-                  >
-                    View
-                  </Link>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 6,
+                    justifyContent: 'space-between',
+                    rowGap: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <Link
+                      to={`/creator/${a.slug}`}
+                      style={secondaryBtnStyle}
+                      data-testid={`creator-activity-${a.slug}`}
+                    >
+                      Activity
+                    </Link>
+                    <Link
+                      to={`/build?edit=${a.slug}`}
+                      style={secondaryBtnStyle}
+                    >
+                      Edit
+                    </Link>
+                    <Link
+                      to={`/p/${a.slug}`}
+                      style={secondaryBtnStyle}
+                    >
+                      View
+                    </Link>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setConfirmSlug(a.slug)}
                     data-testid={`creator-delete-${a.slug}`}
-                    style={{ ...secondaryBtnStyle, cursor: 'pointer' }}
+                    style={creatorDeleteTertiaryStyle}
                   >
                     Delete
                   </button>
@@ -456,5 +467,20 @@ const secondaryBtnStyle: React.CSSProperties = {
   textDecoration: 'none',
   flex: 1,
   textAlign: 'center',
+  whiteSpace: 'nowrap',
+};
+
+/** Tertiary — visually subordinate to Edit / View (issue #110). */
+const creatorDeleteTertiaryStyle: React.CSSProperties = {
+  padding: '4px 8px',
+  fontSize: 12,
+  color: 'var(--muted)',
+  background: 'transparent',
+  border: 'none',
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+  textDecoration: 'underline',
+  textDecorationColor: 'rgba(88, 85, 80, 0.35)',
+  textUnderlineOffset: '2px',
   whiteSpace: 'nowrap',
 };
