@@ -96,6 +96,7 @@ export function LoginPage() {
           throw new api.ApiError('Failed to establish a session', 500, 'session_missing');
         }
         identifyFromSession(session);
+        track('signin_completed');
         navigate(nextPath, { replace: true });
         return;
       } else {

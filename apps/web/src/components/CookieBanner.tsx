@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getConsent, setConsent, type Consent } from '../lib/consent';
 import { initBrowserSentry, closeBrowserSentry } from '../lib/sentry';
+import { initPostHog, closePostHog } from '../lib/posthog';
 
 const MOBILE_BREAKPOINT = 640;
 
@@ -52,12 +53,14 @@ export function CookieBanner() {
     setConsent(choice);
     // Apply the choice to the telemetry SDKs in the same session.
     if (choice === 'all') {
-      // Upgrade: light up browser Sentry now that we have consent.
+      // Upgrade: light up Sentry + PostHog now that we have consent.
       initBrowserSentry();
+      initPostHog();
     } else if (previous === 'all') {
-      // Downgrade: flush + stop the SDK. Anything already in flight at
-      // the network layer can't be recalled — documented on /cookies.
+      // Downgrade: flush + stop both SDKs. Anything already in flight
+      // at the network layer can't be recalled — documented on /cookies.
       closeBrowserSentry();
+      closePostHog();
     }
     setVisible(false);
   };
