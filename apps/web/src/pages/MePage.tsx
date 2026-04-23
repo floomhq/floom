@@ -30,7 +30,8 @@ import { AppIcon } from '../components/AppIcon';
 import { ToolTile } from '../components/me/ToolTile';
 import { Tour } from '../components/onboarding/Tour';
 import { hasOnboarded, resetOnboarding } from '../lib/onboarding';
-import { useSession } from '../hooks/useSession';
+import { useSession, useDeployEnabled } from '../hooks/useSession';
+import { WaitlistModal } from '../components/WaitlistModal';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
 import type { HubApp, MeRunSummary, RunStatus } from '../lib/types';
@@ -339,6 +340,13 @@ export function MePage() {
   // footer "Restart tour" link).
   const forceTour = searchParams.get('tour') === '1';
   const [tourOpen, setTourOpen] = useState(false);
+  // Launch flag. In waitlist mode (DEPLOY_ENABLED=false) every CTA on
+  // /me that funnels toward publishing opens WaitlistModal instead of
+  // starting the onboarding tour. See FirstRunPublishCard + the
+  // "Publish another" CTA further down.
+  const deployEnabled = useDeployEnabled();
+  const waitlistMode = deployEnabled === false;
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
 
   function dismissNotice() {
     const next = new URLSearchParams(searchParams);
@@ -442,7 +450,12 @@ export function MePage() {
             store" card renders (see FirstRunBrowseCard below). */}
         {canLoadPersonalData && runs !== null && runs.length === 0 && (
           !hasOnboarded() ? (
-            <FirstRunPublishCard onStart={() => setTourOpen(true)} />
+            <FirstRunPublishCard
+              waitlistMode={waitlistMode}
+              onStart={() =>
+                waitlistMode ? setWaitlistOpen(true) : setTourOpen(true)
+              }
+            />
           ) : (
             <FirstRunBrowseCard />
           )
@@ -695,6 +708,11 @@ export function MePage() {
       </div>
 
       {tourOpen && <Tour onClose={closeTour} />}
+      <WaitlistModal
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
+        source="me-publish"
+      />
     </PageShell>
   );
 }
@@ -704,10 +722,23 @@ export function MePage() {
  * the user directly into the tour (paste -> publish -> run -> share).
  * Lives on /me empty state — the one place a fresh user reliably lands.
  */
-function FirstRunPublishCard({ onStart }: { onStart: () => void }) {
+function FirstRunPublishCard({
+  onStart,
+  waitlistMode,
+}: {
+  onStart: () => void;
+  /**
+   * When true, the card copy + CTA swap into waitlist language —
+   * "We'll email you when you can publish" — and the onStart handler
+   * is expected to open WaitlistModal rather than the onboarding tour.
+   * Driven by the server's DEPLOY_ENABLED flag.
+   */
+  waitlistMode: boolean;
+}) {
   return (
     <section
       data-testid="me-first-run-card"
+      data-waitlist={waitlistMode ? 'true' : 'false'}
       style={{
         border: '1px solid var(--line)',
         borderRadius: 14,
@@ -719,10 +750,22 @@ function FirstRunPublishCard({ onStart }: { onStart: () => void }) {
         gap: 10,
       }}
     >
-      <strong style={{ fontSize: 16 }}>Let&rsquo;s publish your first app</strong>
-      <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.55 }}>
-        Paste an OpenAPI URL or pick a sample. Publish in one click, share the link.
-        The whole thing takes under a minute.
+      <strong style={{ fontSize: 16 }}>
+        {waitlistMode
+          ? 'Publishing is on the waitlist'
+          : "Let's publish your first app"}
+      </strong>
+      <p
+        style={{
+          margin: 0,
+          color: 'var(--muted)',
+          fontSize: 14,
+          lineHeight: 1.55,
+        }}
+      >
+        {waitlistMode
+          ? "We're rolling Deploy out slowly for launch week. Drop your email and we'll let you know when your slot opens — the featured apps are free to run in the meantime."
+          : 'Paste an OpenAPI URL or pick a sample. Publish in one click, share the link. The whole thing takes under a minute.'}
       </p>
       <div>
         <button
@@ -741,7 +784,9 @@ function FirstRunPublishCard({ onStart }: { onStart: () => void }) {
             cursor: 'pointer',
           }}
         >
-          Let&rsquo;s publish your first app →
+          {waitlistMode
+            ? 'Join waitlist'
+            : 'Let\u2019s publish your first app \u2192'}
         </button>
       </div>
     </section>

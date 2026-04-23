@@ -553,6 +553,31 @@ export function getSessionMe(): Promise<SessionMePayload> {
   return request<SessionMePayload>('/api/session/me');
 }
 
+// ---------- Deploy waitlist (launch 2026-04-27) ----------
+
+/**
+ * Submit an email to the deploy waitlist. `source` tells us which
+ * surface the user clicked from — "hero", "studio-deploy",
+ * "me-publish", "direct" (the /waitlist page), etc. It's persisted
+ * alongside the email so we can slice the conversion funnel later.
+ *
+ * The server is idempotent: re-submitting the same email returns a
+ * 200 `{ ok: true }` instead of a duplicate-key error, so UI code
+ * doesn't need to special-case "already signed up".
+ */
+export function submitWaitlist(opts: {
+  email: string;
+  source?: string;
+}): Promise<{ ok: true }> {
+  return request<{ ok: true }>('/api/waitlist', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: opts.email,
+      source: opts.source,
+    }),
+  });
+}
+
 /**
  * Switch the caller's active workspace. Server-side the pointer is stored
  * on the user row; the next /api/session/me will return the new

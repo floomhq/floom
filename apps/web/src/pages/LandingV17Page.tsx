@@ -41,6 +41,8 @@ import { SectionEyebrow } from '../components/home/SectionEyebrow';
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
+import { useDeployEnabled } from '../hooks/useSession';
+import { WaitlistModal } from '../components/WaitlistModal';
 
 interface Stripe {
   slug: string;
@@ -87,6 +89,11 @@ function pickStripes(apps: HubApp[]): Stripe[] {
 
 export function LandingV17Page() {
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
+  // Launch feature flag (2026-04-27). When false, the secondary
+  // "Deploy your own" hero link swaps to a "Join waitlist" button that
+  // opens WaitlistModal instead of navigating to /signup.
+  const deployEnabled = useDeployEnabled();
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
 
   useEffect(() => {
     document.title = 'Ship AI apps fast · Floom';
@@ -211,21 +218,45 @@ export function LandingV17Page() {
               >
                 Run this in Claude
               </Link>
-              <Link
-                to="/signup"
-                data-testid="hero-cta-deploy"
-                style={{
-                  fontSize: 13,
-                  color: 'var(--muted)',
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                Deploy your own
-                <ArrowRight size={13} aria-hidden="true" />
-              </Link>
+              {deployEnabled === false ? (
+                <button
+                  type="button"
+                  onClick={() => setWaitlistOpen(true)}
+                  data-testid="hero-cta-waitlist"
+                  style={{
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    font: 'inherit',
+                  }}
+                >
+                  Join the waitlist
+                  <ArrowRight size={13} aria-hidden="true" />
+                </button>
+              ) : (
+                <Link
+                  to="/signup"
+                  data-testid="hero-cta-deploy"
+                  style={{
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  Deploy your own
+                  <ArrowRight size={13} aria-hidden="true" />
+                </Link>
+              )}
             </div>
           </div>
 
@@ -464,6 +495,12 @@ export function LandingV17Page() {
 
       <PublicFooter />
       <FeedbackButton />
+
+      <WaitlistModal
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
+        source="hero"
+      />
 
       {/* Responsive tweaks: hero typography + stacking */}
       <style>{`
