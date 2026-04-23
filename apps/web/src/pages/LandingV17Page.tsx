@@ -166,12 +166,14 @@ export function LandingV17Page() {
               The protocol and runtime for agentic work.
             </p>
 
-            {/* CTA — builder-facing to match H1 "Ship AI apps fast."
-                Primary [Start building free] (ink) pill -> /signup for the
-                vibecoder creator ICP. Secondary "Browse apps" text link ->
-                /apps covers the biz/consumer ICP curiosity path. Replaces
-                the consumer-facing "Install in Claude" CTA which didn't
-                match the builder H1 (Federico 2026-04-23). */}
+            {/* CTA — action-oriented pair matching the demo's Build -> Deploy
+                -> Run flow (Federico 2026-04-23). Primary [Run this in
+                Claude] ink pill -> /install surfaces the install-in-claude
+                path, which is what "run anywhere" actually means to a user.
+                Secondary [Deploy] text link -> /signup covers the builder
+                ICP. NOT "Install in Claude", NOT "Start building free", NOT
+                "Deploy your first app" — Federico excluded those explicitly
+                because they either split audiences or bury the verb. */}
             <div
               className="hero-ctas"
               style={{
@@ -183,8 +185,8 @@ export function LandingV17Page() {
               }}
             >
               <Link
-                to="/signup"
-                data-testid="hero-cta-start-building"
+                to="/install"
+                data-testid="hero-cta-run-in-claude"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -193,18 +195,18 @@ export function LandingV17Page() {
                   background: 'var(--ink)',
                   color: '#fff',
                   border: '1px solid var(--ink)',
-                  borderRadius: 12,
-                  padding: '14px 22px',
+                  borderRadius: 999,
+                  padding: '14px 24px',
                   fontSize: 15,
                   fontWeight: 600,
                   textDecoration: 'none',
                 }}
               >
-                Start building free
+                Run this in Claude
               </Link>
               <Link
-                to="/apps"
-                data-testid="hero-cta-browse-apps"
+                to="/signup"
+                data-testid="hero-cta-deploy"
                 style={{
                   fontSize: 13,
                   color: 'var(--muted)',
@@ -214,7 +216,7 @@ export function LandingV17Page() {
                   gap: 4,
                 }}
               >
-                Browse apps
+                Deploy your own
                 <ArrowRight size={13} aria-hidden="true" />
               </Link>
             </div>
