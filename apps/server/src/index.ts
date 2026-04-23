@@ -787,11 +787,9 @@ if (webDist) {
     /\/$/,
     '',
   );
-  // 2026-04-22 (PR #400 ripple): consolidate on /og-main.png as the single
-  // source of truth. Earlier, SSR pointed at /og-image.png and index.html
-  // pointed at /og-main.png, so the served asset depended on whether SSR
-  // ran. Unify everything on /og-main.png and delete the dup PNGs.
-  const defaultOgImage = `${siteOrigin}/og-main.png`;
+  // #316 + PR #400: default raster for social cards is named /og-image.png. The
+  // on-disk /og-main.png is kept for older links; both files are identical.
+  const defaultOgImage = `${siteOrigin}/og-image.png`;
 
   /** Strip trailing slash (except root), /index.html → /, and map /store → /apps. */
   function canonicalPathForSeo(pathname: string): string {

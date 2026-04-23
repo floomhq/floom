@@ -16,8 +16,8 @@ function upsertMeta(isProp: boolean, key: string, content: string) {
   el.setAttribute('content', content);
 }
 
-/** Default static OG (matches apps/web until og-image.png alias; see #316). */
-export const DEFAULT_OG_PATH = '/og-main.png';
+/** #316: default static OG/Twitter image on marketing routes. */
+export const DEFAULT_OG_PATH = '/og-image.png';
 
 /**
  * Fills the standard public meta tag set. Call from public routes’ useEffect;
