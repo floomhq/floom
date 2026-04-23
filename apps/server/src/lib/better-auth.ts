@@ -272,7 +272,7 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
     },
-    // Cookie hardening (pentest MED #382):
+    // Cookie hardening (pentest MED #382, INFO #386):
     //   - `defaultCookieAttributes.sameSite: 'strict'` applies to every
     //     Better Auth cookie, including the `session_token` we care about
     //     most. Strict mode means the session cookie is never sent on a
@@ -289,6 +289,19 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
     //     attributes spread last in better-auth/src/cookies/index.ts).
     //   - `cookiePrefix: 'floom'` so our session cookie name doesn't
     //     collide with the W2.1 device cookie.
+    //   - Pentest INFO #386 — the default name `floom.session_token`
+    //     paired with a signed `<payload>.<signature>` body makes the
+    //     auth backend recognisable (first-glance fingerprint of Better
+    //     Auth or any HMAC-cookie library). Override the session cookie
+    //     name to the opaque `__Secure-fsid` (Secure-prefix enforces
+    //     HTTPS + Path=/; the value shape still carries a signature
+    //     segment but the name no longer advertises the library). The
+    //     matching guarantees — SameSite=Strict, HttpOnly, Secure — are
+    //     unchanged; only the name is swapped. `BETTER_AUTH_SECRET` is
+    //     asserted to be ≥32 chars above so the signature portion is
+    //     HMAC'd with real entropy. The OAuth/state/session_data/etc.
+    //     cookies keep their defaults because they're short-lived and
+    //     their names don't add fingerprinting surface worth the churn.
     advanced: {
       cookiePrefix: 'floom',
       defaultCookieAttributes: {
@@ -297,6 +310,8 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
         httpOnly: true,
       },
       cookies: {
+        // Opaque session cookie name (pentest INFO #386).
+        session_token: { name: 'fsid' },
         // OAuth state cookies must remain `lax` so the provider-to-Floom
         // 302 callback still carries them. See rationale above.
         state: { attributes: { sameSite: 'lax' } },

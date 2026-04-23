@@ -167,7 +167,7 @@ try {
   const verify = await callAuth('GET', `/auth/verify-email?token=${encodeURIComponent(resendToken || '')}`);
   const verifiedCookie = extractCookie(verify.headers.get('set-cookie') || '');
   log('verify-email: 200 OK', verify.status === 200, verify.text);
-  log('verify-email: auto-sign-in cookie issued', verifiedCookie.startsWith('floom.session_token='), verifiedCookie);
+  log('verify-email: auto-sign-in cookie issued', /^(__Secure-)?fsid=/.test(verifiedCookie), verifiedCookie);
 
   const sessionRes = await callAuth('GET', '/auth/get-session', undefined, verifiedCookie);
   log('get-session: 200 OK', sessionRes.status === 200, sessionRes.text);
@@ -194,7 +194,7 @@ try {
   );
   log(
     'sign-in after verification: session cookie issued',
-    (postVerifySignIn.headers.get('set-cookie') || '').includes('floom.session_token='),
+    /(?:^|\s|;)(__Secure-)?fsid=/.test(postVerifySignIn.headers.get('set-cookie') || ''),
     postVerifySignIn.headers.get('set-cookie') || '',
   );
 

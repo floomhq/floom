@@ -27,7 +27,7 @@ const POLL_INTERVAL_MS = 500;
 const REPORT_PATH = process.env.REPORT_PATH || '/tmp/hub-verify-report.json';
 
 if (!COOKIE) {
-  console.error('FATAL: COOKIE env var missing (set to __Secure-floom.session_token=...).');
+  console.error('FATAL: COOKIE env var missing (set to __Secure-fsid=... — the session cookie).');
   process.exit(2);
 }
 

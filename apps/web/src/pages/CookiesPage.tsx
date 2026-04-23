@@ -17,9 +17,9 @@ interface Row {
 
 const COOKIES: Row[] = [
   {
-    name: 'floom.session',
-    purpose_de: 'Hält deine Login-Sitzung aufrecht (Better Auth).',
-    purpose_en: 'Keeps you signed in (Better Auth).',
+    name: '__Secure-fsid',
+    purpose_de: 'Hält deine Login-Sitzung aufrecht.',
+    purpose_en: 'Keeps you signed in.',
     duration_de: 'Bis zum Logout, max. 30 Tage',
     duration_en: 'Until logout, max 30 days',
     type_de: 'Technisch notwendig',
