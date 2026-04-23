@@ -1,0 +1,163 @@
+# ax-eval nightly — agent experience regression signal for Floom.
+#
+# Spawns 10 headless Claude Code agents (claude-opus-4-7) against the Floom
+# tool with a canonical, minimal prompt and scores their runs on four
+# deterministic dimensions (friction, speed, efficiency, error recovery).
+# Posts a compact summary to docs/ax-scores/YYYY-MM-DD.md and updates the
+# AX badge in the README.
+#
+# NOT a PR gate. Nightly signal only. Manual-only for the first two weeks;
+# the schedule trigger is commented out below — flip it on after we trust
+# a few runs.
+#
+# Secrets required on the repo:
+#   ANTHROPIC_API_KEY   — used by the headless `claude --print` calls
+#
+# Cost estimate per run (2026-04 pricing, Opus 4.7):
+#   ~10 agents × ~40 tool turns × ~$0.20/turn  ≈  $40-80 per run
+#   Enforced per-agent ceiling via `--max-budget-usd` in scripts/ax-eval-ci.mjs.
+#
+# How to trigger manually:
+#   GitHub UI: Actions → "ax-eval nightly" → Run workflow
+#   CLI:       gh workflow run ax-eval-nightly.yml
+#
+# How to interpret the badge:
+#   red    → median final <60  (agents are struggling; investigate)
+#   orange → 60–79              (room to improve discoverability/docs)
+#   green  → 80+                (agents complete the task cleanly)
+name: ax-eval nightly
+
+on:
+  workflow_dispatch:
+  # Enable once we've seen 3+ clean manual runs (target: 2026-05-07):
+  # schedule:
+  #   - cron: '0 4 * * *'  # 04:00 UTC nightly
+
+concurrency:
+  group: ax-eval-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # commit the daily scorecard + README badge update
+
+jobs:
+  eval:
+    name: Run ax-eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Floom
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # We commit back to the same branch (main).
+          persist-credentials: true
+
+      - name: Checkout ax-eval (for extract_metrics.py + schemas)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          repository: team2027/ax-eval
+          path: .ax-eval-src
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Claude Code CLI
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+
+      - name: Run ax-eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AX_EVAL_ROUND: ci-${{ github.run_number }}
+          AX_EVAL_N_AGENTS: '10'
+          AX_EVAL_MODEL: claude-opus-4-7
+          AX_EVAL_MAX_TURNS: '40'
+          AX_EVAL_MAX_BUDGET: '4'
+          AX_EVAL_OUT_DIR: ${{ github.workspace }}/ax-eval-output
+          AX_EVAL_DIR: ${{ github.workspace }}/.ax-eval-src
+          AX_EVAL_TASK: >-
+            Publish this OpenAPI spec as a shareable app:
+            https://raw.githubusercontent.com/resend/resend-openapi/main/resend.yaml
+          GITHUB_SHA: ${{ github.sha }}
+        run: node scripts/ax-eval-ci.mjs
+
+      - name: Locate latest run
+        id: locate
+        run: |
+          run_dir=$(ls -td ax-eval-output/*/ | head -1)
+          run_dir="${run_dir%/}"
+          echo "run_dir=$run_dir" >> "$GITHUB_OUTPUT"
+          if [ -f "$run_dir/ci-summary.json" ]; then
+            median=$(jq -r '.median_final' "$run_dir/ci-summary.json")
+            success=$(jq -r '.success_rate' "$run_dir/ci-summary.json")
+            echo "median_final=$median" >> "$GITHUB_OUTPUT"
+            echo "success_rate=$success" >> "$GITHUB_OUTPUT"
+          else
+            echo "median_final=0" >> "$GITHUB_OUTPUT"
+            echo "success_rate=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: ax-eval-ci-${{ github.run_number }}
+          path: |
+            ${{ steps.locate.outputs.run_dir }}/result.json
+            ${{ steps.locate.outputs.run_dir }}/ci-summary.json
+            ${{ steps.locate.outputs.run_dir }}/scorecard.md
+            ${{ steps.locate.outputs.run_dir }}/transcripts
+            ${{ steps.locate.outputs.run_dir }}/stream
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Commit scorecard + update badge
+        if: success() && github.event_name != 'pull_request'
+        env:
+          RUN_DIR: ${{ steps.locate.outputs.run_dir }}
+          MEDIAN_FINAL: ${{ steps.locate.outputs.median_final }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+
+          # Pick the target file. Idempotent: if a same-day file already exists,
+          # append `-run-${run_number}` rather than overwriting.
+          today=$(date -u +%Y-%m-%d)
+          target="docs/ax-scores/${today}.md"
+          if [ -e "$target" ]; then
+            target="docs/ax-scores/${today}-run-${RUN_NUMBER}.md"
+          fi
+          mkdir -p docs/ax-scores
+          cp "$RUN_DIR/scorecard.md" "$target"
+
+          # Update the AX badge in README.md. Color bucket: red <60, orange 60-79, green 80+.
+          if [ "$MEDIAN_FINAL" -ge 80 ]; then
+            color="brightgreen"
+          elif [ "$MEDIAN_FINAL" -ge 60 ]; then
+            color="orange"
+          else
+            color="red"
+          fi
+          export NEW_BADGE="<a href=\"./docs/ax-scores\"><img src=\"https://img.shields.io/badge/AX-${MEDIAN_FINAL}-${color}\" alt=\"Agent Experience score\"/></a>"
+
+          # Replace existing AX badge or insert after the "Live at floom.dev" badge.
+          python3 scripts/ax-eval-update-badge.py
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ax-scores README.md
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+            exit 0
+          fi
+          git commit -m "ax-eval: ${today} round ci-${RUN_NUMBER} median=${MEDIAN_FINAL} [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
