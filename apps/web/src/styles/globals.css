@@ -733,27 +733,35 @@ body:has(.topbar-mobile-menu) {
   flex: 1;
   min-width: 0;
 }
+/* Issue #357 (2026-04-23): expander is now a real <button> so it gets
+   proper focus ring, keyboard activation, aria-expanded, and works
+   without relying on <details>/<summary> quirks. The caret rotates via
+   the aria-expanded attribute selector. */
 .run-progress-details-summary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   user-select: none;
-  list-style: none;
   padding: 6px 2px;
   font-size: 13px;
   color: var(--muted);
   font-weight: 500;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  line-height: 1.4;
 }
-.run-progress-details-summary::-webkit-details-marker { display: none; }
-.run-progress-details-summary::before {
-  content: '›';
+.run-progress-details-caret {
   display: inline-block;
   transition: transform 0.15s ease;
   color: var(--muted);
 }
-.run-progress-details[open] .run-progress-details-summary::before {
+.run-progress-details-summary[aria-expanded='true'] .run-progress-details-caret {
   transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-progress-details-caret { transition: none; }
 }
 .run-progress-details-summary:hover { color: var(--ink); }
 .run-progress-details-summary:focus-visible {
@@ -806,6 +814,18 @@ body:has(.topbar-mobile-menu) {
 .run-progress-cancel:focus-visible {
   outline: 2px solid var(--accent, #047857);
   outline-offset: 2px;
+}
+
+/* Mobile: keep the progress card readable at narrow widths. The title
+   row stacks the elapsed timer below the app name on <400px, and the
+   footer lets the Cancel button wrap to its own line rather than
+   squeezing the "Show technical details" label. */
+@media (max-width: 480px) {
+  .run-progress { padding: 16px; }
+  .run-progress-header { flex-wrap: wrap; gap: 6px; }
+  .run-progress-title > span:last-child { font-size: 13px; }
+  .run-progress-footer { flex-direction: column; align-items: stretch; gap: 10px; }
+  .run-progress-cancel { align-self: flex-start; }
 }
 
 /* ── Creator hero sections ───────────────────────────────────────────────── */

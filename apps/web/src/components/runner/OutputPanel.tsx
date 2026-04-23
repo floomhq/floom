@@ -83,6 +83,46 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
         style={{ display: 'flex', alignItems: 'center', gap: 10 }}
         onClick={onOpenDetails}
       >
+        {/* Issue #357 (2026-04-23): on a successful run, prepend a small
+            green check + "Done" so the transition from the streaming
+            progress card into the result reads as a positive moment for
+            non-devs. Kept out of the error path so "Done" never appears
+            next to an error headline. Duration stays in the meta line
+            unchanged so existing dev users still see "4.2s". */}
+        {!isError && run.status === 'success' && (
+          <span
+            data-testid="run-header-success"
+            aria-label={`Done in ${duration}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              color: 'var(--accent, #047857)',
+              fontWeight: 600,
+              fontSize: 13,
+            }}
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width={14}
+              height={14}
+              aria-hidden="true"
+              style={{ flexShrink: 0 }}
+            >
+              <circle cx="8" cy="8" r="7" fill="currentColor" opacity="0.12" />
+              <path
+                d="M4.5 8.3l2.3 2.3 4.7-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Done
+          </span>
+        )}
+        {!isError && run.status === 'success' && <span className="t-dim">·</span>}
         <span>{app.name}</span>
         <span className="t-dim">·</span>
         <span>{duration}</span>
