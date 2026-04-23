@@ -117,6 +117,38 @@ function getDefaultActionSpec(app: AppDetail): { action: string; spec: ActionSpe
   return { action, spec };
 }
 
+/** Slugs for deterministic one-shot apps; Refine is hidden even if mis-declared. (#86) */
+const NON_REFINABLE_SLUGS = new Set([
+  'uuid',
+  'hash',
+  'sha256',
+  'sha512',
+  'md5',
+  'checksum',
+]);
+
+/**
+ * Issue #86: suppress Refine for uuid/hash-style apps, non-textual outputs, or
+ * explicit `render.refinable: false` (using existing manifest fields only).
+ */
+function isRefineSuppressedForApp(app: AppDetail): boolean {
+  if (app.manifest?.render?.refinable === false) return true;
+  if (NON_REFINABLE_SLUGS.has(app.slug)) return true;
+  const def = getDefaultActionSpec(app);
+  if (!def) return false;
+  for (const o of def.spec.outputs ?? []) {
+    if (o.type === 'image' || o.type === 'pdf' || o.type === 'file') return true;
+  }
+  if (def.spec.outputs?.length === 1) {
+    const o = def.spec.outputs[0];
+    const hint = `${o.name} ${o.label}`.toLowerCase();
+    if (/\b(uuid|ulid|hash|sha-?256|sha-?512|md5|checksum|digest)\b/.test(hint)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Upgrade 2 (2026-04-19): pick the entry action on mount. Honors an
  * optional `?action=<name>` URL param so multi-action apps can be linked
@@ -654,7 +686,8 @@ export function RunSurface({
   // bottom "Iterate" free-text composer on OutputPanel. Apps that are
   // deterministic one-shots (uuid, hash, password, …) correctly stay
   // stuck on "Run" and hide the iterate box. Fix 2 (2026-04-19).
-  const refinable = app.manifest?.render?.refinable === true;
+  const refinable =
+    app.manifest?.render?.refinable === true && !isRefineSuppressedForApp(app);
   const runLabel = state.hasRun && refinable ? 'Refine' : 'Run';
 
   const hasInputs = (state.actionSpec?.inputs?.length ?? 0) > 0;
@@ -1572,12 +1605,14 @@ function summarizeInputs(inputs: Record<string, unknown> | null | undefined): st
 export function deriveRunLabel(args: {
   hasRun: boolean;
   refinable: boolean | undefined;
+  /** When set (e.g. uuid/hash heuristics), keep the button on "Run". */
+  refineSuppressed?: boolean;
 }): 'Run' | 'Refine' {
   // Refine is opt-in: only flips on when the creator explicitly sets
   // `render.refinable: true` in the manifest. Default (undefined or false)
   // keeps the primary button on "Run" forever — desirable for one-shot
   // apps like uuid/hash where there's nothing to refine.
-  const refinable = args.refinable === true;
+  const refinable = args.refinable === true && !args.refineSuppressed;
   return args.hasRun && refinable ? 'Refine' : 'Run';
 }
 
