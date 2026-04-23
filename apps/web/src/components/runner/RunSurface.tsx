@@ -933,6 +933,7 @@ function InputCard({
                 onChange={(v) => onChange(inp.name, v)}
                 idPrefix="run-surface-inp"
                 error={inputErrors?.[inp.name]}
+                appSlug={app.slug}
               />
             ))}
           </div>
@@ -984,6 +985,7 @@ function InputCard({
                       onChange={(v) => onChange(inp.name, v)}
                       idPrefix="run-surface-inp"
                       error={inputErrors?.[inp.name]}
+                      appSlug={app.slug}
                     />
                   ))}
                 </div>

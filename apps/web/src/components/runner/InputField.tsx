@@ -5,6 +5,7 @@
 import { useRef, useState } from 'react';
 import type { InputSpec } from '../../lib/types';
 import { DEFAULT_MAX_FILE_BYTES } from '../../api/client';
+import { getLaunchDemoFilePrefills, loadSampleFile } from '../../lib/app-examples';
 
 export const ARRAY_INPUT_NAMES = new Set<string>(['hashtags', 'urls']);
 
@@ -45,9 +46,25 @@ interface Props {
    * readers announce the error together with the field label.
    */
   error?: string;
+  /**
+   * Launch-hardening 2026-04-23: current app slug, threaded from
+   * RunSurface / AppInputsCard. Used only by the file-input control to
+   * offer a one-click "Load example" button on the 3 hero demo apps
+   * (lead-scorer, resume-screener). When undefined or when no example
+   * is registered for the slug, the button is simply not rendered —
+   * every other input type ignores it.
+   */
+  appSlug?: string;
 }
 
-export function InputField({ spec, value, onChange, idPrefix = 'floom-inp', error }: Props) {
+export function InputField({
+  spec,
+  value,
+  onChange,
+  idPrefix = 'floom-inp',
+  error,
+  appSlug,
+}: Props) {
   const str = typeof value === 'string' ? value : value == null ? '' : String(value);
   // Some app manifests literally include " (optional)" in the label; strip it so
   // the UI doesn't render "Field (optional) (optional)".
@@ -178,6 +195,7 @@ export function InputField({ spec, value, onChange, idPrefix = 'floom-inp', erro
         id={id}
         label={cleanLabel}
         error={error}
+        appSlug={appSlug}
       />
     );
   }
@@ -257,6 +275,7 @@ function FileInputControl({
   id,
   label,
   error: externalError,
+  appSlug,
 }: {
   spec: InputSpec;
   value: unknown;
@@ -264,10 +283,19 @@ function FileInputControl({
   id: string;
   label: string;
   error?: string;
+  appSlug?: string;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [loadingSample, setLoadingSample] = useState(false);
+  // Launch-hardening 2026-04-23: look up the bundled sample file (if
+  // any) for this slug + input name. The registry lives in
+  // lib/app-examples.ts and only covers the 3 hero launch demos, so
+  // every other app hides the button automatically.
+  const samplePrefill = appSlug
+    ? getLaunchDemoFilePrefills(appSlug)?.[spec.name]
+    : undefined;
   // Derive the accept attribute from a `file/<ext>` spec.type. "file/csv"
   // → ".csv,text/csv"; "file/pdf" → ".pdf,application/pdf"; "file"
   // (the narrow InputType) → unset (allow anything).
@@ -399,6 +427,45 @@ function FileInputControl({
               {subtype ? `.${subtype} · ` : ''}
               up to {formatBytes(DEFAULT_MAX_FILE_BYTES)}
             </div>
+            {samplePrefill && (
+              <button
+                type="button"
+                data-testid={`file-load-sample-${spec.name}`}
+                disabled={loadingSample}
+                onClick={async (e) => {
+                  // Stop propagation so the outer drop-zone click
+                  // (which opens the native file picker) doesn't fire
+                  // when the user clicks this mini action.
+                  e.stopPropagation();
+                  setLocalError(null);
+                  setLoadingSample(true);
+                  try {
+                    const f = await loadSampleFile(appSlug!, spec.name);
+                    accept_file(f);
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    setLocalError(`Could not load sample file — ${msg}`);
+                  } finally {
+                    setLoadingSample(false);
+                  }
+                }}
+                style={{
+                  marginTop: 10,
+                  padding: '5px 10px',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: 'var(--accent, #228b22)',
+                  background: 'transparent',
+                  border: '1px solid var(--accent, #228b22)',
+                  borderRadius: 999,
+                  cursor: loadingSample ? 'progress' : 'pointer',
+                  opacity: loadingSample ? 0.6 : 1,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {loadingSample ? 'Loading…' : samplePrefill.buttonLabel}
+              </button>
+            )}
           </>
         )}
         <input

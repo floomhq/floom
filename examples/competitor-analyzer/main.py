@@ -313,6 +313,19 @@ def main() -> int:
         _emit({"ok": False, "error": f"invalid JSON: {exc}", "error_type": "runtime_error"})
         return 2
 
+    # Launch-hardening (2026-04-23): validate the action name so a direct
+    # container caller can't bypass the manifest-declared action set. The
+    # server already routes manifest-declared actions only, but the
+    # entrypoint is also callable via `docker run ...` and `floom run`.
+    action = payload.get("action") or "analyze"
+    if action != "analyze":
+        _emit({
+            "ok": False,
+            "error": f"Unknown action '{action}'. Only 'analyze' is supported.",
+            "error_type": "invalid_action",
+        })
+        return 2
+
     inputs = payload.get("inputs") or {}
     urls_raw = inputs.get("urls")
     your_product = (inputs.get("your_product") or "").strip()

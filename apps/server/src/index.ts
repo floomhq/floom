@@ -50,6 +50,7 @@ import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
 import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
 import { securityHeaders } from './middleware/security.js';
+import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
 
@@ -172,10 +173,14 @@ if (process.env.FLOOM_AUTH_TOKEN) {
 // The MCP admin root (/mcp) is rate-limited separately inside the tool
 // handler (ingest_app only, 10/day).
 const rateLimit = runRateLimitMiddleware(resolveUserContext);
-app.use('/api/run', rateLimit);
-app.use('/api/:slug/run', rateLimit);
-app.use('/api/:slug/jobs', rateLimit);
-app.use('/mcp/app/:slug', rateLimit);
+// Body-size guard runs BEFORE the rate-limit check so an attacker can't
+// burn rate-limit budget with oversized bodies (we reject 413 before
+// incrementing the counter). Launch-hardening 2026-04-23 for the 3 hero
+// demo apps; all run surfaces share the same 8 MiB cap.
+app.use('/api/run', runBodyLimit, rateLimit);
+app.use('/api/:slug/run', runBodyLimit, rateLimit);
+app.use('/api/:slug/jobs', runBodyLimit, rateLimit);
+app.use('/mcp/app/:slug', runBodyLimit, rateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);

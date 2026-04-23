@@ -43,6 +43,11 @@ import {
   markConfettiShown,
   samplePrefill,
 } from '../lib/onboarding';
+// Launch-hardening 2026-04-23: the 3 hero demo apps (lead-scorer,
+// competitor-analyzer, resume-screener) get a richer per-slug prefill
+// so the public landing experience on floom.dev isn't an empty form.
+// Non-hero apps fall through to the generic samplePrefill() above.
+import { getLaunchDemoExampleTextInputs } from '../lib/app-examples';
 
 // Map of known app slugs to GitHub repo URLs. Only slugs whose example
 // directory lives in examples/ are linked; stub-only apps (floom.yaml with
@@ -278,8 +283,26 @@ export function AppPermalinkPage() {
     const firstActionKey = Object.keys(app.manifest.actions)[0];
     const action = firstActionKey ? app.manifest.actions[firstActionKey] : undefined;
     if (!action || action.inputs.length === 0) return null;
-    // Prefill ONLY the first input (the one the user would have clicked
-    // into first). Everything else uses its existing default/empty.
+    // Launch demo (lead-scorer / competitor-analyzer / resume-screener):
+    // prefill EVERY text input the manifest declares. File inputs stay
+    // empty so the user either drops their own bytes or clicks the
+    // per-control "Load example" button rendered by InputField. Doing
+    // this here (vs inside RunSurface) keeps shared-run links faithful
+    // — we already gate on `runIdFromUrl` above.
+    const demoText = getLaunchDemoExampleTextInputs(app.slug);
+    if (demoText) {
+      const prefilled: Record<string, unknown> = {};
+      for (const spec of action.inputs) {
+        if (spec.name in demoText) {
+          prefilled[spec.name] = demoText[spec.name];
+        }
+      }
+      if (Object.keys(prefilled).length > 0) return prefilled;
+    }
+    // Generic fallback for every other app: prefill ONLY the first
+    // input (the one the user would click into first). Everything else
+    // uses its existing default/empty so the first-run form stays
+    // visually "clean" — one planted example, not five.
     const first = action.inputs[0];
     const sample = samplePrefill(first);
     if (sample == null) return null;

@@ -332,7 +332,11 @@ def _cli() -> int:
         _emit({"ok": True, "outputs": out})
         return 0
     except Exception as exc:  # noqa: BLE001
-        _emit({"ok": False, "error": str(exc), "error_type": "runtime_error", "logs": traceback.format_exc()})
+        # Public-run safety: never emit raw tracebacks in the result payload
+        # (they leak absolute filesystem paths and internal structure). The
+        # full traceback still goes to stderr so the operator can debug.
+        traceback.print_exc(file=sys.stderr)
+        _emit({"ok": False, "error": str(exc), "error_type": "runtime_error"})
         return 1
 
 
