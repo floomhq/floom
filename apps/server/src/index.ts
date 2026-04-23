@@ -47,6 +47,11 @@ import {
 import { sanitizeAuthResponse } from './lib/auth-response.js';
 import { padToFloor, shouldPadAuthTiming } from './lib/auth-response-guard.js';
 import { runRateLimitMiddleware } from './lib/rate-limit.js';
+import {
+  applyProgressiveSigninDelayFromContext,
+  parseEmailForSigninProgressiveDelay,
+  recordSigninEmailProgressiveDelayOutcome,
+} from './lib/signin-progressive-delay.js';
 import { resolveUserContext } from './services/session.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
@@ -346,10 +351,29 @@ if (isCloudMode()) {
           return new Response('Auth not configured', { status: 503 });
         }
         const pathname = new URL(c.req.url).pathname;
+        const method = c.req.method;
+        let reqForAuth = c.req.raw;
+        let signinEmailForDelay: string | null = null;
+        if (method === 'POST' && pathname === '/auth/sign-in/email') {
+          const bodyText = await c.req.raw.clone().text();
+          const parsedEmail = parseEmailForSigninProgressiveDelay(bodyText);
+          if (parsedEmail) {
+            signinEmailForDelay = parsedEmail;
+            await applyProgressiveSigninDelayFromContext(c, parsedEmail);
+            reqForAuth = new Request(c.req.raw.url, {
+              method: c.req.raw.method,
+              headers: c.req.raw.headers,
+              body: bodyText,
+            });
+          }
+        }
         const padTiming = shouldPadAuthTiming(pathname);
         const startedAtMs = padTiming ? Date.now() : 0;
-        const raw = await auth.handler(c.req.raw);
-        const res = await sanitizeAuthResponse(c.req.raw, raw);
+        const raw = await auth.handler(reqForAuth);
+        const res = await sanitizeAuthResponse(reqForAuth, raw);
+        if (signinEmailForDelay) {
+          await recordSigninEmailProgressiveDelayOutcome(c, signinEmailForDelay, res);
+        }
         if (padTiming) {
           await padToFloor(startedAtMs);
         }
