@@ -938,32 +938,40 @@ function InputCard({
           </div>
           {optional.length > 0 && (
             <>
-              {!showOptional && (
-                <button
-                  type="button"
-                  data-testid="run-surface-show-optional"
-                  onClick={() => setShowOptional(true)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    marginTop: 8,
-                    padding: '6px 2px',
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--muted)',
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  Show {optional.length} optional field
-                  {optional.length === 1 ? '' : 's'} &rarr;
-                </button>
-              )}
+              {/* Issue #89 (2026-04-23): optional fields are now a proper
+                  toggle. Pre-fix the disclosure only expanded; clicking it
+                  again after expand did nothing, so users had no way to
+                  hide the optional block once opened. The same button now
+                  flips between "Show N optional fields" and "Hide N
+                  optional fields" based on state. */}
+              <button
+                type="button"
+                data-testid="run-surface-show-optional"
+                aria-expanded={showOptional}
+                aria-controls="run-surface-fields-optional"
+                onClick={() => setShowOptional((v) => !v)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  marginTop: 8,
+                  padding: '6px 2px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--muted)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {showOptional ? 'Hide' : 'Show'} {optional.length} optional field
+                {optional.length === 1 ? '' : 's'}{' '}
+                <span aria-hidden="true">{showOptional ? '\u2191' : '\u2192'}</span>
+              </button>
               {showOptional && (
                 <div
+                  id="run-surface-fields-optional"
                   className="run-surface-fields"
                   data-testid="run-surface-fields-optional"
                   style={{ marginTop: 8 }}
