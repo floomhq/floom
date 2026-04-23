@@ -22,6 +22,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Star } from 'lucide-react';
 import { AppIcon } from '../AppIcon';
 import { DescriptionMarkdown } from '../DescriptionMarkdown';
+import { categoryTint } from '../../lib/categoryTint';
 import type { HubApp } from '../../lib/types';
 
 export interface AppGridProps {
@@ -65,69 +66,6 @@ function labelForCategory(cat: string): string {
       .replace(/[-_]+/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
   );
-}
-
-// Category → gradient fallback tint. Matches the three-tint system
-// AppStripe already uses so /apps and /landing read as the same
-// product. See AppStripe.tsx for the palette rationale (restrained,
-// max 3 accents). `--accent` stays the brand green.
-interface Tint {
-  gradient: string;
-  fg: string;
-  ring: string;
-}
-
-const TINT_EMERALD: Tint = {
-  gradient:
-    'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
-  fg: '#047857',
-  ring:
-    'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
-};
-const TINT_AMBER: Tint = {
-  gradient:
-    'radial-gradient(circle at 30% 25%, #fef3c7 0%, #fffaf0 55%, #fde68a 100%)',
-  fg: '#b45309',
-  ring:
-    'inset 0 0 0 1px rgba(180,83,9,0.15), 0 1px 2px rgba(180,83,9,0.14), inset 0 1px 0 rgba(255,255,255,0.6)',
-};
-const TINT_SLATE: Tint = {
-  gradient:
-    'radial-gradient(circle at 30% 25%, #e2e8f0 0%, #f1f5f9 55%, #cbd5e1 100%)',
-  fg: '#475569',
-  ring:
-    'inset 0 0 0 1px rgba(71,85,105,0.12), 0 1px 2px rgba(71,85,105,0.12), inset 0 1px 0 rgba(255,255,255,0.6)',
-};
-
-const CATEGORY_TINT: Record<string, Tint> = {
-  'developer-tools': TINT_EMERALD,
-  'developer_tools': TINT_EMERALD,
-  developer: TINT_EMERALD,
-  productivity: TINT_EMERALD,
-  utilities: TINT_EMERALD,
-  ai: TINT_AMBER,
-  research: TINT_AMBER,
-  marketing: TINT_AMBER,
-  design: TINT_AMBER,
-  writing: TINT_AMBER,
-  content: TINT_AMBER,
-  sales: TINT_AMBER,
-  hr: TINT_AMBER,
-  seo: TINT_AMBER,
-  analytics: TINT_AMBER,
-  'open_data': TINT_SLATE,
-  'open-data': TINT_SLATE,
-  location: TINT_SLATE,
-  financial: TINT_SLATE,
-  media: TINT_SLATE,
-  ecommerce: TINT_SLATE,
-  messaging: TINT_SLATE,
-  travel: TINT_SLATE,
-};
-
-function paletteFor(category: string | null | undefined): Tint {
-  if (!category) return TINT_EMERALD;
-  return CATEGORY_TINT[category] || TINT_EMERALD;
 }
 
 // Category badge palette. Per-category soft color so HIRING / GROWTH /
@@ -243,7 +181,7 @@ function AppGridCard({
   app: HubApp;
   variant?: 'default' | 'featured';
 }) {
-  const tint = paletteFor(app.category);
+  const tint = categoryTint(app.category);
   const stars = app.stars ?? 0;
   const runs7d = app.runs_7d ?? 0;
   const isHot = stars >= 100;
@@ -290,8 +228,8 @@ function AppGridCard({
         data-testid={`app-grid-thumb-${app.slug}`}
         style={{
           height: thumbHeight,
-          background: thumbnail ? 'var(--bg)' : tint.gradient,
-          boxShadow: thumbnail ? undefined : tint.ring,
+          background: thumbnail ? 'var(--bg)' : tint.bg,
+          boxShadow: thumbnail ? undefined : 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
           position: 'relative',
           overflow: 'hidden',
           flexShrink: 0,
@@ -362,8 +300,8 @@ function AppGridCard({
             width: 32,
             height: 32,
             borderRadius: 9,
-            background: tint.gradient,
-            boxShadow: tint.ring,
+            background: tint.bg,
+            boxShadow: 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { AppIcon } from '../AppIcon';
 import { DescriptionMarkdown } from '../DescriptionMarkdown';
+import { categoryTint } from '../../lib/categoryTint';
 
 interface AppStripeProps {
   slug: string;
@@ -11,99 +12,12 @@ interface AppStripeProps {
   meta?: string;
   /** Variant changes spacing & font sizes. Default = landing (roomier). */
   variant?: 'landing' | 'apps';
-  /**
-   * Rescue 2026-04-21 (Fix 4): category hint for the icon-tile tint.
-   * When present, AppStripe picks a category-appropriate palette so
-   * the /apps grid has rhythm instead of 55 identical emerald squares.
-   * Still restrained: three soft tints total (emerald / amber / slate)
-   * mapped from manifest categories. Falls back to emerald when
-   * missing (landing page hero tiles stay green by default).
-   */
+  /** Category hint for glyph tile tint (#91). */
   category?: string;
 }
 
-/**
- * Rescue 2026-04-21 (Fix 4): category-based icon tile tints.
- *
- * Why: when every app icon is the same glyph style on the same
- * emerald tile, visually they read as AI-slop fill. Federico's audit:
- * "when every icon is an identical-style glyph on an identical
- * emerald-tint tile at identical size, visually they read as
- * AI-generated fill. Zero identity per app."
- *
- * Why not per-slug: we'd be back to the banned 10-color palette that
- * violated "max 1-2 accent colors" (2026-04-18 audit). Category
- * gives three stable buckets that carry semantic weight too — a
- * creator browsing "developer" sees green, an analyst scanning
- * "data" sees slate. Still restrained.
- *
- * Mapping:
- *   emerald  — Floom native (dev-utility, productivity, writing, AI apps we built)
- *   amber    — "make / create / generate" AI apps (research, marketing, design, text)
- *   slate    — third-party data & API integrations (open_data, financial, location, etc.)
- */
-// #279 launch polish (2026-04-21): each tint carries a soft radial
-// gradient + inner highlight so the icon tile reads as a physical chip
-// instead of a flat painted square. "Goosebumps" version of the
-// category tints Federico flagged as "not sexy enough".
-interface Tint {
-  bg: string;
-  fg: string;
-  gradient: string;
-  ring: string;
-}
-const TINT_EMERALD: Tint = {
-  bg: '#ecfdf5',
-  fg: '#047857',
-  gradient: 'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
-  ring: 'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
-};
-const TINT_AMBER: Tint = {
-  bg: '#fffaf0',
-  fg: '#b45309',
-  gradient: 'radial-gradient(circle at 30% 25%, #fef3c7 0%, #fffaf0 55%, #fde68a 100%)',
-  ring: 'inset 0 0 0 1px rgba(180,83,9,0.15), 0 1px 2px rgba(180,83,9,0.14), inset 0 1px 0 rgba(255,255,255,0.6)',
-};
-const TINT_SLATE: Tint = {
-  bg: '#f1f5f9',
-  fg: '#475569',
-  gradient: 'radial-gradient(circle at 30% 25%, #e2e8f0 0%, #f1f5f9 55%, #cbd5e1 100%)',
-  ring: 'inset 0 0 0 1px rgba(71,85,105,0.12), 0 1px 2px rgba(71,85,105,0.12), inset 0 1px 0 rgba(255,255,255,0.6)',
-};
-
-const CATEGORY_TINT: Record<string, Tint> = {
-  // Floom-native / creator-tools -> emerald (stays with the brand accent)
-  'developer-tools': TINT_EMERALD,
-  'developer_tools': TINT_EMERALD,
-  developer: TINT_EMERALD,
-  productivity: TINT_EMERALD,
-  // AI generation / creative output -> warm amber
-  ai: TINT_AMBER,
-  research: TINT_AMBER,
-  marketing: TINT_AMBER,
-  design: TINT_AMBER,
-  writing: TINT_AMBER,
-  text: TINT_AMBER,
-  seo: TINT_AMBER,
-  analytics: TINT_AMBER,
-  // Data / third-party APIs -> cool slate
-  open_data: TINT_SLATE,
-  'open-data': TINT_SLATE,
-  location: TINT_SLATE,
-  financial: TINT_SLATE,
-  media: TINT_SLATE,
-  ecommerce: TINT_SLATE,
-  messaging: TINT_SLATE,
-  travel: TINT_SLATE,
-};
-
-function paletteFor(category?: string): Tint {
-  if (!category) return TINT_EMERALD;
-  return CATEGORY_TINT[category] || TINT_EMERALD;
-}
-
 export function AppStripe({ slug, name, description, meta, variant = 'landing', category }: AppStripeProps) {
-  const color = paletteFor(category);
+  const tint = categoryTint(category ?? null);
   const iconSize = variant === 'landing' ? 44 : 42;
   const innerIcon = variant === 'landing' ? 22 : 20;
 
@@ -141,16 +55,16 @@ export function AppStripe({ slug, name, description, meta, variant = 'landing', 
           width: iconSize,
           height: iconSize,
           borderRadius: 12,
-          background: color.gradient,
-          color: color.fg,
+          background: tint.bg,
+          color: tint.fg,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
-          boxShadow: color.ring,
+          boxShadow: 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
         }}
       >
-        <AppIcon slug={slug} size={innerIcon} color={color.fg} />
+        <AppIcon slug={slug} size={innerIcon} color={tint.fg} />
       </span>
 
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -164,9 +78,6 @@ export function AppStripe({ slug, name, description, meta, variant = 'landing', 
         >
           {name}
         </div>
-        {/* 2026-04-23: Fix #413 — description is markdown. Previously
-            rendered plain-text, so creator-authored markdown (e.g.
-            `## Heading`) showed up literally in the /apps directory. */}
         <div
           style={{
             marginTop: 2,
