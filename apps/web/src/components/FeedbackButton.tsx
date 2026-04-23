@@ -4,6 +4,11 @@
 // optional email field. POSTs to /api/feedback on submit. Includes the
 // current URL automatically so Federico can see context when triaging.
 //
+// When the server is configured with FEEDBACK_GITHUB_TOKEN, submissions
+// are also filed as issues on floomhq/floom with the `source/feedback`
+// label. The success state then shows "Filed #123 — view on GitHub" so
+// the reporter can follow the issue through to resolution.
+//
 // Supports ?feedback=open query param for demo links.
 
 import { useEffect, useState } from 'react';
@@ -16,6 +21,8 @@ export function FeedbackButton() {
   const [email, setEmail] = useState('');
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [issueNumber, setIssueNumber] = useState<number | null>(null);
+  const [issueUrl, setIssueUrl] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
 
@@ -31,23 +38,31 @@ export function FeedbackButton() {
     if (!text.trim()) return;
     setState('sending');
     try {
-      await api.postFeedback({
+      const resp = await api.postFeedback({
         text: text.trim(),
         email: email.trim() || undefined,
         url: typeof window !== 'undefined' ? window.location.href : location.pathname,
       });
+      setIssueNumber(resp.issue_number ?? null);
+      setIssueUrl(resp.issue_url ?? null);
       setState('sent');
       setText('');
       setEmail('');
-      setTimeout(() => {
-        setOpen(false);
-        setState('idle');
-        if (searchParams.get('feedback') === 'open') {
-          const sp = new URLSearchParams(searchParams);
-          sp.delete('feedback');
-          setSearchParams(sp, { replace: true });
-        }
-      }, 1500);
+      // When a GH issue was filed, keep the modal open so the user can
+      // click through to it. Otherwise auto-dismiss as before.
+      if (!resp.issue_url) {
+        setTimeout(() => {
+          setOpen(false);
+          setState('idle');
+          setIssueNumber(null);
+          setIssueUrl(null);
+          if (searchParams.get('feedback') === 'open') {
+            const sp = new URLSearchParams(searchParams);
+            sp.delete('feedback');
+            setSearchParams(sp, { replace: true });
+          }
+        }, 1500);
+      }
     } catch (err) {
       setState('error');
       setErrorMsg((err as Error).message || 'Send failed');
@@ -58,6 +73,8 @@ export function FeedbackButton() {
     setOpen(false);
     setState('idle');
     setErrorMsg('');
+    setIssueNumber(null);
+    setIssueUrl(null);
     if (searchParams.get('feedback') === 'open') {
       const sp = new URLSearchParams(searchParams);
       sp.delete('feedback');
@@ -184,17 +201,80 @@ export function FeedbackButton() {
             </div>
 
             {state === 'sent' ? (
-              <p
+              <div
+                data-testid="feedback-success"
                 style={{
                   margin: 0,
-                  fontSize: 14,
-                  color: 'var(--success, #1a7f37)',
                   padding: '20px 0',
                   textAlign: 'center',
                 }}
               >
-                Thanks! Feedback received.
-              </p>
+                <p
+                  style={{
+                    margin: '0 0 8px',
+                    fontSize: 14,
+                    color: 'var(--success, #1a7f37)',
+                    fontWeight: 600,
+                  }}
+                >
+                  Thanks — feedback received.
+                </p>
+                {issueUrl && issueNumber ? (
+                  <p
+                    style={{
+                      margin: '0 0 12px',
+                      fontSize: 13,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    Filed as{' '}
+                    <a
+                      href={issueUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="feedback-issue-link"
+                      style={{
+                        color: 'var(--accent, #1a7f37)',
+                        fontWeight: 600,
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      #{issueNumber} on GitHub
+                    </a>
+                    . Watch it to get notified when it's resolved.
+                  </p>
+                ) : (
+                  <p
+                    style={{
+                      margin: '0 0 12px',
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    We'll review and follow up if you left an email.
+                  </p>
+                )}
+                {issueUrl ? (
+                  <button
+                    type="button"
+                    onClick={close}
+                    data-testid="feedback-success-close"
+                    style={{
+                      marginTop: 4,
+                      padding: '6px 14px',
+                      background: 'transparent',
+                      border: '1px solid var(--line)',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Close
+                  </button>
+                ) : null}
+              </div>
             ) : (
               <form onSubmit={handleSubmit}>
                 <label

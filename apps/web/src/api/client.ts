@@ -934,6 +934,13 @@ export function deleteCreatorSecret(
 export function postFeedback(body: { text: string; email?: string; url?: string }): Promise<{
   ok: true;
   id: string;
+  /** Set when the server is configured with FEEDBACK_GITHUB_TOKEN and the
+   *  issue was created successfully. */
+  issue_number?: number;
+  issue_url?: string;
+  /** Set when GitHub filing was attempted but failed. Feedback is still
+   *  persisted in the DB. */
+  issue_error?: string;
 }> {
   return request('/api/feedback', {
     method: 'POST',

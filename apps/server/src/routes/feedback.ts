@@ -4,12 +4,24 @@
 // Simple in-memory rate limit: 20 calls per rolling hour per IP hash.
 // Writes a row to the `feedback` table including user_id / device_id so
 // Federico can filter by session when triaging.
+//
+// When FEEDBACK_GITHUB_TOKEN is set, ALSO files a GitHub issue on
+// floomhq/floom (or the repo named by FEEDBACK_GITHUB_REPO) with the
+// `source/feedback` label. The route returns the filed issue number +
+// URL so the client can show "Filed #123 — view on GitHub" in the
+// success state. If the token is unset, issue filing is silently
+// skipped — feedback still lands in the DB table.
 
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '../db.js';
 import { resolveUserContext } from '../services/session.js';
+import {
+  fileFeedbackIssue,
+  isFeedbackGitHubConfigured,
+  FeedbackGitHubError,
+} from '../lib/feedback-github.js';
 
 export const feedbackRouter = new Hono();
 
@@ -102,7 +114,43 @@ feedbackRouter.post('/', async (c) => {
     `[feedback] id=${id} user=${ctx.is_authenticated ? ctx.user_id : 'anon'} url=${url || '-'} text="${text.slice(0, 120).replace(/\n/g, ' ')}"`,
   );
 
-  return c.json({ ok: true, id });
+  // Best-effort GitHub issue filing. If the token is unset we skip; if
+  // GitHub 4xx/5xx's we log and still return success to the client with
+  // the DB row id — the user's submission is not lost and rate limit was
+  // already spent.
+  let issue_number: number | undefined;
+  let issue_url: string | undefined;
+  let issue_error: string | undefined;
+  if (isFeedbackGitHubConfigured()) {
+    try {
+      const filed = await fileFeedbackIssue({
+        text,
+        email: email || null,
+        url: url || null,
+        reporter: ctx.is_authenticated ? ctx.user_id : null,
+      });
+      issue_number = filed.number;
+      issue_url = filed.url;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[feedback] filed GH issue #${filed.number} id=${id} url=${filed.url}`,
+      );
+    } catch (err) {
+      const e = err as FeedbackGitHubError;
+      issue_error = e.code || 'unknown';
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[feedback] GH issue filing failed id=${id} code=${issue_error} status=${e.status || 'n/a'} msg=${(e.message || '').slice(0, 200)}`,
+      );
+    }
+  }
+
+  return c.json({
+    ok: true,
+    id,
+    ...(issue_number ? { issue_number, issue_url } : {}),
+    ...(issue_error ? { issue_error } : {}),
+  });
 });
 
 /**
