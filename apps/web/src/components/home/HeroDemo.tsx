@@ -770,88 +770,174 @@ function RunSurface({
       : 'opacity .18s ease, transform .25s cubic-bezier(0.22, 0.9, 0.28, 1)',
   };
 
+  // Reasons fade in staggered after the score lands so the right column
+  // fills with content rather than appearing all at once. The same clock
+  // as the tag (showTag @ 1700ms) gates these — we reuse it to avoid yet
+  // another timer and keep the motion budget predictable.
+  const reasonsVisible = showTag;
+
   return (
     <div style={surfaceStyle} aria-hidden={!active}>
       <div style={RUN_WRAP}>
         {/* Context cue above the payoff card — connects Use back to Deploy
             ("Just deployed via /floomit"). Continuity matters: the demo
             tells a complete 3-beat story and this line is the bridge from
-            Deploy's payoff moment into the live app. */}
+            Deploy's payoff moment into the live app. The live-URL chip on
+            the right reinforces "this is actually a real page now". */}
         <div style={RUN_CONTEXT}>
           <span style={RUN_CONTEXT_DOT} aria-hidden="true" />
           <span>
             Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
           </span>
+          <span style={RUN_CONTEXT_SEP} aria-hidden="true">·</span>
+          <span style={RUN_CONTEXT_URL}>floom.dev/p/lead-scorer</span>
         </div>
 
-        {/* ONE primary card, centered; consumer-style */}
-        <div style={RUN_CARD}>
-          <div style={RUN_HEADER}>
-            <div style={RUN_TITLE}>Lead Scorer</div>
-            <div style={RUN_SUB}>Score a lead against your ICP</div>
-          </div>
-
-          <div style={RUN_INPUT_ZONE}>
-            <div style={RUN_INPUT_PILL}>
-              <span style={RUN_INPUT_LABEL}>Lead</span>
-              <span style={RUN_INPUT_VALUE}>stripe.com</span>
+        {/* 2026-04-28: Federico feedback "the use page looks empty and
+            doesn't resemble our real design, which has input on the left
+            and output on the right". The old design was a single centred
+            card with a tiny input pill; that read as a thumbnail, not a
+            product. The real RunSurface (/p/:slug) is a 2-column grid —
+            input 2fr left, output 3fr right. Mirror it here so the demo
+            is honest about the product shape. The left panel carries the
+            app chrome + input fields + primary Run button; the right
+            panel carries the score card + reasoning bullets. Both panels
+            remain mounted across run states so the surface never flashes
+            blank. */}
+        <div data-hd="use-grid" style={RUN_GRID}>
+          {/* LEFT — input column (2fr) ---------------------------------- */}
+          <div style={RUN_INPUT_COL}>
+            <div style={RUN_APP_HEADER}>
+              <div style={RUN_APP_BADGE} aria-hidden="true">LS</div>
+              <div>
+                <div style={RUN_TITLE}>Lead Scorer</div>
+                <div style={RUN_SUB}>Score a lead against your ICP</div>
+              </div>
             </div>
+
+            <div style={RUN_FIELDS}>
+              <label style={RUN_FIELD}>
+                <span style={RUN_FIELD_LABEL}>Lead website</span>
+                <div style={RUN_FIELD_INPUT}>
+                  <span style={RUN_FIELD_INPUT_TEXT}>stripe.com</span>
+                </div>
+              </label>
+              <label style={RUN_FIELD}>
+                <span style={RUN_FIELD_LABEL}>Your ICP</span>
+                <div style={RUN_FIELD_INPUT_MULTI}>
+                  <span style={RUN_FIELD_INPUT_TEXT}>
+                    B2B fintech, Series C+, 1,000+ employees, US &amp; EU
+                  </span>
+                </div>
+              </label>
+            </div>
+
             <button
               type="button"
               aria-label="Run lead scorer"
               style={{
                 ...RUN_BUTTON,
-                transform: pressed ? 'scale(0.96)' : 'scale(1)',
+                transform: pressed ? 'scale(0.98)' : 'scale(1)',
                 transition: 'transform .12s ease',
               }}
             >
-              Run
+              {thinking ? 'Running…' : 'Run'}
             </button>
           </div>
 
-          {/* Result slot — fixed min-height so the card doesn't jump */}
-          <div style={RUN_RESULT_SLOT}>
-            {thinking && (
-              <div style={RUN_THINKING} aria-label="Thinking">
-                <span style={DOT} />
-                <span style={{ ...DOT, animationDelay: '.15s' }} />
-                <span style={{ ...DOT, animationDelay: '.3s' }} />
-              </div>
-            )}
-            {resultReady && (
-              <div style={RUN_RESULT}>
-                <div style={SCORE_ROW}>
-                  <span style={SCORE_BIG}>{score}</span>
-                  <span style={SCORE_OF}>/ 100</span>
-                  <span
+          {/* RIGHT — output column (3fr) -------------------------------- */}
+          <div style={RUN_OUTPUT_COL}>
+            <div style={RUN_OUTPUT_HEADER}>
+              <span style={RUN_OUTPUT_LABEL}>Result</span>
+              {resultReady && (
+                <span style={RUN_OUTPUT_META}>run_a1f · 1.2s · Gemini 3 Pro</span>
+              )}
+            </div>
+
+            {/* Result slot — always mounted, swaps between empty / thinking /
+                result. Empty state carries ghost lines so the panel reads
+                as a real output surface even before the run fires. */}
+            <div style={RUN_OUTPUT_BODY}>
+              {!resultReady && !thinking && (
+                <div style={RUN_EMPTY} aria-hidden="true">
+                  <div style={{ ...RUN_GHOST, width: '60%' }} />
+                  <div style={{ ...RUN_GHOST, width: '85%' }} />
+                  <div style={{ ...RUN_GHOST, width: '70%' }} />
+                </div>
+              )}
+              {thinking && (
+                <div style={RUN_THINKING_WRAP}>
+                  <div style={RUN_THINKING} aria-label="Thinking">
+                    <span style={DOT} />
+                    <span style={{ ...DOT, animationDelay: '.15s' }} />
+                    <span style={{ ...DOT, animationDelay: '.3s' }} />
+                  </div>
+                  <div style={RUN_THINKING_LABEL}>Scoring lead against ICP…</div>
+                </div>
+              )}
+              {resultReady && (
+                <div style={RUN_RESULT}>
+                  <div style={SCORE_ROW}>
+                    <span style={SCORE_BIG}>{score}</span>
+                    <span style={SCORE_OF}>/ 100</span>
+                    <span
+                      style={{
+                        ...TIER_PILL,
+                        opacity: showTag ? 1 : 0,
+                        transform: showTag ? 'translateY(0)' : 'translateY(4px)',
+                        transition: reducedMotion
+                          ? 'none'
+                          : 'opacity .25s ease, transform .25s ease',
+                      }}
+                    >
+                      Strong fit
+                    </span>
+                  </div>
+
+                  <div
                     style={{
-                      ...TIER_PILL,
-                      opacity: showTag ? 1 : 0,
-                      transform: showTag ? 'translateY(0)' : 'translateY(4px)',
+                      ...RUN_REASONS,
+                      opacity: reasonsVisible ? 1 : 0,
+                      transform: reasonsVisible
+                        ? 'translateY(0)'
+                        : 'translateY(4px)',
                       transition: reducedMotion
                         ? 'none'
-                        : 'opacity .25s ease, transform .25s ease',
+                        : 'opacity .3s ease .1s, transform .3s ease .1s',
                     }}
                   >
-                    Strong fit
-                  </span>
+                    <div style={RUN_REASONS_TITLE}>Why this score</div>
+                    <ul style={RUN_REASONS_LIST}>
+                      <li style={RUN_REASON_ITEM}>
+                        <span style={RUN_REASON_BULLET} aria-hidden="true" />
+                        Known B2B fintech buyer — serves ICP directly.
+                      </li>
+                      <li style={RUN_REASON_ITEM}>
+                        <span style={RUN_REASON_BULLET} aria-hidden="true" />
+                        9,000+ employees, expansion stage, US + EU.
+                      </li>
+                      <li style={RUN_REASON_ITEM}>
+                        <span style={RUN_REASON_BULLET} aria-hidden="true" />
+                        Funded $8.7B — procurement latency ≤ 30 days.
+                      </li>
+                    </ul>
+                  </div>
                 </div>
-                <div style={RESULT_REASON}>
-                  Known B2B fintech buyer. 9,000+ employees, US + EU, expansion stage.
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+              )}
+            </div>
 
-        {/* Secondary line: API / MCP / Analytics — small, NOT equal weight */}
-        <div style={RUN_SECONDARY}>
-          <span>Also available as</span>
-          <span style={RUN_SEC_TAG}>API</span>
-          <span style={RUN_SEC_SEP}>&middot;</span>
-          <span style={RUN_SEC_TAG}>MCP</span>
-          <span style={RUN_SEC_SEP}>&middot;</span>
-          <span style={RUN_SEC_TAG}>Analytics</span>
+            {/* Secondary line: API / MCP / Analytics — small, NOT equal
+                weight. Lives inside the output column so the two columns
+                stay balanced in height. */}
+            <div style={RUN_SECONDARY}>
+              <span>Also available as</span>
+              <span style={RUN_SEC_TAG}>API</span>
+              <span style={RUN_SEC_SEP}>&middot;</span>
+              <span style={RUN_SEC_TAG}>MCP</span>
+              <span style={RUN_SEC_SEP}>&middot;</span>
+              <span style={RUN_SEC_TAG}>Analytics</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -880,6 +966,7 @@ const SCOPED_CSS = `
     [data-testid="hero-demo"] [data-hd="sidebar"]{display:none}
     [data-testid="hero-demo"] [data-hd="deploy-grid"]{grid-template-columns:1fr}
     [data-testid="hero-demo"] [data-hd="deploy-grid"] > :last-child{display:none}
+    [data-testid="hero-demo"] [data-hd="use-grid"]{grid-template-columns:1fr;gap:10px}
   }
   @media (max-width:480px){
     [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{padding:20px 18px;gap:14px}
@@ -1296,15 +1383,20 @@ const LIVE_DOT_CORE: CSSProperties = {
 };
 
 // Run surface ----------------------------------------------------------------
-// 2026-04-27: Use-tab previously felt cramped (the app output slot was too
-// small). Added vertical room to the wrap + card + result slot so the Lead
-// Scorer preview reads as an actual product, not a thumbnail.
+// 2026-04-28: Switched from single centred card (consumer-ChatGPT style) to
+// a 2-column input-left / output-right layout that matches the real
+// RunSurface on /p/:slug. Federico feedback: the old Use tab "looks empty
+// and doesn't resemble our real design, which has input on the left and
+// output on the right". The demo is an honest explainer of the product, so
+// it has to look like the product. Left column carries the app chrome +
+// fields + Run button; right column carries the score + reasoning. Both
+// panels remain mounted across run states so the canvas never flashes blank.
 const RUN_WRAP: CSSProperties = {
   height: '100%',
-  padding: '32px 48px',
+  padding: '22px 32px 24px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 18,
+  gap: 14,
   background: '#ffffff',
   color: '#0e0e0c',
   fontFamily: "'Inter', system-ui, sans-serif",
@@ -1318,6 +1410,7 @@ const RUN_CONTEXT: CSSProperties = {
   fontSize: 11,
   color: '#8b8680',
   letterSpacing: '0.02em',
+  flexWrap: 'wrap',
 };
 
 const RUN_CONTEXT_DOT: CSSProperties = {
@@ -1326,6 +1419,7 @@ const RUN_CONTEXT_DOT: CSSProperties = {
   borderRadius: '50%',
   background: '#047857',
   display: 'inline-block',
+  boxShadow: '0 0 0 3px rgba(4, 120, 87, 0.12)',
 };
 
 const RUN_CONTEXT_CODE: CSSProperties = {
@@ -1337,93 +1431,216 @@ const RUN_CONTEXT_CODE: CSSProperties = {
   borderRadius: 4,
 };
 
-const RUN_CARD: CSSProperties = {
+const RUN_CONTEXT_SEP: CSSProperties = {
+  color: '#d6d2c8',
+};
+
+const RUN_CONTEXT_URL: CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 11,
+  color: '#6a665f',
+};
+
+// 2-column grid: input 2fr / output 3fr matches the real RunSurface on
+// /p/:slug. Mobile collapses via the [data-hd="use-grid"] media query in
+// SCOPED_CSS below (≤860px stacks to a single column).
+const RUN_GRID: CSSProperties = {
   flex: 1,
-  background: '#fafaf8',
-  border: '1px solid #e8e6e0',
-  borderRadius: 16,
-  padding: '28px 32px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 20,
+  display: 'grid',
+  gridTemplateColumns: '2fr 3fr',
+  gap: 14,
   minHeight: 0,
 };
 
-const RUN_HEADER: CSSProperties = {
+const RUN_INPUT_COL: CSSProperties = {
+  background: '#fafaf8',
+  border: '1px solid #e8e6e0',
+  borderRadius: 14,
+  padding: '18px 20px 18px',
   display: 'flex',
   flexDirection: 'column',
-  gap: 2,
+  gap: 14,
+  minHeight: 0,
+};
+
+const RUN_OUTPUT_COL: CSSProperties = {
+  background: '#ffffff',
+  border: '1px solid #e8e6e0',
+  borderRadius: 14,
+  padding: '18px 22px 18px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  minHeight: 0,
+  boxShadow:
+    '0 1px 0 rgba(14,14,12,0.02), 0 14px 30px -24px rgba(14,14,12,0.18)',
+};
+
+const RUN_APP_HEADER: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+};
+
+// Small square badge in place of a real app icon — same language as the
+// real RunSurface's <AppIcon /> but deterministic so the demo doesn't
+// depend on a network fetch.
+const RUN_APP_BADGE: CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 8,
+  background:
+    'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
+  color: '#047857',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontFamily: 'var(--font-display)',
+  fontWeight: 700,
+  fontSize: 13,
+  letterSpacing: '0.02em',
+  boxShadow: 'inset 0 0 0 1px rgba(5,150,105,0.15)',
 };
 
 const RUN_TITLE: CSSProperties = {
   fontFamily: 'var(--font-display)',
-  fontSize: 22,
-  fontWeight: 600,
+  fontSize: 18,
+  fontWeight: 700,
   letterSpacing: '-0.02em',
   color: '#0e0e0c',
-  lineHeight: 1.1,
+  lineHeight: 1.15,
 };
 
 const RUN_SUB: CSSProperties = {
-  fontSize: 12.5,
+  fontSize: 12,
   color: '#8b8680',
+  marginTop: 2,
 };
 
-const RUN_INPUT_ZONE: CSSProperties = {
+const RUN_FIELDS: CSSProperties = {
   display: 'flex',
+  flexDirection: 'column',
   gap: 10,
-  alignItems: 'stretch',
-};
-
-const RUN_INPUT_PILL: CSSProperties = {
   flex: 1,
-  background: '#ffffff',
-  border: '1px solid #e8e6e0',
-  borderRadius: 999,
-  padding: '10px 16px',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
+  minHeight: 0,
 };
 
-const RUN_INPUT_LABEL: CSSProperties = {
+const RUN_FIELD: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 5,
+};
+
+const RUN_FIELD_LABEL: CSSProperties = {
   fontSize: 10.5,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
-  color: '#a8a49b',
+  color: '#8b8680',
   fontWeight: 600,
 };
 
-const RUN_INPUT_VALUE: CSSProperties = {
-  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+const RUN_FIELD_INPUT: CSSProperties = {
+  background: '#ffffff',
+  border: '1px solid #e4e1d8',
+  borderRadius: 8,
+  padding: '9px 12px',
+  display: 'flex',
+  alignItems: 'center',
+  minHeight: 36,
+};
+
+const RUN_FIELD_INPUT_MULTI: CSSProperties = {
+  background: '#ffffff',
+  border: '1px solid #e4e1d8',
+  borderRadius: 8,
+  padding: '10px 12px',
+  minHeight: 52,
+  display: 'flex',
+  alignItems: 'flex-start',
+};
+
+const RUN_FIELD_INPUT_TEXT: CSSProperties = {
+  fontFamily: "'Inter', system-ui, sans-serif",
   fontSize: 13,
-  color: '#0e0e0c',
+  color: '#2a2825',
+  lineHeight: 1.45,
 };
 
 const RUN_BUTTON: CSSProperties = {
   background: '#0e0e0c',
   color: '#ffffff',
   border: 0,
-  borderRadius: 999,
-  padding: '0 24px',
+  borderRadius: 8,
+  padding: '10px 16px',
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
   fontFamily: "'Inter', sans-serif",
+  width: '100%',
+  letterSpacing: '-0.005em',
 };
 
-const RUN_RESULT_SLOT: CSSProperties = {
-  flex: 1,
-  minHeight: 140,
+const RUN_OUTPUT_HEADER: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
+  alignItems: 'baseline',
+  justifyContent: 'space-between',
+  gap: 8,
+};
+
+const RUN_OUTPUT_LABEL: CSSProperties = {
+  fontSize: 10.5,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: '#8b8680',
+  fontWeight: 600,
+};
+
+const RUN_OUTPUT_META: CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 10.5,
+  color: '#a8a49b',
+};
+
+const RUN_OUTPUT_BODY: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: 'flex',
+  flexDirection: 'column',
   justifyContent: 'flex-start',
+};
+
+// Ghost placeholder lines shown before the run fires so the right column
+// reads as an output surface, not an empty box.
+const RUN_EMPTY: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  paddingTop: 8,
+};
+
+const RUN_GHOST: CSSProperties = {
+  height: 10,
+  borderRadius: 3,
+  background: 'linear-gradient(90deg, #f2eee5 0%, #ece8de 50%, #f2eee5 100%)',
+};
+
+const RUN_THINKING_WRAP: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  paddingTop: 8,
+};
+
+const RUN_THINKING_LABEL: CSSProperties = {
+  fontSize: 12,
+  color: '#8b8680',
+  fontStyle: 'italic',
 };
 
 const RUN_THINKING: CSSProperties = {
   display: 'flex',
   gap: 6,
-  padding: '6px 4px',
+  padding: '4px 0',
 };
 
 const DOT: CSSProperties = {
@@ -1477,10 +1694,51 @@ const TIER_PILL: CSSProperties = {
   marginLeft: 4,
 };
 
-const RESULT_REASON: CSSProperties = {
+// Reasoning list shown under the score in the right column. The bullets
+// are rendered as inline dots (not default <ul> discs) because the font
+// mix + tight spacing needs a custom marker to stay visually quiet.
+const RUN_REASONS: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  marginTop: 14,
+  paddingTop: 14,
+  borderTop: '1px solid #f0ece3',
+};
+
+const RUN_REASONS_TITLE: CSSProperties = {
+  fontSize: 10.5,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: '#8b8680',
+  fontWeight: 600,
+};
+
+const RUN_REASONS_LIST: CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+};
+
+const RUN_REASON_ITEM: CSSProperties = {
   fontSize: 12.5,
   color: '#2a2825',
-  lineHeight: 1.5,
+  lineHeight: 1.45,
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 10,
+};
+
+const RUN_REASON_BULLET: CSSProperties = {
+  width: 5,
+  height: 5,
+  borderRadius: '50%',
+  background: '#047857',
+  marginTop: 7,
+  flexShrink: 0,
 };
 
 const RUN_SECONDARY: CSSProperties = {

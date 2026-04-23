@@ -3,9 +3,9 @@
 
   <h1>Floom</h1>
 
-  <p><strong>The protocol + runtime for agentic work.</strong><br/>
+  <p><strong>Infra for agentic work — open source.</strong><br/>
   <em>Vibe-coding speed. Production-grade safety.</em><br/>
-  Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server, HTTP API, and shareable web form. Open source.</p>
+  Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server, HTTP API, and shareable web form.</p>
 
   <p>
     <a href="https://github.com/floomhq/floom/blob/main/LICENSE"><img src="https://img.shields.io/github/license/floomhq/floom?color=111&label=license" alt="License"/></a>
