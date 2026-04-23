@@ -30,7 +30,7 @@ This is the repo-level shipping workflow today. It is separate from the future c
 
 - Preview auto-deploys from `main` after the `Typecheck` and `Test` checks pass.
 - Production is manual by policy.
-- Rollback is documented as an explicit operator runbook with health checks and drill steps.
+- **Rollback in practice** (operator playbook): deploy the last known-good container image, hit `GET /api/health` and a short smoke test on critical paths, then shift traffic or confirm the live tag. Full steps live in the repo’s rollback runbook, including drill checklists.
 
 ## CI/CD integration
 

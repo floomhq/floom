@@ -2,17 +2,17 @@
 
 Floom's launch-week security story is **container isolation plus explicit secret handling**, not a certification story. This page describes what the current code does.
 
-## Isolation model
+## Isolation model (sandboxing)
 
-- Each hosted run starts a **fresh Docker container**.
-- File inputs are materialized on the host, then mounted into the run container as **read-only** files under `/floom/inputs`.
-- Floom does **not** currently advertise a separate micro-VM, gVisor, Firecracker, or per-tenant kernel isolation layer in this repo.
+- Each hosted run is a **fresh Docker container** (Linux namespaces and cgroups; default runtime is the usual OCI `runc`).
+- Inputs are materialized on the host and mounted **read-only** under `/floom/inputs`.
+- Self-hosters may point Docker at **`runsc` (gVisor)** for stronger isolation — an **operator** setting, not a Floom UI toggle. No Firecracker or per-tenant micro-VMs in this repo.
 
 ## How secrets are passed
 
 - App secrets are injected into the run container as **environment variables at container start**.
 - Secrets are **not baked into the Docker image** for a run.
-- Creator-owned and user-owned saved secrets are stored encrypted in SQLite using **AES-256-GCM envelope encryption** with a per-workspace data-encryption key wrapped under `FLOOM_MASTER_KEY`.
+- Saved secrets use **AES-256-GCM** in the app database (an encrypted store in SQLite, not HashiCorp Vault) with a per-workspace key wrapped under `FLOOM_MASTER_KEY`.
 
 ## Bring your own key (BYOK)
 
@@ -33,9 +33,8 @@ Floom's launch-week security story is **container isolation plus explicit secret
 
 ## What Floom does not claim
 
-- No public **SOC 2** claim is shipped in this repo.
-- No hardware security module or external vault integration is documented for the default deployment.
-- No browser-side promise exists that Floom Cloud cannot access saved cloud-side secrets. The guarantee is about encryption at rest plus explicit per-run injection, not about operator invisibility.
+- No **SOC 2** line item, HSM, or third-party vault integration in the default path.
+- Cloud-side “encryption at rest + per-run injection” does not mean the operator can never use saved secrets; do not read it as a promise of total operator blindness.
 
 ## Operator responsibilities
 

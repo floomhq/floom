@@ -26,7 +26,8 @@ Floom does **not** publish a formal uptime SLA in this repo today. The current l
 
 - Floom is treating reliability as an engineering discipline, not as marketing copy.
 - The repo is explicit about health checks, metrics, manual production promotion, and rollback.
-- The repo is equally explicit that a formal SLA is not part of the launch surface today.
+- The repo is equally explicit that a formal SLA is not part of the launch surface today. There is **no paid reliability tier** during launch.
+- There is **no public `/status` page** committed in the product yet. For major cloud incidents, we will post to **`/status` if and when** that page exists; otherwise we will use **Floom’s X (Twitter) account** for public updates.
 
 ## Related pages
 

@@ -30,7 +30,7 @@ The metrics response is cached for 15 seconds so a busy scrape does not hammer S
 
 ## User and creator debugging
 
-- Run detail pages show final status, outputs, and captured logs.
+- Run detail pages show final status, outputs, and a **log tail** of captured stdout and stderr.
 - Public shared runs are redacted and do **not** expose live logs.
 - A creator-facing per-app logs and error-rate dashboard is still tracked separately as product work.
 

@@ -16,42 +16,21 @@ Floom runs hosted apps in one Docker container per run. The current launch-week 
 | Per `(IP, app)` budget | 500 runs / hour | One hot slug cannot monopolize the box. |
 | Demo BYOK budget | 5 free runs / 24h / IP / demo slug | After that, launch demos require the caller's own Gemini key. |
 
-## Concurrency today
+## Concurrency
 
-- There is **no explicit per-app or per-workspace concurrency cap** in the code today.
-- Effective concurrency is bounded by host capacity, Docker scheduling, and the rate limits above.
-- Async jobs are stored in SQLite and claimed by a single worker loop per server process.
-- The repo does **not** claim automatic horizontal scaling or a distributed queue today.
+There is no per-app concurrency cap in code today. Real limits are host capacity, Docker, and the rate limits above. Async jobs are in SQLite, handled by one worker loop per process — no distributed queue is claimed.
 
-## What happens under load
+## Under load and rate limits
 
-- If a caller stays within the published budgets, Floom dispatches the run immediately.
-- If a caller exceeds a budget, Floom returns **HTTP 429** with retry metadata instead of silently queueing forever.
-- Sync runs stop at the five-minute timeout.
-- Async jobs can wait in the SQLite queue, then time out at the job limit if they never finish.
+Under budget, runs dispatch immediately. Over budget, **HTTP 429** with retry metadata. Sync runs hit a five-minute cap; async jobs can queue, then time out. Limits are in-memory sliding windows (reset on single-node restarts). Multi-node shared limits are not in this repo.
 
-## Cold starts
+## Cold starts and run modes
 
-- **Proxied apps** do not build a container at request time. Floom forwards to the upstream API and adds web, MCP, and auth surfaces around it.
-- **Hosted apps** build an image once, then each run starts a fresh container from that image.
-- The repo does **not** publish a cold-start SLA. Exact startup time depends on the app image and the host.
-
-## Burst behavior
-
-- Rate limits are sliding windows in memory on each server process.
-- A single-node preview or self-host deployment resets those counters on restart.
-- Multi-node shared-state rate limiting is **not** in this repo yet.
+**Proxied:** no per-request container; Floom proxies your API and adds web, MCP, and auth. **Hosted:** one image build, then a fresh container per run. No cold-start SLA; depends on the image and host.
 
 ## Scale path
 
-- **Today:** one server process, one SQLite database, one background worker loop, per-run Docker containers.
-- **Next step:** move rate-limit state and job dispatch out of process, then add more workers or dedicated infra.
-- **When a workload outgrows shared cloud defaults:** self-host it or move the app onto dedicated infrastructure.
-
-## When to use proxied mode instead
-
-- Choose proxied mode when you already have a stable upstream API and want Floom to add MCP, web, and share surfaces without paying container cold starts.
-- Choose hosted mode when the app logic itself needs Floom to build and run code.
+**Today:** one process, one SQLite DB, one worker loop, per-run containers. **Next:** out-of-process rate limits and job dispatch, then more workers or dedicated infra. If cloud defaults are too tight, **self-host** or use dedicated hardware.
 
 ## Related pages
 

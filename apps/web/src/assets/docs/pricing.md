@@ -1,16 +1,16 @@
 # Pricing and monetization
 
-Floom is free to try today. The launch-week answer is simple and explicit.
+Floom is free to try during the public beta. The launch-week story is short and explicit.
 
 ## Current state
 
-- **Cloud beta:** free today.
-- **Self-host:** free forever under the MIT license.
-- **Paid cloud plans:** not launched yet.
+- **Cloud (beta + waitlist):** free while we run the waitlist and early access — no credit card required to try the hosted product.
+- **Self-host:** always free under the **MIT** license; you only pay for your own servers and time.
+- **Paid cloud via Stripe:** on the **roadmap**, not a launch guarantee. The codebase may include Stripe-related pieces, but a full, generally available paid tier and creator billing are not the launch promise.
 
 ## Creator monetization
 
-- The repo contains Stripe-related code and docs, but a general-purpose creator billing product is **not** part of the launch surface yet.
+- A full subscription-management and end-user charging flow for every app is **not** part of the launch surface today.
 - There is no public subscription-management flow for creators in the product today.
 - There is no promise that every published app can charge end users on day one.
 

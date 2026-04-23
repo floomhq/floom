@@ -11,7 +11,7 @@ Floom is designed so the app contract stays portable. This repo is honest about 
 
 ## What is open source
 
-- The runtime in this repo is **MIT licensed**.
+- The runtime in this repo is **MIT licensed** — fork it, self-host, or send patches: all are welcome.
 - The self-host guide is public.
 - The same broad runtime model used on `floom.dev` is available to self-hosters.
 
