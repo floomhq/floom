@@ -1,9 +1,20 @@
-// /p/:slug — product page (user view). Rebuilt 2026-04-17 to match
-// wireframes.floom.dev v11 Screen 3. Single scrolling page (no tabs):
-// breadcrumb -> hero + meta card -> how-it-works strip -> about +
-// full ratings widget -> connectors row -> inline run surface.
+// /p/:slug — product page (user view). v17 redesign 2026-04-23 to match
+// wireframes.floom.dev/v17/app-page.html:
+//   - Outer 18px frame card (quiet shadow, overflow hidden) wraps the
+//     whole page.
+//   - Compact .app-header INSIDE the frame: 40px flat tile + 17px title +
+//     13px muted description sub + right-aligned CTA cluster (version
+//     tag, Schedule, Share). No more radial-gradient tile + shadow ring.
+//   - RunSurface renders inside the frame body (unchanged — owns its own
+//     split-layout and empty/running/done states).
+//   - About / Install / Source content swaps inside the frame body based
+//     on ?tab=.
+//   - Mid-page underlined tab bar REMOVED. Replaced with a quiet chip
+//     row at the bottom of the frame (About / Install / Source / Source).
+//     Active chip uses --accent-soft bg, non-active is plain pill.
+//   - Breadcrumb row above the frame is small + quiet (Store / name).
 //
-// Schedule drawer and ChatGPT/Notion/Terminal connectors are explicit
+// Schedule drawer and ChatGPT/Notion/Terminal connectors stay as explicit
 // "coming soon" stubs (schedule needs job queue UI; the provider
 // connectors ship after v1 per project_floom_layers.md).
 
@@ -400,97 +411,83 @@ export function AppPermalinkPage() {
   }, [app]);
 
   if (loading) {
-    // CLS fix (2026-04-18): previous loading state was a ~60px paragraph,
-    // which caused a ~600px layout shift when the hero + meta card + tabs +
-    // RunSurface rendered. Lighthouse recorded CLS 0.486 on /p/:slug. The
-    // skeleton below matches the real layout's above-the-fold height so the
-    // transition from loading → loaded produces near-zero CLS.
+    // CLS fix (carried over from 2026-04-18, v17 refactor 2026-04-23):
+    // the skeleton mirrors the v17 frame layout above-the-fold so that
+    // loading → loaded produces near-zero CLS. Frame · compact header
+    // row · content body placeholder · chip row.
     return (
       <div className="page-root">
         <TopBar />
         <main
-          style={{ padding: '24px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
+          style={{ padding: '20px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
           data-testid="permalink-page"
           aria-busy="true"
         >
-          <div style={{ height: 32, marginBottom: 28 }} />
-          <section style={{ marginBottom: 40 }}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '96px minmax(0, 1fr) 280px',
-                gap: 28,
-                alignItems: 'start',
-              }}
-              className="permalink-hero-grid"
-            >
-              <div
-                style={{
-                  width: 96,
-                  height: 96,
-                  borderRadius: 22,
-                  background: 'var(--accent-soft, var(--bg))',
-                  border: '1px solid var(--accent-border, var(--line))',
-                }}
-              />
-              <div style={{ minHeight: 240 }}>
-                <div
-                  style={{
-                    height: 44,
-                    width: '60%',
-                    borderRadius: 6,
-                    background: 'var(--line)',
-                    opacity: 0.35,
-                    marginBottom: 12,
-                  }}
-                />
-                <div
-                  style={{
-                    height: 14,
-                    width: '30%',
-                    borderRadius: 4,
-                    background: 'var(--line)',
-                    opacity: 0.25,
-                    marginBottom: 20,
-                  }}
-                />
-                <div style={{ minHeight: 30, marginBottom: 14 }} />
-                <div
-                  style={{
-                    height: 72,
-                    borderRadius: 6,
-                    background: 'var(--line)',
-                    opacity: 0.18,
-                    marginBottom: 24,
-                  }}
-                />
-                <div style={{ height: 44 }} />
-              </div>
-              <div
-                style={{
-                  minHeight: 260,
-                  background: 'var(--card)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 14,
-                }}
-              />
-            </div>
-          </section>
-          <div style={{ height: 46, borderBottom: '1px solid var(--line)', marginBottom: 24 }} />
-          <section
+          {/* Breadcrumb placeholder */}
+          <div style={{ height: 18, marginBottom: 14, width: 180, background: 'var(--line)', opacity: 0.25, borderRadius: 4 }} />
+
+          {/* Frame card */}
+          <div
             style={{
               background: 'var(--card)',
               border: '1px solid var(--line)',
-              borderRadius: 14,
-              padding: '28px 24px',
-              minHeight: 320,
-              marginBottom: 32,
+              borderRadius: 18,
+              overflow: 'hidden',
+              boxShadow: '0 1px 3px rgba(22,21,18,.04), 0 4px 20px rgba(22,21,18,.06)',
             }}
           >
-            <p style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}>
-              Loading...
-            </p>
-          </section>
+            {/* Compact app-header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '18px 24px 16px',
+                borderBottom: '1px solid var(--line)',
+              }}
+            >
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 11,
+                  background: 'var(--bg)',
+                  border: '1px solid var(--line)',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ height: 18, width: '40%', borderRadius: 4, background: 'var(--line)', opacity: 0.35, marginBottom: 6 }} />
+                <div style={{ height: 12, width: '70%', borderRadius: 4, background: 'var(--line)', opacity: 0.22 }} />
+              </div>
+              <div style={{ height: 32, width: 120, borderRadius: 8, background: 'var(--line)', opacity: 0.2 }} />
+            </div>
+
+            {/* Body */}
+            <div style={{ padding: '24px', minHeight: 360, background: 'var(--card)' }}>
+              <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: 24 }}>
+                Loading...
+              </p>
+            </div>
+
+            {/* Chip row */}
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                padding: '14px 24px',
+                borderTop: '1px solid var(--line)',
+                background: 'var(--card)',
+              }}
+            >
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{ height: 28, width: 110, borderRadius: 999, background: 'var(--line)', opacity: 0.22 }}
+                />
+              ))}
+            </div>
+          </div>
         </main>
         <Footer />
       </div>
@@ -587,7 +584,9 @@ export function AppPermalinkPage() {
         style={{ padding: '24px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
         data-testid="permalink-page"
       >
-        {/* Breadcrumb row */}
+        {/* v17 breadcrumb: quiet Store / app-name. Lives OUTSIDE the
+            frame, small + muted. "Open in Studio" affordance (owner only)
+            sits on the right. */}
         <div
           style={{
             display: 'flex',
@@ -595,28 +594,23 @@ export function AppPermalinkPage() {
             justifyContent: 'space-between',
             gap: 12,
             flexWrap: 'wrap',
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--line)',
-            marginBottom: 28,
-            fontSize: 12,
+            marginBottom: 14,
+            fontSize: 13,
             color: 'var(--muted)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
             <Link to="/apps" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
-              floom
+              Store
             </Link>
-            <Chevron />
-            <Link to="/apps" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
-              store
-            </Link>
-            {app.category && (
-              <>
-                <Chevron />
-                <span>{app.category}</span>
-              </>
-            )}
-            <Chevron />
+            <span aria-hidden="true" style={{ color: 'var(--line)' }}>/</span>
             <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{app.name}</span>
           </div>
           {app.author && sessionUserId && app.author === sessionUserId && (
@@ -638,47 +632,47 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-        {/* 2026-04-21 restructure: compact header. Single-row icon + name +
-            version/stability inline + (owner) Schedule + Share. One-line
-            truncated description below. This replaces the previous
-            full-fold hero (big icon, 40px h1, CTA row, meta-card sidebar)
-            which pushed the Run form below the fold on 1279x712. Full
-            description + Category / License / Runtime / Source / Created by
-            now live in the About tab's Details block. Test-ids preserved
-            where practical so analytics + smoke stay green. */}
-        <section
-          data-testid="permalink-hero"
+        {/* v17 frame: 18px-radius white card wrapping the whole app page
+            (compact app-header · content body · chip row). Shadow is
+            quiet so the frame reads as a chip, not a popover. */}
+        <div
+          className="app-page-frame"
           style={{
-            marginBottom: 18,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
+            borderRadius: 18,
+            overflow: 'hidden',
+            boxShadow: '0 1px 3px rgba(22,21,18,.04), 0 4px 20px rgba(22,21,18,.06)',
           }}
         >
-          <div
+          {/* v17 compact app-header: 40px flat tile + 17px title + 13px
+              muted description + right-aligned CTA cluster (version
+              meta, Schedule, Share). Replaces the prior 2026-04-21
+              radial-gradient hero. Test-ids preserved so analytics +
+              smoke stay green. */}
+          <section
+            data-testid="permalink-hero"
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 14,
+              padding: '18px 24px 16px',
+              borderBottom: '1px solid var(--line)',
               flexWrap: 'wrap',
             }}
           >
-            {/* #279 launch polish (2026-04-21): gradient tile + ring so the
-                hero icon reads as a physical chip. */}
             <div
               style={{
                 width: 40,
                 height: 40,
-                borderRadius: 10,
-                background:
-                  'radial-gradient(circle at 30% 25%, #d1fae5 0%, #ecfdf5 55%, #d1fae5 100%)',
+                borderRadius: 11,
+                background: 'var(--bg)',
+                border: '1px solid var(--line)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#047857',
+                color: 'var(--accent)',
                 flexShrink: 0,
-                boxShadow:
-                  'inset 0 0 0 1px rgba(5,150,105,0.15), 0 1px 2px rgba(5,150,105,0.18), inset 0 1px 0 rgba(255,255,255,0.6)',
               }}
             >
               <AppIcon slug={app.slug} size={22} />
@@ -686,11 +680,11 @@ export function AppPermalinkPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <h1
                 style={{
-                  fontSize: 22,
+                  fontSize: 17,
                   fontWeight: 700,
                   color: 'var(--ink)',
                   margin: 0,
-                  lineHeight: 1.2,
+                  lineHeight: 1.25,
                   letterSpacing: '-0.01em',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -699,17 +693,46 @@ export function AppPermalinkPage() {
               >
                 {app.name}
               </h1>
-              <div
+              {headerDescription && (
+                <p
+                  data-testid="hero-description"
+                  title={headerDescription}
+                  style={{
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                    margin: '2px 0 0',
+                    lineHeight: 1.5,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '100%',
+                  }}
+                >
+                  {headerDescription}
+                </p>
+              )}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flexShrink: 0,
+                flexWrap: 'wrap',
+              }}
+            >
+              <span
                 data-testid="hero-version-meta"
                 style={{
-                  fontSize: 12,
+                  fontSize: 10.5,
                   color: 'var(--muted)',
-                  marginTop: 2,
-                  display: 'flex',
+                  fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
                   flexWrap: 'wrap',
-                  fontFamily: 'JetBrains Mono, monospace',
                 }}
               >
                 <span data-testid="hero-version">v{app.version ?? '0.1.0'}</span>
@@ -730,32 +753,23 @@ export function AppPermalinkPage() {
                 {summary && summary.count > 0 && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, textTransform: 'none', letterSpacing: 0 }}>
                       <StarsRow value={summary.avg} size={12} />
                       {summary.avg.toFixed(1)} ({summary.count})
                     </span>
                   </>
                 )}
-              </div>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                flexShrink: 0,
-              }}
-            >
+              </span>
               {app.author && sessionUserId && app.author === sessionUserId && (
                 <Link
                   to={`/studio/${app.slug}/triggers`}
                   data-testid="cta-schedule"
                   style={{
-                    padding: '7px 12px',
+                    padding: '8px 12px',
                     border: '1px solid var(--line)',
-                    borderRadius: 8,
-                    fontSize: 13,
-                    fontWeight: 500,
+                    borderRadius: 10,
+                    fontSize: 12.5,
+                    fontWeight: 600,
                     color: 'var(--ink)',
                     background: 'var(--card)',
                     textDecoration: 'none',
@@ -805,106 +819,39 @@ export function AppPermalinkPage() {
                   }
                 }}
                 style={{
-                  padding: '7px 10px',
+                  padding: '8px 12px',
                   border: '1px solid var(--line)',
-                  borderRadius: 8,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: 'var(--muted)',
+                  borderRadius: 10,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
                   background: 'var(--card)',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 4,
+                  gap: 6,
                 }}
               >
                 <ShareIcon /> Share
               </button>
             </div>
-          </div>
-          {headerDescription && (
-            <p
-              data-testid="hero-description"
-              title={headerDescription}
-              style={{
-                fontSize: 13,
-                color: 'var(--muted)',
-                margin: 0,
-                lineHeight: 1.5,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                maxWidth: '100%',
-              }}
-            >
-              {headerDescription}
-            </p>
-          )}
-        </section>
+          </section>
 
-        {/* v16 tab bar: Run is default, everything else is opt-in. This
-            replaces the previous "scroll past marketing to reach the run
-            surface" layout. Shared-run URLs (?run=<id>) land here already. */}
-        <div
-          role="tablist"
-          aria-label="App content"
-          data-testid="permalink-tabs"
-          style={{
-            display: 'flex',
-            gap: 2,
-            borderBottom: '1px solid var(--line)',
-            marginBottom: 24,
-            overflowX: 'auto',
-          }}
-        >
-          {(
-            [
-              { id: 'run', label: 'Run' },
-              { id: 'about', label: 'About' },
-              { id: 'install', label: 'Install' },
-              { id: 'source', label: 'Source' },
-            ] as Array<{ id: PTab; label: string }>
-          ).map((t) => {
-            const isOn = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={isOn}
-                data-testid={`permalink-tab-${t.id}`}
-                data-state={isOn ? 'active' : 'inactive'}
-                onClick={() => {
-                  setActiveTab(t.id);
-                  setSearchParams((prev) => {
-                    const next = new URLSearchParams(prev);
-                    if (t.id === 'run') next.delete('tab');
-                    else next.set('tab', t.id);
-                    return next;
-                  }, { replace: true });
-                }}
-                style={{
-                  padding: '10px 16px',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border: 'none',
-                  background: 'transparent',
-                  color: isOn ? 'var(--accent)' : 'var(--muted)',
-                  borderBottom: isOn ? '2px solid var(--accent)' : '2px solid transparent',
-                  marginBottom: -1,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
+          {/* Frame body: swappable by ?tab= (Run / About / Install / Source).
+              v17 removes the mid-page underlined tab bar — secondary
+              surfaces live behind chips in the footer row below. Test-id
+              permalink-tabs moved to that chip row so analytics stay green. */}
+          <div
+            className="app-page-body"
+            style={{
+              padding: '24px',
+              background: 'var(--card)',
+            }}
+          >
 
-        {/* Run tab (DEFAULT). CLS fix (2026-04-18): min-height so the
+        {/* Run tab (DEFAULT). Renders inside the frame body, so no own
+            border/radius. CLS fix (2026-04-18): min-height so the
             output card's empty state → streaming → done transitions do
             not push footer content around above the fold. */}
         {activeTab === 'run' && (
@@ -915,11 +862,6 @@ export function AppPermalinkPage() {
             data-surface="run"
             className="run-surface"
             style={{
-              background: 'var(--card)',
-              border: '1px solid var(--line)',
-              borderRadius: 14,
-              padding: '28px 24px',
-              marginBottom: 32,
               minHeight: 320,
             }}
           >
@@ -1098,17 +1040,16 @@ export function AppPermalinkPage() {
           </section>
         )}
 
-        {/* About + reviews. 2026-04-21 restructure: the hero now shows a
-            one-line truncated description, so the full markdown
-            description always renders here (no more 200-char gate). This
-            is the canonical prose surface for the app. */}
+        {/* About + reviews. v17 restructure: sits inside the frame body
+            so no own border/radius. The hero still shows a one-line
+            truncated description, so the full markdown description
+            always renders here (no more 200-char gate). This is the
+            canonical prose surface for the app. */}
         <section
           style={{
-            background: 'var(--card)',
-            border: '1px solid var(--line)',
-            borderRadius: 14,
-            padding: '32px 28px',
+            paddingBottom: 24,
             marginBottom: 24,
+            borderBottom: '1px solid var(--line)',
           }}
         >
           {app.description && (
@@ -1144,19 +1085,15 @@ export function AppPermalinkPage() {
           <AppReviews slug={app.slug} />
         </section>
 
-        {/* Details block. 2026-04-21 restructure: former hero meta-card
-            (Created by / Category / Runtime / License / Source) moved
-            here so the primary fold of /p/:slug stays on the Run form
-            + output. Rendered as a two-column key-value grid inside the
-            About tab — secondary info, not competing with the Run CTA. */}
+        {/* Details block. v17: sits inside the frame body with a subtle
+            surface-2 card to differentiate from the About prose above. */}
         <section
           data-testid="details-card"
           style={{
-            background: 'var(--card)',
+            background: 'var(--bg)',
             border: '1px solid var(--line)',
-            borderRadius: 14,
-            padding: '24px 28px',
-            marginBottom: 24,
+            borderRadius: 12,
+            padding: '20px 22px',
           }}
         >
           <h2
@@ -1252,7 +1189,7 @@ export function AppPermalinkPage() {
             thin waitlist link consolidates the upcoming connectors so
             the live option does not compete with dead weight. */}
         {activeTab === 'install' && (
-        <section id="connectors" data-testid="connectors" style={{ marginBottom: 32 }}>
+        <section id="connectors" data-testid="connectors">
           <h2
             style={{
               fontSize: 18,
@@ -1304,12 +1241,13 @@ export function AppPermalinkPage() {
         </section>
         )}
 
-        {/* Source tab: OpenAPI + manifest viewer (v1.1 stub). */}
+        {/* Source tab: OpenAPI + manifest viewer (v1.1 stub). v17: dashed
+            panel on --bg surface, rests inside the frame body. */}
         {activeTab === 'source' && (
           <section
             data-testid="tab-content-source"
             style={{
-              background: 'var(--card)',
+              background: 'var(--bg)',
               border: '1px dashed var(--line)',
               borderRadius: 14,
               padding: '32px 28px',
@@ -1341,6 +1279,77 @@ export function AppPermalinkPage() {
             </p>
           </section>
         )}
+          </div>
+          {/* /frame body */}
+
+          {/* v17 quiet chip row — secondary surfaces (Run / About /
+              Install / Source) demoted from a mid-page underlined tab
+              bar to a pill row at the bottom of the frame. Active chip
+              reads as a green pill (--accent-soft bg + --accent-border
+              + --accent text), non-active reads as a plain pill. */}
+          <div
+            role="tablist"
+            aria-label="App content"
+            data-testid="permalink-tabs"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '14px 24px',
+              borderTop: '1px solid var(--line)',
+              background: 'var(--card)',
+              flexWrap: 'wrap',
+            }}
+          >
+            {(
+              [
+                { id: 'run', label: 'Run' },
+                { id: 'about', label: 'About this app' },
+                { id: 'install', label: 'Install in Claude' },
+                { id: 'source', label: 'Source' },
+              ] as Array<{ id: PTab; label: string }>
+            ).map((t) => {
+              const isOn = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isOn}
+                  data-testid={`permalink-tab-${t.id}`}
+                  data-state={isOn ? 'active' : 'inactive'}
+                  onClick={() => {
+                    setActiveTab(t.id);
+                    setSearchParams((prev) => {
+                      const next = new URLSearchParams(prev);
+                      if (t.id === 'run') next.delete('tab');
+                      else next.set('tab', t.id);
+                      return next;
+                    }, { replace: true });
+                  }}
+                  style={{
+                    padding: '7px 13px',
+                    fontSize: 12.5,
+                    fontWeight: isOn ? 600 : 500,
+                    border: isOn
+                      ? '1px solid var(--accent-border)'
+                      : '1px solid var(--line)',
+                    background: isOn ? 'var(--accent-soft)' : 'var(--card)',
+                    color: isOn ? 'var(--accent)' : 'var(--muted)',
+                    borderRadius: 999,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                    transition: 'color .12s, border-color .12s, background .12s',
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {/* /frame */}
       </main>
       <Footer />
       <FeedbackButton />
@@ -1395,14 +1404,6 @@ function formatRelativeTime(iso: string): string | null {
   } catch {
     return null;
   }
-}
-
-function Chevron() {
-  return (
-    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
 }
 
 function ArrowRight() {
