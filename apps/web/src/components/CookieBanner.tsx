@@ -1,7 +1,7 @@
 // Cookie consent banner.
 //
-// Desktop/tablet: fixed bottom-centre pill, ~460px max-width, Accept / Essential
-// buttons inline. Behaves like a real banner.
+// Desktop/tablet: fixed bottom-right pill, ~420px max-width, Accept / Essential
+// buttons inline. Behaves like a small corner toast.
 //
 // Mobile (< 640px, issue #104 from 2026-04-20 audit): the desktop layout
 // ate ~30% of a 375x812 iPhone viewport and overlapped the hero CTAs
@@ -9,52 +9,19 @@
 // small bottom-left pill (link-style, ~92px wide) that says "Cookies"
 // and expands on tap. Nothing below the fold until the user chooses to
 // open it, so the hero is never blocked.
-// - Persists to localStorage AND a first-party cookie so server-rendered
-//   pages can also respect the choice if we add any.
-// - Hidden once a choice exists. SSR-safe (guards against undefined window).
+//
+// Storage + consent lives in `lib/consent.ts` (so the telemetry modules
+// can read the choice without importing React). This component calls
+// `setConsent` AND inlines `initBrowserSentry` / `initPostHog` (on "Accept
+// all") and their close equivalents (on the "all" -> "essential" downgrade)
+// so the choice applies in the same session without a reload.
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { getConsent, setConsent, type Consent } from '../lib/consent';
+import { initBrowserSentry, closeBrowserSentry } from '../lib/sentry';
 
-const STORAGE_KEY = 'floom.cookie-consent';
-const COOKIE_NAME = 'floom.cookie-consent';
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
 const MOBILE_BREAKPOINT = 640;
-
-type Choice = 'essential' | 'all';
-
-function readChoice(): Choice | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const v = window.localStorage.getItem(STORAGE_KEY);
-    if (v === 'essential' || v === 'all') return v;
-  } catch {
-    // localStorage can throw in private mode; fall through to cookie.
-  }
-  if (typeof document !== 'undefined') {
-    const match = document.cookie.match(
-      new RegExp('(?:^|; )' + COOKIE_NAME.replace(/\./g, '\\.') + '=([^;]+)'),
-    );
-    if (match && (match[1] === 'essential' || match[1] === 'all')) {
-      return match[1] as Choice;
-    }
-  }
-  return null;
-}
-
-function writeChoice(choice: Choice) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, choice);
-  } catch {
-    // ignore
-  }
-  try {
-    const secure = window.location.protocol === 'https:' ? '; Secure' : '';
-    document.cookie = `${COOKIE_NAME}=${choice}; Max-Age=${COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
-  } catch {
-    // ignore
-  }
-}
 
 function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = useState(false);
@@ -75,13 +42,23 @@ export function CookieBanner() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    if (readChoice() === null) setVisible(true);
+    if (getConsent() === null) setVisible(true);
   }, []);
 
   if (!visible) return null;
 
-  const accept = (choice: Choice) => {
-    writeChoice(choice);
+  const accept = (choice: Consent) => {
+    const previous = getConsent();
+    setConsent(choice);
+    // Apply the choice to the telemetry SDKs in the same session.
+    if (choice === 'all') {
+      // Upgrade: light up browser Sentry now that we have consent.
+      initBrowserSentry();
+    } else if (previous === 'all') {
+      // Downgrade: flush + stop the SDK. Anything already in flight at
+      // the network layer can't be recalled — documented on /cookies.
+      closeBrowserSentry();
+    }
     setVisible(false);
   };
 
@@ -125,11 +102,10 @@ export function CookieBanner() {
   const isExpandedMobile = isMobile && expanded;
 
   // Audit 2026-04-22: the banner used to sit bottom-centre, which the
-  // design audit flagged as "covers the fold on every page" — centre
-  // placement with a wide 460px pill dominated the mobile fold and still
-  // drew the eye on desktop. Anchored now to bottom-right, capped at
-  // 420px, so it reads as a small corner toast. Mobile expanded variant
-  // still spans the bottom with its close button.
+  // design audit flagged as "covers the fold on every page". Anchored
+  // now to bottom-right, capped at 420px, so it reads as a small corner
+  // toast. Mobile expanded variant still spans the bottom with its
+  // close button.
   return (
     <div
       role="dialog"
@@ -156,11 +132,11 @@ export function CookieBanner() {
         color: 'var(--ink)',
       }}
     >
-      {/* a11y 2026-04-20: labelledby target for the dialog. Was
-          aria-label="Cookie consent" with no visible title; SRs now
-          announce the actual banner text. */}
+      {/* a11y 2026-04-20: labelledby target for the dialog. */}
       <p id="cookie-banner-title" style={{ margin: 0, flex: '1 1 240px', lineHeight: 1.45 }}>
-        Floom uses essential cookies for sign-in and preferences. See the{' '}
+        Floom uses essential cookies for sign-in and preferences. Choose
+        "Accept all" to also help us with anonymised analytics and error
+        reporting. See the{' '}
         <Link to="/cookies" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
           cookie policy
         </Link>

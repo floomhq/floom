@@ -1,6 +1,5 @@
 import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
-import * as Sentry from '@sentry/react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 // Landing is eager (LCP path). Everything else is lazy so the initial
 // bundle only carries the homepage React tree. Trimmed initial JS from
@@ -87,53 +86,24 @@ import { CookieBanner } from './components/CookieBanner';
 import { RouteLoading } from './components/RouteLoading';
 import { primeSession, refreshSession } from './hooks/useSession';
 import { initPostHog, identifyFromSession, track } from './lib/posthog';
+import { initBrowserSentry } from './lib/sentry';
 import type { SessionMePayload } from './lib/types';
 import './styles/globals.css';
 
-// Optional Sentry wiring. No-op when VITE_SENTRY_DSN is unset — the preview
-// image ships without a DSN so this stays dark until Federico wires one up.
-// Source maps are uploaded via Sentry's build plugin (not configured here
-// yet — that's a follow-up when Sentry is actually turned on).
-const SENTRY_DSN = (import.meta as { env?: Record<string, string | undefined> }).env
-  ?.VITE_SENTRY_DSN;
-if (SENTRY_DSN) {
-  const SECRET_RE = /(password|token|api[_-]?key|authorization|secret|cookie)/i;
-  function scrubDeep(v: unknown, depth = 0): unknown {
-    if (depth > 8 || v === null || v === undefined) return v;
-    if (Array.isArray(v)) return v.map((x) => scrubDeep(x, depth + 1));
-    if (typeof v === 'object') {
-      const obj = v as Record<string, unknown>;
-      for (const k of Object.keys(obj)) {
-        if (SECRET_RE.test(k)) obj[k] = '[Scrubbed]';
-        else obj[k] = scrubDeep(obj[k], depth + 1);
-      }
-      return obj;
-    }
-    return v;
-  }
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    environment: (import.meta as { env?: Record<string, string | undefined> }).env?.MODE ||
-      'production',
-    integrations: [Sentry.browserTracingIntegration()],
-    tracesSampleRate: 0.1,
-    beforeSend(event) {
-      if (event.request) scrubDeep(event.request);
-      if (event.extra) scrubDeep(event.extra);
-      if (event.contexts) scrubDeep(event.contexts);
-      return event;
-    },
-  });
-}
+// Browser Sentry (launch #311). Strict-opt-in — the SDK only boots when
+// the user picked "Accept all" AND VITE_SENTRY_DSN is set. See
+// apps/web/src/lib/sentry.ts for the gating contract; CookieBanner wires
+// the upgrade/downgrade transitions so the choice applies mid-session.
+initBrowserSentry();
 
 // Kick off the /api/session/me fetch as soon as the bundle loads so every
 // page's first render already has a value.
 primeSession();
 
-// PostHog analytics (launch-infra #4, 2026-04-20). No-op when
-// VITE_POSTHOG_KEY is unset; see apps/web/src/lib/posthog.ts. Init
-// happens before the first render so the landing_viewed event below fires
-// with the correct distinct_id.
+// PostHog analytics (launch #311). Also strict-opt-in — see
+// apps/web/src/lib/posthog.ts. When consent is "essential" OR the key is
+// unset, init() is a hard no-op: track() and identifyFromSession()
+// short-circuit, so calling them unconditionally below is safe.
 initPostHog();
 
 // Rebind PostHog identity whenever the session hook resolves. Covers
