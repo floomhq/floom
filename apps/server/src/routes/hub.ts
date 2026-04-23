@@ -39,6 +39,7 @@ import {
   invalidateHubCache,
   setHubCache,
 } from '../lib/hub-cache.js';
+import { deleteAppRecordById } from '../services/app_delete.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -570,11 +571,8 @@ hubRouter.delete('/:slug', async (c) => {
     return c.json({ error: 'Not the owner of this app', code: 'not_owner' }, 403);
   }
 
-  db.prepare('DELETE FROM apps WHERE id = ?').run(app.id);
+  deleteAppRecordById(app.id);
   // Runs are dropped by ON DELETE CASCADE (see db.ts CREATE TABLE runs).
-  // Perf fix (2026-04-20): drop the /api/hub 5s cache so the deleted
-  // app stops appearing in the directory immediately.
-  invalidateHubCache();
   return c.json({ ok: true, slug });
 });
 

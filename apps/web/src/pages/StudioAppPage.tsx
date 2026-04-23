@@ -345,7 +345,7 @@ export function StudioAppPage() {
           )}
 
           {/* Danger zone · delete app. Typed-slug confirm prevents fat-finger
-              deletes. DELETE /api/hub/:slug cascades runs via FK. */}
+              deletes. DELETE /api/me/apps/:slug; runs cascade via FK. */}
           <section
             data-testid="studio-app-danger-zone"
             style={{
@@ -394,13 +394,13 @@ export function StudioAppPage() {
                 }}
                 data-testid="studio-app-delete-trigger"
                 style={{
-                  padding: '9px 16px',
+                  padding: '8px 14px',
                   background: 'transparent',
-                  color: '#c2321f',
-                  border: '1px solid #c2321f',
+                  color: 'var(--muted)',
+                  border: '1px solid var(--line)',
                   borderRadius: 8,
                   fontSize: 13,
-                  fontWeight: 600,
+                  fontWeight: 500,
                   cursor: 'pointer',
                   fontFamily: 'inherit',
                 }}
@@ -504,15 +504,15 @@ export function StudioAppPage() {
                 data-testid="studio-app-delete-submit"
                 style={{
                   padding: '8px 16px',
-                  background: '#c2321f',
-                  color: '#fff',
-                  border: 'none',
+                  background: 'transparent',
+                  color: '#a02818',
+                  border: '1px solid #c2321f',
                   borderRadius: 8,
                   fontSize: 13,
                   fontWeight: 600,
                   cursor: confirmInput === app.slug && !deleting ? 'pointer' : 'not-allowed',
                   fontFamily: 'inherit',
-                  opacity: confirmInput === app.slug && !deleting ? 1 : 0.6,
+                  opacity: confirmInput === app.slug && !deleting ? 1 : 0.5,
                 }}
               >
                 {deleting ? 'Deleting...' : 'Delete forever'}
