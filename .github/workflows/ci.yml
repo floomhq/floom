@@ -7,6 +7,14 @@ on:
     branches: [main]
 
 jobs:
+  boundary-check:
+    name: Public/Internal Boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Block docs/internal/ and internal/ in public repo
+        run: bash scripts/check-no-internal-docs.sh ci
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
