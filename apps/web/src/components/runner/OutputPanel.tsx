@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AppDetail, PickResult, RunRecord } from '../../lib/types';
-import { pickRenderer, shapePick } from '../output/rendererCascade';
+import { isArrayOfFlatObjects, pickRenderer, shapePick } from '../output/rendererCascade';
 import { JsonRaw } from '../output/JsonRaw';
 import { Markdown } from '../output/Markdown';
+import { RowTable } from '../output/RowTable';
 import { ScalarBig } from '../output/ScalarBig';
 import { TextBig } from '../output/TextBig';
 import { sanitizeHtml } from '../../lib/sanitize';
@@ -210,11 +211,27 @@ function OutputRenderer({ outputs }: { outputs: unknown }) {
 
   // Markdown field (also promotes a top-level `summary` string, used by
   // openkeyword / opencontext / openanalytics where it is the primary artefact).
+  // When a row array and prose both exist (e.g. competitor / resume demos),
+  // do not return Markdown alone — v16 `pickRenderer` already handles that when
+  // appDetail is present; this is for legacy callers with no manifest (#470).
   const markdown =
     typeof o.markdown === 'string' ? o.markdown :
     typeof o.summary === 'string' ? o.summary :
     typeof o.report === 'string' ? o.report : null;
   if (markdown) {
+    const compositeTable =
+      isArrayOfFlatObjects(o.competitors) ? { rows: o.competitors, label: 'Competitors' as const } :
+      isArrayOfFlatObjects(o.ranked) ? { rows: o.ranked, label: 'Ranked candidates' as const } :
+      isArrayOfFlatObjects(o.rows) ? { rows: o.rows, label: 'Rows' as const } :
+      null;
+    if (compositeTable) {
+      return (
+        <div data-renderer="composite" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <RowTable rows={compositeTable.rows} label={compositeTable.label} />
+          <Markdown content={markdown} />
+        </div>
+      );
+    }
     return <Markdown content={markdown} />;
   }
 

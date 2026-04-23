@@ -254,7 +254,10 @@ function autoPick(
     );
     if (md) {
       return (
-        <div className="floom-auto-composite-output">
+        <div
+          className="floom-auto-composite-output"
+          data-renderer="composite"
+        >
           {table}
           <div style={{ marginTop: 16 }}>
             <Markdown content={md} />
@@ -332,7 +335,7 @@ function isArrayOfStrings(v: unknown): v is string[] {
   );
 }
 
-function isArrayOfFlatObjects(v: unknown): v is Array<Record<string, unknown>> {
+export function isArrayOfFlatObjects(v: unknown): v is Array<Record<string, unknown>> {
   if (!Array.isArray(v) || v.length === 0) return false;
   if (v.length > 500) return false;
   let keySignature: string | null = null;
