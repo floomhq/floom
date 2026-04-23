@@ -115,17 +115,21 @@ PostgreSQL
 
 ### Fixture CVs (sample-cvs/)
 
-1. **Alice Johnson** — Senior Backend Engineer, 8y Python + Postgres + FastAPI at Plaid and Stripe, Kafka event sourcing, on-call.
-2. **Bob Martinez** — Full-stack, 5y, mostly Node.js + React, MongoDB-heavy, Python only for data scripts.
-3. **Carol Nguyen** — Data scientist, PhD Statistics, 4y applied ML, no backend, no production services.
+1. **Alice Johnson** — Senior Backend Engineer, 8y Python + Postgres + FastAPI at Plaid and Stripe, Kafka event sourcing, on-call. San Francisco.
+2. **Bob Martinez** — Full-stack, 5y, mostly Node.js + React, MongoDB-heavy, Python only for data scripts. Seattle.
+3. **Dirk Weber** — Senior Backend Engineer, 7y Python + Postgres + FastAPI at N26 and Solaris (Berlin fintechs), Kafka + Debezium, on-call. Berlin.
+
+The set intentionally spans two locations (SF + Berlin) with a top-fit
+candidate in each, so the demo surfaces a strong match whether or not
+the JD adds a location / timezone must-have.
 
 ### Actual live output (Gemini 3)
 
 | # | Candidate | Score | must_have_pass | Why |
 |---|-----------|-------|----------------|-----|
 | 1 | cv-f24fdfd2 (Alice) | **98** | true  | 8y backend, direct FastAPI + Postgres + AWS + Kafka match. |
-| 2 | cv-7747237b (Bob)   |  30   | false | Node.js/MongoDB core, Python only for ETL. |
-| 3 | cv-3ff1d45e (Carol) |  10   | false | No backend experience, no production API ownership. |
+| 2 | cv-aa6f12c9 (Dirk)  | **92** | true  | 7y Python + Postgres + FastAPI + AWS + Kafka at Berlin fintechs. |
+| 3 | cv-7747237b (Bob)   |  30   | false | Node.js/MongoDB core, Python only for ETL. |
 
 `summary`: "Screened 3 CV(s) against the JD. 3 scored, 0 failed. Top candidate: cv-f24fdfd2 (98/100)."
 
