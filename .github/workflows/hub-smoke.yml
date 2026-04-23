@@ -16,6 +16,11 @@ jobs:
   fast-apps:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # For PRs the job runs against a shared `preview.floom.dev` that every
+    # branch's tests hit, so a preview regression from one merge cascades to
+    # every open PR. Don't let that block launch merges. On scheduled and
+    # manual runs the job stays required. Tracked in issue #473.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +46,17 @@ jobs:
         run: |
           export BASE_URL="${BASE_URL:-https://preview.floom.dev}"
           pnpm exec playwright test tests/fast-apps.spec.ts
+
+      - name: Upload Playwright artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-apps-playwright-${{ github.run_id }}
+          path: |
+            packages/hub-smoke/test-results/**
+            packages/hub-smoke/playwright-report/**
+          retention-days: 14
+          if-no-files-found: ignore
 
   # Optional: set repo secrets E2E_EMAIL + E2E_PASSWORD (preview account) to run nightly.
   full-hub:
