@@ -183,6 +183,12 @@ function findAction(app: Pick<AppDetail, 'manifest'>, actionKey?: string): Actio
 interface AutoPickCtx {
   appSlug?: string;
   runId?: string;
+  /**
+   * From `manifest.render.rows_field` when present (same convention as Layer 2
+   * RowTable). When multiple `json`/`table` outputs exist, prefer this field's
+   * spec first so the primary table wins over auxiliary row arrays.
+   */
+  rowsFieldHint?: string;
 }
 
 /**
@@ -223,9 +229,18 @@ function autoPick(
     }
   }
 
-  // 2. Declared json / table + row array + optional summary/report (Issue #471)
-  for (const spec of outputs) {
-    if (spec.type !== 'json' && spec.type !== 'table') continue;
+  // 2. Declared json / table + row array + optional summary/report (Issue #343 / #470)
+  const tableLikeSpecs = outputs.filter((o) => o.type === 'json' || o.type === 'table');
+  let orderedTableSpecs = tableLikeSpecs;
+  const hint = ctx?.rowsFieldHint;
+  if (hint) {
+    const idx = tableLikeSpecs.findIndex((s) => s.name === hint);
+    if (idx > 0) {
+      const pick = tableLikeSpecs[idx]!;
+      orderedTableSpecs = [pick, ...tableLikeSpecs.slice(0, idx), ...tableLikeSpecs.slice(idx + 1)];
+    }
+  }
+  for (const spec of orderedTableSpecs) {
     const raw = outObj[spec.name];
     if (!isArrayOfFlatObjects(raw) || raw.length === 0) continue;
     const md = pluckMarkdownSidecar(outObj);
@@ -239,7 +254,10 @@ function autoPick(
     );
     if (md) {
       return (
-        <div className="floom-auto-composite-output">
+        <div
+          className="floom-auto-composite-output"
+          data-renderer="composite"
+        >
           {table}
           <div style={{ marginTop: 16 }}>
             <Markdown content={md} />
@@ -317,7 +335,7 @@ function isArrayOfStrings(v: unknown): v is string[] {
   );
 }
 
-function isArrayOfFlatObjects(v: unknown): v is Array<Record<string, unknown>> {
+export function isArrayOfFlatObjects(v: unknown): v is Array<Record<string, unknown>> {
   if (!Array.isArray(v) || v.length === 0) return false;
   if (v.length > 500) return false;
   let keySignature: string | null = null;
@@ -539,7 +557,15 @@ export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): Ca
 
   const actionSpec = findAction(app, action);
   const outputs = actionSpec?.outputs ?? [];
-  const auto = autoPick(outputs, runOutput, { appSlug, runId });
+  const renderCfg = app.manifest?.render;
+  const rowsFieldHint =
+    renderCfg &&
+    typeof renderCfg === 'object' &&
+    'rows_field' in renderCfg &&
+    typeof (renderCfg as { rows_field?: unknown }).rows_field === 'string'
+      ? (renderCfg as { rows_field: string }).rows_field
+      : undefined;
+  const auto = autoPick(outputs, runOutput, { appSlug, runId, rowsFieldHint });
   if (auto) {
     return { kind: 'auto', element: auto };
   }
