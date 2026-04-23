@@ -345,6 +345,12 @@ export interface SessionMePayload {
     google: boolean;
     github: boolean;
   };
+  // Launch-2026-04-27 feature flag. When false, every Deploy / Publish
+  // CTA in the web UI becomes a "Join waitlist" affordance that POSTs
+  // to /api/waitlist. When true, the original deploy flow works as-is.
+  // Defaults to false server-side, so treat `undefined` as false for
+  // forward compatibility with older server builds.
+  deploy_enabled: boolean;
 }
 
 export interface MeRunSummary {

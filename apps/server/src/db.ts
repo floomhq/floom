@@ -728,6 +728,40 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
 `);
 
+// ---------- Deploy waitlist (launch 2026-04-27) ----------
+// Email capture for the floom.dev production rollout. When DEPLOY_ENABLED
+// is false on prod, every "Deploy / Publish" CTA swaps to a waitlist
+// affordance that POSTs here. preview.floom.dev keeps DEPLOY_ENABLED=true
+// so the real deploy flow is unaffected.
+//
+// - email: stored as-is (case preserved for display) but uniqueness is
+//   enforced on LOWER(email) so "Alice@x.com" and "alice@x.com" dedupe.
+// - source: which surface the signup came from (hero, studio-deploy,
+//   me-publish, direct, etc.). Free-form TEXT; truncated to 64 chars at
+//   insert time to match the spec.
+// - user_agent: raw UA header, capped to 512 chars so we don't store
+//   megabytes of spoofed nonsense.
+// - ip_hash: sha256(ip + WAITLIST_IP_HASH_SECRET) hex. Never store raw
+//   IP. Lets the route layer rate-limit per-IP without retaining PII.
+//
+// Postgres would use citext + gen_random_uuid + timestamptz here; on
+// SQLite we hand-roll a UUID at insert time and use the standard TEXT
+// datetime('now') pattern used by every other Floom table.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS waitlist_signups (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    source TEXT,
+    user_agent TEXT,
+    ip_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_waitlist_email_lower
+    ON waitlist_signups(LOWER(email));
+  CREATE INDEX IF NOT EXISTS idx_waitlist_created
+    ON waitlist_signups(created_at);
+`);
+
 // =====================================================================
 // ---------- Secrets policy (per-app creator-override vs user-vault) ---
 // =====================================================================
@@ -897,8 +931,9 @@ db.exec(`
 // secrets-policy lands v10: app_secret_policies + app_creator_secrets.
 // triggers (unified schedule + webhook) lands v11.
 // Manual publish-review gate (#362) lands v12: apps.publish_status.
+// Deploy waitlist (launch 2026-04-27) lands v13: waitlist_signups.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 12) {
-  db.pragma('user_version = 12');
+if (currentUserVersion < 13) {
+  db.pragma('user_version = 13');
 }

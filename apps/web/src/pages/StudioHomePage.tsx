@@ -24,10 +24,11 @@ import { StudioSignedOutState } from '../components/studio/StudioSignedOutState'
 import { Sparkline } from '../components/studio/Sparkline';
 import * as api from '../api/client';
 import { refreshMyApps, useMyApps } from '../hooks/useMyApps';
-import { useSession } from '../hooks/useSession';
+import { useSession, useDeployEnabled } from '../hooks/useSession';
 import { formatTime } from '../lib/time';
 import type { AppVisibility, CreatorApp } from '../lib/types';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
+import { WaitlistModal } from '../components/WaitlistModal';
 
 export function StudioHomePage() {
   const { apps, error: loadError } = useMyApps();
@@ -37,6 +38,13 @@ export function StudioHomePage() {
   const [confirmInput, setConfirmInput] = useState('');
   const [deleting, setDeleting] = useState(false);
   const signedOutPreview = !!session && session.cloud_mode && session.user.is_local;
+  // Launch flag. Null while session loads → fall back to showing the
+  // original + New app / Start publishing CTAs rather than flickering.
+  // A cold-load user who clicks before the session resolves would go to
+  // /studio/build, which in turn runs through the same gate at render.
+  const deployEnabled = useDeployEnabled();
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const waitlistMode = deployEnabled === false;
 
   useEffect(() => {
     if (signedOutPreview) {
@@ -94,14 +102,26 @@ export function StudioHomePage() {
           >
             Your apps
           </h1>
-          <Link
-            to="/studio/build"
-            data-testid="studio-new-app-cta"
-            className="btn-ink"
-            style={{ textDecoration: 'none' }}
-          >
-            + New app
-          </Link>
+          {waitlistMode ? (
+            <button
+              type="button"
+              onClick={() => setWaitlistOpen(true)}
+              data-testid="studio-new-app-waitlist"
+              className="btn-ink"
+              style={{ border: 'none', cursor: 'pointer', font: 'inherit' }}
+            >
+              Join waitlist
+            </button>
+          ) : (
+            <Link
+              to="/studio/build"
+              data-testid="studio-new-app-cta"
+              className="btn-ink"
+              style={{ textDecoration: 'none' }}
+            >
+              + New app
+            </Link>
+          )}
         </div>
 
         {error && (
@@ -150,9 +170,21 @@ export function StudioHomePage() {
             >
               Paste your app's link. Floom gives you a Claude tool, a page to share, a CLI, and a URL your teammates can hit.
             </p>
-            <Link to="/studio/build" className="btn-ink">
-              Start publishing
-            </Link>
+            {waitlistMode ? (
+              <button
+                type="button"
+                onClick={() => setWaitlistOpen(true)}
+                data-testid="studio-empty-waitlist"
+                className="btn-ink"
+                style={{ border: 'none', cursor: 'pointer', font: 'inherit' }}
+              >
+                Join waitlist
+              </button>
+            ) : (
+              <Link to="/studio/build" className="btn-ink">
+                Start publishing
+              </Link>
+            )}
           </div>
         )}
 
@@ -272,6 +304,11 @@ export function StudioHomePage() {
           </div>
         )}
       </div>
+      <WaitlistModal
+        open={waitlistOpen}
+        onClose={() => setWaitlistOpen(false)}
+        source="studio-deploy"
+      />
     </StudioLayout>
   );
 }

@@ -76,6 +76,12 @@ const CookiesPage = lazy(() => import('./pages/CookiesPage').then(m => ({ defaul
 // link in the centre nav; previously it was a dead `#` anchor. This
 // page is a minimal landing that points at GitHub Releases + Discord.
 const ChangelogPage = lazy(() => import('./pages/ChangelogPage').then(m => ({ default: m.ChangelogPage })));
+// Deploy waitlist fallback page (launch 2026-04-27). The primary
+// surface is WaitlistModal, popped from every gated Deploy CTA when
+// DEPLOY_ENABLED=false. /waitlist is the URL we link to from the
+// confirmation email for users who lost the modal, and the destination
+// for the /deploy shortcut when the flow is gated.
+const WaitlistPage = lazy(() => import('./pages/WaitlistPage').then(m => ({ default: m.WaitlistPage })));
 import { IconSprite } from './components/IconSprite';
 import { CookieBanner } from './components/CookieBanner';
 import { RouteLoading } from './components/RouteLoading';
@@ -347,6 +353,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/pricing" element={<PricingPage />} />
         {/* /changelog — added alongside v17 TopBar (PR #405 ripple fix). */}
         <Route path="/changelog" element={<ChangelogPage />} />
+        <Route path="/waitlist" element={<WaitlistPage />} />
         <Route path="/p/:slug/dashboard" element={<PSlugDashboardRedirect />} />
         {/* Legal pages. Floom, Inc. is a Delaware C-Corp. /legal is the
             canonical company-info route; /imprint is kept as a back-compat

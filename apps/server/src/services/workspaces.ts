@@ -694,6 +694,14 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
           process.env.GITHUB_OAUTH_CLIENT_SECRET,
       ),
     },
+    // DEPLOY_ENABLED gates every Deploy / Publish CTA in the web UI.
+    // Default-false ("waitlist mode") so a misconfigured prod box never
+    // accidentally exposes the deploy flow. preview.floom.dev opts in
+    // with DEPLOY_ENABLED=true to keep the full flow available for
+    // internal dogfooding. Self-hosters can also flip it on to keep
+    // their workflows unchanged — the waitlist form still works in
+    // that mode, it just isn't the default affordance anymore.
+    deploy_enabled: isDeployEnabled(),
   };
 }
 
@@ -756,4 +764,18 @@ export function provisionPersonalWorkspace(
   });
   tx();
   return id;
+}
+
+/**
+ * Parse the DEPLOY_ENABLED env var. Accepts standard truthy strings
+ * ("true", "1", "yes", "on") case-insensitively. Anything else —
+ * including unset, empty, "false", "0" — is treated as disabled.
+ *
+ * Module-local so tests and `/api/session/me` read the same gate.
+ */
+function isDeployEnabled(): boolean {
+  const raw = process.env.DEPLOY_ENABLED;
+  if (!raw) return false;
+  const v = raw.trim().toLowerCase();
+  return v === 'true' || v === '1' || v === 'yes' || v === 'on';
 }
