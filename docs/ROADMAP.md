@@ -1,12 +1,12 @@
 # Floom Roadmap
 
-Living document. Snapshot as of **2026-04-17**.
+Living document. Snapshot as of **2026-04-24**.
 
 Floom is pre-1.0. Anything here can shift as we learn from real usage.
 
 ## Current state
 
-Shipped layers (6): manifest, ingest, runner, 3 surfaces (web + MCP + HTTP), runs, auth. The cloud tier at [floom.dev](https://floom.dev) runs the same image as the self-host Docker release.
+Shipped layers (6): manifest, ingest, runner, 3 surfaces (web + MCP + HTTP), runs, auth. **[floom.dev](https://floom.dev)** is the v0.4.0-mvp cloud deployment: it is being moved to the current build, the waitlist gates **publishing** new apps, while **consuming** existing public apps stays open. **[preview.floom.dev](https://preview.floom.dev)** auto-deploys from `main` and is the rolling preview. The self-host image ([`ghcr.io/floomhq/floom-monorepo`](https://github.com/floomhq/floom/pkgs/container/floom-monorepo)) is the same codebase with different packaging—the compiled server matches what we ship in cloud, but cloud adds managed secrets, rate limits, and the waitlist gate.
 
 - Web form + output renderer at `/p/:slug`
 - Per-app MCP server at `/mcp/app/:slug`
