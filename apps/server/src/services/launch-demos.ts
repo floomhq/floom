@@ -55,7 +55,7 @@ interface LaunchDemo {
   manifest: NormalizedManifest;
 }
 
-const DEMOS: LaunchDemo[] = [
+export const DEMOS: LaunchDemo[] = [
   {
     slug: 'lead-scorer',
     name: 'Lead Scorer',

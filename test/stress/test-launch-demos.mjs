@@ -21,6 +21,7 @@ process.env.DATA_DIR = join(tmp, 'data');
 const {
   fingerprintDemoContext,
   imageTagForDemo,
+  DEMOS,
 } = await import('../../apps/server/src/services/launch-demos.ts');
 
 let passed = 0;
@@ -73,6 +74,31 @@ log(
 );
 
 rmSync(tmp, { recursive: true, force: true });
+
+// Regression guard (Federico 2026-04-23): every launch demo that routes
+// through the BYOK gate (lead-scorer / competitor-analyzer / resume-screener)
+// must declare GEMINI_API_KEY in its seeded manifest, otherwise the runner
+// will not inject the server-side key and free-tier runs return an
+// auth_error instead of succeeding. This was verified correct on
+// 2026-04-23 when Federico asked "shouldnt resume_screener have a gemini
+// api key secret?" — all 3 manifests do declare it. This test prevents
+// silent regression if someone edits the seeder.
+const BYOK_GATED = ['lead-scorer', 'competitor-analyzer', 'resume-screener'];
+for (const slug of BYOK_GATED) {
+  const demo = DEMOS.find((d) => d.slug === slug);
+  log(
+    `launch demo ${slug} is present in seeder`,
+    demo !== undefined,
+    demo ? undefined : 'DEMOS missing the slug entry',
+  );
+  if (!demo) continue;
+  const secrets = demo.manifest?.secrets_needed ?? [];
+  log(
+    `launch demo ${slug} declares GEMINI_API_KEY`,
+    secrets.includes('GEMINI_API_KEY'),
+    `secrets_needed = ${JSON.stringify(secrets)}`,
+  );
+}
 
 console.log(`\npassed=${passed} failed=${failed}`);
 if (failed > 0) process.exit(1);
