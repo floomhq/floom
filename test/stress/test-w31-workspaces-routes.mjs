@@ -87,6 +87,13 @@ let r = await fetchRoute(workspacesRouter, 'POST', '/', {
 log('POST /: 201', r.status === 201, `got ${r.status}`);
 log('POST /: workspace.id starts with ws_', r.json?.workspace?.id?.startsWith('ws_'));
 log('POST /: workspace.slug=acme-inc', r.json?.workspace?.slug === 'acme-inc');
+// Security H1 (audit 2026-04-23): wrapped_dek MUST never cross the API
+// boundary. It's the AES-wrapped DEK ciphertext — useless without the
+// KEK, but still defense-in-depth.
+log(
+  'POST /: response does NOT include wrapped_dek',
+  !('wrapped_dek' in (r.json?.workspace || {})),
+);
 
 // capture session cookie for follow-up requests
 const setCookie = r.headers.get('set-cookie') || '';
@@ -119,11 +126,20 @@ log('GET /: workspaces is an array', Array.isArray(r.json?.workspaces));
 const slugs = r.json.workspaces.map((w) => w.slug);
 log('GET /: includes local', slugs.includes('local'));
 log('GET /: includes acme-inc', slugs.includes('acme-inc'));
+// Security H1: no wrapped_dek on any workspace in the list.
+log(
+  'GET /: no workspace exposes wrapped_dek',
+  r.json.workspaces.every((w) => !('wrapped_dek' in w)),
+);
 
 // ---- 5. GET /:id happy path ----
 r = await fetchRoute(workspacesRouter, 'GET', `/${acmeId}`, undefined, cookie);
 log('GET /:id: 200', r.status === 200);
 log('GET /:id: name matches', r.json?.workspace?.name === 'Acme Inc');
+log(
+  'GET /:id: response does NOT include wrapped_dek',
+  !('wrapped_dek' in (r.json?.workspace || {})),
+);
 
 // ---- 6. GET /:id missing → 404 ----
 r = await fetchRoute(

@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for Typecheck
-        uses: lewagon/wait-on-check-action@v1.3.4
+        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
         with:
           ref: ${{ github.sha }}
           check-name: 'Typecheck'
@@ -34,7 +34,7 @@ jobs:
           wait-interval: 10
           allowed-conclusions: success
       - name: Wait for Test
-        uses: lewagon/wait-on-check-action@v1.3.4
+        uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc  # v1.3.4
         with:
           ref: ${{ github.sha }}
           check-name: 'Test'
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: SSH to AX41 (forced-command runs deploy script)
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.AX41_HOST }}
           username: ${{ secrets.AX41_USER }}

@@ -222,6 +222,7 @@ if (process.env.FLOOM_AUTH_TOKEN) {
 //   - POST /api/:slug/run         (slug-keyed, primary for paste-first)
 //   - POST /api/:slug/jobs        (async enqueue)
 //   - POST /mcp/app/:slug         (per-app MCP tool calls)
+//   - POST /api/hub/ingest        (HTTP ingest; MCP ingest_app has its own daily cap)
 // The MCP admin root (/mcp) is rate-limited separately inside the tool
 // handler (ingest_app only, 10/day).
 const rateLimit = runRateLimitMiddleware(resolveUserContext);
@@ -233,6 +234,13 @@ app.use('/api/run', runBodyLimit, rateLimit);
 app.use('/api/:slug/run', runBodyLimit, rateLimit);
 app.use('/api/:slug/jobs', runBodyLimit, rateLimit);
 app.use('/mcp/app/:slug', runBodyLimit, rateLimit);
+// Security H2 (audit 2026-04-23): /api/hub/ingest was the only
+// unauthenticated-in-OSS write surface missing from the run-rate-limit
+// umbrella. The MCP equivalent (`ingest_app` tool) already has its own
+// 10/day cap via checkMcpIngestLimit, but the HTTP surface went
+// uncapped. Route covers only POST (other hub paths are reads / owner-
+// scoped writes and route through their own auth).
+app.use('/api/hub/ingest', runBodyLimit, rateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);

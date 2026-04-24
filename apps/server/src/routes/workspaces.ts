@@ -37,10 +37,32 @@ import {
 } from '../services/workspaces.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
-import type { WorkspaceMemberRole } from '../types.js';
+import type { WorkspaceMemberRole, WorkspaceRecord } from '../types.js';
 
 export const workspacesRouter = new Hono();
 export const sessionRouter = new Hono();
+
+// --------------------------------------------------------------------
+// Public DTO — strip server-only fields before any JSON response.
+//
+// Security H1 (audit 2026-04-23): the service layer returns the full
+// WorkspaceRecord row including `wrapped_dek` — the AES-wrapped DEK
+// ciphertext — which is needed internally for user_secrets encryption
+// but must never cross the API boundary. On its own the ciphertext is
+// useless without the KEK, but shipping it to clients is still a
+// defense-in-depth violation and makes a future KEK leak unnecessarily
+// catastrophic. This helper is the one chokepoint every workspace
+// response flows through.
+// --------------------------------------------------------------------
+type PublicWorkspace = Omit<WorkspaceRecord, 'wrapped_dek'>;
+
+function toPublicWorkspace(w: WorkspaceRecord): PublicWorkspace {
+  // Intentionally exhaustive destructure so a new sensitive column added
+  // to WorkspaceRecord fails the type-check here instead of silently
+  // leaking.
+  const { wrapped_dek: _wrapped_dek, ...pub } = w;
+  return pub;
+}
 
 // --------------------------------------------------------------------
 // Zod schemas
@@ -146,7 +168,7 @@ workspacesRouter.post('/', async (c) => {
   }
   try {
     const w = ws.create(ctx, parsed.data);
-    return c.json({ workspace: w }, 201);
+    return c.json({ workspace: toPublicWorkspace(w) }, 201);
   } catch (err) {
     const m = mapError(err);
     return c.json(m.body, m.status);
@@ -163,7 +185,7 @@ workspacesRouter.get('/', async (c) => {
     const rows = ws.listMine(ctx);
     return c.json({
       workspaces: rows.map((r) => ({
-        ...r.workspace,
+        ...toPublicWorkspace(r.workspace),
         role: r.role,
       })),
     });
@@ -181,7 +203,7 @@ workspacesRouter.get('/:id', async (c) => {
   const id = c.req.param('id') || '';
   try {
     const w = ws.getById(ctx, id);
-    return c.json({ workspace: w });
+    return c.json({ workspace: toPublicWorkspace(w) });
   } catch (err) {
     const m = mapError(err);
     return c.json(m.body, m.status);
@@ -217,7 +239,7 @@ workspacesRouter.patch('/:id', async (c) => {
   }
   try {
     const w = ws.update(ctx, id, parsed.data);
-    return c.json({ workspace: w });
+    return c.json({ workspace: toPublicWorkspace(w) });
   } catch (err) {
     const m = mapError(err);
     return c.json(m.body, m.status);
