@@ -399,8 +399,11 @@ export function WaitlistPage() {
       contentStyle={{ maxWidth: 1120 }}
     >
       {/* 1. Hero ----------------------------------------------------------- */}
+      {/* 2026-04-24 hero trim: killed the "Waitlist" eyebrow (the pill already
+          anchors launch week, and the page title handles the route context).
+          Merged lede + micro into one line so the form sits higher on the
+          viewport. Federico: "so much bloat?" */}
       <section style={HERO_SECTION} data-testid="waitlist-hero">
-        <div style={EYEBROW_STYLE}>Waitlist</div>
         <div
           style={LAUNCH_PILL_STYLE}
           data-testid="waitlist-launch-pill"
@@ -412,12 +415,8 @@ export function WaitlistPage() {
         <h1 style={H1_STYLE}>Ship AI apps fast.</h1>
         <p style={SUBHEAD_STYLE}>The protocol and runtime for agentic work.</p>
         <p style={LEDE_STYLE}>
-          Floom is already live. Self-host today with one Docker command, or
-          join the waitlist for Floom Cloud, going live 27 April 2026.
-        </p>
-        <p style={MICRO_STYLE}>
-          We&rsquo;ll email you the moment Cloud opens. The repo is public, so
-          you don&rsquo;t have to wait to build with it.
+          Self-host today. Cloud goes live 27 April. Drop your email and
+          we&rsquo;ll let you in.
         </p>
       </section>
 
