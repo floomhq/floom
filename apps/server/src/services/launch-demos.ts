@@ -43,6 +43,32 @@ export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
   process.env.LAUNCH_DEMO_BUILD_TIMEOUT || 600_000,
 );
 
+type BuildEvent = {
+  errorDetail?: { message?: string } | unknown;
+  error?: unknown;
+};
+
+export type SeedLogger = Pick<Console, 'log' | 'warn' | 'error'>;
+
+export interface LaunchDemoDockerLike {
+  ping(): Promise<unknown>;
+  buildImage(file: unknown, opts: { t: string; rm: boolean; forcerm: boolean }): Promise<unknown>;
+  getImage(tag: string): { inspect(): Promise<unknown> };
+  modem: {
+    followProgress(
+      stream: unknown,
+      onFinished: (err: Error | null, output?: BuildEvent[]) => void,
+      onProgress?: (event: BuildEvent) => void,
+    ): void;
+  };
+}
+
+interface SeedLaunchDemosOptions {
+  docker?: LaunchDemoDockerLike;
+  logger?: SeedLogger;
+  repoRoot?: string | null;
+}
+
 interface LaunchDemo {
   slug: string;
   name: string;
@@ -252,7 +278,10 @@ function findRepoRoot(): string | null {
   return null;
 }
 
-async function imageExists(docker: Docker, tag: string): Promise<boolean> {
+async function imageExists(
+  docker: Pick<LaunchDemoDockerLike, 'getImage'>,
+  tag: string,
+): Promise<boolean> {
   try {
     await docker.getImage(tag).inspect();
     return true;
@@ -310,7 +339,7 @@ export function imageTagForDemo(
 }
 
 async function buildDemoImage(
-  docker: Docker,
+  docker: LaunchDemoDockerLike,
   contextPath: string,
   tag: string,
 ): Promise<void> {
@@ -332,10 +361,7 @@ async function buildDemoImage(
       (err, output) => {
         clearTimeout(timer);
         if (err) return rejectP(err);
-        const errEvent = (output || []).find(
-          (e: { errorDetail?: unknown; error?: unknown }) =>
-            e.errorDetail || e.error,
-        );
+        const errEvent = (output || []).find((e) => e.errorDetail || e.error);
         if (errEvent) {
           const msg =
             (typeof errEvent.error === 'string' ? errEvent.error : null) ||
@@ -385,7 +411,7 @@ function demoSecretKeys(): string[] {
  * because the global row already exists, and is a pure no-op if the env var
  * is unset.
  */
-function seedLaunchDemoSecretsFromEnv(): void {
+function seedLaunchDemoSecretsFromEnv(logger: SeedLogger = console): void {
   const selectGlobal = db.prepare(
     "SELECT id FROM secrets WHERE name = ? AND app_id IS NULL",
   );
@@ -398,17 +424,84 @@ function seedLaunchDemoSecretsFromEnv(): void {
     const existing = selectGlobal.get(key) as { id: string } | undefined;
     if (existing) continue;
     insertGlobal.run(newSecretId(), key, envVal);
-    console.log(`[launch-demos] seeded global ${key} from env`);
+    logger.log(`[launch-demos] seeded global ${key} from env`);
   }
+}
+
+export async function resolveDemoImageTag(opts: {
+  contextPath: string;
+  demo: Pick<LaunchDemo, 'slug'>;
+  docker: LaunchDemoDockerLike;
+  logger: SeedLogger;
+  persistedImageTag: string | null;
+}): Promise<
+  | { kind: 'ready'; imageTag: string }
+  | { kind: 'keep_previous'; imageTag: string }
+  | { kind: 'missing'; imageTag: string }
+> {
+  const imageTag = imageTagForDemo(opts.demo, opts.contextPath);
+
+  if (!(await imageExists(opts.docker, imageTag))) {
+    opts.logger.log(
+      `[launch-demos] ${opts.demo.slug}: building image ${imageTag} from ${opts.contextPath}`,
+    );
+    try {
+      await buildDemoImage(opts.docker, opts.contextPath, imageTag);
+      opts.logger.log(`[launch-demos] ${opts.demo.slug}: built ${imageTag}`);
+    } catch (err) {
+      opts.logger.error(
+        `[launch-demos] ${opts.demo.slug}: build failed:`,
+        (err as Error).message,
+      );
+      if (
+        opts.persistedImageTag &&
+        opts.persistedImageTag !== imageTag &&
+        (await imageExists(opts.docker, opts.persistedImageTag))
+      ) {
+        return { kind: 'keep_previous', imageTag: opts.persistedImageTag };
+      }
+      return { kind: 'missing', imageTag };
+    }
+  } else {
+    opts.logger.log(
+      `[launch-demos] ${opts.demo.slug}: image ${imageTag} already present`,
+    );
+  }
+
+  // Production incident 2026-04-24: prod carried DB rows that pointed at
+  // `floom-demo-<slug>:ctx-<hash>` tags that no longer existed on the host.
+  // If the target tag cannot be inspected after build OR reuse, never advance
+  // the DB to it. Keep the previous runnable tag when possible, otherwise the
+  // app must be marked inactive so /api/run refuses it instead of serving a
+  // broken hero app.
+  if (await imageExists(opts.docker, imageTag)) {
+    return { kind: 'ready', imageTag };
+  }
+  if (
+    opts.persistedImageTag &&
+    opts.persistedImageTag !== imageTag &&
+    (await imageExists(opts.docker, opts.persistedImageTag))
+  ) {
+    return { kind: 'keep_previous', imageTag: opts.persistedImageTag };
+  }
+  return { kind: 'missing', imageTag };
 }
 
 export async function seedLaunchDemos(): Promise<{
   apps_added: number;
   apps_existing: number;
   apps_failed: number;
+}>;
+export async function seedLaunchDemos(
+  options: SeedLaunchDemosOptions = {},
+): Promise<{
+  apps_added: number;
+  apps_existing: number;
+  apps_failed: number;
 }> {
+  const logger = options.logger || console;
   if (!isEnabled()) {
-    console.log('[launch-demos] FLOOM_SEED_LAUNCH_DEMOS disabled — skipping');
+    logger.log('[launch-demos] FLOOM_SEED_LAUNCH_DEMOS disabled — skipping');
     return { apps_added: 0, apps_existing: 0, apps_failed: 0 };
   }
 
@@ -416,28 +509,28 @@ export async function seedLaunchDemos(): Promise<{
   // docker is unreachable on this host (dev mode without Docker), because the
   // secret is a DB-only operation and a later host with docker reachable will
   // reuse the same DB.
-  seedLaunchDemoSecretsFromEnv();
+  seedLaunchDemoSecretsFromEnv(logger);
 
-  const repoRoot = findRepoRoot();
+  const repoRoot = options.repoRoot ?? findRepoRoot();
   if (!repoRoot) {
-    console.log(
+    logger.log(
       '[launch-demos] repo root not found (no examples/lead-scorer/Dockerfile nearby) — skipping',
     );
     return { apps_added: 0, apps_existing: 0, apps_failed: 0 };
   }
 
-  const docker = new Docker();
+  const docker = options.docker || new Docker();
   try {
     await docker.ping();
   } catch {
-    console.log(
+    logger.log(
       '[launch-demos] docker daemon not reachable — skipping (preview requires /var/run/docker.sock mount)',
     );
     return { apps_added: 0, apps_existing: 0, apps_failed: 0 };
   }
 
   const existsBySlug = db.prepare(
-    'SELECT id, docker_image FROM apps WHERE slug = ?',
+    'SELECT id, status, docker_image FROM apps WHERE slug = ?',
   );
   // Launch-demo apps are first-party showcases — always 'published'. User
   // ingestion paths (openapi-ingest / docker-image-ingest) go through the
@@ -467,52 +560,82 @@ export async function seedLaunchDemos(): Promise<{
            updated_at = datetime('now')
      WHERE id = ?`,
   );
+  const markAppInactive = db.prepare(
+    `UPDATE apps
+       SET status = 'inactive',
+           updated_at = datetime('now')
+     WHERE id = ?`,
+  );
+  const markAppActive = db.prepare(
+    `UPDATE apps
+       SET status = 'active',
+           updated_at = datetime('now')
+     WHERE id = ?`,
+  );
 
   let added = 0;
   let existing = 0;
   let failed = 0;
+  let keptPrevious = 0;
+  let markedInactive = 0;
 
   for (const demo of DEMOS) {
     const contextPath = resolve(repoRoot, demo.contextDir);
     if (!existsSync(resolve(contextPath, 'Dockerfile'))) {
-      console.log(
+      logger.log(
         `[launch-demos] ${demo.slug}: Dockerfile missing at ${contextPath} — skipping`,
       );
       failed++;
       continue;
     }
 
-    const imageTag = imageTagForDemo(demo, contextPath);
-    const codePath = `reused:launch-demo:${demo.slug}:${imageTag.split(':')[1]}`;
-    const manifestJson = JSON.stringify(demo.manifest);
-
-    // Build the image if it's not already on the local daemon.
-    if (!(await imageExists(docker, imageTag))) {
-      console.log(
-        `[launch-demos] ${demo.slug}: building image ${imageTag} from ${contextPath}`,
-      );
-      try {
-        await buildDemoImage(docker, contextPath, imageTag);
-        console.log(`[launch-demos] ${demo.slug}: built ${imageTag}`);
-      } catch (err) {
-        console.error(
-          `[launch-demos] ${demo.slug}: build failed:`,
-          (err as Error).message,
-        );
-        failed++;
-        continue;
-      }
-    } else {
-      console.log(
-        `[launch-demos] ${demo.slug}: image ${imageTag} already present`,
-      );
-    }
-
     // Insert the DB row if missing. Existing launch demos are refreshed in
     // place so preview picks up current manifests + image tags after deploy.
     const row = existsBySlug.get(demo.slug) as
-      | { id: string; docker_image: string | null }
+      | { id: string; status: string; docker_image: string | null }
       | undefined;
+    const resolvedImage = await resolveDemoImageTag({
+      contextPath,
+      demo,
+      docker,
+      logger,
+      persistedImageTag: row?.docker_image ?? null,
+    });
+    if (resolvedImage.kind === 'keep_previous') {
+      if (row) {
+        markAppActive.run(row.id);
+        keptPrevious++;
+        existing++;
+        logger.warn(
+          `[launch-demos] WARN: ${demo.slug}: keeping existing docker_image ${resolvedImage.imageTag}`,
+        );
+      } else {
+        failed++;
+        logger.error(
+          `[launch-demos] ${demo.slug}: no existing row to keep on ${resolvedImage.imageTag}`,
+        );
+      }
+      continue;
+    }
+    if (resolvedImage.kind === 'missing') {
+      failed++;
+      if (row) {
+        markAppInactive.run(row.id);
+        markedInactive++;
+        logger.error(
+          `[launch-demos] FATAL: ${demo.slug}: ${resolvedImage.imageTag} unavailable; marked app inactive`,
+        );
+      } else {
+        logger.error(
+          `[launch-demos] FATAL: ${demo.slug}: ${resolvedImage.imageTag} unavailable; not inserting`,
+        );
+      }
+      continue;
+    }
+
+    const imageTag = resolvedImage.imageTag;
+    const codePath = `reused:launch-demo:${demo.slug}:${imageTag.split(':')[1]}`;
+    const manifestJson = JSON.stringify(demo.manifest);
     if (row) {
       updateApp.run(
         demo.name,
@@ -526,11 +649,11 @@ export async function seedLaunchDemos(): Promise<{
         row.id,
       );
       if (row.docker_image !== imageTag) {
-        console.log(
+        logger.log(
           `[launch-demos] ${demo.slug}: refreshed existing app to ${imageTag}`,
         );
       } else {
-        console.log(
+        logger.log(
           `[launch-demos] ${demo.slug}: refreshed existing app metadata`,
         );
       }
@@ -551,11 +674,11 @@ export async function seedLaunchDemos(): Promise<{
       demo.icon,
     );
     added++;
-    console.log(`[launch-demos] ${demo.slug}: inserted (app_id=${appId})`);
+    logger.log(`[launch-demos] ${demo.slug}: inserted (app_id=${appId})`);
   }
 
-  console.log(
-    `[launch-demos] done: ${added} added, ${existing} existing, ${failed} failed`,
+  logger.log(
+    `[launch-demos] done: ${added} added, ${existing} existing, ${failed} failed, ${keptPrevious} kept-previous, ${markedInactive} marked-inactive`,
   );
   return { apps_added: added, apps_existing: existing, apps_failed: failed };
 }
