@@ -13,6 +13,11 @@
  * The band keeps the section eyebrow ("Pricing") and a single link so
  * the page retains a pricing beat, but it no longer eats ~550px of
  * vertical space.
+ *
+ * 2026-04-24: dropped "MIT-licensed" from the headline. Per MEMORY.md:
+ * "Never write 'Open source. MIT licensed.' or similar robotic license
+ * declarations in human-facing copy." License info lives in the repo
+ * and /docs — not in marketing hero copy.
  */
 import { Link } from 'react-router-dom';
 import type { CSSProperties } from 'react';
@@ -59,7 +64,7 @@ export function PricingTeaser() {
     <section data-testid="pricing-teaser" style={OUTER_STYLE}>
       <div style={INNER_STYLE}>
         <SectionEyebrow>Pricing</SectionEyebrow>
-        <h2 style={HEADLINE_STYLE}>Free during launch. Self-host MIT-licensed.</h2>
+        <h2 style={HEADLINE_STYLE}>Free during launch. Self-host anytime.</h2>
         <p style={SUB_STYLE}>
           <Link to="/pricing" data-testid="pricing-teaser-link" style={LINK_STYLE}>
             See the full pricing page &rarr;

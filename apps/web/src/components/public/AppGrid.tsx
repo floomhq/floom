@@ -733,7 +733,7 @@ function AppGridCard({
             <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
           </>
         )}
-        {showRuns ? (
+        {showRuns && (
           <>
             <span data-testid={`app-grid-runs-${app.slug}`}>
               {formatRuns(runs7d)} runs
@@ -741,29 +741,12 @@ function AppGridCard({
             <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
             <span>7d</span>
           </>
-        ) : (
-          /* Pre-launch replacement for "{N} runs · 7d" while usage is
-             too small to be meaningful signal. A single "Fresh" badge
-             (#645) keeps the stats row anchored without showing an
-             embarrassing "0 runs" label. Flips back to the real counter
-             once runs_7d hits 10. */
-          <span
-            data-testid={`app-grid-fresh-${app.slug}`}
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: 'var(--accent, #047857)',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              padding: '2px 7px',
-              border: '1px solid var(--accent-border, #a7f3d0)',
-              borderRadius: 999,
-              background: 'rgba(4,120,87,0.06)',
-            }}
-          >
-            Fresh
-          </span>
         )}
+        {/* FRESH badge removed 2026-04-24 (#657): every launch card is
+           fresh on day one, so the badge painted on all 3 cards and read
+           as noise rather than signal. When an app grows past 10 runs
+           the real "{N} runs · 7d" counter takes over. No replacement
+           badge — an empty stats row beats a meaningless one. */}
       </div>
 
       {/* DESCRIPTION: 3-line clamp so the first value sentence is

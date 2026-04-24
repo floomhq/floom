@@ -85,7 +85,7 @@ const LIMITS = [
     v: 'Unlimited, free forever',
     s: (
       <>
-        One Docker command. MIT-licensed. Unlimited concurrency. See{' '}
+        One Docker command. Open source. Unlimited concurrency. See{' '}
         <a
           href="https://github.com/floomhq/floom"
           style={{ color: ACCENT, fontWeight: 600 }}
@@ -118,7 +118,7 @@ const FAQS: FaqItem[] = [
     q: 'Can I self-host Floom?',
     a: (
       <>
-        Yes, and it&rsquo;s fully free. The core runtime is MIT-licensed. Run{' '}
+        Yes, and it&rsquo;s fully free. The core runtime is open source. Run{' '}
         <code
           style={{
             ...MONO,
@@ -130,7 +130,7 @@ const FAQS: FaqItem[] = [
             padding: '2px 7px',
           }}
         >
-          docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+          docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest
         </code>{' '}
         on your own infra and you&rsquo;re live in under a minute. See the{' '}
         <a
@@ -285,7 +285,7 @@ export function PricingPage() {
   return (
     <PageShell
       title="Pricing · Floom"
-      description="Floom Cloud is free during the launch waitlist. Self-hosting is always free and MIT-licensed. Paid tiers with per-app metering, team features, and SLAs are on the roadmap."
+      description="Floom Cloud is free during the launch waitlist. Self-hosting is always free and open source. Paid tiers with per-app metering, team features, and SLAs are on the roadmap."
       contentStyle={{
         padding: '0 0 80px',
         maxWidth: '100%',
@@ -504,8 +504,11 @@ export function PricingPage() {
               flexWrap: 'wrap',
             }}
           >
+            {/* Primary CTA gated on deployEnabled: in waitlist mode, /signup
+                redirects to /waitlist, so the button should read as a waitlist
+                ask up front rather than bait-and-switch. */}
             <Link
-              to="/signup"
+              to={deployEnabled ? '/signup' : waitlistHref('pricing-hero')}
               data-testid="pricing-cta-signup"
               style={{
                 display: 'inline-flex',
@@ -521,7 +524,7 @@ export function PricingPage() {
                 border: `1px solid ${ACCENT}`,
               }}
             >
-              Create your account
+              {deployEnabled ? 'Create your account' : 'Join the waitlist'}
             </Link>
             <Link
               to="/docs"
@@ -537,25 +540,6 @@ export function PricingPage() {
             >
               Read the docs &rarr;
             </Link>
-            {!deployEnabled && (
-              <>
-                {/* TODO(Agent 9): swap for WaitlistModal trigger. */}
-                <Link
-                  to={waitlistHref('pricing-footer')}
-                  data-testid="pricing-cta-waitlist"
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: ACCENT,
-                    textDecoration: 'none',
-                    borderBottom: `1px solid rgba(4,120,87,0.35)`,
-                    paddingBottom: 2,
-                  }}
-                >
-                  Join publish waitlist &rarr;
-                </Link>
-              </>
-            )}
           </div>
 
           {/* Fine print */}
@@ -615,7 +599,7 @@ export function PricingPage() {
                 maxWidth: 500,
               }}
             >
-              The core runtime is MIT-licensed. One command, one container,
+              The core runtime is open source. One command, one container,
               your infra. See{' '}
               <a
                 href="https://github.com/floomhq/floom"
@@ -638,7 +622,7 @@ export function PricingPage() {
               whiteSpace: 'nowrap',
             }}
           >
-            docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+            docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest
           </code>
         </div>
       </section>

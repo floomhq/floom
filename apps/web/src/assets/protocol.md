@@ -82,7 +82,7 @@ Floom is MIT licensed. Floom.dev is the hosted flagship, but you can run the ful
 
 **Via Docker** (one command):
 ```bash
-docker run -p 3051:3051 \
+docker run -p 3000:3000 \
   -e OPENAI_API_KEY=... \
   ghcr.io/floomhq/floom-monorepo:latest
 ```

@@ -43,7 +43,7 @@ Point Floom at an OpenAPI spec and you get all three, from the same manifest, wi
 One container, no setup:
 
 ```bash
-docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest
 ```
 
 Or sign in at [**floom.dev**](https://floom.dev), paste an OpenAPI URL, hit publish. Full self-host walkthrough: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
@@ -52,7 +52,7 @@ Or sign in at [**floom.dev**](https://floom.dev), paste an OpenAPI URL, hit publ
 
 Floom is a runtime and a protocol for agentic apps. You describe an app once with an OpenAPI spec; Floom gives you an MCP server an agent can call, a plain HTTP endpoint, and a web form on a shareable URL — all at the same time, all backed by the same auth and rate-limit layer.
 
-It's open source, MIT-licensed, and you can self-host the whole stack in one Docker container.
+It's open source, and you can self-host the whole stack in one Docker container.
 
 ## The three surfaces
 
@@ -123,7 +123,7 @@ apps:
 
 ```bash
 docker run -d --name floom \
-  -p 3051:3051 \
+  -p 3000:3000 \
   -v floom_data:/data \
   -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
@@ -131,7 +131,7 @@ docker run -d --name floom \
   ghcr.io/floomhq/floom-monorepo:latest
 ```
 
-Open `http://localhost:3051/p/resend`, or point your agent at `http://localhost:3051/mcp/app/resend`.
+Open `http://localhost:3000/p/resend`, or point your agent at `http://localhost:3000/mcp/app/resend`.
 
 Two manifest shapes ship out of the box:
 

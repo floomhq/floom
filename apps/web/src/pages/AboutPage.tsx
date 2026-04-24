@@ -261,8 +261,8 @@ export function AboutPage() {
         </p>
         <p style={BODY_STYLE}>
           Floom, Inc. is a Delaware C-Corp. The runtime and the protocol
-          spec are published openly, MIT-licensed, and self-hostable. No
-          VC funding yet. If you want the hosted version, it's{' '}
+          spec are open source and self-hostable. No VC funding yet. If
+          you want the hosted version, it's{' '}
           <Link to="/" style={{ color: 'var(--accent)' }}>floom.dev</Link>.
           If you want to run it on your own box, clone the repo.
         </p>

@@ -36,7 +36,7 @@ export function InstallPage() {
   return (
     <PageShell
       title="Self-host Floom · Floom"
-      description="Run Floom on your own server in one Docker command. Open source, MIT-licensed, no waitlist."
+      description="Run Floom on your own server in one Docker command. Open source, no waitlist."
     >
       <main
         data-testid="install-page"
@@ -56,8 +56,8 @@ export function InstallPage() {
           Self-host Floom
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: 16, margin: '0 0 28px' }}>
-          Run Floom on your own server in one command. Open source, MIT-licensed,
-          no waitlist, no signup.
+          Run Floom on your own server in one command. Open source, no waitlist,
+          no signup.
         </p>
 
         <h2 style={{ fontSize: 18, margin: '24px 0 8px' }}>1. Docker (recommended)</h2>
