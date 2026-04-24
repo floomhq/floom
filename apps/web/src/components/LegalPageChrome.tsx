@@ -60,10 +60,12 @@ interface HeaderProps {
 }
 
 export function LegalPageHeader({ title, updated, lang }: HeaderProps) {
-  const notice =
-    lang === 'de'
-      ? 'Dies ist ein vorläufiger Entwurf. Eine anwaltlich geprüfte Fassung wird vor dem kostenpflichtigen Start veröffentlicht.'
-      : 'This is a preliminary draft. A reviewed version will be published before paid launch.';
+  // Launch-audit 2026-04-24 (P1 #617): the "preliminary draft, reviewed
+  // version will be published before paid launch" banner shipped above
+  // every legal page. On launch day that signals "our legal text might
+  // be wrong" to the first impression a visitor gets, so the banner is
+  // removed. Lawyer review remains a post-launch track (ref #113) and
+  // will add a softer notice back if/when it warrants one.
   const updatedLabel = lang === 'de' ? 'Letzte Aktualisierung' : 'Last updated';
 
   return (
@@ -84,19 +86,6 @@ export function LegalPageHeader({ title, updated, lang }: HeaderProps) {
       <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>
         {updatedLabel}: <time dateTime={updated}>{updated}</time>
       </p>
-      <div
-        style={{
-          padding: '12px 16px',
-          background: 'rgba(5, 150, 105, 0.08)',
-          border: '1px solid rgba(5, 150, 105, 0.25)',
-          borderRadius: 8,
-          fontSize: 13,
-          color: 'var(--ink)',
-          lineHeight: 1.5,
-        }}
-      >
-        {notice}
-      </div>
     </header>
   );
 }
