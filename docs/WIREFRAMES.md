@@ -89,3 +89,46 @@ Before any parity agent runs, read these PRs for the explicit decisions:
 See also:
 - `/root/.claude/projects/-root/memory/feedback_parity_not_blind.md` — "informed gap-closing, not blind match"
 - `/root/.claude/projects/-root/memory/feedback_agents_preserve_dont_wipe.md` — preserve Federico decisions
+
+---
+
+## `/me` Consumer Spec (2026-04-24)
+
+Since `me.html` at wireframes.floom.dev was flagged by Federico as "too techie, not consumer ready", the canonical reference for `/me` is this text spec + the implementation in PR #732 when merged.
+
+### Target user
+Someone who RUNS apps, not someone who builds them. They don't care about avg run duration, 7-day statistics, workspace roles, or audit logs. They care about: "what apps have I used recently", "what were the results", "how do I manage my API keys if I add my own".
+
+### Structure
+
+1. **Hero.** H1 `Hey, {firstName}.` (or `Welcome back.` if no name). No sub-positioning line, no metrics strip, no Launch Week pill (this is post-auth).
+
+2. **Your apps.** 3-col grid (stacks 1-col mobile) of up to 6 apps the user has actually RUN. Each card: app icon + name + "last run X ago" + one-click Re-run. "See all →" link to `/me/apps`. If user has never run anything: clean empty state `You haven't run anything yet. [Browse the store →]` button.
+
+3. **Recent runs.** Compact table, 5 rows max. Columns: `App · Output preview · When`. Click row → opens the run permalink (`/r/<id>`). "See all →" to `/me/runs`.
+
+4. **Settings row.** Small, de-emphasized, bottom of page. 3 text links: `API keys` (to `/me/secrets`), `Profile`, `Sign out`.
+
+### Explicitly NOT on `/me`
+- Workspace switcher (single-workspace launch scope; add when multi-workspace ships)
+- Metrics dashboard (avg run duration, 7d counts, etc. — this is for /studio + power users)
+- Pinned apps concept
+- Discord CTA (belongs on landing, not post-auth)
+- Tabs at top (single-page, flat scroll)
+
+### Sub-routes
+- `/me` → this consumer home
+- `/me/apps` → full grid of apps user has run
+- `/me/runs` → full run history table with filters
+- `/me/secrets` → BYOK keys, minimal UI
+- `/me/settings` → profile + logout
+
+### Mobile
+Stacks cleanly, no horizontal scroll. All text readable at 375w. Primary Re-run button tap-target ≥44px.
+
+### When in doubt
+Prefer clarity over density. Consumer users abandon dense UIs. Remove before you add.
+
+---
+
+End of WIREFRAMES.md
