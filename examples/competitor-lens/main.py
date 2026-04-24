@@ -33,9 +33,11 @@ from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-DEFAULT_MODEL = "gemini-3-pro"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
 FETCH_TIMEOUT_S = 5.0
-TOTAL_BUDGET_S = 10.0
+# Benchmarked 2026-04-25: 2.5-flash-lite + JSON schema returns in 1-3s.
+# Total budget is fetch(5s max × 2 in parallel) + Gemini(8s cap) + slack.
+TOTAL_BUDGET_S = 12.0
 MAX_RESPONSE_BYTES = 500_000
 MAX_URL_LEN = 200
 MAX_TEXT_CHARS = 12_000
@@ -223,7 +225,7 @@ def _log(message: str) -> None:
 
 def _resolve_model() -> str:
     model = (os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL).strip()
-    if not model.startswith("gemini-3"):
+    if not (model.startswith("gemini-2.5") or model.startswith("gemini-3")):
         raise InputValidationError(
             f"GEMINI_MODEL must be gemini-3.x (got '{model}')."
         )
@@ -709,7 +711,9 @@ async def _analyze_async(your_url: str, competitor_url: str) -> dict[str, Any]:
 
                 _log("calling Gemini")
                 elapsed = time.monotonic() - started
-                remaining_budget = min(4.5, TOTAL_BUDGET_S - elapsed - 0.25)
+                # Raw httpx call bypasses the 10s SDK minimum; 8s cap is
+                # plenty for 2.5-flash-lite (typical 1-3s).
+                remaining_budget = max(4.0, min(8.0, TOTAL_BUDGET_S - elapsed - 0.25))
                 result = await _call_gemini(
                     client,
                     api_key=api_key,
