@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import { writeUserGeminiKey, clearUserGeminiKey } from '../api/client';
 import { SecretInput } from './forms/SecretInput';
+import { track } from '../lib/posthog';
 
 export interface BYOKModalProps {
   open: boolean;
@@ -64,8 +65,19 @@ export function BYOKModal({
     if (!open) {
       setValue('');
       setError(null);
+      return;
     }
-  }, [open]);
+    // Analytics #599: capture when the BYOK modal opens and why. `mode`
+    // separates the reactive case (429 exhausted) from the proactive case
+    // (user pre-configured before exhaustion) so the funnel can split on it.
+    // `slug` lets us see which demo app drives most BYOK prompts.
+    track('byok_modal_open', {
+      mode,
+      slug: payload?.slug ?? null,
+      usage: payload?.usage ?? null,
+      limit: payload?.limit ?? null,
+    });
+  }, [open, mode, payload?.slug, payload?.usage, payload?.limit]);
 
   if (!open) return null;
 

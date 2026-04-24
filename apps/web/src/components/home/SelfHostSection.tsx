@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { SectionEyebrow } from './SectionEyebrow';
+import { track } from '../../lib/posthog';
 
 const DOCKER_CMD = 'docker run -p 3010:3010 floomhq/floom';
 
@@ -23,6 +24,9 @@ export function SelfHostSection() {
 
   function handleCopy() {
     if (typeof navigator === 'undefined' || !navigator.clipboard) return;
+    // Analytics #599: fire on click (not inside the .then) so we still
+    // capture intent even if clipboard permission is denied.
+    track('docker_copy_click', { surface: 'self_host_band' });
     navigator.clipboard
       .writeText(DOCKER_CMD)
       .then(() => {
