@@ -21,7 +21,7 @@
  * The existing CreatorHeroPage.tsx is kept in the tree for reference;
  * main.tsx wires "/" to this page.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 
@@ -46,6 +46,8 @@ import { DiscordCta } from '../components/home/DiscordCta';
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
+import { readDeployEnabled, useDeployEnabled } from '../lib/flags';
+import { waitlistHref } from '../lib/waitlistCta';
 
 interface Stripe {
   slug: string;
@@ -92,6 +94,10 @@ function pickStripes(apps: HubApp[]): Stripe[] {
 
 export function LandingV17Page() {
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
+  const deployEnabledFlag = useDeployEnabled();
+  const deployEnabled = deployEnabledFlag ?? readDeployEnabled();
+  const waitlistHeroHref = useMemo(() => waitlistHref('landing-hero'), []);
+  const runInClaudeHref = deployEnabled ? '/install' : '/install/lead-scorer';
 
   useEffect(() => {
     document.title = 'Ship AI apps fast · Floom';
@@ -185,59 +191,84 @@ export function LandingV17Page() {
               The protocol and runtime for agentic work.
             </p>
 
-            {/* CTA — action-oriented pair matching the demo's Build -> Deploy
-                -> Run flow (Federico 2026-04-23). Primary [Run this in
-                Claude] ink pill -> /install surfaces the install-in-claude
-                path, which is what "run anywhere" actually means to a user.
-                Secondary [Deploy] text link -> /signup covers the builder
-                ICP. NOT "Install in Claude", NOT "Start building free", NOT
-                "Deploy your first app" — Federico excluded those explicitly
-                because they either split audiences or bury the verb. */}
+            {/* CTA — runtime-gated by DEPLOY_ENABLED. Preview keeps the
+                original install-first branch; waitlist mode swaps the
+                builder CTA into the primary slot so floom.dev leads with
+                the waitlist while still exposing a "try one now" path in
+                Claude beside it. */}
             <div
               className="hero-ctas"
               style={{
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: deployEnabled ? 'column' : 'row',
                 alignItems: 'center',
-                gap: 10,
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                gap: deployEnabled ? 10 : 12,
                 marginBottom: 4,
               }}
             >
+              {!deployEnabled && (
+                <Link
+                  to={waitlistHeroHref}
+                  data-testid="hero-cta-deploy"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    background: 'var(--ink)',
+                    color: '#fff',
+                    border: '1px solid var(--ink)',
+                    borderRadius: 999,
+                    padding: '14px 26px',
+                    fontSize: 15,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Join the waitlist
+                </Link>
+              )}
               <Link
-                to="/install"
+                to={runInClaudeHref}
                 data-testid="hero-cta-run-in-claude"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 8,
-                  background: 'var(--ink)',
-                  color: '#fff',
-                  border: '1px solid var(--ink)',
+                  background: deployEnabled ? 'var(--ink)' : 'var(--card)',
+                  color: deployEnabled ? '#fff' : 'var(--ink)',
+                  border: `1px solid ${deployEnabled ? 'var(--ink)' : 'var(--line)'}`,
                   borderRadius: 999,
-                  padding: '14px 24px',
+                  padding: deployEnabled ? '14px 24px' : '13px 18px',
                   fontSize: 15,
                   fontWeight: 600,
                   textDecoration: 'none',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                Run this in Claude
+                {deployEnabled ? 'Run this in Claude' : 'Run in Claude'}
               </Link>
-              <Link
-                to="/signup"
-                data-testid="hero-cta-deploy"
-                style={{
-                  fontSize: 13,
-                  color: 'var(--muted)',
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                Deploy your own
-                <ArrowRight size={13} aria-hidden="true" />
-              </Link>
+              {deployEnabled && (
+                <Link
+                  to="/signup"
+                  data-testid="hero-cta-deploy"
+                  style={{
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  Deploy your own
+                  <ArrowRight size={13} aria-hidden="true" />
+                </Link>
+              )}
             </div>
           </div>
 
