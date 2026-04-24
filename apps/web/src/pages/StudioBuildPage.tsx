@@ -10,7 +10,11 @@ import { BuildPage } from './BuildPage';
 import { StudioLayout } from '../components/studio/StudioLayout';
 
 function StudioLayoutAdapter({ children, title }: { children: ReactNode; title?: string }) {
-  return <StudioLayout title={title}>{children}</StudioLayout>;
+  return (
+    <StudioLayout title={title} allowSignedOutShell>
+      {children}
+    </StudioLayout>
+  );
 }
 
 export function StudioBuildPage() {

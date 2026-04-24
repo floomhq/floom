@@ -29,7 +29,7 @@
 
 import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useSession } from '../hooks/useSession';
 import { useDeployEnabled } from '../lib/flags';
 import { PageShell } from '../components/PageShell';
@@ -94,6 +94,7 @@ interface BuildPageProps {
 
 export function BuildPage({ postPublishHref, layout: Layout = PageShell }: BuildPageProps = {}) {
   const deployEnabled = useDeployEnabled();
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isAuthenticated, loading: sessionLoading, data: sessionData } = useSession();
@@ -133,6 +134,7 @@ export function BuildPage({ postPublishHref, layout: Layout = PageShell }: Build
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [devDisclosureOpen, setDevDisclosureOpen] = useState(false);
+  const authReturnPath = location.pathname + location.search;
 
   // Auto-detect once when the landing hero hands off a URL. Ref guard so
   // the effect never retriggers on subsequent renders.
@@ -321,7 +323,7 @@ export function BuildPage({ postPublishHref, layout: Layout = PageShell }: Build
   async function handlePublish() {
     if (!detected) return;
     if (!isAuthenticated) {
-      navigate('/signup?next=' + encodeURIComponent('/studio/build'));
+      navigate('/signup?next=' + encodeURIComponent(authReturnPath));
       return;
     }
     setStep('publishing');
