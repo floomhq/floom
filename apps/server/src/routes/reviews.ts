@@ -151,3 +151,45 @@ reviewsRouter.post('/:slug/reviews', async (c) => {
   const row = db.prepare('SELECT * FROM app_reviews WHERE id = ?').get(id) as AppReviewRecord;
   return c.json({ review: serialize(row, ctx.email?.split('@')[0] || null) }, existing ? 200 : 201);
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Stub: POST /api/apps/:slug/invite  —  see #640 (ShareModal) / #637 (impl).
+//
+// The ShareModal on /p/:slug lets the app owner invite teammates by email.
+// The real pipeline (persistence in `app_invites`, Resend delivery, accept
+// + revoke endpoints) is scoped in issue #637. This endpoint unblocks the
+// UI by validating the payload and echoing a synthetic invite id so the
+// client can exercise the happy path end-to-end.
+//
+// TODO(#637): persist to app_invites, send email via Resend, and add
+// GET /api/apps/:slug/invites + DELETE /api/apps/:slug/invites/:id.
+// ────────────────────────────────────────────────────────────────────────────
+const InviteBody = z.object({
+  emails: z.array(z.string().email()).min(1).max(25),
+  permission: z.enum(['run', 'view']),
+});
+
+reviewsRouter.post('/:slug/invite', async (c) => {
+  const slug = c.req.param('slug') || '';
+  const app = db
+    .prepare('SELECT id FROM apps WHERE slug = ?')
+    .get(slug) as { id: string } | undefined;
+  if (!app) {
+    return c.json({ error: 'App not found', code: 'app_not_found' }, 404);
+  }
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = InviteBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() },
+      400,
+    );
+  }
+  return c.json({ ok: true, invite_id: `stub-${Date.now()}` }, 201);
+});
+

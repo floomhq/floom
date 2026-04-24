@@ -28,6 +28,7 @@ import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 import { Confetti } from '../components/Confetti';
+import { ShareModal } from '../components/share/ShareModal';
 import { getApp, getAppReviews, getRun, shareRun, ApiError } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
@@ -77,8 +78,15 @@ export function AppPermalinkPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadFailure, setLoadFailure] = useState<PermalinkLoadOutcome | null>(null);
-  // Fix 4 (2026-04-19): tiny self-dismissing toast for the Share button.
-  const [shareToast, setShareToast] = useState(false);
+  // #640: Notion-style Share modal. The hero Share button opens this
+  // dialog instead of falling straight through to navigator.share /
+  // clipboard.writeText. `shareModalUrl` is resolved at click time so it
+  // reflects the currently-selected run (if any). The previous one-shot
+  // "Link copied" toast lived in `shareToast` — the modal owns that
+  // affordance now (copy button + inline "Copied" state), so the toast
+  // was removed in the same change.
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareModalUrl, setShareModalUrl] = useState<string>('');
 
   // v16 restructure: /p/:slug is tabbed now (Run / About / Install / Source).
   // Run is the default — the previous product-page layout made users scroll
@@ -924,50 +932,39 @@ export function AppPermalinkPage() {
                 data-testid="cta-share"
                 aria-label="Share link"
                 onClick={() => {
-                  const copyUrl = (url: string) => {
-                    void navigator.clipboard.writeText(url).then(() => {
-                      setShareToast(true);
-                      window.setTimeout(() => setShareToast(false), 1800);
-                    });
-                  };
-                  const shareOrCopy = async (url: string) => {
-                    if (typeof navigator !== 'undefined' && navigator.share) {
-                      try {
-                        await navigator.share({
-                          url,
-                          title: app.name,
-                        });
-                        return;
-                      } catch (e) {
-                        const name = e && typeof e === 'object' && 'name' in e ? String((e as { name?: string }).name) : '';
-                        if (name === 'AbortError') return;
-                        // UserSharePermissionDeniedError / missing share target — fall back
-                      }
-                    }
-                    copyUrl(url);
-                  };
-                  const run = async () => {
+                  // #640: open the Notion-style Share modal. We still pre-
+                  // resolve the best URL to seed the "Private signed link"
+                  // field so the modal is useful immediately: if the user
+                  // has a run selected, flip it to public first (same
+                  // shareRun() call the old handler used) and show the
+                  // /r/:id permalink. Otherwise fall back to the current
+                  // /p/:slug URL. Any failure just falls back to the page
+                  // URL — the modal still opens, never a dead-end.
+                  const resolve = async () => {
                     try {
                       const currentUrl = new URL(window.location.href);
                       const currentRunId = currentUrl.searchParams.get('run');
                       if (!currentRunId) {
-                        await shareOrCopy(currentUrl.toString());
+                        setShareModalUrl(currentUrl.toString());
+                        setShareModalOpen(true);
                         return;
                       }
                       try {
                         await shareRun(currentRunId);
-                        await shareOrCopy(
+                        setShareModalUrl(
                           `${window.location.origin}${buildPublicRunPath(currentRunId)}`,
                         );
                       } catch {
                         currentUrl.searchParams.delete('run');
-                        await shareOrCopy(currentUrl.toString());
+                        setShareModalUrl(currentUrl.toString());
                       }
+                      setShareModalOpen(true);
                     } catch {
-                      /* ignore */
+                      setShareModalUrl(window.location.href);
+                      setShareModalOpen(true);
                     }
                   };
-                  void run();
+                  void resolve();
                 }}
                 style={{
                   padding: '8px 12px',
@@ -1523,27 +1520,15 @@ export function AppPermalinkPage() {
       <Footer />
       <FeedbackButton />
 
-      {shareToast && (
-        <div
-          role="status"
-          data-testid="share-toast"
-          style={{
-            position: 'fixed',
-            bottom: 24,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '10px 18px',
-            borderRadius: 999,
-            background: 'var(--ink)',
-            color: '#fff',
-            fontSize: 13,
-            fontWeight: 500,
-            boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
-            zIndex: 1100,
-          }}
-        >
-          Link copied
-        </div>
+      {app && (
+        <ShareModal
+          open={shareModalOpen}
+          onClose={() => setShareModalOpen(false)}
+          slug={app.slug}
+          appName={app.name}
+          visibility={app.visibility}
+          shareUrl={shareModalUrl || (typeof window !== 'undefined' ? window.location.href : '')}
+        />
       )}
 
       {/* Mobile polish for /p/:slug. The hero row already wraps; these

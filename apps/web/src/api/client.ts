@@ -298,6 +298,34 @@ export function shareRun(runId: string): Promise<ShareRunResponse> {
   });
 }
 
+/**
+ * Invite email(s) to collaborate on an app (see #640 / #637).
+ *
+ * The /api/apps/:slug/invite endpoint is currently a minimal stub that
+ * returns `{ ok: true, invite_id: 'stub-<ts>' }` so the Notion-style
+ * ShareModal can ship without blocking on the full invite pipeline.
+ * Real persistence, email delivery, and accept/revoke flows are tracked
+ * in #637.
+ */
+export type InvitePermission = 'run' | 'view';
+
+export interface InviteRequest {
+  emails: string[];
+  permission: InvitePermission;
+}
+
+export interface InviteResponse {
+  ok: boolean;
+  invite_id: string;
+}
+
+export function inviteToApp(slug: string, body: InviteRequest): Promise<InviteResponse> {
+  return request<InviteResponse>(`/api/apps/${encodeURIComponent(slug)}/invite`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export interface RunStreamHandlers {
   onLog?: (line: { stream: 'stdout' | 'stderr'; text: string; ts: number }) => void;
   onStatus?: (run: RunRecord) => void;
