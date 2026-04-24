@@ -533,6 +533,8 @@ const SPECS = {
           // click. Launch-audit 2026-04-24 (P1 #609).
           default: '{"example": true, "items": [1, 2, 3]}',
           description: 'The JSON text to parse and format.',
+          // Minimal valid JSON so the first click succeeds on the public page.
+          default: '{}',
         },
         indent: {
           type: 'integer',

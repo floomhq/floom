@@ -174,7 +174,10 @@ const SAMPLE_BY_NAME: Record<string, string> = {
   query: 'vienna weather today',
   q: 'hello world',
   prompt: 'Write a haiku about ship logs.',
-  text: 'The quick brown fox jumps over the lazy dog.',
+  // `text` was mapped to the pangram, which broke JSON Formatter on first
+  // click ("quick brown fox" is not valid JSON -> parse error). The `text`
+  // key is too ambiguous (JSON for json-format, prose for word-count), so
+  // leave it to each app's manifest `default`/`example` + input placeholder.
   city: 'Hamburg',
   location: 'San Francisco',
   email: 'hello@floom.dev',

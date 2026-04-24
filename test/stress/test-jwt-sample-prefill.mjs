@@ -64,10 +64,9 @@ check('samplePrefill respects manifest-provided default first', () => {
   assert.equal(out, 'explicit-override');
 });
 
-check('samplePrefill for non-jwt input still returns old fallback', () => {
+check('samplePrefill for bare `text` input returns null', () => {
   const out = samplePrefill({ name: 'text', type: 'text' });
-  // Still the generic "text → text sentence" mapping.
-  assert.equal(out, 'The quick brown fox jumps over the lazy dog.');
+  assert.equal(out, null);
 });
 
 check('samplePrefill for unknown name + unknown type returns null', () => {
