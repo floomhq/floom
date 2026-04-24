@@ -78,14 +78,26 @@ export function StudioHomePage() {
   // signed-in session (not the signed-out preview). Falls back to an
   // empty array on error so the panel shows an honest "no runs yet"
   // empty state instead of faking data.
+  //
+  // IMPORTANT: getMyRuns() returns /me/runs, which is "every app the
+  // user has ever run" — not just apps they OWN. Studio's feed must
+  // scope to owned apps only, otherwise a creator who also uses public
+  // apps sees unrelated activity here (and the owned-app rows get
+  // pushed out by the global limit). Over-fetch by ~6x then filter
+  // client-side by owned slug set and cap at 6.
   useEffect(() => {
     if (signedOutPreview) return;
     if (!apps || apps.length === 0) return;
+    const ownedSlugs = new Set(apps.map((a) => a.slug));
     let cancelled = false;
     api
-      .getMyRuns(6)
+      .getMyRuns(40)
       .then((resp) => {
-        if (!cancelled) setRecentRuns(resp.runs);
+        if (cancelled) return;
+        const filtered = resp.runs
+          .filter((r) => r.app_slug && ownedSlugs.has(r.app_slug))
+          .slice(0, 6);
+        setRecentRuns(filtered);
       })
       .catch(() => {
         if (!cancelled) setRecentRuns([]);
@@ -117,8 +129,14 @@ export function StudioHomePage() {
   // aggregates the API doesn't expose yet; per
   // memory/feedback_never_fabricate.md we leave them out rather than
   // hardcode an "illustrative" number.
-  const liveCount = apps?.filter((a) => a.publish_status !== 'draft').length ?? 0;
-  const draftCount = apps?.filter((a) => a.publish_status === 'draft').length ?? 0;
+  //
+  // "Live" maps to publish_status === 'published' (the only state the
+  // backend treats as publicly live — pending_review / rejected / draft
+  // all 404 for non-owners). Everything else collapses to "draft" in
+  // the headline copy to avoid claiming a pending app is live.
+  const liveCount = apps?.filter((a) => a.publish_status === 'published').length ?? 0;
+  const draftCount =
+    apps?.filter((a) => !a.publish_status || a.publish_status !== 'published').length ?? 0;
   const totalRuns = apps?.reduce((sum, a) => sum + (a.run_count || 0), 0) ?? 0;
 
   return (
@@ -498,11 +516,12 @@ function MetricCell({ label, value, sub }: { label: string; value: string; sub?:
 }
 
 // ------------------------------------------------------------------
-// Empty state — 3 entry cards (GitHub / Docker / OpenAPI)
-// Mirrors v17/studio-empty.html entry-grid. Every card points to the
-// same /studio/build surface today (the build page auto-detects paste
-// type); we keep three cards so the affordances match the wireframe
-// and the visual language signals "any of these inputs are fine".
+// Empty state — 2 entry cards (GitHub / OpenAPI)
+// Mirrors v17/studio-empty.html entry-grid shape. The wireframe shows
+// a third "Docker image" card, but the current build flow only
+// accepts GitHub refs and OpenAPI URLs (BuildPage.detectApp), so
+// surfacing a Docker affordance would dead-end first-run creators.
+// Add the Docker card back when the build flow supports image tags.
 // ------------------------------------------------------------------
 
 function StudioEmptyState({
@@ -514,7 +533,6 @@ function StudioEmptyState({
 }) {
   const entries: Array<{ title: string; desc: string }> = [
     { title: 'From GitHub', desc: 'Paste a repo URL. We read the Dockerfile.' },
-    { title: 'Docker image', desc: 'Bring an image tag. Bind secrets, go.' },
     { title: 'OpenAPI spec', desc: 'Paste the spec URL. We wrap the API.' },
   ];
   return (
@@ -820,7 +838,12 @@ function AppCard({
   app: CreatorApp;
   onDelete: () => void;
 }) {
-  const isDraft = app.publish_status === 'draft';
+  // Only explicitly-published apps render the LIVE pill. pending_review
+  // / rejected / draft / missing all fall back to a DRAFT pill so a
+  // creator with a freshly ingested app doesn't see a misleading
+  // "LIVE" signal while admin review is still pending. The
+  // pending_review card adds its own inline note below for context.
+  const isPublished = app.publish_status === 'published';
   const initials = app.slug.slice(0, 2).toUpperCase();
   return (
     <div
@@ -898,26 +921,7 @@ function AppCard({
             /p/{app.slug}
           </div>
         </div>
-        {isDraft ? (
-          <span
-            data-testid={`studio-app-card-draft-${app.slug}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              padding: '2px 7px',
-              borderRadius: 999,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-              background: '#fef3c7',
-              color: '#92400e',
-              border: '1px solid #fde68a',
-              flexShrink: 0,
-            }}
-          >
-            DRAFT
-          </span>
-        ) : (
+        {isPublished ? (
           <span
             data-testid={`studio-app-card-live-${app.slug}`}
             style={{
@@ -946,6 +950,25 @@ function AppCard({
               }}
             />
             LIVE
+          </span>
+        ) : (
+          <span
+            data-testid={`studio-app-card-draft-${app.slug}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '2px 7px',
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              background: '#fef3c7',
+              color: '#92400e',
+              border: '1px solid #fde68a',
+              flexShrink: 0,
+            }}
+          >
+            DRAFT
           </span>
         )}
       </div>
