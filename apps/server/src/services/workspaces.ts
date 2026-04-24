@@ -805,15 +805,33 @@ export function provisionPersonalWorkspace(
 }
 
 /**
- * Parse the DEPLOY_ENABLED env var. Accepts standard truthy strings
- * ("true", "1", "yes", "on") case-insensitively. Anything else —
- * including unset, empty, "false", "0" — is treated as disabled.
+ * Waitlist / deploy-enabled gate for `/api/session/me.deploy_enabled`.
+ *
+ * Default semantics (launch-audit 2026-04-24, P0 #605): publishing is
+ * ENABLED unless explicitly disabled. Previously `DEPLOY_ENABLED`
+ * defaulted to `false` when unset, so every container that forgot the
+ * env var rendered "join the waitlist" copy ten times on the homepage
+ * despite the runtime actually being open. The fix flips the default
+ * and requires an explicit opt-in to turn waitlist mode back on.
+ *
+ * Resolution order (first hit wins):
+ *   1. `FLOOM_WAITLIST_MODE` truthy → waitlist ON (deploy_enabled=false)
+ *   2. Legacy `DEPLOY_ENABLED` truthy → deploy_enabled=true
+ *   3. Legacy `DEPLOY_ENABLED` falsy  → deploy_enabled=false
+ *   4. Nothing set → deploy_enabled=true (open by default)
  *
  * Module-local so tests and `/api/session/me` read the same gate.
  */
 function isDeployEnabled(): boolean {
-  const raw = process.env.DEPLOY_ENABLED;
-  if (!raw) return false;
-  const v = raw.trim().toLowerCase();
-  return v === 'true' || v === '1' || v === 'yes' || v === 'on';
+  // Explicit opt-in to waitlist mode wins.
+  const wait = (process.env.FLOOM_WAITLIST_MODE || '').trim().toLowerCase();
+  if (wait === 'true' || wait === '1' || wait === 'yes' || wait === 'on') {
+    return false;
+  }
+  // Legacy DEPLOY_ENABLED: still honored when set.
+  const raw = (process.env.DEPLOY_ENABLED || '').trim().toLowerCase();
+  if (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on') return true;
+  if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') return false;
+  // Default: publishing enabled.
+  return true;
 }
