@@ -1,84 +1,144 @@
-// /waitlist — full-page fallback for the deploy waitlist (launch 2026-04-27).
+// /waitlist — "what to expect" landing + email capture (issue #591).
 //
-// The primary surface for joining the waitlist is the WaitlistModal
-// (see components/WaitlistModal.tsx), popped from every gated
-// Deploy/Publish CTA. This page is the URL we link to from the
-// confirmation email ("if you lost the modal, go here") and the
-// bare-bones destination `/deploy` and other removed flows can
-// redirect to when DEPLOY_ENABLED=false.
+// 2026-04-23 rewrite: the previous version was a bare email form. This
+// upgrade adds:
+//   1. Vision band — "Infrastructure for agentic work."
+//   2. Email form (unchanged endpoint, same testids so e2e still passes)
+//   3. "What's shipping" — 3 cards: launch apps, publish flow, self-host
+//   4. Two ICPs (makers + teams), brief
+//   5. Timeline line
+//   6. Footer links to /docs + /apps so curious visitors can explore now
 //
-// Deliberately minimal: header, logo, short pitch, the same email form
-// as the modal, and the same success state. Layout borrows from
-// PricingPage + ChangelogPage so it slots into the v17 page shell
-// family without a new pattern.
+// Design rules (MEMORY): restrained palette, real lucide icons, no emojis,
+// no text-in-circles, no pure black, warm dark surface uses `#1b1a17`.
+// Display font via `var(--font-display)`. Primary accent = `var(--accent)`.
+//
+// The email form, its testids, and the submitWaitlist call are preserved
+// exactly so tests + the backend endpoint keep working.
 
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  ArrowRight,
+  Layers,
+  Rocket,
+  Server,
+  Users,
+  Wrench,
+} from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { PageShell } from '../components/PageShell';
 import { submitWaitlist, ApiError } from '../api/client';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const SECTION_STYLE: React.CSSProperties = {
-  maxWidth: 560,
+// ---- Vision band (hero) ---------------------------------------------------
+
+const HERO_SECTION: CSSProperties = {
+  maxWidth: 720,
   margin: '0 auto',
-  padding: '64px 0',
+  padding: '64px 0 40px',
   textAlign: 'center',
 };
 
-const EYEBROW_STYLE: React.CSSProperties = {
+const EYEBROW_STYLE: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   fontSize: 11,
   fontWeight: 700,
   color: 'var(--muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
-  margin: '0 0 12px',
+  margin: '0 0 14px',
 };
 
-const H1_STYLE: React.CSSProperties = {
+// Launch Week pill — neutral #f5f5f3 bg, #1b1a17 ink, green accent dot.
+// Contrast on #f5f5f3: #1b1a17 = 16.1:1 (AAA). Color is NOT the info carrier —
+// the text "Launch week · 27 April 2026" carries the meaning on its own.
+const LAUNCH_PILL_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '6px 14px',
+  borderRadius: 999,
+  background: '#f5f5f3',
+  border: '1px solid var(--line)',
+  color: '#1b1a17',
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 11,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  margin: '0 0 18px',
+};
+
+const LAUNCH_PILL_DOT: CSSProperties = {
+  width: 7,
+  height: 7,
+  borderRadius: '50%',
+  background: 'var(--accent)',
+  flex: '0 0 auto',
+};
+
+const H1_STYLE: CSSProperties = {
   fontFamily: 'var(--font-display)',
   fontWeight: 800,
   fontSize: 52,
   lineHeight: 1.08,
   letterSpacing: '-0.025em',
   color: 'var(--ink)',
-  margin: '0 0 20px',
+  margin: '0 0 16px',
   textWrap: 'balance' as unknown as 'balance',
 };
 
-const SUB_STYLE: React.CSSProperties = {
+const LEDE_STYLE: CSSProperties = {
   fontSize: 18,
   lineHeight: 1.6,
   color: 'var(--muted)',
-  margin: '0 auto 28px',
-  maxWidth: 480,
+  margin: '0 auto 8px',
+  maxWidth: 560,
 };
 
-const FORM_WRAP_STYLE: React.CSSProperties = {
-  maxWidth: 420,
+const MICRO_STYLE: CSSProperties = {
+  fontSize: 13,
+  color: 'var(--muted)',
   margin: '0 auto',
-  textAlign: 'left' as const,
+  maxWidth: 520,
+  opacity: 0.85,
 };
 
-const FORM_STYLE: React.CSSProperties = {
+// ---- Email form -----------------------------------------------------------
+
+const FORM_SECTION: CSSProperties = {
+  maxWidth: 560,
+  margin: '0 auto',
+  padding: '0 0 32px',
+};
+
+const FORM_CARD: CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--line)',
+  borderRadius: 16,
+  padding: '28px 28px 24px',
+};
+
+const FORM_ROW: CSSProperties = {
   display: 'flex',
   gap: 8,
   flexWrap: 'wrap',
-  justifyContent: 'center',
 };
 
-const INPUT_STYLE: React.CSSProperties = {
-  flex: '1 1 220px',
-  minWidth: 220,
+const INPUT_STYLE: CSSProperties = {
+  flex: '1 1 240px',
+  minWidth: 0,
   padding: '12px 14px',
   border: '1px solid var(--line)',
   borderRadius: 8,
-  background: 'var(--card)',
+  background: 'var(--bg)',
   color: 'var(--ink)',
   fontSize: 15,
 };
 
-const BUTTON_STYLE: React.CSSProperties = {
+const BUTTON_STYLE: CSSProperties = {
   padding: '12px 20px',
   border: 'none',
   borderRadius: 8,
@@ -87,7 +147,225 @@ const BUTTON_STYLE: React.CSSProperties = {
   fontSize: 15,
   fontWeight: 600,
   cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };
+
+// ---- Shipping cards -------------------------------------------------------
+
+interface ShippingCard {
+  icon: typeof Rocket;
+  title: string;
+  body: string;
+  cta: { label: string; to: string };
+}
+
+const SHIPPING: ShippingCard[] = [
+  {
+    icon: Rocket,
+    title: 'Launch apps to run now',
+    body: 'Lead Scorer, Resume Screener, Competitor Analyzer — real AI apps doing real work. No account needed to try them.',
+    cta: { label: 'Browse the store', to: '/apps' },
+  },
+  {
+    icon: Layers,
+    title: 'Publish any OpenAPI',
+    body: 'Paste an OpenAPI URL, get three surfaces: a web page, an MCP server, and a typed HTTP endpoint — all at once.',
+    cta: { label: 'Read the docs', to: '/docs' },
+  },
+  {
+    icon: Server,
+    title: 'Self-host path',
+    body: 'Run the whole thing yourself. One container, your infra, your data. Open source from day one.',
+    cta: { label: 'Self-host guide', to: '/docs/self-host' },
+  },
+];
+
+const SHIPPING_SECTION: CSSProperties = {
+  maxWidth: 1080,
+  margin: '0 auto',
+  padding: '48px 0 16px',
+};
+
+const SECTION_HEAD_EYEBROW: CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--muted)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  margin: '0 0 10px',
+  textAlign: 'center',
+};
+
+const SECTION_H2: CSSProperties = {
+  fontFamily: 'var(--font-display)',
+  fontWeight: 700,
+  fontSize: 32,
+  lineHeight: 1.15,
+  letterSpacing: '-0.02em',
+  color: 'var(--ink)',
+  margin: '0 0 28px',
+  textAlign: 'center',
+};
+
+const SHIPPING_GRID: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  gap: 14,
+};
+
+const CARD_STYLE: CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--line)',
+  borderRadius: 14,
+  padding: 24,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+  minWidth: 0,
+};
+
+const ICON_BADGE: CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 10,
+  background: '#ecfdf5',
+  color: 'var(--accent)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const CARD_TITLE: CSSProperties = {
+  fontSize: 16,
+  fontWeight: 700,
+  color: 'var(--ink)',
+  margin: 0,
+  letterSpacing: '-0.01em',
+  lineHeight: 1.25,
+};
+
+const CARD_BODY: CSSProperties = {
+  fontSize: 13.5,
+  color: 'var(--muted)',
+  lineHeight: 1.55,
+  margin: 0,
+  flex: 1,
+};
+
+const CARD_LINK: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: 'var(--accent)',
+  textDecoration: 'none',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  marginTop: 4,
+};
+
+// ---- ICPs (makers + teams) ------------------------------------------------
+
+const ICP_SECTION: CSSProperties = {
+  maxWidth: 880,
+  margin: '0 auto',
+  padding: '32px 0 16px',
+};
+
+const ICP_GRID: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 12,
+};
+
+const ICP_CARD: CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--line)',
+  borderRadius: 12,
+  padding: 20,
+  display: 'flex',
+  gap: 14,
+  alignItems: 'flex-start',
+};
+
+const ICP_ICON_BADGE: CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 8,
+  background: '#ecfdf5',
+  color: 'var(--accent)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: '0 0 auto',
+};
+
+const ICP_TITLE: CSSProperties = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: 'var(--ink)',
+  margin: '0 0 4px',
+  letterSpacing: '-0.005em',
+};
+
+const ICP_BODY: CSSProperties = {
+  fontSize: 13,
+  color: 'var(--muted)',
+  lineHeight: 1.5,
+  margin: 0,
+};
+
+// ---- Timeline band --------------------------------------------------------
+
+const TIMELINE_BAND: CSSProperties = {
+  maxWidth: 720,
+  margin: '0 auto',
+  padding: '32px 24px',
+  textAlign: 'center',
+  background: '#1b1a17',
+  color: '#f5f5f3',
+  borderRadius: 14,
+  marginTop: 32,
+  marginBottom: 32,
+};
+
+const TIMELINE_EYEBROW: CSSProperties = {
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: 11,
+  fontWeight: 700,
+  color: '#9a9790',
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  margin: '0 0 8px',
+};
+
+const TIMELINE_LINE: CSSProperties = {
+  fontFamily: 'var(--font-display)',
+  fontSize: 20,
+  lineHeight: 1.4,
+  fontWeight: 600,
+  color: '#f5f5f3',
+  margin: 0,
+  letterSpacing: '-0.01em',
+};
+
+// ---- Footer links ---------------------------------------------------------
+
+const FOOTER_LINKS: CSSProperties = {
+  textAlign: 'center',
+  padding: '16px 0 32px',
+  fontSize: 13,
+  color: 'var(--muted)',
+};
+
+const FOOTER_LINK: CSSProperties = {
+  color: 'var(--ink)',
+  fontWeight: 600,
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+};
+
+// ---------------------------------------------------------------------------
 
 export function WaitlistPage() {
   const [email, setEmail] = useState('');
@@ -143,44 +421,82 @@ export function WaitlistPage() {
   return (
     <PageShell
       title="Join the Floom waitlist"
-      description="Floom Cloud is rolling out in waves. Tell us what you'd deploy first and we'll let you in as soon as we can."
+      description="Floom is the protocol and runtime for agentic work. Join the waitlist and see what's shipping — launch apps, a publish flow, and a self-host path."
+      contentStyle={{ maxWidth: 1120 }}
     >
-      <section style={SECTION_STYLE}>
+      {/* 1. Vision band ---------------------------------------------------- */}
+      <section style={HERO_SECTION} data-testid="waitlist-hero">
         <div style={EYEBROW_STYLE}>Waitlist</div>
-        <h1 style={H1_STYLE}>Join the Floom waitlist.</h1>
-        {success ? (
-          <>
-            <p style={SUB_STYLE} data-testid="waitlist-page-success">
-              You&rsquo;re on the list. We&rsquo;ll email you when your slot
-              opens. In the meantime, the featured apps on the Floom store are
-              free to run — no signup required.
-            </p>
-            <a
-              href="/apps"
-              style={{
-                display: 'inline-block',
-                padding: '12px 20px',
-                borderRadius: 8,
-                background: 'var(--ink)',
-                color: '#fff',
-                textDecoration: 'none',
-                fontSize: 15,
-                fontWeight: 600,
-              }}
-            >
-              Browse the store
-            </a>
-          </>
-        ) : (
-          <>
-            <p style={SUB_STYLE}>
-              We&rsquo;re rolling out Deploy slowly. Drop your email and
-              we&rsquo;ll let you know as soon as you can publish your own
-              app.
-            </p>
-            <div style={FORM_WRAP_STYLE}>
+        <div
+          style={LAUNCH_PILL_STYLE}
+          data-testid="waitlist-launch-pill"
+          aria-label="Launch week 27 April 2026"
+        >
+          <span aria-hidden="true" style={LAUNCH_PILL_DOT} />
+          Launch week &middot; 27 April 2026
+        </div>
+        <h1 style={H1_STYLE}>Infrastructure for agentic work.</h1>
+        <p style={LEDE_STYLE}>
+          Production-grade runtime + protocol for AI apps. Open source.
+          Get early access to the runtime for the agent era.
+        </p>
+        <p style={MICRO_STYLE}>
+          Deploy is rolling out in waves. Drop your email and we&rsquo;ll let
+          you in as soon as your slot opens.
+        </p>
+      </section>
+
+      {/* 2. Email form ----------------------------------------------------- */}
+      <section style={FORM_SECTION}>
+        <div style={FORM_CARD}>
+          {success ? (
+            <div style={{ textAlign: 'center' }}>
+              <p
+                style={{
+                  fontSize: 16,
+                  lineHeight: 1.55,
+                  color: 'var(--ink)',
+                  margin: '0 0 16px',
+                  fontWeight: 600,
+                }}
+                data-testid="waitlist-page-success"
+              >
+                You&rsquo;re on the list.
+              </p>
+              <p
+                style={{
+                  fontSize: 14,
+                  lineHeight: 1.55,
+                  color: 'var(--muted)',
+                  margin: '0 0 20px',
+                }}
+              >
+                We&rsquo;ll email you when your slot opens. Meanwhile, every
+                app on the store is free to run — no signup needed.
+              </p>
+              <Link
+                to="/apps"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '10px 18px',
+                  borderRadius: 8,
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  textDecoration: 'none',
+                  fontSize: 14,
+                  fontWeight: 600,
+                }}
+              >
+                Browse the store
+                <ArrowRight size={14} strokeWidth={2} />
+              </Link>
+            </div>
+          ) : (
+            <>
               <form onSubmit={handleSubmit} data-testid="waitlist-page-form">
-                <div style={FORM_STYLE}>
+                <div style={FORM_ROW}>
                   <input
                     type="email"
                     value={email}
@@ -220,8 +536,8 @@ export function WaitlistPage() {
                   style={{
                     display: 'block',
                     width: '100%',
-                    marginTop: 10,
-                    marginBottom: showDeployDetails ? 10 : 0,
+                    marginTop: 12,
+                    marginBottom: showDeployDetails ? 12 : 0,
                     padding: 0,
                     border: 'none',
                     background: 'none',
@@ -306,23 +622,113 @@ export function WaitlistPage() {
                   </div>
                 )}
               </form>
-            </div>
-            {error && (
-              <div
-                data-testid="waitlist-page-error"
-                role="alert"
-                style={{
-                  marginTop: 12,
-                  color: 'var(--danger, #e5484d)',
-                  fontSize: 13,
-                }}
-              >
-                {error}
-              </div>
-            )}
-          </>
-        )}
+              {error && (
+                <div
+                  data-testid="waitlist-page-error"
+                  role="alert"
+                  style={{
+                    marginTop: 12,
+                    color: 'var(--danger, #e5484d)',
+                    fontSize: 13,
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </section>
+
+      {/* 3. What's shipping ----------------------------------------------- */}
+      <section style={SHIPPING_SECTION} data-testid="waitlist-shipping">
+        <div style={SECTION_HEAD_EYEBROW}>What&rsquo;s shipping</div>
+        <h2 style={SECTION_H2}>Three things live the day you&rsquo;re in.</h2>
+        <div className="waitlist-shipping-grid" style={SHIPPING_GRID}>
+          {SHIPPING.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article key={card.title} style={CARD_STYLE}>
+                <span aria-hidden="true" style={ICON_BADGE}>
+                  <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <h3 style={CARD_TITLE}>{card.title}</h3>
+                <p style={CARD_BODY}>{card.body}</p>
+                <Link to={card.cta.to} style={CARD_LINK}>
+                  {card.cta.label}
+                  <ArrowRight size={13} strokeWidth={2} aria-hidden="true" />
+                </Link>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 4. ICPs ----------------------------------------------------------- */}
+      <section style={ICP_SECTION} data-testid="waitlist-icps">
+        <div style={SECTION_HEAD_EYEBROW}>Who it&rsquo;s for</div>
+        <h2 style={{ ...SECTION_H2, fontSize: 24, marginBottom: 20 }}>
+          Built for two kinds of builders.
+        </h2>
+        <div className="waitlist-icp-grid" style={ICP_GRID}>
+          <article style={ICP_CARD}>
+            <span aria-hidden="true" style={ICP_ICON_BADGE}>
+              <Wrench size={16} strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <h3 style={ICP_TITLE}>Makers</h3>
+              <p style={ICP_BODY}>
+                Ship your vibe-coded weekend projects to real URLs — with
+                auth, run history, and share pages included.
+              </p>
+            </div>
+          </article>
+          <article style={ICP_CARD}>
+            <span aria-hidden="true" style={ICP_ICON_BADGE}>
+              <Users size={16} strokeWidth={1.8} aria-hidden="true" />
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <h3 style={ICP_TITLE}>Teams</h3>
+              <p style={ICP_BODY}>
+                Run internal tools and productivity apps in a production
+                wrapper your org can trust.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      {/* 5. Timeline band -------------------------------------------------- */}
+      <section style={TIMELINE_BAND} data-testid="waitlist-timeline">
+        <div style={TIMELINE_EYEBROW}>Timeline</div>
+        <p style={TIMELINE_LINE}>
+          Going live Launch Week: 27 April 2026. The waitlist opens access as
+          we scale.
+        </p>
+      </section>
+
+      {/* 6. Footer links --------------------------------------------------- */}
+      <div style={FOOTER_LINKS}>
+        Already exploring? Poke around{' '}
+        <Link to="/docs" style={FOOTER_LINK}>
+          the docs
+        </Link>
+        {' '}or run an app on{' '}
+        <Link to="/apps" style={FOOTER_LINK}>
+          the store
+        </Link>
+        .
+      </div>
+
+      <style>{`
+        @media (max-width: 860px) {
+          .waitlist-shipping-grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .waitlist-icp-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        }
+        @media (max-width: 560px) {
+          [data-testid="waitlist-hero"] h1 { font-size: 36px !important; }
+        }
+      `}</style>
     </PageShell>
   );
 }
