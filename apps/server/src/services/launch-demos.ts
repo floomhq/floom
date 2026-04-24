@@ -37,7 +37,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
-import type { NormalizedManifest } from '../types.js';
+import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
   process.env.LAUNCH_DEMO_BUILD_TIMEOUT || 600_000,
@@ -252,12 +252,17 @@ function findRepoRoot(): string | null {
   return null;
 }
 
-async function imageExists(docker: Docker, tag: string): Promise<boolean> {
+export async function imageExists(docker: Docker, tag: string): Promise<boolean> {
   try {
     await docker.getImage(tag).inspect();
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const e = err as Error & { statusCode?: number };
+    const msg = e.message || '';
+    if (e.statusCode === 404 || /no such image|not found/i.test(msg)) {
+      return false;
+    }
+    throw err;
   }
 }
 
@@ -307,6 +312,90 @@ export function imageTagForDemo(
   contextPath: string,
 ): string {
   return `floom-demo-${demo.slug}:ctx-${fingerprintDemoContext(contextPath)}`;
+}
+
+type RuntimeDemoApp = Pick<AppRecord, 'slug' | 'code_path' | 'docker_image'>;
+
+export type ResolveDemoImageTagResult =
+  | { status: 'ready'; imageTag: string }
+  | { status: 'keep_previous'; imageTag: string }
+  | { status: 'missing' };
+
+function findDemoForApp(app: RuntimeDemoApp): LaunchDemo | null {
+  const launchPrefix = 'reused:launch-demo:';
+  const slugFromCodePath =
+    typeof app.code_path === 'string' && app.code_path.startsWith(launchPrefix)
+      ? app.code_path.slice(launchPrefix.length).split(':', 1)[0]
+      : null;
+  const slug = slugFromCodePath || app.slug;
+  return DEMOS.find((demo) => demo.slug === slug) || null;
+}
+
+async function findLatestLocalDemoTag(
+  docker: Docker,
+  demoSlug: string,
+  excludeTag?: string | null,
+): Promise<string | null> {
+  const prefix = `floom-demo-${demoSlug}:ctx-`;
+  const images = await docker.listImages({ all: true });
+  const matches = images
+    .flatMap((image) => {
+      const created = typeof image.Created === 'number' ? image.Created : 0;
+      const repoTags = Array.isArray(image.RepoTags) ? image.RepoTags : [];
+      return repoTags
+        .filter(
+          (tag): tag is string =>
+            typeof tag === 'string' &&
+            tag !== '<none>:<none>' &&
+            tag.startsWith(prefix) &&
+            tag !== excludeTag,
+        )
+        .map((tag) => ({ tag, created }));
+    })
+    .sort((a, b) => b.created - a.created || b.tag.localeCompare(a.tag));
+  return matches[0]?.tag ?? null;
+}
+
+export async function resolveDemoImageTag(
+  docker: Docker,
+  app: RuntimeDemoApp,
+): Promise<ResolveDemoImageTagResult> {
+  const demo = findDemoForApp(app);
+  if (!demo) return { status: 'missing' };
+
+  const fallbackToPrevious = async (): Promise<ResolveDemoImageTagResult> => {
+    const previousTag = await findLatestLocalDemoTag(
+      docker,
+      demo.slug,
+      app.docker_image,
+    );
+    return previousTag
+      ? { status: 'keep_previous', imageTag: previousTag }
+      : { status: 'missing' };
+  };
+
+  const repoRoot = findRepoRoot();
+  if (!repoRoot) return fallbackToPrevious();
+
+  const contextPath = resolve(repoRoot, demo.contextDir);
+  if (!existsSync(resolve(contextPath, 'Dockerfile'))) {
+    return fallbackToPrevious();
+  }
+
+  const desiredTag = imageTagForDemo(demo, contextPath);
+  if (await imageExists(docker, desiredTag)) {
+    return { status: 'ready', imageTag: desiredTag };
+  }
+
+  try {
+    await buildDemoImage(docker, contextPath, desiredTag);
+    return { status: 'ready', imageTag: desiredTag };
+  } catch (err) {
+    console.warn(
+      `[launch-demos] ${demo.slug}: runtime rebuild failed for ${desiredTag}: ${(err as Error).message}`,
+    );
+    return fallbackToPrevious();
+  }
 }
 
 async function buildDemoImage(

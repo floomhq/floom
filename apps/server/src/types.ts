@@ -150,7 +150,7 @@ export interface AppRecord {
   name: string;
   description: string;
   manifest: string; // JSON-stringified NormalizedManifest
-  status: 'active' | 'deploying' | 'failed';
+  status: 'active' | 'deploying' | 'failed' | 'inactive';
   docker_image: string | null;
   code_path: string;
   category: string | null;

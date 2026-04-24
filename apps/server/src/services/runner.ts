@@ -1,7 +1,12 @@
 // Trimmed port of the marketplace runner. Loads secrets, dispatches a
 // container run, streams output to the log bus, and updates the run record.
+import Docker from 'dockerode';
 import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { runAppContainer } from './docker.js';
+import {
+  imageExists,
+  resolveDemoImageTag,
+} from './launch-demos.js';
 import { runProxied } from './proxied-runner.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
@@ -29,6 +34,113 @@ function defaultContext(device_id?: string): SessionContext {
     device_id: device_id || DEFAULT_USER_ID,
     is_authenticated: false,
   };
+}
+
+const runtimeGuardDocker = new Docker();
+const updateAppDockerImageStmt = db.prepare(
+  `UPDATE apps SET docker_image = ?, updated_at = datetime('now') WHERE id = ?`,
+);
+const markAppInactiveStmt = db.prepare(
+  `UPDATE apps SET status = 'inactive', updated_at = datetime('now') WHERE id = ?`,
+);
+
+interface RuntimeImageMissingPayload {
+  error: 'app_unavailable';
+  error_type: 'app_image_missing';
+  app_id: string;
+  slug: string;
+  docker_image: string;
+}
+
+type RuntimeImageGuardResult =
+  | { kind: 'ready'; image: string }
+  | {
+      kind: 'app_unavailable';
+      message: string;
+      payload: RuntimeImageMissingPayload;
+      fatalLine: string;
+    }
+  | { kind: 'internal_error'; error: string; logs: string };
+
+type AppRecordWithImage = AppRecord & { docker_image: string };
+
+interface RuntimeImageGuardDeps {
+  docker: Docker;
+  imageExists: typeof imageExists;
+  resolveDemoImageTag: typeof resolveDemoImageTag;
+  rewriteAppImage: (app: AppRecordWithImage, imageTag: string) => void;
+  markAppInactive: (app: AppRecord) => void;
+  fatalLog: (line: string) => void;
+}
+
+function rewriteAppImage(app: AppRecordWithImage, imageTag: string): void {
+  if (app.docker_image === imageTag) return;
+  updateAppDockerImageStmt.run(imageTag, app.id);
+  app.docker_image = imageTag;
+}
+
+function markAppInactive(app: AppRecord): void {
+  markAppInactiveStmt.run(app.id);
+  app.status = 'inactive';
+}
+
+const runtimeImageGuardDeps: RuntimeImageGuardDeps = {
+  docker: runtimeGuardDocker,
+  imageExists,
+  resolveDemoImageTag,
+  rewriteAppImage,
+  markAppInactive,
+  fatalLog: (line) => console.error(line),
+};
+
+function buildAppImageMissingMessage(imageTag: string): string {
+  return `This app's container image "${imageTag}" isn't available on this Floom instance. The app creator needs to republish it.`;
+}
+
+export async function ensureRuntimeImageReady(
+  app: AppRecordWithImage,
+  deps: RuntimeImageGuardDeps = runtimeImageGuardDeps,
+): Promise<RuntimeImageGuardResult> {
+  const missingImage = app.docker_image;
+  try {
+    if (await deps.imageExists(deps.docker, missingImage)) {
+      return { kind: 'ready', image: missingImage };
+    }
+
+    const recovery = await deps.resolveDemoImageTag(deps.docker, app);
+    if (recovery.status === 'ready') {
+      deps.rewriteAppImage(app, recovery.imageTag);
+      return { kind: 'ready', image: recovery.imageTag };
+    }
+    if (recovery.status === 'keep_previous') {
+      deps.rewriteAppImage(app, recovery.imageTag);
+      return { kind: 'ready', image: recovery.imageTag };
+    }
+
+    deps.markAppInactive(app);
+    const payload: RuntimeImageMissingPayload = {
+      error: 'app_unavailable',
+      error_type: 'app_image_missing',
+      app_id: app.id,
+      slug: app.slug,
+      docker_image: missingImage,
+    };
+    const fatalLine = `[runner] FATAL app_image_missing slug=${app.slug} app_id=${app.id} docker_image=${missingImage}`;
+    deps.fatalLog(fatalLine);
+    return {
+      kind: 'app_unavailable',
+      message: buildAppImageMissingMessage(missingImage),
+      payload,
+      fatalLine,
+    };
+  } catch (err) {
+    const e = err as Error;
+    return {
+      kind: 'internal_error',
+      error: e.message || 'Runtime image guard crashed',
+      logs: e.stack || e.message || 'Runtime image guard crashed',
+    };
+  }
 }
 
 interface UpdateRunArgs {
@@ -364,15 +476,76 @@ export function dispatchRun(
   if (app.app_type === 'proxied') {
     void runProxiedWorker({ app, manifest, runId, action, inputs, secrets });
   } else {
-    void runActionWorker({
-      appId: app.id,
+    void runDockerDispatchWithRuntimeGuard({
+      app,
       runId,
       action,
       inputs,
       secrets,
-      image: app.docker_image ?? undefined,
     });
   }
+}
+
+async function runDockerDispatchWithRuntimeGuard(opts: {
+  app: AppRecord;
+  runId: string;
+  action: string;
+  inputs: Record<string, unknown>;
+  secrets: Record<string, string>;
+}): Promise<void> {
+  if (!opts.app.docker_image) {
+    await runActionWorker({
+      appId: opts.app.id,
+      runId: opts.runId,
+      action: opts.action,
+      inputs: opts.inputs,
+      secrets: opts.secrets,
+      image: undefined,
+    });
+    return;
+  }
+
+  const guard = await ensureRuntimeImageReady(
+    opts.app as AppRecordWithImage,
+  );
+  if (guard.kind === 'ready') {
+    await runActionWorker({
+      appId: opts.app.id,
+      runId: opts.runId,
+      action: opts.action,
+      inputs: opts.inputs,
+      secrets: opts.secrets,
+      image: guard.image,
+    });
+    return;
+  }
+
+  const logStream = getOrCreateStream(opts.runId);
+  if (guard.kind === 'app_unavailable') {
+    logStream.append(guard.fatalLine, 'stderr');
+    updateRun(opts.runId, {
+      status: 'error',
+      outputs: guard.payload,
+      error: guard.message,
+      error_type: 'app_unavailable',
+      logs: guard.fatalLine,
+      finished: true,
+    });
+    logStream.finish();
+    return;
+  }
+
+  const crashLine = `[runner] runtime image guard failed for ${opts.app.slug}: ${guard.error}`;
+  console.error(crashLine);
+  logStream.append(crashLine, 'stderr');
+  updateRun(opts.runId, {
+    status: 'error',
+    error: guard.error,
+    error_type: 'floom_internal_error',
+    logs: guard.logs,
+    finished: true,
+  });
+  logStream.finish();
 }
 
 async function runProxiedWorker(opts: {
