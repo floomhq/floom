@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import { useDeployEnabled } from '../lib/flags';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,8 +54,12 @@ function desktopSnippet(slug: string | null): string {
 }
 
 function claudeCodeSnippet(slug: string | null): string {
+  const serverName = slug ?? 'floom';
   const url = slug ? `${MCP_BASE}/app/${slug}` : `${MCP_BASE}/search`;
-  return `claude mcp add --transport http ${url}`;
+  // `claude mcp add <name> --transport http <url>` — the <name> positional
+  // is required; without it Claude Code fails with "missing required
+  // argument 'commandOrUrl'".
+  return `claude mcp add ${serverName} --transport http ${url}`;
 }
 
 function cursorSnippet(slug: string | null): string {
@@ -740,6 +745,13 @@ const TABS: Array<{ id: ClientTab; label: string; sub: string; icon: React.React
 
 export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
   const [activeTab, setActiveTab] = useState<ClientTab>('desktop');
+  // Waitlist mode (floom.dev): /me/apps is WaitlistGuard'd and redirects
+  // to /waitlist, which would loop users back from this finish CTA. In
+  // that mode, send them to /apps (public, always accessible) instead.
+  const deployEnabled = useDeployEnabled();
+  const finishHref = deployEnabled === false ? '/apps' : '/me/apps';
+  const finishLabel =
+    deployEnabled === false ? 'Browse all apps →' : 'Done, open My apps →';
   // Simulated connection detection. Each tab tracks its own state so
   // switching tabs doesn't incorrectly claim a different client is
   // connected. Real MCP probes land once each client exposes a
@@ -1018,7 +1030,7 @@ export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
           )}
 
           <Link
-            to="/me/apps"
+            to={finishHref}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -1033,7 +1045,7 @@ export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
               border: '1px solid var(--accent,#059669)',
             }}
           >
-            Done, open My apps →
+            {finishLabel}
           </Link>
         </div>
 
