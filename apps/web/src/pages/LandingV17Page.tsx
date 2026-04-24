@@ -1,66 +1,111 @@
 /**
  * LandingV17Page — marketing home `/` rebuilt to the v17 wireframes.
  *
- * 2026-04-24 restructure ("landing still feels messy"):
- *   Federico audit flagged the landing as too tall, too duplicated, and
- *   with a missing manifesto band on preview. This revision collapses the
- *   page to 7 core sections (was 9):
- *     1. Hero (slim: H1 + sub + CTAs only, no inline DeployYourOwnTile)
- *     2. ManifestoBand (the vision) — "Infrastructure for agentic work."
- *     3. TryTheseApps (3 live apps)
- *     4. SelfHost band
- *     5. CliReference + HowItWorks (3 steps)
- *     6. DualAudiences (makers + teams)
- *     7. PricingTeaser + Final CTA + Footer
- *   Removed: the duplicate Showcase stripes (same 3 apps as TryTheseApps),
- *   the PublishCtaBox (duplicated DualAudiences' makers column), and the
- *   inline DeployYourOwnTile (hero bloat — the hero-secondary CTA and the
- *   SelfHost band already carry that message).
- *   The works-with-MCP eyebrow moved from above-H1 to a thin proof-bar
- *   BELOW the hero CTAs — the H1 now leads, the compatibility claim trails.
- *
- * 2026-04-27 waitlist-reality rewrite (still applies):
- *   floom.dev (production) is waitlist-only for the build/deploy flow, but
- *   the 3 featured apps (Lead Scorer, Resume Screener, Competitor Analyzer)
- *   are live and runnable today. preview.floom.dev keeps the full flow.
- *     - Hero CTAs: [Try an app] primary, [Join the waitlist] secondary.
- *     - Hero demo: full 3-state build -> deploy -> use (visual explainer).
- *     - Every deploy/publish CTA across the page reacts to DEPLOY_ENABLED.
- *
  * Sources of truth:
  *   /var/www/wireframes-floom/v17/landing.html            (desktop)
  *   /var/www/wireframes-floom/v17/landing-mobile.html     (mobile)
  *   /var/www/wireframes-floom/v17/REVISION-2026-04-22.md  (latest revisions)
  *   /root/floom-internal/launch/v17-preview-delta-2026-04-22.md
+ *
+ * v17 deltas vs the previous CreatorHeroPage.tsx:
+ *   - Drop the "Vibe-coding speed. Production-grade safety." kicker from hero (dropped 2026-04-22).
+ *   - CTAs: [Try an app] (accent) + [Publish your app] (ink). No docs button in hero.
+ *   - Works-with belt moves DIRECTLY under CTAs with six explicit items.
+ *   - Add a compact CLI reference strip ("/floom-deploy", "floom deploy").
+ *   - Add a Publish-CTA box (accent btn + Read the protocol + "open source · MIT").
+ *   - Add biz/teams card (live preview only had the vibecoder card).
+ *   - Pricing teaser = single $0 card + 3 limit cells (no Pro/Team grid).
+ *   - Hero demo column renders <HeroDemo /> — interactive 3-state
+ *     build/deploy/use loop per HERO-DEMO-SPEC.md.
+ *
+ * The existing CreatorHeroPage.tsx is kept in the tree for reference;
+ * main.tsx wires "/" to this page.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
+import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 
-import { PageHead } from '../components/PageHead';
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
 import { CliReference } from '../components/home/CliReference';
+import { PublishCtaBox } from '../components/home/PublishCtaBox';
 import { DualAudiences } from '../components/home/DualAudiences';
 import { PricingTeaser } from '../components/home/PricingTeaser';
 import { HeroDemo } from '../components/home/HeroDemo';
 import { SectionEyebrow } from '../components/home/SectionEyebrow';
-import { TryTheseApps } from '../components/home/TryTheseApps';
-import { ManifestoBand } from '../components/landing/ManifestoBand';
-import { SelfHostSection } from '../components/home/SelfHostSection';
+import { LaunchWeekPill } from '../components/home/LaunchWeekPill';
+import { WorkedExample } from '../components/home/WorkedExample';
+import { ThreeSurfacesDiagram } from '../components/home/ThreeSurfacesDiagram';
+import { FitBand } from '../components/home/FitBand';
+import { WhosBehind } from '../components/home/WhosBehind';
+import { DiscordCta } from '../components/home/DiscordCta';
 
-import { DEPLOY_ENABLED, useDeployEnabled } from '../lib/flags';
-import { WaitlistModal } from '../components/WaitlistModal';
+import * as api from '../api/client';
+import type { HubApp } from '../lib/types';
+import { publicHubApps } from '../lib/hub-filter';
+
+interface Stripe {
+  slug: string;
+  name: string;
+  description: string;
+  category?: string;
+}
+
+// Same showcase roster as CreatorHeroPage (see P0 launch curation #253).
+const PREFERRED_SLUGS = ['lead-scorer', 'competitor-analyzer', 'resume-screener'] as const;
+
+const FALLBACK_STRIPES: Stripe[] = [
+  {
+    slug: 'lead-scorer',
+    name: 'Lead Scorer',
+    description: 'Upload a CSV of leads + your ICP. Get fit scores, reasoning, and enriched columns.',
+    category: 'growth',
+  },
+  {
+    slug: 'competitor-analyzer',
+    name: 'Competitor Analyzer',
+    description: 'Paste competitor URLs, get positioning, pricing, and a strengths/weaknesses table.',
+    category: 'research',
+  },
+  {
+    slug: 'resume-screener',
+    name: 'Resume Screener',
+    description: 'Upload a zip of PDFs + a JD, get a ranked shortlist with reasoning per candidate.',
+    category: 'growth',
+  },
+];
+
+function pickStripes(apps: HubApp[]): Stripe[] {
+  if (apps.length === 0) return FALLBACK_STRIPES;
+  const bySlug = new Map(apps.map((app) => [app.slug, app]));
+  const picked: Stripe[] = [];
+  for (const slug of PREFERRED_SLUGS) {
+    const hit = bySlug.get(slug);
+    if (hit) picked.push({ slug: hit.slug, name: hit.name, description: hit.description, category: hit.category ?? undefined });
+  }
+  if (picked.length === PREFERRED_SLUGS.length) return picked;
+  return picked.length >= 3 ? picked : FALLBACK_STRIPES;
+}
 
 export function LandingV17Page() {
-  // Launch feature flag (2026-04-27). When false, the secondary
-  // "Deploy your own" hero link swaps to a "Join waitlist" button that
-  // opens WaitlistModal instead of navigating to /signup.
-  const deployEnabled = useDeployEnabled();
-  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
+
+  useEffect(() => {
+    document.title = 'Ship AI apps fast · Floom';
+    api
+      .getHub()
+      .then((apps) => {
+        const visible = publicHubApps(apps);
+        if (visible.length > 0) setStripes(pickStripes(visible));
+      })
+      .catch(() => {
+        // Keep static roster on failure.
+      });
+  }, []);
 
   return (
     <div
@@ -68,32 +113,22 @@ export function LandingV17Page() {
       data-testid="landing-v17"
       style={{ minHeight: '100vh', background: 'var(--bg)' }}
     >
-      <PageHead
-        title="Ship AI apps fast · Floom"
-        description="Floom is the protocol and runtime for agentic work. Paste your app's link and get a Claude tool, a page to share, a command-line, and a clean URL your teammates can hit."
-      />
       <TopBar />
 
       <main id="main" style={{ display: 'block' }}>
         {/* HERO — wireframe: .hero-shell > .hero
-            Cursor-style layout. Demo does NOT have to fit the viewport in
-            full — people scroll. The hero reads as: nav / breath / H1 /
-            sub / CTAs / proof belt / demo (demo naturally tall).
-            2026-04-24 (Federico feedback): the H1 was sitting almost flush
-            against the top nav with ~16px of breathing room, which made
-            the headline feel cramped. Top padding bumped to 96px desktop
-            (overridden to 56px at ≤640px) so the H1 has real breathing
-            room above it. Bottom stays modest — the gradient already
-            hands off to the manifesto band below. */}
+            Cursor-style layout (Federico 2026-04-23 — "the visual demo
+            doesn't have to fit on the hero in full"). Above the fold at
+            1440x900: eyebrow + H1 + sub + CTA + top ~120-150px of the
+            HeroDemo canvas. The rest of the demo extends below the fold and
+            reveals on scroll — no min-height:100vh forcing fit, no squished
+            demo. Top padding trimmed (40 -> 24) to give the canvas more room
+            inside the first viewport. */}
         <section
           data-testid="hero"
           style={{
             position: 'relative',
-            // Breathing room above the H1 — Federico 2026-04-24. Mobile
-            // override in the scoped <style> block below drops this to
-            // 56px so the small-screen hero doesn't start with a huge
-            // empty block.
-            padding: '96px 24px 32px',
+            padding: '24px 24px 40px',
             borderBottom: '1px solid var(--line)',
             background:
               'linear-gradient(180deg, var(--card) 0%, var(--bg) 100%)',
@@ -106,40 +141,27 @@ export function LandingV17Page() {
               textAlign: 'center',
             }}
           >
-            {/* H1 — "Ship AI apps fast." (Federico 2026-04-24 —
-                restored the original punchy two-word-verb headline that
-                preview used to carry. The 2026-04-27 waitlist-reality
-                rewrite "AI apps you can ship as easily as you write a
-                prompt." softened the verb to account for a gated Deploy,
-                but on the actual page that full sentence read unclear
-                — too many clauses, "ship" fighting "write a prompt" for
-                the sentence's centre of gravity. We'd rather keep the
-                hero short and let the subtitle carry the nuance; that's
-                also how Cursor/Linear/Vercel structure their own launch
-                heroes. Waitlist gating is communicated unambiguously by
-                the CTA row below (primary "Try an app", secondary
-                "Join the waitlist to build your own") and by the
-                publish-waitlist banner on /docs and /apps. Font swap at
-                the same time: DM Serif Display out, Inter 800 with
-                tight tracking in — see wireframe.css rationale on
-                --font-display. */}
-            {/* Accent on "fast." lifted from the v17 landing wireframe
-                (v17-wireframes/v17/landing.html line 146). Giving the
-                punch word the green accent color sharpens the hero
-                without adding any new element — the headline's rhythm
-                is intact, but the eye now lands on the promise word,
-                not the mass of "Ship AI apps". Federico 2026-04-25
-                "hero could still be cleaner" — this is the single
-                highest-leverage visual pop on the page that doesn't
-                require layout surgery. */}
+            {/* Launch week pill — top of the hero, mirrors the
+                chip on /pricing (#544, Federico 2026-04-23). Small,
+                unambiguous date anchor so cold visitors know they're
+                landing during launch week, not a generic static page. */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              <LaunchWeekPill />
+            </div>
+
+            {/* Works-with belt as small eyebrow ABOVE the H1
+                (Federico 2026-04-23 — "like we had before"). */}
+            <WorksWithBelt />
+
+            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
             <h1
               className="hero-headline"
               style={{
-                fontFamily: 'var(--font-display)',
-                fontWeight: 800,
-                fontSize: 72,
-                lineHeight: 1.0,
-                letterSpacing: '-0.04em',
+                fontFamily: "'DM Serif Display', Georgia, serif",
+                fontWeight: 400,
+                fontSize: 64,
+                lineHeight: 1.02,
+                letterSpacing: '-0.025em',
                 color: 'var(--ink)',
                 margin: '0 0 16px',
                 textWrap: 'balance' as unknown as 'balance',
@@ -148,52 +170,44 @@ export function LandingV17Page() {
               Ship AI apps <span style={{ color: 'var(--accent)' }}>fast.</span>
             </h1>
 
-            {/* Subtitle. Single line. The old hero carried a second
-                "For founders, solo devs, and small teams" line underneath
-                this one; Federico 2026-04-24 asked to drop it — one
-                subtitle is enough, and the protocol-runtime framing
-                covers the intended audience implicitly. 2026-04-25 —
-                tightened margin-bottom (32 -> 24) so the CTAs don't
-                float far below the sub; same intent as the H1 margin
-                trim above. */}
+            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22). */}
             <p
               className="hero-sub"
               data-testid="hero-sub-positioning"
               style={{
-                fontFamily: 'var(--font-sans)',
-                fontSize: 20,
+                fontFamily: "'Inter', system-ui, sans-serif",
+                fontSize: 19,
                 lineHeight: 1.45,
                 fontWeight: 400,
                 color: 'var(--muted)',
                 maxWidth: 640,
-                margin: '0 auto 24px',
+                margin: '0 auto 28px',
               }}
             >
               The protocol and runtime for agentic work.
             </p>
 
-            {/* CTA — waitlist-reality pair.
-                Primary: [Try an app] -> /store (directs into the 3 live
-                  featured apps; the hero demo itself is running one).
-                Secondary: [Join the waitlist] opens the waitlist modal so
-                  makers who want to ship their OWN app are captured at the
-                  right emotional moment. Reverts to the Deploy-forward pair
-                  when DEPLOY_ENABLED flips on. */}
+            {/* CTA — action-oriented pair matching the demo's Build -> Deploy
+                -> Run flow (Federico 2026-04-23). Primary [Run this in
+                Claude] ink pill -> /install surfaces the install-in-claude
+                path, which is what "run anywhere" actually means to a user.
+                Secondary [Deploy] text link -> /signup covers the builder
+                ICP. NOT "Install in Claude", NOT "Start building free", NOT
+                "Deploy your first app" — Federico excluded those explicitly
+                because they either split audiences or bury the verb. */}
             <div
               className="hero-ctas"
               style={{
                 display: 'flex',
-                flexDirection: 'row',
+                flexDirection: 'column',
                 alignItems: 'center',
-                justifyContent: 'center',
-                flexWrap: 'wrap',
-                gap: 12,
+                gap: 10,
                 marginBottom: 4,
               }}
             >
               <Link
-                to="/apps"
-                data-testid="hero-cta-try-app"
+                to="/install"
+                data-testid="hero-cta-run-in-claude"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -209,81 +223,40 @@ export function LandingV17Page() {
                   textDecoration: 'none',
                 }}
               >
-                Try an app
-                <ArrowRight size={15} aria-hidden="true" />
+                Run this in Claude
               </Link>
-
-              {deployEnabled === false ? (
-                <button
-                  type="button"
-                  data-testid="hero-cta-waitlist"
-                  onClick={() => setWaitlistOpen(true)}
-                  style={{ ...HERO_GHOST_STYLE, cursor: 'pointer' }}
-                >
-                  Join the waitlist to build your own
-                  <ArrowRight size={14} aria-hidden="true" />
-                </button>
-              ) : (
-                <Link
-                  to="/signup"
-                  data-testid="hero-cta-deploy"
-                  style={HERO_GHOST_STYLE}
-                >
-                  Deploy your own
-                  <ArrowRight size={14} aria-hidden="true" />
-                </Link>
-              )}
-            </div>
-
-            {/* Works-with proof strip — moved BELOW the CTAs (2026-04-24
-                restructure). Previously sat above the H1 as a compat
-                eyebrow, but pushed the headline down and competed with the
-                H1 for attention. Below the CTAs it reads as quiet proof
-                ("this works with your tools"), not a lede. */}
-            <div style={{ marginTop: 20 }}>
-              <WorksWithBelt />
+              <Link
+                to="/signup"
+                data-testid="hero-cta-deploy"
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                Deploy your own
+                <ArrowRight size={13} aria-hidden="true" />
+              </Link>
             </div>
           </div>
 
-          {/* Hero demo — morphing canvas. Full build -> deploy -> use loop.
-              The hero demo is a visual explainer of the product shape,
-              unrelated to DEPLOY_ENABLED (which gates the *public*
-              deploy flow at the CTA layer). The Use state shows Lead
-              Scorer returning a real fit score. */}
+          {/* Hero demo — interactive 3-state build/deploy/use loop.
+              Sits directly under the CTAs. Sized to 580px (Cursor-style,
+              Federico 2026-04-23): top ~120-150px is visible above the fold
+              at 1440x900, rest scrolls into view. Bigger canvas = more
+              cinematic, no squishing to fit the viewport. */}
           <HeroDemo />
         </section>
 
-        {/* MANIFESTO BAND — vision-forward block under the hero.
-            Federico 2026-04-24: "we need to say clearly we are building
-            infra for agentic work. more big vision talk, rn it feels like
-            a tool". Direction A, Option 2 (hybrid): the benefit-forward
-            hero ("Ship AI apps fast.") stays as the wedge, this band adds
-            the philosophy ("Infrastructure for agentic work."). Placed
-            between hero and TryTheseApps so the page reads: promise -> why
-            we exist -> proof. */}
-        <ManifestoBand />
-
-        {/* "Try these 3 apps" — 3 side-by-side cards of the live featured
-            apps. Placed strategically just below the hero, BEFORE the "how
-            it works" narrative, so the page delivers a usable product (not
-            a promise) in the first scroll. 2026-04-27 launch-strategy pivot. */}
-        <TryTheseApps />
-
-        {/* SELF-HOST — dedicated band. Federico 2026-04-24: "make self-
-            hosting prominent". Commercial evaluators landing on floom.dev
-            should see within one scroll that waiting for the beta is
-            optional: the OSS image is shipped today, one docker run away.
-            Keeps the launch page honest about what's available without
-            hiding the hosted story. */}
-        <SelfHostSection />
-
-        {/* Compact CLI reference strip below the hero. Docs/informational —
-            not an action CTA, so it stays put regardless of DEPLOY_ENABLED
-            (the slash command IS the integration even while the public deploy
-            flow is gated — self-hosters and MCP builders use it today). */}
+        {/* Compact CLI reference strip below the hero — smaller than the
+            original hero-inline version (Federico 2026-04-23 — moved out of
+            hero, kept below as a smaller block). */}
         <section
           data-testid="cli-reference-section"
-          style={{ padding: '16px 24px 8px' }}
+          style={{ padding: '32px 24px 8px' }}
         >
           <CliReference />
         </section>
@@ -291,16 +264,16 @@ export function LandingV17Page() {
         {/* HOW IT WORKS — 3 steps */}
         <section
           data-testid="how-it-works"
-          style={{ padding: '56px 28px', maxWidth: 1240, margin: '0 auto' }}
+          style={{ padding: '72px 28px', maxWidth: 1240, margin: '0 auto' }}
         >
           <SectionEyebrow>How it works</SectionEyebrow>
           <h2
             style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 700,
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontWeight: 400,
               fontSize: 34,
               lineHeight: 1.1,
-              letterSpacing: '-0.03em',
+              letterSpacing: '-0.02em',
               textAlign: 'center',
               margin: '0 auto 28px',
               maxWidth: 760,
@@ -372,15 +345,78 @@ export function LandingV17Page() {
           </div>
         </section>
 
-        {/* 2026-04-24 restructure: two duplicated sections removed here.
-            - <Showcase /> — same 3 apps as <TryTheseApps /> above; pure
-              duplication. Was previously gated on DEPLOY_ENABLED so it
-              only hit preview, but even on preview it was redundant. */}
+        {/* WORKED EXAMPLE — one concrete run (#541, Federico 2026-04-23).
+            Dedicated mid-page band that shows the Lead Scorer output in
+            full (87/100 "Strong fit" on stripe.com). Separate from the
+            HeroDemo USE tab so a scroller who skipped the demo still
+            lands on a complete example before they leave. */}
+        <WorkedExample />
 
-        {/* 2026-04-24 restructure: <PublishCtaBox /> also removed — its
-            "Publish your own app" tile duplicated the Makers column of
-            <DualAudiences /> below. One "for makers" CTA per page is
-            enough; DualAudiences carries it alongside the teams column. */}
+        {/* THREE SURFACES DIAGRAM — non-tech visual (#542). Inline SVG,
+            "paste app -> web page + MCP + API". Scales cleanly, single
+            brand accent for connectors, no bespoke PNG. */}
+        <ThreeSurfacesDiagram />
+
+        {/* FIT BAND — who it's for / who it's not for (#543). Honest
+            about the shape before the visitor signs up. Placed between
+            the diagram and the showcase so the filter happens before
+            the product gallery. */}
+        <FitBand />
+
+        {/* SHOWCASE — 3 apps */}
+        <section
+          data-testid="showcase"
+          style={{
+            padding: '72px 28px',
+            maxWidth: 1240,
+            margin: '0 auto',
+            borderTop: '1px solid var(--line)',
+          }}
+        >
+          <SectionEyebrow>Showcase</SectionEyebrow>
+          <h2
+            style={{
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontWeight: 400,
+              fontSize: 34,
+              lineHeight: 1.1,
+              letterSpacing: '-0.02em',
+              textAlign: 'center',
+              margin: '0 auto 10px',
+              maxWidth: 760,
+            }}
+          >
+            Three apps Floom already runs in production.
+          </h2>
+          <p
+            style={{
+              fontSize: 15.5,
+              color: 'var(--muted)',
+              textAlign: 'center',
+              maxWidth: 620,
+              margin: '0 auto 40px',
+            }}
+          >
+            Real AI doing real work. All three deploy from a single GitHub repo.
+          </p>
+          <div style={{ display: 'grid', gap: 12, maxWidth: 820, margin: '0 auto' }}>
+            {stripes.map((s) => (
+              <AppStripe
+                key={s.slug}
+                slug={s.slug}
+                name={s.name}
+                description={s.description}
+                category={s.category}
+                variant="landing"
+              />
+            ))}
+          </div>
+        </section>
+
+        {/* PUBLISH-CTA BOX */}
+        <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
+          <PublishCtaBox />
+        </section>
 
         {/* DUAL AUDIENCES — makers + teams */}
         <DualAudiences />
@@ -388,14 +424,10 @@ export function LandingV17Page() {
         {/* PRICING TEASER — single $0 card */}
         <PricingTeaser />
 
-        {/* FINAL CTA — docs + GitHub stay put (informational CTAs, not
-            deploy promises). Where there was previously an implicit "deploy
-            your first app" framing, the copy now leans on "join the waitlist"
-            on prod. Reverts when DEPLOY_ENABLED is on. */}
+        {/* BUILD CTA */}
         <section
-          data-testid="final-cta"
           style={{
-            padding: '56px 28px',
+            padding: '72px 28px',
             maxWidth: 760,
             margin: '0 auto',
             textAlign: 'center',
@@ -403,46 +435,21 @@ export function LandingV17Page() {
         >
           <h2
             style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 700,
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontWeight: 400,
               fontSize: 26,
               lineHeight: 1.1,
-              letterSpacing: '-0.025em',
+              letterSpacing: '-0.02em',
               margin: '0 0 8px',
             }}
           >
-            {DEPLOY_ENABLED ? 'Want to build yours?' : 'Want to build your own?'}
+            Want to build yours?
           </h2>
           <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
-            {DEPLOY_ENABLED
-              ? 'The protocol is 40 lines of JSON. The docs walk you through your first deploy in under 10 minutes.'
-              : 'The protocol is 40 lines of JSON and open source today. Join the waitlist to deploy on the hosted runtime, or self-host right now with one Docker command.'}
+            The protocol is 40 lines of JSON. The docs walk you through your
+            first deploy in under 10 minutes.
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-            {DEPLOY_ENABLED ? null : (
-              <button
-                type="button"
-                data-testid="final-cta-waitlist"
-                onClick={() => setWaitlistOpen(true)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  background: 'var(--ink)',
-                  color: '#fff',
-                  border: '1px solid var(--ink)',
-                  borderRadius: 10,
-                  padding: '11px 17px',
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: "'Inter', system-ui, sans-serif",
-                }}
-              >
-                Join the waitlist
-              </button>
-            )}
             <Link
               to="/docs"
               style={{
@@ -485,16 +492,25 @@ export function LandingV17Page() {
             </a>
           </div>
         </section>
+        {/* WHO'S BEHIND IT — single-founder context + direct contact
+            (#589, Federico 2026-04-23). Sits near the bottom so a
+            visitor has already seen the product by the time they ask
+            "who's building this?". Photo is served from
+            /team/fede.jpg — a placeholder ships in the repo for
+            day-one parity; Federico overwrites the file locally when
+            he has a photo he likes. */}
+        <WhosBehind />
+
+        {/* DISCORD CTA — quiet chip above the footer (#613,
+            Federico 2026-04-23). Invite lives in MEMORY
+            (project_floom_discord): https://discord.gg/8fXGXjxcRz. Not
+            a second hero, just a visible path for visitors who want
+            to talk to the team or other builders. */}
+        <DiscordCta />
       </main>
 
       <PublicFooter />
       <FeedbackButton />
-
-      <WaitlistModal
-        open={waitlistOpen}
-        onClose={() => setWaitlistOpen(false)}
-        source="hero"
-      />
 
       {/* Responsive tweaks: hero typography + stacking */}
       <style>{`
@@ -507,67 +523,20 @@ export function LandingV17Page() {
           .landing-v17 .hero-sub { font-size: 16px !important; }
         }
         @media (max-width: 640px) {
-          .landing-v17 [data-testid="hero"] { padding: 56px 16px 32px !important; }
+          .landing-v17 [data-testid="hero"] { padding: 40px 16px 32px !important; }
           .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
           .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
           .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
-          .landing-v17 .hero-ctas a, .landing-v17 .hero-ctas button { width: 100% !important; }
-          .landing-v17 .hero-ctas a[data-testid="hero-cta-try-app"] { padding: 14px 20px !important; min-height: 44px !important; box-sizing: border-box !important; }
-          .landing-v17 .hero-ctas a[data-testid="hero-cta-deploy"] { padding: 10px 12px !important; min-height: 44px !important; justify-content: center !important; }
-          .landing-v17 .hero-ctas button[data-testid="hero-cta-waitlist"] { padding: 10px 12px !important; min-height: 44px !important; justify-content: center !important; }
+          .landing-v17 .hero-ctas a { width: 100% !important; }
           .landing-v17 .works-with { gap: 16px 24px !important; }
           .landing-v17 .dual { grid-template-columns: 1fr !important; }
           .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
           .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
-          /* Shrink sections so 28px side padding + 34px H2 don't blow out
-             the 375px viewport. Applies to every landing section that uses
-             the default 72px/28px padding. */
-          .landing-v17 main > section { padding-left: 20px !important; padding-right: 20px !important; }
-          .landing-v17 main > section { padding-top: 48px !important; padding-bottom: 48px !important; }
-          .landing-v17 [data-testid="hero"] { padding-top: 56px !important; padding-bottom: 32px !important; }
-          .landing-v17 [data-testid="cli-reference-section"] { padding-top: 24px !important; padding-bottom: 8px !important; }
-          /* Display H2 across the page: scale down so long headlines
-             don't overflow on narrow screens. 34->26, 28->24. */
-          .landing-v17 main > section h2 { font-size: 26px !important; letter-spacing: -0.015em !important; }
-          .landing-v17 [data-testid="pricing-teaser"] h2 { font-size: 24px !important; }
-          /* Pricing card padding tightens so the $0 number stays centered. */
-          .landing-v17 [data-testid="pricing-teaser"] > div > div:nth-child(2) { padding: 24px 18px 22px !important; }
-          /* Build CTA buttons: stack full width and stay tap-friendly. */
-          .landing-v17 main > section:last-of-type > div { flex-direction: column !important; align-items: stretch !important; }
-          .landing-v17 main > section:last-of-type > div a { width: 100% !important; min-height: 44px !important; padding: 12px 18px !important; }
         }
       `}</style>
     </div>
   );
 }
-
-/**
- * Hero secondary CTA — ghost button. Pulled out of the JSX so both the
- * Deploy-forward and waitlist variants render identically. Sized a notch
- * smaller than the primary ink pill so the hierarchy is obvious.
- */
-const HERO_GHOST_STYLE = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 6,
-  background: 'var(--card)',
-  color: 'var(--ink)',
-  border: '1px solid var(--line)',
-  borderRadius: 999,
-  padding: '12px 18px',
-  fontSize: 14,
-  fontWeight: 500,
-  textDecoration: 'none',
-  fontFamily: "'Inter', system-ui, sans-serif",
-} as const;
-
-// 2026-04-24 restructure: DeployYourOwnTile removed. The tile sat directly
-// under the HeroDemo, pushing the hero to ~1100px and visually competing
-// with (a) the hero CTA row above it and (b) the SelfHost band below the
-// manifesto. The hero secondary CTA ("Join the waitlist to build your own")
-// already carries the waitlist ask, and the SelfHost band carries the
-// self-host ask — this tile was redundant on both axes.
 
 const STEPS = [
   {
