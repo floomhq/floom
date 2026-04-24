@@ -351,6 +351,63 @@ export function IconSprite() {
           d="M8 18c.5-1.5 1.6-2.5 3-2.5s2.5 1 3 2.5M14 18l2 2 4-4"
         />
       </symbol>
+      <symbol id="app-competitor-lens" viewBox="0 0 24 24">
+        {/* Lucide `binoculars` — two-side comparison lens for the 2-URL diff. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M5 9V5a1 1 0 011-1h2a1 1 0 011 1v4M15 9V5a1 1 0 011-1h2a1 1 0 011 1v4"
+        />
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M9 9h6M9 13a3 3 0 11-6 0 3 3 0 016 0zM21 13a3 3 0 11-6 0 3 3 0 016 0z"
+        />
+      </symbol>
+      <symbol id="app-ai-readiness-audit" viewBox="0 0 24 24">
+        {/* Lucide `gauge` — readiness score 0-10 on a dial. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 14l4-4"
+        />
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3.34 19a10 10 0 1117.32 0H3.34z"
+        />
+      </symbol>
+      <symbol id="app-pitch-coach" viewBox="0 0 24 24">
+        {/* Lucide `megaphone` — pitch delivery, call to attention. */}
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3 11l18-5v12L3 13v-2z"
+        />
+        <path
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M11.6 20a1 1 0 01-1.88.7L6.5 13"
+        />
+      </symbol>
 
       {/* Default fallback app icon */}
       <symbol id="app-default" viewBox="0 0 24 24">
@@ -515,10 +572,13 @@ export function iconForSlug(slug: string): string {
     'json-format': 'app-json-format',
     'jwt-decode': 'app-jwt-decode',
     'word-count': 'app-word-count',
-    // Launch demos (#253 / #279)
+    // Launch demos (#253 / #279, swapped 2026-04-25 to bounded <5s roster)
     'lead-scorer': 'app-lead-scorer',
     'competitor-analyzer': 'app-competitor-analyzer',
     'resume-screener': 'app-resume-screener',
+    'competitor-lens': 'app-competitor-lens',
+    'ai-readiness-audit': 'app-ai-readiness-audit',
+    'pitch-coach': 'app-pitch-coach',
   };
   const explicit = map[slug];
   if (explicit) return explicit;
