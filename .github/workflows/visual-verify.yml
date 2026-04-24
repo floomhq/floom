@@ -1,0 +1,279 @@
+# Visual verify — Gemini-judged screenshot loop on every main merge.
+#
+# Flow: Deploy preview workflow finishes -> capture screenshots of key routes on
+# preview.floom.dev at desktop 1440x900 + mobile 390x844 -> Gemini 3.1 Pro judges
+# each screenshot against the latest merge title/body and wireframe expectation
+# -> aggregated PASS/FAIL/PARTIAL verdict posted as commit status + (if available)
+# PR comment. A FAIL status on the commit can be used as a required check to
+# block prod deploys via branch protection. (See PR body for how to enable.)
+#
+# Secrets required on the repo:
+#   GEMINI_API_KEY   — Google AI Studio key for gemini-3.1-pro-preview
+#
+# Cost estimate per run (2026-04 pricing, Gemini 3.1 Pro):
+#   20 screenshots × 1 multi-modal call ≈ ~$0.10 per run
+#   Runs once per successful preview deploy (≈ per main merge).
+#
+# How to trigger manually:
+#   GitHub UI: Actions → "Visual verify" → Run workflow
+#   CLI:       gh workflow run visual-verify.yml --repo floomhq/floom
+#
+# Verdict semantics:
+#   PASS    — all routes render cleanly, no regressions
+#   PARTIAL — some routes flagged minor issues, investigate but not blocking
+#   FAIL    — at least one route has critical regression, block prod deploy
+name: Visual verify
+
+on:
+  workflow_run:
+    workflows: ['Deploy preview']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Base URL to capture (default preview.floom.dev)'
+        required: false
+        default: 'https://preview.floom.dev'
+
+concurrency:
+  group: visual-verify-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+
+jobs:
+  screenshot-capture:
+    name: Capture screenshots
+    # Only run after a SUCCESSFUL preview deploy. Manual dispatch always runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      commit_sha: ${{ steps.ctx.outputs.commit_sha }}
+      commit_title: ${{ steps.ctx.outputs.commit_title }}
+      commit_body: ${{ steps.ctx.outputs.commit_body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve context
+        id: ctx
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          echo "commit_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          title=$(git log -1 --pretty=%s "${HEAD_SHA}")
+          body=$(git log -1 --pretty=%b "${HEAD_SHA}")
+          # Multiline outputs via heredoc delimiter.
+          {
+            echo "commit_title<<__END__"
+            echo "${title}"
+            echo "__END__"
+            echo "commit_body<<__END__"
+            echo "${body}"
+            echo "__END__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm init -y >/dev/null 2>&1 || true
+          npm install --no-save playwright@1.47.2
+          npx playwright install --with-deps chromium
+
+      - name: Capture screenshots
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://preview.floom.dev' }}
+          OUT_DIR: ${{ github.workspace }}/visual-verify-output
+        run: node scripts/visual-verify-capture.mjs
+
+      - name: Upload screenshots artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: visual-verify-screenshots-${{ github.event.workflow_run.head_sha || github.sha }}
+          path: |
+            visual-verify-output/**
+          retention-days: 30
+          if-no-files-found: error
+
+  gemini-judge:
+    name: Gemini judge
+    needs: screenshot-capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      verdict: ${{ steps.judge.outputs.verdict }}
+      report_path: ${{ steps.judge.outputs.report_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: ${{ needs.screenshot-capture.outputs.commit_sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '20'
+
+      - name: Download screenshots artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: visual-verify-screenshots-${{ needs.screenshot-capture.outputs.commit_sha }}
+          path: visual-verify-output
+
+      - name: Run Gemini judge
+        id: judge
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          COMMIT_SHA: ${{ needs.screenshot-capture.outputs.commit_sha }}
+          COMMIT_TITLE: ${{ needs.screenshot-capture.outputs.commit_title }}
+          COMMIT_BODY: ${{ needs.screenshot-capture.outputs.commit_body }}
+          SHOTS_DIR: ${{ github.workspace }}/visual-verify-output
+          REPORT_PATH: ${{ github.workspace }}/visual-verify-output/report.md
+        run: |
+          if [ -z "${GEMINI_API_KEY}" ]; then
+            echo "::error::GEMINI_API_KEY is not set on the repository. Add it under Settings → Secrets → Actions."
+            exit 1
+          fi
+          node scripts/visual-verify-judge.mjs
+
+      - name: Upload judge report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: visual-verify-report-${{ needs.screenshot-capture.outputs.commit_sha }}
+          path: |
+            visual-verify-output/report.md
+            visual-verify-output/report.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  post-report:
+    name: Post report
+    needs: [screenshot-capture, gemini-judge]
+    if: always() && needs.screenshot-capture.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download report artifact
+        if: needs.gemini-judge.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: visual-verify-report-${{ needs.screenshot-capture.outputs.commit_sha }}
+          path: visual-verify-output
+
+      - name: Set commit status
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        env:
+          COMMIT_SHA: ${{ needs.screenshot-capture.outputs.commit_sha }}
+          VERDICT: ${{ needs.gemini-judge.outputs.verdict }}
+          JUDGE_RESULT: ${{ needs.gemini-judge.result }}
+        with:
+          script: |
+            const sha = process.env.COMMIT_SHA;
+            const verdict = process.env.VERDICT || 'UNKNOWN';
+            const judgeResult = process.env.JUDGE_RESULT;
+
+            // Map verdict + job result to a commit status state.
+            // - PASS    -> success
+            // - PARTIAL -> success (non-blocking, but visible)
+            // - FAIL    -> failure (usable as a required check to block prod)
+            // - anything else / judge failure -> error
+            let state = 'error';
+            let description = `Gemini verdict: ${verdict}`;
+            if (judgeResult !== 'success') {
+              state = 'error';
+              description = 'Gemini judge job failed — see workflow logs';
+            } else if (verdict === 'PASS') {
+              state = 'success';
+              description = 'Gemini: all routes render cleanly';
+            } else if (verdict === 'PARTIAL') {
+              state = 'success';
+              description = 'Gemini: minor issues flagged — see report';
+            } else if (verdict === 'FAIL') {
+              state = 'failure';
+              description = 'Gemini: critical regressions detected';
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state,
+              context: 'visual-verify/gemini',
+              description: description.substring(0, 140),
+              target_url: runUrl,
+            });
+
+            core.info(`Set commit status: ${state} — ${description}`);
+
+      - name: Comment on associated PR (if any)
+        if: needs.gemini-judge.result == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        env:
+          COMMIT_SHA: ${{ needs.screenshot-capture.outputs.commit_sha }}
+          VERDICT: ${{ needs.gemini-judge.outputs.verdict }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const sha = process.env.COMMIT_SHA;
+            const verdict = process.env.VERDICT || 'UNKNOWN';
+
+            // Find a PR associated with this commit, if any.
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha,
+            });
+
+            if (!prs.length) {
+              core.info('No PR associated with this commit — skipping comment');
+              return;
+            }
+
+            const reportPath = path.join(process.env.GITHUB_WORKSPACE, 'visual-verify-output', 'report.md');
+            let reportBody = '_(report artifact not found)_';
+            if (fs.existsSync(reportPath)) {
+              reportBody = fs.readFileSync(reportPath, 'utf8');
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `### Visual verify: **${verdict}**`,
+              '',
+              `Gemini 3.1 Pro judged screenshots of preview.floom.dev for commit \`${sha.substring(0, 7)}\`.`,
+              '',
+              `Full screenshots + JSON report available in the [workflow artifacts](${runUrl}).`,
+              '',
+              '<details><summary>Per-route report</summary>',
+              '',
+              reportBody,
+              '',
+              '</details>',
+            ].join('\n');
+
+            for (const pr of prs) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body,
+              });
+              core.info(`Posted report comment on PR #${pr.number}`);
+            }
