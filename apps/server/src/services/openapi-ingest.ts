@@ -17,9 +17,15 @@ import $RefParser from '@apidevtools/json-schema-ref-parser';
 import { parseRendererManifest } from '../lib/renderer-manifest.js';
 import type { RendererManifest } from '@floom/renderer/contract';
 import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
-import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
+import type {
+  AppRecord,
+  NormalizedManifest,
+  InputSpec,
+  OutputSpec,
+} from '../types.js';
 
 // ---------- config schema ----------
 
@@ -1608,13 +1614,12 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
   // needed. They land as 'published'. User-driven ingest (Studio /build,
   // MCP ingest_app) routes through ingestAppFromSpec instead, which
   // applies the 'pending_review' default.
-  const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
-  );
-  const updateApp = db.prepare(
-    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, updated_at=datetime('now') WHERE slug=?`,
-  );
+  //
+  // Insert + update are routed through `adapters.storage` so the SQL lives
+  // in one place (`adapters/storage-sqlite.ts`). createApp builds the
+  // INSERT from the provided keys and updateApp adds `updated_at =
+  // datetime('now')` automatically, so behavior is identical to the prior
+  // prepared statements.
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
   );
@@ -1729,24 +1734,24 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       }
 
       if (existing) {
-        updateApp.run(
-          manifest.name,
-          appSpec.description || manifest.description,
-          JSON.stringify(manifest),
-          appSpec.category || null,
-          resolvedBaseUrl || null,
-          appSpec.auth || null,
-          authConfigJson,
-          appSpec.openapi_spec_url || null,
-          specCached,
+        adapters.storage.updateApp(appSpec.slug, {
+          name: manifest.name,
+          description: appSpec.description || manifest.description,
+          manifest: JSON.stringify(manifest),
+          category: appSpec.category || null,
+          app_type: 'proxied',
+          base_url: resolvedBaseUrl || null,
+          auth_type: (appSpec.auth as AppRecord['auth_type']) || null,
+          auth_config: authConfigJson,
+          openapi_spec_url: appSpec.openapi_spec_url || null,
+          openapi_spec_cached: specCached,
           visibility,
-          isAsync,
-          webhookUrl,
-          timeoutMs,
+          is_async: isAsync as 0 | 1,
+          webhook_url: webhookUrl,
+          timeout_ms: timeoutMs,
           retries,
-          asyncMode,
-          appSpec.slug,
-        );
+          async_mode: asyncMode as AppRecord['async_mode'],
+        });
         // Insert placeholder secrets if not already present (so the UI shows them)
         for (const name of secretNames) {
           insertSecret.run(newSecretId(), name, '', existing.id);
@@ -1754,27 +1759,32 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         console.log(`[openapi-ingest] updated ${appSpec.slug}`);
       } else {
         const appId = newAppId();
-        insertApp.run(
-          appId,
-          appSpec.slug,
-          manifest.name,
-          appSpec.description || manifest.description,
-          JSON.stringify(manifest),
-          `proxied:${appSpec.slug}`,
-          appSpec.category || null,
-          appSpec.icon || null,
-          resolvedBaseUrl || null,
-          appSpec.auth || null,
-          authConfigJson,
-          appSpec.openapi_spec_url || null,
-          specCached,
+        adapters.storage.createApp({
+          id: appId,
+          slug: appSpec.slug,
+          name: manifest.name,
+          description: appSpec.description || manifest.description,
+          manifest: JSON.stringify(manifest),
+          status: 'active',
+          docker_image: null,
+          code_path: `proxied:${appSpec.slug}`,
+          category: appSpec.category || null,
+          author: null,
+          icon: appSpec.icon || null,
+          app_type: 'proxied',
+          base_url: resolvedBaseUrl || null,
+          auth_type: (appSpec.auth as AppRecord['auth_type']) || null,
+          auth_config: authConfigJson,
+          openapi_spec_url: appSpec.openapi_spec_url || null,
+          openapi_spec_cached: specCached,
           visibility,
-          isAsync,
-          webhookUrl,
-          timeoutMs,
+          is_async: isAsync as 0 | 1,
+          webhook_url: webhookUrl,
+          timeout_ms: timeoutMs,
           retries,
-          asyncMode,
-        );
+          async_mode: asyncMode as AppRecord['async_mode'],
+          publish_status: 'published',
+        } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
         // Insert placeholder secrets
         for (const name of secretNames) {
           insertSecret.run(newSecretId(), name, '', appId);
