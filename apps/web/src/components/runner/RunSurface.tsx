@@ -565,6 +565,12 @@ export function RunSurface({
               run,
               hasRun: true,
             }));
+            // Issue #618: a finished job consumed a free-run slot on the
+            // server (recordFreeRun fires synchronously at dispatch, before
+            // this SSE/polling completion). Bump so FreeRunsStrip re-fetches
+            // /api/:slug/quota and the counter drops from "5 of 5" to "4
+            // of 5". No-op for non-gated slugs (the strip renders nothing).
+            freeRunsRefresher.bump();
             if (typeof window !== 'undefined' && window.history?.replaceState) {
               try {
                 const url = new URL(window.location.href);
@@ -633,6 +639,13 @@ export function RunSurface({
             hasRun: true,
           }));
           close();
+          // Issue #618: the server already consumed a free-run slot at
+          // POST /api/run dispatch time (recordFreeRun in routes/run.ts).
+          // The strip would otherwise stay stuck at "5 of 5" for the whole
+          // session because useFreeRunsRefresher was only bumped by the
+          // BYOK modal. Bump on every terminal status so the counter
+          // drops after each real run. No-op on non-gated slugs.
+          freeRunsRefresher.bump();
           if (typeof window !== 'undefined' && window.history?.replaceState) {
             try {
               const url = new URL(window.location.href);
@@ -688,7 +701,7 @@ export function RunSurface({
         errorMessage: getRunStartErrorMessage(e, 'Run failed to start'),
       }));
     }
-  }, [state, app.slug, app.is_async, defaultEntry, onResetInitialRun, onResult]);
+  }, [state, app.slug, app.is_async, defaultEntry, onResetInitialRun, onResult, freeRunsRefresher]);
 
   const handleCancelJob = useCallback(async () => {
     const s = state;

@@ -154,6 +154,24 @@ test('ScoredRowsTable model chip: cache_hit=true appends "· CACHED" suffix', ()
     cachedHtml.includes('· CACHED'),
     'cached chip should append the "· CACHED" suffix',
   );
+  // Issue #619: the CACHED chip is semantically correct (sample input IS
+  // pre-computed), but without context it reads like a bug on a first
+  // run. The chip carries a tooltip + aria-label + data-tooltip naming
+  // the why, so hovering or screen-reading explains "pre-computed
+  // sample, edit input to run live". Regression test asserts all three
+  // surfaces are present so we don't silently drop accessibility later.
+  assert.ok(
+    cachedHtml.includes('title="Pre-computed sample'),
+    'cached chip should carry a title tooltip for sighted users',
+  );
+  assert.ok(
+    cachedHtml.includes('aria-label="Pre-computed sample'),
+    'cached chip should carry an aria-label for screen readers',
+  );
+  assert.ok(
+    cachedHtml.includes('edit any input to run'),
+    'tooltip copy should name the "edit input to run live" hint',
+  );
 
   const liveHtml = renderToStaticMarkup(
     React.createElement(ScoredRowsTable, {

@@ -750,9 +750,24 @@ export function ScoredRowsTable({
           <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
             {model}
             {cacheHit ? (
+              // Issue #619: the CACHED chip is honest — sample input IS
+              // pre-computed (Phase B: goldens served instantly so demos
+              // feel fast). But "CACHED" on a first run reads like a bug
+              // ("did my input run?"). Tooltip + aria-label name the
+              // why without hiding the truth. title= for sighted users,
+              // aria-label for screen readers, data-tooltip so downstream
+              // a11y tests / Playwright snapshots can assert the text.
               <span
                 data-testid="scored-rows-cache-hit-suffix"
-                style={{ opacity: 0.65, marginLeft: 6 }}
+                data-tooltip="Pre-computed sample result — edit any input to run the live model."
+                aria-label="Pre-computed sample result. Edit any input to run the live model."
+                title="Pre-computed sample — edit any input to run live."
+                style={{
+                  opacity: 0.65,
+                  marginLeft: 6,
+                  cursor: 'help',
+                  borderBottom: '1px dotted currentColor',
+                }}
               >
                 · CACHED
               </span>
