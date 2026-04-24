@@ -5,9 +5,10 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Docker from 'dockerode';
+import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
-import type { NormalizedManifest } from '../types.js';
+import type { AppRecord, NormalizedManifest } from '../types.js';
 
 /**
  * Probe the Docker daemon to confirm `image` exists locally. Used by the
@@ -136,23 +137,16 @@ export async function seedFromFile(): Promise<{
   // Bundled seed apps ship as 'published' on first insert — they're first-party
   // content that already went through Federico's review. New user-ingested apps
   // go to 'pending_review' via services/openapi-ingest.ts / docker-image-ingest.ts.
-  // ON CONFLICT refreshes seed-owned fields only; we do not overwrite
+  // Updates refresh seed-owned fields only; we do not overwrite
   // publish_status, stars, featured, hero, etc.
-  const upsertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')
-     ON CONFLICT(slug) DO UPDATE SET
-       name = excluded.name,
-       description = excluded.description,
-       manifest = excluded.manifest,
-       status = excluded.status,
-       docker_image = excluded.docker_image,
-       code_path = excluded.code_path,
-       category = excluded.category,
-       author = excluded.author,
-       icon = excluded.icon,
-       updated_at = datetime('now')`,
-  );
+  //
+  // Insert + refresh are now routed through `adapters.storage` (the
+  // existing `existing` lookup already lets us branch deterministically,
+  // so splitting the former `INSERT ... ON CONFLICT DO UPDATE` into two
+  // adapter calls produces the same row state: existing rows get their
+  // seed-owned columns refreshed, new rows are inserted with
+  // publish_status='published'; non-seed columns (stars / featured /
+  // hero / publish_status) are left untouched on the update path.
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
   );
@@ -186,21 +180,39 @@ export async function seedFromFile(): Promise<{
       }
 
       const appId = existing ? existing.id : newAppId();
-      upsertApp.run(
-        appId,
-        app.slug,
-        app.name,
-        app.description,
-        JSON.stringify(app.manifest),
-        app.docker_image,
-        // code_path is unused when docker_image is already set; we store
-        // a placeholder so the NOT NULL constraint is satisfied.
-        `reused:${app.marketplace_app_id}`,
-        app.category,
-        app.author,
-        app.icon,
-      );
-      if (!existing) appsAdded++;
+      // code_path is unused when docker_image is already set; we store
+      // a placeholder so the NOT NULL constraint is satisfied.
+      const codePath = `reused:${app.marketplace_app_id}`;
+      const manifestJson = JSON.stringify(app.manifest);
+      if (existing) {
+        adapters.storage.updateApp(app.slug, {
+          name: app.name,
+          description: app.description,
+          manifest: manifestJson,
+          status: 'active',
+          docker_image: app.docker_image,
+          code_path: codePath,
+          category: app.category,
+          author: app.author,
+          icon: app.icon,
+        } as Partial<AppRecord>);
+      } else {
+        adapters.storage.createApp({
+          id: appId,
+          slug: app.slug,
+          name: app.name,
+          description: app.description,
+          manifest: manifestJson,
+          status: 'active',
+          docker_image: app.docker_image,
+          code_path: codePath,
+          category: app.category,
+          author: app.author,
+          icon: app.icon,
+          publish_status: 'published',
+        } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
+        appsAdded++;
+      }
 
       // Per-app secrets
       const perApp = seed.per_app_secrets[app.slug] || {};
