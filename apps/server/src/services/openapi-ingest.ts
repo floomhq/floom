@@ -2370,28 +2370,30 @@ export async function ingestAppFromSpec(args: {
   const resolvedBaseUrl = resolveBaseUrl(derefed, appSpec, openapi_url || undefined);
 
   if (existing) {
-    db.prepare(
-      `UPDATE apps SET
-         name=?, description=?, manifest=?, category=?, app_type='proxied',
-         base_url=?, auth_type=?, auth_config=NULL, openapi_spec_url=?,
-         openapi_spec_cached=?, visibility=?, is_async=0,
-         webhook_url=NULL, timeout_ms=NULL, retries=0, async_mode=NULL,
-         workspace_id=?, author=?, updated_at=datetime('now')
-       WHERE slug=?`,
-    ).run(
-      manifest.name,
-      description || manifest.description,
-      JSON.stringify(manifest),
-      args.category || null,
-      resolvedBaseUrl || null,
-      'none',
-      openapi_url || null,
-      specCached,
+    // Routed through adapters.storage.updateApp so the UPDATE SQL lives in
+    // one place (adapters/storage-sqlite.ts). The wrapper emits
+    // `updated_at = datetime('now')` automatically, so behavior is
+    // identical to the prior prepared statement.
+    adapters.storage.updateApp(slug, {
+      name: manifest.name,
+      description: description || manifest.description,
+      manifest: JSON.stringify(manifest),
+      category: args.category || null,
+      app_type: 'proxied',
+      base_url: resolvedBaseUrl || null,
+      auth_type: 'none',
+      auth_config: null,
+      openapi_spec_url: openapi_url || null,
+      openapi_spec_cached: specCached,
       visibility,
-      args.workspace_id,
-      args.author_user_id,
-      slug,
-    );
+      is_async: 0,
+      webhook_url: null,
+      timeout_ms: null,
+      retries: 0,
+      async_mode: null,
+      workspace_id: args.workspace_id,
+      author: args.author_user_id,
+    });
     return { slug, name, created: false };
   }
 
@@ -2403,33 +2405,37 @@ export async function ingestAppFromSpec(args: {
   // public Store. Re-ingesting an existing app hits the UPDATE branch
   // above and leaves publish_status alone, so a published app stays
   // published when its spec refreshes.
-  db.prepare(
-    `INSERT INTO apps (
-       id, slug, name, description, manifest, status, docker_image, code_path,
-       category, author, icon, app_type, base_url, auth_type, auth_config,
-       openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
-       timeout_ms, retries, async_mode, workspace_id, publish_status
-     ) VALUES (
-       ?, ?, ?, ?, ?, 'active', NULL, ?,
-       ?, ?, NULL, 'proxied', ?, 'none', NULL,
-       ?, ?, ?, 0, NULL,
-       NULL, 0, NULL, ?, 'pending_review'
-     )`,
-  ).run(
-    appId,
+  //
+  // Routed through adapters.storage.createApp: the wrapper builds the
+  // INSERT from the provided keys, so explicit NULLs above translate
+  // directly into the SQL that used to be hand-written here.
+  adapters.storage.createApp({
+    id: appId,
     slug,
-    manifest.name,
-    description || manifest.description,
-    JSON.stringify(manifest),
-    `proxied:${slug}`,
-    args.category || null,
-    args.author_user_id,
-    resolvedBaseUrl || null,
-    openapi_url || null,
-    specCached,
+    name: manifest.name,
+    description: description || manifest.description,
+    manifest: JSON.stringify(manifest),
+    status: 'active',
+    docker_image: null,
+    code_path: `proxied:${slug}`,
+    category: args.category || null,
+    author: args.author_user_id,
+    icon: null,
+    app_type: 'proxied',
+    base_url: resolvedBaseUrl || null,
+    auth_type: 'none',
+    auth_config: null,
+    openapi_spec_url: openapi_url || null,
+    openapi_spec_cached: specCached,
     visibility,
-    args.workspace_id,
-  );
+    is_async: 0,
+    webhook_url: null,
+    timeout_ms: null,
+    retries: 0,
+    async_mode: null,
+    workspace_id: args.workspace_id,
+    publish_status: 'pending_review',
+  } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
 
   return { slug, name, created: true };
 }
