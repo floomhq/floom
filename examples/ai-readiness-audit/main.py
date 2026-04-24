@@ -56,8 +56,10 @@ from urllib.parse import urlparse, urlunsplit
 import httpx
 from bs4 import BeautifulSoup
 
-DEFAULT_MODEL_ID = "gemini-3-pro"
-HARD_TIMEOUT_S = 10.0
+DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
+# Benchmarked 2026-04-25: 2.5-flash-lite + JSON schema returns in 1-2s,
+# well inside an 8s wall-clock. Page fetch adds 1-2s.
+HARD_TIMEOUT_S = 8.0
 FETCH_TIMEOUT_S = 5.0
 DNS_TIMEOUT_S = 1.5
 MAX_FETCH_BYTES = 500 * 1024
@@ -138,9 +140,9 @@ def _collapse_ws(text: str) -> str:
 
 def _resolve_model() -> str:
     model = (os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL_ID).strip()
-    if model != DEFAULT_MODEL_ID:
+    if not (model.startswith("gemini-2.5") or model.startswith("gemini-3")):
         raise SystemExit(
-            f"refusing to run: model must be '{DEFAULT_MODEL_ID}' (got '{model}')"
+            f"refusing to run: model must be gemini-2.5.x or gemini-3.x (got '{model}')"
         )
     return model
 
@@ -471,7 +473,7 @@ async def _call_gemini(company_url: str, page_text: str, model: str) -> dict[str
     config = GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         temperature=0.1,
-        max_output_tokens=512,
+        max_output_tokens=1024,
         response_mime_type="application/json",
         response_json_schema=AUDIT_JSON_SCHEMA,
         thinking_config=ThinkingConfig(thinking_budget=0),
