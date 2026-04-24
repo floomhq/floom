@@ -541,9 +541,18 @@ export async function seedLaunchDemos(
   // three slugs in DEMOS are the bounded AI demos (competitor-lens,
   // ai-readiness-audit, pitch-coach) so a blanket hero=1 is correct here;
   // if a non-hero demo is added later, gate this on demo.slug.
+  // Note: we force app_type='docker', visibility='public', base_url=NULL on
+  // every insert + update. Production incident 2026-04-25: a prior
+  // preseed attempt had left ai-readiness-audit rows with
+  // app_type='proxied' + base_url='http://172.17.0.1:4310' +
+  // visibility='private'. The older updateApp kept those stale fields,
+  // and the next seed refreshed only name/desc/image/etc. The runner
+  // then tried to POST HTTP to the dead proxied URL instead of running
+  // the Docker image, and /api/hub filtered the private row out. Force
+  // the showcase shape on every seed so stale rows heal themselves.
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status, hero)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published', 1)`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status, hero, app_type, visibility, base_url)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published', 1, 'docker', 'public', NULL)`,
   );
   const updateApp = db.prepare(
     `UPDATE apps
@@ -557,6 +566,9 @@ export async function seedLaunchDemos(
            author = ?,
            icon = ?,
            hero = 1,
+           app_type = 'docker',
+           visibility = 'public',
+           base_url = NULL,
            updated_at = datetime('now')
      WHERE id = ?`,
   );
