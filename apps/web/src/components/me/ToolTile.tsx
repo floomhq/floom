@@ -25,28 +25,31 @@ interface Props {
   /** Optional pill when tile is surfaced but not yet used (curated row). */
   badge?: string;
   testIdSuffix?: string;
+  ctaLabel?: string;
 }
 
 const s: Record<string, CSSProperties> = {
   tile: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 10,
-    padding: '14px 14px 12px',
+    gap: 14,
+    padding: '18px 18px 16px',
     border: '1px solid var(--line)',
-    borderRadius: 12,
-    background: 'var(--card)',
+    borderRadius: 18,
+    background:
+      'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,248,243,0.92) 100%)',
     color: 'var(--ink)',
     textDecoration: 'none',
-    transition: 'border-color 120ms ease',
-    minHeight: 118,
+    transition: 'border-color 120ms ease, transform 120ms ease',
+    minHeight: 154,
     position: 'relative',
+    boxShadow: '0 1px 0 rgba(17, 24, 39, 0.03)',
   },
   iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    background: 'var(--bg)',
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    background: 'rgba(255,255,255,0.72)',
     border: '1px solid var(--line)',
     display: 'inline-flex',
     alignItems: 'center',
@@ -54,17 +57,18 @@ const s: Record<string, CSSProperties> = {
     flexShrink: 0,
   },
   name: {
-    fontSize: 14,
-    fontWeight: 600,
+    fontSize: 15,
+    fontWeight: 700,
     lineHeight: 1.3,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
   meta: {
-    fontSize: 12,
+    fontSize: 13,
     color: 'var(--muted)',
     fontVariantNumeric: 'tabular-nums',
+    lineHeight: 1.45,
   },
   badge: {
     fontSize: 10,
@@ -80,19 +84,26 @@ const s: Record<string, CSSProperties> = {
   },
   runCta: {
     marginTop: 'auto',
-    alignSelf: 'flex-end',
-    fontSize: 12,
+    alignSelf: 'flex-start',
+    fontSize: 12.5,
     fontWeight: 700,
     letterSpacing: '0.02em',
     color: '#fff',
     background: 'var(--ink)',
-    padding: '6px 12px',
-    borderRadius: 6,
+    padding: '9px 13px',
+    borderRadius: 999,
     lineHeight: 1,
   },
 };
 
-export function ToolTile({ slug, name, lastUsedAt, badge, testIdSuffix }: Props) {
+export function ToolTile({
+  slug,
+  name,
+  lastUsedAt,
+  badge,
+  testIdSuffix,
+  ctaLabel = 'Run again',
+}: Props) {
   const suffix = testIdSuffix ?? slug;
   const rel = lastUsedAt ? formatTime(lastUsedAt) : null;
   return (
@@ -102,26 +113,28 @@ export function ToolTile({ slug, name, lastUsedAt, badge, testIdSuffix }: Props)
       style={s.tile}
       onMouseEnter={(e) => {
         (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--accent)';
+        (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-1px)';
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--line)';
+        (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
       }}
     >
       <span aria-hidden style={s.iconWrap}>
-        <AppIcon slug={slug} size={18} />
+        <AppIcon slug={slug} size={20} />
       </span>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
         <span style={s.name} title={name}>
           {name}
         </span>
         {rel ? (
-          <span style={s.meta}>Last used {rel}</span>
+          <span style={s.meta}>Latest run {rel}</span>
         ) : badge ? (
           <span style={s.badge}>{badge}</span>
         ) : null}
       </div>
       <span aria-hidden data-testid={`me-tool-run-${suffix}`} style={s.runCta}>
-        Run →
+        {ctaLabel} →
       </span>
     </Link>
   );
