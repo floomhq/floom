@@ -1,0 +1,38 @@
+{
+  "_comment": "Frozen sample response for the /p/competitor-lens demo input. When the exact canonical input hash below matches, main.py returns this blob immediately instead of doing a live fetch/model run.",
+  "generated_with": "manual-sample-2026-04-24",
+  "entries": {
+    "78627a9198e5b7744928007e4e078838f32c4de7a060df61d74b4371941271d0": {
+      "positioning_diff": {
+        "your_angle": "Floom positions itself as the production layer that turns AI-written Python scripts into live apps with a URL, REST API, web UI, and MCP.",
+        "their_angle": "n8n positions itself as a workflow automation and AI agent platform for technical teams, mixing a visual canvas with deeper code and broad integrations.",
+        "contrast_1_liner": "Floom sells fast deployment for AI-written code, while n8n sells flexible workflow automation for technical teams."
+      },
+      "pricing_diff": {
+        "your_pricing": "Free and open source; the homepage emphasizes no credit card and does not surface paid tiers.",
+        "their_pricing": "Starter from 20€/mo, Pro from 50€/mo, Business from 667€/mo annually, plus Enterprise contact-sales pricing.",
+        "insight": "Floom's page leads with speed-to-live and free/open-source trust signals, while n8n puts explicit execution-based plans in front of buyers."
+      },
+      "unique_angles": {
+        "you_only_3": [
+          "One script becomes four outputs: live URL, web UI, REST API, and MCP",
+          "Deploy AI-written Python code in about 45 seconds",
+          "Paste-code workflow aimed at turning local scripts into shareable apps"
+        ],
+        "them_only_3": [
+          "Visual workflow canvas with traceable AI-agent reasoning",
+          "500+ integrations and a large template ecosystem",
+          "Execution-based pricing with both cloud and self-hosted paths"
+        ]
+      },
+      "meta": {
+        "dry_run": false,
+        "cache_hit": false,
+        "model": "gemini-3-pro"
+      }
+    }
+  },
+  "_debug": {
+    "canonical": "{\"competitor_url\":\"https://n8n.io\",\"your_url\":\"https://floom.dev\"}"
+  }
+}

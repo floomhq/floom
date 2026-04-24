@@ -1,0 +1,34 @@
+slug: competitor-lens
+name: Competitor Lens
+description: Compare one HTTPS page against one competitor page and get a bounded positioning, pricing, and angle diff.
+creator: floom
+category: research
+icon: binoculars
+
+action: analyze
+label: Compare Competitor Pages
+
+inputs:
+  - name: your_url
+    type: url
+    required: true
+    label: Your URL
+    description: Your HTTPS homepage or product page. Max 200 chars.
+    placeholder: https://floom.dev
+  - name: competitor_url
+    type: url
+    required: true
+    label: Competitor URL
+    description: One competitor HTTPS homepage or product page on a different host. Max 200 chars.
+    placeholder: https://n8n.io
+
+output_type: json
+
+secrets_needed:
+  - GEMINI_API_KEY
+
+runtime: python
+image: floom/competitor-lens:latest
+memory_mb: 512
+timeout: 30s
+manifest_version: "2.0"
