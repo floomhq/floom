@@ -822,7 +822,7 @@ export function provisionPersonalWorkspace(
  *
  * Module-local so tests and `/api/session/me` read the same gate.
  */
-function isDeployEnabled(): boolean {
+export function isDeployEnabled(): boolean {
   // Explicit opt-in to waitlist mode wins.
   const wait = (process.env.FLOOM_WAITLIST_MODE || '').trim().toLowerCase();
   if (wait === 'true' || wait === '1' || wait === 'yes' || wait === 'on') {

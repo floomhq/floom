@@ -61,6 +61,7 @@ import { securityHeaders, noIndexPreview, isPreviewEnv } from './middleware/secu
 import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
+import { isDeployEnabled } from './services/workspaces.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -827,6 +828,29 @@ if (webDist) {
     }
   }
 
+  const deployBootstrapMarker = 'data-floom-bootstrap="deploy-enabled"';
+  const deployBootstrapCache = new Map<boolean, string>();
+
+  function injectDeployBootstrap(html: string, deployEnabled: boolean): string {
+    if (html.includes(deployBootstrapMarker)) return html;
+    const scriptTagIndex = html.search(/<script\b[^>]*\btype=["']module["'][^>]*>/i);
+    if (scriptTagIndex === -1) return html;
+    const bootstrap =
+      `<script ${deployBootstrapMarker}>` +
+      `window.__FLOOM__=window.__FLOOM__||{};` +
+      `window.__FLOOM__.deployEnabled=${deployEnabled};` +
+      `</script>\n    `;
+    return `${html.slice(0, scriptTagIndex)}${bootstrap}${html.slice(scriptTagIndex)}`;
+  }
+
+  function getIndexHtmlForDeployFlag(deployEnabled: boolean): string {
+    const cached = deployBootstrapCache.get(deployEnabled);
+    if (cached) return cached;
+    const injected = injectDeployBootstrap(indexHtml, deployEnabled);
+    deployBootstrapCache.set(deployEnabled, injected);
+    return injected;
+  }
+
   // Paths that must never be swallowed by the SPA wildcard. These reach
   // Hono's other route handlers or return a real 404. The order matters:
   // prefix matches first, then exact matches.
@@ -1291,6 +1315,7 @@ if (webDist) {
   app.use('/*', async (c, next) => {
     const url = new URL(c.req.url);
     const pathname = url.pathname;
+    const servedIndexHtml = getIndexHtmlForDeployFlag(isDeployEnabled());
 
     // Skip API + MCP routes and named utility endpoints — let Hono handle them.
     if (
@@ -1301,7 +1326,7 @@ if (webDist) {
     }
 
     if (pathname === '/' || pathname === '/index.html') {
-      return new Response(rewriteHeadForLanding(indexHtml), {
+      return new Response(rewriteHeadForLanding(servedIndexHtml), {
         status: 200,
         headers: {
           'content-type': 'text/html; charset=utf-8',
@@ -1404,12 +1429,12 @@ if (webDist) {
     // (PRR #172).
     const slugMatch = pathname.match(pSlugPattern);
     if (slugMatch && slugMatch[1]) {
-      return c.html(rewriteHeadForSlug(indexHtml, slugMatch[1]));
+      return c.html(rewriteHeadForSlug(servedIndexHtml, slugMatch[1]));
     }
     // 2026-04-20 (PRR tail cleanup): explicit /404 path returns 404 status.
     if (pathname === '/404' || pathname === '/404.html') {
       return new Response(
-        rewriteTitle(rewriteCanonical(indexHtml, pathname), 'Page not found · Floom'),
+        rewriteTitle(rewriteCanonical(servedIndexHtml, pathname), 'Page not found · Floom'),
         {
           status: 404,
           headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
@@ -1424,7 +1449,7 @@ if (webDist) {
     // dynamic patterns like /p/:slug) continue to return 200.
     if (!isKnownRoute(pathname)) {
       return new Response(
-        rewriteTitle(rewriteCanonical(indexHtml, pathname), 'Page not found · Floom'),
+        rewriteTitle(rewriteCanonical(servedIndexHtml, pathname), 'Page not found · Floom'),
         {
           status: 404,
           headers: {
@@ -1434,7 +1459,7 @@ if (webDist) {
         },
       );
     }
-    return c.html(rewriteHeadForPath(indexHtml, pathname));
+    return c.html(rewriteHeadForPath(servedIndexHtml, pathname));
   });
 } else {
   console.log('[web] no built web bundle found — backend-only mode');
