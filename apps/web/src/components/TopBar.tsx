@@ -768,6 +768,15 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 role="menuitem"
                 onClick={() => setMenuOpen(false)}
                 data-testid="topbar-mobile-waitlist"
+                style={{
+                  // Ink pill so the green Publish CTA stays the single
+                  // primary action in the mobile menu — same hierarchy
+                  // the desktop right-rail already establishes.
+                  background: INK,
+                  borderColor: INK,
+                  color: '#fff',
+                  boxShadow: 'none',
+                }}
               >
                 Join waitlist
               </Link>
