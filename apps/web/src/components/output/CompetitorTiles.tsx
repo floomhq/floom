@@ -1,18 +1,27 @@
-// CompetitorTiles — slap-level renderer for competitor-analyzer output
-// (#643). Replaces the cramped auto-pick table with a stacked tile-per-
-// competitor layout. Each tile: company name (display serif) + one-line
-// positioning, pricing chip, and a 2x2 strengths/weaknesses grid with
-// restrained check / alert glyphs (brand green for strengths, muted
-// slate for gaps — NO amber, NO red).
+// CompetitorTiles — compact table renderer for competitor-analyzer output.
+//
+// Rewritten 2026-04-24 (PR #661 follow-up) to match the same philosophy
+// shift Lead Scorer's ScoredRowsTable took in PR #702: Floom apps produce
+// JSON; the UI renders it with simple primitives. Bespoke per-app cards
+// (serif "COMPETITIVE LANDSCAPE" hero, favicon chips, 2x2 strengths/gaps
+// grids, gradient backgrounds) don't scale across 3 AI apps, and the
+// CSV/JSON/markdown downloads are the source of truth. The UI should be
+// a compact table, not ornamentation.
+//
+// Columns: Competitor · Strengths · Gaps · Source. Strengths and Gaps
+// collapse to a 2-line preview that click-expands to a bulleted list.
+// Strategic summary stays as a collapsible block below the table,
+// collapsed by default. Download CSV + Copy JSON + Copy markdown kept as
+// the primary outputs.
 //
 // Called from rendererCascade.tsx when the runtime shape looks like
 // {competitors: [{company, positioning, strengths, weaknesses, ...}]}.
 // Falls back to the existing RowTable + Markdown composite if the
 // shape doesn't match.
 import { useState } from 'react';
-import { Check, AlertCircle } from 'lucide-react';
 import { CopyButton } from './CopyButton';
 import { Markdown } from './Markdown';
+import { rowsToCsv } from './RowTable';
 
 export interface CompetitorTile {
   url?: string;
@@ -35,12 +44,11 @@ export interface CompetitorTilesProps {
 }
 
 const ACCENT = '#047857';
-const STRENGTH = '#047857';
-const GAP = '#6b6f76'; // muted slate, NOT red
 const INK = 'var(--ink)';
 const MUTED = 'var(--muted)';
 const LINE = 'var(--line)';
 const CARD = 'var(--card)';
+const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 function domainOf(url?: string): string | null {
   if (!url) return null;
@@ -52,291 +60,130 @@ function domainOf(url?: string): string | null {
   }
 }
 
-function FaviconChip({ domain }: { domain: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: 16,
-        height: 16,
-        borderRadius: 4,
-        background: 'var(--bg)',
-        border: `1px solid ${LINE}`,
-        overflow: 'hidden',
-        flexShrink: 0,
-      }}
-    >
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`}
-        alt=""
-        loading="lazy"
-        width={16}
-        height={16}
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
-        }}
-        style={{ display: 'block', width: 16, height: 16, objectFit: 'cover' }}
-      />
-    </span>
-  );
-}
-
-function TileBulletList({
+function BulletCell({
   items,
-  color,
-  icon,
-  label,
-  max = 4,
+  index,
+  column,
 }: {
   items: string[];
-  color: string;
-  icon: 'check' | 'alert';
-  label: string;
-  max?: number;
+  index: number;
+  column: 'strengths' | 'gaps';
 }) {
-  const Icon = icon === 'check' ? Check : AlertCircle;
-  const visible = items.slice(0, max);
-  const extra = items.length - visible.length;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        minWidth: 0,
-      }}
-    >
-      <div
+  const [expanded, setExpanded] = useState(false);
+  if (items.length === 0) return <span style={{ color: MUTED }}>—</span>;
+  if (items.length === 1) {
+    return <span style={{ fontSize: 13, lineHeight: 1.5 }}>{items[0]}</span>;
+  }
+  if (!expanded) {
+    const preview = items.join(' · ');
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        aria-expanded="false"
+        aria-label={`Expand ${items.length} ${column}`}
+        title="Click to expand"
         style={{
-          fontSize: 10.5,
-          fontWeight: 700,
-          color: MUTED,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
+          background: 'none',
+          border: 0,
+          padding: 0,
+          margin: 0,
+          textAlign: 'left',
+          font: 'inherit',
+          color: INK,
+          cursor: 'pointer',
+          fontSize: 13,
+          lineHeight: 1.5,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          width: '100%',
         }}
       >
-        {label}
-      </div>
-      {visible.length === 0 ? (
-        <div style={{ fontSize: 13, color: MUTED }}>—</div>
-      ) : (
-        <ul
-          style={{
-            listStyle: 'none',
-            margin: 0,
-            padding: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          {visible.map((item, i) => (
-            <li
-              key={i}
-              style={{
-                display: 'flex',
-                gap: 8,
-                alignItems: 'flex-start',
-                fontSize: 13,
-                lineHeight: 1.5,
-                color: INK,
-              }}
-            >
-              <Icon
-                size={13}
-                color={color}
-                strokeWidth={2}
-                style={{ flexShrink: 0, marginTop: 3 }}
-                aria-hidden="true"
-              />
-              <span style={{ minWidth: 0 }}>{item}</span>
-            </li>
-          ))}
-          {extra > 0 && (
-            <li
-              style={{
-                fontSize: 12,
-                color: MUTED,
-                paddingLeft: 21,
-                fontFamily: "'JetBrains Mono', monospace",
-              }}
-            >
-              + {extra} more
-            </li>
-          )}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function CompetitorTile({ tile }: { tile: CompetitorTile }) {
-  const domain = domainOf(tile.url);
-  const strengths = Array.isArray(tile.strengths)
-    ? tile.strengths.filter((s) => typeof s === 'string' && s.length > 0)
-    : [];
-  const weaknesses = Array.isArray(tile.weaknesses)
-    ? tile.weaknesses.filter((s) => typeof s === 'string' && s.length > 0)
-    : [];
-  const positioning =
-    typeof tile.positioning === 'string' && tile.positioning.length > 0
-      ? tile.positioning
-      : null;
-  const pricing =
-    typeof tile.pricing === 'string' && tile.pricing.length > 0 ? tile.pricing : null;
-
+        {preview}
+      </button>
+    );
+  }
   return (
-    <div
-      data-testid={`competitor-tile-${domain ?? tile.company ?? 'row'}`}
+    <ul
+      data-testid={`competitor-${column}-bullets-${index}`}
+      onClick={() => setExpanded(false)}
       style={{
-        background: CARD,
-        border: `1px solid ${LINE}`,
-        borderRadius: 12,
-        padding: '18px 20px',
+        margin: 0,
+        padding: 0,
+        listStyle: 'none',
         display: 'flex',
         flexDirection: 'column',
-        gap: 14,
+        gap: 2,
+        cursor: 'pointer',
       }}
     >
-      {/* HEADER: company name + domain link */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 }}>
-          <div
-            className="floom-display"
-            style={{
-              fontFamily: "'Tiempos Headline', 'Charter', ui-serif, Georgia, serif",
-              fontSize: 22,
-              fontWeight: 500,
-              color: INK,
-              letterSpacing: '-0.015em',
-              lineHeight: 1.15,
-              wordBreak: 'break-word',
-            }}
-          >
-            {tile.company ?? domain ?? 'Competitor'}
-          </div>
-          {positioning && (
-            <div
-              style={{
-                fontSize: 13,
-                color: MUTED,
-                lineHeight: 1.5,
-                fontStyle: 'normal',
-              }}
-            >
-              {positioning}
-            </div>
-          )}
-        </div>
-        {domain && (
-          <a
-            href={tile.url ?? `https://${domain}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              fontSize: 12,
-              color: ACCENT,
-              textDecoration: 'none',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 8px',
-              border: `1px solid ${LINE}`,
-              borderRadius: 999,
-              background: 'var(--bg)',
-              flexShrink: 0,
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none';
-            }}
-          >
-            <FaviconChip domain={domain} />
-            {domain}
-          </a>
-        )}
-      </div>
-
-      {/* PRICING chip */}
-      {pricing && (
-        <div
+      {items.map((b, j) => (
+        <li
+          key={j}
           style={{
-            fontSize: 12,
-            color: INK,
-            padding: '6px 10px',
-            background: 'var(--bg)',
-            border: `1px solid ${LINE}`,
-            borderRadius: 8,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            alignSelf: 'flex-start',
-            maxWidth: '100%',
-            lineHeight: 1.45,
+            position: 'relative',
+            paddingLeft: 12,
+            fontSize: 13,
+            lineHeight: 1.5,
           }}
         >
           <span
+            aria-hidden
             style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: MUTED,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
+              position: 'absolute',
+              left: 2,
+              top: 8,
+              width: 3,
+              height: 3,
+              borderRadius: '50%',
+              background: MUTED,
             }}
-          >
-            Pricing
-          </span>
-          <span style={{ fontWeight: 500 }}>{pricing}</span>
-        </div>
-      )}
-
-      {/* 2-COL STRENGTHS / WEAKNESSES grid */}
-      <div
-        className="competitor-tile-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 20,
-          paddingTop: 4,
-        }}
-      >
-        <TileBulletList
-          items={strengths}
-          color={STRENGTH}
-          icon="check"
-          label="Strengths"
-        />
-        <TileBulletList
-          items={weaknesses}
-          color={GAP}
-          icon="alert"
-          label="Gaps vs you"
-        />
-      </div>
-    </div>
+          />
+          {b}
+        </li>
+      ))}
+    </ul>
   );
+}
+
+function buildMarkdown(
+  competitors: CompetitorTile[],
+  summary: string | undefined,
+): string {
+  const lines: string[] = [];
+  for (const c of competitors) {
+    const name = c.company ?? domainOf(c.url) ?? 'Competitor';
+    lines.push(`## ${name}`);
+    if (c.positioning) lines.push(c.positioning);
+    if (c.pricing) lines.push(`**Pricing:** ${c.pricing}`);
+    if (Array.isArray(c.strengths) && c.strengths.length > 0) {
+      lines.push('**Strengths:**');
+      for (const s of c.strengths) lines.push(`- ${s}`);
+    }
+    if (Array.isArray(c.weaknesses) && c.weaknesses.length > 0) {
+      lines.push('**Gaps:**');
+      for (const w of c.weaknesses) lines.push(`- ${w}`);
+    }
+    if (c.url) lines.push(`Source: ${c.url}`);
+    lines.push('');
+  }
+  if (summary && summary.trim().length > 0) {
+    lines.push('## Strategic summary');
+    lines.push(summary);
+  }
+  return lines.join('\n');
 }
 
 export function CompetitorTiles({
   competitors,
   summary,
   runOutput,
-  appSlug: _appSlug,
-  runId: _runId,
+  appSlug,
+  runId,
 }: CompetitorTilesProps) {
-  const [summaryOpen, setSummaryOpen] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const total = competitors.length;
   const totalStrengths = competitors.reduce(
     (acc, t) => acc + (Array.isArray(t.strengths) ? t.strengths.length : 0),
@@ -355,78 +202,237 @@ export function CompetitorTiles({
       ? (runOutput.meta as Record<string, unknown>).cache_hit === true
       : false;
   const cleanedModel = rawModel?.replace(/\s*\(cached\)\s*$/i, '');
-  const copyValue = JSON.stringify(
+  const copyJsonValue = JSON.stringify(
     { competitors, summary, meta: runOutput?.meta },
     null,
     2,
   );
+  const copyMarkdownValue = buildMarkdown(competitors, summary);
+
+  const csvColumns = ['company', 'url', 'positioning', 'pricing', 'strengths', 'gaps'];
+  const downloadCsv = () => {
+    const normalized = competitors.map((c) => ({
+      company: c.company ?? domainOf(c.url) ?? '',
+      url: c.url ?? '',
+      positioning: c.positioning ?? '',
+      pricing: c.pricing ?? '',
+      strengths: Array.isArray(c.strengths) ? c.strengths.join(' | ') : '',
+      gaps: Array.isArray(c.weaknesses) ? c.weaknesses.join(' | ') : '',
+    }));
+    const csv = rowsToCsv(normalized, csvColumns);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const slug = appSlug ?? 'competitors';
+    const suffix = runId ?? new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slug}-${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   return (
     <div
       data-renderer="CompetitorTiles"
-      className="app-expanded-card floom-slap-output"
+      className="floom-scored-output"
       style={{
         padding: 0,
         overflow: 'hidden',
-        borderTop: `2px solid ${ACCENT}`,
+        border: `1px solid ${LINE}`,
+        borderRadius: 8,
         background: CARD,
       }}
     >
-      {/* HEADER: title + summary meta */}
+      {/* Sticky action bar: summary counts + Copy JSON + Copy markdown + Download CSV */}
       <div
         style={{
-          padding: '20px 20px 16px',
+          padding: '8px 14px',
           borderBottom: `1px solid ${LINE}`,
           display: 'flex',
           alignItems: 'center',
-          gap: 14,
+          justifyContent: 'space-between',
+          gap: 12,
           flexWrap: 'wrap',
-          background: 'linear-gradient(180deg, rgba(4,120,87,0.03) 0%, transparent 100%)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
+          background: CARD,
         }}
       >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 11,
-              color: MUTED,
-              letterSpacing: '0.09em',
-              textTransform: 'uppercase',
-              fontWeight: 600,
-            }}
-          >
-            Competitive landscape
-          </div>
-          <div
-            data-testid="competitor-tiles-summary-line"
-            className="floom-display"
-            style={{
-              fontFamily: "'Tiempos Headline', 'Charter', ui-serif, Georgia, serif",
-              fontSize: 26,
-              lineHeight: 1.15,
-              color: INK,
-              fontWeight: 500,
-              letterSpacing: '-0.02em',
-              marginTop: 4,
-            }}
-          >
-            {total} competitors ·{' '}
-            <span style={{ color: STRENGTH, fontWeight: 600 }}>{totalStrengths}</span> strengths
-            ·{' '}
-            <span style={{ color: GAP, fontWeight: 600 }}>{totalGaps}</span> gaps
-          </div>
+        <div
+          data-testid="competitor-tiles-summary-line"
+          style={{ fontSize: 12, color: MUTED, fontFamily: MONO }}
+        >
+          {total} competitors · {totalStrengths} strengths · {totalGaps} gaps
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <CopyButton value={copyValue} label="Copy JSON" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            data-testid="competitor-tiles-download-csv"
+            onClick={downloadCsv}
+            disabled={competitors.length === 0}
+            style={{
+              fontSize: 12,
+              padding: '4px 10px',
+              border: `1px solid ${LINE}`,
+              background: CARD,
+              color: INK,
+              borderRadius: 6,
+              cursor: competitors.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: competitors.length === 0 ? 0.5 : 1,
+              fontFamily: 'inherit',
+            }}
+          >
+            Download CSV
+          </button>
+          <CopyButton value={copyMarkdownValue} label="Copy markdown" />
+          <CopyButton value={copyJsonValue} label="Copy JSON" />
         </div>
       </div>
 
-      {/* SUMMARY — collapsible markdown prose (fold open by default) */}
+      <div style={{ maxHeight: 640, overflow: 'auto' }}>
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <thead>
+            <tr>
+              {['Competitor', 'Strengths', 'Gaps vs you', 'Source'].map((h) => (
+                <th
+                  key={h}
+                  scope="col"
+                  style={{
+                    position: 'sticky',
+                    top: 0,
+                    background: CARD,
+                    borderBottom: `1px solid ${LINE}`,
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: MUTED,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {competitors.map((c, i) => {
+              const strengths = Array.isArray(c.strengths)
+                ? c.strengths.filter((s): s is string => typeof s === 'string' && s.length > 0)
+                : [];
+              const weaknesses = Array.isArray(c.weaknesses)
+                ? c.weaknesses.filter((s): s is string => typeof s === 'string' && s.length > 0)
+                : [];
+              const domain = domainOf(c.url);
+              const displayName = c.company ?? domain ?? 'Competitor';
+              return (
+                <tr
+                  key={i}
+                  data-testid={`competitor-tile-${domain ?? c.company ?? `row-${i}`}`}
+                  style={{
+                    borderTop: i === 0 ? 'none' : `1px solid ${LINE}`,
+                  }}
+                >
+                  <td
+                    style={{
+                      padding: '8px 10px',
+                      color: INK,
+                      fontWeight: 500,
+                      verticalAlign: 'top',
+                      wordBreak: 'break-word',
+                      width: 160,
+                    }}
+                  >
+                    <div>{displayName}</div>
+                    {c.positioning ? (
+                      <div style={{ fontSize: 12, color: MUTED, marginTop: 2, lineHeight: 1.4 }}>
+                        {c.positioning}
+                      </div>
+                    ) : null}
+                    {c.pricing ? (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: MUTED,
+                          marginTop: 2,
+                          fontFamily: MONO,
+                        }}
+                      >
+                        {c.pricing}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td
+                    style={{
+                      padding: '8px 10px',
+                      color: INK,
+                      verticalAlign: 'top',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    <BulletCell items={strengths} index={i} column="strengths" />
+                  </td>
+                  <td
+                    style={{
+                      padding: '8px 10px',
+                      color: INK,
+                      verticalAlign: 'top',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    <BulletCell items={weaknesses} index={i} column="gaps" />
+                  </td>
+                  <td
+                    style={{
+                      padding: '8px 10px',
+                      verticalAlign: 'top',
+                      wordBreak: 'break-word',
+                      width: 160,
+                    }}
+                  >
+                    {domain ? (
+                      <a
+                        href={c.url ?? `https://${domain}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: ACCENT,
+                          textDecoration: 'none',
+                          fontSize: 13,
+                        }}
+                      >
+                        {domain}
+                      </a>
+                    ) : (
+                      <span style={{ color: MUTED }}>—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Strategic summary — collapsed by default. Click to expand. */}
       {summary && summary.trim().length > 0 && (
         <div
           data-testid="competitor-tiles-summary"
           style={{
-            padding: '16px 20px',
-            borderBottom: `1px solid ${LINE}`,
+            padding: '10px 14px',
+            borderTop: `1px solid ${LINE}`,
             background: 'var(--bg)',
           }}
         >
@@ -458,9 +464,9 @@ export function CompetitorTiles({
           {summaryOpen && (
             <div
               style={{
-                marginTop: 10,
-                fontSize: 14,
-                lineHeight: 1.65,
+                marginTop: 8,
+                fontSize: 13,
+                lineHeight: 1.6,
                 color: INK,
               }}
             >
@@ -470,26 +476,11 @@ export function CompetitorTiles({
         </div>
       )}
 
-      {/* TILES — stacked vertically, one per competitor */}
-      <div
-        style={{
-          padding: '16px 16px 16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 14,
-          background: 'var(--bg)',
-        }}
-      >
-        {competitors.map((c, i) => (
-          <CompetitorTile key={i} tile={c} />
-        ))}
-      </div>
-
       {cleanedModel && (
         <div
           data-testid="competitor-tiles-model-chip"
           style={{
-            padding: '8px 16px',
+            padding: '6px 14px',
             borderTop: `1px solid ${LINE}`,
             fontSize: 11,
             color: MUTED,
@@ -501,7 +492,7 @@ export function CompetitorTiles({
           }}
         >
           <span>Model</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ fontFamily: MONO }}>
             {cleanedModel}
             {cacheHit ? (
               <span
@@ -514,13 +505,6 @@ export function CompetitorTiles({
           </span>
         </div>
       )}
-
-      {/* Mobile polish — single-column grid on narrow widths */}
-      <style>{`
-        @media (max-width: 520px) {
-          .competitor-tile-grid { grid-template-columns: 1fr !important; gap: 14px !important; }
-        }
-      `}</style>
     </div>
   );
 }

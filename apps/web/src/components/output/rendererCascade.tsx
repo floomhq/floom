@@ -600,6 +600,27 @@ export function shapePick(
 }
 
 /**
+ * Shape check for resume-screener's `ranked` payload: an array of
+ * candidate objects with a `score` number and a `filename` (or
+ * `redacted_id`) identifier. Mirrors looksLikeCompetitorOutput so
+ * unrelated apps that happen to return a `ranked` array keep their
+ * existing renderer.
+ */
+export function looksLikeRankedCandidates(runOutput: unknown): boolean {
+  if (!runOutput || typeof runOutput !== 'object') return false;
+  const obj = runOutput as Record<string, unknown>;
+  const r = obj.ranked;
+  if (!Array.isArray(r) || r.length === 0) return false;
+  const first = r[0];
+  if (!first || typeof first !== 'object') return false;
+  const row = first as Record<string, unknown>;
+  const hasScore = typeof row.score === 'number';
+  const hasIdent =
+    typeof row.filename === 'string' || typeof row.redacted_id === 'string';
+  return hasScore && hasIdent;
+}
+
+/**
  * Pick a component to mount for this run. Returns `{kind:'fallback',
  * element: null}` to signal the caller should render its JsonRaw
  * fallback.
@@ -631,6 +652,34 @@ export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): Ca
     // Unknown component name OR missing referenced field → fall through
     // to auto-pick. The manifest is not broken, it's just overspecified
     // relative to the run output.
+  }
+
+  // Layer 2.4 (2026-04-24, #661 follow-up): resume-screener shape
+  // short-circuit. The resume-screener manifest declares `ranked` as a
+  // plain `json` output (array of candidates), so without this hook the
+  // cascade fell into the generic RowTable + Markdown composite path.
+  // That gave every column equal weight and rendered `gaps: string[]`
+  // alongside `must_have_pass: boolean` — dense and hard to scan. Route
+  // to ScoredRowsTable instead, which ranks by score, truncates reason
+  // text, and keeps the Download CSV + Copy JSON buttons consistent
+  // with the Lead Scorer treatment (PR #702).
+  if (looksLikeRankedCandidates(runOutput)) {
+    const obj = runOutput as Record<string, unknown>;
+    const rows = obj.ranked as Array<Record<string, unknown>>;
+    return {
+      kind: 'library',
+      element: (
+        <ScoredRowsTable
+          rows={rows}
+          runOutput={obj}
+          company_key="filename"
+          reason_key="match_summary"
+          score_scale="0-100"
+          appSlug={appSlug}
+          runId={runId}
+        />
+      ),
+    };
   }
 
   // Layer 2.5 (2026-04-24, #643): competitor-analyzer shape short-circuit.

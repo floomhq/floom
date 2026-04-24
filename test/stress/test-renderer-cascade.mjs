@@ -192,8 +192,12 @@ console.log('v16 renderer cascade tests');
 }
 
 {
-  // Issue #471 / #470: manifest lists json (rows) + summary; must not show
-  // summary-only Markdown (hides the table).
+  // Issue #471 / #470 + PR #710 follow-up to #661: resume-screener output
+  // (ranked array of scored candidates) used to fall into the composite
+  // RowTable + Markdown path. #710 routes it to ScoredRowsTable via the
+  // `looksLikeRankedCandidates` shape short-circuit, matching the Lead
+  // Scorer treatment (#702). The test now asserts the new library route
+  // and that the run metadata flows through to the table.
   const app = {
     slug: 'resume-screener',
     manifest: mkManifest({
@@ -220,18 +224,38 @@ console.log('v16 renderer cascade tests');
     runOutput: out,
     runId: 'run_resume_test',
   });
-  const children = result.element?.props?.children;
-  const rowTable = Array.isArray(children) ? children[0] : null;
-  const wrap = Array.isArray(children) ? children[1] : null;
-  log('Auto-pick: json rows + summary → kind auto', result.kind === 'auto');
-  log('Auto-pick: composite outer is div.floom-auto-composite-output', result.element?.props?.className === 'floom-auto-composite-output');
-  log('Auto-pick: RowTable is first child', rowTable?.type === OUTPUT_LIBRARY.RowTable);
-  log('Auto-pick: RowTable gets runId for CSV', rowTable?.props?.runId === 'run_resume_test');
-  log('Auto-pick: RowTable gets app slug', rowTable?.props?.appSlug === 'resume-screener');
-  log('Auto-pick: Markdown is nested under marginTop wrapper', wrap?.props?.style?.marginTop === 16);
+  log('Ranked shape → kind library', result.kind === 'library');
   log(
-    'Auto-pick: summary text passed to Markdown',
-    wrap?.props?.children?.props?.content === 'Screened 2 CV(s). Top: cv-abc.',
+    'Ranked shape → ScoredRowsTable renderer',
+    result.element?.type === OUTPUT_LIBRARY.ScoredRowsTable,
+  );
+  log(
+    'ScoredRowsTable receives ranked rows',
+    Array.isArray(result.element?.props?.rows) && result.element?.props?.rows?.length === 2,
+  );
+  log(
+    'ScoredRowsTable gets appSlug for CSV naming',
+    result.element?.props?.appSlug === 'resume-screener',
+  );
+  log(
+    'ScoredRowsTable gets runId for CSV naming',
+    result.element?.props?.runId === 'run_resume_test',
+  );
+  log(
+    'ScoredRowsTable gets company_key=filename',
+    result.element?.props?.company_key === 'filename',
+  );
+  log(
+    'ScoredRowsTable gets reason_key=match_summary',
+    result.element?.props?.reason_key === 'match_summary',
+  );
+  log(
+    'ScoredRowsTable gets score_scale 0-100',
+    result.element?.props?.score_scale === '0-100',
+  );
+  log(
+    'ScoredRowsTable passes full runOutput for model chip',
+    result.element?.props?.runOutput?.model === 'gemini-3.1-pro-preview',
   );
 }
 
