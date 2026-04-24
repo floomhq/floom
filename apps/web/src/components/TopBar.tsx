@@ -268,19 +268,22 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             withWordmark={false}
             variant="glow"
           />
-          {!compact && (
-            <span
-              style={{
-                fontSize: WORDMARK_SIZE,
-                fontWeight: WORDMARK_WEIGHT,
-                letterSpacing: '-0.02em',
-                lineHeight: 1,
-                color: INK,
-              }}
-            >
-              floom
-            </span>
-          )}
+          {/* Wordmark always shows — previously hidden in compact mode
+              on /p/:slug run views, but Federico 2026-04-24 asked for
+              consistency: the brand lockup should read the same on every
+              page. Compact's height reduction (40px top bar) still
+              applies; only the wordmark-hide behaviour is dropped. */}
+          <span
+            style={{
+              fontSize: compact ? 15 : WORDMARK_SIZE,
+              fontWeight: WORDMARK_WEIGHT,
+              letterSpacing: '-0.02em',
+              lineHeight: 1,
+              color: INK,
+            }}
+          >
+            floom
+          </span>
         </Link>
 
         {/* Studio-only mobile sidebar toggle */}
