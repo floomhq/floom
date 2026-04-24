@@ -22,7 +22,7 @@
 //     including the Layer 1 CustomRendererHost iframe sandbox (PR #22).
 //   - Async apps (is_async) route through JobProgress in the output slot.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type {
   ActionSpec,
@@ -333,6 +333,124 @@ function jobToRunRecord(job: JobRecord, action: string): RunRecord {
   };
 }
 
+/**
+ * #626 v17 run banner helper: best-effort estimate of how many rows the
+ * current run will process. Deliberately conservative — returns null
+ * unless the inputs include an obviously row-oriented field. We'd
+ * rather render a row-less "Running..." banner than invent progress for
+ * apps that don't have a row dimension (codex review 2026-04-24: a
+ * multiline `job_description` textarea is NOT a 4-row dataset).
+ *
+ * Accepted signals, in order:
+ *   - Array-valued inputs registered in ARRAY_INPUT_NAMES (urls/items/etc).
+ *   - String inputs whose name/label explicitly names a row-oriented
+ *     concept (csv, rows, leads, list, items, entries). Header line is
+ *     stripped when present.
+ * Generic textareas (prompts, descriptions, JSONL pastes) do NOT count —
+ * they have lines, but lines != rows.
+ */
+function estimateRowCount(
+  inputs: Record<string, unknown>,
+  spec: ActionSpec,
+): number | null {
+  // Name-based allowlist applied to BOTH array and string inputs — we
+  // only call it a "row" when the field's name/label actually reads as
+  // row-oriented. Prevents e.g. `hashtags: ['#a', '#b']` on ig-nano-scout
+  // from being reported as "row 1 of 2" (codex review 2026-04-24).
+  const ROW_ORIENTED_NAME = /\b(csv|rows?|leads?|urls?|list|items?|entries)\b/i;
+  for (const inp of spec.inputs) {
+    const value = inputs[inp.name];
+    const fingerprint = `${inp.name} ${inp.label ?? ''}`;
+    if (!ROW_ORIENTED_NAME.test(fingerprint)) continue;
+    if (Array.isArray(value)) {
+      if (value.length > 0) return value.length;
+      continue;
+    }
+    if (typeof value === 'string' && value.length > 0) {
+      const lines = value.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) continue;
+      // We deliberately do NOT strip a "header" line here. Reliable header
+      // detection without a schema hint is a coin flip (codex review
+      // 2026-04-24: `Acme,https://acme.com` would look like a header but
+      // is a data row). We surface this count as "~N rows" in the UI so
+      // a ±1 over/undercount from a present/absent header is honest.
+      return lines.length;
+    }
+    // File inputs: no sync row-count available. Fall through to null.
+  }
+  return null;
+}
+
+/**
+ * Return the first input value that's a user-uploaded CSV-ish File, so
+ * the run banner can read its row count. Mirrors `estimateRowCount`'s
+ * name-based heuristic (we only count files from clearly row-oriented
+ * slots) and layers a filename/MIME check so a generic File input won't
+ * trigger a misleading count. Returns null for every other shape.
+ */
+function pickCsvFileInput(
+  inputs: Record<string, unknown>,
+  spec: ActionSpec,
+): File | null {
+  if (typeof File === 'undefined') return null;
+  const ROW_ORIENTED_NAME = /\b(csv|rows?|leads?|urls?|list|items?|entries)\b/i;
+  for (const inp of spec.inputs) {
+    const value = inputs[inp.name];
+    if (!(value instanceof File)) continue;
+    const fingerprint = `${inp.name} ${inp.label ?? ''}`;
+    const name = value.name.toLowerCase();
+    const mime = (value.type || '').toLowerCase();
+    const looksRowOriented =
+      ROW_ORIENTED_NAME.test(fingerprint) ||
+      name.endsWith('.csv') ||
+      name.endsWith('.tsv') ||
+      mime === 'text/csv' ||
+      mime === 'text/tab-separated-values';
+    if (looksRowOriented) return value;
+  }
+  return null;
+}
+
+/**
+ * Count non-empty newline-delimited rows in a CSV File. Caps at ~5MB so
+ * the UI never blocks on pathological uploads — above the cap we bail
+ * out and let the banner fall back to the row-less "Processing..."
+ * label. Header is stripped when the first line has no digits and more
+ * than one comma-separated field.
+ */
+async function countFileCsvRows(file: File): Promise<number | null> {
+  const MAX_BYTES = 5 * 1024 * 1024;
+  if (file.size > MAX_BYTES) return null;
+  let text: string;
+  try {
+    text = await file.text();
+  } catch {
+    return null;
+  }
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  // A single line is almost always a header-only template (the shipped
+  // lead-scorer sample is `company,website,...` with nothing below).
+  // Reporting "row 1" here would lie about work that doesn't exist
+  // (codex review 2026-04-24).
+  if (lines.length === 1) return null;
+  // CSV/TSV uploads on Floom are documented to require a header row
+  // (see examples/lead-scorer/README.md: "header row required"), so we
+  // always strip the first line from the count. This matches the
+  // shipped demo contract — a ±1 drift on creator apps that choose to
+  // accept headerless CSVs is acceptable since the UI surfaces this as
+  // "~N rows", not a precise commitment.
+  return lines.length - 1;
+}
+
+/** Format milliseconds as mm:ss (used in the run banner). */
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 export function RunSurface({
   app,
   initialInputs,
@@ -428,6 +546,117 @@ export function RunSurface({
   // and re-reads localStorage for the user-key presence. No-op when the
   // slug isn't gated — the strip renders nothing in that case.
   const freeRunsRefresher = useFreeRunsRefresher();
+
+  // #626 v17 run banner state — the banner (top of output area) shows a
+  // live mm:ss timer + "Running: <action>..." label during streaming/job
+  // phases. runStartedAt is pinned on the phase transition; elapsedMs
+  // re-ticks every second so the timer stays current without hammering
+  // React's render loop. Both reset to null on reaching `done`/`ready`/
+  // `error` so a shared-run permalink (phase=done) sees nothing.
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number>(0);
+  // `isRunning` gates the banner + per-row feed. For async apps, the
+  // `phase === 'job'` transition fires as soon as /api/:slug/jobs
+  // returns (status=queued) — the worker hasn't started yet and
+  // JobProgress still reads "Your job is queued." Reporting
+  // "Running..." / "row 1 of M" there would contradict the output
+  // panel, so we hold the banner until the job transitions to
+  // `running`. Streaming (sync SSE) apps go live immediately.
+  const isRunning =
+    state.phase === 'streaming' ||
+    (state.phase === 'job' && state.job?.status === 'running');
+  useEffect(() => {
+    if (!isRunning) {
+      setRunStartedAt(null);
+      setElapsedMs(0);
+      return;
+    }
+    // For async jobs, seed from `job.started_at` (the server's clock, same
+    // one JobProgress reads) so the banner's mm:ss stays in lockstep
+    // with the existing progress card. Falls back to Date.now() for sync
+    // streaming runs where the server has no separate "started" moment
+    // visible client-side (codex review 2026-04-24).
+    let startedAt = runStartedAt;
+    if (startedAt == null) {
+      const serverStart = state.job?.started_at;
+      if (serverStart) {
+        // Match JobProgress's parse exactly (`new Date(job.started_at)`)
+        // so the two timers on screen agree to the second. The jobs API
+        // returns raw SQLite `datetime('now')` strings without a
+        // timezone, which both parses interpret as local time — that's
+        // a pre-existing timezone bug tracked separately, but we MUST
+        // NOT fix it here in isolation or the banner and the progress
+        // card would diverge (codex review 2026-04-24 [P1]).
+        const parsed = new Date(serverStart).getTime();
+        startedAt = Number.isFinite(parsed) ? parsed : Date.now();
+      } else {
+        startedAt = Date.now();
+      }
+      setRunStartedAt(startedAt);
+    }
+    setElapsedMs(Math.max(0, Date.now() - startedAt));
+    const id = window.setInterval(() => {
+      setElapsedMs(Math.max(0, Date.now() - (startedAt as number)));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isRunning, runStartedAt, state.job?.started_at]);
+
+  // Estimated M for the per-row stream feed. We snapshot the SUBMITTED
+  // payload (not state.inputs) at Run-click time via `submittedPayloadRef`
+  // so that:
+  //   (a) Edits the user makes between click and phase=streaming never
+  //       reshape the banner. `isRunning` doesn't flip true until the
+  //       server acknowledges dispatch (startRun / startJob resolves),
+  //       which can take seconds on a slow upload.
+  //   (b) Mutable form state (InputCard `running` disables fields, but
+  //       we don't rely on that) can never drift M mid-run.
+  // File-backed CSV inputs populate this asynchronously via
+  // `countFileCsvRows` (cap 5MB so huge uploads don't hang the banner).
+  const [runRowCount, setRunRowCount] = useState<number | null>(null);
+  const submittedPayloadRef = useRef<{
+    inputs: Record<string, unknown>;
+    spec: ActionSpec;
+  } | null>(null);
+  useEffect(() => {
+    if (!isRunning) {
+      setRunRowCount(null);
+      return;
+    }
+    const payload = submittedPayloadRef.current;
+    if (!payload) {
+      setRunRowCount(null);
+      return;
+    }
+    const syncEstimate = estimateRowCount(payload.inputs, payload.spec);
+    if (syncEstimate != null) {
+      setRunRowCount(syncEstimate);
+      return;
+    }
+    let cancelled = false;
+    const fileInput = pickCsvFileInput(payload.inputs, payload.spec);
+    if (!fileInput) {
+      setRunRowCount(null);
+      return;
+    }
+    countFileCsvRows(fileInput)
+      .then((count) => {
+        if (!cancelled && count != null) setRunRowCount(count);
+      })
+      .catch(() => {
+        /* leave row count null on failure */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isRunning]);
+  const estimatedRowCount = runRowCount;
+  // N (current row) is deliberately NOT computed client-side for this
+  // launch: neither SSE log lines nor wall-clock ticks are reliable
+  // signals. We'd rather show a row-less "Processing M rows..." label
+  // (honest + useful) than a fake "row 3 of 5" that drifts off real
+  // progress (codex review 2026-04-24). The ticking timer on the banner
+  // still gives the user a live heartbeat. Real per-row N ships when
+  // the server emits structured progress events (tracked separately).
 
   const handleInputChange = useCallback((name: string, value: unknown) => {
     setState((s) => {
@@ -536,6 +765,13 @@ export function RunSurface({
 
     // Clear shared-run hydration on explicit re-run.
     onResetInitialRun?.();
+
+    // Snapshot the submitted payload for the run-banner row counter. We
+    // pin it here (BEFORE the async startRun/startJob call resolves) so
+    // any field edits the user makes in the short gap between click and
+    // phase=streaming/job don't reshape M mid-flight (codex review
+    // 2026-04-24). Cleared on terminal phase via the same effect.
+    submittedPayloadRef.current = { inputs, spec: actionSpec };
 
     if (app.is_async) {
       try {
@@ -916,6 +1152,53 @@ export function RunSurface({
             );
           })}
         </div>
+      )}
+
+      {/* #626 v17 run banner + per-row stream feed — visible ONLY during
+          streaming / job phases, never on the shared-run `done` path
+          (PublicRunPermalinkPage always hydrates with phase=done). Guarded
+          by the explicit phase check so no banner/feed ever renders for
+          /r/:id permalinks. Styles live in globals.css (.run-banner,
+          .run-feed, .run-feed-row) and mirror the wireframe's
+          .run-banner + .stream-row blocks. */}
+      {isRunning && (
+        <>
+          {/* Plain non-live region: assistive tech already gets phase
+              changes from run-surface-output (aria-live="polite") and
+              the InputCard's `running` prop. Re-announcing the timer
+              every 1s would spam screen readers (codex [P3]
+              2026-04-24). */}
+          <div className="run-banner" data-testid="run-banner">
+            <span className="run-banner-dot" aria-hidden="true" />
+            <span className="run-banner-label">
+              Running: <strong>{state.actionSpec.label || state.action || 'run'}</strong>
+              ...
+            </span>
+            <span className="run-banner-meta mono">
+              {formatElapsed(elapsedMs)}
+            </span>
+          </div>
+          <div className="run-feed" data-testid="run-feed">
+            <div className="run-feed-row" data-testid="run-feed-row">
+              <span className="run-feed-idx mono" aria-hidden="true">
+                {estimatedRowCount != null
+                  ? `~${estimatedRowCount}`
+                  : '—'}
+              </span>
+              <span className="run-feed-glyph" aria-hidden="true">
+                <span className="run-feed-glyph-pulse" />
+              </span>
+              <span className="run-feed-name">
+                {estimatedRowCount != null
+                  ? `Processing ~${estimatedRowCount} ${estimatedRowCount === 1 ? 'row' : 'rows'}...`
+                  : 'Processing...'}
+              </span>
+              <span className="run-feed-elapsed mono">
+                {formatElapsed(elapsedMs)}
+              </span>
+            </div>
+          </div>
+        </>
       )}
 
       <div className="run-surface-grid">

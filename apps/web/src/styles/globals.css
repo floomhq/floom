@@ -703,6 +703,125 @@ body:has(.topbar-mobile-menu) {
   .run-surface-past-row { grid-template-columns: 80px 60px 1fr; gap: 8px; }
 }
 
+/* ── Run banner + per-row stream feed (#626, v17 app-page parity)
+   ─────────────────────────────────────────────────────────────────────
+   Rendered above the run-surface-grid during streaming/job phases only
+   (guarded in RunSurface.tsx via `isRunning`). Mirrors the wireframe's
+   .run-banner block: light accent tint, pulse dot, mm:ss elapsed timer
+   on the right. Stays hidden on `ready` / `done` / `error` so shared-
+   run permalinks (/r/:id → /p/:slug hydrated with phase=done) never
+   flash a banner. */
+.run-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-border, #a7f3d0);
+  border-radius: 10px;
+  background: var(--accent-soft, #ecfdf5);
+  margin-bottom: 14px;
+}
+.run-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px var(--accent-soft, #ecfdf5);
+}
+.run-banner-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 2px solid var(--accent);
+  opacity: .35;
+  animation: run-banner-pulse 1.4s ease-out infinite;
+}
+@keyframes run-banner-pulse {
+  0% { transform: scale(.6); opacity: .6; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+.run-banner-label {
+  font-size: 13px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-banner-label strong { color: var(--ink); font-weight: 600; }
+.run-banner-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* Per-row stream feed — a compact grid row that mirrors the wireframe's
+   .stream-row shape (index · glyph · name · elapsed). For launch we
+   render a single "Processing row N of M" row that updates from client
+   state; a fuller per-row feed ships after launch when the server
+   streams row events. */
+.run-feed {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.run-feed-row {
+  display: grid;
+  grid-template-columns: 54px 48px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px dashed var(--line);
+  font-size: 12.5px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.run-feed-row:last-child { border-bottom: none; background: var(--accent-soft, #ecfdf5); }
+.run-feed-idx { color: var(--muted); font-size: 11px; }
+.run-feed-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft, #ecfdf5);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.run-feed-glyph-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: run-banner-pulse 1.4s ease-out infinite;
+}
+.run-feed-name {
+  color: var(--ink);
+  font-weight: 500;
+  font-size: 12.5px;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-feed-elapsed {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+@media (max-width: 640px) {
+  .run-feed-row { grid-template-columns: 48px 40px 1fr auto; gap: 8px; padding: 8px 10px; }
+}
+
 /* ── Run progress (Issue #358, launch-blocker 2026-04-22) ─────────────────
    Non-developer friendly replacement for the old black-terminal streaming
    log. Progress bar + current step label sit above a collapsed "Show

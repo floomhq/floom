@@ -1031,10 +1031,78 @@ export function AppPermalinkPage() {
             </div>
           </section>
 
-          {/* Frame body: swappable by ?tab= (Run / About / Install / Source).
-              v17 removes the mid-page underlined tab bar — secondary
-              surfaces live behind chips in the footer row below. Test-id
-              permalink-tabs moved to that chip row so analytics stay green. */}
+          {/* Top tab bar (#626, 2026-04-24): moved About / Install / Source
+              from the bottom chip row to an underlined tab bar directly
+              below the hero. Run stays the default (no tab rendered) so
+              the Run surface fills the frame. Clicking a secondary tab
+              swaps the content panel below. Deviates from the v17
+              wireframe's bottom chip row — the wireframe keeps these as
+              chips at the bottom, but Federico's review called for
+              TABS-at-top placement (see PR body). Behaviour is
+              unchanged: clicking each tab swaps the content panel, URL
+              updates via ?tab=, test-ids preserved. */}
+          <div
+            role="tablist"
+            aria-label="App content"
+            data-testid="permalink-tabs"
+            style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              flexWrap: 'wrap',
+              gap: 0,
+              padding: '0 24px',
+              borderBottom: '1px solid var(--line)',
+              background: 'var(--card)',
+            }}
+          >
+            {([
+              { id: 'run' as PTab, label: 'Run' },
+              { id: 'about' as PTab, label: 'About this app' },
+              { id: 'install' as PTab, label: 'Install in Claude' },
+              { id: 'source' as PTab, label: 'Source' },
+            ]).map((t) => {
+              const isOn = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isOn}
+                  data-testid={`permalink-tab-${t.id}`}
+                  data-state={isOn ? 'active' : 'inactive'}
+                  onClick={() => {
+                    setActiveTab(t.id);
+                    setSearchParams((prev) => {
+                      const next = new URLSearchParams(prev);
+                      if (t.id === 'run') next.delete('tab');
+                      else next.set('tab', t.id);
+                      return next;
+                    }, { replace: true });
+                  }}
+                  style={{
+                    padding: '12px 16px',
+                    fontSize: 13,
+                    fontWeight: isOn ? 600 : 500,
+                    border: 'none',
+                    background: 'transparent',
+                    color: isOn ? 'var(--ink)' : 'var(--muted)',
+                    borderBottom: isOn
+                      ? '2px solid var(--accent)'
+                      : '2px solid transparent',
+                    marginBottom: -1,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                    transition: 'color .12s, border-color .12s',
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Frame body: swappable by ?tab= (Run / About / Install / Source). */}
           <div
             className="app-page-body"
             style={{
@@ -1507,91 +1575,6 @@ export function AppPermalinkPage() {
         )}
           </div>
           {/* /frame body */}
-
-          {/* v17 quiet chip row — secondary surfaces (Run / About /
-              Install / Source) demoted from a mid-page underlined tab
-              bar to a pill row at the bottom of the frame. Active chip
-              reads as a green pill (--accent-soft bg + --accent-border
-              + --accent text), non-active reads as a plain pill. */}
-          <div
-            role="tablist"
-            aria-label="App content"
-            data-testid="permalink-tabs"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '14px 24px',
-              borderTop: '1px solid var(--line)',
-              background: 'var(--card)',
-              flexWrap: 'wrap',
-            }}
-          >
-            {/* v17 app-page.html alignment (2026-04-25): when the user is
-                on the default Run tab, the bottom chip row shows only the
-                three SECONDARY surfaces (About / Install / Source) — per
-                wireframe line 382-397 ("About this app", "Install in
-                Claude", "Source"). The "Run" chip appears only when a
-                secondary tab is active, so the user has an explicit
-                "← back to Run" affordance.
-                Rationale: on the Run tab, the whole frame IS the Run
-                surface, so an additional "Run" pill that points to the
-                state you're already in reads as noise. Matches the
-                wireframe's 3-chip row exactly in the idle/running/complete
-                states, and keeps navigation clear when you've drilled
-                into About/Install/Source. */}
-            {(
-              [
-                // Run chip is conditionally included below — only when
-                // an alternate tab is active, so it acts as a "return"
-                // affordance rather than a redundant selector.
-                ...(activeTab === 'run'
-                  ? []
-                  : [{ id: 'run' as PTab, label: 'Run' }]),
-                { id: 'about' as PTab, label: 'About this app' },
-                { id: 'install' as PTab, label: 'Install in Claude' },
-                { id: 'source' as PTab, label: 'Source' },
-              ]
-            ).map((t) => {
-              const isOn = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isOn}
-                  data-testid={`permalink-tab-${t.id}`}
-                  data-state={isOn ? 'active' : 'inactive'}
-                  onClick={() => {
-                    setActiveTab(t.id);
-                    setSearchParams((prev) => {
-                      const next = new URLSearchParams(prev);
-                      if (t.id === 'run') next.delete('tab');
-                      else next.set('tab', t.id);
-                      return next;
-                    }, { replace: true });
-                  }}
-                  style={{
-                    padding: '7px 13px',
-                    fontSize: 12.5,
-                    fontWeight: isOn ? 600 : 500,
-                    border: isOn
-                      ? '1px solid var(--accent-border)'
-                      : '1px solid var(--line)',
-                    background: isOn ? 'var(--accent-soft)' : 'var(--card)',
-                    color: isOn ? 'var(--accent)' : 'var(--muted)',
-                    borderRadius: 999,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    whiteSpace: 'nowrap',
-                    transition: 'color .12s, border-color .12s, background .12s',
-                  }}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
         </div>
         {/* /frame */}
       </main>
