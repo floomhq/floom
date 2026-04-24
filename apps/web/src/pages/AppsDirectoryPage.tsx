@@ -289,10 +289,10 @@ export function AppsDirectoryPage() {
               className="apps-headline"
               style={{
                 fontFamily: 'var(--font-display)',
-                fontWeight: 400,
+                fontWeight: 800,
                 fontSize: 34,
                 lineHeight: 1.1,
-                letterSpacing: '-0.02em',
+                letterSpacing: '-0.025em',
                 color: 'var(--ink)',
                 margin: '0 0 8px',
               }}

@@ -552,12 +552,22 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     zIndex: 50,
                   }}
                 >
-                  {/* #641 — order per Federico: Studio · Apps I run ·
-                      Settings · Sign out. "Apps I run" replaces the old
-                      "Me" / "Runtime" phrasing ("runtime i meant me —
-                      where user runs apps"). Points at /me/runs, which
-                      redirects to /me#recent-runs. API keys collapsed
-                      into Settings to keep the menu at four items. */}
+                  {/* #674 — Dashboard lands first so signed-in users
+                      reach /me (their overview) in one click. Order
+                      per Federico 2026-04-24: Dashboard · Studio ·
+                      Apps I run · Settings · Sign out. "Apps I run"
+                      points at /me/runs. API keys collapsed into
+                      Settings. */}
+                  <Link
+                    to="/me"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-dashboard"
+                    aria-current={isMe ? 'page' : undefined}
+                    style={menuItemStyle}
+                  >
+                    Dashboard
+                  </Link>
                   <Link
                     to="/studio"
                     onClick={() => setDropOpen(false)}
@@ -715,10 +725,20 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Pricing
             </Link>
 
-            {/* Authed-only: Studio + Apps I run + Settings. Mirrors the
-                desktop avatar dropdown order (#641). */}
+            {/* Authed-only: Dashboard + Studio + Apps I run + Settings.
+                Mirrors the desktop avatar dropdown order (#641, #674). */}
             {isAuthenticated && (
               <>
+                <Link
+                  to="/me"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-dashboard"
+                  aria-current={isMe ? 'page' : undefined}
+                >
+                  Dashboard
+                </Link>
                 <Link
                   to="/studio"
                   className="topbar-mobile-link"

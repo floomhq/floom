@@ -38,8 +38,8 @@ const MONO: React.CSSProperties = {
 // rename.
 const SERIF: React.CSSProperties = {
   fontFamily: 'var(--font-display)',
-  fontWeight: 700,
-  letterSpacing: '-0.02em',
+  fontWeight: 800,
+  letterSpacing: '-0.025em',
 };
 
 const EYEBROW: React.CSSProperties = {
