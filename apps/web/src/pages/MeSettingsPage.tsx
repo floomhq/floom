@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { PageShell } from '../components/PageShell';
+import { MeLayout } from '../components/me/MeLayout';
 import { useSession, refreshSession, clearSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { friendlyAuthError } from '../lib/authErrors';
@@ -238,7 +238,7 @@ export function MeSettingsPage() {
   };
 
   return (
-    <PageShell requireAuth="cloud" title="Settings | Floom" noIndex>
+    <MeLayout activeTab="settings" title="Settings · Me · Floom">
       <div data-testid="settings-page" style={{ maxWidth: 880 }}>
         <div
           style={{
@@ -247,23 +247,23 @@ export function MeSettingsPage() {
             justifyContent: 'space-between',
             gap: 16,
             flexWrap: 'wrap',
-            marginBottom: 24,
+            marginBottom: 18,
           }}
         >
           <div>
-            <h1
+            <h2
               style={{
                 fontFamily: 'var(--font-display)',
-                fontSize: 26,
-                fontWeight: 700,
-                letterSpacing: '-0.02em',
-                lineHeight: 1.15,
+                fontSize: 20,
+                fontWeight: 800,
+                letterSpacing: '-0.025em',
+                lineHeight: 1.2,
                 margin: '0 0 6px',
                 color: 'var(--ink)',
               }}
             >
               Settings
-            </h1>
+            </h2>
             <p style={{ fontSize: 14, color: 'var(--muted)', margin: 0 }}>
               {tabSubtitle[activeTab]}
             </p>
@@ -303,7 +303,9 @@ export function MeSettingsPage() {
           </button>
         </div>
 
-        {/* ---------- Tab nav ---------- */}
+        {/* ---------- Sub-tab nav (Account / Studio / Danger zone) ----------
+            These are sub-tabs within Settings, not the top-level /me tabs.
+            Rendered as a secondary strip below the main MeLayout tab nav. */}
         <div
           role="tablist"
           aria-label="Settings sections"
@@ -714,7 +716,7 @@ export function MeSettingsPage() {
           </div>
         )}
       </div>
-    </PageShell>
+    </MeLayout>
   );
 }
 

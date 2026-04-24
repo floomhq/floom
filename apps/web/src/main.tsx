@@ -27,6 +27,12 @@ const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage').then(m => ({ default: m.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage').then(m => ({ default: m.ResetPasswordPage })));
 const MePage = lazy(() => import('./pages/MePage').then(m => ({ default: m.MePage })));
+// /me/apps + /me/runs + /me/secrets are new tab sub-pages for the
+// Studio-tabbed /me dashboard (issue #547). Prior /me/apps and /me/runs
+// were just redirects back to /me; they now render dedicated pages.
+const MeAppsPage = lazy(() => import('./pages/MeAppsPage').then(m => ({ default: m.MeAppsPage })));
+const MeRunsPage = lazy(() => import('./pages/MeRunsPage').then(m => ({ default: m.MeRunsPage })));
+const MeSecretsPage = lazy(() => import('./pages/MeSecretsPage').then(m => ({ default: m.MeSecretsPage })));
 const MeRunDetailPage = lazy(() => import('./pages/MeRunDetailPage').then(m => ({ default: m.MeRunDetailPage })));
 const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ default: m.MeSettingsPage })));
 const MeSettingsTokensPage = lazy(() => import('./pages/MeSettingsTokensPage').then(m => ({ default: m.MeSettingsTokensPage })));
@@ -234,11 +240,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             leaving the public landing, /apps, /p/:slug, and /docs open. */}
         <Route path="/me" element={<WaitlistGuard source="me"><MePage /></WaitlistGuard>} />
         <Route path="/me/install" element={<WaitlistGuard source="me"><MeInstallPage /></WaitlistGuard>} />
-        {/* Design-audit fix 2026-04-22: /me/runs was advertised by the
-            user-surface nav but never had a page. The full run history
-            already lives on /me (Recent runs section), so redirect there
-            with a #recent-runs anchor so the section scrolls into view. */}
-        <Route path="/me/runs" element={<Navigate to="/me#recent-runs" replace />} />
+        {/* Studio-tabbed dashboard tab pages (issue #547). Each tab is
+            its own URL so deep links + browser back/forward behave
+            naturally. Default tab = Overview at /me. */}
+        <Route path="/me/apps" element={<WaitlistGuard source="me"><MeAppsPage /></WaitlistGuard>} />
+        <Route path="/me/runs" element={<WaitlistGuard source="me"><MeRunsPage /></WaitlistGuard>} />
+        <Route path="/me/secrets" element={<WaitlistGuard source="me"><MeSecretsPage /></WaitlistGuard>} />
         <Route path="/me/runs/:runId" element={<WaitlistGuard source="me"><MeRunDetailPage /></WaitlistGuard>} />
         <Route path="/me/settings" element={<WaitlistGuard source="me"><MeSettingsPage /></WaitlistGuard>} />
         {/* /me/api-keys — canonical location for personal API keys
@@ -256,10 +263,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             to the new Studio tree. MeAppRunPage stays under /me/apps/:slug/run
             because "run an owned app" is a /me (consumer) action, not a
             creator management action — the RunSurface lives there, and
-            Studio links into it when needed. */}
-        {/* Index route: /me/apps was 404ing; /me already renders the
-            user's apps list in the sidebar, so redirect there. */}
-        <Route path="/me/apps" element={<Navigate to="/me" replace />} />
+            Studio links into it when needed.
+            /me/apps is now the Apps tab (rendered above); the sub-paths
+            below redirect deeper links into the Studio tree. */}
         <Route path="/me/apps/:slug" element={<StudioSlugRedirect />} />
         <Route path="/me/apps/:slug/secrets" element={<StudioSlugRedirect subpath="secrets" />} />
         <Route path="/me/apps/:slug/run" element={<WaitlistGuard source="me"><MeAppRunPage /></WaitlistGuard>} />
