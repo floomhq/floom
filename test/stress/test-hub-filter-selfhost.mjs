@@ -46,10 +46,12 @@ const mkApp = (slug, extras = {}) => ({
   ...extras,
 });
 
-// Hosted floom.dev baseline.
-const demo = mkApp('lead-scorer');
-const demo2 = mkApp('competitor-analyzer');
-const demo3 = mkApp('resume-screener');
+// Hosted floom.dev baseline. Roster swapped 2026-04-25 to bounded
+// <5s demos; the fixture slugs below match SHOWCASE_SLUGS in
+// apps/web/src/lib/hub-filter.ts.
+const demo = mkApp('competitor-lens');
+const demo2 = mkApp('ai-readiness-audit');
+const demo3 = mkApp('pitch-coach');
 const fastApp = mkApp('uuid');
 const ingested = mkApp('stripe-api');
 const fixture = mkApp('swagger-petstore', {
@@ -77,7 +79,7 @@ console.log('hub-filter: hosted mode (default opts)');
     'hosted publicHubApps: keeps exactly 3 demos',
     visible.length === 3 &&
       visible.every((a) =>
-        ['lead-scorer', 'competitor-analyzer', 'resume-screener'].includes(a.slug),
+        ['competitor-lens', 'ai-readiness-audit', 'pitch-coach'].includes(a.slug),
       ),
     `got ${visible.map((a) => a.slug).join(',')}`,
   );

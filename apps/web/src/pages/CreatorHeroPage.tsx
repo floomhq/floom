@@ -49,34 +49,33 @@ interface Stripe {
 // share this roster so the hero teaser and featured section stay in
 // sync. /apps/web/src/lib/hub-filter.ts hides everything else from the
 // public listings.
-const PREFERRED_SLUGS = ['lead-scorer', 'competitor-analyzer', 'resume-screener'] as const;
+// 2026-04-25 roster swap: replaced the heavy originals with bounded
+// <5s demos.
+const PREFERRED_SLUGS = ['competitor-lens', 'ai-readiness-audit', 'pitch-coach'] as const;
 
-// Descriptions pulled from each app's floom.yaml manifest on the demo
-// feature branches (feature/lead-scorer-demo, feature/competitor-
-// analyzer-demo, feature/resume-screener-demo). Kept slightly shorter
-// than the full manifest text so the hero tile clamp (~80 chars) and
-// the stripe row don't drop mid-clause.
+// Fallback stripe copy used when /api/hub is slow or empty. Kept tight so
+// the hero tile clamp (~80 chars) and the stripe row don't drop mid-clause.
 const FALLBACK_STRIPES: Stripe[] = [
   {
-    slug: 'lead-scorer',
-    name: 'Lead Scorer',
+    slug: 'competitor-lens',
+    name: 'Competitor Lens',
     description:
-      'Upload a CSV of leads + your ICP. Get fit scores, reasoning, and enriched columns.',
-    category: 'growth',
-  },
-  {
-    slug: 'competitor-analyzer',
-    name: 'Competitor Analyzer',
-    description:
-      'Paste competitor URLs, get positioning, pricing, and a strengths/weaknesses table.',
+      'Paste 2 URLs — yours + a competitor. Get a positioning, pricing, and angle diff in under 5 seconds.',
     category: 'research',
   },
   {
-    slug: 'resume-screener',
-    name: 'Resume Screener',
+    slug: 'ai-readiness-audit',
+    name: 'AI Readiness Audit',
     description:
-      'Upload a zip of PDFs + a JD, get a ranked shortlist with reasoning per candidate.',
-    category: 'growth',
+      'Paste one URL. Get a readiness score 0-10, three risks, three opportunities, and one concrete next step.',
+    category: 'research',
+  },
+  {
+    slug: 'pitch-coach',
+    name: 'Pitch Coach',
+    description:
+      'Paste a startup pitch. Get three direct critiques, three angle-specific rewrites, and a one-line TL;DR.',
+    category: 'writing',
   },
 ];
 

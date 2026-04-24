@@ -54,10 +54,14 @@ export function isTestFixture(app: HubApp): boolean {
  * healthy and callable by permalink. The empty grid reads as a broken
  * install.
  */
+// 2026-04-25 roster swap: previous lead-scorer / competitor-analyzer /
+// resume-screener could run 30s-5min on real inputs. Replaced with
+// bounded <5s apps. The old slugs still live in examples/ and on the
+// DB (as inactive rows), but are off the showcase allowlist.
 const SHOWCASE_SLUGS = new Set<string>([
-  'lead-scorer',
-  'competitor-analyzer',
-  'resume-screener',
+  'competitor-lens',
+  'ai-readiness-audit',
+  'pitch-coach',
 ]);
 
 export interface HubFilterOptions {

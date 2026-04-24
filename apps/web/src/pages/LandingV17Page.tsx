@@ -56,27 +56,30 @@ interface Stripe {
   category?: string;
 }
 
-// Same showcase roster as CreatorHeroPage (see P0 launch curation #253).
-const PREFERRED_SLUGS = ['lead-scorer', 'competitor-analyzer', 'resume-screener'] as const;
+// Same showcase roster as CreatorHeroPage (P0 launch curation #253).
+// 2026-04-25 roster swap: bounded <5s demos replaced the heavy originals.
+const PREFERRED_SLUGS = ['competitor-lens', 'ai-readiness-audit', 'pitch-coach'] as const;
 
+// Fallback descriptions rendered if /api/hub is slow or empty on cold
+// visits. Match the 2026-04-25 launch roster. Keep tight + benefit-led.
 const FALLBACK_STRIPES: Stripe[] = [
   {
-    slug: 'lead-scorer',
-    name: 'Lead Scorer',
-    description: 'Upload a CSV of leads + your ICP. Get fit scores, reasoning, and enriched columns.',
-    category: 'growth',
-  },
-  {
-    slug: 'competitor-analyzer',
-    name: 'Competitor Analyzer',
-    description: 'Paste competitor URLs, get positioning, pricing, and a strengths/weaknesses table.',
+    slug: 'competitor-lens',
+    name: 'Competitor Lens',
+    description: 'Paste 2 URLs — yours + a competitor. Get a positioning, pricing, and angle diff in under 5 seconds.',
     category: 'research',
   },
   {
-    slug: 'resume-screener',
-    name: 'Resume Screener',
-    description: 'Upload a zip of PDFs + a JD, get a ranked shortlist with reasoning per candidate.',
-    category: 'growth',
+    slug: 'ai-readiness-audit',
+    name: 'AI Readiness Audit',
+    description: 'Paste one URL. Get a readiness score 0-10, three risks, three opportunities, and one concrete next step.',
+    category: 'research',
+  },
+  {
+    slug: 'pitch-coach',
+    name: 'Pitch Coach',
+    description: 'Paste a startup pitch. Get three direct critiques, three angle-specific rewrites, and a one-line TL;DR.',
+    category: 'writing',
   },
 ];
 
