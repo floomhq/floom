@@ -35,9 +35,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
 import { newAppId } from '../lib/ids.js';
-import type { NormalizedManifest } from '../types.js';
+import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
   process.env.LAUNCH_DEMO_BUILD_TIMEOUT || 600_000,
@@ -402,25 +403,12 @@ export async function seedLaunchDemos(): Promise<{
   // three slugs in DEMOS are the AI demos (lead-scorer, competitor-
   // analyzer, resume-screener) so a blanket hero=1 is correct here; if
   // a non-hero demo is added later, gate this on demo.slug.
-  const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status, hero)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published', 1)`,
-  );
-  const updateApp = db.prepare(
-    `UPDATE apps
-       SET name = ?,
-           description = ?,
-           manifest = ?,
-           status = 'active',
-           docker_image = ?,
-           code_path = ?,
-           category = ?,
-           author = ?,
-           icon = ?,
-           hero = 1,
-           updated_at = datetime('now')
-     WHERE id = ?`,
-  );
+  //
+  // Insert + update are now routed through `adapters.storage` so the
+  // SQL lives in one place (`adapters/storage-sqlite.ts`). createApp
+  // builds the INSERT from the provided keys and updateApp adds
+  // `updated_at = datetime('now')` automatically, so the behavior is
+  // identical to the prior prepared statements.
 
   let added = 0;
   let existing = 0;
@@ -468,17 +456,18 @@ export async function seedLaunchDemos(): Promise<{
       | { id: string; docker_image: string | null }
       | undefined;
     if (row) {
-      updateApp.run(
-        demo.name,
-        demo.description,
-        manifestJson,
-        imageTag,
-        codePath,
-        demo.category,
-        demo.author,
-        demo.icon,
-        row.id,
-      );
+      adapters.storage.updateApp(demo.slug, {
+        name: demo.name,
+        description: demo.description,
+        manifest: manifestJson,
+        status: 'active',
+        docker_image: imageTag,
+        code_path: codePath,
+        category: demo.category,
+        author: demo.author,
+        icon: demo.icon,
+        hero: 1,
+      } as Partial<AppRecord>);
       if (row.docker_image !== imageTag) {
         console.log(
           `[launch-demos] ${demo.slug}: refreshed existing app to ${imageTag}`,
@@ -492,18 +481,21 @@ export async function seedLaunchDemos(): Promise<{
       continue;
     }
     const appId = newAppId();
-    insertApp.run(
-      appId,
-      demo.slug,
-      demo.name,
-      demo.description,
-      manifestJson,
-      imageTag,
-      codePath,
-      demo.category,
-      demo.author,
-      demo.icon,
-    );
+    adapters.storage.createApp({
+      id: appId,
+      slug: demo.slug,
+      name: demo.name,
+      description: demo.description,
+      manifest: manifestJson,
+      status: 'active',
+      docker_image: imageTag,
+      code_path: codePath,
+      category: demo.category,
+      author: demo.author,
+      icon: demo.icon,
+      publish_status: 'published',
+      hero: 1,
+    } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
     added++;
     console.log(`[launch-demos] ${demo.slug}: inserted (app_id=${appId})`);
   }

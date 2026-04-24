@@ -27,12 +27,13 @@
 // reflected in both places or the wrapper will silently diverge from what
 // routes actually execute. Greppable list of current duplicate sites:
 //   - apps/server/src/services/seed.ts:142             (INSERT/UPDATE apps)
-//   - apps/server/src/services/launch-demos.ts:406     (INSERT/UPDATE apps)
 //   - apps/server/src/services/openapi-ingest.ts:1612  (INSERT/UPDATE apps)
 //   - apps/server/src/services/openapi-ingest.ts:2397  (INSERT apps + rekey)
 //   - apps/server/src/services/docker-image-ingest.ts:482 (INSERT apps)
 //   - apps/server/src/lib/better-auth.ts:434           (INSERT/UPDATE users)
 //   - apps/server/src/services/session.ts:174          (INSERT/UPDATE users)
+// Migrated to adapters.storage.* (no longer duplicating this wrapper):
+//   - apps/server/src/services/launch-demos.ts
 // -------------------------------------------------------------------------
 
 import { db } from '../db.js';
