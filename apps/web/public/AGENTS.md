@@ -1,16 +1,6 @@
-# Floom for agents
+# Agent working notes
 
-Short, stable reference for AI coding agents (Claude Code, Cursor, Codex, Aider, Continue, or any bash-capable agent) pointed at https://floom.dev. Machine-parseable service descriptor lives at `/.well-known/floom.json`.
-
-## What Floom is
-
-The protocol and runtime for agentic work. Point Floom at an OpenAPI spec (or a repo containing a `floom.yaml`) and you get:
-
-- A **web page** a human can use (`https://floom.dev/p/<slug>`)
-- An **MCP server** a Claude/Cursor agent can install (`https://floom.dev/mcp/app/<slug>`)
-- A **typed HTTP endpoint** (`POST https://floom.dev/api/<slug>/<operation>`)
-
-Built-in auth, rate limits, secret injection, and run history.
+Short rules for any AI coding agent (Cursor, Claude Code, Codex, etc.) touching this repo.
 
 ## Install the CLI
 
@@ -28,16 +18,18 @@ export PATH="$HOME/.floom/repo/cli/floom/bin:$PATH"
 floom --help
 ```
 
-> **Do NOT run `npm install floom`.** The unscoped `floom` name on npm belongs to an unrelated third-party streaming tool — it will not give you the Floom CLI. Use the curl installer or the manual clone above.
+> **Do NOT run `npm install floom`.** The unscoped `floom` npm package is an unrelated streaming tool by a third party. It will not install the Floom CLI. Use the curl installer or the manual clone above.
 
-Full CLI reference: https://github.com/floomhq/floom/blob/main/cli/floom/README.md
+See [`cli/floom/README.md`](./cli/floom/README.md) for the full reference.
 
-## Publish an app (three commands)
+## How an agent publishes (happy path)
+
+Three commands to publish an OpenAPI spec as a Floom app:
 
 ```bash
 export FLOOM_API_KEY=floom_...          # mint one at https://floom.dev/me/api-keys
-floom auth --check                      # verify the key reaches the API
-floom deploy <path-to-floom.yaml>       # or `floom init --openapi-url <spec-url>` first
+floom auth --check                      # verify the key reaches the API (prints "auth: OK")
+floom deploy <path-to-floom.yaml>       # or `floom init --openapi-url <spec-url>` first, then `floom deploy`
 ```
 
 `floom deploy` reads a `floom.yaml`. If you only have an OpenAPI URL, scaffold one first:
@@ -47,39 +39,56 @@ floom init --name "Resend" --openapi-url https://raw.githubusercontent.com/resen
 floom deploy
 ```
 
-## Machine-readable endpoints
+### Where to mint a key
 
-- Service descriptor: https://floom.dev/.well-known/floom.json
-- OpenAPI spec: https://floom.dev/openapi.json
-- App catalog (JSON): `GET https://floom.dev/api/hub`
-- Single app metadata: `GET https://floom.dev/api/hub/:slug`
-- Run over HTTP: `POST https://floom.dev/api/:slug/run` (or `POST /api/:slug/:operation` for typed operations)
-- MCP server for one app: `https://floom.dev/mcp/app/:slug`
-- MCP aggregator (all apps): `https://floom.dev/mcp`
-- Ingest an app: `POST https://floom.dev/api/hub/ingest` (bearer auth)
-- Protocol spec: https://floom.dev/protocol
+https://floom.dev/me/api-keys (cloud). Keys look like `floom_xxxxxxxx`. One key per machine is enough.
 
-## Auth
+### Self-host (no internet or cloud account)
 
-```
-Authorization: Bearer floom_<your-api-key>
-```
-
-Mint keys at https://floom.dev/me/api-keys. The CLI also accepts `FLOOM_API_KEY` via env or `~/.floom/config.json`.
-
-## Self-host
-
-Single Docker container, same codebase as the hosted cloud:
+Run the server locally and point the CLI at it:
 
 ```bash
-docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+docker run -d --name floom -p 3051:3051 -v floom_data:/data ghcr.io/floomhq/floom-monorepo:latest
+export FLOOM_API_URL=http://localhost:3051
+export FLOOM_API_KEY=local              # any non-empty value works in OSS mode
+floom auth --check
 ```
 
-Full guide: https://github.com/floomhq/floom/blob/main/docs/SELF_HOST.md
+Full self-host guide: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
 
-## Links
+### Troubleshooting
 
-- Repo: https://github.com/floomhq/floom (MIT license)
-- Docs: https://floom.dev/docs
-- Discord: https://discord.gg/8fXGXjxcRz
-- Issues: https://github.com/floomhq/floom/issues
+If you see `auth_required` or `HTTP 401` from `floom deploy`:
+
+- Run `floom auth --check`. If it prints `FLOOM_API_KEY: not set` and config absent, export `FLOOM_API_KEY=<key>` or run `floom auth <key>`.
+- If `auth: FAILED (HTTP 401)`, the key is wrong or revoked. Mint a fresh one at https://floom.dev/me/api-keys and re-run `floom auth <new-key>`.
+
+If you see `floom: No FLOOM_API_KEY found`: the CLI couldn't resolve a key from env, `~/.floom/config.json`, or the legacy skill config. Same fix as above.
+
+## Before you delete anything
+
+1. Read [`docs/PRODUCT.md`](./docs/PRODUCT.md) in full. It lists load-bearing code paths that look abandoned but hold a product pillar.
+2. If your proposed deletion touches a path on that list, **stop and ask the owner**. Do not delete.
+3. If it does not touch a listed path but removes >50 lines of source or a whole package/route/service, write one paragraph in your proposal answering: *"What product pillar does this serve, and what replaces it?"* If you cannot answer clearly, you do not have enough context.
+4. Prefer `docs/deprecated/<name>.md` redirects or feature flags over hard deletion when there is any ambiguity.
+
+## Before you consolidate or refactor
+
+- Preserve public surfaces unless the owner asked for a breaking change: `/api/*`, `/mcp/*`, `/p/:slug`, manifest shape, apps.yaml shape.
+- Do not "simplify" the manifest schema, the three-surfaces model, or the two ingest modes without a product discussion first — those are in `docs/PRODUCT.md`.
+
+## When you are scoping work
+
+- ICP: non-developer AI engineer with a `localhost` prototype who needs production hosting. If your plan assumes infra fluency from the user, you are scoping for the wrong person.
+- Primary path: *paste a repo URL, we host it*. OpenAPI-wrapping is an advanced path, not the default.
+- Three surfaces: web form, MCP, HTTP. Always.
+
+## Writing style
+
+- No emojis in code, comments, or docs unless the owner asks for them.
+- No narrating comments (`// increment counter`). Only non-obvious intent.
+- Commit messages: `type(scope): imperative subject`. Body explains *why*, not *what*.
+
+## When you are stuck
+
+Ask. One question is cheaper than a wrong week.
