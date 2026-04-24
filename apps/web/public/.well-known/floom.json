@@ -1,0 +1,44 @@
+{
+  "version": "1",
+  "name": "Floom",
+  "description": "The protocol and runtime for agentic work. Paste your app's link and get a Claude tool, a shareable page, a command-line, and a clean HTTP endpoint.",
+  "docs": "https://floom.dev/AGENTS.md",
+  "openapi": "https://floom.dev/openapi.json",
+  "protocol": "https://floom.dev/protocol",
+  "endpoints": {
+    "catalog": "https://floom.dev/api/hub",
+    "app": "https://floom.dev/api/hub/:slug",
+    "run": "https://floom.dev/api/:slug/run",
+    "operation": "https://floom.dev/api/:slug/:operation",
+    "ingest": "https://floom.dev/api/hub/ingest",
+    "health": "https://floom.dev/api/health",
+    "openapi": "https://floom.dev/openapi.json"
+  },
+  "mcp": {
+    "app": "https://floom.dev/mcp/app/:slug",
+    "aggregator": "https://floom.dev/mcp",
+    "transport": "http"
+  },
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization",
+    "prefix": "Bearer floom_",
+    "mint": "https://floom.dev/me/api-keys"
+  },
+  "cli": {
+    "install": "curl -fsSL https://floom.dev/install.sh | bash",
+    "source": "https://github.com/floomhq/floom/tree/main/cli/floom",
+    "note": "The unscoped `floom` npm package is an unrelated third-party tool. Do not run `npm install floom`."
+  },
+  "selfhost": {
+    "docker": "docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest",
+    "image": "ghcr.io/floomhq/floom-monorepo",
+    "guide": "https://github.com/floomhq/floom/blob/main/docs/SELF_HOST.md"
+  },
+  "support": {
+    "docs": "https://floom.dev/docs",
+    "discord": "https://discord.gg/8fXGXjxcRz",
+    "issues": "https://github.com/floomhq/floom/issues",
+    "repo": "https://github.com/floomhq/floom"
+  }
+}
