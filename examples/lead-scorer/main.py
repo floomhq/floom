@@ -43,7 +43,14 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MODEL_ID = "gemini-3-flash-preview"
-MAX_WORKERS = 8
+# 2026-04-24: bumped default 8 → 32 (Gemini Flash paid tier is ~2000 RPM, so 32
+# concurrent calls is safe). Tunable via FLOOM_APP_MAX_WORKERS env. See
+# /root/floom-perf-investigation-2026-04-24.md — 168 rows × 3s / 32 ≈ 16s
+# instead of ~63s on 8 workers.
+MAX_WORKERS = int(os.environ.get("FLOOM_APP_MAX_WORKERS", "32"))
+# Hard cap on input rows to protect Gemini quota + keep runtime bounded. Rows
+# above the cap are truncated and a warning is included in the output.
+MAX_ROWS = int(os.environ.get("FLOOM_APP_MAX_ROWS", "200"))
 PER_CALL_TIMEOUT_S = 45
 
 # Path to the pre-generated golden cache. Lives next to this file so the
@@ -320,6 +327,14 @@ def score(data: str, icp: str, model: str | None = None, **_kwargs) -> dict[str,
             "cache_hit": False,
             "model": resolved_model,
         }
+    truncated_from = 0
+    if len(rows) > MAX_ROWS:
+        truncated_from = len(rows)
+        rows = rows[:MAX_ROWS]
+        _log(
+            f"input has {truncated_from} rows; capped to MAX_ROWS={MAX_ROWS} "
+            "(raise FLOOM_APP_MAX_ROWS to override)"
+        )
     _log(f"scoring {len(rows)} rows against ICP ({len(icp)} chars) with {resolved_model}")
 
     genai_bits = _build_genai()
@@ -403,7 +418,7 @@ def score(data: str, icp: str, model: str | None = None, **_kwargs) -> dict[str,
     scored = sum(1 for r in results if r.get("status") == "ok")
     failed = len(results) - scored
 
-    return {
+    out: dict[str, Any] = {
         "total": len(rows),
         "scored": scored,
         "failed": failed,
@@ -413,6 +428,13 @@ def score(data: str, icp: str, model: str | None = None, **_kwargs) -> dict[str,
         "rows": ranked,
         "score_distribution": buckets,
     }
+    if truncated_from:
+        out["warning"] = (
+            f"Input had {truncated_from} rows; capped at {MAX_ROWS} to protect "
+            "Gemini quota. Split into smaller batches to score more."
+        )
+        out["input_rows"] = truncated_from
+    return out
 
 
 # ---------------------------------------------------------------------------

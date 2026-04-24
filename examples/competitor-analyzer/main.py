@@ -42,7 +42,13 @@ from urllib.parse import urlparse
 # Model is read from env so ops can upgrade free-tier (flash) → paid (pro)
 # without touching code. Hard-fail on any Gemini 2.x / non-Gemini-3 model.
 DEFAULT_MODEL = "gemini-3-flash-preview"
-MAX_WORKERS = 8
+# 2026-04-24: bumped default 8 → 32 (Gemini Flash paid tier is ~2000 RPM, so 32
+# concurrent calls is safe). Tunable via FLOOM_APP_MAX_WORKERS env. See
+# /root/floom-perf-investigation-2026-04-24.md.
+MAX_WORKERS = int(os.environ.get("FLOOM_APP_MAX_WORKERS", "32"))
+# Hard cap on input URLs to protect Gemini quota + keep runtime bounded. URLs
+# above the cap are truncated and a warning is included in the output.
+MAX_URLS = int(os.environ.get("FLOOM_APP_MAX_ROWS", "200"))
 RETRIES_PER_URL = 1  # one retry on top of the initial attempt
 
 # Sample-input cache: if the canonical input hash matches an entry in
@@ -446,6 +452,16 @@ def main() -> int:
         )
         return 2
 
+    truncated_from = 0
+    if len(urls) > MAX_URLS:
+        truncated_from = len(urls)
+        urls = urls[:MAX_URLS]
+        print(
+            f"[competitor-analyzer] input has {truncated_from} URLs; capped to "
+            f"MAX_URLS={MAX_URLS} (raise FLOOM_APP_MAX_ROWS to override)",
+            flush=True,
+        )
+
     # Fast path: exact-match sample input returns the baked-in golden in
     # <500ms. The golden was produced with gemini-3.1-pro-preview (richer
     # reasoning than live Flash). Any other input falls through.
@@ -468,16 +484,23 @@ def main() -> int:
 
     if dry_run:
         competitors = [_mock_competitor(u, your_product) for u in urls]
+        meta: dict[str, Any] = {
+            "analyzed": len(competitors),
+            "failed": 0,
+            "dry_run": True,
+            "cache_hit": False,
+            "model": model,
+        }
+        if truncated_from:
+            meta["warning"] = (
+                f"Input had {truncated_from} URLs; capped at {MAX_URLS} to "
+                "protect Gemini quota. Split into smaller batches to analyze more."
+            )
+            meta["input_urls"] = truncated_from
         result = {
             "competitors": competitors,
             "summary": _mock_summary(your_product, competitors),
-            "meta": {
-                "analyzed": len(competitors),
-                "failed": 0,
-                "dry_run": True,
-                "cache_hit": False,
-                "model": model,
-            },
+            "meta": meta,
         }
         _emit({"ok": True, "outputs": result})
         return 0
@@ -508,16 +531,23 @@ def main() -> int:
     analyzed = len(competitors) - failed
     summary = _comparative_summary(your_product, competitors, api_key, model)
 
+    meta: dict[str, Any] = {
+        "analyzed": analyzed,
+        "failed": failed,
+        "dry_run": False,
+        "cache_hit": False,
+        "model": model,
+    }
+    if truncated_from:
+        meta["warning"] = (
+            f"Input had {truncated_from} URLs; capped at {MAX_URLS} to "
+            "protect Gemini quota. Split into smaller batches to analyze more."
+        )
+        meta["input_urls"] = truncated_from
     result = {
         "competitors": competitors,
         "summary": summary,
-        "meta": {
-            "analyzed": analyzed,
-            "failed": failed,
-            "dry_run": False,
-            "cache_hit": False,
-            "model": model,
-        },
+        "meta": meta,
     }
     _emit({"ok": True, "outputs": result})
     return 0

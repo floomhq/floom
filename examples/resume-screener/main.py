@@ -53,7 +53,13 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_MODEL_ID = "gemini-3-flash-preview"
-MAX_WORKERS = 8
+# 2026-04-24: bumped default 8 → 32 (Gemini Flash paid tier is ~2000 RPM, so 32
+# concurrent calls is safe). Tunable via FLOOM_APP_MAX_WORKERS env. See
+# /root/floom-perf-investigation-2026-04-24.md.
+MAX_WORKERS = int(os.environ.get("FLOOM_APP_MAX_WORKERS", "32"))
+# Hard cap on input PDFs to protect Gemini quota + keep runtime bounded. PDFs
+# above the cap are truncated and a warning is included in the output.
+MAX_PDFS = int(os.environ.get("FLOOM_APP_MAX_ROWS", "200"))
 PER_CALL_TIMEOUT_S = 45
 MAX_CV_CHARS = 20_000  # truncate very long CVs to stay under token budget
 
@@ -420,6 +426,14 @@ def screen(
             "cache_hit": False,
             "model": resolved_model,
         }
+    truncated_from = 0
+    if len(pdfs) > MAX_PDFS:
+        truncated_from = len(pdfs)
+        pdfs = pdfs[:MAX_PDFS]
+        _log(
+            f"archive has {truncated_from} PDFs; capped to MAX_PDFS={MAX_PDFS} "
+            "(raise FLOOM_APP_MAX_ROWS to override)"
+        )
     _log(f"found {len(pdfs)} PDF(s) in archive; must_haves={len(mh_list)} model={resolved_model}")
 
     client = _build_genai()
@@ -523,7 +537,7 @@ def screen(
         )
     )
 
-    return {
+    out: dict[str, Any] = {
         "total": len(pdfs),
         "scored": scored,
         "failed": failed,
@@ -533,6 +547,13 @@ def screen(
         "ranked": ranked,
         "summary": summary,
     }
+    if truncated_from:
+        out["warning"] = (
+            f"Archive had {truncated_from} PDFs; capped at {MAX_PDFS} to protect "
+            "Gemini quota. Split into smaller bundles to screen more candidates."
+        )
+        out["input_pdfs"] = truncated_from
+    return out
 
 
 # ---------------------------------------------------------------------------

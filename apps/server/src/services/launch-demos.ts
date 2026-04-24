@@ -36,7 +36,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../db.js';
-import { newAppId } from '../lib/ids.js';
+import { newAppId, newSecretId } from '../lib/ids.js';
 import type { NormalizedManifest } from '../types.js';
 
 export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
@@ -362,6 +362,46 @@ function isEnabled(): boolean {
   return !/^(0|false|no|off)$/i.test(v);
 }
 
+/**
+ * Derive the full set of secret env keys the launch demos declare across their
+ * manifests. Today that's just GEMINI_API_KEY, but walking `secrets_needed`
+ * keeps this honest if a future demo adds another.
+ */
+function demoSecretKeys(): string[] {
+  const keys = new Set<string>();
+  for (const demo of DEMOS) {
+    for (const k of demo.manifest.secrets_needed || []) keys.add(k);
+  }
+  return [...keys];
+}
+
+/**
+ * 2026-04-24: auto-seed any demo secret env (e.g. GEMINI_API_KEY) as a GLOBAL
+ * secret from process.env when set and when no global row exists for that key.
+ * Prevents fresh preview/prod deploys from leaving the 3 AI demos in dry-run
+ * mode (empty `secrets` table → runner falls back to GEMINI_API_KEY="" →
+ * handler emits a random-score dry-run result, which breaks the landing
+ * demo). Idempotent: runs once per boot, does nothing on subsequent boots
+ * because the global row already exists, and is a pure no-op if the env var
+ * is unset.
+ */
+function seedLaunchDemoSecretsFromEnv(): void {
+  const selectGlobal = db.prepare(
+    "SELECT id FROM secrets WHERE name = ? AND app_id IS NULL",
+  );
+  const insertGlobal = db.prepare(
+    'INSERT INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, NULL)',
+  );
+  for (const key of demoSecretKeys()) {
+    const envVal = process.env[key];
+    if (!envVal || envVal.length < 20) continue;
+    const existing = selectGlobal.get(key) as { id: string } | undefined;
+    if (existing) continue;
+    insertGlobal.run(newSecretId(), key, envVal);
+    console.log(`[launch-demos] seeded global ${key} from env`);
+  }
+}
+
 export async function seedLaunchDemos(): Promise<{
   apps_added: number;
   apps_existing: number;
@@ -371,6 +411,12 @@ export async function seedLaunchDemos(): Promise<{
     console.log('[launch-demos] FLOOM_SEED_LAUNCH_DEMOS disabled — skipping');
     return { apps_added: 0, apps_existing: 0, apps_failed: 0 };
   }
+
+  // Seed global secrets from env BEFORE building images. This runs even when
+  // docker is unreachable on this host (dev mode without Docker), because the
+  // secret is a DB-only operation and a later host with docker reachable will
+  // reuse the same DB.
+  seedLaunchDemoSecretsFromEnv();
 
   const repoRoot = findRepoRoot();
   if (!repoRoot) {
