@@ -798,14 +798,33 @@ if (webDist) {
   // crawlers to skip regardless of any downstream rewrite. Belt + braces
   // with the X-Robots-Tag header set by `noIndexPreview` middleware. Prod
   // (`PUBLIC_URL=https://floom.dev`) gets the pristine HTML unchanged.
-  const indexHtml = isPreviewEnv()
-    ? rawIndexHtml.replace(
-        '<meta name="viewport"',
-        '<meta name="robots" content="noindex, nofollow" />\n    <meta name="viewport"',
-      )
-    : rawIndexHtml;
+  //
+  // SEO #598: also inject `<meta name="google-site-verification" ...>` on
+  // prod so floom.dev can be claimed in Google Search Console. Preview is
+  // noindex anyway so we intentionally skip the verification tag there —
+  // there's nothing to claim on a deployment we don't want indexed. The
+  // token comes from FLOOM_GSC_VERIFICATION_TOKEN; if unset, no tag is
+  // injected (so the site still builds cleanly before Federico claims it).
+  let indexHtml = rawIndexHtml;
   if (isPreviewEnv()) {
+    indexHtml = indexHtml.replace(
+      '<meta name="viewport"',
+      '<meta name="robots" content="noindex, nofollow" />\n    <meta name="viewport"',
+    );
     console.log('[web] preview deployment detected — injecting noindex meta + X-Robots-Tag');
+  } else {
+    const gscToken = (process.env.FLOOM_GSC_VERIFICATION_TOKEN || '').trim();
+    if (gscToken) {
+      // Double-quote sanitize so a pasted token with a stray `"` can't
+      // break out of the attribute. Search Console tokens are URL-safe
+      // base64-ish strings in practice, but defense is cheap.
+      const safe = gscToken.replace(/"/g, '');
+      indexHtml = indexHtml.replace(
+        '<meta name="viewport"',
+        `<meta name="google-site-verification" content="${safe}" />\n    <meta name="viewport"`,
+      );
+      console.log('[web] injected Google Search Console verification meta');
+    }
   }
 
   // Paths that must never be swallowed by the SPA wildcard. These reach
@@ -818,6 +837,111 @@ if (webDist) {
   // redirect. Fix for blank-page on social sign-in reported post-launch.
   const spaExcludedPrefixes = ['/api/', '/mcp', '/renderer/', '/og/', '/hook/', '/auth/'];
   const spaExcludedExact = new Set(['/openapi.json', '/metrics']);
+
+  // SEO #621: known-route table for proper 404 status on unknown SPA paths.
+  //
+  // Before this, every unknown URL (e.g. `/foo-bar-xyz`) returned HTTP 200
+  // with index.html because the SPA fallback is a catch-all. React Router
+  // then rendered NotFoundPage inside that 200 response — a "soft 404" that
+  // crawlers index as a real page. Google Search Console flagged this as
+  // duplicate content and indexed the not-found page as its own URL.
+  //
+  // Fix: maintain a mirror of the React Router table in apps/web/src/main.tsx.
+  // When the SPA fallback runs for a pathname that doesn't match any known
+  // exact path or dynamic pattern, return HTTP 404 with the same SPA
+  // index.html body (so the client-side router still renders NotFoundPage
+  // without a double-render flash). Crawlers see the 404 status and don't
+  // index the page; humans see the same NotFoundPage UX they did before.
+  const knownExactPaths = new Set<string>([
+    '/',
+    '/index.html',
+    '/apps',
+    '/store',
+    '/about',
+    '/pricing',
+    '/protocol',
+    '/install',
+    '/install-in-claude',
+    '/docs',
+    '/login',
+    '/signup',
+    '/forgot-password',
+    '/reset-password',
+    '/me',
+    '/me/install',
+    '/me/runs',
+    '/me/settings',
+    '/me/api-keys',
+    '/me/settings/tokens',
+    '/me/apps',
+    '/me/secrets',
+    '/studio',
+    '/studio/build',
+    '/studio/new',
+    '/studio/settings',
+    '/build',
+    '/creator',
+    '/browse',
+    '/deploy',
+    '/self-host',
+    '/onboarding',
+    '/changelog',
+    '/waitlist',
+    '/legal',
+    '/legal/imprint',
+    '/legal/privacy',
+    '/legal/terms',
+    '/legal/cookies',
+    '/imprint',
+    '/impressum',
+    '/privacy',
+    '/terms',
+    '/cookies',
+    '/spec',
+    '/_creator-legacy',
+    '/_build-legacy',
+    '/404',
+    '/404.html',
+  ]);
+  // Dynamic route patterns. Each matches a family of real routes declared
+  // in apps/web/src/main.tsx. Keep slug shape permissive (`[a-z0-9-_]+`)
+  // to match server-side slug validation in the rest of the codebase; a
+  // nonsense slug still resolves to a real SPA route (and NotFoundPage if
+  // the slug doesn't exist in the DB).
+  const SLUG = '[a-z0-9][a-z0-9-]*';
+  const RUN_ID = '[A-Za-z0-9_-]+';
+  const knownDynamicPatterns: RegExp[] = [
+    new RegExp(`^/p/${SLUG}/?$`),
+    new RegExp(`^/p/${SLUG}/dashboard/?$`),
+    new RegExp(`^/r/${RUN_ID}/?$`),
+    new RegExp(`^/apps/${SLUG}/?$`),
+    new RegExp(`^/store/${SLUG}/?$`),
+    new RegExp(`^/install/${SLUG}/?$`),
+    new RegExp(`^/docs/${SLUG}/?$`),
+    new RegExp(`^/me/runs/${RUN_ID}/?$`),
+    new RegExp(`^/me/apps/${SLUG}/?$`),
+    new RegExp(`^/me/apps/${SLUG}/(secrets|run)/?$`),
+    new RegExp(`^/me/a/${SLUG}/?$`),
+    new RegExp(`^/me/a/${SLUG}/(secrets|run)/?$`),
+    new RegExp(`^/studio/${SLUG}/?$`),
+    new RegExp(
+      `^/studio/${SLUG}/(runs|secrets|access|renderer|analytics|triggers)/?$`,
+    ),
+    new RegExp(`^/creator/${SLUG}/?$`),
+    new RegExp(`^/_creator-legacy/${SLUG}/?$`),
+    new RegExp(`^/spec(/.*)?$`),
+    new RegExp(`^/protocol(/.*|#.*)?$`),
+    new RegExp(`^/docs/.*$`), // docs catch-all ends at /docs landing via redirect
+  ];
+  function isKnownRoute(pathname: string): boolean {
+    if (knownExactPaths.has(pathname)) return true;
+    // Normalise trailing slash so "/apps/" matches "/apps"
+    const stripped = pathname.length > 1 && pathname.endsWith('/')
+      ? pathname.slice(0, -1)
+      : pathname;
+    if (knownExactPaths.has(stripped)) return true;
+    return knownDynamicPatterns.some((rx) => rx.test(pathname));
+  }
 
   // Crawlers don't run JS, so client-side meta updates in AppPermalinkPage
   // never reach them. For /p/:slug we rewrite the og:image, og:title,
@@ -1268,15 +1392,31 @@ if (webDist) {
     if (slugMatch && slugMatch[1]) {
       return c.html(rewriteHeadForSlug(indexHtml, slugMatch[1]));
     }
-    // 2026-04-20 (PRR tail cleanup): explicit /404 path returns 404 status
-    // (the React Router wildcard renders NotFoundPage at 200 for all other
-    // unknown routes — a deeper fix but out of scope for this PR).
+    // 2026-04-20 (PRR tail cleanup): explicit /404 path returns 404 status.
     if (pathname === '/404' || pathname === '/404.html') {
       return new Response(
         rewriteTitle(rewriteCanonical(indexHtml, pathname), 'Page not found · Floom'),
         {
           status: 404,
           headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+        },
+      );
+    }
+    // SEO #621: soft-404 fix. If the path isn't in the known-route table
+    // (mirror of apps/web/src/main.tsx), return the SPA index.html with
+    // HTTP 404 so crawlers see a real 404 and don't index the page. React
+    // Router's wildcard still renders NotFoundPage client-side inside the
+    // 404 response body, so the UX is unchanged. Known routes (including
+    // dynamic patterns like /p/:slug) continue to return 200.
+    if (!isKnownRoute(pathname)) {
+      return new Response(
+        rewriteTitle(rewriteCanonical(indexHtml, pathname), 'Page not found · Floom'),
+        {
+          status: 404,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-cache',
+          },
         },
       );
     }

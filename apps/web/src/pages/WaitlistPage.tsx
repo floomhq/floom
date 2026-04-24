@@ -29,6 +29,7 @@ import {
 import type { CSSProperties } from 'react';
 import { PageShell } from '../components/PageShell';
 import { submitWaitlist, ApiError } from '../api/client';
+import { track } from '../lib/posthog';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -392,6 +393,9 @@ export function WaitlistPage() {
         deploy_repo_url: deployRepoUrl,
         deploy_intent: deployIntent,
       });
+      // Analytics #599: mirror the WaitlistModal emit for the standalone
+      // /waitlist page so direct visitors are counted in the same funnel.
+      track('waitlist_join', { source: 'direct' });
       setSuccess(true);
     } catch (err) {
       if (err instanceof ApiError) {

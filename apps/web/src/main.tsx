@@ -1,6 +1,6 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 // Landing is eager (LCP path). Everything else is lazy so the initial
 // bundle only carries the homepage React tree. Trimmed initial JS from
 // 427 KB (118 KB gzip) to the landing slice; other pages stream in on
@@ -179,10 +179,28 @@ function ExternalRedirect({ to }: { to: string }) {
   return null;
 }
 
+/**
+ * PostHog page_view tracker (issue #599). Fires `page_view` on every route
+ * change with `{ path }`. PostHog's own `capture_pageview` is disabled in
+ * `lib/posthog.ts` so we own the routing semantics — a client-side nav in
+ * the SPA is one `page_view`, not zero and not two. When PostHog is not
+ * initialized (consent=essential or VITE_POSTHOG_KEY unset) track() is a
+ * no-op so this is safe unconditionally. Must be mounted INSIDE BrowserRouter
+ * so useLocation resolves.
+ */
+function RouteChangeTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    track('page_view', { path: location.pathname });
+  }, [location.pathname]);
+  return null;
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <IconSprite />
     <BrowserRouter>
+      <RouteChangeTracker />
       {/* a11y 2026-04-20: WCAG 2.4.1 skip link. Hidden until keyboard
           focus lands on it (first Tab press from the URL bar). Target
           is the #main landmark set on PageShell's <main>. Styling

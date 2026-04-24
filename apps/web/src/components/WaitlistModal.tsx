@@ -25,6 +25,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { submitWaitlist, ApiError } from '../api/client';
+import { track } from '../lib/posthog';
 
 export interface WaitlistModalProps {
   open: boolean;
@@ -119,6 +120,10 @@ export function WaitlistModal({
         deploy_repo_url: deployRepoUrl,
         deploy_intent: deployIntent,
       });
+      // Analytics #599: record successful waitlist sign-ups so we can
+      // measure which surface (hero, deploy CTA, pricing) funnels best.
+      // `source` values come from the caller — see apps/web/src/lib/waitlistCta.ts.
+      track('waitlist_join', { source: source ?? null });
       setSuccess(true);
     } catch (err) {
       if (err instanceof ApiError) {

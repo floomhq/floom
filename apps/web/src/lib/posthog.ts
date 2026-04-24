@@ -32,6 +32,7 @@ import { getConsent, type Consent } from './consent';
  *
  * Launch funnel (issue #311):
  *   - landing_viewed     : pageview on the creator hero
+ *   - page_view          : route change on any SPA page (client-side nav)
  *   - publish_clicked    : "Publish your app" CTA tap
  *   - publish_succeeded  : app was successfully published (app created)
  *   - signup_completed   : Better Auth /sign-up/email returned 200
@@ -40,9 +41,15 @@ import { getConsent, type Consent } from './consent';
  *   - run_succeeded      : run finished 2xx (app deployed + ran OK)
  *   - run_failed         : run finished non-2xx
  *   - share_link_opened  : someone landed on a /r/:runId permalink
+ *
+ * Issue #599 additions (analytics wiring PR):
+ *   - waitlist_join       : waitlist modal/page form submission succeeded
+ *   - byok_modal_open     : BYOK (bring-your-own-key) modal opened
+ *   - docker_copy_click   : user copied the self-host Docker snippet
  */
 export type TrackedEvent =
   | 'landing_viewed'
+  | 'page_view'
   | 'publish_clicked'
   | 'publish_succeeded'
   | 'signup_completed'
@@ -50,7 +57,10 @@ export type TrackedEvent =
   | 'run_triggered'
   | 'run_succeeded'
   | 'run_failed'
-  | 'share_link_opened';
+  | 'share_link_opened'
+  | 'waitlist_join'
+  | 'byok_modal_open'
+  | 'docker_copy_click';
 
 type Props = Record<string, string | number | boolean | null | undefined>;
 
