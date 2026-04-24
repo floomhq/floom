@@ -58,7 +58,7 @@ const s: Record<string, CSSProperties> = {
   },
   appsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     gap: 14,
   },
   tableWrap: {
@@ -172,34 +172,26 @@ const s: Record<string, CSSProperties> = {
   settingsRow: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    paddingTop: 18,
+    gap: 10,
+    paddingTop: 20,
     borderTop: '1px solid var(--line)',
     flexWrap: 'wrap',
   },
-  settingsCopy: {
-    fontSize: 12.5,
-    color: 'var(--muted)',
-    lineHeight: 1.5,
-  },
-  settingsLinks: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14,
-    flexWrap: 'wrap',
-  },
   settingsLink: {
-    fontSize: 12.5,
+    fontSize: 13.5,
     fontWeight: 600,
     color: 'var(--muted)',
     textDecoration: 'none',
+  },
+  settingsSeparator: {
+    fontSize: 13.5,
+    color: 'var(--muted)',
   },
   settingsButton: {
     padding: 0,
     border: 'none',
     background: 'none',
-    fontSize: 12.5,
+    fontSize: 13.5,
     fontWeight: 600,
     color: 'var(--muted)',
     cursor: 'pointer',
@@ -296,7 +288,16 @@ export function MePage() {
 
   const previewApps = useMemo(() => {
     if (runs === null) return null;
-    const seen = new Map<string, { slug: string; name: string; lastUsedAt: string | null }>();
+    const seen = new Map<
+      string,
+      {
+        slug: string;
+        name: string;
+        lastUsedAt: string | null;
+        lastRunId: string;
+        lastRunAction: string;
+      }
+    >();
     for (const run of runs) {
       if (!run.app_slug) continue;
       if (seen.has(run.app_slug)) continue;
@@ -304,6 +305,8 @@ export function MePage() {
         slug: run.app_slug,
         name: run.app_name || run.app_slug,
         lastUsedAt: run.started_at,
+        lastRunId: run.id,
+        lastRunAction: run.action,
       });
       if (seen.size >= APP_PREVIEW_LIMIT) break;
     }
@@ -314,8 +317,6 @@ export function MePage() {
     () => (runs ? runs.slice(0, RECENT_RUNS_PREVIEW) : []),
     [runs],
   );
-
-  const showCleanEmptyState = !runsError && runs !== null && runs.length === 0;
 
   function dismissNotice() {
     const next = new URLSearchParams(searchParams);
@@ -356,7 +357,7 @@ export function MePage() {
     <MeLayout
       title="Me · Floom"
       allowSignedOutShell={signedOutPreview}
-      subtitle="The apps you’ve actually used, plus the latest runs worth picking back up."
+      headerVariant="inline"
     >
       <div data-testid="me-page">
         {showWelcome && <WelcomeBanner onDismiss={dismissWelcome} />}
@@ -364,8 +365,6 @@ export function MePage() {
 
         {runsError ? (
           <ErrorPanel message={runsError} />
-        ) : showCleanEmptyState ? (
-          <HomeEmptyState signedOutPreview={signedOutPreview} />
         ) : (
           <>
             <section data-testid="me-apps-preview" aria-label="Your apps preview" style={s.section}>
@@ -388,78 +387,91 @@ export function MePage() {
               ) : previewApps.length === 0 ? (
                 <HomeEmptyState signedOutPreview={signedOutPreview} testId="me-apps-preview-empty" />
               ) : (
-                <div data-testid="me-apps-preview-grid" style={s.appsGrid}>
+                <div
+                  data-testid="me-apps-preview-grid"
+                  style={{
+                    ...s.appsGrid,
+                    gridTemplateColumns: compactLayout
+                      ? 'minmax(0, 1fr)'
+                      : (s.appsGrid.gridTemplateColumns as string),
+                  }}
+                >
                   {previewApps.map((app) => (
                     <ToolTile
                       key={app.slug}
                       slug={app.slug}
                       name={app.name}
                       lastUsedAt={app.lastUsedAt}
+                      lastRunId={app.lastRunId}
+                      lastRunAction={app.lastRunAction}
                     />
                   ))}
                 </div>
               )}
             </section>
 
-            <section id="recent-runs" data-testid="me-runs-preview" aria-label="Recent runs">
-              <header style={s.sectionHeader}>
-                <div>
-                  <h2 style={s.sectionH2}>Recent runs</h2>
-                  <p style={s.sectionCopy}>
-                    The last few things you ran across every app.
-                  </p>
-                </div>
-                <Link to="/me/runs" data-testid="me-runs-see-all" style={s.headerLink}>
-                  See all →
-                </Link>
-              </header>
+            {(runs === null || recentRuns.length > 0) && (
+              <section id="recent-runs" data-testid="me-runs-preview" aria-label="Recent runs">
+                <header style={s.sectionHeader}>
+                  <div>
+                    <h2 style={s.sectionH2}>Recent runs</h2>
+                    <p style={s.sectionCopy}>
+                      The last few things you ran across every app.
+                    </p>
+                  </div>
+                  <Link to="/me/runs" data-testid="me-runs-see-all" style={s.headerLink}>
+                    See all →
+                  </Link>
+                </header>
 
-              {runs === null ? (
-                <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
-                  Loading runs…
-                </div>
-              ) : recentRuns.length === 0 ? (
-                <HomeEmptyState signedOutPreview={signedOutPreview} testId="me-runs-empty" />
-              ) : (
-                <div data-testid="me-runs-preview-list" style={{ ...s.card, ...s.tableWrap }}>
-                  {!compactLayout ? (
-                    <div style={s.tableHeader}>
-                      <span>App</span>
-                      <span>Output preview</span>
-                      <span style={{ textAlign: 'right' }}>When</span>
-                    </div>
-                  ) : null}
-                  {recentRuns.map((run, index) => (
-                    <HomeRunRow
-                      key={run.id}
-                      run={run}
-                      isLast={index === recentRuns.length - 1}
-                      compact={compactLayout}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
+                {runs === null ? (
+                  <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
+                    Loading runs…
+                  </div>
+                ) : (
+                  <div data-testid="me-runs-preview-list" style={{ ...s.card, ...s.tableWrap }}>
+                    {!compactLayout ? (
+                      <div style={s.tableHeader}>
+                        <span>App</span>
+                        <span>Output preview</span>
+                        <span style={{ textAlign: 'right' }}>When</span>
+                      </div>
+                    ) : null}
+                    {recentRuns.map((run, index) => (
+                      <HomeRunRow
+                        key={run.id}
+                        run={run}
+                        isLast={index === recentRuns.length - 1}
+                        compact={compactLayout}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
 
             <div style={s.settingsRow}>
-              <div style={s.settingsCopy}>Settings</div>
-              <div style={s.settingsLinks}>
-                <Link to="/me/secrets" style={s.settingsLink}>
-                  API keys
-                </Link>
-                <Link to="/me/settings" style={s.settingsLink}>
-                  Profile
-                </Link>
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  data-testid="me-sign-out"
-                  disabled={signingOut}
-                  style={s.settingsButton}
-                >
-                  {signingOut ? 'Signing out…' : 'Sign out'}
-                </button>
-              </div>
+              <Link to="/me/secrets" style={s.settingsLink}>
+                API keys
+              </Link>
+              <span aria-hidden style={s.settingsSeparator}>
+                ·
+              </span>
+              <Link to="/me/settings" style={s.settingsLink}>
+                Profile
+              </Link>
+              <span aria-hidden style={s.settingsSeparator}>
+                ·
+              </span>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                data-testid="me-sign-out"
+                disabled={signingOut}
+                style={s.settingsButton}
+              >
+                {signingOut ? 'Signing out…' : 'Sign out'}
+              </button>
             </div>
           </>
         )}
@@ -480,7 +492,7 @@ function HomeRunRow({
   compact: boolean;
 }) {
   const appName = run.app_name || run.app_slug || 'App';
-  const href = `/me/runs/${encodeURIComponent(run.id)}`;
+  const href = `/r/${encodeURIComponent(run.id)}`;
 
   return (
     <Link
@@ -605,16 +617,14 @@ function HomeEmptyState({
 }) {
   return (
     <section data-testid={testId} style={s.emptyCard}>
-      <h2 style={s.emptyTitle}>
-        {signedOutPreview ? 'Nothing to pick up yet.' : 'You haven’t run anything yet.'}
-      </h2>
+      <h2 style={s.emptyTitle}>Nothing here yet.</h2>
       <p style={s.emptyBody}>
         {signedOutPreview
-          ? 'Browse the store, try an app, and your recent activity will appear here after you sign in.'
-          : 'Browse the store, try an app, and this space will turn into your personal dashboard.'}
+          ? 'Try one from the public directory and your recent activity will show up here after you sign in.'
+          : 'Try one from the public directory.'}
       </p>
       <Link to="/apps" data-testid="me-empty-browse" style={s.primaryButton}>
-        Browse the store →
+        Browse apps →
       </Link>
     </section>
   );

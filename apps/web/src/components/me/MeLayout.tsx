@@ -8,10 +8,11 @@ interface MeLayoutProps {
   activeTab?: MeTabId;
   title?: string;
   allowSignedOutShell?: boolean;
-  eyebrow?: string;
+  eyebrow?: string | null;
   heading?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  headerVariant?: 'default' | 'inline';
   children: ReactNode;
 }
 
@@ -110,6 +111,23 @@ const s: Record<string, CSSProperties> = {
     marginLeft: 'auto',
     flexWrap: 'wrap',
   },
+  inlineHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 16,
+    marginBottom: 28,
+    flexWrap: 'wrap',
+  },
+  inlineHeading: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 34,
+    fontWeight: 800,
+    letterSpacing: '-0.045em',
+    lineHeight: 1.04,
+    color: 'var(--ink)',
+    margin: 0,
+  },
 };
 
 export function MeLayout({
@@ -119,12 +137,13 @@ export function MeLayout({
   heading,
   subtitle,
   actions,
+  headerVariant = 'default',
   children,
 }: MeLayoutProps) {
   const { data: session } = useSession();
   const signedOutPreview = !!session && session.cloud_mode && session.user.is_local;
   const greeting = deriveGreeting(session?.user);
-  const resolvedEyebrow = eyebrow || greeting.eyebrow;
+  const resolvedEyebrow = eyebrow === undefined ? greeting.eyebrow : eyebrow;
   const resolvedHeading = heading || greeting.heading;
 
   return (
@@ -136,21 +155,32 @@ export function MeLayout({
       noIndex
     >
       <div data-testid="me-layout" style={s.shell}>
-        <header style={s.header}>
-          <div style={s.identity}>
-            <GreetingAvatar image={greeting.image} initials={greeting.initials} />
-            <div style={s.greetingStack}>
-              <span data-testid="me-greeting-hello" style={s.greetingHello}>
-                {resolvedEyebrow}
-              </span>
-              <h1 data-testid="me-greeting-name" style={s.greetingName}>
-                {resolvedHeading}
-              </h1>
-              {subtitle ? <p style={s.subtitle}>{subtitle}</p> : null}
+        {headerVariant === 'inline' ? (
+          <header style={s.inlineHeader}>
+            <h1 data-testid="me-greeting-name" style={s.inlineHeading}>
+              {resolvedHeading}
+            </h1>
+            {actions ? <div style={s.actions}>{actions}</div> : null}
+          </header>
+        ) : (
+          <header style={s.header}>
+            <div style={s.identity}>
+              <GreetingAvatar image={greeting.image} initials={greeting.initials} />
+              <div style={s.greetingStack}>
+                {resolvedEyebrow ? (
+                  <span data-testid="me-greeting-hello" style={s.greetingHello}>
+                    {resolvedEyebrow}
+                  </span>
+                ) : null}
+                <h1 data-testid="me-greeting-name" style={s.greetingName}>
+                  {resolvedHeading}
+                </h1>
+                {subtitle ? <p style={s.subtitle}>{subtitle}</p> : null}
+              </div>
             </div>
-          </div>
-          {actions ? <div style={s.actions}>{actions}</div> : null}
-        </header>
+            {actions ? <div style={s.actions}>{actions}</div> : null}
+          </header>
+        )}
 
         <div data-testid="me-tab-panel">{children}</div>
       </div>
@@ -172,7 +202,7 @@ function deriveGreeting(user: {
   const email = (user?.email ?? '').trim();
   const emailLocal = email.includes('@') ? email.split('@')[0] : email;
   const displayName = nameRaw || emailLocal || '';
-  const firstName = firstNameFrom(displayName);
+  const firstName = firstNameFromName(nameRaw) || capitalize(emailLocal);
 
   return {
     eyebrow: firstName ? 'Welcome back' : 'Account',
@@ -182,11 +212,10 @@ function deriveGreeting(user: {
   };
 }
 
-function firstNameFrom(input: string): string {
+function firstNameFromName(input: string): string {
   const clean = input.trim();
   if (!clean) return '';
-  const first = clean.split(/[\s._-]+/).find(Boolean) || '';
-  return first ? capitalize(first) : '';
+  return clean.split(/\s+/)[0] || '';
 }
 
 function capitalize(input: string): string {

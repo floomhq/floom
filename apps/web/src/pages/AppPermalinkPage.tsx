@@ -66,6 +66,7 @@ export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const runIdFromUrl = searchParams.get('run');
+  const rerunIdFromUrl = searchParams.get('rerun');
   // Gate "Open in Studio" — only the app owner sees the creator bridge.
   // Previously ANY authenticated user saw a link into the creator dashboard,
   // which was a permission leak (audit 2026-04-18). Studio restructure locks
@@ -103,6 +104,8 @@ export function AppPermalinkPage() {
   // initialRunLoading avoids rendering the RunSurface in `ready` phase (which
   // would flash the empty form) while the run is being fetched.
   const [initialRunLoading, setInitialRunLoading] = useState<boolean>(!!runIdFromUrl);
+  const [rerunInputs, setRerunInputs] = useState<Record<string, unknown> | null>(null);
+  const [rerunLoading, setRerunLoading] = useState<boolean>(!!rerunIdFromUrl && !runIdFromUrl);
   // 2026-04-20 (P2 #147): a shared link with a dead run-id used to silently
   // fall through to the empty form, making the page look broken ("I clicked
   // a link and got a blank form"). Surface a gentle amber "Run not found"
@@ -218,6 +221,46 @@ export function AppPermalinkPage() {
     };
   }, [slug, runIdFromUrl, setSearchParams]);
 
+  useEffect(() => {
+    if (!slug || !rerunIdFromUrl || runIdFromUrl) {
+      setRerunInputs(null);
+      setRerunLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRerunLoading(true);
+    getRun(rerunIdFromUrl)
+      .then((run) => {
+        if (cancelled) return;
+        if (run.app_slug && run.app_slug !== slug) {
+          setRerunInputs(null);
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete('rerun');
+              return next;
+            },
+            { replace: true },
+          );
+          return;
+        }
+        if (run.inputs && typeof run.inputs === 'object' && !Array.isArray(run.inputs)) {
+          setRerunInputs(run.inputs as Record<string, unknown>);
+          return;
+        }
+        setRerunInputs({});
+      })
+      .catch(() => {
+        if (!cancelled) setRerunInputs(null);
+      })
+      .finally(() => {
+        if (!cancelled) setRerunLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, rerunIdFromUrl, runIdFromUrl, setSearchParams]);
+
   const handleResetInitialRun = useCallback(() => {
     setInitialRun(null);
     setRunNotFound(false);
@@ -240,7 +283,7 @@ export function AppPermalinkPage() {
   const runSurfaceRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (activeTab !== 'run') return;
-    if (runIdFromUrl || initialRun || initialRunLoading) return;
+    if (runIdFromUrl || initialRun || initialRunLoading || rerunLoading) return;
     if (!app) return;
     // Defer one frame so RunSurface and InputCard have mounted.
     const raf = requestAnimationFrame(() => {
@@ -255,7 +298,9 @@ export function AppPermalinkPage() {
       }
     });
     return () => cancelAnimationFrame(raf);
-  }, [app, activeTab, runIdFromUrl, initialRun, initialRunLoading]);
+  }, [app, activeTab, runIdFromUrl, initialRun, initialRunLoading, rerunLoading]);
+
+  const initialSurfaceLoading = initialRunLoading || rerunLoading;
 
   // Single-line plain-text description for the compact header. Strips
   // markdown syntax + collapses whitespace so a multi-line or markdown
@@ -287,7 +332,7 @@ export function AppPermalinkPage() {
   // but only assign real samples to inputs whose name/type we recognise.
   const samplePrefillInputs = useMemo<Record<string, unknown> | null>(() => {
     if (!app) return null;
-    if (runIdFromUrl) return null; // respect shared-run links
+    if (runIdFromUrl || rerunIdFromUrl) return null; // respect shared-run links
     const firstActionKey = Object.keys(app.manifest.actions)[0];
     const action = firstActionKey ? app.manifest.actions[firstActionKey] : undefined;
     if (!action || action.inputs.length === 0) return null;
@@ -315,7 +360,7 @@ export function AppPermalinkPage() {
     const sample = samplePrefill(first);
     if (sample == null) return null;
     return { [first.name]: sample };
-  }, [app, runIdFromUrl]);
+  }, [app, runIdFromUrl, rerunIdFromUrl]);
 
   // Issue #255 (2026-04-21): the celebration card ("Your app is live —
   // send to coworkers") must only fire for the creator who JUST pressed
@@ -1126,12 +1171,12 @@ export function AppPermalinkPage() {
               minHeight: 320,
             }}
           >
-            {initialRunLoading ? (
+            {initialSurfaceLoading ? (
               <div
                 data-testid="shared-run-loading"
                 style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}
               >
-                Loading shared run...
+                {runIdFromUrl ? 'Loading shared run...' : 'Loading previous inputs...'}
               </div>
             ) : (
               <>
@@ -1192,7 +1237,7 @@ export function AppPermalinkPage() {
                 <RunSurface
                   app={app}
                   initialRun={initialRun}
-                  initialInputs={samplePrefillInputs ?? undefined}
+                  initialInputs={rerunInputs ?? samplePrefillInputs ?? undefined}
                   onResetInitialRun={handleResetInitialRun}
                   onResult={handleRunResult}
                 />
