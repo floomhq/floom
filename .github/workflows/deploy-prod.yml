@@ -1,0 +1,97 @@
+name: Deploy prod
+
+# Manual prod deploy for floom.dev. Never triggers on push.
+#
+# Run this AFTER you have visually verified a change on preview.floom.dev.
+# See scripts/ops/README.md for the full 4-step ship workflow and
+# scripts/ops/floom-deploy-prod.sh for what runs on AX41.
+#
+# SSH to AX41 uses a DIFFERENT deploy key than the preview workflow
+# (secret: AX41_PROD_DEPLOY_KEY). That key's authorized_keys entry
+# forced-command is:
+#   command="/usr/local/sbin/floom-deploy-prod.sh $SSH_ORIGINAL_COMMAND"
+# which passes through the client's requested command (the image tag)
+# as the one and only argument. The script strictly validates the arg
+# against ^[A-Za-z0-9:._-]+$ before using it, and rejects anything else.
+# This gives us hard isolation: the preview key literally cannot run the
+# prod script, and vice versa.
+#
+# See scripts/ops/README.md for the exact authorized_keys entries.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (default: current preview tag). Example: auto-abc1234 or floom-preview-local:auto-abc1234. Leave blank to promote whatever is currently live on preview.floom.dev."
+        required: false
+        default: ""
+
+# Serialize prod deploys. We never want two overlapping prod rollouts.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    name: "=== DEPLOYING TO PROD ==="
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pre-deploy summary
+        run: |
+          echo "=================================================="
+          echo "=== DEPLOYING TO PROD (floom.dev) ==="
+          echo "=================================================="
+          echo "image_tag input: '${{ github.event.inputs.image_tag }}'"
+          echo "(blank = promote whatever is currently live on preview.floom.dev)"
+          echo "commit:          ${{ github.sha }}"
+          echo "ref:             ${{ github.ref }}"
+          echo "actor:           ${{ github.actor }}"
+          echo "=================================================="
+          echo "The AX41 deploy script will:"
+          echo "  1. Resolve the image tag (input > preview's current tag)"
+          echo "  2. Verify the image exists locally (built by the preview"
+          echo "     deploy on every main push — prod does not build)"
+          echo "  3. Swap image tag in /opt/floom-mcp-preview/docker-compose.yml"
+          echo "  4. docker compose up -d --no-deps floom-mcp-preview"
+          echo "  5. Health-check http://127.0.0.1:3051/api/health"
+          echo "  6. On failure: restore prod compose backup, restart prod."
+          echo "  (Preview compose + container are never touched.)"
+          echo "=================================================="
+
+  deploy:
+    name: Deploy to AX41 prod
+    needs: announce
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate image_tag input
+        env:
+          TAG_INPUT: ${{ github.event.inputs.image_tag }}
+        run: |
+          if [ -n "$TAG_INPUT" ] && ! printf '%s' "$TAG_INPUT" \
+             | grep -Eq '^[A-Za-z0-9:._-]+$'; then
+            echo "Refusing to pass unsafe image_tag to SSH: '$TAG_INPUT'"
+            exit 1
+          fi
+      - name: Write deploy key
+        env:
+          KEY: ${{ secrets.AX41_PROD_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/prod_deploy
+          chmod 600 ~/.ssh/prod_deploy
+          ssh-keyscan -H "${{ secrets.AX41_HOST }}" >> ~/.ssh/known_hosts
+      - name: SSH to AX41 (forced-command runs prod deploy script)
+        env:
+          TAG_INPUT: ${{ github.event.inputs.image_tag }}
+        timeout-minutes: 15
+        run: |
+          # SSH sends $TAG_INPUT as the command-to-run on AX41. sshd sees
+          # forced-command in authorized_keys and exports SSH_ORIGINAL_COMMAND
+          # = $TAG_INPUT before running:
+          #   /usr/local/sbin/floom-deploy-prod.sh $SSH_ORIGINAL_COMMAND
+          # Empty tag is allowed (script defaults to current preview tag).
+          ssh -i ~/.ssh/prod_deploy \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              "${{ secrets.AX41_USER }}@${{ secrets.AX41_HOST }}" \
+              "$TAG_INPUT"
