@@ -226,13 +226,17 @@ export function LoginPage() {
             the 2026-04-24 audit). Copy follows wireframes/v17/login.html:
             "Sign in to Floom" + "One account. Run apps, ship apps, all in
             one place." — same message on signup tab, the wireframe notes
-            call out this is intentionally one combined page. */}
+            call out this is intentionally one combined page.
+            #545 regression fix 2026-04-23: bumped weight 700 → 800 and
+            letter-spacing -0.02em → -0.025em to match the display-font
+            spec. Previous values rendered as plain Inter 700 once the
+            display token was applied. */}
         <h1
           style={{
             fontFamily: 'var(--font-display)',
             fontSize: 28,
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
+            fontWeight: 800,
+            letterSpacing: '-0.025em',
             lineHeight: 1.15,
             margin: '0 0 8px',
             color: 'var(--ink)',
@@ -420,47 +424,12 @@ export function LoginPage() {
           </>
         )}
 
-        {/* v17 parity 2026-04-24: BYOK callout. Wireframes/v17/login.html
-            puts this directly in the auth card so the self-host / BYOK
-            expectation is set before first run. Uses the accent-soft
-            gradient + lock icon from the wireframe spec, in the warm
-            tinted-neutral palette (no pure black) per design rules. */}
-        <div
-          data-testid="login-byok-callout"
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 10,
-            background: 'linear-gradient(180deg, var(--card), var(--accent-soft, #ecfdf5))',
-            border: '1px solid var(--accent-border, #d1fae5)',
-            borderRadius: 10,
-            padding: '12px 14px',
-            margin: '0 0 16px',
-            fontSize: 12,
-            color: 'var(--ink)',
-            lineHeight: 1.55,
-          }}
-        >
-          <svg
-            width={14}
-            height={14}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.75}
-            aria-hidden="true"
-            style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }}
-          >
-            <rect x="3" y="11" width="18" height="11" rx="2" />
-            <path d="M7 11 V7 a5 5 0 0 1 10 0 v4" />
-          </svg>
-          <span>
-            {mode === 'signup' ? 'On signup, save ' : 'Save '}your own{' '}
-            <code style={byokKeyStyle}>GEMINI_API_KEY</code> or{' '}
-            <code style={byokKeyStyle}>OPENAI_API_KEY</code> once — every app on Floom
-            can use it. Your keys stay encrypted, never logged.
-          </span>
-        </div>
+        {/* #633 2026-04-23: removed the BYOK callout that used to live
+            here. The auth screen is not the place to ask users to think
+            about API keys — it just adds friction before they've even
+            signed in. BYOK setup stays in /me/settings and the
+            rate-limit modal (5 free runs → "add your key to continue"),
+            which is where the prompt is actually contextual. */}
 
         <form onSubmit={handlePasswordSubmit}>
           {mode === 'signup' && (
@@ -684,13 +653,19 @@ const labelStyle: React.CSSProperties = {
   marginTop: 12,
 };
 
+// #563 2026-04-23: font-size is 16px, not 14px. iOS Safari auto-zooms
+// into any input whose computed font-size is < 16px on focus, which
+// jolts the viewport on mobile sign-in. 16px is the documented fix
+// (WebKit zoom trigger is < 16px) and matches what Stripe / Linear /
+// Vercel ship on their auth surfaces. Applied at all breakpoints —
+// there's no visual downside on desktop.
 const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
   border: '1px solid var(--line)',
   borderRadius: 8,
   background: 'var(--card)',
-  fontSize: 14,
+  fontSize: 16,
   color: 'var(--ink)',
   fontFamily: 'inherit',
   marginBottom: 8,
@@ -713,18 +688,6 @@ const primaryButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
   marginTop: 12,
   boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
-};
-
-// Inline code chip for env-var names in the BYOK callout. Small, neutral,
-// monospace — reads as a token the user will paste later, not as decoration.
-const byokKeyStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: 11,
-  background: 'var(--card)',
-  padding: '1px 5px',
-  borderRadius: 4,
-  border: '1px solid var(--line)',
-  color: 'var(--ink)',
 };
 
 // Full-width, outlined, white-bg button matching the login-page surface.
