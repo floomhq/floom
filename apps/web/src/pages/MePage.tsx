@@ -1,124 +1,96 @@
-// /me — user surface. Answers: "What can I run, and what have I run?"
+// /me — Overview tab of the Studio-tabbed dashboard (issue #547).
 //
-// v18 shape (2026-04-20): /me is strictly the USER surface. Creator
-// inventory ("apps you've published") has moved out entirely and lives on
-// /studio, which is the creator surface. The two pages no longer overlap.
+// Four at-a-glance cards across the top (runs last 7d, apps count,
+// free-runs-remaining, BYOK status) then a short "Your apps" mini-tile
+// row and the 5 most-recent runs. Full history + full apps list live on
+// /me/runs and /me/apps respectively. Settings and Secrets are their
+// own tabs (see MeLayout).
 //
-// Sections top to bottom:
-//   1. Greeting header — "Hey {name}" + avatar, then an "Me" H1 is dropped
-//      in favour of the greeting carrying the identity. A single "Browse
-//      apps" link sits in the header.
-//   2. "Your apps" — tiles for the apps the user has actually run before
-//      (distinct slugs from run history, most-recent first, top 8).
-//      Empty state = one "Try an app →" CTA pointing at /apps. No
-//      "Publish your first app" CTA on /me (that's a creator action and
-//      belongs in /studio).
-//   3. "Recent runs" — full run history. Rows carry the first 8 chars of
-//      the run id so two runs of the same slug within the same relative
-//      minute render as visually distinct events.
-//
-// Prior v17 kept a second "apps you've published" block here which
-// duplicated /studio and muddied the IA — users asked "why do I have my
-// own apps here AND in studio?". Fix: remove the creator block from /me
-// entirely. The TopBar "Studio" link covers that job.
+// Why the split? Earlier /me was a flat "greeting + used apps + run
+// history" scroll. It worked fine as a single page but did not answer
+// "what's the state of my account?" at a glance. The Overview layout
+// surfaces the four numbers that matter (how active I've been, how much
+// I've built, whether I'm going to hit the free-tier wall, whether I've
+// brought my own key) and pushes the lists to their own tabs.
 
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { PageShell } from '../components/PageShell';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { MeLayout } from '../components/me/MeLayout';
 import { AppIcon } from '../components/AppIcon';
 import { ToolTile } from '../components/me/ToolTile';
 import { Tour } from '../components/onboarding/Tour';
 import { hasOnboarded, resetOnboarding } from '../lib/onboarding';
 import { useSession } from '../hooks/useSession';
+import { useMyApps } from '../hooks/useMyApps';
 import { useDeployEnabled } from '../lib/flags';
 import { WaitlistModal } from '../components/WaitlistModal';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
-import type { HubApp, MeRunSummary, RunStatus } from '../lib/types';
+import type { MeRunSummary, RunStatus } from '../lib/types';
 
-const INITIAL_LIMIT = 25;
-const LOAD_STEP = 25;
+// BYOK key is written by BYOKModal under this localStorage entry. Read it
+// (never write it) to drive the BYOK status card on the overview tab.
+const BYOK_KEY = 'floom_user_gemini_key';
+// Matches apps/server/src/lib/byok-gate.ts — 5 free Gemini runs per anon
+// session. Surfaced here so users don't get surprised at run 6 with a
+// modal. If this constant drifts on the server, update both in the same PR.
+const FREE_RUNS_LIMIT = 5;
 const FETCH_LIMIT = 200;
+const RECENT_RUNS_PREVIEW = 5;
+const APPS_TILE_PREVIEW = 4;
 
 const s: Record<string, CSSProperties> = {
-  main: {
-    maxWidth: 820,
-    margin: '0 auto',
-    padding: '32px 24px 96px',
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    flexWrap: 'wrap',
-    marginBottom: 28,
-  },
-  greetingWrap: {
-    display: 'flex',
-    alignItems: 'center',
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
     gap: 12,
-    minWidth: 0,
+    marginBottom: 32,
   },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: '50%',
-    objectFit: 'cover' as const,
+  statCard: {
     border: '1px solid var(--line)',
-    flexShrink: 0,
-    background: 'var(--bg)',
-  },
-  avatarInitials: {
-    width: 32,
-    height: 32,
-    borderRadius: '50%',
-    border: '1px solid var(--line)',
-    background: 'var(--bg)',
-    color: 'var(--ink)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 13,
-    fontWeight: 700,
-    letterSpacing: '0.02em',
-    flexShrink: 0,
-  },
-  greetingText: {
+    borderRadius: 12,
+    background: 'var(--card)',
+    padding: '16px 18px',
     display: 'flex',
     flexDirection: 'column' as const,
-    gap: 2,
-    minWidth: 0,
+    gap: 4,
   },
-  greetingHello: {
-    fontSize: 13,
+  statLabel: {
+    fontSize: 12,
+    fontWeight: 500,
     color: 'var(--muted)',
-    lineHeight: 1.2,
-  },
-  greetingName: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 22,
-    fontWeight: 700,
-    letterSpacing: '-0.02em',
-    lineHeight: 1.2,
-    color: 'var(--ink)',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: 440,
-    // a11y 2026-04-20: element promoted from <span> to <h1>. Reset the
-    // browser default h1 margins so visual rhythm stays identical to
-    // the prior span render.
+    letterSpacing: '0.01em',
+    textTransform: 'uppercase' as const,
     margin: 0,
+  },
+  statValue: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 26,
+    fontWeight: 800,
+    letterSpacing: '-0.025em',
+    color: 'var(--ink)',
+    lineHeight: 1.1,
+    margin: 0,
+  },
+  statHint: {
+    fontSize: 12,
+    color: 'var(--muted)',
+    lineHeight: 1.45,
+    margin: 0,
+  },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 12,
   },
   sectionH2: {
     fontFamily: 'var(--font-display)',
-    fontSize: 20,
-    fontWeight: 700,
-    letterSpacing: '-0.015em',
+    fontSize: 18,
+    fontWeight: 800,
+    letterSpacing: '-0.025em',
     lineHeight: 1.2,
     margin: 0,
     color: 'var(--ink)',
@@ -135,22 +107,11 @@ const s: Record<string, CSSProperties> = {
     background: 'var(--card)',
     overflow: 'hidden',
   },
-  loadMoreWrap: {
-    padding: 14,
-    textAlign: 'center' as const,
-    borderTop: '1px solid var(--line)',
-    background: 'var(--bg)',
-  },
-  loadMoreBtn: {
-    padding: '8px 16px',
-    border: '1px solid var(--line)',
-    background: 'var(--card)',
-    color: 'var(--ink)',
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
+  appsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+    gap: 12,
+    marginBottom: 36,
   },
   notice: {
     display: 'flex',
@@ -186,42 +147,6 @@ const s: Record<string, CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
-  signedOutBanner: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    padding: '18px 20px',
-    marginBottom: 24,
-    borderRadius: 12,
-    border: '1px solid var(--line)',
-    background: 'var(--card)',
-  },
-  primaryButton: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '10px 16px',
-    borderRadius: 8,
-    border: '1px solid var(--ink)',
-    background: 'var(--ink)',
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: 600,
-    textDecoration: 'none',
-  },
-  secondaryButton: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '10px 16px',
-    borderRadius: 8,
-    border: '1px solid var(--line)',
-    background: 'var(--bg)',
-    color: 'var(--ink)',
-    fontSize: 13,
-    fontWeight: 600,
-    textDecoration: 'none',
-  },
   appIconWrap: {
     width: 26,
     height: 26,
@@ -233,41 +158,34 @@ const s: Record<string, CSSProperties> = {
     justifyContent: 'center',
     flexShrink: 0,
   },
-};
-
-// Apps grid: 2 cols on narrow (375px), 3-4 cols on tablet, 4 cols on
-// desktop at 820px max. Uses auto-fit with a minmax so the layout stays
-// sane at any width without media queries.
-const gridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-  gap: 12,
-};
-
-const USED_APPS_LIMIT = 8;
-const CURATED_LIMIT = 6;
-
-type UsedApp = {
-  slug: string;
-  name: string;
-  lastUsedAt: string | null;
+  footerLink: {
+    marginTop: 28,
+    paddingTop: 18,
+    borderTop: '1px solid var(--line)',
+    fontSize: 12,
+    color: 'var(--muted)',
+    textAlign: 'center' as const,
+  },
 };
 
 export function MePage() {
-  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: sessionData, loading: sessionLoading, error: sessionError } = useSession();
+  const { apps: myApps } = useMyApps();
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
-  const [curated, setCurated] = useState<HubApp[] | null>(null);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
+
   const sessionPending = sessionLoading || (sessionData === null && !sessionError);
   const signedOutPreview = !!sessionData && sessionData.cloud_mode && sessionData.user.is_local;
   const canLoadPersonalData = !signedOutPreview;
-  const signInHref =
-    '/login?next=' + encodeURIComponent(location.pathname + location.search);
+
+  // Launch flag. Used to gate the publish CTA + waitlist modal; when
+  // DEPLOY_ENABLED=false the Overview never surfaces the publish prompt,
+  // just the free-tier hints.
+  useDeployEnabled();
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
 
   useEffect(() => {
     if (sessionPending) return;
@@ -290,12 +208,12 @@ export function MePage() {
     };
   }, [canLoadPersonalData, sessionPending]);
 
-  // Derive "Your apps" from runs: group by slug, take N most-recent
-  // distinct slugs. Runs arrive started_at DESC from the backend, so a
-  // simple first-hit-wins pass yields the correct order without sorting.
-  const usedApps: UsedApp[] | null = useMemo(() => {
+  // Used apps = distinct slugs the user has actually run, most-recent
+  // first. Small preview row on the Overview tab; the full grid lives on
+  // /me/apps (which also merges published apps from useMyApps).
+  const usedApps = useMemo(() => {
     if (runs === null) return null;
-    const seen = new Map<string, UsedApp>();
+    const seen = new Map<string, { slug: string; name: string; lastUsedAt: string | null }>();
     for (const run of runs) {
       if (!run.app_slug) continue;
       if (seen.has(run.app_slug)) continue;
@@ -304,52 +222,42 @@ export function MePage() {
         name: run.app_name || run.app_slug,
         lastUsedAt: run.started_at,
       });
-      if (seen.size >= USED_APPS_LIMIT) break;
+      if (seen.size >= APPS_TILE_PREVIEW) break;
     }
     return Array.from(seen.values());
   }, [runs]);
 
-  // If the user has no runs yet, fetch the public directory and surface a
-  // curated row. /api/hub returns sorted by featured DESC, avg_run_ms ASC,
-  // created_at DESC, name ASC — already the order we want.
-  const needsCurated = signedOutPreview || (usedApps !== null && usedApps.length === 0);
-  useEffect(() => {
-    if (!needsCurated || curated !== null) return;
-    let cancelled = false;
-    api
-      .getHub()
-      .then((hub) => {
-        if (cancelled) return;
-        setCurated(hub.slice(0, CURATED_LIMIT));
-      })
-      .catch(() => {
-        if (!cancelled) setCurated([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [needsCurated, curated]);
+  // Stats
+  const runsLast7d = useMemo(() => {
+    if (runs === null) return null;
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return runs.filter((r) => {
+      const t = r.started_at ? new Date(r.started_at).getTime() : NaN;
+      return Number.isFinite(t) && t >= cutoff;
+    }).length;
+  }, [runs]);
 
+  const appsCount = myApps ? myApps.length : null;
+
+  // Free runs remaining: we don't have a session endpoint for usage (yet),
+  // so surface the limit + a hint to BYOK. When BYOK is set, display
+  // "Unlimited". See apps/server/src/lib/byok-gate.ts for the real counter.
+  const [byokSet, setByokSet] = useState<boolean | null>(null);
+  useEffect(() => {
+    try {
+      setByokSet(!!window.localStorage.getItem(BYOK_KEY));
+    } catch {
+      setByokSet(false);
+    }
+  }, []);
+
+  // URL params: ?notice=app_not_found (from redirect), ?welcome=1 (post-signup),
+  // ?tour=1 (restart tour), ?slug=<slug> (context for notice).
   const showNotice = searchParams.get('notice') === 'app_not_found';
   const noticeSlug = searchParams.get('slug');
-  // /onboarding redirects to /me?welcome=1 (no standalone onboarding page).
-  // Show a one-shot welcome banner so users who just finished signup have
-  // a clear next step instead of landing on a bare runs list.
   const showWelcome = searchParams.get('welcome') === '1';
-
-  // First-run tour state. The tour fires automatically for users who
-  // haven't onboarded yet AND who have no runs AND no published apps.
-  // It can also be opened manually via `?tour=1` (used by the /me
-  // footer "Restart tour" link).
   const forceTour = searchParams.get('tour') === '1';
   const [tourOpen, setTourOpen] = useState(false);
-  // Launch flag. In waitlist mode (DEPLOY_ENABLED=false) every CTA on
-  // /me that funnels toward publishing opens WaitlistModal instead of
-  // starting the onboarding tour. See FirstRunPublishCard + the
-  // "Publish another" CTA further down.
-  const deployEnabled = useDeployEnabled();
-  const waitlistMode = deployEnabled === false;
-  const [waitlistOpen, setWaitlistOpen] = useState(false);
 
   function dismissNotice() {
     const next = new URLSearchParams(searchParams);
@@ -364,12 +272,6 @@ export function MePage() {
     setSearchParams(next, { replace: true });
   }
 
-  // Auto-open the tour for new users landing on /me, or on ?tour=1.
-  //   - ?tour=1 always opens (Restart tour link, or /onboarding redirect)
-  //   - First-run auto-open: only when runs have loaded AND come back
-  //     empty AND localStorage.floom_onboarded is false. Waiting for
-  //     `runs` to load prevents flashing the tour at returning users
-  //     whose runs happen to be fetching.
   useEffect(() => {
     if (forceTour) {
       setTourOpen(true);
@@ -390,138 +292,173 @@ export function MePage() {
     }
   }
 
-  const visibleRuns = useMemo(
-    () => (runs ? runs.slice(0, visibleCount) : []),
-    [runs, visibleCount],
-  );
-  const hasMore = runs ? runs.length > visibleCount : false;
-
   function openRun(run: MeRunSummary) {
     if (!run.app_slug) return;
     navigate(`/p/${run.app_slug}?run=${encodeURIComponent(run.id)}`);
   }
 
-  const appsLoading = usedApps === null;
-
-  // Greeting derivation: prefer display name, fall back to the local
-  // part of the email, then a neutral "there". Avatar uses the Better
-  // Auth session `image` field when present; otherwise we render an
-  // initials circle derived from the same display name.
-  const greeting = deriveGreeting(sessionData?.user);
+  const recentRuns = useMemo(
+    () => (runs ? runs.slice(0, RECENT_RUNS_PREVIEW) : []),
+    [runs],
+  );
 
   return (
-    <PageShell
-      requireAuth="cloud"
-      title="Me · Floom"
-      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
-      allowSignedOutShell={signedOutPreview}
-      noIndex
-    >
-      <div data-testid="me-page" style={s.main}>
-        <header style={s.header}>
-          <div style={s.greetingWrap}>
-            <GreetingAvatar
-              image={greeting.image}
-              initials={greeting.initials}
-            />
-            <div style={s.greetingText}>
-              <span data-testid="me-greeting-hello" style={s.greetingHello}>
-                Hey
-              </span>
-              {/* a11y 2026-04-20: /me had no <h1> (audit flagged
-                  WCAG 1.3.1 + 2.4.6). Render the greeting name as
-                  the page's h1 so screen readers announce a clear
-                  page title. Visual size matches the previous span. */}
-              <h1 data-testid="me-greeting-name" style={s.greetingName}>
-                {greeting.displayName}
-              </h1>
-            </div>
-          </div>
-          {/* v6-align 2026-04-20: removed the duplicate "Browse apps →"
-              link from the greeting row. The same link lives next to the
-              "Your apps" H2 below, where it reads as a direct affordance
-              for the apps section. Federico flagged the double render in
-              the visual audit — one canonical Browse-apps link, not two. */}
-        </header>
-
+    <MeLayout activeTab="overview" title="Me · Floom" allowSignedOutShell={signedOutPreview}>
+      <div data-testid="me-page">
         {showWelcome && <WelcomeBanner onDismiss={dismissWelcome} />}
 
-        {/* First-run welcome card: brand-new signup (no runs, not yet
-            onboarded). Prompts directly into the tour instead of the
-            generic "try an app" CTA. If they've been through onboarding
-            but just haven't run anything yet, the fallback "browse the
-            store" card renders (see FirstRunBrowseCard below). */}
-        {canLoadPersonalData && runs !== null && runs.length === 0 && (
-          !hasOnboarded() ? (
-            <FirstRunPublishCard
-              waitlistMode={waitlistMode}
-              onStart={() =>
-                waitlistMode ? setWaitlistOpen(true) : setTourOpen(true)
-              }
-            />
-          ) : (
-            <FirstRunBrowseCard />
-          )
-        )}
+        {showNotice && <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />}
 
-        {showNotice && (
-          <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />
-        )}
+        {/* Overview stats — runs last 7d, apps count, free runs left,
+            BYOK status. Each card is a flat neutral surface; the one
+            exception is the BYOK card turning green when set, because
+            that is a state change the user actively cares about. */}
+        <div data-testid="me-overview-stats" style={s.statsGrid}>
+          <StatCard
+            testid="stat-runs-7d"
+            label="Runs · last 7 days"
+            value={runsLast7d === null ? '…' : String(runsLast7d)}
+            hint={
+              runs && runs.length > 0
+                ? `${runs.length} total`
+                : 'Your runs will show up here.'
+            }
+          />
+          <StatCard
+            testid="stat-apps"
+            label="Apps you publish"
+            value={appsCount === null ? '…' : String(appsCount)}
+            hint={
+              appsCount === 0
+                ? 'Ship your first one.'
+                : appsCount === 1
+                  ? '1 live app.'
+                  : `${appsCount} live apps.`
+            }
+          />
+          <StatCard
+            testid="stat-free-runs"
+            label="Free runs"
+            value={byokSet ? 'Unlimited' : `${FREE_RUNS_LIMIT}/day`}
+            hint={
+              byokSet
+                ? 'Your Gemini key is set. No rate limit.'
+                : 'Then add your own Gemini key to keep going.'
+            }
+          />
+          <StatCard
+            testid="stat-byok"
+            label="Gemini key"
+            value={byokSet ? 'Connected' : 'Not set'}
+            hint={
+              byokSet
+                ? 'Stored in your browser, never sent to us.'
+                : 'Set it in Settings to unlock unlimited runs.'
+            }
+            accent={byokSet === true}
+          />
+        </div>
 
         {signedOutPreview && (
-          <section data-testid="me-signed-out-shell" style={s.signedOutBanner}>
-            <div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--ink)' }}>
-              <strong style={{ display: 'block', marginBottom: 4 }}>Sign in to load your runs.</strong>
-              You can still browse live apps and preview how this page works before you log in.
-            </div>
+          <section
+            data-testid="me-signed-out-shell"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              padding: '16px 18px',
+              marginBottom: 24,
+              borderRadius: 12,
+              border: '1px solid var(--line)',
+              background: 'var(--card)',
+            }}
+          >
+            <strong style={{ fontSize: 14, color: 'var(--ink)' }}>
+              Sign in to load your runs.
+            </strong>
+            <span style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+              Browse apps or preview how this page works without signing in.
+            </span>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Link to={signInHref} style={s.primaryButton}>
+              <Link
+                to="/login?next=%2Fme"
+                style={{
+                  padding: '9px 16px',
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
                 Sign in
               </Link>
-              <Link to="/apps" style={s.secondaryButton}>
+              <Link
+                to="/apps"
+                style={{
+                  padding: '9px 16px',
+                  border: '1px solid var(--line)',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  color: 'var(--ink)',
+                }}
+              >
                 Browse apps
               </Link>
             </div>
           </section>
         )}
 
-        {/* Your apps — the only apps section on /me. These are the apps
-            the user has actually RUN (distinct slugs from run history).
-            Creator inventory lives in /studio and does not appear here. */}
-        <section
-          data-testid="me-apps-section"
-          style={{ marginBottom: 36 }}
-          aria-label="Your apps"
-        >
-          <header
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
+        {/* Your apps preview — first 4 distinct slugs from run history.
+            Full apps + published grid on /me/apps. */}
+        <section data-testid="me-apps-preview" aria-label="Your apps preview">
+          <header style={s.sectionHeader}>
             <h2 style={s.sectionH2}>Your apps</h2>
-            <Link to="/apps" data-testid="me-apps-browse" style={s.headerLink}>
-              Browse apps →
+            <Link to="/me/apps" data-testid="me-apps-see-all" style={s.headerLink}>
+              See all →
             </Link>
           </header>
 
-          {appsLoading ? (
-            <div
-              data-testid="me-apps-loading"
-              style={{
-                ...s.card,
-                padding: 20,
-                color: 'var(--muted)',
-                fontSize: 13,
-              }}
-            >
+          {usedApps === null ? (
+            <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13, marginBottom: 36 }}>
               Loading your apps…
             </div>
-          ) : usedApps && usedApps.length > 0 ? (
-            <div data-testid="me-apps-grid" style={gridStyle}>
+          ) : usedApps.length === 0 ? (
+            <div
+              data-testid="me-apps-preview-empty"
+              style={{
+                border: '1px dashed var(--line)',
+                borderRadius: 12,
+                background: 'var(--card)',
+                padding: '22px 20px',
+                textAlign: 'center' as const,
+                marginBottom: 36,
+              }}
+            >
+              <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+                Nothing here yet. Try one from the public directory to get started.
+              </div>
+              <Link
+                to="/apps"
+                style={{
+                  display: 'inline-block',
+                  padding: '9px 16px',
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Browse apps →
+              </Link>
+            </div>
+          ) : (
+            <div data-testid="me-apps-preview-grid" style={s.appsGrid}>
               {usedApps.map((a) => (
                 <ToolTile
                   key={a.slug}
@@ -531,164 +468,42 @@ export function MePage() {
                 />
               ))}
             </div>
-          ) : curated === null ? (
-            <div
-              data-testid="me-apps-loading"
-              style={{
-                ...s.card,
-                padding: 20,
-                color: 'var(--muted)',
-                fontSize: 13,
-              }}
-            >
-              Loading suggestions…
-            </div>
-          ) : curated.length > 0 ? (
-            <div data-testid="me-apps-empty">
-              <div
-                style={{
-                  fontSize: 13,
-                  color: 'var(--muted)',
-                  marginBottom: 10,
-                  lineHeight: 1.55,
-                }}
-              >
-                Try one →
-              </div>
-              <div data-testid="me-apps-grid" style={gridStyle}>
-                {curated.map((a) => (
-                  <ToolTile
-                    key={a.slug}
-                    slug={a.slug}
-                    name={a.name}
-                    lastUsedAt={null}
-                    badge="New"
-                  />
-                ))}
-              </div>
-              <div style={{ marginTop: 14 }}>
-                <Link
-                  to="/apps"
-                  data-testid="me-apps-empty-cta"
-                  style={{
-                    display: 'inline-block',
-                    padding: '10px 18px',
-                    background: 'var(--ink)',
-                    color: '#fff',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                  }}
-                >
-                  Try an app →
-                </Link>
-              </div>
-            </div>
-          ) : (
-            <section
-              data-testid="me-apps-empty"
-              style={{
-                border: '1px dashed var(--line)',
-                borderRadius: 12,
-                background: 'var(--card)',
-                padding: '24px 20px',
-                textAlign: 'center',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 14,
-                  color: 'var(--muted)',
-                  marginBottom: 12,
-                  lineHeight: 1.55,
-                }}
-              >
-                You haven&rsquo;t run any Floom apps yet.
-              </div>
-              <Link
-                to="/apps"
-                data-testid="me-apps-empty-cta"
-                style={{
-                  display: 'inline-block',
-                  padding: '10px 18px',
-                  background: 'var(--ink)',
-                  color: '#fff',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                }}
-              >
-                Try an app →
-              </Link>
-            </section>
           )}
         </section>
 
-        {/* Recent runs — full history of past runs. Rows include a short
-            run-id tag so two runs of the same app within the same relative
-            window read as distinct events (fixes the "UUID Generator · v4 ·
-            3h ago" duplication Federico flagged). id="recent-runs" lets
-            /me/runs redirect to /me#recent-runs and scroll straight here. */}
-        <section id="recent-runs" data-testid="me-runs-section" aria-label="Recent runs">
-          <header
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 12,
-              marginBottom: 12,
-            }}
-          >
+        {/* Recent runs preview — most-recent 5. Full history on /me/runs. */}
+        <section id="recent-runs" data-testid="me-runs-preview" aria-label="Recent runs">
+          <header style={s.sectionHeader}>
             <h2 style={s.sectionH2}>Recent runs</h2>
+            <Link to="/me/runs" data-testid="me-runs-see-all" style={s.headerLink}>
+              See all →
+            </Link>
           </header>
 
           {runs === null && !runsError ? (
-            <RunsSkeleton />
+            <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13 }}>
+              Loading runs…
+            </div>
           ) : runsError ? (
             <ErrorPanel message={runsError} />
-          ) : runs && runs.length === 0 ? (
-            <EmptyRuns signedOutPreview={signedOutPreview} signInHref={signInHref} />
+          ) : recentRuns.length === 0 ? (
+            <EmptyRuns signedOutPreview={signedOutPreview} />
           ) : (
-            <div data-testid="me-runs-list" style={s.card}>
-              {visibleRuns.map((run, i) => (
+            <div data-testid="me-runs-preview-list" style={s.card}>
+              {recentRuns.map((run, i) => (
                 <RunRow
                   key={run.id}
                   run={run}
                   onOpen={openRun}
-                  isLast={i === visibleRuns.length - 1}
+                  isLast={i === recentRuns.length - 1}
                 />
               ))}
-              {hasMore && (
-                <div style={s.loadMoreWrap}>
-                  <button
-                    type="button"
-                    onClick={() => setVisibleCount((n) => n + LOAD_STEP)}
-                    data-testid="me-load-more"
-                    style={s.loadMoreBtn}
-                  >
-                    Load more
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </section>
 
-        {/* Footer affordance: let users re-trigger the tour after they
-            dismissed it. Muted, single line — this is not a CTA. */}
-        <div
-          data-testid="me-restart-tour"
-          style={{
-            marginTop: 28,
-            paddingTop: 18,
-            borderTop: '1px solid var(--line)',
-            fontSize: 12,
-            color: 'var(--muted)',
-            textAlign: 'center',
-          }}
-        >
+        {/* Footer affordance: let users re-trigger the onboarding tour. */}
+        <div data-testid="me-restart-tour" style={s.footerLink}>
           <button
             type="button"
             onClick={() => {
@@ -703,6 +518,7 @@ export function MePage() {
               textDecoration: 'underline',
               cursor: 'pointer',
               fontSize: 12,
+              fontFamily: 'inherit',
             }}
           >
             Restart tour
@@ -716,258 +532,46 @@ export function MePage() {
         onClose={() => setWaitlistOpen(false)}
         source="me-publish"
       />
-    </PageShell>
+    </MeLayout>
   );
 }
 
-/**
- * First-run card for brand-new signups with no runs and no apps. Drops
- * the user directly into the tour (paste -> publish -> run -> share).
- * Lives on /me empty state — the one place a fresh user reliably lands.
- */
-function FirstRunPublishCard({
-  onStart,
-  waitlistMode,
+/* ---------- subcomponents ---------- */
+
+function StatCard({
+  testid,
+  label,
+  value,
+  hint,
+  accent = false,
 }: {
-  onStart: () => void;
-  /**
-   * When true, the card copy + CTA swap into waitlist language —
-   * "We'll email you when you can publish" — and the onStart handler
-   * is expected to open WaitlistModal rather than the onboarding tour.
-   * Driven by the server's DEPLOY_ENABLED flag.
-   */
-  waitlistMode: boolean;
+  testid: string;
+  label: string;
+  value: string;
+  hint?: string;
+  /** When true, highlight the value in brand green (for BYOK=connected). */
+  accent?: boolean;
 }) {
   return (
     <section
-      data-testid="me-first-run-card"
-      data-waitlist={waitlistMode ? 'true' : 'false'}
+      data-testid={testid}
       style={{
-        border: '1px solid var(--line)',
-        borderRadius: 14,
-        background: 'var(--card)',
-        padding: '20px 22px',
-        marginBottom: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
+        ...s.statCard,
+        borderColor: accent ? 'var(--accent, #10b981)' : 'var(--line)',
+        background: accent ? 'rgba(16, 185, 129, 0.06)' : 'var(--card)',
       }}
     >
-      <strong style={{ fontSize: 16 }}>
-        {waitlistMode
-          ? 'Publishing is on the waitlist'
-          : "Let's publish your first app"}
-      </strong>
-      <p
+      <span style={s.statLabel}>{label}</span>
+      <strong
         style={{
-          margin: 0,
-          color: 'var(--muted)',
-          fontSize: 14,
-          lineHeight: 1.55,
+          ...s.statValue,
+          color: accent ? 'var(--accent, #10b981)' : 'var(--ink)',
         }}
       >
-        {waitlistMode
-          ? "We're rolling Deploy out slowly for launch week. Drop your email and we'll let you know when your slot opens — the featured apps are free to run in the meantime."
-          : 'Paste an OpenAPI URL or pick a sample. Publish in one click, share the link. The whole thing takes under a minute.'}
-      </p>
-      <div>
-        <button
-          type="button"
-          onClick={onStart}
-          data-testid="me-first-run-start"
-          style={{
-            display: 'inline-block',
-            padding: '10px 16px',
-            borderRadius: 8,
-            border: 'none',
-            background: 'var(--accent, #10b981)',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: 14,
-            cursor: 'pointer',
-          }}
-        >
-          {waitlistMode
-            ? 'Join waitlist'
-            : 'Let\u2019s publish your first app \u2192'}
-        </button>
-      </div>
+        {value}
+      </strong>
+      {hint ? <p style={s.statHint}>{hint}</p> : null}
     </section>
-  );
-}
-
-/**
- * Soft CTA for users who finished the tour (or skipped it) but haven't
- * actually run anything yet. Points to the app directory — "try what
- * other people built".
- */
-function FirstRunBrowseCard() {
-  return (
-    <section
-      data-testid="me-first-run-browse-card"
-      style={{
-        border: '1px solid var(--line)',
-        borderRadius: 14,
-        background: 'var(--card)',
-        padding: '20px 22px',
-        marginBottom: 20,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
-      <strong style={{ fontSize: 15 }}>Try running an app in the store</strong>
-      <p style={{ margin: 0, color: 'var(--muted)', fontSize: 14, lineHeight: 1.55 }}>
-        See how Floom apps feel before you publish another one.
-      </p>
-      <div>
-        <Link
-          to="/apps"
-          style={{
-            display: 'inline-block',
-            padding: '10px 16px',
-            borderRadius: 8,
-            background: 'var(--ink)',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: 14,
-            textDecoration: 'none',
-          }}
-        >
-          Browse apps →
-        </Link>
-      </div>
-    </section>
-  );
-}
-
-/**
- * Greeting derivation: Better Auth session carries `name`, `email`, and
- * `image`. Pick the best human-readable handle in that order; fall back
- * to the email local part, then a neutral "there". Initials are derived
- * from whichever string we end up using so the avatar never looks wrong.
- */
-function deriveGreeting(user: {
-  email: string | null;
-  name: string | null;
-  image: string | null;
-} | undefined): {
-  displayName: string;
-  initials: string;
-  image: string | null;
-} {
-  const nameRaw = (user?.name ?? '').trim();
-  const email = (user?.email ?? '').trim();
-  const emailLocal = email.includes('@') ? email.split('@')[0] : email;
-  const displayName = nameRaw || emailLocal || 'there';
-  const initials = initialsFrom(displayName);
-  return { displayName, initials, image: user?.image ?? null };
-}
-
-function initialsFrom(s: string): string {
-  const parts = s
-    .split(/[\s._-]+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length === 0) return '·';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-function GreetingAvatar({
-  image,
-  initials,
-}: {
-  image: string | null;
-  initials: string;
-}) {
-  const [broken, setBroken] = useState(false);
-  if (image && !broken) {
-    return (
-      <img
-        data-testid="me-greeting-avatar"
-        src={image}
-        alt=""
-        style={s.avatar}
-        onError={() => setBroken(true)}
-      />
-    );
-  }
-  return (
-    <span
-      data-testid="me-greeting-avatar-initials"
-      aria-hidden="true"
-      style={s.avatarInitials}
-    >
-      {initials}
-    </span>
-  );
-}
-
-function WelcomeBanner({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <div role="status" data-testid="me-welcome-banner" style={s.welcome}>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
-        <strong style={{ color: 'var(--accent)' }}>Welcome to Floom</strong>
-        <span style={{ display: 'block', marginTop: 4 }}>
-          Try an app below, or{' '}
-          <Link to="/apps" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
-            browse the directory
-          </Link>
-          {' '}to get started.
-        </span>
-      </div>
-      <button
-        type="button"
-        aria-label="Dismiss welcome"
-        data-testid="me-welcome-dismiss"
-        onClick={onDismiss}
-        style={s.noticeDismiss}
-      >
-        Dismiss
-      </button>
-    </div>
-  );
-}
-
-function AppNotFound({
-  slug,
-  onDismiss,
-}: {
-  slug: string | null;
-  onDismiss: () => void;
-}) {
-  return (
-    <div role="alert" data-testid="me-app-not-found-notice" style={s.notice}>
-      <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
-        <strong style={{ color: '#c2321f' }}>App not found</strong>
-        <span style={{ display: 'block', marginTop: 4 }}>
-          We couldn&rsquo;t open that app
-          {slug ? (
-            <>
-              {' '}
-              (
-              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>
-                {slug}
-              </span>
-              )
-            </>
-          ) : (
-            ''
-          )}
-          . It may have been removed or you don&rsquo;t have access.
-        </span>
-      </div>
-      <button
-        type="button"
-        aria-label="Dismiss"
-        data-testid="me-app-not-found-dismiss"
-        onClick={onDismiss}
-        style={s.noticeDismiss}
-      >
-        Dismiss
-      </button>
-    </div>
   );
 }
 
@@ -980,19 +584,11 @@ function RunRow({
   onOpen: (run: MeRunSummary) => void;
   isLast: boolean;
 }) {
-  // Re-render on an interval so relative time always uses a fresh
-  // `Date.now()` vs `started_at` (issue #102 — not frozen at first paint).
-  const [, setRelTimeTick] = useState(0);
   const [rowHover, setRowHover] = useState(false);
-  useEffect(() => {
-    const id = window.setInterval(() => setRelTimeTick((n) => n + 1), 30_000);
-    return () => clearInterval(id);
-  }, []);
   const appName = run.app_name || run.app_slug || 'App';
   const summary = runSummary(run);
   const outPreview = runOutputPreviewLine(run);
   const previewLine = [summary, outPreview].filter(Boolean).join(' → ');
-  const tooltip = runRowTooltip(run, summary);
   const time = formatTime(run.started_at);
   const runTag = runIdShort(run.id);
   const disabled = !run.app_slug;
@@ -1002,7 +598,6 @@ function RunRow({
       onClick={() => onOpen(run)}
       disabled={disabled}
       data-testid={`me-run-row-${run.id}`}
-      title={tooltip}
       onMouseEnter={() => setRowHover(true)}
       onMouseLeave={() => setRowHover(false)}
       style={{
@@ -1014,9 +609,12 @@ function RunRow({
         minHeight: 56,
         border: 'none',
         borderBottom: isLast ? 'none' : '1px solid var(--line)',
-        background: rowHover && !disabled ? 'color-mix(in srgb, var(--line) 32%, transparent)' : 'transparent',
+        background:
+          rowHover && !disabled
+            ? 'color-mix(in srgb, var(--line) 32%, transparent)'
+            : 'transparent',
         transition: 'background 0.12s ease',
-        textAlign: 'left',
+        textAlign: 'left' as const,
         cursor: disabled ? 'default' : 'pointer',
         fontFamily: 'inherit',
         color: 'var(--ink)',
@@ -1061,7 +659,6 @@ function RunRow({
                 whiteSpace: 'nowrap',
                 flex: 1,
                 minWidth: 0,
-                fontFamily: 'inherit',
               }}
             >
               {previewLine}
@@ -1098,22 +695,6 @@ function RunRow({
   );
 }
 
-/**
- * First 8 chars of the run id so rows of the same slug render as distinct
- * events even when their relative time ("3h ago") collapses to the same
- * bucket. Falls back to empty string if the id is missing, which lets the
- * row degrade gracefully instead of showing a literal "undefined".
- */
-function runIdShort(id: string | null | undefined): string {
-  if (!id) return '';
-  const trimmed = id.replace(/^run_/, '');
-  return trimmed.slice(0, 8);
-}
-
-/**
- * Compact status label for the runs list (issue #92). Uses the same
- * success/error colors as the prior StatusDot.
- */
 function MeRunStatusPill({ status }: { status: RunStatus }) {
   if (status === 'success') {
     return (
@@ -1175,7 +756,157 @@ function MeRunStatusPill({ status }: { status: RunStatus }) {
   );
 }
 
-/** One-line output snippet for the runs list (issue #92). */
+function WelcomeBanner({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div role="status" data-testid="me-welcome-banner" style={s.welcome}>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
+        <strong style={{ color: 'var(--accent)' }}>Welcome to Floom</strong>
+        <span style={{ display: 'block', marginTop: 4 }}>
+          Try an app below, or{' '}
+          <Link to="/apps" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+            browse the directory
+          </Link>{' '}
+          to get started.
+        </span>
+      </div>
+      <button
+        type="button"
+        aria-label="Dismiss welcome"
+        data-testid="me-welcome-dismiss"
+        onClick={onDismiss}
+        style={s.noticeDismiss}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+function AppNotFound({
+  slug,
+  onDismiss,
+}: {
+  slug: string | null;
+  onDismiss: () => void;
+}) {
+  return (
+    <div role="alert" data-testid="me-app-not-found-notice" style={s.notice}>
+      <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.55 }}>
+        <strong style={{ color: '#c2321f' }}>App not found</strong>
+        <span style={{ display: 'block', marginTop: 4 }}>
+          We couldn&rsquo;t open that app
+          {slug ? (
+            <>
+              {' '}
+              (
+              <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>
+                {slug}
+              </span>
+              )
+            </>
+          ) : (
+            ''
+          )}
+          . It may have been removed or you don&rsquo;t have access.
+        </span>
+      </div>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        data-testid="me-app-not-found-dismiss"
+        onClick={onDismiss}
+        style={s.noticeDismiss}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+function ErrorPanel({ message }: { message: string }) {
+  return (
+    <section
+      data-testid="me-runs-error"
+      style={{
+        border: '1px solid #f4b7b1',
+        borderRadius: 12,
+        background: '#fdecea',
+        padding: '16px 20px',
+        color: '#5c2d26',
+        fontSize: 13,
+        lineHeight: 1.55,
+      }}
+    >
+      <strong style={{ color: '#c2321f' }}>Couldn&rsquo;t load runs.</strong> {message}
+    </section>
+  );
+}
+
+function EmptyRuns({ signedOutPreview = false }: { signedOutPreview?: boolean }) {
+  return (
+    <section
+      data-testid="me-runs-empty"
+      style={{
+        border: '1px dashed var(--line)',
+        borderRadius: 12,
+        background: 'var(--card)',
+        padding: '32px 24px',
+        textAlign: 'center' as const,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 18,
+          fontWeight: 800,
+          letterSpacing: '-0.025em',
+          color: 'var(--ink)',
+          marginBottom: 8,
+        }}
+      >
+        {signedOutPreview ? 'Sign in to see your runs.' : 'No runs yet.'}
+      </div>
+      <p
+        style={{
+          margin: '0 auto 18px',
+          color: 'var(--muted)',
+          fontSize: 14,
+          lineHeight: 1.55,
+          maxWidth: 380,
+        }}
+      >
+        {signedOutPreview
+          ? 'Your run history appears here after you sign in.'
+          : 'Run any Floom app and it will show up here.'}
+      </p>
+      <Link
+        to="/apps"
+        data-testid="me-empty-browse"
+        style={{
+          display: 'inline-block',
+          padding: '10px 18px',
+          background: 'var(--ink)',
+          color: '#fff',
+          borderRadius: 8,
+          fontSize: 14,
+          fontWeight: 600,
+          textDecoration: 'none',
+        }}
+      >
+        Browse apps →
+      </Link>
+    </section>
+  );
+}
+
+/* ---------- helpers (ported from prior MePage) ---------- */
+
+function runIdShort(id: string | null | undefined): string {
+  if (!id) return '';
+  const trimmed = id.replace(/^run_/, '');
+  return trimmed.slice(0, 8);
+}
+
 function runOutputPreviewLine(run: MeRunSummary): string | null {
   const o = run.outputs;
   if (o == null || o === '') return null;
@@ -1209,11 +940,6 @@ function runOutputPreviewLine(run: MeRunSummary): string | null {
 function runSummary(run: MeRunSummary): string | null {
   const inputs = run.inputs;
   if (inputs && typeof inputs === 'object' && !Array.isArray(inputs)) {
-    // Heuristic order: prefer the canonical prompt field, then the first
-    // non-trivial string, then a compact "key: value" pair for scalar
-    // inputs. Never fall through to a raw JSON dump — round 2 audit found
-    // rows rendering {"foo":"bar"} because apps with object-only inputs
-    // had no string field for the previous heuristic to surface.
     const prompt = inputs['prompt'];
     if (typeof prompt === 'string' && prompt.trim()) {
       return truncate(prompt.trim(), 90);
@@ -1223,9 +949,6 @@ function runSummary(run: MeRunSummary): string | null {
         return truncate(value.trim(), 90);
       }
     }
-    // Scalar fallback: first primitive (number, boolean) rendered as
-    // "key: value". Covers hash/uuid/base64-style apps whose first input
-    // is "text" or "input" plus scalar options.
     const entries = Object.entries(inputs).filter(
       ([, v]) => v !== null && (typeof v === 'number' || typeof v === 'boolean'),
     );
@@ -1233,9 +956,6 @@ function runSummary(run: MeRunSummary): string | null {
       const [k, v] = entries[0];
       return truncate(`${k}: ${v}`, 90);
     }
-    // Last resort: count keys so the row reads "3 inputs" rather than
-    // empty or a JSON blob. Keeps the row skimmable while preserving the
-    // full payload in the hover title (renderer attaches it above).
     const keyCount = Object.keys(inputs).length;
     if (keyCount > 0) return `${keyCount} input${keyCount === 1 ? '' : 's'}`;
   }
@@ -1243,140 +963,7 @@ function runSummary(run: MeRunSummary): string | null {
   return null;
 }
 
-/**
- * Round 2 polish: hover tooltip showing the full input JSON. Previously
- * the title attr held just the truncated summary, so there was no way to
- * see what actually ran without opening the run detail. Stringifies
- * inputs for the title only — the visible row copy still uses the
- * human-readable heuristic above.
- */
-function runRowTooltip(run: MeRunSummary, summary: string | null): string {
-  if (!run.inputs || typeof run.inputs !== 'object') return summary ?? '';
-  try {
-    const raw = JSON.stringify(run.inputs, null, 2);
-    if (raw.length <= 400) return raw;
-    return `${raw.slice(0, 397)}...`;
-  } catch {
-    return summary ?? '';
-  }
-}
-
 function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1).trimEnd()}…`;
-}
-
-function RunsSkeleton() {
-  return (
-    <section
-      data-testid="me-runs-loading"
-      style={{ ...s.card, padding: 20, color: 'var(--muted)', fontSize: 13 }}
-    >
-      Loading runs…
-    </section>
-  );
-}
-
-function ErrorPanel({ message }: { message: string }) {
-  return (
-    <section
-      data-testid="me-runs-error"
-      style={{
-        border: '1px solid #f4b7b1',
-        borderRadius: 12,
-        background: '#fdecea',
-        padding: '16px 20px',
-        color: '#5c2d26',
-        fontSize: 13,
-        lineHeight: 1.55,
-      }}
-    >
-      <strong style={{ color: '#c2321f' }}>Couldn&rsquo;t load runs.</strong>{' '}
-      {message}
-    </section>
-  );
-}
-
-function EmptyRuns({
-  signedOutPreview = false,
-  signInHref = '/login?next=%2Fme',
-}: {
-  signedOutPreview?: boolean;
-  signInHref?: string;
-}) {
-  return (
-    <section
-      data-testid="me-runs-empty"
-      style={{
-        border: '1px dashed var(--line)',
-        borderRadius: 12,
-        background: 'var(--card)',
-        padding: '40px 24px',
-        textAlign: 'center',
-      }}
-    >
-      <div
-        style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: 20,
-          fontWeight: 600,
-          letterSpacing: '-0.015em',
-          color: 'var(--ink)',
-          marginBottom: 8,
-        }}
-      >
-        {signedOutPreview ? 'Sign in to see your runs.' : 'No runs yet.'}
-      </div>
-      <p
-        style={{
-          margin: '0 auto 20px',
-          color: 'var(--muted)',
-          fontSize: 14,
-          lineHeight: 1.55,
-          maxWidth: 380,
-        }}
-      >
-        {signedOutPreview
-          ? 'Your run history appears here after you sign in. You can still try apps from the public directory right now.'
-          : 'Run any Floom app and it will show up here. Try one from the public directory.'}
-      </p>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-        {signedOutPreview ? (
-          <Link
-            to={signInHref}
-            data-testid="me-empty-signin"
-            style={{
-              display: 'inline-block',
-              padding: '10px 18px',
-              background: 'var(--ink)',
-              color: '#fff',
-              borderRadius: 8,
-              fontSize: 14,
-              fontWeight: 600,
-              textDecoration: 'none',
-            }}
-          >
-            Sign in
-          </Link>
-        ) : null}
-        <Link
-          to="/apps"
-          data-testid="me-empty-browse"
-          style={{
-            display: 'inline-block',
-            padding: '10px 18px',
-            background: signedOutPreview ? 'var(--card)' : 'var(--ink)',
-            color: signedOutPreview ? 'var(--ink)' : '#fff',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            textDecoration: 'none',
-            border: signedOutPreview ? '1px solid var(--line)' : '1px solid var(--ink)',
-          }}
-        >
-          Browse apps →
-        </Link>
-      </div>
-    </section>
-  );
 }
