@@ -20,7 +20,9 @@ export PATH="$HOME/.floom/repo/cli/floom/bin:$PATH"
 floom --help
 ```
 
-> Note: the `floom.dev/install.sh` URL is a follow-up. Manual install above is the supported path until then.
+> Manual install above works without the hosted installer path if you want a fully transparent setup.
+
+> **Do not run `npm install floom`.** The unscoped `floom` name on npm belongs to an unrelated third-party streaming tool; installing it will not give you the Floom CLI. Use the curl installer or the manual clone above.
 
 > **Do not run `npm install floom`.** The unscoped `floom` name on npm belongs to an unrelated third-party streaming tool; installing it will not give you the Floom CLI. Use the curl installer or the manual clone above.
 

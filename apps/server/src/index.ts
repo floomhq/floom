@@ -1368,6 +1368,8 @@ if (webDist) {
             ? 'application/xml; charset=utf-8'
             : ext === 'txt'
             ? 'text/plain; charset=utf-8'
+            : ext === 'sh'
+            ? 'text/plain; charset=utf-8'
             : ext === 'md'
             ? 'text/markdown; charset=utf-8'
             : 'application/octet-stream';

@@ -34,6 +34,8 @@ OpenAPI spec ──▶ Floom ──▶ 3 surfaces
                            └─ Web form      (/p/:slug)
 ```
 
+> **Install the CLI with `curl -fsSL https://floom.dev/install.sh | bash`.** Do NOT run `npm install floom` - the unscoped `floom` npm package is an unrelated third-party streaming tool. Details: [cli/floom/README.md](./cli/floom/README.md).
+
 Point Floom at an OpenAPI spec and you get all three, from the same manifest, with auth, rate limits, secret injection, run history, and shareable output pages. No glue code.
 
 ## Quickstart

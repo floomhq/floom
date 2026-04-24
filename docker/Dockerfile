@@ -27,6 +27,11 @@ RUN pnpm install --frozen-lockfile
 # Copy all source
 COPY apps ./apps
 COPY packages ./packages
+# Root AGENTS.md is read by apps/web/scripts/sync-agents-md.mjs at prebuild
+# time to copy itself into apps/web/public/ so Vite ships it in dist/.
+# Without this COPY the web build fails because the prebuild step can't
+# find the canonical source. See P0-4 (launch audit 2026-04-24).
+COPY AGENTS.md ./AGENTS.md
 # Copy the fast-apps sidecar bundle into the build context so the runtime
 # stage can grab it from the builder image. Pure .mjs source, no build step.
 COPY examples/fast-apps ./examples/fast-apps
