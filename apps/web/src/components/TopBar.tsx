@@ -82,6 +82,27 @@ const signUpStyle: CSSProperties = {
   transition: 'opacity 0.12s',
 };
 
+// Primary Publish CTA — brand green pill, eye-draw. Always visible to
+// signed-out + signed-in alike. Routes to /studio/build on preview, opens
+// the waitlist on prod (waitlistMode). #572 — single primary action on the
+// right side; everything else is text or chrome.
+const publishCtaStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '7px 14px',
+  borderRadius: 6,
+  fontSize: 13,
+  fontWeight: 600,
+  lineHeight: 1,
+  textDecoration: 'none',
+  color: '#fff',
+  background: ACCENT,
+  border: '1px solid ' + ACCENT,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  transition: 'filter 0.12s',
+};
+
 const menuItemStyle: CSSProperties = {
   display: 'block',
   padding: '8px 12px',
@@ -91,14 +112,21 @@ const menuItemStyle: CSSProperties = {
   borderRadius: 6,
 };
 
-// v17 TopBar — declutter 2026-04-23 (Fede: "header nav has too many items rn").
-//   logged-out: Apps · Pricing · Docs + Sign in / Sign up
-//   logged-in:  Apps · Pricing · Docs · Studio · Me + avatar dropdown
+// v17 TopBar — declutter v2 2026-04-24 (#572: "too many nav bar items").
+//   Centre nav (always): Apps · Docs · Pricing                       (3 items)
+//   Right (anon, preview): GH stars · Publish (CTA) · Sign in · Sign up
+//   Right (anon, waitlist): GH stars · Publish (CTA) · Join waitlist
+//   Right (authed):         GH stars · Publish (CTA) · avatar dropdown
+//   Avatar dropdown:        Studio · Me · API keys · Settings · Sign out
 //
-// Changelog was demoted to the footer (still linked via PublicFooter + the
-// /changelog route stays live). Primary nav now holds 3 items for guests,
-// 5 for authed users. Replaces the old Store/Studio pill toggle pattern.
-// Mobile: hamburger collapses all links to a vertical column menu.
+// Publish is the single primary action — brand-green pill on the right.
+// On waitlist-prod it opens the waitlist; on preview it routes to
+// /studio/build. Studio + Me are no longer top-level links — they live
+// behind the avatar dropdown so the chrome stays calm for visitors who
+// don't have an account yet. Mirrors Vercel / Linear / Raycast.
+//
+// Changelog stays in the footer (#572 nav declutter, original 04-23 pass).
+// Mobile: hamburger collapses everything to a vertical column menu.
 export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
@@ -250,7 +278,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Centre nav: Apps · Pricing · Docs · Changelog. Hidden on /login + /signup. */}
+        {/* Centre nav (#572): exactly 3 items — Apps · Docs · Pricing.
+            Self-host moved to the landing band's anchor + footer link;
+            Deploy/Publish promoted to the brand-green CTA on the right;
+            Studio + Me hidden behind the avatar dropdown for authed users.
+            Hidden on /login + /signup so the centred logo lockup reads
+            cleanly on auth pages. */}
         {!isLoginPage && (
           <nav
             className="topbar-links topbar-links-desktop topbar-centre-nav"
@@ -275,14 +308,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Apps
             </Link>
             <Link
-              to="/pricing"
-              data-testid="topbar-pricing"
-              aria-current={isPricing ? 'page' : undefined}
-              style={navLinkStyle(isPricing)}
-            >
-              Pricing
-            </Link>
-            <Link
               to="/protocol"
               data-testid="topbar-docs"
               aria-current={isDocs ? 'page' : undefined}
@@ -290,64 +315,14 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             >
               Docs
             </Link>
-            {/* Self-host — deep-links to the landing band. Federico
-                2026-04-24: "make self-hosting prominent". Keeping it
-                in the centre nav (not the footer) so commercial
-                evaluators can see it from any page. */}
             <Link
-              to="/#self-host"
-              data-testid="topbar-selfhost"
-              style={navLinkStyle(false)}
+              to="/pricing"
+              data-testid="topbar-pricing"
+              aria-current={isPricing ? 'page' : undefined}
+              style={navLinkStyle(isPricing)}
             >
-              Self-host
+              Pricing
             </Link>
-            {deployEnabled ? (
-              <Link
-                to="/studio/build"
-                data-testid="topbar-deploy"
-                aria-current={isPublishNav ? 'page' : undefined}
-                style={navLinkStyle(isPublishNav)}
-              >
-                Deploy
-              </Link>
-            ) : waitlistMode ? (
-              <button
-                type="button"
-                data-testid="topbar-publish-waitlist"
-                onClick={() => goWaitlistPublish('topbar-publish')}
-                style={{
-                  ...navLinkStyle(false),
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Publish
-              </button>
-            ) : null}
-            {/* Changelog demoted to footer 2026-04-23 (nav declutter). */}
-            {/* Logged-in only: Studio + Me */}
-            {isAuthenticated && (
-              <>
-                <Link
-                  to="/studio"
-                  data-testid="topbar-studio"
-                  aria-current={isStudio ? 'page' : undefined}
-                  style={navLinkStyle(isStudio)}
-                >
-                  {studioNavLabel}
-                </Link>
-                <Link
-                  to="/me"
-                  data-testid="topbar-me"
-                  aria-current={isMe ? 'page' : undefined}
-                  style={navLinkStyle(isMe)}
-                >
-                  Me
-                </Link>
-              </>
-            )}
           </nav>
         )}
 
@@ -366,6 +341,33 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               and GH becomes the single rightmost affordance on
               waitlist-prod (where Sign in / Sign up are hidden). */}
           <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />
+
+          {/* Primary Publish CTA (#572) — brand-green pill. Always shown
+              (anon + authed alike), hidden only on /login + /signup so the
+              auth pages stay focused. Routes to /studio/build on preview;
+              opens the waitlist on prod. While the deploy flag is loading
+              (deployEnabledFlag === null) we render nothing to avoid the
+              flash. */}
+          {!isLoginPage && deployEnabled && (
+            <Link
+              to="/studio/build"
+              data-testid="topbar-publish-cta"
+              aria-current={isPublishNav ? 'page' : undefined}
+              style={publishCtaStyle}
+            >
+              Publish
+            </Link>
+          )}
+          {!isLoginPage && waitlistMode && (
+            <button
+              type="button"
+              data-testid="topbar-publish-cta-waitlist"
+              onClick={() => goWaitlistPublish('topbar-publish')}
+              style={publishCtaStyle}
+            >
+              Publish
+            </button>
+          )}
 
           {/* Sign in / Sign up. Hidden in waitlist mode (floom.dev) and
               while session is still loading (prevents the "Sign in +
@@ -479,21 +481,31 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     zIndex: 50,
                   }}
                 >
-                  <Link
-                    to="/me"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    style={menuItemStyle}
-                  >
-                    My dashboard
-                  </Link>
+                  {/* #572 — order: Studio (with app count badge) · Me ·
+                      API keys · Settings · Sign out. Studio + Me used to
+                      live as top-level nav items; they are now dropdown-
+                      only so the centre nav can stay at 3 items. The
+                      old "My dashboard" entry was redundant with Me and
+                      has been folded in. */}
                   <Link
                     to="/studio"
                     onClick={() => setDropOpen(false)}
                     role="menuitem"
+                    data-testid="topbar-user-studio"
+                    aria-current={isStudio ? 'page' : undefined}
                     style={menuItemStyle}
                   >
                     {studioNavLabel}
+                  </Link>
+                  <Link
+                    to="/me"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-me"
+                    aria-current={isMe ? 'page' : undefined}
+                    style={menuItemStyle}
+                  >
+                    Me
                   </Link>
                   <Link
                     to="/me/api-keys"
@@ -602,7 +614,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               </button>
             </div>
 
-            {/* Primary nav links — column list matching desktop labels */}
+            {/* Primary nav links — column list matching desktop labels.
+                #572: Apps · Docs · Pricing only. Self-host moves to the
+                landing band's anchor + footer; Studio + Me move to the
+                authed-only block below; Publish becomes the bottom CTA. */}
             <Link
               to="/apps"
               className="topbar-mobile-link topbar-mobile-link-primary"
@@ -613,17 +628,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             >
               <MobileAppsIcon />
               <span>Apps</span>
-            </Link>
-
-            <Link
-              to="/pricing"
-              className="topbar-mobile-link"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              data-testid="topbar-mobile-pricing"
-              aria-current={isPricing ? 'page' : undefined}
-            >
-              Pricing
             </Link>
 
             <Link
@@ -638,52 +642,18 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             </Link>
 
             <Link
-              to="/#self-host"
+              to="/pricing"
               className="topbar-mobile-link"
               role="menuitem"
               onClick={() => setMenuOpen(false)}
-              data-testid="topbar-mobile-selfhost"
+              data-testid="topbar-mobile-pricing"
+              aria-current={isPricing ? 'page' : undefined}
             >
-              Self-host
+              Pricing
             </Link>
 
-            {deployEnabled ? (
-              <Link
-                to="/studio/build"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-deploy"
-                aria-current={isPublishNav ? 'page' : undefined}
-              >
-                Deploy
-              </Link>
-            ) : waitlistMode ? (
-              <button
-                type="button"
-                className="topbar-mobile-link"
-                role="menuitem"
-                data-testid="topbar-mobile-publish-waitlist"
-                onClick={() => {
-                  setMenuOpen(false);
-                  goWaitlistPublish('topbar-publish-mobile');
-                }}
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  font: 'inherit',
-                  color: 'inherit',
-                }}
-              >
-                Publish
-              </button>
-            ) : null}
-
-            {/* Changelog demoted to footer 2026-04-23 (nav declutter). */}
-
+            {/* Authed-only: Studio + Me + API keys + Settings.
+                Same items the desktop avatar dropdown holds. */}
             {isAuthenticated && (
               <>
                 <Link
@@ -724,6 +694,47 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   Settings
                 </Link>
               </>
+            )}
+
+            {/* Publish CTA — primary action on mobile too. Above the auth
+                pills so the green pill anchors the bottom of the menu. */}
+            {!isLoginPage && deployEnabled && (
+              <Link
+                to="/studio/build"
+                className="topbar-mobile-cta"
+                role="menuitem"
+                onClick={() => setMenuOpen(false)}
+                data-testid="topbar-mobile-publish"
+                aria-current={isPublishNav ? 'page' : undefined}
+                style={{
+                  background: ACCENT,
+                  borderColor: ACCENT,
+                  color: '#fff',
+                }}
+              >
+                Publish
+              </Link>
+            )}
+            {!isLoginPage && waitlistMode && (
+              <button
+                type="button"
+                className="topbar-mobile-cta"
+                role="menuitem"
+                data-testid="topbar-mobile-publish-waitlist"
+                onClick={() => {
+                  setMenuOpen(false);
+                  goWaitlistPublish('topbar-publish-mobile');
+                }}
+                style={{
+                  background: ACCENT,
+                  borderColor: ACCENT,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                }}
+              >
+                Publish
+              </button>
             )}
 
             {!isAuthenticated && !isLoginPage && deployEnabled && (
