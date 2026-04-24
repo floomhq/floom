@@ -43,16 +43,6 @@ const HERO_SECTION: CSSProperties = {
   textAlign: 'center',
 };
 
-const EYEBROW_STYLE: CSSProperties = {
-  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
-  fontWeight: 700,
-  color: 'var(--muted)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.08em',
-  margin: '0 0 14px',
-};
-
 // Launch Week pill — neutral #f5f5f3 bg, #1b1a17 ink, green accent dot.
 // Contrast on #f5f5f3: #1b1a17 = 16.1:1 (AAA). Color is NOT the info carrier —
 // the text "Launch week · 27 April 2026" carries the meaning on its own.
@@ -113,14 +103,6 @@ const LEDE_STYLE: CSSProperties = {
   color: 'var(--muted)',
   margin: '0 auto 8px',
   maxWidth: 560,
-};
-
-const MICRO_STYLE: CSSProperties = {
-  fontSize: 13,
-  color: 'var(--muted)',
-  margin: '0 auto',
-  maxWidth: 520,
-  opacity: 0.85,
 };
 
 // ---- Email form -----------------------------------------------------------

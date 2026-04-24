@@ -11,9 +11,9 @@
 //   sidebar reads at a glance (Getting started / Examples / Protocol /
 //   Runtime / Deploy / API reference…). Icons are stroke-only, colored
 //   --muted, stay neutral on active state. No emojis.
-// - Active link: left border accent (brand green, 2px) + bold weight,
-//   not a full ink pill — matches Stripe / Linear docs active style and
-//   keeps the restrained palette.
+// - Active link: tinted background + bold weight, no colored left
+//   border (design rule: no colored left borders on cards — AI slop).
+//   Background-only active state keeps the palette restrained.
 // - Hover: subtle card-tint bg, not green.
 // - Mobile: drawer toggle with hamburger icon, closes on link click,
 //   is the only thing visible on docs landing at 390px.
@@ -130,25 +130,23 @@ const listStyle: CSSProperties = {
   margin: '0 0 22px',
 };
 
-// Link row — uses a 2px transparent left border by default so the active
-// state (accent left stripe) doesn't shift text on state change.
+// Link row — background-only active state (no colored left border,
+// per design rule "no colored left borders on cards").
 const linkBase: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  padding: '7px 10px 7px 12px',
+  padding: '7px 10px',
   borderRadius: 8,
-  borderLeft: '2px solid transparent',
   fontSize: 13,
   color: 'var(--muted)',
   textDecoration: 'none',
   lineHeight: 1.3,
-  transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+  transition: 'background 0.12s, color 0.12s',
 };
 
 const linkActive: CSSProperties = {
   ...linkBase,
-  borderLeft: '2px solid var(--accent)',
   background: 'var(--accent-soft)',
   color: 'var(--ink)',
   fontWeight: 600,

@@ -504,28 +504,27 @@ export function ShareModal({
           )}
         </section>
 
-        {/* ───────── People with access ───────── */}
-        <section style={{ padding: '4px 20px 16px' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 11.5,
-              fontWeight: 600,
-              color: 'var(--muted, #6c6a66)',
-              letterSpacing: 0.4,
-              textTransform: 'uppercase',
-              margin: '4px 0 8px',
-            }}
-          >
-            <Users size={12} aria-hidden="true" /> People with access
-          </div>
-          {rows.length === 0 ? (
-            <p style={{ fontSize: 12.5, color: 'var(--muted, #6c6a66)', margin: 0 }}>
-              Only you, for now. Invite teammates above.
-            </p>
-          ) : (
+        {/* ───────── People with access ─────────
+            Only render when there are actual rows — otherwise the
+            "Only you, for now" copy is redundant with the email
+            input above. */}
+        {rows.length > 0 && (
+          <section style={{ padding: '4px 20px 16px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: 'var(--muted, #6c6a66)',
+                letterSpacing: 0.4,
+                textTransform: 'uppercase',
+                margin: '4px 0 8px',
+              }}
+            >
+              <Users size={12} aria-hidden="true" /> People with access
+            </div>
             <ul
               data-testid="share-modal-access-list"
               style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}
@@ -581,8 +580,8 @@ export function ShareModal({
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
+        )}
 
         {/* ───────── Link sharing ───────── */}
         <section
@@ -631,7 +630,7 @@ export function ShareModal({
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={{ fontSize: 13, fontWeight: 500 }}>Public link</span>
               <span style={{ fontSize: 11.5, color: 'var(--muted, #6c6a66)' }}>
-                Subject to a ~1h review before it appears in the Floom store (tracked in #637).
+                Subject to a ~1h review before it appears in the Floom store.
               </span>
             </span>
           </label>
@@ -694,15 +693,15 @@ export function ShareModal({
             </button>
           </div>
 
-          <p style={{ fontSize: 11.5, color: 'var(--muted, #6c6a66)', margin: '8px 0 0' }}>
-            Signed links stay active until you revoke them, even while the app is private.
+          <p style={{ fontSize: 11, color: 'var(--muted, #6c6a66)', margin: '6px 0 0' }}>
+            Signed links stay active until revoked.
           </p>
         </section>
 
         {/* ───────── Visibility radio ───────── */}
         <section
           style={{
-            padding: '12px 20px 20px',
+            padding: '10px 20px 16px',
             borderTop: '1px solid var(--line, rgba(27,26,23,0.08))',
           }}
         >
@@ -713,7 +712,7 @@ export function ShareModal({
               color: 'var(--muted, #6c6a66)',
               letterSpacing: 0.4,
               textTransform: 'uppercase',
-              margin: '0 0 10px',
+              margin: '0 0 8px',
             }}
           >
             Visibility
@@ -725,7 +724,7 @@ export function ShareModal({
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 6,
+              gap: 4,
             }}
           >
             {VISIBILITY_OPTIONS.map((opt) => {
@@ -737,8 +736,8 @@ export function ShareModal({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    padding: '8px 10px',
-                    borderRadius: 10,
+                    padding: '6px 10px',
+                    borderRadius: 8,
                     border: active
                       ? '1px solid var(--accent, #047857)'
                       : '1px solid var(--line, rgba(27,26,23,0.12))',
@@ -754,7 +753,7 @@ export function ShareModal({
                     onChange={() => onVisibilityChange?.(opt.value)}
                     style={{ accentColor: 'var(--accent, #047857)' }}
                   />
-                  <span style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 13, fontWeight: 500 }}>{opt.label}</span>
                     <span style={{ fontSize: 11.5, color: 'var(--muted, #6c6a66)' }}>{opt.hint}</span>
                   </span>
