@@ -378,7 +378,7 @@ export function DocsLandingPage() {
           <pre style={heroCodeBlockStyle}>
             <span style={heroCodeCommentStyle}>{'# macOS / Linux — one command, no Node required\n'}</span>
             <span style={heroCodePromptStyle}>{'$ '}</span>
-            {'curl -fsSL https://floom.dev/install | bash\n\n'}
+            {'curl -fsSL https://floom.dev/install.sh | bash\n\n'}
             <span style={heroCodeCommentStyle}>{'# verify\n'}</span>
             <span style={heroCodePromptStyle}>{'$ '}</span>
             {'floom --version'}
