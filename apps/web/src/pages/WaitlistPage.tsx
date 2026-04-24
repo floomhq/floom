@@ -1,10 +1,18 @@
 // /waitlist — "what to expect" landing + email capture (issue #591).
 //
-// 2026-04-23 rewrite: the previous version was a bare email form. This
-// upgrade adds:
+// 2026-04-24 reframe (Federico): Floom is already live today. The repo is
+// public, you can self-host with one Docker command. The waitlist is for
+// Floom Cloud, the hosted version, going live 27 April 2026. Copy + order
+// updated to make all four points unmissable:
+//   1. You can already self-host now
+//   2. Cloud launches within a week
+//   3. We'll email you when Cloud opens
+//   4. The repo is public, try it today
+//
+// Layout (unchanged):
 //   1. Vision band — "Infrastructure for agentic work."
-//   2. Email form (unchanged endpoint, same testids so e2e still passes)
-//   3. "What's shipping" — 3 cards: launch apps, publish flow, self-host
+//   2. Email form + GitHub repo link (unchanged endpoint + testids)
+//   3. "What's shipping" — 3 cards: self-host (now first), apps, publish
 //   4. Two ICPs (makers + teams), brief
 //   5. Timeline line
 //   6. Footer links to /docs + /apps so curious visitors can explore now
@@ -160,24 +168,29 @@ interface ShippingCard {
   cta: { label: string; to: string };
 }
 
+// 2026-04-24: reordered to put Self-host first. Federico's ask is to
+// lead with "Floom is already live today" — self-host is the thing that
+// actually works right now, so it goes first. Cloud (the thing you're
+// on the waitlist for) opens 27 April. Launch apps + Publish flow stay
+// as the things that will light up when Cloud opens.
 const SHIPPING: ShippingCard[] = [
+  {
+    icon: Server,
+    title: 'Self-host today',
+    body: 'Run Floom on your own server with one Docker command. Open source, public repo, no waitlist, no signup. Already live.',
+    cta: { label: 'Self-host guide', to: '/docs/self-host' },
+  },
   {
     icon: Rocket,
     title: 'Launch apps to run now',
-    body: 'Lead Scorer, Resume Screener, Competitor Analyzer — real AI apps doing real work. No account needed to try them.',
+    body: 'Lead Scorer, Resume Screener, Competitor Analyzer: real AI apps doing real work. No account needed to try them.',
     cta: { label: 'Browse the store', to: '/apps' },
   },
   {
     icon: Layers,
     title: 'Publish any OpenAPI',
-    body: 'Paste an OpenAPI URL, get three surfaces: a web page, an MCP server, and a typed HTTP endpoint — all at once.',
+    body: 'Paste an OpenAPI URL, get three surfaces at once: a web page, an MCP server, and a typed HTTP endpoint.',
     cta: { label: 'Read the docs', to: '/docs' },
-  },
-  {
-    icon: Server,
-    title: 'Self-host path',
-    body: 'Run the whole thing yourself. One container, your infra, your data. Open source from day one.',
-    cta: { label: 'Self-host guide', to: '/docs/self-host' },
   },
 ];
 
@@ -425,7 +438,7 @@ export function WaitlistPage() {
   return (
     <PageShell
       title="Join the Floom waitlist"
-      description="Floom is the protocol and runtime for agentic work. Join the waitlist and see what's shipping — launch apps, a publish flow, and a self-host path."
+      description="Floom is already live. Self-host today with one Docker command, or join the waitlist for Floom Cloud, going live 27 April 2026."
       contentStyle={{ maxWidth: 1120 }}
     >
       {/* 1. Vision band ---------------------------------------------------- */}
@@ -441,12 +454,12 @@ export function WaitlistPage() {
         </div>
         <h1 style={H1_STYLE}>Infrastructure for agentic work.</h1>
         <p style={LEDE_STYLE}>
-          Production-grade runtime + protocol for AI apps. Open source.
-          Get early access to the runtime for the agent era.
+          Floom is already live. Self-host today with one Docker command, or
+          join the waitlist for Floom Cloud, going live 27 April 2026.
         </p>
         <p style={MICRO_STYLE}>
-          Deploy is rolling out in waves. Drop your email and we&rsquo;ll let
-          you in as soon as your slot opens.
+          We&rsquo;ll email you the moment Cloud opens. The repo is public, so
+          you don&rsquo;t have to wait to build with it.
         </p>
       </section>
 
@@ -475,27 +488,58 @@ export function WaitlistPage() {
                   margin: '0 0 20px',
                 }}
               >
-                We&rsquo;ll email you when your slot opens. Meanwhile, every
-                app on the store is free to run — no signup needed.
+                We&rsquo;ll email you the moment Floom Cloud opens (27 April
+                2026). Don&rsquo;t want to wait? Self-host today, one Docker
+                command, no signup.
               </p>
-              <Link
-                to="/apps"
+              <div
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '10px 18px',
-                  borderRadius: 8,
-                  background: 'var(--ink)',
-                  color: '#fff',
-                  textDecoration: 'none',
-                  fontSize: 14,
-                  fontWeight: 600,
+                  display: 'flex',
+                  gap: 10,
+                  justifyContent: 'center',
+                  flexWrap: 'wrap',
                 }}
               >
-                Browse the store
-                <ArrowRight size={14} strokeWidth={2} />
-              </Link>
+                <Link
+                  to="/docs/self-host"
+                  data-testid="waitlist-success-self-host"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '10px 18px',
+                    borderRadius: 8,
+                    background: 'var(--ink)',
+                    color: '#fff',
+                    textDecoration: 'none',
+                    fontSize: 14,
+                    fontWeight: 600,
+                  }}
+                >
+                  Self-host now
+                  <ArrowRight size={14} strokeWidth={2} />
+                </Link>
+                <Link
+                  to="/apps"
+                  data-testid="waitlist-success-browse"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '10px 18px',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: 'var(--ink)',
+                    border: '1px solid var(--line)',
+                    textDecoration: 'none',
+                    fontSize: 14,
+                    fontWeight: 600,
+                  }}
+                >
+                  Browse the store
+                  <ArrowRight size={14} strokeWidth={2} />
+                </Link>
+              </div>
             </div>
           ) : (
             <>
@@ -642,12 +686,42 @@ export function WaitlistPage() {
             </>
           )}
         </div>
+        {/* Secondary "view the repo" link — small, below the card. Federico
+            2026-04-24: the repo is public, users should be able to reach
+            it in one click without scrolling to the self-host card. */}
+        {!success && (
+          <div
+            style={{
+              textAlign: 'center',
+              marginTop: 14,
+              fontSize: 13,
+              color: 'var(--muted)',
+            }}
+          >
+            Can&rsquo;t wait?{' '}
+            <a
+              href="https://github.com/floomhq/floom"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="waitlist-repo-link"
+              style={{
+                color: 'var(--ink)',
+                fontWeight: 600,
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              View the repo on GitHub
+            </a>{' '}
+            and self-host today.
+          </div>
+        )}
       </section>
 
       {/* 3. What's shipping ----------------------------------------------- */}
       <section style={SHIPPING_SECTION} data-testid="waitlist-shipping">
         <div style={SECTION_HEAD_EYEBROW}>What&rsquo;s shipping</div>
-        <h2 style={SECTION_H2}>Three things live the day you&rsquo;re in.</h2>
+        <h2 style={SECTION_H2}>Self-host today. Cloud in a week.</h2>
         <div className="waitlist-shipping-grid" style={SHIPPING_GRID}>
           {SHIPPING.map((card) => {
             const Icon = card.icon;
