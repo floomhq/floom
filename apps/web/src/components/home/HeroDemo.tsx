@@ -104,7 +104,7 @@ const STATE_DURATION: Record<DemoState, number> = {
   // register the DEPLOYED moment (label flip + URL line + pulse) before the
   // canvas morphs to Use. Previously 3.2s — too short to feel celebratory.
   deploy: 4400,
-  use: 4000,
+  run: 4000,
 };
 
 /**
