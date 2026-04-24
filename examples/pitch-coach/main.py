@@ -49,9 +49,14 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MODEL_ID = "gemini-3-pro-preview"
-HTTP_TIMEOUT_MS = int(os.environ.get("FLOOM_APP_HTTP_TIMEOUT_MS", "8500"))
-TOTAL_BUDGET_S = 10.0
+DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
+# Benchmarked 2026-04-25: gemini-2.5-flash-lite with JSON schema returns in
+# 1.4-2.1s on comparable prompts. Gemini enforces a 10s minimum request
+# deadline at the API layer (reject <10000ms with INVALID_ARGUMENT), so we
+# set 10500ms as a floor. Actual wall-clock is still 2-3s; TOTAL_BUDGET_S
+# kicks in if the server is the bottleneck.
+HTTP_TIMEOUT_MS = int(os.environ.get("FLOOM_APP_HTTP_TIMEOUT_MS", "10500"))
+TOTAL_BUDGET_S = 8.0
 MIN_PITCH_CHARS = 20
 MAX_PITCH_CHARS = 500
 REWRITE_ANGLES = ("user-outcome", "market-size", "technical-moat")
@@ -130,11 +135,9 @@ def _log(msg: str) -> None:
 
 def _resolve_model() -> str:
     model = (os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL_ID).strip()
-    if model == "gemini-3-pro":
-        model = DEFAULT_MODEL_ID
-    if not model.startswith("gemini-3-pro"):
+    if not (model.startswith("gemini-2.5") or model.startswith("gemini-3")):
         raise SystemExit(
-            f"refusing to run: GEMINI_MODEL must be gemini-3-pro* (got '{model}')"
+            f"refusing to run: GEMINI_MODEL must be gemini-2.5.x or gemini-3.x (got '{model}')"
         )
     return model
 
