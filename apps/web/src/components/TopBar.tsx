@@ -34,6 +34,18 @@ const MUTED = '#585550';
 const ACCENT = '#047857';
 const BG = '#fafaf8';
 
+// Brand lockup sizing (#632): wordmark bumped from inherited 14px to a
+// bolder 22/700 on desktop so the logo outweighs surrounding CTAs, and
+// the icon goes from 20→24 to keep the lockup proportional. Compact
+// mode (/p/:slug run view) hides the wordmark entirely (unchanged) and
+// shrinks the mark so the TopBar can still collapse to 40px. Mobile
+// uses the same 22/700 — at 390px the wordmark + 24px mark + hamburger
+// still leaves room for CTAs.
+const WORDMARK_SIZE = 22;
+const WORDMARK_WEIGHT = 700;
+const MARK_SIZE_DEFAULT = 24;
+const MARK_SIZE_COMPACT = 18;
+
 const navLinkBase: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
@@ -235,20 +247,40 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           padding: compact ? '0 20px' : undefined,
         }}
       >
-        {/* Logo */}
+        {/* Logo lockup (#632): mark from <Logo /> + wordmark rendered
+            directly here so we can bump font-size past Logo.tsx's baked-in
+            14px. Gap 8px keeps mark and wordmark optically balanced. */}
         <Link
           to="/"
           className="brand"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
+            gap: 8,
             textDecoration: 'none',
             color: INK,
             flexShrink: 0,
           }}
           aria-label="floom — home"
         >
-          <Logo size={compact ? 18 : 20} withWordmark={!compact} variant="glow" />
+          <Logo
+            size={compact ? MARK_SIZE_COMPACT : MARK_SIZE_DEFAULT}
+            withWordmark={false}
+            variant="glow"
+          />
+          {!compact && (
+            <span
+              style={{
+                fontSize: WORDMARK_SIZE,
+                fontWeight: WORDMARK_WEIGHT,
+                letterSpacing: '-0.02em',
+                lineHeight: 1,
+                color: INK,
+              }}
+            >
+              floom
+            </span>
+          )}
         </Link>
 
         {/* Studio-only mobile sidebar toggle */}
@@ -323,6 +355,21 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             >
               Pricing
             </Link>
+            {/* Studio (#641): 4th nav item, authed-only. Signed-out users
+                still see the 3-item nav (Apps · Docs · Pricing). Studio
+                is the creator's working area and deserves nav-level
+                presence once a user has an account. Deep-link exists in
+                the avatar dropdown too; this just surfaces it. */}
+            {isAuthenticated && (
+              <Link
+                to="/studio"
+                data-testid="topbar-studio"
+                aria-current={isStudio ? 'page' : undefined}
+                style={navLinkStyle(isStudio)}
+              >
+                Studio
+              </Link>
+            )}
           </nav>
         )}
 
@@ -413,11 +460,13 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 onClick={() => setDropOpen((v) => !v)}
                 data-testid="topbar-user-trigger"
                 aria-label="Account menu"
+                aria-haspopup="menu"
+                aria-expanded={dropOpen}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
-                  padding: '4px 10px 4px 4px',
+                  gap: 6,
+                  padding: '4px 8px 4px 4px',
                   border: '1px solid rgba(14,14,12,0.14)',
                   borderRadius: 999,
                   background: BG,
@@ -463,6 +512,28 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 >
                   {userLabel}
                 </span>
+                {/* Chevron-down affordance (#641) — signals the avatar
+                    is a menu trigger, not a profile picture. Rotates
+                    180° when open so the state reads at a glance. */}
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={MUTED}
+                  strokeWidth="2.25"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  data-testid="topbar-user-chevron"
+                  style={{
+                    flexShrink: 0,
+                    transition: 'transform 0.12s ease',
+                    transform: dropOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                  }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </button>
               {dropOpen && (
                 <div
@@ -481,12 +552,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     zIndex: 50,
                   }}
                 >
-                  {/* #572 — order: Studio (with app count badge) · Me ·
-                      API keys · Settings · Sign out. Studio + Me used to
-                      live as top-level nav items; they are now dropdown-
-                      only so the centre nav can stay at 3 items. The
-                      old "My dashboard" entry was redundant with Me and
-                      has been folded in. */}
+                  {/* #641 — order per Federico: Studio · Apps I run ·
+                      Settings · Sign out. "Apps I run" replaces the old
+                      "Me" / "Runtime" phrasing ("runtime i meant me —
+                      where user runs apps"). Points at /me/runs, which
+                      redirects to /me#recent-runs. API keys collapsed
+                      into Settings to keep the menu at four items. */}
                   <Link
                     to="/studio"
                     onClick={() => setDropOpen(false)}
@@ -498,28 +569,20 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     {studioNavLabel}
                   </Link>
                   <Link
-                    to="/me"
+                    to="/me/runs"
                     onClick={() => setDropOpen(false)}
                     role="menuitem"
-                    data-testid="topbar-user-me"
+                    data-testid="topbar-user-runs"
                     aria-current={isMe ? 'page' : undefined}
                     style={menuItemStyle}
                   >
-                    Me
-                  </Link>
-                  <Link
-                    to="/me/api-keys"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-api-keys"
-                    style={menuItemStyle}
-                  >
-                    API keys
+                    Apps I run
                   </Link>
                   <Link
                     to="/me/settings"
                     onClick={() => setDropOpen(false)}
                     role="menuitem"
+                    data-testid="topbar-user-settings"
                     style={menuItemStyle}
                   >
                     Settings
@@ -652,8 +715,8 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Pricing
             </Link>
 
-            {/* Authed-only: Studio + Me + API keys + Settings.
-                Same items the desktop avatar dropdown holds. */}
+            {/* Authed-only: Studio + Apps I run + Settings. Mirrors the
+                desktop avatar dropdown order (#641). */}
             {isAuthenticated && (
               <>
                 <Link
@@ -667,29 +730,21 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   {studioNavLabel}
                 </Link>
                 <Link
-                  to="/me"
+                  to="/me/runs"
                   className="topbar-mobile-link"
                   role="menuitem"
                   onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-me"
+                  data-testid="topbar-mobile-runs"
                   aria-current={isMe ? 'page' : undefined}
                 >
-                  Me
-                </Link>
-                <Link
-                  to="/me/api-keys"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-api-keys"
-                >
-                  API keys
+                  Apps I run
                 </Link>
                 <Link
                   to="/me/settings"
                   className="topbar-mobile-link"
                   role="menuitem"
                   onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-settings"
                 >
                   Settings
                 </Link>
