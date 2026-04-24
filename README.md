@@ -3,9 +3,9 @@
 
   <h1>Floom</h1>
 
-  <p><strong>Infrastructure for agentic work.</strong><br/>
-  <em>Vibe-coding speed. Production-grade safety.</em><br/>
-  Turn an OpenAPI spec into an MCP server, an HTTP endpoint, and a shareable web form. Auth, rate limits, run history, and shareable URLs built in.</p>
+  <p><strong>Ship AI apps fast.</strong><br/>
+  The protocol and runtime for agentic work.<br/>
+  Describe an app once with an OpenAPI spec. Floom gives you an MCP server, an HTTP endpoint, and a shareable web form — with auth, rate limits, run history, and output pages already wired up.</p>
 
   <p>
     <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/floomhq/floom/ci.yml?branch=main&label=CI" alt="CI status"/></a>
@@ -17,8 +17,9 @@
   </p>
 
   <p>
-    <a href="https://floom.dev/build">Try it</a> ·
+    <a href="https://floom.dev/apps">Try it</a> ·
     <a href="./docs/SELF_HOST.md">Self-host</a> ·
+    <a href="https://floom.dev/waitlist">Waitlist</a> ·
     <a href="./spec/protocol.md">Protocol</a> ·
     <a href="./docs/ROADMAP.md">Roadmap</a> ·
     <a href="https://discord.gg/8fXGXjxcRz">Discord</a>
@@ -34,6 +35,8 @@ OpenAPI spec ──▶ Floom ──▶ 3 surfaces
                            └─ Web form      (/p/:slug)
 ```
 
+> **Launching 2026-04-27.** Floom Cloud goes live on April 27. Self-host already works today — one Docker command, full stack. Three AI apps are live now for anyone to try: [Lead Scorer](https://floom.dev/p/lead-scorer), [Competitor Analyzer](https://floom.dev/p/competitor-analyzer), [Resume Screener](https://floom.dev/p/resume-screener). [Join the waitlist](https://floom.dev/waitlist) for Cloud.
+
 > **Install the CLI with `curl -fsSL https://floom.dev/install.sh | bash`.** Do NOT run `npm install floom` - the unscoped `floom` npm package is an unrelated third-party streaming tool. Details: [cli/floom/README.md](./cli/floom/README.md).
 
 Point Floom at an OpenAPI spec and you get all three, from the same manifest, with auth, rate limits, secret injection, run history, and shareable output pages. No glue code.
@@ -43,16 +46,16 @@ Point Floom at an OpenAPI spec and you get all three, from the same manifest, wi
 One container, no setup:
 
 ```bash
-docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest
 ```
 
-Or sign in at [**floom.dev**](https://floom.dev), paste an OpenAPI URL, hit publish. Full self-host walkthrough: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
+Or try the live apps at [floom.dev/apps](https://floom.dev/apps) — no install. Cloud (publish your own) lands 2026-04-27; [join the waitlist](https://floom.dev/waitlist). Full self-host walkthrough: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
 
 ## What it is
 
 Floom is a runtime and a protocol for agentic apps. You describe an app once with an OpenAPI spec; Floom gives you an MCP server an agent can call, a plain HTTP endpoint, and a web form on a shareable URL — all at the same time, all backed by the same auth and rate-limit layer.
 
-It's open source, MIT-licensed, and you can self-host the whole stack in one Docker container.
+The whole stack self-hosts in one Docker container. Source is [MIT](./LICENSE).
 
 ## The three surfaces
 
@@ -61,7 +64,7 @@ It's open source, MIT-licensed, and you can self-host the whole stack in one Doc
 ```json
 {
   "mcpServers": {
-    "resend": { "url": "http://localhost:3010/mcp/app/resend" }
+    "resend": { "url": "http://localhost:3000/mcp/app/resend" }
   }
 }
 ```
@@ -69,7 +72,7 @@ It's open source, MIT-licensed, and you can self-host the whole stack in one Doc
 **HTTP** — straight JSON-in, JSON-out. Use it from curl, a backend, a cron job.
 
 ```bash
-curl -X POST http://localhost:3010/api/resend/send-email \
+curl -X POST http://localhost:3000/api/resend/send-email \
   -H "Authorization: Bearer $FLOOM_TOKEN" \
   -H "content-type: application/json" \
   -d '{"from":"hi@floom.dev","to":"you@example.com","subject":"hi","text":"first"}'
