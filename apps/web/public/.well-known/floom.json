@@ -31,7 +31,7 @@
     "note": "The unscoped `floom` npm package is an unrelated third-party tool. Do not run `npm install floom`."
   },
   "selfhost": {
-    "docker": "docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest",
+    "docker": "docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest",
     "image": "ghcr.io/floomhq/floom-monorepo",
     "guide": "https://github.com/floomhq/floom/blob/main/docs/SELF_HOST.md"
   },

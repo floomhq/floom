@@ -39,7 +39,7 @@ Floom is open source (MIT) and self-hostable in a single Docker container. Hoste
 ## Self-host (one line)
 
 ```
-docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest
 ```
 
 Full guide: https://github.com/floomhq/floom/blob/main/docs/SELF_HOST.md

@@ -233,7 +233,7 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
           title="Use AI apps that actually work."
           lede="Score leads, triage tickets, screen resumes. No setup, no code. Install in Claude or run from a browser. Workspace, shared runs, one bill."
           bullets={[
-            { text: '22 apps live, free to run' },
+            { text: '3 AI apps, free to run' },
             { text: 'Install in Claude in 30 seconds' },
             { text: 'Workspace, roles, audit log on Team plan' },
           ]}

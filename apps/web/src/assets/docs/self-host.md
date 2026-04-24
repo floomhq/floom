@@ -15,13 +15,13 @@ cp apps.yaml.example apps.yaml
 docker compose up -d
 ```
 
-Open `http://localhost:3051`. The web UI, MCP server, and HTTP API are all on that port.
+Open `http://localhost:3000`. The web UI, MCP server, and HTTP API are all on that port.
 
 Verify it's alive:
 
 ```bash
-curl http://localhost:3051/api/health
-curl http://localhost:3051/api/hub | jq 'length'
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/hub | jq 'length'
 ```
 
 ## Quick start with plain docker run
@@ -30,11 +30,11 @@ If you don't want to clone the repo, a single `docker run` works:
 
 ```bash
 docker run -d --name floom \
-  -p 3051:3051 \
+  -p 3000:3000 \
   -v floom_data:/data \
   -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
-  ghcr.io/floomhq/floom:v0.3.0
+  ghcr.io/floomhq/floom-monorepo:latest
 ```
 
 Point it at your own `apps.yaml` and the hub populates on boot.
@@ -47,7 +47,7 @@ Source: [`docker/docker-compose.yml`](https://github.com/floomhq/floom/blob/main
 
 | Variable | Default | What it does |
 |---|---|---|
-| `PORT` | `3051` | HTTP port inside the container. |
+| `PORT` | `3000` | HTTP port inside the container. |
 | `DATA_DIR` | `/data` | Where SQLite + per-app state live. Mount a volume here to persist across restarts. |
 | `PUBLIC_URL` | `http://localhost:$PORT` | URL the server advertises in MCP payloads. |
 | `FLOOM_APPS_CONFIG` | — | Path to an `apps.yaml` file. When set, Floom ingests it on boot. |
@@ -114,7 +114,7 @@ docker compose pull
 docker compose up -d
 
 # Pin to a specific version
-docker pull ghcr.io/floomhq/floom:v0.3.0
+docker pull ghcr.io/floomhq/floom-monorepo:latest
 ```
 
 Tags are published for every tagged GitHub release. Use `:latest` for the bleeding edge, or a pinned version for production.
@@ -125,10 +125,10 @@ For private single-tenant deployments, set `FLOOM_AUTH_TOKEN` to a long random s
 
 ```bash
 docker run -d --name floom \
-  -p 3051:3051 \
+  -p 3000:3000 \
   -v floom_data:/data \
   -e FLOOM_AUTH_TOKEN="$(openssl rand -hex 32)" \
-  ghcr.io/floomhq/floom:v0.3.0
+  ghcr.io/floomhq/floom-monorepo:latest
 ```
 
 Every request to `/api/*`, `/mcp/*`, and `/p/*` must now include `Authorization: Bearer <token>`. `/api/health` stays open for probes.

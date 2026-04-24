@@ -22,7 +22,7 @@ import { track } from '../../lib/posthog';
 // 2026-04-24 (P1 #616): homepage said `floomhq/floom :3010` while pricing said
 // `floomhq/floom-docker :3000`, pointing users at two different images and
 // ports. Canonical form is the README's ghcr.io/floomhq/floom-monorepo:latest.
-const DOCKER_CMD = 'docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest';
+const DOCKER_CMD = 'docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest';
 
 export function SelfHostSection() {
   const [copied, setCopied] = useState(false);

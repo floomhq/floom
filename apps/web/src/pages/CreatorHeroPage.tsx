@@ -914,7 +914,7 @@ export function CreatorHeroPage() {
             >
               <div>
                 <span style={{ color: 'var(--muted)' }}>$</span>{' '}
-                <span style={{ color: 'var(--ink)', fontWeight: 600 }}>docker run -p 3051:3051 ghcr.io/floomhq/floom-monorepo:latest</span>
+                <span style={{ color: 'var(--ink)', fontWeight: 600 }}>docker run -p 3000:3000 ghcr.io/floomhq/floom-monorepo:latest</span>
               </div>
               <div style={{ color: 'var(--muted)', marginTop: 6 }}>
                 <span style={{ color: 'var(--accent)', fontWeight: 700 }}>✓</span> Floom is up. Browse the full catalog on localhost. Claude integration live.

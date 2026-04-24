@@ -518,7 +518,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
             Self-host Floom
           </h2>
           <p style={pStyle}>
-            The core runtime is MIT-licensed and ships as a single Docker image.
+            The core runtime is open source and ships as a single Docker image.
             Live reference instance:{' '}
             <a
               href="https://docker.floom.dev"
@@ -533,16 +533,16 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
 
           <h3 style={h3Style}>One command</h3>
           <pre style={codeBlockStyle}>{`# pulls from GitHub Container Registry, persists data in a named volume
-docker run -d -p 3051:3051 \\
+docker run -d -p 3000:3000 \\
   -v floom_data:/data \\
   -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \\
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \\
-  ghcr.io/floomhq/floom:v0.3.0`}</pre>
+  ghcr.io/floomhq/floom-monorepo:latest`}</pre>
 
           <p style={pStyle}>
-            Open <code>http://localhost:3051</code>, configure apps via{' '}
+            Open <code>http://localhost:3000</code>, configure apps via{' '}
             <code>apps.yaml</code>, point an MCP client at{' '}
-            <code>http://localhost:3051/mcp/app/&lt;slug&gt;</code>. Full guide at{' '}
+            <code>http://localhost:3000/mcp/app/&lt;slug&gt;</code>. Full guide at{' '}
             <Link to="/docs/self-host" style={{ color: 'var(--accent)' }}>
               Self-host
             </Link>

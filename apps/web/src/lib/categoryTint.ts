@@ -1,56 +1,24 @@
-// Category-tinted backgrounds for app glyph tiles (/apps grid, AppStripe).
-// Flat pastels (#91) so neighboring cards read as distinct buckets instead of
-// near-identical teal. Icons use a dark foreground on each tint for contrast.
+// App glyph tile tint for AppStripe (landing Showcase).
+//
+// 2026-04-24: collapsed from per-category pastels (green / red / blue /
+// pink / amber) to a single neutral tint across every category. The
+// landing Showcase rendered three AI apps in three different hues —
+// lead-scorer green, resume-screener red/pink, competitor-analyzer
+// blue — which fought the page's restrained single-accent palette
+// (brand green only). Category identity already reads via the
+// eyebrow label + app name; the tinted icon tile was redundant
+// signal that broke visual unity. Matches `CARD_NEUTRAL` in
+// AppGrid.tsx + `NEUTRAL_PALETTE` in TryTheseApps.tsx: warm dark
+// ink on a warm light neutral band.
+//
+// Function + type signatures kept stable so call-sites (AppStripe)
+// don't need to change. If we ever re-introduce category tints,
+// this is where to wire them back.
 
 export type CategoryTint = { bg: string; fg: string };
 
-/** Issue #91 palette — keyed by semantic bucket. */
-const BUCKET: Record<
-  'ai' | 'dev' | 'productivity' | 'analytics' | 'research',
-  CategoryTint
-> = {
-  ai: { bg: '#fef3c7', fg: '#78350f' },
-  dev: { bg: '#d7f1e0', fg: '#047857' },
-  productivity: { bg: '#dbeafe', fg: '#1e40af' },
-  analytics: { bg: '#fce7f3', fg: '#9d174d' },
-  research: { bg: '#fef2f2', fg: '#b91c1c' },
-};
+const NEUTRAL: CategoryTint = { bg: '#f5f5f3', fg: '#1b1a17' };
 
-const NEUTRAL: CategoryTint = { bg: '#f4f4f5', fg: '#27272a' };
-
-/** Maps manifest `HubApp.category` strings → bucket. Unlisted → neutral.
- *
- * Audit fix 2026-04-24: the seed/launch-demos categories (growth, hiring,
- * research) are the ones that actually appear on /apps today. Only
- * `research` was wired; `growth` and `hiring` fell through to neutral,
- * which is the bug #91 set out to fix. Mapping them explicitly restores
- * the category-tint promise.
- */
-const CATEGORY_TO_BUCKET: Record<string, keyof typeof BUCKET> = {
-  ai: 'ai',
-  marketing: 'ai',
-  design: 'ai',
-  writing: 'ai',
-  content: 'ai',
-  seo: 'ai',
-  text: 'ai',
-  sales: 'ai',
-  hr: 'ai',
-  'developer-tools': 'dev',
-  developer_tools: 'dev',
-  developer: 'dev',
-  utilities: 'dev',
-  productivity: 'productivity',
-  analytics: 'analytics',
-  research: 'research',
-  growth: 'dev',
-  hiring: 'productivity',
-};
-
-export function categoryTint(category: string | null | undefined): CategoryTint {
-  if (!category) return NEUTRAL;
-  const bucket =
-    CATEGORY_TO_BUCKET[category] ?? CATEGORY_TO_BUCKET[category.toLowerCase()];
-  if (!bucket) return NEUTRAL;
-  return BUCKET[bucket];
+export function categoryTint(_category: string | null | undefined): CategoryTint {
+  return NEUTRAL;
 }

@@ -126,7 +126,7 @@ apps:
 
 ```bash
 docker run -d --name floom \
-  -p 3051:3051 \
+  -p 3000:3000 \
   -v floom_data:/data \
   -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
@@ -134,7 +134,7 @@ docker run -d --name floom \
   ghcr.io/floomhq/floom-monorepo:latest
 ```
 
-Open `http://localhost:3051/p/resend`, or point your agent at `http://localhost:3051/mcp/app/resend`.
+Open `http://localhost:3000/p/resend`, or point your agent at `http://localhost:3000/mcp/app/resend`.
 
 Two manifest shapes ship out of the box:
 

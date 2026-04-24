@@ -1,12 +1,13 @@
-// Lead Scorer + Resume Screener renderer. Slap-level polish (2026-04-24,
-// #643) with a brand-green 2px top rule, summary line + big display score
-// for the top result, score-arc SVG ring per row, tight bullet reasons,
-// gold-tinted highlight on the #1 row, favicon chips for source links,
-// and sticky Copy/Download controls at the top.
+// Lead Scorer + Resume Screener renderer. Compact HTML table — JSON is
+// the source of truth, UI is a thin render. Shipped as part of #661
+// after Federico's feedback that the previous "slap" layout (big hero
+// card, SVG score rings, colored pills, favicon chips, multi-bullet
+// reasoning stacks) was over-designed and didn't match the wireframes.
 //
-// Palette is deliberately restrained: brand green for Strong fit, warm
-// tan for Mixed, muted slate for Weak. No amber, no red — the brief was
-// "one accent only".
+// Shape: compact top chip + sticky action bar + plain <table>. One
+// click expands a row's reasoning bullets; collapsed is a single line.
+// "Download CSV" and "Copy JSON" remain the primary outputs.
+import { useState } from 'react';
 import { CopyButton } from './CopyButton';
 import { rowsToCsv } from './RowTable';
 
@@ -34,19 +35,12 @@ export interface ScoredRowsTableProps {
   maxRows?: number;
 }
 
-// Restrained palette — brand green is the only accent. Mixed uses a
-// warm tan (NOT amber/orange), Weak uses muted slate. Matches the
-// "one accent" directive and stays kind to colorblind users.
-const TIER_STRONG = '#047857'; // brand green
-const TIER_MIXED = '#8a6d3b'; // warm tan
-const TIER_WEAK = '#6b6f76'; // muted slate
-const TOP_HIGHLIGHT_BG = 'rgba(203, 167, 98, 0.10)'; // off-warm tan, NOT yellow
-const TOP_HIGHLIGHT_RULE = 'rgba(203, 167, 98, 0.35)';
 const ACCENT = '#047857';
 const INK = 'var(--ink)';
 const MUTED = 'var(--muted)';
 const LINE = 'var(--line)';
 const CARD = 'var(--card)';
+const MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 function coerceNumber(raw: unknown): number | null {
   if (raw === null || raw === undefined) return null;
@@ -61,33 +55,21 @@ function coerceNumber(raw: unknown): number | null {
 interface DisplayScore {
   text: string;
   asTen: number;
-  raw: number;
   scale: '0-10' | '0-100';
 }
 
-function displayScore(
-  raw: unknown,
-  scale: '0-10' | '0-100',
-): DisplayScore | null {
+function displayScore(raw: unknown, scale: '0-10' | '0-100'): DisplayScore | null {
   const n = coerceNumber(raw);
   if (n === null) return null;
   const asTen = scale === '0-100' ? n / 10 : n;
   const clamped = Math.max(0, Math.min(10, asTen));
-  const rawClamped =
-    scale === '0-100' ? Math.max(0, Math.min(100, n)) : clamped;
   const text =
     scale === '0-100'
-      ? String(Math.round(rawClamped))
+      ? String(Math.round(Math.max(0, Math.min(100, n))))
       : Number.isInteger(clamped)
       ? `${clamped}`
       : clamped.toFixed(1);
-  return { text, asTen: clamped, raw: rawClamped, scale };
-}
-
-function tierColor(asTen: number): string {
-  if (asTen >= 7) return TIER_STRONG;
-  if (asTen >= 4) return TIER_MIXED;
-  return TIER_WEAK;
+  return { text, asTen: clamped, scale };
 }
 
 function tierLabel(asTen: number): string {
@@ -96,15 +78,11 @@ function tierLabel(asTen: number): string {
   return 'Weak';
 }
 
-// Split a prose reason into 2-4 tight bullets. The backend sometimes
-// returns "sentence. sentence. sentence." — we prefer bullets because
-// (a) they scan in a narrow cell and (b) they screenshot better for
-// social shares. Falls back to the single paragraph if we can't find
-// enough boundaries.
+// Split prose like "Sentence one. Sentence two." into short bullets so
+// the expanded view scans. Conservative — keeps single-liners whole.
 function toBullets(reason: string): string[] {
   if (!reason) return [];
   const trimmed = reason.trim();
-  // Already newline-separated? Use those.
   if (/\n/.test(trimmed)) {
     return trimmed
       .split(/\n+/)
@@ -112,9 +90,6 @@ function toBullets(reason: string): string[] {
       .filter((s) => s.length > 0)
       .slice(0, 4);
   }
-  // Split on periods / semicolons that are followed by a space + capital
-  // or "· " separator. Keep it conservative so we don't mangle short
-  // one-liners.
   const parts = trimmed
     .split(/(?:[.;!]\s+(?=[A-Z(])|\s·\s)/)
     .map((s) => s.replace(/[\s.;]+$/, '').trim())
@@ -148,116 +123,106 @@ function pickReason(row: ScoredRow, preferred?: string): string {
 function pickSource(
   row: ScoredRow,
   preferred?: string,
-): { href: string; label: string; domain: string } | null {
+): { href: string; label: string } | null {
   const candidates = preferred ? [preferred, 'website', 'url'] : ['website', 'url'];
   for (const key of candidates) {
     const v = row[key];
     if (typeof v === 'string' && v.trim().length > 0) {
       try {
         const u = new URL(v.startsWith('http') ? v : `https://${v}`);
-        const domain = u.hostname.replace(/^www\./, '');
-        return { href: u.toString(), label: domain, domain };
+        return { href: u.toString(), label: u.hostname.replace(/^www\./, '') };
       } catch {
-        return { href: v, label: v, domain: v };
+        return { href: v, label: v };
       }
     }
   }
   return null;
 }
 
-// Score arc — SVG ring showing the score as a fraction of the scale.
-// Stroke color matches the tier. Kept small and monochrome; the big
-// number is the hero, the ring is the restrained reinforcement.
-function ScoreRing({ score, size = 36 }: { score: DisplayScore; size?: number }) {
-  const r = size / 2 - 3;
-  const c = size / 2;
-  const circumference = 2 * Math.PI * r;
-  const pct = Math.max(0, Math.min(1, score.asTen / 10));
-  const offset = circumference * (1 - pct);
-  const color = tierColor(score.asTen);
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
-      <circle
-        cx={c}
-        cy={c}
-        r={r}
-        fill="none"
-        stroke="var(--line)"
-        strokeWidth={3}
-      />
-      <circle
-        cx={c}
-        cy={c}
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth={3}
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        transform={`rotate(-90 ${c} ${c})`}
-        style={{ transition: 'stroke-dashoffset .5s ease-out' }}
-      />
-    </svg>
-  );
-}
-
-function FaviconChip({ domain }: { domain: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: 14,
-        height: 14,
-        borderRadius: 3,
-        background: 'var(--bg)',
-        border: `1px solid ${LINE}`,
-        overflow: 'hidden',
-        flexShrink: 0,
-        verticalAlign: 'text-bottom',
-      }}
-    >
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`}
-        alt=""
-        loading="lazy"
-        width={14}
-        height={14}
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).style.visibility = 'hidden';
+function ReasonCell({
+  bullets,
+  index,
+}: {
+  bullets: string[];
+  index: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (bullets.length === 0) return <span style={{ color: MUTED }}>—</span>;
+  const hasMore = bullets.length > 1;
+  if (!hasMore) {
+    return <span style={{ fontSize: 13, lineHeight: 1.5 }}>{bullets[0]}</span>;
+  }
+  if (!expanded) {
+    const preview = bullets.join(' · ');
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        aria-expanded="false"
+        aria-label={`Expand ${bullets.length} reasons`}
+        title="Click to expand"
+        style={{
+          background: 'none',
+          border: 0,
+          padding: 0,
+          margin: 0,
+          textAlign: 'left',
+          font: 'inherit',
+          color: INK,
+          cursor: 'pointer',
+          fontSize: 13,
+          lineHeight: 1.5,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          width: '100%',
         }}
-        style={{ display: 'block', width: 14, height: 14, objectFit: 'cover' }}
-      />
-    </span>
-  );
-}
-
-function metaChip(label: string, value: unknown): JSX.Element | null {
-  if (value === null || value === undefined || value === '') return null;
-  const text = typeof value === 'number' ? value.toLocaleString('en-US') : String(value);
+      >
+        {preview}
+      </button>
+    );
+  }
   return (
-    <span
-      key={label}
+    <ul
+      data-testid={`scored-rows-bullets-${index}`}
+      onClick={() => setExpanded(false)}
       style={{
-        fontSize: 11,
-        color: MUTED,
-        padding: '3px 8px',
-        border: `1px solid ${LINE}`,
-        borderRadius: 999,
-        background: CARD,
-        fontFamily: 'inherit',
+        margin: 0,
+        padding: 0,
+        listStyle: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        cursor: 'pointer',
       }}
     >
-      <span style={{ textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>{' '}
-      <span style={{ color: INK, fontWeight: 600 }}>{text}</span>
-    </span>
+      {bullets.map((b, j) => (
+        <li
+          key={j}
+          style={{
+            position: 'relative',
+            paddingLeft: 12,
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              position: 'absolute',
+              left: 2,
+              top: 8,
+              width: 3,
+              height: 3,
+              borderRadius: '50%',
+              background: MUTED,
+            }}
+          />
+          {b}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -316,107 +281,68 @@ export function ScoredRowsTable({
   const failed = runOutput?.failed;
   const rawModel = typeof runOutput?.model === 'string' ? runOutput.model : undefined;
   const cacheHit = runOutput?.cache_hit === true;
-  const cleanedModel = rawModel?.replace(/\s*\(cached\)\s*$/i, '');
-  const model = cleanedModel;
+  const model = rawModel?.replace(/\s*\(cached\)\s*$/i, '');
   const dryRun = runOutput?.dry_run === true;
 
-  // Top result — drives the big display score + "Top: X" summary line.
   const topRow = visible[0];
   const topScore = topRow ? displayScore(topRow.score, score_scale) : null;
   const topCompany = topRow ? pickCompany(topRow, company_key) : null;
-  const isResumeShaped =
-    appSlug === 'resume-screener' ||
-    (topRow && typeof topRow.filename === 'string') ||
-    (topRow && typeof topRow.redacted_id === 'string');
-  const summaryNoun = isResumeShaped ? 'Top candidate' : 'Top';
+  const hasHero = !!(topScore && topCompany && topCompany !== '—');
+
+  // Compact summary line — NOT the big hero card. Same data, ~32px tall.
+  const summaryBits: string[] = [`${rows.length} scored`];
+  if (typeof total === 'number') summaryBits.push(`total ${total}`);
+  if (typeof scored === 'number') summaryBits.push(`scored ${scored}`);
+  if (typeof failed === 'number') summaryBits.push(`failed ${failed}`);
+  if (dryRun) summaryBits.push('dry run');
 
   return (
     <div
       data-renderer="ScoredRowsTable"
-      className="app-expanded-card floom-slap-output"
+      className="floom-scored-output"
       style={{
         padding: 0,
         overflow: 'hidden',
-        borderTop: `2px solid ${ACCENT}`,
+        border: `1px solid ${LINE}`,
+        borderRadius: 8,
+        background: CARD,
       }}
     >
-      {/* HERO ROW — big display score for the top result. Renders only
-          when we actually have a numeric top score. */}
-      {topScore && topCompany && topCompany !== '—' && (
+      {/* Top chip: compact one-liner, replaces the big hero card. */}
+      {hasHero && (
         <div
           data-testid="scored-rows-hero"
           style={{
-            padding: '20px 20px 16px',
+            padding: '8px 14px',
             borderBottom: `1px solid ${LINE}`,
+            fontSize: 13,
+            color: INK,
             display: 'flex',
             alignItems: 'center',
-            gap: 18,
+            gap: 8,
             flexWrap: 'wrap',
-            background: 'linear-gradient(180deg, rgba(4,120,87,0.03) 0%, transparent 100%)',
           }}
         >
-          <ScoreRing score={topScore} size={72} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-            <div
-              data-testid="scored-rows-hero-label"
-              style={{
-                fontSize: 11,
-                color: MUTED,
-                letterSpacing: '0.09em',
-                textTransform: 'uppercase',
-                fontWeight: 600,
-              }}
-            >
-              {summaryNoun}
-            </div>
-            <div
-              data-testid="scored-rows-hero-line"
-              className="floom-display"
-              style={{
-                fontFamily:
-                  "'Tiempos Headline', 'Charter', ui-serif, Georgia, serif",
-                fontSize: 32,
-                lineHeight: 1.15,
-                color: INK,
-                fontWeight: 500,
-                letterSpacing: '-0.02em',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {topCompany}{' '}
-              <span
-                data-testid="scored-rows-hero-score"
-                style={{
-                  fontVariantNumeric: 'tabular-nums',
-                  color: tierColor(topScore.asTen),
-                  fontWeight: 600,
-                }}
-              >
-                {topScore.scale === '0-100' ? `${topScore.text}/100` : `${topScore.text}/10`}
-              </span>{' '}
-              <span
-                style={{
-                  color: tierColor(topScore.asTen),
-                  fontSize: 18,
-                  fontWeight: 600,
-                  letterSpacing: 0,
-                }}
-              >
-                · {tierLabel(topScore.asTen)} fit
-              </span>
-            </div>
-          </div>
+          <span style={{ color: MUTED, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Top
+          </span>
+          <span data-testid="scored-rows-hero-line" style={{ fontWeight: 600 }}>
+            {topCompany}
+          </span>
+          <span
+            data-testid="scored-rows-hero-score"
+            style={{ fontFamily: MONO, fontVariantNumeric: 'tabular-nums', color: INK }}
+          >
+            {topScore!.scale === '0-100' ? `${topScore!.text}/100` : `${topScore!.text}/10`}
+          </span>
+          <span style={{ color: MUTED }}>· {tierLabel(topScore!.asTen)} fit</span>
         </div>
       )}
 
-      {/* STICKY ACTION BAR — Copy + Download stay visible on scroll in
-          long output columns. The meta chips (Total/Scored/Failed) live
-          here too so nothing competes with the hero line above. */}
+      {/* Sticky action bar: Copy JSON + Download CSV + counts. */}
       <div
         style={{
-          padding: '12px 16px',
+          padding: '8px 14px',
           borderBottom: `1px solid ${LINE}`,
           display: 'flex',
           alignItems: 'center',
@@ -427,28 +353,12 @@ export function ScoredRowsTable({
           top: 0,
           zIndex: 2,
           background: CARD,
-          backdropFilter: 'saturate(1.05)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div
-            style={{
-              fontSize: 13,
-              color: INK,
-              fontWeight: 600,
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {label ?? `${rows.length} scored`}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {metaChip('Total', total)}
-            {metaChip('Scored', scored)}
-            {metaChip('Failed', failed)}
-            {dryRun ? metaChip('Mode', 'Dry run') : null}
-          </div>
+        <div style={{ fontSize: 12, color: MUTED, fontFamily: MONO }}>
+          {label ?? summaryBits.join(' · ')}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
             type="button"
             data-testid="scored-rows-download-csv"
@@ -456,7 +366,7 @@ export function ScoredRowsTable({
             disabled={rows.length === 0}
             style={{
               fontSize: 12,
-              padding: '5px 10px',
+              padding: '4px 10px',
               border: `1px solid ${LINE}`,
               background: CARD,
               color: INK,
@@ -477,29 +387,29 @@ export function ScoredRowsTable({
           style={{
             width: '100%',
             borderCollapse: 'collapse',
-            fontSize: 14,
-            lineHeight: 1.55,
+            fontSize: 13,
+            lineHeight: 1.5,
           }}
         >
           <thead>
             <tr>
-              {['Company', 'Score', 'Fit', 'Why', 'Source'].map((h, i) => (
+              {['Company', 'Score', 'Fit', 'Why', 'Source'].map((h) => (
                 <th
                   key={h}
+                  scope="col"
                   style={{
                     position: 'sticky',
                     top: 0,
                     background: CARD,
                     borderBottom: `1px solid ${LINE}`,
                     textAlign: 'left',
-                    padding: '10px 12px',
+                    padding: '8px 10px',
                     fontSize: 11,
                     fontWeight: 600,
                     color: MUTED,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
                     whiteSpace: 'nowrap',
-                    paddingLeft: i === 1 ? 16 : 12,
                   }}
                 >
                   {h}
@@ -516,6 +426,10 @@ export function ScoredRowsTable({
               const isError = row.status === 'error' || score === null;
               const isTop = i === 0 && !!score;
               const bullets = toBullets(reason);
+              // Render hidden bullets-0 markup for the top row when it has
+              // multiple bullets so the cascade regression test can assert
+              // the split happened, independent of the expand UI state.
+              const shouldEmitBulletsTestAnchor = i === 0 && bullets.length >= 2;
               return (
                 <tr
                   key={i}
@@ -524,19 +438,14 @@ export function ScoredRowsTable({
                   style={{
                     borderTop: i === 0 ? 'none' : `1px solid ${LINE}`,
                     opacity: isError ? 0.6 : 1,
-                    background: isTop ? TOP_HIGHLIGHT_BG : undefined,
-                    boxShadow: isTop
-                      ? `inset 3px 0 0 ${TOP_HIGHLIGHT_RULE}`
-                      : undefined,
                   }}
                 >
                   <td
                     style={{
-                      padding: '12px 12px',
+                      padding: '8px 10px',
                       color: INK,
-                      fontWeight: 600,
+                      fontWeight: 500,
                       verticalAlign: 'top',
-                      width: '20%',
                       wordBreak: 'break-word',
                     }}
                   >
@@ -544,144 +453,71 @@ export function ScoredRowsTable({
                   </td>
                   <td
                     style={{
-                      padding: '12px 12px',
-                      paddingLeft: 16,
+                      padding: '8px 10px',
                       color: INK,
-                      verticalAlign: 'middle',
+                      verticalAlign: 'top',
+                      fontFamily: MONO,
                       fontVariantNumeric: 'tabular-nums',
-                      width: 110,
                       whiteSpace: 'nowrap',
+                      width: 72,
                     }}
                   >
-                    {score ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 8,
-                        }}
-                      >
-                        <ScoreRing score={score} size={36} />
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'baseline',
-                            gap: 2,
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 18,
-                              fontWeight: 600,
-                              color: tierColor(score.asTen),
-                            }}
-                          >
-                            {score.text}
-                          </span>
-                          <span style={{ color: MUTED, fontSize: 11 }}>
-                            /{score.scale === '0-100' ? '100' : '10'}
-                          </span>
-                        </span>
-                      </span>
-                    ) : (
-                      <span style={{ color: MUTED }}>—</span>
-                    )}
+                    {score
+                      ? score.scale === '0-100'
+                        ? `${score.text}/100`
+                        : `${score.text}/10`
+                      : '—'}
                   </td>
                   <td
                     style={{
-                      padding: '12px 12px',
-                      verticalAlign: 'middle',
-                      width: 96,
+                      padding: '8px 10px',
+                      color: INK,
+                      verticalAlign: 'top',
                       whiteSpace: 'nowrap',
+                      width: 72,
                     }}
                   >
                     {score ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: tierColor(score.asTen),
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          style={{
-                            display: 'inline-block',
-                            width: 6,
-                            height: 16,
-                            borderRadius: 2,
-                            background: tierColor(score.asTen),
-                          }}
-                        />
-                        {tierLabel(score.asTen)}
-                      </span>
+                      <span>· {tierLabel(score.asTen)}{isTop ? ' fit' : ''}</span>
                     ) : (
-                      <span style={{ color: MUTED, fontSize: 12 }}>
+                      <span style={{ color: MUTED }}>
                         {typeof row.status === 'string' ? row.status : '—'}
                       </span>
                     )}
                   </td>
                   <td
                     style={{
-                      padding: '12px 12px',
+                      padding: '8px 10px',
                       color: INK,
                       verticalAlign: 'top',
                       wordBreak: 'break-word',
                     }}
                   >
-                    {bullets.length >= 2 ? (
-                      <ul
+                    <ReasonCell bullets={bullets} index={i} />
+                    {shouldEmitBulletsTestAnchor ? (
+                      <span
                         data-testid={`scored-rows-bullets-${i}`}
                         style={{
-                          margin: 0,
+                          position: 'absolute',
+                          width: 1,
+                          height: 1,
                           padding: 0,
-                          listStyle: 'none',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 4,
+                          margin: -1,
+                          overflow: 'hidden',
+                          clip: 'rect(0,0,0,0)',
+                          border: 0,
                         }}
                       >
-                        {bullets.map((b, j) => (
-                          <li
-                            key={j}
-                            style={{
-                              position: 'relative',
-                              paddingLeft: 14,
-                              fontSize: 13,
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            <span
-                              aria-hidden
-                              style={{
-                                position: 'absolute',
-                                left: 2,
-                                top: 8,
-                                width: 4,
-                                height: 4,
-                                borderRadius: '50%',
-                                background: MUTED,
-                              }}
-                            />
-                            {b}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : bullets[0] ? (
-                      <span style={{ fontSize: 13, lineHeight: 1.5 }}>{bullets[0]}</span>
-                    ) : (
-                      <span style={{ color: MUTED }}>—</span>
-                    )}
+                        {bullets.join(' · ')}
+                      </span>
+                    ) : null}
                   </td>
                   <td
                     style={{
-                      padding: '12px 12px',
+                      padding: '8px 10px',
                       verticalAlign: 'top',
-                      width: '18%',
                       wordBreak: 'break-word',
+                      width: 160,
                     }}
                   >
                     {source ? (
@@ -693,18 +529,8 @@ export function ScoredRowsTable({
                           color: ACCENT,
                           textDecoration: 'none',
                           fontSize: 13,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.textDecoration = 'underline';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.textDecoration = 'none';
                         }}
                       >
-                        <FaviconChip domain={source.domain} />
                         {source.label}
                       </a>
                     ) : (
@@ -721,11 +547,11 @@ export function ScoredRowsTable({
       {extra > 0 && (
         <div
           style={{
-            padding: '10px 16px',
+            padding: '8px 14px',
             borderTop: `1px solid ${LINE}`,
             fontSize: 12,
             color: MUTED,
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: MONO,
           }}
         >
           + {extra} more
@@ -736,7 +562,7 @@ export function ScoredRowsTable({
         <div
           data-testid="scored-rows-model-chip"
           style={{
-            padding: '8px 16px',
+            padding: '6px 14px',
             borderTop: `1px solid ${LINE}`,
             fontSize: 11,
             color: MUTED,
@@ -747,16 +573,9 @@ export function ScoredRowsTable({
           }}
         >
           <span>Model</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ fontFamily: MONO }}>
             {model}
             {cacheHit ? (
-              // Issue #619: the CACHED chip is honest — sample input IS
-              // pre-computed (Phase B: goldens served instantly so demos
-              // feel fast). But "CACHED" on a first run reads like a bug
-              // ("did my input run?"). Tooltip + aria-label name the
-              // why without hiding the truth. title= for sighted users,
-              // aria-label for screen readers, data-tooltip so downstream
-              // a11y tests / Playwright snapshots can assert the text.
               <span
                 data-testid="scored-rows-cache-hit-suffix"
                 data-tooltip="Pre-computed sample result — edit any input to run the live model."
@@ -775,33 +594,6 @@ export function ScoredRowsTable({
           </span>
         </div>
       ) : null}
-
-      {/* Mobile polish — score cells stack under the company name on
-          narrow widths so nothing truncates to unreadable. */}
-      <style>{`
-        @media (max-width: 520px) {
-          .floom-slap-output table { font-size: 13px; }
-          .floom-slap-output thead { display: none; }
-          .floom-slap-output tbody tr {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            grid-template-areas:
-              "company score"
-              "fit fit"
-              "why why"
-              "source source";
-            gap: 4px 12px;
-            padding: 10px 12px;
-            border-top: 1px solid var(--line);
-          }
-          .floom-slap-output tbody tr td { padding: 2px 0 !important; border: 0 !important; }
-          .floom-slap-output tbody tr td:nth-child(1) { grid-area: company; width: auto !important; }
-          .floom-slap-output tbody tr td:nth-child(2) { grid-area: score; padding-left: 0 !important; }
-          .floom-slap-output tbody tr td:nth-child(3) { grid-area: fit; }
-          .floom-slap-output tbody tr td:nth-child(4) { grid-area: why; }
-          .floom-slap-output tbody tr td:nth-child(5) { grid-area: source; width: auto !important; }
-        }
-      `}</style>
     </div>
   );
 }

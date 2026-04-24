@@ -1,14 +1,12 @@
 /**
- * FitBand — "who's it for / who's it not for" honesty band.
+ * FitBand — "who it's for" honesty band.
  *
- * Federico 2026-04-23 (#543): "let's be upfront about who this is for
- * and who it isn't for. vibecoded weekend apps, internal tools,
- * productivity things — yes. Stripe-scale enterprise wrappers,
- * Zapier-style integration platforms, full chatbots — no."
- *
- * Tone: collaborative and slightly defensive per MEMORY.md message
- * preferences. Not directive, not boastful — a small band that saves
- * both sides time by filtering out visitors in the wrong shape.
+ * Federico 2026-04-24: dropped the "Not for" column entirely — calling
+ * out anti-ICP shapes (Stripe-scale wrappers, Zapier-style platforms,
+ * full chatbots) on the landing page this early creates more noise
+ * than filter. Visitors don't need us to tell them what we're NOT.
+ * The "For" column alone communicates fit; the "Not for" card was
+ * making the section feel defensive rather than honest.
  *
  * Placed between ThreeSurfacesDiagram and SelfHostSection, so a
  * visitor reads: "here is the shape (3 surfaces) -> here is the fit
@@ -51,9 +49,9 @@ const SUB_STYLE: CSSProperties = {
 
 const GRID_STYLE: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
+  gridTemplateColumns: '1fr',
   gap: 16,
-  maxWidth: 880,
+  maxWidth: 560,
   margin: '0 auto',
 };
 
@@ -70,11 +68,6 @@ const CARD_FIT: CSSProperties = {
   ...CARD_BASE,
   background: 'var(--card)',
   borderColor: 'rgba(4,120,87,0.35)',
-};
-
-const CARD_NOT_FIT: CSSProperties = {
-  ...CARD_BASE,
-  background: 'var(--studio, #f6f5f1)',
 };
 
 const CARD_LABEL_STYLE: CSSProperties = {
@@ -122,25 +115,10 @@ const MARK_STYLE_FIT: CSSProperties = {
   background: 'var(--accent)',
 };
 
-const MARK_STYLE_NOT: CSSProperties = {
-  flexShrink: 0,
-  marginTop: 9,
-  width: 10,
-  height: 1.5,
-  background: 'var(--muted)',
-  borderRadius: 999,
-};
-
 const FIT_ITEMS = [
   'Vibecoded weekend apps shipped by one person',
   'Internal tools your team pings from Slack',
   'Small productivity apps (scorers, extractors, formatters)',
-];
-
-const NOT_FIT_ITEMS = [
-  'Stripe-scale enterprise wrappers with bespoke SLAs',
-  'Zapier-style integration platforms',
-  'Full conversational chatbots',
 ];
 
 export function FitBand() {
@@ -148,11 +126,9 @@ export function FitBand() {
     <section data-testid="fit-band" style={SECTION_STYLE}>
       <div style={HEADER_STYLE}>
         <SectionEyebrow>Who it&rsquo;s for</SectionEyebrow>
-        <h2 style={H2_STYLE}>Honest about the shape.</h2>
+        <h2 style={H2_STYLE}>Built for small, useful apps.</h2>
         <p style={SUB_STYLE}>
-          Floom is shaped for small, useful apps &mdash; the ones you&rsquo;d
-          build in a weekend and then actually use. If that&rsquo;s not
-          your thing, here&rsquo;s what it isn&rsquo;t.
+          The ones you&rsquo;d build in a weekend and then actually use.
         </p>
       </div>
 
@@ -173,32 +149,7 @@ export function FitBand() {
             ))}
           </ul>
         </div>
-
-        <div data-testid="fit-band-not-for" style={CARD_NOT_FIT}>
-          <div style={{ ...CARD_LABEL_STYLE, color: 'var(--muted)' }}>
-            Not for
-          </div>
-          <h3 style={CARD_H3_STYLE}>
-            Some shapes Floom won&rsquo;t be the right fit for.
-          </h3>
-          <ul style={LIST_STYLE}>
-            {NOT_FIT_ITEMS.map((item) => (
-              <li key={item} style={ITEM_STYLE}>
-                <span aria-hidden="true" style={MARK_STYLE_NOT} />
-                <span style={{ color: 'var(--muted)' }}>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
       </div>
-
-      <style>{`
-        @media (max-width: 780px) {
-          .fit-band-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      `}</style>
     </section>
   );
 }
