@@ -135,32 +135,48 @@ function escapeHtml(value: string): string {
 //
 // Email clients are a mess. Gmail strips <style> tags, Outlook on Windows
 // ignores half the CSS spec, dark-mode clients invert colors unpredictably.
-// So every template is a <table>-based layout with inline styles and no
-// external assets — the chrome below matches the floom.dev look-and-feel
-// without depending on images (Gmail's image-block-by-default would hide
-// any logo we shipped as an <img>).
+// So every template is a <table>-based layout with inline styles — no
+// flexbox, no grid, no external CSS. The only external asset is the
+// hosted logo PNG (with an inline-SVG fallback via <picture> for Apple
+// Mail and modern webmail that support it).
 //
 // Palette matches `apps/web/src/styles/globals.css` tokens:
 //   --bg:     #f8f5ef   (cream page background)
+//   --band:   #f5f5f3   (warm header band behind the logo)
 //   --card:   #ffffff   (email card)
 //   --line:   #eceae3   (borders / rules)
-//   --ink:    #1c1a14   (primary text)
+//   --ink:    #1c1a14   (primary text — warm near-black, never pure #000)
 //   --muted:  #6b6659   (secondary text)
-//   --accent: #0a9d63   (green dot, link hovers in body)
+//   --accent: #0a9d63   (green mark, link hovers in body)
 //
 // Typography mirrors the site pairing: Georgia as a web-safe stand-in for
 // Fraunces on display copy, system sans for running text.
 // ─────────────────────────────────────────────────────────────────────────
 
 const EMAIL_BG = '#f8f5ef';
+const EMAIL_BAND = '#f5f5f3';
 const EMAIL_CARD = '#ffffff';
 const EMAIL_LINE = '#eceae3';
 const EMAIL_INK = '#1c1a14';
 const EMAIL_MUTED = '#6b6659';
-const EMAIL_ACCENT = '#0a9d63';
+// EMAIL_ACCENT (#0a9d63) lives baked into the logo SVG/PNG — we no
+// longer render a CSS green dot here, so no runtime constant is needed.
 const SERIF = "Georgia, 'Times New Roman', serif";
 const SANS =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+/**
+ * Origin for hosted brand assets. Kept separate from `publicUrl` on
+ * template inputs so ops can swap the logo CDN without touching every
+ * caller (e.g. when we move /brand/* behind a cache or a bucket).
+ * Defaults to production floom.dev because transactional mail sent from
+ * preview/dev should still surface the real brand — operators don't
+ * want their password-reset test to be missing a logo.
+ */
+function getAssetBaseUrl(): string {
+  const raw = process.env.FLOOM_EMAIL_ASSET_BASE_URL || 'https://floom.dev';
+  return raw.replace(/\/+$/, '');
+}
 
 interface BaseLayoutOpts {
   /** Serif display heading that leads the email. */
@@ -170,6 +186,10 @@ interface BaseLayoutOpts {
   /** Optional preheader — the inbox-preview snippet shown next to the
    *  subject line. Hidden in the rendered email. */
   preheader?: string;
+  /** Optional absolute unsubscribe URL. Rendered as a subtle link in
+   *  the footer when present. Omitted for auth-flow emails (reset
+   *  password, verify email) where an unsubscribe link makes no sense. */
+  unsubscribeUrl?: string;
 }
 
 /**
@@ -177,14 +197,53 @@ interface BaseLayoutOpts {
  *
  * Structure:
  *   1. Hidden preheader (inbox preview text)
- *   2. Brand bar — green dot + "floom" wordmark, no images
- *   3. Serif H1 heading that the caller provides
+ *   2. Branded header — warm band (#f5f5f3) with the hosted floom logo
+ *      (200x60 displayed, 400x120 PNG source for retina) + SVG variant
+ *      via <picture> for clients that support it
+ *   3. Serif H1 heading that the caller provides, on a white card
  *   4. Body HTML from the template
- *   5. Sign-off + muted footer (address, support email, reply-hint)
+ *   5. Footer — tagline, site link, address, reply-hint, optional
+ *      unsubscribe link
+ *
+ * Gotchas handled:
+ *   - <picture>: Apple Mail picks the SVG <source>, Outlook/Gmail ignore
+ *     it and use the <img> fallback. Safe in both directions.
+ *   - srcset on <img>: iOS Mail honours the 2x descriptor; other clients
+ *     fall through to the 1x `src`.
+ *   - No pure #000 anywhere — text is #1c1a14, matching the site.
+ *   - Dark-mode clients: color-scheme meta is "light only" so Apple Mail
+ *     / iOS don't invert our warm palette into muddy greys. The header
+ *     band keeps the logo readable even when a client ignores the meta
+ *     and forces a dark background on the <body>.
  */
-function baseLayout({ heading, body, preheader }: BaseLayoutOpts): string {
+function baseLayout({
+  heading,
+  body,
+  preheader,
+  unsubscribeUrl,
+}: BaseLayoutOpts): string {
   const preheaderBlock = preheader
     ? `<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader)}</div>`
+    : '';
+
+  const assetBase = getAssetBaseUrl();
+  const logoPng = `${assetBase}/brand/logo-email.png`;
+  const logoPng2x = `${assetBase}/brand/logo-email@2x.png`;
+  const logoSvg = `${assetBase}/brand/logo-email.svg`;
+
+  // <picture> lets Apple Mail, iOS Mail, and most webmail clients pick
+  // the crisp SVG, while Outlook + Gmail fall back to the PNG (they
+  // ignore the <source> element entirely). srcset on the <img> handles
+  // retina for clients that honour it. Width/height are set so clients
+  // that strip styles still lay the image out correctly, and max-width
+  // keeps it from overflowing the card on narrow screens.
+  const logoBlock = `<picture>
+<source type="image/svg+xml" srcset="${escapeHtml(logoSvg)}">
+<img src="${escapeHtml(logoPng)}" srcset="${escapeHtml(logoPng)} 1x, ${escapeHtml(logoPng2x)} 2x" width="200" height="60" alt="Floom" style="display:block;border:0;outline:none;text-decoration:none;width:200px;height:60px;max-width:100%;">
+</picture>`;
+
+  const unsubscribeBlock = unsubscribeUrl
+    ? `<br><a href="${escapeHtml(unsubscribeUrl)}" style="color:${EMAIL_MUTED};text-decoration:underline;">Unsubscribe</a>`
     : '';
 
   return `<!doctype html>
@@ -202,27 +261,19 @@ ${preheaderBlock}
 <tr><td align="center">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
 
-<tr><td style="padding:4px 4px 20px;">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0">
-<tr>
-<td style="vertical-align:middle;padding-right:8px;">
-<div style="width:10px;height:10px;border-radius:50%;background:${EMAIL_ACCENT};"></div>
-</td>
-<td style="vertical-align:middle;font-family:${SANS};font-size:15px;font-weight:600;color:${EMAIL_INK};letter-spacing:-0.01em;">
-floom
-</td>
-</tr>
-</table>
+<tr><td style="background:${EMAIL_BAND};border:1px solid ${EMAIL_LINE};border-bottom:none;border-radius:12px 12px 0 0;padding:24px 28px;">
+${logoBlock}
 </td></tr>
 
-<tr><td style="background:${EMAIL_CARD};border:1px solid ${EMAIL_LINE};border-radius:12px;padding:40px 36px;">
+<tr><td style="background:${EMAIL_CARD};border:1px solid ${EMAIL_LINE};border-top:1px solid ${EMAIL_LINE};border-radius:0 0 12px 12px;padding:36px 36px 40px;">
 <h1 style="margin:0 0 20px;font-family:${SERIF};font-size:26px;line-height:1.25;font-weight:600;letter-spacing:-0.01em;color:${EMAIL_INK};">${heading}</h1>
 ${body}
 </td></tr>
 
 <tr><td style="padding:24px 4px 4px;font-family:${SANS};font-size:12px;line-height:1.6;color:${EMAIL_MUTED};">
-Floom, Inc. &middot; Wilmington, DE<br>
-Questions or feedback? Just reply to this email, or write <a href="mailto:hello@floom.dev" style="color:${EMAIL_MUTED};text-decoration:underline;">hello@floom.dev</a>.
+<strong style="color:${EMAIL_INK};font-weight:600;">Floom</strong>: infrastructure for agentic work.<br>
+<a href="https://floom.dev" style="color:${EMAIL_MUTED};text-decoration:underline;">floom.dev</a> &middot; Floom, Inc. &middot; Wilmington, DE<br>
+Questions? Just reply to this email, or write <a href="mailto:hello@floom.dev" style="color:${EMAIL_MUTED};text-decoration:underline;">hello@floom.dev</a>.${unsubscribeBlock}
 </td></tr>
 
 </table>
@@ -359,6 +410,8 @@ export function renderVerificationEmail(input: VerificationTemplateInput): {
 export interface WelcomeTemplateInput {
   name?: string | null;
   publicUrl: string;
+  /** Optional unsubscribe URL — when present, a footer link is shown. */
+  unsubscribeUrl?: string;
 }
 
 export function renderWelcomeEmail(input: WelcomeTemplateInput): {
@@ -400,6 +453,7 @@ export function renderWelcomeEmail(input: WelcomeTemplateInput): {
       body,
       preheader:
         'Your account is live. Paste a repo, ship an app — your first one is on us.',
+      unsubscribeUrl: input.unsubscribeUrl,
     }),
     text,
   };
@@ -417,6 +471,9 @@ export function renderWelcomeEmail(input: WelcomeTemplateInput): {
 export interface WaitlistConfirmationTemplateInput {
   /** Public origin the "Browse the live apps" CTA should point at. */
   publicUrl: string;
+  /** Optional absolute URL that removes the recipient from the waitlist.
+   *  When present, renders an "Unsubscribe" link in the footer. */
+  unsubscribeUrl?: string;
 }
 
 export function renderWaitlistConfirmationEmail(
@@ -464,6 +521,7 @@ export function renderWaitlistConfirmationEmail(
       body,
       preheader:
         "We're rolling out Publish in small batches. While you wait, three apps are free to run right now.",
+      unsubscribeUrl: input.unsubscribeUrl,
     }),
     text,
   };
