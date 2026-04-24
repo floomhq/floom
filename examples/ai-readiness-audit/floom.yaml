@@ -1,0 +1,60 @@
+name: AI Readiness Audit
+slug: ai-readiness-audit
+description: Paste one public HTTPS company URL, fetch the page, and return a
+  strict AI-readiness score with 3 risks, 3 opportunities, and one concrete next
+  step.
+creator: floom
+category: research
+icon: gauge
+actions:
+  audit:
+    label: Run Audit
+    description: Fetch one public company URL, extract the main page text, and
+      score how ready the company looks to ship AI products.
+    inputs:
+      - name: company_url
+        label: Company URL
+        type: url
+        required: true
+        placeholder: https://floom.dev
+        description: Public HTTPS URL only. Max 200 characters. Private,
+          loopback, and RFC1918 addresses are rejected server-side.
+    outputs:
+      - name: company_url
+        label: Audited URL
+        type: text
+      - name: readiness_score
+        label: Readiness Score
+        type: number
+      - name: score_rationale
+        label: Score Rationale
+        type: text
+      - name: risks
+        label: Risks
+        type: json
+      - name: opportunities
+        label: Opportunities
+        type: json
+      - name: next_action
+        label: Next Action
+        type: text
+      - name: model
+        label: Model
+        type: text
+      - name: dry_run
+        label: Dry Run
+        type: text
+      - name: cache_hit
+        label: Cache Hit
+        type: text
+runtime: python
+python_dependencies:
+  - beautifulsoup4==4.13.4
+  - google-genai==1.64.0
+  - httpx==0.28.1
+node_dependencies: {}
+secrets_needed:
+  - GEMINI_API_KEY
+output_type: json
+timeout: 10s
+manifest_version: "2.0"

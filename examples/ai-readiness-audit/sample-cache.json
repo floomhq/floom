@@ -1,0 +1,28 @@
+{
+  "_comment": "Pre-generated sample responses for the /p/ai-readiness-audit demo input. If the user submits the exact sample URL, main.py returns this blob immediately instead of fetching live content.",
+  "generated_with": "hand-authored sample",
+  "entries": {
+    "59ed5b14683b9ec00593fa1255242ae025795bcab85501ec369ff43fcae4c886": {
+      "company_url": "https://floom.dev/",
+      "readiness_score": 8,
+      "score_rationale": "The public story is clearly about shipping and hosting AI apps, and the surrounding docs and examples imply real implementation depth rather than generic AI messaging. The page would look more production-ready with more explicit customer proof, eval language, and quantified operating evidence.",
+      "risks": [
+        "no public evals or benchmark metrics",
+        "customer proof and case studies are limited",
+        "technical credibility is present but spread across multiple pages"
+      ],
+      "opportunities": [
+        "add one quantified case study with before-and-after metrics",
+        "publish a short architecture page covering runtime limits and guardrails",
+        "show one end-to-end app walkthrough with screenshots and latency detail"
+      ],
+      "next_action": "Publish a single proof-of-work case study that shows one app moving from spec or repo to live endpoint with metrics, screenshots, and guardrails.",
+      "dry_run": false,
+      "cache_hit": false,
+      "model": "sample-cache"
+    }
+  },
+  "_debug": {
+    "canonical": "{\"company_url\":\"https://floom.dev/\"}"
+  }
+}
