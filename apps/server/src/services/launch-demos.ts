@@ -48,9 +48,9 @@ type BuildEvent = {
   error?: unknown;
 };
 
-type SeedLogger = Pick<Console, 'log' | 'error'>;
+export type SeedLogger = Pick<Console, 'log' | 'warn' | 'error'>;
 
-interface LaunchDemoDockerLike {
+export interface LaunchDemoDockerLike {
   ping(): Promise<unknown>;
   buildImage(file: unknown, opts: { t: string; rm: boolean; forcerm: boolean }): Promise<unknown>;
   getImage(tag: string): { inspect(): Promise<unknown> };
@@ -428,9 +428,9 @@ function seedLaunchDemoSecretsFromEnv(logger: SeedLogger = console): void {
   }
 }
 
-async function resolveDemoImageTag(opts: {
+export async function resolveDemoImageTag(opts: {
   contextPath: string;
-  demo: LaunchDemo;
+  demo: Pick<LaunchDemo, 'slug'>;
   docker: LaunchDemoDockerLike;
   logger: SeedLogger;
   persistedImageTag: string | null;
@@ -458,9 +458,6 @@ async function resolveDemoImageTag(opts: {
         opts.persistedImageTag !== imageTag &&
         (await imageExists(opts.docker, opts.persistedImageTag))
       ) {
-        opts.logger.error(
-          `[launch-demos] ${opts.demo.slug}: keeping previous image ${opts.persistedImageTag}`,
-        );
         return { kind: 'keep_previous', imageTag: opts.persistedImageTag };
       }
       return { kind: 'missing', imageTag };
@@ -480,18 +477,11 @@ async function resolveDemoImageTag(opts: {
   if (await imageExists(opts.docker, imageTag)) {
     return { kind: 'ready', imageTag };
   }
-
-  opts.logger.error(
-    `[launch-demos] FATAL: image ${imageTag} missing after build/reuse for ${opts.demo.slug}`,
-  );
   if (
     opts.persistedImageTag &&
     opts.persistedImageTag !== imageTag &&
     (await imageExists(opts.docker, opts.persistedImageTag))
   ) {
-    opts.logger.error(
-      `[launch-demos] ${opts.demo.slug}: keeping previous image ${opts.persistedImageTag}`,
-    );
     return { kind: 'keep_previous', imageTag: opts.persistedImageTag };
   }
   return { kind: 'missing', imageTag };
@@ -616,8 +606,8 @@ export async function seedLaunchDemos(
         markAppActive.run(row.id);
         keptPrevious++;
         existing++;
-        logger.error(
-          `[launch-demos] ${demo.slug}: leaving existing app on ${resolvedImage.imageTag}`,
+        logger.warn(
+          `[launch-demos] WARN: ${demo.slug}: keeping existing docker_image ${resolvedImage.imageTag}`,
         );
       } else {
         failed++;
@@ -633,11 +623,11 @@ export async function seedLaunchDemos(
         markAppInactive.run(row.id);
         markedInactive++;
         logger.error(
-          `[launch-demos] ${demo.slug}: marking existing app inactive because ${resolvedImage.imageTag} is unavailable`,
+          `[launch-demos] FATAL: ${demo.slug}: ${resolvedImage.imageTag} unavailable; marked app inactive`,
         );
       } else {
         logger.error(
-          `[launch-demos] ${demo.slug}: not inserting because ${resolvedImage.imageTag} is unavailable`,
+          `[launch-demos] FATAL: ${demo.slug}: ${resolvedImage.imageTag} unavailable; not inserting`,
         );
       }
       continue;
