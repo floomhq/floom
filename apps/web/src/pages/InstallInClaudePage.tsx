@@ -155,9 +155,9 @@ function CopyButton({ text, style }: { text: string; style?: React.CSSProperties
       type="button"
       onClick={copy}
       style={{
-        background: '#1e293b',
-        color: copied ? '#7bffc0' : '#cbd5e1',
-        border: '1px solid #334155',
+        background: '#26241f',
+        color: copied ? 'var(--accent,#047857)' : '#c7c3b8',
+        border: '1px solid #3a3731',
         borderRadius: 7,
         padding: '5px 10px',
         fontSize: 11,
@@ -181,8 +181,10 @@ function CodeBlock({ code }: { code: string }) {
     <div style={{ position: 'relative' }}>
       <pre
         style={{
-          background: '#0b1220',
-          color: '#e2e8f0',
+          // Warm dark neutral — no pure black on terminal surfaces.
+          // Same token used by the landing hero code panel.
+          background: '#1b1a17',
+          color: '#e8e6e0',
           fontFamily: "'JetBrains Mono', ui-monospace, monospace",
           fontSize: 12.5,
           lineHeight: 1.7,
@@ -337,7 +339,89 @@ function ConnectedPanel({ appName }: { appName: string }) {
 
 // ── Tab content per client ────────────────────────────────────────────────────
 
-function DesktopTabContent({ slug, appName }: { slug: string | null; appName: string }) {
+// Props shared by every tab so the active tab can render the Connected
+// panel when the user has confirmed install, and a "Check install" button
+// otherwise. Simulated detection for now — real probes land once each
+// client ships a connection-status endpoint.
+interface TabContentProps {
+  slug: string | null;
+  appName: string;
+  connected: boolean;
+  onMarkInstalled: () => void;
+}
+
+function InstallFooter({
+  connected,
+  onMarkInstalled,
+  appName,
+}: {
+  connected: boolean;
+  onMarkInstalled: () => void;
+  appName: string;
+}) {
+  if (connected) return <ConnectedPanel appName={appName} />;
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: '18px 20px',
+        background: 'var(--surface-2,#f5f4f0)',
+        border: '1px dashed var(--border-hover,#c4c1b8)',
+        borderRadius: 12,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+        flexWrap: 'wrap',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--ink,#0f172a)',
+            marginBottom: 2,
+          }}
+        >
+          Installed it?
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--muted,#64748b)',
+            lineHeight: 1.5,
+          }}
+        >
+          Confirm once you see the MCP server listed in your client. We'll show the
+          next steps.
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onMarkInstalled}
+        data-testid="install-mark-installed"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '9px 16px',
+          background: '#fff',
+          color: 'var(--ink,#0f172a)',
+          border: '1px solid var(--border,#eceae4)',
+          borderRadius: 9,
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        I've installed it
+      </button>
+    </div>
+  );
+}
+
+function DesktopTabContent({ slug, appName, connected, onMarkInstalled }: TabContentProps) {
   return (
     <>
       <Step
@@ -413,12 +497,16 @@ function DesktopTabContent({ slug, appName }: { slug: string | null; appName: st
         />
       </Step>
 
-      <ConnectedPanel appName={appName} />
+      <InstallFooter
+        connected={connected}
+        onMarkInstalled={onMarkInstalled}
+        appName={appName}
+      />
     </>
   );
 }
 
-function ClaudeCodeTabContent({ slug, appName }: { slug: string | null; appName: string }) {
+function ClaudeCodeTabContent({ slug, appName, connected, onMarkInstalled }: TabContentProps) {
   return (
     <>
       <Step
@@ -455,12 +543,16 @@ function ClaudeCodeTabContent({ slug, appName }: { slug: string | null; appName:
         />
       </Step>
 
-      <ConnectedPanel appName={appName} />
+      <InstallFooter
+        connected={connected}
+        onMarkInstalled={onMarkInstalled}
+        appName={appName}
+      />
     </>
   );
 }
 
-function CursorTabContent({ slug, appName }: { slug: string | null; appName: string }) {
+function CursorTabContent({ slug, appName, connected, onMarkInstalled }: TabContentProps) {
   return (
     <>
       <Step
@@ -501,12 +593,16 @@ function CursorTabContent({ slug, appName }: { slug: string | null; appName: str
         />
       </Step>
 
-      <ConnectedPanel appName={appName} />
+      <InstallFooter
+        connected={connected}
+        onMarkInstalled={onMarkInstalled}
+        appName={appName}
+      />
     </>
   );
 }
 
-function OtherTabContent({ slug, appName }: { slug: string | null; appName: string }) {
+function OtherTabContent({ slug, appName, connected, onMarkInstalled }: TabContentProps) {
   const url = slug ? `${MCP_BASE}/app/${slug}` : `${MCP_BASE}/search`;
   return (
     <>
@@ -548,7 +644,11 @@ function OtherTabContent({ slug, appName }: { slug: string | null; appName: stri
         />
       </Step>
 
-      <ConnectedPanel appName={appName} />
+      <InstallFooter
+        connected={connected}
+        onMarkInstalled={onMarkInstalled}
+        appName={appName}
+      />
     </>
   );
 }
@@ -640,6 +740,18 @@ const TABS: Array<{ id: ClientTab; label: string; sub: string; icon: React.React
 
 export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
   const [activeTab, setActiveTab] = useState<ClientTab>('desktop');
+  // Simulated connection detection. Each tab tracks its own state so
+  // switching tabs doesn't incorrectly claim a different client is
+  // connected. Real MCP probes land once each client exposes a
+  // "list-servers" introspection endpoint we can call from the browser.
+  const [connectedTabs, setConnectedTabs] = useState<Record<ClientTab, boolean>>({
+    desktop: false,
+    code: false,
+    cursor: false,
+    other: false,
+  });
+  const markInstalled = () =>
+    setConnectedTabs((prev) => ({ ...prev, [activeTab]: true }));
   const navigate = useNavigate();
 
   const slug = app?.slug ?? null;
@@ -765,11 +877,11 @@ export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
                   gap: 12,
                   padding: '16px 18px',
                   border: isOn
-                    ? '1px solid var(--accent,#059669)'
+                    ? '1px solid var(--ink,#0f172a)'
                     : '1px solid var(--border,#eceae4)',
                   borderRadius: 13,
-                  background: isOn ? 'var(--accent-bg,#ecfdf5)' : '#fff',
-                  boxShadow: isOn ? '0 0 0 3px rgba(5,150,105,.07)' : 'none',
+                  background: isOn ? 'var(--surface-2,#f5f4f0)' : '#fff',
+                  boxShadow: isOn ? '0 0 0 3px rgba(15,23,42,.05)' : 'none',
                   cursor: 'pointer',
                   textAlign: 'left',
                   color: 'inherit',
@@ -781,17 +893,13 @@ export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
                     width: 34,
                     height: 34,
                     borderRadius: 9,
-                    background: isOn
-                      ? '#fff'
-                      : 'var(--surface-2,#f5f4f0)',
-                    border: isOn ? '1px solid var(--accent,#059669)' : 'none',
+                    background: isOn ? '#fff' : 'var(--surface-2,#f5f4f0)',
+                    border: isOn ? '1px solid var(--ink,#0f172a)' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     flexShrink: 0,
-                    color: isOn
-                      ? 'var(--accent,#059669)'
-                      : 'var(--muted,#64748b)',
+                    color: isOn ? 'var(--ink,#0f172a)' : 'var(--muted,#64748b)',
                   }}
                 >
                   {tab.icon}
@@ -832,16 +940,36 @@ export function InstallInClaudePage({ app }: InstallInClaudePageProps) {
           }}
         >
           {activeTab === 'desktop' && (
-            <DesktopTabContent slug={slug} appName={appName} />
+            <DesktopTabContent
+              slug={slug}
+              appName={appName}
+              connected={connectedTabs.desktop}
+              onMarkInstalled={markInstalled}
+            />
           )}
           {activeTab === 'code' && (
-            <ClaudeCodeTabContent slug={slug} appName={appName} />
+            <ClaudeCodeTabContent
+              slug={slug}
+              appName={appName}
+              connected={connectedTabs.code}
+              onMarkInstalled={markInstalled}
+            />
           )}
           {activeTab === 'cursor' && (
-            <CursorTabContent slug={slug} appName={appName} />
+            <CursorTabContent
+              slug={slug}
+              appName={appName}
+              connected={connectedTabs.cursor}
+              onMarkInstalled={markInstalled}
+            />
           )}
           {activeTab === 'other' && (
-            <OtherTabContent slug={slug} appName={appName} />
+            <OtherTabContent
+              slug={slug}
+              appName={appName}
+              connected={connectedTabs.other}
+              onMarkInstalled={markInstalled}
+            />
           )}
         </div>
 
