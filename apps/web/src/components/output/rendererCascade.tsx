@@ -39,6 +39,7 @@ import type { ActionSpec, AppDetail, OutputSpec, RenderConfig } from '../../lib/
 
 export { React };
 import { CodeBlock } from './CodeBlock';
+import { CompetitorTiles, looksLikeCompetitorOutput } from './CompetitorTiles';
 import { FileDownload } from './FileDownload';
 import { HeadlineWithMeta } from './HeadlineWithMeta';
 import { ImageView } from './ImageView';
@@ -67,6 +68,7 @@ export const OUTPUT_LIBRARY: Record<string, LibraryComponent> = {
   RowTable: RowTable as unknown as LibraryComponent,
   ScoredRowsTable: ScoredRowsTable as unknown as LibraryComponent,
   HeadlineWithMeta: HeadlineWithMeta as unknown as LibraryComponent,
+  CompetitorTiles: CompetitorTiles as unknown as LibraryComponent,
 };
 
 function getField(output: unknown, fieldName: string): unknown {
@@ -629,6 +631,29 @@ export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): Ca
     // Unknown component name OR missing referenced field → fall through
     // to auto-pick. The manifest is not broken, it's just overspecified
     // relative to the run output.
+  }
+
+  // Layer 2.5 (2026-04-24, #643): competitor-analyzer shape short-circuit.
+  // The generic composite path (RowTable + Markdown) worked but read as
+  // cramped; a dedicated tile-per-competitor layout makes the output
+  // actually screenshot-worthy. We only fire when the shape matches so
+  // unrelated apps keep their existing renderer.
+  if (looksLikeCompetitorOutput(runOutput)) {
+    const obj = runOutput as Record<string, unknown>;
+    const competitors = obj.competitors as Array<Record<string, unknown>>;
+    const summary = typeof obj.summary === 'string' ? obj.summary : undefined;
+    return {
+      kind: 'library',
+      element: (
+        <CompetitorTiles
+          competitors={competitors}
+          summary={summary}
+          runOutput={runOutput as Record<string, unknown>}
+          appSlug={appSlug}
+          runId={runId}
+        />
+      ),
+    };
   }
 
   const actionSpec = findAction(app, action);

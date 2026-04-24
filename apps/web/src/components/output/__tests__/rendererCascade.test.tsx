@@ -254,6 +254,93 @@ test('composite auto-pick model chip: absent when meta.model is missing', () => 
   assert.ok(!html.includes('· CACHED'), 'no cache suffix without model');
 });
 
+test('CompetitorTiles: positioning + strengths/weaknesses shape → dedicated tile renderer', () => {
+  // #643 slap polish: when the competitor-analyzer output carries the
+  // full positioning + strengths[] + weaknesses[] shape, pickRenderer
+  // should short-circuit to CompetitorTiles rather than the cramped
+  // RowTable+Markdown composite. Legacy thin payloads (no positioning,
+  // no strengths, no weaknesses) continue to fall through to the
+  // composite path — covered by the first test in this file.
+  const app = {
+    slug: 'competitor-analyzer',
+    manifest: mkManifest({
+      outputs: [
+        { name: 'competitors', label: 'Competitors', type: 'table' },
+        { name: 'summary', label: 'Summary', type: 'markdown' },
+      ],
+    }),
+  };
+  const out = {
+    competitors: [
+      {
+        url: 'https://linear.app',
+        company: 'Linear',
+        positioning: 'Product development system for teams and agents.',
+        pricing: '$10/user/mo',
+        strengths: ['Keyboard-centric UI', 'Deep GitHub integration'],
+        weaknesses: ['No CRM features', 'Rigid per-seat pricing'],
+      },
+    ],
+    summary: 'Linear is fast but has no GTM features.',
+    meta: { model: 'gemini-3.1-pro-preview', cache_hit: false },
+  };
+  const result = pickRenderer({ app, action: 'go', runOutput: out, runId: 'r9' });
+  assert.equal(result.kind, 'library');
+  const html = renderToStaticMarkup(result.element!);
+  assert.ok(html.includes('data-renderer="CompetitorTiles"'), 'CompetitorTiles should render');
+  assert.ok(html.includes('Linear'), 'company name should render');
+  assert.ok(html.includes('Strengths'), 'Strengths column label should render');
+  assert.ok(html.includes('Gaps vs you'), 'Weaknesses column label should render');
+  assert.ok(html.includes('Keyboard-centric UI'), 'strength bullet should render');
+  assert.ok(html.includes('No CRM features'), 'weakness bullet should render');
+});
+
+test('CompetitorTiles: thin payload without positioning/strengths/weaknesses falls through to composite', () => {
+  // Guard against accidentally hijacking unrelated "competitors"-named
+  // arrays. The first test in this file already asserts the composite
+  // path for the thin case; this one asserts the shape-check returns
+  // false when none of the three identifying fields are present.
+  const app = {
+    slug: 'competitor-analyzer',
+    manifest: mkManifest({
+      outputs: [
+        { name: 'competitors', label: 'Competitors', type: 'table' },
+      ],
+    }),
+  };
+  const out = {
+    competitors: [{ name: 'Linear', pricing: '$10/user/mo' }],
+  };
+  const result = pickRenderer({ app, action: 'go', runOutput: out });
+  assert.equal(result.kind, 'auto');
+  const html = renderToStaticMarkup(result.element!);
+  assert.ok(!html.includes('data-renderer="CompetitorTiles"'), 'CompetitorTiles should NOT render for thin payload');
+});
+
+test('ScoredRowsTable: top row gets hero + display score + gold highlight', () => {
+  // #643 slap polish: the top-scored row gets a #1 hero block with a
+  // big display serif number and a gold-tinted highlight bar. Rows 2+
+  // render in the table without the highlight.
+  const rows = [
+    { company: 'Stripe', score: 92, reasoning: 'Enterprise fit. EU presence. Scaled API.' },
+    { company: 'Acme', score: 65, reasoning: 'Mid-market only.' },
+  ];
+  const html = renderToStaticMarkup(
+    React.createElement(ScoredRowsTable, {
+      rows,
+      runOutput: { total: 2, scored: 2, failed: 0, model: 'gemini-3.1-pro-preview' },
+      appSlug: 'lead-scorer',
+    }),
+  );
+  assert.ok(html.includes('scored-rows-hero'), 'hero block should render');
+  assert.ok(html.includes('Stripe'), 'top company should appear in hero');
+  assert.ok(html.includes('92/100') || html.includes('92'), 'score text should appear');
+  assert.ok(html.includes('Strong fit'), 'tier label should render');
+  assert.ok(html.includes('data-top="true"'), 'top row should carry data-top attribute');
+  // Bullet split: "Enterprise fit. EU presence. Scaled API." → 3 bullets
+  assert.ok(html.includes('scored-rows-bullets-0'), 'bullets should render for prose reason');
+});
+
 test('ScoredRowsTable model chip: legacy "(cached)" backend stamp is normalized, not doubled', () => {
   // examples/lead-scorer/main.py uses setdefault("model", "...-pro-preview (cached)")
   // as a fallback when the cache fixture lacks a `model` field. The UI must
