@@ -45,6 +45,7 @@ import { ApiError, CsvRowCapExceededError, FileInputTooLargeError } from '../../
 import { buildPublicRunPath, getRunStartErrorMessage } from '../../lib/publicPermalinks';
 import { BYOKModal } from '../BYOKModal';
 import { FreeRunsStrip, useFreeRunsRefresher } from './FreeRunsStrip';
+import { SampleOutputPreview, hasSampleForSlug } from './SampleOutputPreview';
 
 export interface RunSurfaceResult {
   runId: string;
@@ -1281,6 +1282,7 @@ function OutputSlot({
   if (state.phase === 'ready') {
     return (
       <EmptyOutputCard
+        slug={app.slug}
         appName={app.name}
         actionSpec={state.actionSpec}
       />
@@ -1360,44 +1362,86 @@ function OutputSlot({
 }
 
 function EmptyOutputCard({
+  slug,
   appName,
   actionSpec,
 }: {
+  slug: string;
   appName: string;
   actionSpec: ActionSpec;
 }) {
-  // Pre-run empty state. The previous copy ("Output will appear here /
-  // Fill in the form and press Run …") was functionally correct but
-  // joyless — Federico audit 2026-04-24: "a small ghost preview would
-  // invite the run". We now:
+  // Pre-run empty state. Federico audit 2026-04-24: the right-side
+  // output panel used to read as dead space — title was the literal
+  // first output label (e.g. "Total Rows will appear here" for Lead
+  // Scorer, because `outputs[0]` is a scalar counter, not the real
+  // ranked table). We now:
   //
-  //   1. Pull the first output's label/description from actionSpec to
-  //      tell the user what they'll get ("Lead scores" / "One row per
-  //      lead, scored 0-100"). Falls back to the original generic copy
-  //      when the action omits outputs (rare, but the OpenAPI importer
-  //      allows it).
-  //   2. Render a type-specific skeleton underneath so the empty slot
-  //      has visual structure: a 3-row dashed table for table outputs,
-  //      3 stacked lines of text for text/markdown/html, a `{ }` shell
-  //      for json. Skeletons use `--muted` at low opacity so they read
-  //      as placeholder, not content.
-  const firstOutput = actionSpec.outputs[0];
-  const outputLabel = firstOutput?.label || 'Output';
-  const outputHint =
-    firstOutput?.description?.trim() ||
-    `Fill in the form and press Run to generate a result with ${appName}.`;
+  //   1. Pick the HERO output for title/hint — first `table` / `json`
+  //      / `markdown` / `html` output if present, else fall back to
+  //      outputs[0]. This gives Lead Scorer "Scored Leads" instead of
+  //      "Total Rows", which actually describes what the user is
+  //      about to get.
+  //   2. If the app has a curated SampleOutputPreview entry (hero apps:
+  //      lead-scorer, resume-screener, competitor-analyzer), render
+  //      that instead of the generic skeleton. Sample shows the SHAPE
+  //      of real output (columns, example rows) in muted monospace,
+  //      clearly labeled "example output · not yours". This is what
+  //      Federico asked for — "app visuals could show on the right
+  //      side".
+  //   3. Copy shifts to proposal tone — "Your result will look like
+  //      this" (matches wireframe app-page.html line 358) when we have
+  //      a sample, keeps the previous "Output will appear here" copy
+  //      otherwise.
+  //   4. Type-specific skeleton still fires for apps without a curated
+  //      sample: 3-row dashed table for table outputs, 3 stacked lines
+  //      for text/markdown/html, a `{ }` shell for json.
+  const heroOutput = pickHeroOutput(actionSpec);
+  const outputLabel = heroOutput?.label || 'Output';
+  const hasSample = hasSampleForSlug(slug);
+  const outputHint = hasSample
+    ? 'This is what your real result will look like once you press Run.'
+    : heroOutput?.description?.trim() ||
+      `Fill in the form and press Run to generate a result with ${appName}.`;
+  const title = hasSample
+    ? 'Your result will look like this'
+    : `${outputLabel} will appear here`;
   return (
     <div
       className="run-surface-card run-surface-empty-output"
       data-testid="run-surface-empty-output"
     >
       <div className="run-surface-empty-output-inner">
-        <div className="run-surface-empty-output-title">{outputLabel} will appear here</div>
+        <div className="run-surface-empty-output-title">{title}</div>
         <div className="run-surface-empty-output-sub">{outputHint}</div>
-        <EmptyOutputSkeleton outputType={firstOutput?.type} />
+        {hasSample ? (
+          <div style={{ marginTop: 18 }}>
+            <SampleOutputPreview slug={slug} />
+          </div>
+        ) : (
+          <EmptyOutputSkeleton outputType={heroOutput?.type} />
+        )}
       </div>
     </div>
   );
+}
+
+/**
+ * Pick the "hero" output from an action spec — the one the user cares
+ * about, which is almost always the richest container type (table /
+ * json / markdown / html) rather than a scalar counter that happens to
+ * sit at outputs[0]. Falls back to outputs[0] when no container output
+ * exists (utility apps like uuid / hash return a single string).
+ */
+function pickHeroOutput(
+  actionSpec: ActionSpec,
+): ActionSpec['outputs'][number] | undefined {
+  const rich = actionSpec.outputs.find((o) =>
+    o.type === 'table' ||
+    o.type === 'json' ||
+    o.type === 'markdown' ||
+    o.type === 'html',
+  );
+  return rich ?? actionSpec.outputs[0];
 }
 
 /**
