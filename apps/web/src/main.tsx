@@ -64,6 +64,7 @@ const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ 
 // Studio (darker surface, sidebar, tool chrome). All /studio/* routes
 // auth-gate through StudioLayout (cloud-only).
 const StudioHomePage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioHomePage })));
+const StudioAppsPage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioAppsPage })));
 const StudioBuildPage = lazy(() => import('./pages/StudioBuildPage').then(m => ({ default: m.StudioBuildPage })));
 const StudioAppPage = lazy(() => import('./pages/StudioAppPage').then(m => ({ default: m.StudioAppPage })));
 const StudioAppRunsPage = lazy(() => import('./pages/StudioAppRunsPage').then(m => ({ default: m.StudioAppRunsPage })));
@@ -293,12 +294,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/me/a/:slug" element={<MeAppRedirect />} />
         <Route path="/me/a/:slug/secrets" element={<MeAppSecretsRedirect />} />
         <Route path="/me/a/:slug/run" element={<MeAppRunRedirect />} />
-        {/* Studio context (v16 restructure 2026-04-18). Creator workspace:
-            manage every app you own, publish new ones, upload renderers.
-            Auth-gated via StudioLayout; additionally waitlist-gated so
-            floom.dev redirects into /waitlist instead of asking for a
-            login that doesn't lead anywhere (DEPLOY_ENABLED=false). */}
+        {/* Studio context: /studio is the creator home; /studio/apps is
+            the heavier app index. Still auth-gated and waitlist-gated. */}
         <Route path="/studio" element={<WaitlistGuard source="studio"><StudioHomePage /></WaitlistGuard>} />
+        <Route path="/studio/apps" element={<WaitlistGuard source="studio"><StudioAppsPage /></WaitlistGuard>} />
         <Route path="/studio/build" element={<WaitlistGuard source="studio"><StudioBuildPage /></WaitlistGuard>} />
         {/* Design-audit fix 2026-04-22: /studio/new is the create-new-app
             entry point shown in wireframe v17. Funnel it to /studio/build

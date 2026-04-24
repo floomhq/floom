@@ -1,35 +1,5 @@
-// /studio — Studio home. Single-focus surface: my apps + one CTA to build new.
-//
-// 2026-04-21 zero-bloat pass (#248): stripped hero stats row, per-app
-// sparklines, ACTIVE/IDLE status pills, and the app-count eyebrow. The
-// earlier version was analytics-heavy (4-stat hero + 7-day sparkline
-// per card) which competed with the golden path "see my apps -> open
-// one OR build new". Per-app analytics live on /studio/:slug; this
-// page is the index, nothing more.
-//
-// 2026-04-23 wireframe-parity pass: per-card sparkline is back (v17
-// `studio-my-apps.html` requires it). This time the sparkline is a
-// lean 7-bar strip (24px tall, 2px min bars) driven by REAL run data
-// from GET /api/hub/:slug/runs-by-day — not a fabricated series.
-//
-// 2026-04-24 v17 full wireframe parity pass (see issue #__studio-parity):
-// aligned with v17/studio-home.html + v17/studio-my-apps.html +
-// v17/studio-empty.html. Adds:
-//   - "MY APPS" eyebrow + DM-serif headline that adapts to live/draft counts
-//   - metrics row (runs 7d · active apps) derived client-side from
-//     CreatorApp list; success/latency/unique-users intentionally not
-//     shown (no real server data yet — refuse to fake numbers per
-//     feedback_never_fabricate)
-//   - cross-app activity feed below the grid, fed by GET /api/me/runs
-//     (existing getMyRuns API)
-//   - 3-card empty state (GitHub / Docker / OpenAPI) mirroring
-//     studio-empty.html's entry-card grid
-//   - LIVE/DRAFT pill on each card, monochrome letter chip, mini
-//     thumbnail lines matching the wireframe's app-thumb pattern
-//
-// Preserved: app cards (name, slug, description, total runs, last run),
-// the primary "+ New app" CTA, waitlist gating, the delete-confirm
-// dialog, visibility + publish-status pills.
+// /studio + /studio/apps.
+// Canonical split: creator home lives at /studio; app index lives at /studio/apps.
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -50,6 +20,352 @@ import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 import { WaitlistModal } from '../components/WaitlistModal';
 
 export function StudioHomePage() {
+  const { apps, error: loadError } = useMyApps();
+  const { data: session } = useSession();
+  const signedOutPreview = !!session && session.cloud_mode && session.user.is_local;
+  const deployEnabled = useDeployEnabled();
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const waitlistMode = deployEnabled === false;
+  const displayName = studioDisplayName(session?.user.name, session?.user.email);
+  const liveCount = apps?.filter(isLiveApp).length ?? 0;
+  const draftCount = apps?.filter((app) => !isLiveApp(app)).length ?? 0;
+  const recentApps =
+    apps
+      ?.slice()
+      .sort((a, b) => (recentAppKey(a) < recentAppKey(b) ? 1 : -1))
+      .slice(0, 3) ?? [];
+  const shortcuts = [
+    { to: '/studio/apps', title: 'Your apps', body: 'Full app list, metrics, and recent activity.' },
+    { to: '/me/api-keys', title: 'API keys', body: 'Manage personal keys without leaving the product.' },
+    { to: '/docs', title: 'Docs', body: 'Read the platform and creator docs.' },
+    { to: '/docs/self-host', title: 'Self-host guide', body: 'Run Floom with Docker when you want the OSS path.' },
+  ];
+  const error = !signedOutPreview && loadError ? loadError.message : null;
+
+  return (
+    <StudioLayout
+      title="Studio · Floom"
+      allowSignedOutShell={signedOutPreview}
+    >
+      <div
+        data-testid="studio-home"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 18,
+        }}
+      >
+        {signedOutPreview ? (
+          <StudioSignedOutState />
+        ) : (
+          <>
+            <section
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 16,
+                padding: '28px 28px 24px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                  gap: 20,
+                  flexWrap: 'wrap',
+                  marginBottom: 18,
+                }}
+              >
+                <div style={{ minWidth: 0, flex: '1 1 440px' }}>
+                  <div
+                    style={{
+                      fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: '0.1em',
+                      textTransform: 'uppercase',
+                      color: 'var(--accent)',
+                      marginBottom: 6,
+                    }}
+                  >
+                    Welcome back
+                  </div>
+                  <h1
+                    data-testid="studio-home-headline"
+                    style={{
+                      fontFamily: 'var(--font-display)',
+                      fontSize: 36,
+                      fontWeight: 400,
+                      letterSpacing: '-0.03em',
+                      lineHeight: 1.02,
+                      margin: 0,
+                      color: 'var(--ink)',
+                    }}
+                  >
+                    What do you want to ship, {displayName}?
+                  </h1>
+                  <p
+                    style={{
+                      margin: '10px 0 0',
+                      maxWidth: 700,
+                      fontSize: 14,
+                      lineHeight: 1.65,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    Start from a GitHub repo or an OpenAPI spec, then keep the creator workflow in
+                    Studio. Docker is live today as the self-host path in docs, not the default
+                    cloud publish ramp.
+                  </p>
+                  {apps && (
+                    <p
+                      style={{
+                        margin: '10px 0 0',
+                        fontSize: 12.5,
+                        color: 'var(--muted)',
+                      }}
+                    >
+                      {apps.length === 0
+                        ? 'No apps yet. Start with one deploy path and the rest of Studio opens up.'
+                        : `${apps.length} apps total · ${liveCount} live${draftCount > 0 ? ` · ${draftCount} draft` : ''}`}
+                    </p>
+                  )}
+                </div>
+                {waitlistMode ? (
+                  <button
+                    type="button"
+                    onClick={() => setWaitlistOpen(true)}
+                    data-testid="studio-new-app-waitlist"
+                    className="btn-ink"
+                    style={{ border: 'none', cursor: 'pointer', font: 'inherit' }}
+                  >
+                    Join waitlist
+                  </button>
+                ) : (
+                  <Link
+                    to="/studio/build"
+                    data-testid="studio-new-app-cta"
+                    className="btn-ink"
+                    style={{ textDecoration: 'none' }}
+                  >
+                    + New app
+                  </Link>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 12,
+                }}
+              >
+                <StudioHomeActionCard
+                  title="Deploy from GitHub"
+                  body="Paste a repo URL. Floom detects the app and hands you the publish flow."
+                  dataTestId="studio-home-action-github"
+                  to={waitlistMode ? undefined : '/studio/build'}
+                  onClick={waitlistMode ? () => setWaitlistOpen(true) : undefined}
+                />
+                <StudioHomeActionCard
+                  title="Wrap an OpenAPI spec"
+                  body="Paste a direct spec URL when the API already lives somewhere else."
+                  dataTestId="studio-home-action-openapi"
+                  to={waitlistMode ? undefined : '/studio/build'}
+                  onClick={waitlistMode ? () => setWaitlistOpen(true) : undefined}
+                />
+                <StudioHomeActionCard
+                  title="Bring your own Docker"
+                  body="Self-host with Docker today. The cloud Docker ramp is not the default Studio path yet."
+                  dataTestId="studio-home-action-docker"
+                  to="/docs/self-host"
+                />
+              </div>
+            </section>
+
+            {error && (
+              <div
+                style={{
+                  background: '#fdecea',
+                  border: '1px solid #f4b7b1',
+                  color: '#c2321f',
+                  borderRadius: 10,
+                  padding: '14px 18px',
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            <section
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 14,
+                padding: '20px 20px 18px',
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: 'var(--muted)',
+                  marginBottom: 4,
+                }}
+              >
+                Workspace
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  marginBottom: 12,
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: 'var(--ink)' }}>
+                  Creator shortcuts
+                </h2>
+                <Link
+                  to="/studio/apps"
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: 'var(--accent)',
+                    textDecoration: 'none',
+                  }}
+                >
+                  View all apps →
+                </Link>
+              </div>
+
+              {!apps && !error && (
+                <div style={{ color: 'var(--muted)', padding: '4px 0 2px' }}>
+                  Loading your Studio workspace…
+                </div>
+              )}
+
+              {apps && apps.length === 0 && (
+                <div
+                  data-testid="studio-home-empty-note"
+                  style={{
+                    border: '1px dashed var(--line)',
+                    borderRadius: 12,
+                    padding: '16px 14px',
+                    background: 'var(--bg)',
+                    marginBottom: 14,
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    color: 'var(--muted)',
+                  }}
+                >
+                  No apps yet. Use GitHub when Floom should host the runtime, or OpenAPI when the
+                  API already exists and you want Floom to wrap it.
+                </div>
+              )}
+
+              {recentApps.length > 0 && (
+                <div
+                  data-testid="studio-home-recents"
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    marginBottom: 14,
+                  }}
+                >
+                  {recentApps.map((app) => (
+                    <Link
+                      key={app.slug}
+                      to={`/studio/${app.slug}`}
+                      data-testid={`studio-home-recent-${app.slug}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '8px 12px',
+                        borderRadius: 999,
+                        border: '1px solid var(--line)',
+                        background: 'var(--bg)',
+                        textDecoration: 'none',
+                        color: 'var(--ink)',
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>{app.name}</span>
+                      <span style={{ color: 'var(--muted)', fontWeight: 500 }}>
+                        {app.last_run_at ? formatTime(app.last_run_at) : 'draft'}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              <div
+                data-testid="studio-home-shortcuts"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 8,
+                }}
+              >
+                {shortcuts.map((item) => (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                      padding: '12px 14px',
+                      borderRadius: 12,
+                      border: '1px solid var(--line)',
+                      background: 'var(--bg)',
+                      textDecoration: 'none',
+                      color: 'inherit',
+                    }}
+                  >
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{item.title}</div>
+                    <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--muted)' }}>{item.body}</div>
+                  </Link>
+                ))}
+              </div>
+              <div
+                style={{
+                  marginTop: 14,
+                  paddingTop: 14,
+                  borderTop: '1px solid var(--line)',
+                  fontSize: 12.5,
+                  lineHeight: 1.65,
+                  color: 'var(--muted)',
+                }}
+              >
+                GitHub is the path when Floom should host the runtime. OpenAPI is the path when
+                the API already lives somewhere else. Docker is live today through the self-host
+                guide, not the default Studio publish ramp.
+              </div>
+            </section>
+          </>
+        )}
+
+        <WaitlistModal
+          open={waitlistOpen}
+          onClose={() => setWaitlistOpen(false)}
+          source="studio-home"
+        />
+      </div>
+    </StudioLayout>
+  );
+}
+
+export function StudioAppsPage() {
   const { apps, error: loadError } = useMyApps();
   const { data: session } = useSession();
   const [error, setError] = useState<string | null>(null);
@@ -145,18 +461,16 @@ export function StudioHomePage() {
   // explicit non-published states (draft / pending_review / rejected)
   // as drafts. Preserves back-compat with older servers while still
   // refusing to claim a pending app is live.
-  const isLive = (a: CreatorApp) =>
-    !a.publish_status || a.publish_status === 'published';
-  const liveCount = apps?.filter(isLive).length ?? 0;
-  const draftCount = apps?.filter((a) => !isLive(a)).length ?? 0;
+  const liveCount = apps?.filter(isLiveApp).length ?? 0;
+  const draftCount = apps?.filter((a) => !isLiveApp(a)).length ?? 0;
   const totalRuns = apps?.reduce((sum, a) => sum + (a.run_count || 0), 0) ?? 0;
 
   return (
     <StudioLayout
-      title="Studio · Floom"
+      title="Studio apps · Floom"
       allowSignedOutShell={signedOutPreview}
     >
-      <div data-testid="studio-home">
+      <div data-testid="studio-apps-page">
         {signedOutPreview ? (
           <StudioSignedOutState />
         ) : (
@@ -446,6 +760,62 @@ export function StudioHomePage() {
       />
     </StudioLayout>
   );
+}
+
+// ------------------------------------------------------------------
+// Studio home helpers
+// ------------------------------------------------------------------
+
+function StudioHomeActionCard({
+  title,
+  body,
+  dataTestId,
+  to,
+  onClick,
+}: {
+  title: string;
+  body: string;
+  dataTestId: string;
+  to?: string;
+  onClick?: () => void;
+}) {
+  const style: React.CSSProperties = {
+    display: 'flex', flexDirection: 'column', gap: 10, minHeight: 152, padding: '16px 16px 14px',
+    textAlign: 'left', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 14,
+    color: 'inherit', textDecoration: 'none', boxSizing: 'border-box',
+  };
+  const content = (
+    <>
+      <div style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent)' }}>New app</div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--muted)' }}>{body}</div>
+      <div style={{ marginTop: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)' }}>Open →</div>
+    </>
+  );
+  if (to) return <Link to={to} data-testid={dataTestId} style={style}>{content}</Link>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={dataTestId}
+      style={{ ...style, width: '100%', cursor: 'pointer', font: 'inherit' }}
+    >
+      {content}
+    </button>
+  );
+}
+
+function studioDisplayName(name: string | null | undefined, email: string | null | undefined): string {
+  const raw = name?.trim() || email?.split('@')[0] || 'there';
+  return raw.split(/\s+/)[0] || 'there';
+}
+
+function recentAppKey(app: CreatorApp): string {
+  return app.last_run_at || app.updated_at || app.created_at;
+}
+
+function isLiveApp(app: CreatorApp): boolean {
+  return !app.publish_status || app.publish_status === 'published';
 }
 
 // ------------------------------------------------------------------
