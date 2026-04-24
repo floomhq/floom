@@ -196,11 +196,11 @@ export const DEMOS: LaunchDemo[] = [
           inputs: [
             {
               name: 'cvs_zip',
-              label: 'CV Bundle (zip of PDFs)',
+              label: 'Upload PDFs (single file or zip)',
               type: 'file',
               required: true,
               description:
-                'A .zip file containing one or more candidate CVs as PDFs. Each top-level .pdf becomes one candidate.',
+                'A single candidate CV as a PDF, or a .zip of PDFs. Each PDF becomes one candidate.',
             },
             {
               name: 'job_description',

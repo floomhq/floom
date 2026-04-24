@@ -343,7 +343,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Apps
             </Link>
             <Link
-              to="/protocol"
+              to="/docs"
               data-testid="topbar-docs"
               aria-current={isDocs ? 'page' : undefined}
               style={navLinkStyle(isDocs)}
@@ -707,7 +707,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             </Link>
 
             <Link
-              to="/protocol"
+              to="/docs"
               className="topbar-mobile-link"
               role="menuitem"
               onClick={() => setMenuOpen(false)}

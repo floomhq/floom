@@ -327,9 +327,8 @@ export function PricingPage() {
             margin: '0 0 14px',
           }}
         >
-          Free to start.{' '}
-          <span style={{ color: ACCENT }}>5 runs a day on us.</span>{' '}
-          Bring your own key for unlimited.
+          Free.{' '}
+          <span style={{ color: ACCENT }}>Your own key → unlimited.</span>
         </h1>
         <p
           style={{

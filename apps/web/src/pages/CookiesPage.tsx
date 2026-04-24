@@ -93,7 +93,10 @@ function CookieTable({ lang }: { lang: Lang }) {
 }
 
 export function CookiesPage() {
-  const [lang, setLang] = useState<Lang>('de');
+  // UX sweep 2026-04-24 (issue #704): Floom Inc. is a Delaware C-Corp,
+  // so the policy should open in English by default, not German. The DE
+  // copy stays fully translated, users can flip via LegalLangToggle.
+  const [lang, setLang] = useState<Lang>('en');
 
   return (
     <PageShell title="Cookies · Floom">

@@ -6,14 +6,14 @@ actions:
     label: Screen Resumes
     inputs:
       - name: cvs_zip
-        label: CV Bundle (zip of PDFs)
+        label: Upload PDFs (single file or zip)
         type: file
         required: true
         description: >-
-          A .zip file containing one or more candidate CVs as PDFs. The manifest
-          input shape does not support arrays-of-files yet (only `file`,
-          `textarea`, etc.), so we accept a single zip and unpack it in the
-          sandbox. Each top-level .pdf in the archive becomes one candidate.
+          A single candidate CV as a PDF, or a .zip of multiple PDFs. The
+          manifest input shape doesn't support arrays-of-files yet (only
+          `file`, `textarea`, etc.), so we accept either shape and unpack
+          in the sandbox. Each PDF becomes one candidate.
       - name: job_description
         label: Job Description
         type: textarea

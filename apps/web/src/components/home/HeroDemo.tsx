@@ -448,7 +448,7 @@ function EditorSurface({ active, cycle, reducedMotion }: EditorProps) {
         </aside>
 
         <div style={MAIN_PANE}>
-          <div style={EDITOR_PANE}>
+          <div style={EDITOR_PANE} data-hd="editor-pane">
             <div style={TAB_ROW}>
               <div style={{ ...TAB_STYLE, ...TAB_ACTIVE }}>handler.py</div>
             </div>
@@ -951,10 +951,19 @@ const SCOPED_CSS = `
      Shrink font + tighten padding so the full Python snippet fits, and
      keep overflowX:auto on the pre for graceful scroll if it still
      doesn't. Audit 2026-04-24 flagged this as the most visible mobile
-     regression on the hero. */
+     regression on the hero.
+
+     UX sweep 2026-04-24 (issue #706): add a subtle right-edge fade on
+     the gutter-wrap container so users get a visual "swipe for more"
+     cue when the code still overflows at 375px. The fade is a pure CSS
+     mask — doesn't eat a DOM node, doesn't affect desktop. */
   @media (max-width:640px){
     [data-testid="hero-demo"] pre{font-size:11px !important;line-height:1.6 !important;padding:10px 12px !important;}
     [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{padding:20px 18px;gap:14px}
+    [data-testid="hero-demo"] [data-hd="editor-pane"]{
+      -webkit-mask-image:linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
+      mask-image:linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
+    }
   }
   @media (max-width:480px){
     [data-testid="hero-demo"] pre{font-size:10.5px !important;padding:10px 10px !important;}

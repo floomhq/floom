@@ -1770,8 +1770,36 @@ function shortUrl(u: string): string {
   return u.replace(/^https?:\/\//, '').replace(/^www\./, '');
 }
 
+/**
+ * Strip common markdown tokens before rendering a repo description as
+ * plain text. UX sweep 2026-04-24 (issue #708): Studio ingest was
+ * showing `##` literally in the preview card because repo READMEs
+ * frequently start with a Markdown heading. We don't render Markdown
+ * here (would need a full renderer + sanitizer for a one-line preview),
+ * so stripping is the simplest correct fix.
+ */
+function stripMarkdown(text: string): string {
+  return text
+    // ATX headings at line start: `## Foo` → `Foo`
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    // Bold/italic markers: **foo**, *foo*, __foo__, _foo_ → foo
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(\*|_)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    // Inline code backticks: `foo` → foo (keep content)
+    .replace(/`([^`]+)`/g, '$1')
+    // Links: [label](url) → label
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Blockquote markers at line start
+    .replace(/^\s{0,3}>\s?/gm, '')
+    // Unordered list markers at line start: `- foo`, `* foo`, `+ foo`
+    .replace(/^\s{0,3}[-*+]\s+/gm, '')
+    // Collapse repeated whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function firstSentence(text: string): string {
-  const t = (text || '').trim();
+  const t = stripMarkdown((text || '').trim());
   if (!t) return '';
   const dot = t.indexOf('. ');
   if (dot === -1) return t.length > 180 ? t.slice(0, 177) + '…' : t;

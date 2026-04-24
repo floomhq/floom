@@ -82,6 +82,13 @@ export function InputField({
 
   if (spec.type === 'textarea') {
     const isArray = ARRAY_INPUT_NAMES.has(spec.name);
+    // UX sweep 2026-04-24: textareas whose name is "urls" (competitor-
+    // analyzer et al.) get the same auto-https treatment as single-URL
+    // inputs. On blur, every non-empty line is normalized — users can
+    // paste `linear.app` and we turn it into `https://linear.app`
+    // before submit, mirroring the server-side normalization in
+    // examples/competitor-analyzer/main.py::_normalize_urls.
+    const isUrlArray = isArray && spec.name === 'urls';
     return (
       <div className="input-group">
         <label className="input-label" htmlFor={id}>
@@ -94,16 +101,33 @@ export function InputField({
           id={id}
           className="input-field"
           style={{ height: 96, padding: '10px 12px', resize: 'vertical' as const, ...invalidStyle }}
-          placeholder={spec.placeholder || (isArray ? 'vienna, berlin, paris' : undefined)}
+          placeholder={
+            spec.placeholder ||
+            (isUrlArray
+              ? 'linear.app\nnotion.so (https:// optional)'
+              : isArray
+                ? 'vienna, berlin, paris'
+                : undefined)
+          }
           value={str}
           aria-invalid={invalid || undefined}
           aria-describedby={errorId}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={(e) => {
+            if (!isUrlArray) return;
+            const next = e.target.value
+              .split('\n')
+              .map((line) => maybePrependHttps(line))
+              .join('\n');
+            if (next !== e.target.value) onChange(next);
+          }}
         />
         {error && <FieldError id={errorId!} text={error} />}
         {isArray && !error && (
           <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0 0' }}>
-            Separate multiple values with a comma or a new line.
+            {isUrlArray
+              ? 'One URL per line. https:// added automatically.'
+              : 'Separate multiple values with a comma or a new line.'}
           </p>
         )}
       </div>
@@ -206,7 +230,7 @@ export function InputField({
   // user typed a bare domain. Placeholder swaps to a no-https example so
   // users aren't cued to type the scheme.
   if (spec.type === 'url') {
-    const urlPlaceholder = spec.placeholder || 'github.com/owner/repo';
+    const urlPlaceholder = spec.placeholder || 'linear.app (https:// optional)';
     return (
       <div className="input-group">
         <label className="input-label" htmlFor={id}>

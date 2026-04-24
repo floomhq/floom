@@ -199,7 +199,23 @@ def _load_zip_bytes(cvs_zip_input: str) -> bytes:
 
 
 def _extract_pdfs(zip_bytes: bytes) -> list[tuple[str, bytes]]:
-    """Return list of (filename, pdf_bytes) for every .pdf in the zip."""
+    """Return list of (filename, pdf_bytes) from the uploaded file.
+
+    UX sweep 2026-04-24: accept a single PDF OR a zip of PDFs. Detect via
+    magic bytes:
+      - `%PDF` (0x25 50 44 46) → single PDF, wrap in a 1-item list
+      - `PK\\x03\\x04`          → zip archive, iterate entries
+    Any other shape raises a clean ValueError with a human sentence
+    (entrypoint.py will surface it as `error`, no raw traceback).
+    """
+    head = zip_bytes[:4]
+    if head.startswith(b"%PDF"):
+        return [("resume.pdf", zip_bytes)]
+    if not head.startswith(b"PK\x03\x04"):
+        raise ValueError(
+            "Upload must be a PDF or a .zip of PDFs. "
+            "The file you uploaded is neither."
+        )
     out: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for info in zf.infolist():
