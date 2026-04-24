@@ -2,7 +2,11 @@
 
 ## Reporting a vulnerability
 
-Please email **team@floom.dev** with the details. Do **not** open a public GitHub issue for security problems.
+Please email **security@floom.dev** (routes to the maintainer). Do **not** open a public GitHub issue for security problems.
+
+## Safe harbor
+
+If you follow this policy — report privately, give us a reasonable window to fix the issue, don't exfiltrate data or harm users — we will not pursue legal action against you for good-faith security research on Floom. This covers first-party code in this repo and the hosted floom.dev deployment. Third-party systems reached via a proxied-mode app are out of scope; report those to the upstream vendor.
 
 Include:
 

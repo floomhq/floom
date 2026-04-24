@@ -3,54 +3,100 @@
 
   <h1>Floom</h1>
 
-  <p><strong>Infra for agentic work — open source.</strong><br/>
+  <p><strong>Infrastructure for agentic work.</strong><br/>
   <em>Vibe-coding speed. Production-grade safety.</em><br/>
-  Build agents, workflows, and scripts with AI. Floom deploys them as an MCP server, HTTP API, and shareable web form.</p>
+  Turn an OpenAPI spec into an MCP server, an HTTP endpoint, and a shareable web form. Auth, rate limits, run history, and shareable URLs built in.</p>
 
   <p>
+    <a href="https://github.com/floomhq/floom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/floomhq/floom/ci.yml?branch=main&label=CI" alt="CI status"/></a>
+    <a href="https://github.com/floomhq/floom/stargazers"><img src="https://img.shields.io/github/stars/floomhq/floom?style=flat&color=111" alt="Stars"/></a>
     <a href="https://github.com/floomhq/floom/blob/main/LICENSE"><img src="https://img.shields.io/github/license/floomhq/floom?color=111&label=license" alt="License"/></a>
     <a href="https://github.com/floomhq/floom/pkgs/container/floom-monorepo"><img src="https://img.shields.io/badge/ghcr.io-floom--monorepo-0969da" alt="Docker image"/></a>
-    <a href="https://github.com/floomhq/floom/commits/main"><img src="https://img.shields.io/github/last-commit/floomhq/floom" alt="Last commit"/></a>
+    <a href="https://discord.gg/8fXGXjxcRz"><img src="https://img.shields.io/discord/1494746428403089590?label=discord&logo=discord&logoColor=white&color=5865F2" alt="Discord"/></a>
     <a href="https://floom.dev"><img src="https://img.shields.io/badge/live-floom.dev-22c55e" alt="Live at floom.dev"/></a>
-    <a href="./docs/ax-scores"><img src="https://img.shields.io/badge/AX-pending-lightgrey" alt="Agent Experience score"/></a>
   </p>
 
   <p>
     <a href="https://floom.dev/build">Try it</a> ·
     <a href="./docs/SELF_HOST.md">Self-host</a> ·
     <a href="./spec/protocol.md">Protocol</a> ·
-    <a href="./docs/ROADMAP.md">Roadmap</a>
+    <a href="./docs/ROADMAP.md">Roadmap</a> ·
+    <a href="https://discord.gg/8fXGXjxcRz">Discord</a>
   </p>
 </div>
 
 ---
 
-Point Floom at an OpenAPI spec. In seconds you get a web form, an MCP server an agent can call, and an HTTP endpoint. All from the same manifest, all with auth, rate limits, secret injection, and a shareable output page.
+```
+OpenAPI spec ──▶ Floom ──▶ 3 surfaces
+                           ├─ MCP server    (/mcp/app/:slug)
+                           ├─ HTTP endpoint (/api/:slug/run)
+                           └─ Web form      (/p/:slug)
+```
 
-## What it does
+Point Floom at an OpenAPI spec and you get all three, from the same manifest, with auth, rate limits, secret injection, run history, and shareable output pages. No glue code.
 
-- **One manifest, three surfaces.** Web form at `/p/:slug`, MCP server at `/mcp/app/:slug`, HTTP endpoint at `/api/:slug/run`.
-- **Two ingest modes.** Proxied (wrap an existing API) or hosted (Floom runs your Docker container).
-- **Production layer included.** Bearer/API-key auth, per-operation rate limits, secret injection, run history, shareable result URLs.
-- **Agent-native.** Every app exposes MCP tools out of the box. Four MCP admin tools (`ingest_app`, `list_apps`, `search_apps`, `get_app`) let an agent add new apps over MCP.
+## Quickstart
+
+One container, no setup:
+
+```bash
+docker run -p 3010:3010 ghcr.io/floomhq/floom-monorepo:latest
+```
+
+Or sign in at [**floom.dev**](https://floom.dev), paste an OpenAPI URL, hit publish. Full self-host walkthrough: [docs/SELF_HOST.md](./docs/SELF_HOST.md).
+
+## What it is
+
+Floom is a runtime and a protocol for agentic apps. You describe an app once with an OpenAPI spec; Floom gives you an MCP server an agent can call, a plain HTTP endpoint, and a web form on a shareable URL — all at the same time, all backed by the same auth and rate-limit layer.
+
+It's open source, MIT-licensed, and you can self-host the whole stack in one Docker container.
+
+## The three surfaces
+
+**MCP** — any client that speaks Model Context Protocol (Claude Desktop, Claude Code, Cursor, Codex CLI) can call your app as a tool.
+
+```json
+{
+  "mcpServers": {
+    "resend": { "url": "http://localhost:3010/mcp/app/resend" }
+  }
+}
+```
+
+**HTTP** — straight JSON-in, JSON-out. Use it from curl, a backend, a cron job.
+
+```bash
+curl -X POST http://localhost:3010/api/resend/send-email \
+  -H "Authorization: Bearer $FLOOM_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"from":"hi@floom.dev","to":"you@example.com","subject":"hi","text":"first"}'
+```
+
+**Web form** — a clean page at `/p/:slug` your teammates can fill in, with typed inputs, a shareable result URL, and a run history.
+
+```
+https://floom.dev/p/lead-scorer
+```
 
 ## Who it's for
 
-- **Vibecoder creators** shipping weekend apps (OpenDraft, OpenPaper shape). Paste an OpenAPI URL, publish a shareable page, get an MCP tool your friends can install.
-- **Biz users** running internal tooling and productivity apps. Wrap a Stripe-style API in a form your ops team can fill out, with runs logged and outputs rendered cleanly.
+- **Makers shipping side projects.** Paste an OpenAPI URL, publish a shareable page, hand your friends an MCP tool.
+- **Teams running internal tools.** Wrap a Stripe-style API in a form your ops team can fill in, with runs logged and outputs rendered cleanly.
 
-Two equal ICPs. Two CTAs side by side. Two dashboards (`/me` for consumers, `/creator` for publishers).
+Two equal ICPs. Two CTAs on the homepage. Two dashboards (`/me` for runners, `/creator` for publishers).
 
-## How it works
+## Showcase apps
 
-```
-OpenAPI spec ──▶ Floom manifest ──▶ 3 surfaces
-                                    ├─ Web form + output page  (/p/:slug)
-                                    ├─ MCP server              (/mcp/app/:slug)
-                                    └─ HTTP endpoint           (/api/:slug/run)
-```
+Three apps shipped with Floom to show what it can do:
 
-Floom reads each OpenAPI operation, turns its parameters into a form field or MCP tool input, injects secrets at runtime, and renders the response. No glue code.
+| App | What it does | Live |
+|---|---|---|
+| [Lead Scorer](./examples/lead-scorer) | Scores a CSV of leads with Gemini, ranks them, explains why. | [floom.dev/p/lead-scorer](https://floom.dev/p/lead-scorer) |
+| [Competitor Analyzer](./examples/competitor-analyzer) | Takes a list of competitor URLs, pulls positioning + pricing + weak spots. | [floom.dev/p/competitor-analyzer](https://floom.dev/p/competitor-analyzer) |
+| [Resume Screener](./examples/resume-screener) | Scans a batch of resumes against a job description, ranks and flags. | [floom.dev/p/resume-screener](https://floom.dev/p/resume-screener) |
+
+Each one is a real OpenAPI-defined app under [`examples/`](./examples) — fork, rename, tweak the prompt.
 
 <p align="center">
   <img src="./docs/assets/demo-product-page.png" alt="A published Floom app" width="420" />
@@ -58,16 +104,10 @@ Floom reads each OpenAPI operation, turns its parameters into a form field or MC
   <img src="./docs/assets/demo-dashboard.png" alt="Creator dashboard" width="420" />
 </p>
 
-## Quickstart (cloud)
+## Self-host
 
-1. Sign in at [floom.dev](https://floom.dev).
-2. Paste an OpenAPI spec URL at [floom.dev/build](https://floom.dev/build).
-3. Publish. Share the `/p/:slug` URL, or install the MCP server in your agent.
-
-## Self-host (60 seconds)
-
-```bash
-cat > apps.yaml <<'EOF'
+```yaml
+# apps.yaml — one app, wrapped in 10 lines
 apps:
   - slug: resend
     type: proxied
@@ -77,47 +117,33 @@ apps:
     secrets: [RESEND_API_KEY]
     display_name: Resend
     description: "Transactional email API."
-EOF
+```
 
+```bash
 docker run -d --name floom \
   -p 3051:3051 \
   -v floom_data:/data \
   -v "$(pwd)/apps.yaml:/app/config/apps.yaml:ro" \
   -e FLOOM_APPS_CONFIG=/app/config/apps.yaml \
   -e RESEND_API_KEY=re_... \
-  ghcr.io/floomhq/floom-monorepo:v0.4.0-mvp.4
+  ghcr.io/floomhq/floom-monorepo:latest
 ```
 
-Then open `http://localhost:3051/p/resend`, or point your agent at `http://localhost:3051/mcp/app/resend`.
+Open `http://localhost:3051/p/resend`, or point your agent at `http://localhost:3051/mcp/app/resend`.
 
-### Auth modes
-
-Floom ships with two independent auth layers and they share one header. Read this before you deploy:
-
-- `FLOOM_AUTH_TOKEN` is an operator-wide kill switch. When set, every `/api/*`, `/mcp/*`, `/p/*` request must present `Authorization: Bearer <token>`. Use it for a solo box or a CI/staging guard.
-- `FLOOM_CLOUD_MODE=true` turns on Better Auth so real users sign in and their API keys ride the same `Authorization: Bearer <key>` header.
-
-A single header can only carry one token. Enabling both on the same deployment locks your signed-in users out of the API. Pick one per deployment — see the comment block above `FLOOM_AUTH_TOKEN` in [`docker/.env.example`](./docker/.env.example) for the full breakdown.
-
-Full guide: [docs/SELF_HOST.md](./docs/SELF_HOST.md) · Protocol spec: [spec/protocol.md](./spec/protocol.md)
-
-## The manifest
-
-Two shapes, same surfaces.
+Two manifest shapes ship out of the box:
 
 ```yaml
 # Proxied — wrap an existing API
-name: stripe
 type: proxied
-openapi_spec_url: https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
-base_url: https://api.stripe.com
+openapi_spec_url: https://api.example.com/openapi.json
+base_url: https://api.example.com
 auth: bearer
-secrets: [STRIPE_SECRET_KEY]
+secrets: [EXAMPLE_API_KEY]
 ```
 
 ```yaml
 # Hosted — Floom runs your container
-name: my-app
 type: hosted
 runtime: python3.12
 openapi_spec: ./openapi.yaml
@@ -125,15 +151,17 @@ build: pip install .
 run: uvicorn my_app.server:app --port 8000
 ```
 
-See example manifests under [`examples/`](./examples).
+A single request header can only carry one auth token, so pick one per deployment: `FLOOM_AUTH_TOKEN` (operator-wide kill switch) **or** `FLOOM_CLOUD_MODE=true` (real user sign-in + per-user API keys). Full breakdown: [`docker/.env.example`](./docker/.env.example).
+
+Full self-host guide: [docs/SELF_HOST.md](./docs/SELF_HOST.md) · Protocol spec: [spec/protocol.md](./spec/protocol.md) · More examples: [`examples/`](./examples).
 
 ## Repo layout
 
 - `apps/web` — floom.dev web surface (React, form + output renderer)
-- `apps/server` — backend (Hono + SQLite + Docker runner)
+- `apps/server` — backend (Hono + SQLite + Docker runner + MCP)
 - `packages/renderer` — `@floom/renderer`, default + custom output/input renderer library
 - `spec/protocol.md` — Floom Protocol spec
-- `examples/` — example manifests you can copy to register your own app
+- `examples/` — example manifests, including the three showcase apps above
 
 ## Development
 
@@ -142,22 +170,27 @@ pnpm install
 pnpm dev
 ```
 
-Runs the web app on `:5173` and the server on `:3051` with hot reload.
+Web on `:5173`, server on `:3051`, hot reload on both.
 
-## Roadmap
+## Contributing
 
-See [docs/ROADMAP.md](./docs/ROADMAP.md) for priorities. The v0.4 line is
-OpenAPI ingest, secret policies, per-app rate limits, and MCP admin tools;
-everything else is parked until those are battle-tested.
+Short version: pick an issue labelled `good first issue` or drop a new example app under [`examples/`](./examples). Full guide, including how to add a showcase app: [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## Community
+## Community & support
 
-- Support and usage questions: see [SUPPORT.md](./SUPPORT.md)
-- Security reports: see [SECURITY.md](./SECURITY.md)
-- Contribute: see [CONTRIBUTING.md](./CONTRIBUTING.md)
-
-Built in SF by [@federicodeponte](https://github.com/federicodeponte).
+- **Discord** — [discord.gg/8fXGXjxcRz](https://discord.gg/8fXGXjxcRz) for help, ideas, and patch-of-the-day.
+- **Docs** — [floom.dev/docs](https://floom.dev/docs)
+- **Issues** — [github.com/floomhq/floom/issues](https://github.com/floomhq/floom/issues) for bugs, feature requests, docs gaps.
+- **Security** — read [SECURITY.md](./SECURITY.md), email `security@floom.dev`.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+Floom is released under the [MIT license](./LICENSE). Use it at work, use it at home, fork it, sell products built on top of it. If you ship something cool, we'd love to see it in the Discord.
+
+---
+
+<p align="center">
+  <a href="https://star-history.com/#floomhq/floom&Date"><img src="https://api.star-history.com/svg?repos=floomhq/floom&type=Date" alt="Star history" width="640" /></a>
+</p>
+
+<p align="center">Built in SF by <a href="https://github.com/federicodeponte">@federicodeponte</a>.</p>
