@@ -1,21 +1,16 @@
 // /waitlist — "what to expect" landing + email capture (issue #591).
 //
-// 2026-04-24 reframe (Federico): Floom is already live today. The repo is
-// public, you can self-host with one Docker command. The waitlist is for
-// Floom Cloud, the hosted version, going live 27 April 2026. Copy + order
-// updated to make all four points unmissable:
-//   1. You can already self-host now
-//   2. Cloud launches within a week
-//   3. We'll email you when Cloud opens
-//   4. The repo is public, try it today
+// 2026-04-24 trim (Federico): page was 5 bands and felt messy for a
+// signup page. Cut to 3 bands, aligned H1 with landing ("Ship AI apps
+// fast.") so the positioning is consistent everywhere, and killed the
+// "Who it's for" makers+teams duplicate (landing already covers this
+// with "Two audiences. One runtime.").
 //
-// Layout (unchanged):
-//   1. Vision band — "Infrastructure for agentic work."
-//   2. Email form + GitHub repo link (unchanged endpoint + testids)
-//   3. "What's shipping" — 3 cards: self-host (now first), apps, publish
-//   4. Two ICPs (makers + teams), brief
-//   5. Timeline line
-//   6. Footer links to /docs + /apps so curious visitors can explore now
+// Layout:
+//   1. Hero — launch pill + H1 + subhead + email form + repo link
+//   2. "What's shipping" — 3 cards: self-host, apps, publish (#692)
+//   3. Timeline band (dark): "Going live Launch Week: 27 April 2026"
+//   + Footer link row to /docs + /apps
 //
 // Design rules (MEMORY): restrained palette, real lucide icons, no emojis,
 // no text-in-circles, no pure black, warm dark surface uses `#1b1a17`.
@@ -31,8 +26,6 @@ import {
   Layers,
   Rocket,
   Server,
-  Users,
-  Wrench,
 } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { PageShell } from '../components/PageShell';
@@ -97,6 +90,21 @@ const H1_STYLE: CSSProperties = {
   color: 'var(--ink)',
   margin: '0 0 16px',
   textWrap: 'balance' as unknown as 'balance',
+};
+
+// Subhead carries the positioning line, matching the landing page's
+// "The protocol and runtime for agentic work." Rendered slightly smaller
+// than the H1 but heavier than the lede so the positioning reads as the
+// second-most-important line on the page.
+const SUBHEAD_STYLE: CSSProperties = {
+  fontFamily: 'var(--font-display)',
+  fontSize: 22,
+  lineHeight: 1.35,
+  fontWeight: 500,
+  color: 'var(--ink)',
+  margin: '0 auto 16px',
+  maxWidth: 620,
+  letterSpacing: '-0.01em',
 };
 
 const LEDE_STYLE: CSSProperties = {
@@ -278,57 +286,6 @@ const CARD_LINK: CSSProperties = {
   marginTop: 4,
 };
 
-// ---- ICPs (makers + teams) ------------------------------------------------
-
-const ICP_SECTION: CSSProperties = {
-  maxWidth: 880,
-  margin: '0 auto',
-  padding: '32px 0 16px',
-};
-
-const ICP_GRID: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-  gap: 12,
-};
-
-const ICP_CARD: CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 12,
-  padding: 20,
-  display: 'flex',
-  gap: 14,
-  alignItems: 'flex-start',
-};
-
-const ICP_ICON_BADGE: CSSProperties = {
-  width: 32,
-  height: 32,
-  borderRadius: 8,
-  background: '#ecfdf5',
-  color: 'var(--accent)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flex: '0 0 auto',
-};
-
-const ICP_TITLE: CSSProperties = {
-  fontSize: 14,
-  fontWeight: 700,
-  color: 'var(--ink)',
-  margin: '0 0 4px',
-  letterSpacing: '-0.005em',
-};
-
-const ICP_BODY: CSSProperties = {
-  fontSize: 13,
-  color: 'var(--muted)',
-  lineHeight: 1.5,
-  margin: 0,
-};
-
 // ---- Timeline band --------------------------------------------------------
 
 const TIMELINE_BAND: CSSProperties = {
@@ -441,7 +398,7 @@ export function WaitlistPage() {
       description="Floom is already live. Self-host today with one Docker command, or join the waitlist for Floom Cloud, going live 27 April 2026."
       contentStyle={{ maxWidth: 1120 }}
     >
-      {/* 1. Vision band ---------------------------------------------------- */}
+      {/* 1. Hero ----------------------------------------------------------- */}
       <section style={HERO_SECTION} data-testid="waitlist-hero">
         <div style={EYEBROW_STYLE}>Waitlist</div>
         <div
@@ -452,7 +409,8 @@ export function WaitlistPage() {
           <span aria-hidden="true" style={LAUNCH_PILL_DOT} />
           Launch week &middot; 27 April 2026
         </div>
-        <h1 style={H1_STYLE}>Infrastructure for agentic work.</h1>
+        <h1 style={H1_STYLE}>Ship AI apps fast.</h1>
+        <p style={SUBHEAD_STYLE}>The protocol and runtime for agentic work.</p>
         <p style={LEDE_STYLE}>
           Floom is already live. Self-host today with one Docker command, or
           join the waitlist for Floom Cloud, going live 27 April 2026.
@@ -718,7 +676,7 @@ export function WaitlistPage() {
         )}
       </section>
 
-      {/* 3. What's shipping ----------------------------------------------- */}
+      {/* 2. What's shipping ----------------------------------------------- */}
       <section style={SHIPPING_SECTION} data-testid="waitlist-shipping">
         <div style={SECTION_HEAD_EYEBROW}>What&rsquo;s shipping</div>
         <h2 style={SECTION_H2}>Self-host today. Cloud in a week.</h2>
@@ -742,41 +700,7 @@ export function WaitlistPage() {
         </div>
       </section>
 
-      {/* 4. ICPs ----------------------------------------------------------- */}
-      <section style={ICP_SECTION} data-testid="waitlist-icps">
-        <div style={SECTION_HEAD_EYEBROW}>Who it&rsquo;s for</div>
-        <h2 style={{ ...SECTION_H2, fontSize: 24, marginBottom: 20 }}>
-          Built for two kinds of builders.
-        </h2>
-        <div className="waitlist-icp-grid" style={ICP_GRID}>
-          <article style={ICP_CARD}>
-            <span aria-hidden="true" style={ICP_ICON_BADGE}>
-              <Wrench size={16} strokeWidth={1.8} aria-hidden="true" />
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <h3 style={ICP_TITLE}>Makers</h3>
-              <p style={ICP_BODY}>
-                Ship your vibe-coded weekend projects to real URLs — with
-                auth, run history, and share pages included.
-              </p>
-            </div>
-          </article>
-          <article style={ICP_CARD}>
-            <span aria-hidden="true" style={ICP_ICON_BADGE}>
-              <Users size={16} strokeWidth={1.8} aria-hidden="true" />
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <h3 style={ICP_TITLE}>Teams</h3>
-              <p style={ICP_BODY}>
-                Run internal tools and productivity apps in a production
-                wrapper your org can trust.
-              </p>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      {/* 5. Timeline band -------------------------------------------------- */}
+      {/* 3. Timeline band -------------------------------------------------- */}
       <section style={TIMELINE_BAND} data-testid="waitlist-timeline">
         <div style={TIMELINE_EYEBROW}>Timeline</div>
         <p style={TIMELINE_LINE}>
@@ -785,7 +709,7 @@ export function WaitlistPage() {
         </p>
       </section>
 
-      {/* 6. Footer links --------------------------------------------------- */}
+      {/* Footer links ------------------------------------------------------ */}
       <div style={FOOTER_LINKS}>
         Already exploring? Poke around{' '}
         <Link to="/docs" style={FOOTER_LINK}>
@@ -801,7 +725,6 @@ export function WaitlistPage() {
       <style>{`
         @media (max-width: 860px) {
           .waitlist-shipping-grid { grid-template-columns: minmax(0, 1fr) !important; }
-          .waitlist-icp-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
         @media (max-width: 560px) {
           [data-testid="waitlist-hero"] h1 { font-size: 36px !important; }
