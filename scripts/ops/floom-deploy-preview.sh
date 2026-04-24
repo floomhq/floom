@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 # floom-deploy-preview.sh
-# Auto-deploy on every push to main. Rolls BOTH the prod container
-# (floom-mcp-preview on :3051) AND the preview container
-# (floom-preview-launch on :3052). Invoked via forced-command SSH from
-# the GitHub Actions runner.
+# Auto-deploy on every push to main. Rolls ONLY the preview container
+# (floom-preview-launch on :3052 -> preview.floom.dev). Prod (floom.dev,
+# floom-mcp-preview on :3051) is deployed manually via
+# floom-deploy-prod.sh triggered by workflow_dispatch. See
+# scripts/ops/floom-deploy-prod.sh and .github/workflows/deploy-prod.yml.
 #
 # This file is the source of truth. The live copy lives at
 # /usr/local/sbin/floom-deploy-preview.sh on AX41. See
 # scripts/ops/README.md for how to update.
 #
-# Behavior (fail fast, idempotent, atomic across both containers):
+# Behavior (fail fast, idempotent, preview-only):
 #   1. git fetch + reset --hard origin/main in a DEDICATED clone
-#   2. docker build -> floom-preview-local:auto-<sha>   (ONE image)
-#   3. Bump image tag in /opt/floom-mcp-preview/docker-compose.yml (prod)
-#   4. Bump image tag in /opt/floom-preview-launch/docker-compose.yml (preview)
-#   5. docker compose up -d --no-deps for both services
-#   6. Health check http://127.0.0.1:3051/api/health (prod) AND
-#                  http://127.0.0.1:3052/api/health (preview), each up to 60s
-#   7. On EITHER failure: restore BOTH compose backups + restart both
-#      (the deploy is atomic: either both roll forward, or both roll back)
+#   2. docker build -> floom-preview-local:auto-<sha>
+#      (the same tag is reused by floom-deploy-prod.sh when promoted)
+#   3. Bump image tag in /opt/floom-preview-launch/docker-compose.yml
+#   4. docker compose up -d --no-deps floom-preview-launch
+#   5. Health-check http://127.0.0.1:3052/api/health for up to 60s
+#   6. On failure: restore the preview compose backup and restart the
+#      preview container only. NEVER touches the prod compose or container.
 #
 # Env var differences are preserved in the compose files themselves — the
-# script ONLY swaps the image tag. In particular:
-#   - prod    (:3051) keeps DEPLOY_ENABLED=false
-#   - preview (:3052) keeps DEPLOY_ENABLED=true
+# script ONLY swaps the image tag. In particular, preview keeps
+# DEPLOY_ENABLED=true; prod keeps DEPLOY_ENABLED=false. This script does
+# not see or edit env vars.
 #
 # Why a dedicated clone: /root/floom is a shared worktree used by many
 # concurrent agents on feature branches. `git reset --hard` there would
@@ -38,17 +38,12 @@ LOG=/var/log/floom-deploy-preview.log
 exec >> "$LOG" 2>&1
 
 echo ""
-echo "=== deploy started $(date --iso-8601=seconds) ==="
+echo "=== preview deploy started $(date --iso-8601=seconds) ==="
 
 REPO=/opt/floom-deploy-src
 REMOTE_URL=https://github.com/floomhq/floom.git
 
-# Prod (floom.dev)
-PROD_COMPOSE_DIR=/opt/floom-mcp-preview
-PROD_SERVICE=floom-mcp-preview
-PROD_HEALTH_URL="http://127.0.0.1:3051/api/health"
-
-# Preview (preview.floom.dev)
+# Preview (preview.floom.dev) — the only thing this script touches.
 PREVIEW_COMPOSE_DIR=/opt/floom-preview-launch
 PREVIEW_SERVICE=floom-preview-launch
 PREVIEW_HEALTH_URL="http://127.0.0.1:3052/api/health"
@@ -68,106 +63,55 @@ SHA=$(git rev-parse --short HEAD)
 TAG="floom-preview-local:auto-${SHA}"
 echo "[build] sha=${SHA} tag=${TAG}"
 
-# Build ONE image — both containers run the same bits.
-# Dockerfile lives at docker/Dockerfile, not the repo root.
+# Build the image. Prod reuses this tag when promoted.
 docker build -t "$TAG" -f docker/Dockerfile .
 
-# Shared timestamp for matching backups across both composes. Makes the
-# rollback pair unambiguous even if the script is re-run quickly.
 TS=$(date +%s)
+BACKUP="${PREVIEW_COMPOSE_DIR}/docker-compose.yml.bak.auto-${TS}"
 
-# -----------------------------------------------------------------------
-# Helper: bump image tag in the compose file at $1, backup to .bak.auto-$TS
-# Exits non-zero if the sed didn't actually produce the target tag.
-# -----------------------------------------------------------------------
-bump_compose() {
-  local dir="$1"
-  local backup="${dir}/docker-compose.yml.bak.auto-${TS}"
-  cp "${dir}/docker-compose.yml" "$backup"
-  echo "[compose] backup=${backup}"
+cp "${PREVIEW_COMPOSE_DIR}/docker-compose.yml" "$BACKUP"
+echo "[compose] backup=${BACKUP}"
+sed -i -E "s|(^\s*image:\s*)floom-preview-local:.*|\1${TAG}|" \
+    "${PREVIEW_COMPOSE_DIR}/docker-compose.yml"
 
-  # Replace the image: line for the floom-preview-local:* tag.
-  # Both compose files use floom-preview-local:<something>; there is only
-  # one such line in each file. No yq dependency needed.
-  sed -i -E "s|(^\s*image:\s*)floom-preview-local:.*|\1${TAG}|" "${dir}/docker-compose.yml"
+if ! grep -q "image: ${TAG}" "${PREVIEW_COMPOSE_DIR}/docker-compose.yml"; then
+  echo "[compose] FAILED to bump image tag in ${PREVIEW_COMPOSE_DIR}"
+  cp "$BACKUP" "${PREVIEW_COMPOSE_DIR}/docker-compose.yml"
+  exit 1
+fi
 
-  if ! grep -q "image: ${TAG}" "${dir}/docker-compose.yml"; then
-    echo "[compose] FAILED to bump image tag in ${dir}"
-    return 1
+# Roll preview only.
+(cd "$PREVIEW_COMPOSE_DIR" && docker compose up -d --no-deps "$PREVIEW_SERVICE")
+
+# Health-check preview only.
+HEALTHY=0
+for i in $(seq 1 12); do
+  if curl -fsS "$PREVIEW_HEALTH_URL" > /dev/null 2>&1; then
+    echo "[health] ok ${PREVIEW_HEALTH_URL} after $((i*5))s"
+    HEALTHY=1
+    break
   fi
-}
+  sleep 5
+done
 
-# Helper: roll a compose service (up -d --no-deps against $dir / $service)
-roll_compose() {
-  local dir="$1"
-  local service="$2"
-  (cd "$dir" && docker compose up -d --no-deps "$service")
-}
-
-# Helper: health-check $1 for up to 60s. Returns 0 on first success.
-wait_healthy() {
-  local url="$1"
-  local i
-  for i in $(seq 1 12); do
-    if curl -fsS "$url" > /dev/null 2>&1; then
-      echo "[health] ok ${url} after $((i*5))s"
-      return 0
-    fi
-    sleep 5
-  done
-  echo "[health] FAILED ${url} after 60s"
-  return 1
-}
-
-# Helper: restore a compose file from its THIS-RUN backup and roll the service.
-restore_compose() {
-  local dir="$1"
-  local service="$2"
-  local backup="${dir}/docker-compose.yml.bak.auto-${TS}"
-  if [ -f "$backup" ]; then
-    echo "[rollback] restoring ${backup}"
-    cp "$backup" "${dir}/docker-compose.yml"
-    roll_compose "$dir" "$service" || true
-  else
-    echo "[rollback] NO backup at ${backup} — manual intervention needed for ${service}"
-  fi
-}
-
-# -----------------------------------------------------------------------
-# Roll forward: bump tags in both composes, then up both.
-# -----------------------------------------------------------------------
-bump_compose "$PROD_COMPOSE_DIR"
-bump_compose "$PREVIEW_COMPOSE_DIR"
-
-roll_compose "$PROD_COMPOSE_DIR"    "$PROD_SERVICE"
-roll_compose "$PREVIEW_COMPOSE_DIR" "$PREVIEW_SERVICE"
-
-# -----------------------------------------------------------------------
-# Health-check both. If EITHER fails, roll BOTH back (atomic).
-# -----------------------------------------------------------------------
-PROD_OK=0
-PREVIEW_OK=0
-wait_healthy "$PROD_HEALTH_URL"    && PROD_OK=1
-wait_healthy "$PREVIEW_HEALTH_URL" && PREVIEW_OK=1
-
-if [ "$PROD_OK" = "1" ] && [ "$PREVIEW_OK" = "1" ]; then
-  echo "=== deploy done $(date --iso-8601=seconds) sha=${SHA} (prod + preview) ==="
+if [ "$HEALTHY" = "1" ]; then
+  echo "=== preview deploy done $(date --iso-8601=seconds) sha=${SHA} ==="
   exit 0
 fi
 
-echo "=== HEALTHCHECK FAILED (prod=${PROD_OK} preview=${PREVIEW_OK}), rolling back BOTH ==="
-restore_compose "$PROD_COMPOSE_DIR"    "$PROD_SERVICE"
-restore_compose "$PREVIEW_COMPOSE_DIR" "$PREVIEW_SERVICE"
+echo "[health] FAILED ${PREVIEW_HEALTH_URL} after 60s"
+echo "=== HEALTHCHECK FAILED, rolling back preview (prod untouched) ==="
+cp "$BACKUP" "${PREVIEW_COMPOSE_DIR}/docker-compose.yml"
+(cd "$PREVIEW_COMPOSE_DIR" && docker compose up -d --no-deps "$PREVIEW_SERVICE") || true
 
-# Re-check health after rollback so the log is unambiguous about end state.
-PROD_BACK=0
-PREVIEW_BACK=0
-wait_healthy "$PROD_HEALTH_URL"    && PROD_BACK=1
-wait_healthy "$PREVIEW_HEALTH_URL" && PREVIEW_BACK=1
+# Confirm rollback health.
+for i in $(seq 1 12); do
+  if curl -fsS "$PREVIEW_HEALTH_URL" > /dev/null 2>&1; then
+    echo "=== preview rollback ok after $((i*5))s ==="
+    exit 1
+  fi
+  sleep 5
+done
 
-if [ "$PROD_BACK" = "1" ] && [ "$PREVIEW_BACK" = "1" ]; then
-  echo "=== rollback ok — both containers back on previous image ==="
-else
-  echo "=== rollback ALSO unhealthy (prod=${PROD_BACK} preview=${PREVIEW_BACK}) — manual intervention needed ==="
-fi
+echo "=== preview rollback ALSO unhealthy — manual intervention needed ==="
 exit 1
