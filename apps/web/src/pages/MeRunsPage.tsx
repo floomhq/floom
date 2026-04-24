@@ -1,16 +1,10 @@
-// /me/runs — Runs tab of the Studio-tabbed dashboard.
-//
-// Full chronological list of the user's own runs across every app. The
-// Overview tab shows a 5-run preview; this page shows everything with
-// "Load more" pagination. Status pill + app icon + row-level click to
-// open the run permalink — same interaction as the prior /me Recent
-// runs section, extracted so /me/runs is no longer a redirect stub.
-
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { MeLayout } from '../components/me/MeLayout';
+import { Link } from 'react-router-dom';
 import { AppIcon } from '../components/AppIcon';
+import { MeLayout } from '../components/me/MeLayout';
+import { runIdShort, runPreviewText } from '../components/me/runPreview';
+import { useMeCompactLayout } from '../components/me/useMeCompactLayout';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
@@ -27,64 +21,164 @@ const s: Record<string, CSSProperties> = {
     justifyContent: 'space-between',
     gap: 12,
     marginBottom: 14,
+    flexWrap: 'wrap',
   },
   h2: {
     fontFamily: 'var(--font-display)',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 800,
-    letterSpacing: '-0.025em',
-    lineHeight: 1.2,
+    letterSpacing: '-0.03em',
+    lineHeight: 1.15,
     margin: 0,
     color: 'var(--ink)',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: 'var(--muted)',
-    margin: '4px 0 20px',
-    lineHeight: 1.5,
+    margin: '0 0 20px',
+    lineHeight: 1.6,
+    maxWidth: 620,
   },
   card: {
     border: '1px solid var(--line)',
-    borderRadius: 12,
+    borderRadius: 20,
     background: 'var(--card)',
     overflow: 'hidden',
+    boxShadow: '0 1px 0 rgba(17, 24, 39, 0.02)',
   },
-  loadMoreWrap: {
-    padding: 14,
-    textAlign: 'center' as const,
-    borderTop: '1px solid var(--line)',
-    background: 'var(--bg)',
-  },
-  loadMoreBtn: {
-    padding: '8px 16px',
-    border: '1px solid var(--line)',
-    background: 'var(--card)',
+  runRow: {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+    alignItems: 'center',
+    gap: 14,
+    padding: '15px 18px',
+    textDecoration: 'none',
     color: 'var(--ink)',
-    borderRadius: 8,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
+    borderBottom: '1px solid var(--line)',
   },
   appIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    background: 'var(--bg)',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    background: 'rgba(250, 248, 243, 0.92)',
     border: '1px solid var(--line)',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
+  previewStack: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 3,
+    minWidth: 0,
+  },
+  appTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+    flexWrap: 'wrap',
+  },
+  appName: {
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.3,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  runMeta: {
+    fontSize: 11,
+    color: 'var(--muted)',
+    fontFamily: 'JetBrains Mono, monospace',
+    letterSpacing: '0.02em',
+  },
+  previewText: {
+    fontSize: 13.5,
+    lineHeight: 1.55,
+    color: 'var(--muted)',
+    minWidth: 0,
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+  },
+  rightMeta: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'flex-end',
+    gap: 6,
+    flexShrink: 0,
+  },
+  whenText: {
+    fontSize: 12.5,
+    color: 'var(--muted)',
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap' as const,
+  },
+  loadMoreWrap: {
+    padding: 14,
+    textAlign: 'center' as const,
+    borderTop: '1px solid var(--line)',
+    background: 'rgba(250, 248, 243, 0.82)',
+  },
+  loadMoreBtn: {
+    padding: '9px 16px',
+    border: '1px solid var(--line)',
+    background: 'var(--card)',
+    color: 'var(--ink)',
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  emptyCard: {
+    border: '1px solid var(--line)',
+    borderRadius: 24,
+    background:
+      'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,248,243,0.94) 100%)',
+    padding: '40px 28px',
+    textAlign: 'center' as const,
+  },
+  emptyTitle: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 24,
+    fontWeight: 800,
+    letterSpacing: '-0.04em',
+    lineHeight: 1.1,
+    color: 'var(--ink)',
+    margin: '0 0 10px',
+  },
+  emptyBody: {
+    margin: '0 auto 22px',
+    maxWidth: 420,
+    fontSize: 15,
+    lineHeight: 1.65,
+    color: 'var(--muted)',
+  },
+  button: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '11px 18px',
+    borderRadius: 999,
+    background: 'var(--ink)',
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 700,
+    textDecoration: 'none',
+  },
 };
 
 export function MeRunsPage() {
-  const navigate = useNavigate();
   const { data: session, loading: sessionLoading, error: sessionError } = useSession();
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_LIMIT);
+  const compactLayout = useMeCompactLayout();
 
   const signedOutPreview = !!session && session.cloud_mode && session.user.is_local;
   const sessionPending = sessionLoading || (session === null && !sessionError);
@@ -95,6 +189,7 @@ export function MeRunsPage() {
       setRuns([]);
       return;
     }
+
     let cancelled = false;
     api
       .getMyRuns(FETCH_LIMIT)
@@ -104,6 +199,7 @@ export function MeRunsPage() {
       .catch((err) => {
         if (!cancelled) setRunsError((err as Error).message);
       });
+
     return () => {
       cancelled = true;
     };
@@ -115,16 +211,23 @@ export function MeRunsPage() {
   );
   const hasMore = runs ? runs.length > visibleCount : false;
 
-  function openRun(run: MeRunSummary) {
-    if (!run.app_slug) return;
-    navigate(`/p/${run.app_slug}?run=${encodeURIComponent(run.id)}`);
-  }
-
   return (
-    <MeLayout activeTab="runs" title="Runs · Me · Floom" allowSignedOutShell={signedOutPreview}>
+    <MeLayout
+      activeTab="runs"
+      title="Run history · Me · Floom"
+      allowSignedOutShell={signedOutPreview}
+      eyebrow="History"
+      heading="Recent runs"
+      subtitle="Everything you’ve run on Floom, ordered from newest to oldest."
+      actions={
+        <Link to="/me" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--accent)', textDecoration: 'none' }}>
+          Back home →
+        </Link>
+      }
+    >
       <div data-testid="me-runs-page">
         <header style={s.header}>
-          <h2 style={s.h2}>All runs</h2>
+          <h2 style={s.h2}>Run history</h2>
           {runs && runs.length > 0 ? (
             <span style={{ fontSize: 12, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
               {runs.length} total
@@ -132,11 +235,11 @@ export function MeRunsPage() {
           ) : null}
         </header>
         <p style={s.subtitle}>
-          Every Floom app you&rsquo;ve run. Most-recent first. Click any row to open the run detail.
+          Open any row to inspect the full run permalink with inputs, outputs, and logs.
         </p>
 
         {runs === null && !runsError ? (
-          <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13 }}>
+          <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
             Loading runs…
           </div>
         ) : runsError ? (
@@ -144,12 +247,12 @@ export function MeRunsPage() {
             data-testid="me-runs-error"
             style={{
               border: '1px solid #f4b7b1',
-              borderRadius: 12,
+              borderRadius: 16,
               background: '#fdecea',
               padding: '16px 20px',
               color: '#5c2d26',
-              fontSize: 13,
-              lineHeight: 1.55,
+              fontSize: 13.5,
+              lineHeight: 1.6,
             }}
           >
             <strong style={{ color: '#c2321f' }}>Couldn&rsquo;t load runs.</strong> {runsError}
@@ -158,26 +261,26 @@ export function MeRunsPage() {
           <EmptyRuns signedOutPreview={signedOutPreview} />
         ) : (
           <div data-testid="me-runs-list" style={s.card}>
-            {visibleRuns.map((run, i) => (
+            {visibleRuns.map((run, index) => (
               <RunRow
                 key={run.id}
                 run={run}
-                onOpen={openRun}
-                isLast={i === visibleRuns.length - 1}
+                isLast={index === visibleRuns.length - 1}
+                compact={compactLayout}
               />
             ))}
-            {hasMore && (
+            {hasMore ? (
               <div style={s.loadMoreWrap}>
                 <button
                   type="button"
-                  onClick={() => setVisibleCount((n) => n + LOAD_STEP)}
+                  onClick={() => setVisibleCount((count) => count + LOAD_STEP)}
                   data-testid="me-load-more"
                   style={s.loadMoreBtn}
                 >
                   Load more
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         )}
       </div>
@@ -187,120 +290,60 @@ export function MeRunsPage() {
 
 function RunRow({
   run,
-  onOpen,
   isLast,
+  compact,
 }: {
   run: MeRunSummary;
-  onOpen: (run: MeRunSummary) => void;
   isLast: boolean;
+  compact: boolean;
 }) {
-  const [rowHover, setRowHover] = useState(false);
   const appName = run.app_name || run.app_slug || 'App';
-  const summary = runSummary(run);
-  const outPreview = runOutputPreviewLine(run);
-  const previewLine = [summary, outPreview].filter(Boolean).join(' → ');
-  const time = formatTime(run.started_at);
-  const runTag = runIdShort(run.id);
-  const disabled = !run.app_slug;
+
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(run)}
-      disabled={disabled}
+    <Link
+      to={`/me/runs/${encodeURIComponent(run.id)}`}
       data-testid={`me-run-row-${run.id}`}
-      onMouseEnter={() => setRowHover(true)}
-      onMouseLeave={() => setRowHover(false)}
       style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '14px 16px',
-        minHeight: 56,
-        border: 'none',
-        borderBottom: isLast ? 'none' : '1px solid var(--line)',
-        background:
-          rowHover && !disabled
-            ? 'color-mix(in srgb, var(--line) 32%, transparent)'
-            : 'transparent',
-        transition: 'background 0.12s ease',
-        textAlign: 'left' as const,
-        cursor: disabled ? 'default' : 'pointer',
-        fontFamily: 'inherit',
-        color: 'var(--ink)',
+        ...s.runRow,
+        gridTemplateColumns: compact
+          ? 'minmax(0, 1fr)'
+          : (s.runRow.gridTemplateColumns as string),
+        borderBottom: isLast ? 'none' : s.runRow.borderBottom,
       }}
     >
-      <StatusPill status={run.status} />
-      {run.app_slug && (
+      {run.app_slug ? (
         <span aria-hidden style={s.appIconWrap}>
-          <AppIcon slug={run.app_slug} size={14} />
+          <AppIcon slug={run.app_slug} size={16} />
+        </span>
+      ) : (
+        <span aria-hidden style={s.appIconWrap}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>•</span>
         </span>
       )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
+      <div style={s.previewStack}>
+        <div style={s.appTitle}>
+          <span style={s.appName}>{appName}</span>
+          <StatusPill status={run.status} />
+          <span style={s.runMeta}>{runIdShort(run.id)}</span>
+        </div>
+        <span style={s.previewText}>{runPreviewText(run)}</span>
+      </div>
+      <div
+        style={{
+          ...s.rightMeta,
+          alignItems: compact ? 'flex-start' : s.rightMeta.alignItems,
+        }}
+      >
+        <span
           style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 8,
-            fontSize: 14,
-            minWidth: 0,
-            width: '100%',
+            ...s.whenText,
+            whiteSpace: compact ? 'normal' : s.whenText.whiteSpace,
           }}
         >
-          <span
-            style={{
-              fontWeight: 600,
-              color: 'var(--ink)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: 'min(220px, 40%)',
-              flexShrink: 0,
-            }}
-          >
-            {appName}
-          </span>
-          {previewLine ? (
-            <span
-              style={{
-                color: 'var(--muted)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                flex: 1,
-                minWidth: 0,
-              }}
-            >
-              {previewLine}
-            </span>
-          ) : null}
-        </div>
+          {formatTime(run.started_at)}
+        </span>
       </div>
-      <span
-        aria-hidden="true"
-        style={{
-          fontSize: 11,
-          color: 'var(--muted)',
-          flexShrink: 0,
-          fontFamily: 'JetBrains Mono, monospace',
-          fontVariantNumeric: 'tabular-nums',
-          marginRight: 8,
-          opacity: 0.75,
-        }}
-      >
-        {runTag}
-      </span>
-      <span
-        style={{
-          fontSize: 12,
-          color: 'var(--muted)',
-          flexShrink: 0,
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {time}
-      </span>
-    </button>
+    </Link>
   );
 }
 
@@ -316,7 +359,7 @@ function StatusPill({ status }: { status: RunStatus }) {
           letterSpacing: '0.04em',
           textTransform: 'uppercase' as const,
           padding: '3px 6px',
-          borderRadius: 4,
+          borderRadius: 999,
           background: 'rgba(4, 120, 87, 0.12)',
           color: 'var(--accent, #047857)',
         }}
@@ -336,7 +379,7 @@ function StatusPill({ status }: { status: RunStatus }) {
           letterSpacing: '0.04em',
           textTransform: 'uppercase' as const,
           padding: '3px 6px',
-          borderRadius: 4,
+          borderRadius: 999,
           background: '#fdecea',
           color: '#c2321f',
         }}
@@ -355,138 +398,30 @@ function StatusPill({ status }: { status: RunStatus }) {
         letterSpacing: '0.03em',
         textTransform: 'uppercase' as const,
         padding: '3px 6px',
-        borderRadius: 4,
+        borderRadius: 999,
         background: 'color-mix(in srgb, var(--muted) 12%, transparent)',
         color: 'var(--muted)',
       }}
     >
-      {status === 'running' ? 'Run' : '…'}
+      {status === 'running' ? 'Run' : 'Queued'}
     </span>
   );
 }
 
 function EmptyRuns({ signedOutPreview = false }: { signedOutPreview?: boolean }) {
   return (
-    <section
-      data-testid="me-runs-empty"
-      style={{
-        border: '1px dashed var(--line)',
-        borderRadius: 12,
-        background: 'var(--card)',
-        padding: '40px 24px',
-        textAlign: 'center' as const,
-      }}
-    >
-      <div
-        style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: 20,
-          fontWeight: 800,
-          letterSpacing: '-0.025em',
-          color: 'var(--ink)',
-          marginBottom: 8,
-        }}
-      >
-        {signedOutPreview ? 'Sign in to see your runs.' : 'No runs yet.'}
-      </div>
-      <p
-        style={{
-          margin: '0 auto 20px',
-          color: 'var(--muted)',
-          fontSize: 14,
-          lineHeight: 1.55,
-          maxWidth: 380,
-        }}
-      >
+    <section data-testid="me-runs-empty" style={s.emptyCard}>
+      <h2 style={s.emptyTitle}>
+        {signedOutPreview ? 'Nothing to pick up yet.' : 'You haven’t run anything yet.'}
+      </h2>
+      <p style={s.emptyBody}>
         {signedOutPreview
-          ? 'Your run history appears here after you sign in. You can still try apps from the public directory right now.'
-          : 'Run any Floom app and it will show up here.'}
+          ? 'Browse the store, try an app, and your history will show up here after you sign in.'
+          : 'Run any app from the store and its history will show up here.'}
       </p>
-      <Link
-        to="/apps"
-        data-testid="me-empty-browse"
-        style={{
-          display: 'inline-block',
-          padding: '10px 18px',
-          background: 'var(--ink)',
-          color: '#fff',
-          borderRadius: 8,
-          fontSize: 14,
-          fontWeight: 600,
-          textDecoration: 'none',
-        }}
-      >
-        Browse apps →
+      <Link to="/apps" data-testid="me-empty-browse" style={s.button}>
+        Browse the store →
       </Link>
     </section>
   );
-}
-
-/* ---------- helpers ---------- */
-
-function runIdShort(id: string | null | undefined): string {
-  if (!id) return '';
-  const trimmed = id.replace(/^run_/, '');
-  return trimmed.slice(0, 8);
-}
-
-function runOutputPreviewLine(run: MeRunSummary): string | null {
-  const o = run.outputs;
-  if (o == null || o === '') return null;
-  if (typeof o === 'string') {
-    const t = o.replace(/\s+/g, ' ').trim();
-    return t ? truncate(t, 72) : null;
-  }
-  if (typeof o === 'object' && o !== null && !Array.isArray(o)) {
-    const rec = o as Record<string, unknown>;
-    const direct =
-      typeof rec['text'] === 'string'
-        ? rec['text']
-        : typeof rec['message'] === 'string'
-          ? rec['message']
-          : typeof rec['result'] === 'string'
-            ? rec['result']
-            : null;
-    if (direct && String(direct).trim()) {
-      return truncate(String(direct).replace(/\s+/g, ' ').trim(), 72);
-    }
-  }
-  try {
-    const raw = JSON.stringify(o);
-    if (raw.length <= 80) return raw;
-    return `${raw.slice(0, 77)}…`;
-  } catch {
-    return null;
-  }
-}
-
-function runSummary(run: MeRunSummary): string | null {
-  const inputs = run.inputs;
-  if (inputs && typeof inputs === 'object' && !Array.isArray(inputs)) {
-    const prompt = inputs['prompt'];
-    if (typeof prompt === 'string' && prompt.trim()) {
-      return truncate(prompt.trim(), 90);
-    }
-    for (const value of Object.values(inputs)) {
-      if (typeof value === 'string' && value.trim()) {
-        return truncate(value.trim(), 90);
-      }
-    }
-    const entries = Object.entries(inputs).filter(
-      ([, v]) => v !== null && (typeof v === 'number' || typeof v === 'boolean'),
-    );
-    if (entries.length > 0) {
-      const [k, v] = entries[0];
-      return truncate(`${k}: ${v}`, 90);
-    }
-    const keyCount = Object.keys(inputs).length;
-    if (keyCount > 0) return `${keyCount} input${keyCount === 1 ? '' : 's'}`;
-  }
-  if (run.action && run.action !== 'run') return run.action;
-  return null;
-}
-
-function truncate(str: string, max: number): string {
-  if (str.length <= max) return str;
-  return `${str.slice(0, max - 1).trimEnd()}…`;
 }

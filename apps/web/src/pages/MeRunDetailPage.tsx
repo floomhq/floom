@@ -28,7 +28,7 @@ export function MeRunDetailPage() {
     <PageShell requireAuth="cloud" title="Run detail | Floom" noIndex>
       <div data-testid="run-detail" style={{ maxWidth: 900 }}>
         <Link
-          to="/me"
+          to="/me/runs"
           style={{
             fontSize: 13,
             color: 'var(--muted)',
@@ -48,7 +48,7 @@ export function MeRunDetailPage() {
               strokeLinejoin="round"
             />
           </svg>
-          Back to dashboard
+          Back to runs
         </Link>
 
         {error && (
