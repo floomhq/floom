@@ -185,7 +185,16 @@ export function ScoredRowsTable({
   const total = runOutput?.total ?? rows.length;
   const scored = runOutput?.scored;
   const failed = runOutput?.failed;
-  const model = typeof runOutput?.model === 'string' ? runOutput.model : undefined;
+  const rawModel = typeof runOutput?.model === 'string' ? runOutput.model : undefined;
+  // Phase B (#533) ships pre-generated Pro responses for the demo sample inputs
+  // so /p/:slug feels instant. The chip must say so — viewers were reading
+  // "GEMINI-3.1-PRO-PREVIEW" as live-Pro inference and assuming Floom defaults
+  // to Pro (it defaults to Flash). `cache_hit` is the truthful signal from
+  // main.py; some older fixtures already stamp " (cached)" into the model
+  // string itself, so we strip that before re-appending to avoid double-suffix.
+  const cacheHit = runOutput?.cache_hit === true;
+  const cleanedModel = rawModel?.replace(/\s*\(cached\)\s*$/i, '');
+  const model = cleanedModel;
   const dryRun = runOutput?.dry_run === true;
 
   return (
@@ -429,6 +438,7 @@ export function ScoredRowsTable({
 
       {model ? (
         <div
+          data-testid="scored-rows-model-chip"
           style={{
             padding: '8px 16px',
             borderTop: `1px solid ${LINE}`,
@@ -441,7 +451,17 @@ export function ScoredRowsTable({
           }}
         >
           <span>Model</span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{model}</span>
+          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+            {model}
+            {cacheHit ? (
+              <span
+                data-testid="scored-rows-cache-hit-suffix"
+                style={{ opacity: 0.65, marginLeft: 6 }}
+              >
+                · CACHED
+              </span>
+            ) : null}
+          </span>
         </div>
       ) : null}
     </div>

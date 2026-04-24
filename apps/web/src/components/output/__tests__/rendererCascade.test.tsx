@@ -8,6 +8,7 @@ import type { ActionSpec, NormalizedManifest } from '../../../lib/types';
 import { OUTPUT_LIBRARY, pickRenderer } from '../rendererCascade';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RowTable } from '../RowTable';
+import { ScoredRowsTable } from '../ScoredRowsTable';
 import React from 'react';
 
 function mkManifest(opts: {
@@ -126,4 +127,74 @@ test('RowTable renders string[] cells as a bullet list (not stringified JSON)', 
     !html.includes('Exceptional performance with instant navigation&quot;,&quot;'),
     'cells should not leave a comma-separated JSON blob in the table cell',
   );
+});
+
+test('ScoredRowsTable model chip: cache_hit=true appends "· CACHED" suffix', () => {
+  // Phase B (#533) ships pre-generated Pro responses for demo sample inputs.
+  // The chip must read e.g. "gemini-3.1-pro-preview · CACHED" so viewers
+  // don't read it as live Pro inference (Floom defaults to Flash).
+  const rows = [{ company: 'Acme', score: 80, reasoning: 'Strong fit' }];
+  const cachedHtml = renderToStaticMarkup(
+    React.createElement(ScoredRowsTable, {
+      rows,
+      runOutput: {
+        total: 1,
+        scored: 1,
+        failed: 0,
+        cache_hit: true,
+        model: 'gemini-3.1-pro-preview',
+      },
+    }),
+  );
+  assert.ok(
+    cachedHtml.includes('gemini-3.1-pro-preview'),
+    'cached chip should still show the underlying model name',
+  );
+  assert.ok(
+    cachedHtml.includes('· CACHED'),
+    'cached chip should append the "· CACHED" suffix',
+  );
+
+  const liveHtml = renderToStaticMarkup(
+    React.createElement(ScoredRowsTable, {
+      rows,
+      runOutput: {
+        total: 1,
+        scored: 1,
+        failed: 0,
+        cache_hit: false,
+        model: 'gemini-3-flash-preview',
+      },
+    }),
+  );
+  assert.ok(
+    liveHtml.includes('gemini-3-flash-preview'),
+    'live chip should show the live model name',
+  );
+  assert.ok(
+    !liveHtml.includes('· CACHED'),
+    'live chip must NOT show the cached suffix',
+  );
+});
+
+test('ScoredRowsTable model chip: legacy "(cached)" backend stamp is normalized, not doubled', () => {
+  // examples/lead-scorer/main.py uses setdefault("model", "...-pro-preview (cached)")
+  // as a fallback when the cache fixture lacks a `model` field. The UI must
+  // strip that suffix before re-appending its own "· CACHED" marker so we
+  // don't end up with "...-pro-preview (cached) · CACHED".
+  const rows = [{ company: 'Acme', score: 80 }];
+  const html = renderToStaticMarkup(
+    React.createElement(ScoredRowsTable, {
+      rows,
+      runOutput: {
+        cache_hit: true,
+        model: 'gemini-3.1-pro-preview (cached)',
+      },
+    }),
+  );
+  assert.ok(
+    !/\(cached\)/i.test(html),
+    'the legacy "(cached)" suffix should be stripped from the chip text',
+  );
+  assert.ok(html.includes('· CACHED'), 'the new suffix should be present exactly once');
 });
