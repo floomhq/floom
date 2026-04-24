@@ -608,7 +608,9 @@ input { font-family: inherit; }
   white-space: nowrap;
 }
 .btn-ink:hover {
-  background: #000;
+  /* Warm dark neutral on hover — Federico's locked rule bans pure black
+     on landing surfaces, and this button lives on the landing page. */
+  background: #1b1a17;
   box-shadow: 0 4px 12px rgba(22, 21, 18, 0.25),
               inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }

@@ -340,7 +340,10 @@ function CodeBlock({ code }: { code: string }) {
     <div style={{ position: 'relative' }}>
       <pre
         style={{
-          background: '#0e0e0c',
+          // Warm dark neutral (no pure black) — Federico's locked rule
+          // for terminal surfaces. Matches the landing hero code panel
+          // + /install code blocks.
+          background: '#1b1a17',
           color: '#d4d4c8',
           fontFamily: 'JetBrains Mono, monospace',
           fontSize: 12,

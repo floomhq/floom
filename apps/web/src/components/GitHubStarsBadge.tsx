@@ -11,29 +11,36 @@
  * with no number across both landing + signed-in views, even though
  * the repo has a live star count. Three changes to make the count
  * actually show up:
- *   1. Seed with FALLBACK_COUNT (updated manually per release) so the
- *      first paint always carries a number. Prevents the "Star"
- *      no-number state on ANY load, including when:
- *        - The API fetch fails (rate-limit on shared IPs, CORS from
- *          cloud WAFs, adblock extensions that block api.github.com).
- *        - localStorage is disabled (Safari private mode).
- *        - The component unmounts before fetch resolves.
- *   2. Always render a number (never null) — the live fetch still
- *      runs and upgrades the value when it succeeds, but there is no
- *      UI state where the badge renders the word "Star" with no count.
- *   3. Widened the GitHub API error detection: any non-2xx response
- *      now logs (dev only) so we can see rate-limits in preview logs,
- *      instead of silently falling back.
+ *   1. Seed with FALLBACK_COUNT so the first paint always carries a
+ *      number. Prevents the no-number state on ANY load.
+ *   2. Always render a number (never null).
+ *   3. Log non-2xx responses in dev so rate-limits surface.
+ *
+ * 2026-04-24 (Federico launch-readiness audit): the live fetch used to
+ * hit `https://api.github.com/repos/floomhq/floom` directly from the
+ * browser. GitHub's anonymous REST budget is 60 req/hour/IP — shared
+ * cloud WAFs, office NATs, and most adblock lists silently blocked or
+ * 403-rate-limited the call, which produced a console warning on every
+ * landing page load. Fetch now goes through the same-origin server
+ * proxy at `/api/gh-stars`, which uses a PAT (when set) and a 10-min
+ * in-process cache to give every visitor the same live number with no
+ * CORS / rate-limit / adblock edge cases. See apps/server/src/routes/
+ * gh-stars.ts.
  */
 import { useEffect, useState } from 'react';
 
 const REPO = 'floomhq/floom';
 const CACHE_KEY = 'floom:gh-stars';
 const TTL_MS = 10 * 60 * 1000; // 10 minutes
+// Same-origin server proxy — no CORS, no client-side GitHub auth, no
+// rate-limit on shared IPs. Server caches for 10 minutes so this path
+// costs us at most one upstream GitHub call per 10 minutes per server.
+const STARS_ENDPOINT = '/api/gh-stars';
 // Floor value — updated at each release so the badge always shows a
-// plausible (not inflated) number even when the live fetch fails. The
-// actual count is usually higher; the live fetch upgrades on success.
-// Keep this conservative: better to underrepresent than to mislead.
+// plausible (not inflated) number even when every call fails. The
+// server proxy returns this same floor on total upstream failure; we
+// keep it in the client as a belt-and-braces seed so the first paint
+// always has a number even before the network round-trip completes.
 const FALLBACK_COUNT = 60;
 
 type Cached = { count: number; ts: number };
@@ -99,31 +106,30 @@ export function GitHubStarsBadge({
       return;
     }
     let cancelled = false;
-    fetch(`https://api.github.com/repos/${REPO}`, {
-      headers: { Accept: 'application/vnd.github+json' },
+    fetch(STARS_ENDPOINT, {
+      headers: { Accept: 'application/json' },
     })
       .then(async (r) => {
         if (!r.ok) {
           if (import.meta.env.DEV) {
-            // Surface rate-limits / 403 / CORS for debugging in preview.
             // eslint-disable-next-line no-console
-            console.warn(`[GitHubStarsBadge] GitHub API responded ${r.status}`);
+            console.warn(`[GitHubStarsBadge] /api/gh-stars responded ${r.status}`);
           }
           return null;
         }
         return r.json();
       })
-      .then((d: { stargazers_count?: number } | null) => {
-        if (cancelled || !d || typeof d.stargazers_count !== 'number') return;
-        setCount(d.stargazers_count);
-        writeCache(d.stargazers_count);
+      .then((d: { count?: number } | null) => {
+        if (cancelled || !d || typeof d.count !== 'number') return;
+        setCount(d.count);
+        writeCache(d.count);
       })
       .catch((err) => {
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn('[GitHubStarsBadge] fetch failed', err);
         }
-        // Network/CORS failure — keep whatever fallback/cached value we have.
+        // Network failure — keep whatever fallback/cached value we have.
       });
     return () => {
       cancelled = true;

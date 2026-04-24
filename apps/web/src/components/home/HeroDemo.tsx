@@ -965,10 +965,11 @@ const WRAP_STYLE: CSSProperties = {
   // Federico 2026-04-23: "wider and bigger" (previously 720px — felt small
   // vs. the hero text). 1080px gives Cursor-style visual weight while still
   // fitting a 1200px content column on desktop. Mobile collapses via CSS.
-  // 2026-04-24: marginTop trimmed 28 -> 16 as part of the landing
-  // restructure (cap hero at ~820px).
+  // 2026-04-24: marginTop restored to 36 — the prior 16 was part of the
+  // "fit hero into 820px" attempt that Federico reversed. Give the demo
+  // real air above the proof belt so it reads as a separate beat.
   maxWidth: 1080,
-  margin: '16px auto 0',
+  margin: '36px auto 0',
   borderRadius: 24,
   background: 'var(--card, #ffffff)',
   border: '1px solid var(--line, #e8e6e0)',
@@ -1019,17 +1020,17 @@ const TRACKER_DOT: CSSProperties = {
   background: 'var(--accent, #047857)',
 };
 
-// Fixed-height canvas — the morphing surface. Trimmed from 580 -> 460
-// as part of the 2026-04-24 landing restructure: the 580 canvas pushed
-// the total hero height to 993px (well above Federico's 820px target,
-// and enough that the Manifesto band below fell out of the first
-// viewport). 460 keeps the demo cinematic — editor + deploy timeline +
-// run card all legible — while letting the hero fit in ~820px. The
-// Cursor-style "demo extends below the fold on scroll" narrative still
-// holds at 1440x900; it just doesn't extend as deep.
+// Fixed-height canvas — the morphing surface. 2026-04-24 (Federico
+// feedback): the demo was capped at 460 to try to jam the whole hero
+// into ~820px, which made the editor / deploy timeline / run card all
+// feel pinched. The Cursor-style framing is "demo extends below the
+// fold on scroll" — people scroll, the demo doesn't have to fit in the
+// first viewport. Reset to 580 (the original intrinsic height) so each
+// of the three states has real room to breathe. The Manifesto band
+// below simply lives further down the page; that's fine.
 const CANVAS_STYLE: CSSProperties = {
   position: 'relative',
-  height: 460,
+  height: 580,
   overflow: 'hidden',
   // Warm paper tone — the visible background around the panels. Brand rule:
   // never pure black on hero demo surfaces. See feedback_terminal_never_black.md.

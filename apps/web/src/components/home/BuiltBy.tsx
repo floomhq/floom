@@ -1,13 +1,19 @@
 /**
  * BuiltBy — small, tasteful "who's behind this" block above the footer.
  *
- * Pulls the GitHub star count live from the public GitHub REST API at
- * mount time. If the request fails or is rate-limited, we silently hide
- * the star badge and keep the static text: never fabricate a number.
+ * Pulls the GitHub star count from the same-origin server proxy
+ * `/api/gh-stars` at mount time. Previously this hit api.github.com
+ * directly from the browser, which 403-rate-limited on shared IPs /
+ * office NATs / adblock-equipped sessions and spammed the console on
+ * every load. The server proxy caches upstream for 10 minutes and uses
+ * a PAT when set, so one upstream call covers all visitors.
+ * If the proxy fails, we silently hide the star badge and keep the
+ * static text: never fabricate a number.
  */
 import { useEffect, useState } from 'react';
 
 const GH_REPO = 'floomhq/floom';
+const STARS_ENDPOINT = '/api/gh-stars';
 
 interface StarState {
   stars: number | null;
@@ -19,15 +25,14 @@ export function BuiltBy() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`https://api.github.com/repos/${GH_REPO}`, {
-      headers: { Accept: 'application/vnd.github+json' },
+    fetch(STARS_ENDPOINT, {
+      headers: { Accept: 'application/json' },
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+      .then((data: { count?: number } | null) => {
         if (cancelled) return;
-        const stars = data && typeof data.stargazers_count === 'number'
-          ? (data.stargazers_count as number)
-          : null;
+        const stars =
+          data && typeof data.count === 'number' ? (data.count as number) : null;
         setState({ stars, loaded: true });
       })
       .catch(() => {

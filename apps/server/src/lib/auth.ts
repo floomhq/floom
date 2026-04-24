@@ -93,6 +93,11 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === '/api/health' || path === '/api/health/') return next();
   if (path === '/api/metrics' || path === '/api/metrics/') return next();
+  // Public read-only badge endpoint — used by the marketing TopBar for a
+  // floomhq/floom star count. No credentials, no side effects; a self-
+  // hosted instance with FLOOM_AUTH_TOKEN set still lets unauthenticated
+  // visitors see the number on their own landing page.
+  if (path === '/api/gh-stars' || path === '/api/gh-stars/') return next();
 
   const got = presentedToken(c);
   if (!got || !constantTimeEqual(got, expected)) {

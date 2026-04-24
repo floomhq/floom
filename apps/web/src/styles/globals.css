@@ -938,7 +938,10 @@ body:has(.topbar-mobile-menu) {
   /* right visual column */
 }
 .hero-manifest-card {
-  background: #0e0e0c;
+  /* Warm dark neutral — Federico's locked rule bans pure black on
+     hero/landing panels. Keeps the class in sync with the rest of the
+     landing terminal palette even though no TSX currently uses it. */
+  background: #1b1a17;
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 16px;
   padding: 24px;

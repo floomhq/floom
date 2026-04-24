@@ -76,21 +76,24 @@ export function LandingV17Page() {
 
       <main id="main" style={{ display: 'block' }}>
         {/* HERO — wireframe: .hero-shell > .hero
-            Cursor-style layout (Federico 2026-04-23 — "the visual demo
-            doesn't have to fit on the hero in full"). Above the fold at
-            1440x900: eyebrow + H1 + sub + CTA + top ~120-150px of the
-            HeroDemo canvas. The rest of the demo extends below the fold and
-            reveals on scroll — no min-height:100vh forcing fit, no squished
-            demo. Top padding trimmed (40 -> 24) to give the canvas more room
-            inside the first viewport. */}
+            Cursor-style layout. Demo does NOT have to fit the viewport in
+            full — people scroll. The hero reads as: nav / breath / H1 /
+            sub / CTAs / proof belt / demo (demo naturally tall).
+            2026-04-24 (Federico feedback): the H1 was sitting almost flush
+            against the top nav with ~16px of breathing room, which made
+            the headline feel cramped. Top padding bumped to 96px desktop
+            (overridden to 56px at ≤640px) so the H1 has real breathing
+            room above it. Bottom stays modest — the gradient already
+            hands off to the manifesto band below. */}
         <section
           data-testid="hero"
           style={{
             position: 'relative',
-            // 2026-04-24 restructure: trimmed padding from 24/40 -> 16/24
-            // to keep hero within ~820px budget after also shrinking the
-            // HeroDemo canvas (580 -> 460).
-            padding: '16px 24px 24px',
+            // Breathing room above the H1 — Federico 2026-04-24. Mobile
+            // override in the scoped <style> block below drops this to
+            // 56px so the small-screen hero doesn't start with a huge
+            // empty block.
+            padding: '96px 24px 32px',
             borderBottom: '1px solid var(--line)',
             background:
               'linear-gradient(180deg, var(--card) 0%, var(--bg) 100%)',
@@ -504,7 +507,7 @@ export function LandingV17Page() {
           .landing-v17 .hero-sub { font-size: 16px !important; }
         }
         @media (max-width: 640px) {
-          .landing-v17 [data-testid="hero"] { padding: 24px 16px 28px !important; }
+          .landing-v17 [data-testid="hero"] { padding: 56px 16px 32px !important; }
           .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
           .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
           .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
@@ -521,7 +524,7 @@ export function LandingV17Page() {
              the default 72px/28px padding. */
           .landing-v17 main > section { padding-left: 20px !important; padding-right: 20px !important; }
           .landing-v17 main > section { padding-top: 48px !important; padding-bottom: 48px !important; }
-          .landing-v17 [data-testid="hero"] { padding-top: 24px !important; padding-bottom: 28px !important; }
+          .landing-v17 [data-testid="hero"] { padding-top: 56px !important; padding-bottom: 32px !important; }
           .landing-v17 [data-testid="cli-reference-section"] { padding-top: 24px !important; padding-bottom: 8px !important; }
           /* Display H2 across the page: scale down so long headlines
              don't overflow on narrow screens. 34->26, 28->24. */

@@ -27,6 +27,7 @@ import { feedbackRouter } from './routes/feedback.js';
 import { meAppsRouter } from './routes/me_apps.js';
 import { metricsRouter } from './routes/metrics.js';
 import { ogRouter } from './routes/og.js';
+import { ghStarsRouter } from './routes/gh-stars.js';
 import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
@@ -155,6 +156,9 @@ app.use('/api/admin/*', restrictedCors);
 app.use('/api/hub/*', openCors);
 app.use('/api/hub', openCors);
 app.use('/api/health/*', openCors);
+// GH stars proxy — public read-only, no credentials.
+app.use('/api/gh-stars', openCors);
+app.use('/api/gh-stars/*', openCors);
 app.use('/api/run', openCors);
 app.use('/api/:slug/run', openCors);
 app.use('/api/:slug/jobs', openCors);
@@ -250,6 +254,10 @@ app.use('/api/hub/ingest', runBodyLimit, rateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
+// Server-side proxy for the floomhq/floom GitHub star count. Browser
+// fetches from api.github.com were getting 403-rate-limited on every
+// page load (anonymous budget is 60/hour/IP). See routes/gh-stars.ts.
+app.route('/api/gh-stars', ghStarsRouter);
 // Admin surface (#362 publish-review gate, more to come). Every route inside
 // is gated by FLOOM_AUTH_TOKEN bearer in its own middleware; if the env var
 // isn't set, the router replies 404 to avoid advertising its existence.
