@@ -188,13 +188,28 @@ const SAMPLE_BY_NAME: Record<string, string> = {
   // the happy path the default.
   token: SAMPLE_JWT,
   jwt: SAMPLE_JWT,
+  // Currency codes — exchangerate-api's base-currency input lands here
+  // with `name: "base"` and `type: string`. Default to USD so the
+  // happy path produces real FX rates instead of a 400.
+  base: 'USD',
+  from: 'USD',
+  to: 'EUR',
+  currency: 'USD',
 };
 
+// SAMPLE_BY_TYPE — generic fallback by input type. Keep this list
+// narrow: only pre-fill when the type carries an obvious good default
+// (a URL looks like a URL, an email looks like an email). For plain
+// `string`/`text`/`textarea` we return null and leave the input empty,
+// letting the field's own `placeholder`/`example` drive the UX.
+//
+// 2026-04-24 (P1 polish): removed `string: 'hello floom'` fallback.
+// On apps where the input was a currency code / country code / ID,
+// the user saw "hello floom" pre-filled — nonsense data that made the
+// app look broken (audit P1-6: exchangerate-api landed with
+// "hello floom" as the base-currency input, producing a 400).
 const SAMPLE_BY_TYPE: Record<string, string> = {
   url: 'https://floom.dev',
-  string: 'hello floom',
-  text: 'hello floom',
-  textarea: 'hello floom',
   number: '1',
   email: 'hello@floom.dev',
 };
