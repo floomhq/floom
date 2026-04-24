@@ -82,7 +82,7 @@ import {
 // -----------------------------------------------------------------------------
 // State machine
 // -----------------------------------------------------------------------------
-type DemoState = 'build' | 'deploy' | 'use';
+type DemoState = 'build' | 'deploy' | 'run';
 
 /**
  * Always three states. The hero demo is an explainer of the product shape;
@@ -91,7 +91,7 @@ type DemoState = 'build' | 'deploy' | 'use';
  * Collapsing to 2 states here was the wrong primitive — the demo stays
  * Build -> Deploy -> Use unconditionally, and the CTAs do the truth-telling.
  */
-const STATES: DemoState[] = ['build', 'deploy', 'use'];
+const STATES: DemoState[] = ['build', 'deploy', 'run'];
 
 /**
  * State durations in milliseconds. Use is intentionally the longest — it's
@@ -283,7 +283,7 @@ function useCountUp(
 // -----------------------------------------------------------------------------
 export function HeroDemo() {
   const reducedMotion = usePrefersReducedMotion();
-  const [state, setState] = useState<DemoState>(() => (reducedMotion ? 'use' : 'build'));
+  const [state, setState] = useState<DemoState>(() => (reducedMotion ? 'run' : 'build'));
   const [cycle, setCycle] = useState(0);
   const [paused, setPaused] = useState(false);
   const timerRef = useRef<number | null>(null);
@@ -291,7 +291,7 @@ export function HeroDemo() {
   // Reset to Use if reduced motion gets enabled mid-cycle.
   useEffect(() => {
     if (reducedMotion) {
-      setState('use');
+      setState('run');
       if (timerRef.current) window.clearTimeout(timerRef.current);
     }
   }, [reducedMotion]);
@@ -355,7 +355,7 @@ export function HeroDemo() {
           reducedMotion={reducedMotion}
         />
         <RunSurface
-          active={state === 'use'}
+          active={state === 'run'}
           cycle={cycle}
           reducedMotion={reducedMotion}
         />
@@ -398,7 +398,7 @@ function Tracker({
               }}
             >
               <span style={TRACKER_NUM}>{`0${i + 1}`}</span>
-              <span style={{ marginLeft: 6 }}>{s === 'use' ? 'USE' : s.toUpperCase()}</span>
+              <span style={{ marginLeft: 6 }}>{s.toUpperCase()}</span>
             </button>
           );
         })}
