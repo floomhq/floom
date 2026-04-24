@@ -154,7 +154,7 @@ for (const deployEnabled of [false, true]) {
     const first = await fetchHtml(server.port);
     const second = await fetchHtml(server.port);
     const bootstrap = await fetchBootstrap(server.port);
-    const scriptNeedle = "<script src='/__floom/bootstrap.js' data-floom-bootstrap></script>";
+    const scriptNeedle = "<script defer src='/__floom/bootstrap.js' data-floom-bootstrap></script>";
     const scriptIndex = first.text.indexOf(scriptNeedle);
     const bundleIndex = first.text.indexOf('<script type="module"');
     log(

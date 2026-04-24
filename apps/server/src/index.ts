@@ -835,8 +835,12 @@ if (webDist) {
     if (html.includes(deployBootstrapMarker)) return html;
     const scriptTagIndex = html.search(/<script\b[^>]*\btype=["']module["'][^>]*>/i);
     if (scriptTagIndex === -1) return html;
+    // `defer` keeps the fetch off the critical parsing path so CSS + the
+    // module bundle can still be discovered immediately; execution is
+    // ordered so the bootstrap still runs before the (implicitly deferred)
+    // module bundle, priming window.__FLOOM__ before React mounts.
     const bootstrap =
-      `<script src='/__floom/bootstrap.js' ${deployBootstrapMarker}></script>\n    `;
+      `<script defer src='/__floom/bootstrap.js' ${deployBootstrapMarker}></script>\n    `;
     return `${html.slice(0, scriptTagIndex)}${bootstrap}${html.slice(scriptTagIndex)}`;
   }
 
