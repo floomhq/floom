@@ -167,6 +167,8 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
 
   const isLoginPage =
     location.pathname === '/login' || location.pathname === '/signup';
+  const isSignInRoute = location.pathname === '/login';
+  const isSignUpRoute = location.pathname === '/signup';
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -316,65 +318,61 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
         {/* Centre nav (#572): exactly 3 items — Apps · Docs · Pricing.
             Self-host moved to the landing band's anchor + footer link;
             Deploy/Publish promoted to the brand-green CTA on the right;
-            Studio + Me hidden behind the avatar dropdown for authed users.
-            Hidden on /login + /signup so the centred logo lockup reads
-            cleanly on auth pages. */}
-        {!isLoginPage && (
-          <nav
-            className="topbar-links topbar-links-desktop topbar-centre-nav"
-            aria-label="Primary"
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'auto',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 2,
-            }}
+            Studio + Me hidden behind the avatar dropdown for authed users. */}
+        <nav
+          className="topbar-links topbar-links-desktop topbar-centre-nav"
+          aria-label="Primary"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            pointerEvents: 'auto',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 2,
+          }}
+        >
+          <Link
+            to="/apps"
+            data-testid="topbar-apps"
+            aria-current={isApps ? 'page' : undefined}
+            style={navLinkStyle(isApps)}
           >
+            Apps
+          </Link>
+          <Link
+            to="/docs"
+            data-testid="topbar-docs"
+            aria-current={isDocs ? 'page' : undefined}
+            style={navLinkStyle(isDocs)}
+          >
+            Docs
+          </Link>
+          <Link
+            to="/pricing"
+            data-testid="topbar-pricing"
+            aria-current={isPricing ? 'page' : undefined}
+            style={navLinkStyle(isPricing)}
+          >
+            Pricing
+          </Link>
+          {/* Studio (#641): 4th nav item, authed-only. Signed-out users
+              still see the 3-item nav (Apps · Docs · Pricing). Studio
+              is the creator's working area and deserves nav-level
+              presence once a user has an account. Deep-link exists in
+              the avatar dropdown too; this just surfaces it. */}
+          {isAuthenticated && (
             <Link
-              to="/apps"
-              data-testid="topbar-apps"
-              aria-current={isApps ? 'page' : undefined}
-              style={navLinkStyle(isApps)}
+              to="/studio"
+              data-testid="topbar-studio"
+              aria-current={isStudio ? 'page' : undefined}
+              style={navLinkStyle(isStudio)}
             >
-              Apps
+              Studio
             </Link>
-            <Link
-              to="/docs"
-              data-testid="topbar-docs"
-              aria-current={isDocs ? 'page' : undefined}
-              style={navLinkStyle(isDocs)}
-            >
-              Docs
-            </Link>
-            <Link
-              to="/pricing"
-              data-testid="topbar-pricing"
-              aria-current={isPricing ? 'page' : undefined}
-              style={navLinkStyle(isPricing)}
-            >
-              Pricing
-            </Link>
-            {/* Studio (#641): 4th nav item, authed-only. Signed-out users
-                still see the 3-item nav (Apps · Docs · Pricing). Studio
-                is the creator's working area and deserves nav-level
-                presence once a user has an account. Deep-link exists in
-                the avatar dropdown too; this just surfaces it. */}
-            {isAuthenticated && (
-              <Link
-                to="/studio"
-                data-testid="topbar-studio"
-                aria-current={isStudio ? 'page' : undefined}
-                style={navLinkStyle(isStudio)}
-              >
-                Studio
-              </Link>
-            )}
-          </nav>
-        )}
+          )}
+        </nav>
 
         {/* Right side: Sign in + Sign up (anon) or avatar dropdown (authed) */}
         <div
@@ -390,7 +388,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               auth pills so the hierarchy stays Sign-up > GH on preview,
               and GH becomes the single rightmost affordance on
               waitlist-prod (where Sign in / Sign up are hidden). */}
-          <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />
+          {!isLoginPage && <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />}
 
           {/* Primary Publish CTA (#572) — brand-green pill. Always shown
               (anon + authed alike), hidden only on /login + /signup so the
@@ -423,19 +421,23 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               while session is still loading (prevents the "Sign in +
               Join waitlist" contradiction Federico saw on preview on
               2026-04-24). Shown on preview.floom.dev (deployEnabled). */}
-          {!isAuthenticated && !isLoginPage && deployEnabled && (
+          {!isAuthenticated && deployEnabled && (
             <>
               <Link
                 to="/login"
                 data-testid="topbar-signin"
-                style={signInStyle}
+                style={isLoginPage ? (isSignInRoute ? signUpStyle : signInStyle) : signInStyle}
               >
                 Sign in
               </Link>
               <Link
                 to="/signup"
                 data-testid="topbar-signup"
-                style={signUpStyle}
+                style={
+                  isLoginPage
+                    ? (isSignUpRoute ? signUpStyle : signInStyle)
+                    : signUpStyle
+                }
               >
                 Sign up
               </Link>

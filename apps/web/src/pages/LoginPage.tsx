@@ -192,9 +192,13 @@ export function LoginPage() {
   }
 
   const cloudMode = data?.cloud_mode === true;
+  const hasOAuthProvider = Boolean(
+    cloudMode && (data?.auth_providers?.google || data?.auth_providers?.github),
+  );
+  const showPasswordForm = !hasOAuthProvider;
 
   return (
-    <PageShell title={mode === 'signin' ? 'Sign in · Floom' : 'Create account · Floom'}>
+    <PageShell title={mode === 'signin' ? 'Sign in · Floom' : 'Sign up · Floom'}>
       <div
         className="login-grid"
         style={{
@@ -243,14 +247,10 @@ export function LoginPage() {
             textAlign: 'center',
           }}
         >
-          {mode === 'signin' ? 'Sign in to Floom' : 'Create your Floom account'}
+          Sign in to Floom
         </h1>
         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
-          {mode === 'signin'
-            ? 'One account. Run apps, ship apps, all in one place.'
-            : deployEnabled
-              ? 'One account. Run apps, connect tools, publish your own.'
-              : 'One account. Run apps, save history, and manage runs.'}
+          One account. Run apps, ship apps, all in one place.
         </p>
 
         {hasSavedDraft && (
@@ -267,7 +267,7 @@ export function LoginPage() {
               lineHeight: 1.5,
             }}
           >
-            Your app draft is saved. {mode === 'signin' ? 'Sign in' : 'Create your account'} to pick up where you left off.
+            Your app draft is saved. {mode === 'signin' ? 'Sign in' : 'Sign up'} to pick up where you left off.
           </div>
         )}
 
@@ -301,7 +301,7 @@ export function LoginPage() {
             data-testid="tab-signup"
             style={tabStyle(mode === 'signup')}
           >
-            Create account
+            Sign up
           </button>
         </div>
 
@@ -369,7 +369,7 @@ export function LoginPage() {
         {/* Social sign-in (OAuth). Buttons render only when the provider
             is configured on this server — dead buttons are a trust-killer.
             Check: data.auth_providers.{google,github}. */}
-        {cloudMode && (data?.auth_providers?.google || data?.auth_providers?.github) && (
+        {hasOAuthProvider && (
           <>
             <div
               data-testid="oauth-buttons"
@@ -380,17 +380,6 @@ export function LoginPage() {
                 marginBottom: 16,
               }}
             >
-              {data?.auth_providers?.github && (
-                <button
-                  type="button"
-                  onClick={() => signInWithProvider('github')}
-                  data-testid="oauth-github"
-                  style={oauthButtonStyle}
-                >
-                  <GitHubIcon />
-                  <span>Continue with GitHub</span>
-                </button>
-              )}
               {data?.auth_providers?.google && (
                 <button
                   type="button"
@@ -402,148 +391,185 @@ export function LoginPage() {
                   <span>Continue with Google</span>
                 </button>
               )}
-            </div>
-            <div
-              data-testid="oauth-divider"
-              aria-hidden="true"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                margin: '0 0 16px',
-                color: 'var(--muted)',
-                fontSize: 11,
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-              }}
-            >
-              <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
-              <span>or continue with email</span>
-              <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />
+              {data?.auth_providers?.github && (
+                <button
+                  type="button"
+                  onClick={() => signInWithProvider('github')}
+                  data-testid="oauth-github"
+                  style={oauthButtonStyle}
+                >
+                  <GitHubIcon />
+                  <span>Continue with GitHub</span>
+                </button>
+              )}
             </div>
           </>
         )}
 
-        {/* #633 2026-04-23: removed the BYOK callout that used to live
-            here. The auth screen is not the place to ask users to think
-            about API keys — it just adds friction before they've even
-            signed in. BYOK setup stays in /me/settings and the
-            rate-limit modal (5 free runs → "add your key to continue"),
-            which is where the prompt is actually contextual. */}
-
-        <form onSubmit={handlePasswordSubmit}>
-          {mode === 'signup' && (
-            <>
-              <label htmlFor="login-name" style={labelStyle}>Display name</label>
-              <input
-                id="login-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ada Lovelace"
-                data-testid="input-name"
-                style={inputStyle}
-                autoComplete="name"
-              />
-            </>
-          )}
-          <label htmlFor="login-email" style={labelStyle}>Email</label>
-          <input
-            id="login-email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            placeholder="you@example.com"
-            data-testid="input-email"
-            style={inputStyle}
-            autoComplete="email"
-          />
-          <label htmlFor="login-password" style={labelStyle}>Password</label>
-          <input
-            id="login-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-            placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
-            data-testid="input-password"
-            style={inputStyle}
-            autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-          />
-
-          {mode === 'signin' && (
-            <div style={{ textAlign: 'right', margin: '-2px 0 12px' }}>
-              <Link
-                to="/forgot-password"
-                data-testid="forgot-password-link"
-                style={{
-                  fontSize: 12,
-                  color: 'var(--muted)',
-                  textDecoration: 'underline',
-                }}
-              >
-                Forgot password?
-              </Link>
-            </div>
-          )}
-
-          {state === 'error' && errorCopy && (
-            <div
-              data-testid="auth-error"
+        {hasOAuthProvider && (
+          <>
+            <p
               style={{
-                margin: '0 0 12px',
-                padding: '10px 12px',
-                background: '#fff8e6',
-                border: '1px solid #f4e0a5',
-                borderRadius: 8,
                 fontSize: 13,
-                color: '#8a5a00',
-                lineHeight: 1.5,
+                color: 'var(--muted)',
+                lineHeight: 1.55,
+                margin: '0 0 12px',
               }}
             >
-              <div>{errorCopy.message}</div>
-              {errorCopy.action && (
-                <button
-                  type="button"
-                  data-testid="auth-error-action"
-                  onClick={() => void handleErrorAction(errorCopy.action!.intent)}
-                  style={{
-                    marginTop: 6,
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--accent)',
-                    fontWeight: 600,
-                    fontSize: 13,
-                    cursor: 'pointer',
-                    padding: 0,
-                    textDecoration: 'underline',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {errorCopy.action.label}
-                </button>
-              )}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={state === 'submitting'}
-            data-testid="submit-password"
+              On signup, you can save your own GEMINI_API_KEY or OPENAI_API_KEY once, every app on Floom can use it. Your keys stay encrypted, never logged.
+            </p>
+            <p
+              style={{
+                fontSize: 12,
+                color: 'var(--muted)',
+                lineHeight: 1.5,
+                margin: 0,
+              }}
+            >
+              By continuing, you agree to our <Link to="/terms" style={{ color: 'var(--ink)' }}>Terms</Link> and <Link to="/privacy" style={{ color: 'var(--ink)' }}>Privacy Policy</Link>.
+            </p>
+            <p
+              style={{
+                fontSize: 12,
+                color: 'var(--muted)',
+                lineHeight: 1.5,
+                margin: '4px 0 16px',
+              }}
+            >
+              No password. No tracking pixels.
+            </p>
+          </>
+        )}
+
+        {!hasOAuthProvider && (
+          <p
             style={{
-              ...primaryButtonStyle,
-              opacity: state === 'submitting' ? 0.7 : 1,
-              cursor: state === 'submitting' ? 'not-allowed' : 'pointer',
+              fontSize: 12,
+              color: 'var(--muted)',
+              lineHeight: 1.5,
+              margin: '0 0 16px',
             }}
           >
-            {state === 'submitting'
-              ? 'Working...'
-              : mode === 'signin'
-              ? 'Sign in'
-              : 'Create account'}
-          </button>
-        </form>
+            By continuing, you agree to our <Link to="/terms" style={{ color: 'var(--ink)' }}>Terms</Link> and <Link to="/privacy" style={{ color: 'var(--ink)' }}>Privacy Policy</Link>.
+          </p>
+        )}
+
+        {state === 'error' && errorCopy && (
+          <div
+            data-testid="auth-error"
+            style={{
+              margin: '0 0 12px',
+              padding: '10px 12px',
+              background: '#fff8e6',
+              border: '1px solid #f4e0a5',
+              borderRadius: 8,
+              fontSize: 13,
+              color: '#8a5a00',
+              lineHeight: 1.5,
+            }}
+          >
+            <div>{errorCopy.message}</div>
+            {errorCopy.action && (
+              <button
+                type="button"
+                data-testid="auth-error-action"
+                onClick={() => void handleErrorAction(errorCopy.action!.intent)}
+                style={{
+                  marginTop: 6,
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--accent)',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  padding: 0,
+                  textDecoration: 'underline',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {errorCopy.action.label}
+              </button>
+            )}
+          </div>
+        )}
+
+        {showPasswordForm && (
+          <form onSubmit={handlePasswordSubmit}>
+            {mode === 'signup' && (
+              <>
+                <label htmlFor="login-name" style={labelStyle}>Display name</label>
+                <input
+                  id="login-name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Ada Lovelace"
+                  data-testid="input-name"
+                  style={inputStyle}
+                  autoComplete="name"
+                />
+              </>
+            )}
+            <label htmlFor="login-email" style={labelStyle}>Email</label>
+            <input
+              id="login-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              placeholder="you@example.com"
+              data-testid="input-email"
+              style={inputStyle}
+              autoComplete="email"
+            />
+            <label htmlFor="login-password" style={labelStyle}>Password</label>
+            <input
+              id="login-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
+              data-testid="input-password"
+              style={inputStyle}
+              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+            />
+
+            {mode === 'signin' && (
+              <div style={{ textAlign: 'right', margin: '-2px 0 12px' }}>
+                <Link
+                  to="/forgot-password"
+                  data-testid="forgot-password-link"
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--muted)',
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Forgot password?
+                </Link>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={state === 'submitting'}
+              data-testid="submit-password"
+              style={{
+                ...primaryButtonStyle,
+                opacity: state === 'submitting' ? 0.7 : 1,
+                cursor: state === 'submitting' ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {state === 'submitting'
+                ? 'Working...'
+                : mode === 'signin'
+                ? 'Sign in'
+                : 'Sign up'}
+            </button>
+          </form>
+        )}
 
         <p
           style={{
@@ -567,8 +593,19 @@ export function LoginPage() {
               font: 'inherit',
             }}
           >
-            {mode === 'signin' ? 'Create account' : 'Sign in'}
+            {mode === 'signin' ? 'Sign up' : 'Sign in'}
           </button>
+        </p>
+        <p
+          style={{
+            textAlign: 'center',
+            margin: '10px 0 0',
+            fontSize: 12,
+            color: 'var(--muted)',
+          }}
+        >
+          New to Floom? You are in the right place, the same page signs you up. ·{' '}
+          <Link to="/" style={{ color: 'var(--ink)' }}>Back to home</Link>
         </p>
       </div>
 
