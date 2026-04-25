@@ -7,11 +7,11 @@
 //     tag, Schedule, Share). No more radial-gradient tile + shadow ring.
 //   - RunSurface renders inside the frame body (unchanged — owns its own
 //     split-layout and empty/running/done states).
-//   - About / Install / Source content swaps inside the frame body based
-//     on ?tab=.
+//   - About lives as an optional inline panel beneath the split; Install
+//     and Source stay quiet footer chips, not primary nav.
 //   - Mid-page underlined tab bar REMOVED. Replaced with a quiet chip
-//     row at the bottom of the frame (About / Install / Source / Source).
-//     Active chip uses --accent-soft bg, non-active is plain pill.
+//     row at the bottom of the frame (About / Install / Source).
+//     Active About chip uses --accent-soft bg, non-active is plain pill.
 //   - Breadcrumb row above the frame is small + quiet (Apps / name).
 //
 // Schedule drawer and ChatGPT/Notion/Terminal connectors stay as explicit
@@ -56,11 +56,32 @@ import { getLaunchDemoExampleTextInputs } from '../lib/app-examples';
 const GITHUB_REPOS: Record<string, string> = {
   'blast-radius': 'https://github.com/floomhq/floom/tree/main/examples/blast-radius',
   'claude-wrapped': 'https://github.com/floomhq/floom/tree/main/examples/claude-wrapped',
+  'competitor-analyzer': 'https://github.com/floomhq/floom/tree/main/examples/competitor-analyzer',
   'dep-check': 'https://github.com/floomhq/floom/tree/main/examples/dep-check',
   'hook-stats': 'https://github.com/floomhq/floom/tree/main/examples/hook-stats',
   'session-recall': 'https://github.com/floomhq/floom/tree/main/examples/session-recall',
   'ig-nano-scout': 'https://github.com/floomhq/floom/tree/main/examples/ig-nano-scout',
+  'lead-scorer': 'https://github.com/floomhq/floom/tree/main/examples/lead-scorer',
+  'resume-screener': 'https://github.com/floomhq/floom/tree/main/examples/resume-screener',
 };
+
+function getDefaultPermalinkAction(app: AppDetail): { action: string; spec: ActionSpec } | null {
+  const entries = Object.entries(app.manifest.actions) as Array<[string, ActionSpec]>;
+  if (entries.length === 0) return null;
+  const primary = app.manifest.primary_action;
+  if (primary && typeof primary === 'string' && app.manifest.actions[primary]) {
+    return { action: primary, spec: app.manifest.actions[primary] };
+  }
+  const [action, spec] = entries[0];
+  return { action, spec };
+}
+
+function pickPermalinkActionSpec(app: AppDetail, actionParam: string | null): ActionSpec | null {
+  if (actionParam && app.manifest.actions[actionParam]) {
+    return app.manifest.actions[actionParam];
+  }
+  return getDefaultPermalinkAction(app)?.spec ?? null;
+}
 
 export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -88,15 +109,9 @@ export function AppPermalinkPage() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareModalUrl, setShareModalUrl] = useState<string>('');
 
-  // v16 restructure: /p/:slug is tabbed now (Run / About / Install / Source).
-  // Run is the default — the previous product-page layout made users scroll
-  // past marketing copy to find the actual run surface. Shared-run URLs
-  // (/p/:slug?run=<id>) auto-land on Run.
-  type PTab = 'run' | 'about' | 'install' | 'source';
-  const initialTab: PTab = searchParams.get('tab') as PTab | null ?? 'run';
-  const [activeTab, setActiveTab] = useState<PTab>(
-    ['run', 'about', 'install', 'source'].includes(initialTab) ? initialTab : 'run',
-  );
+  // v17 parity 2026-04-24: About is an inline expandable panel; Install
+  // and Source are quiet footer chips, not content-swapping tabs.
+  const aboutExpanded = searchParams.get('tab') === 'about';
   // Run prefetched from /api/run/:id when the URL contains ?run=<id>. Lets
   // RunSurface hydrate directly into the `done` phase for shared links.
   const [initialRun, setInitialRun] = useState<RunRecord | null>(null);
@@ -231,15 +246,27 @@ export function AppPermalinkPage() {
     );
   }, [setSearchParams]);
 
+  const setAboutExpanded = useCallback((nextOpen: boolean) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (nextOpen) next.set('tab', 'about');
+        else if (next.get('tab') === 'about') next.delete('tab');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   // 2026-04-21 restructure: after the Run surface mounts (not a shared
   // run, Run tab active), move keyboard focus to the first visible input
   // so power users can type + submit without a click. Scoped to the
   // RunSurface container so we don't steal focus from e.g. a toast. We
-  // scope the effect to the (slug, activeTab) pair so switching tabs
-  // away and back doesn't re-steal focus mid-scroll.
+  // scope the effect to the (slug, aboutExpanded) pair so opening the
+  // About panel doesn't re-steal focus mid-scroll.
   const runSurfaceRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (activeTab !== 'run') return;
+    if (aboutExpanded) return;
     if (runIdFromUrl || initialRun || initialRunLoading) return;
     if (!app) return;
     // Defer one frame so RunSurface and InputCard have mounted.
@@ -255,7 +282,7 @@ export function AppPermalinkPage() {
       }
     });
     return () => cancelAnimationFrame(raf);
-  }, [app, activeTab, runIdFromUrl, initialRun, initialRunLoading]);
+  }, [app, aboutExpanded, runIdFromUrl, initialRun, initialRunLoading]);
 
   // Single-line plain-text description for the compact header. Strips
   // markdown syntax + collapses whitespace so a multi-line or markdown
@@ -501,6 +528,80 @@ export function AppPermalinkPage() {
     return out;
   }, [app]);
 
+  const actionParam = searchParams.get('action');
+  const currentActionSpec = useMemo(
+    () => (app ? pickPermalinkActionSpec(app, actionParam) : null),
+    [app, actionParam],
+  );
+
+  const focusRunSurface = useCallback((target?: HTMLElement | null) => {
+    const root = runSurfaceRef.current;
+    const fallback =
+      root?.querySelector<HTMLElement>(
+        'input.input-field, textarea.input-field, select.input-field, button[data-testid="run-surface-run-btn"]',
+      ) ?? root;
+    const node = target ?? fallback;
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (typeof node.focus === 'function') {
+      node.focus({ preventScroll: true });
+    }
+  }, []);
+
+  const findFirstMissingRequiredField = useCallback((root: HTMLElement): HTMLElement | null => {
+    if (!currentActionSpec) return null;
+    for (const input of currentActionSpec.inputs) {
+      if (!input.required) continue;
+      const control = document.getElementById(`run-surface-inp-${input.name}`) as HTMLElement | null;
+      const isFileType = input.type === 'file' || String(input.type).startsWith('file');
+      if (isFileType) {
+        const dropZone = root.querySelector<HTMLElement>(`[data-testid="file-drop-${input.name}"]`);
+        const removeButton = Array.from(dropZone?.querySelectorAll('button') ?? []).find(
+          (button) => button.textContent?.trim() === 'Remove',
+        );
+        if (!removeButton) return dropZone ?? control;
+        continue;
+      }
+      if (control instanceof HTMLInputElement) {
+        if (control.type === 'checkbox') {
+          if (!control.checked) return control;
+          continue;
+        }
+        if (!control.value.trim()) return control;
+        continue;
+      }
+      if (control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) {
+        if (!control.value.trim()) return control;
+      }
+    }
+    return null;
+  }, [currentActionSpec]);
+
+  const handleHeaderRun = useCallback(() => {
+    const openRunSurface = () => {
+      const root = runSurfaceRef.current;
+      if (!root) return;
+      const missingField = findFirstMissingRequiredField(root);
+      if (missingField) {
+        focusRunSurface(missingField);
+        return;
+      }
+      const runButton = root.querySelector<HTMLButtonElement>('[data-testid="run-surface-run-btn"]');
+      if (runButton && !runButton.disabled) {
+        runButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        runButton.click();
+        return;
+      }
+      focusRunSurface();
+    };
+    if (aboutExpanded) {
+      setAboutExpanded(false);
+      requestAnimationFrame(() => requestAnimationFrame(openRunSurface));
+      return;
+    }
+    openRunSurface();
+  }, [aboutExpanded, findFirstMissingRequiredField, focusRunSurface, setAboutExpanded]);
+
   if (loading) {
     // CLS fix (carried over from 2026-04-18, v17 refactor 2026-04-23):
     // the skeleton mirrors the v17 frame layout above-the-fold so that
@@ -652,9 +753,6 @@ export function AppPermalinkPage() {
     );
   }
 
-  // Use the live origin so each env (floom.dev, preview.floom.dev,
-  // docker.floom.dev) exposes its own endpoints in the share/MCP panels.
-  const mcpEndpoint = `${window.location.origin}/mcp/app/${app.slug}`;
   const githubRepo = GITHUB_REPOS[app.slug];
 
   // Upgrade 4 (2026-04-19): compact TopBar when a run is active so the
@@ -1028,81 +1126,33 @@ export function AppPermalinkPage() {
               >
                 <ShareIcon /> Share
               </button>
+              <button
+                type="button"
+                data-testid="cta-run"
+                aria-controls="run"
+                onClick={handleHeaderRun}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid var(--ink)',
+                  borderRadius: 10,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: 'var(--card, #fff)',
+                  background: 'var(--ink)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                Run
+              </button>
             </div>
           </section>
 
-          {/* Top tab bar (#626, 2026-04-24): moved About / Install / Source
-              from the bottom chip row to an underlined tab bar directly
-              below the hero. Run stays the default (no tab rendered) so
-              the Run surface fills the frame. Clicking a secondary tab
-              swaps the content panel below. Deviates from the v17
-              wireframe's bottom chip row — the wireframe keeps these as
-              chips at the bottom, but Federico's review called for
-              TABS-at-top placement (see PR body). Behaviour is
-              unchanged: clicking each tab swaps the content panel, URL
-              updates via ?tab=, test-ids preserved. */}
-          <div
-            role="tablist"
-            aria-label="App content"
-            data-testid="permalink-tabs"
-            style={{
-              display: 'flex',
-              alignItems: 'stretch',
-              flexWrap: 'wrap',
-              gap: 0,
-              padding: '0 24px',
-              borderBottom: '1px solid var(--line)',
-              background: 'var(--card)',
-            }}
-          >
-            {([
-              { id: 'run' as PTab, label: 'Run' },
-              { id: 'about' as PTab, label: 'About this app' },
-              { id: 'install' as PTab, label: 'Install in Claude' },
-              { id: 'source' as PTab, label: 'Source' },
-            ]).map((t) => {
-              const isOn = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isOn}
-                  data-testid={`permalink-tab-${t.id}`}
-                  data-state={isOn ? 'active' : 'inactive'}
-                  onClick={() => {
-                    setActiveTab(t.id);
-                    setSearchParams((prev) => {
-                      const next = new URLSearchParams(prev);
-                      if (t.id === 'run') next.delete('tab');
-                      else next.set('tab', t.id);
-                      return next;
-                    }, { replace: true });
-                  }}
-                  style={{
-                    padding: '12px 16px',
-                    fontSize: 13,
-                    fontWeight: isOn ? 600 : 500,
-                    border: 'none',
-                    background: 'transparent',
-                    color: isOn ? 'var(--ink)' : 'var(--muted)',
-                    borderBottom: isOn
-                      ? '2px solid var(--accent)'
-                      : '2px solid transparent',
-                    marginBottom: -1,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    whiteSpace: 'nowrap',
-                    transition: 'color .12s, border-color .12s',
-                  }}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Frame body: swappable by ?tab= (Run / About / Install / Source). */}
+          {/* Frame body: Run stays primary. About expands inline beneath the
+              split; Install + Source remain footer chips. */}
           <div
             className="app-page-body"
             style={{
@@ -1110,135 +1160,138 @@ export function AppPermalinkPage() {
               background: 'var(--card)',
             }}
           >
-
-        {/* Run tab (DEFAULT). Renders inside the frame body, so no own
-            border/radius. CLS fix (2026-04-18): min-height so the
-            output card's empty state → streaming → done transitions do
-            not push footer content around above the fold. */}
-        {activeTab === 'run' && (
-          <section
-            id="run"
-            ref={runSurfaceRef}
-            data-testid="tab-content-run-primary"
-            data-surface="run"
-            className="run-surface"
-            style={{
-              minHeight: 320,
-            }}
-          >
-            {initialRunLoading ? (
-              <div
-                data-testid="shared-run-loading"
-                style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}
-              >
-                Loading shared run...
-              </div>
-            ) : (
-              <>
-                {/* 2026-04-20 (P2 #147): gentle amber "Run not found" card
-                    when /p/:slug?run=<bad-id> hits a 404. Amber, not red —
-                    matches the new error-taxonomy cards from PR #167 for
-                    recoverable / expected states. Renders above the empty
-                    form so the user gets a fresh starting point without
-                    having to edit the URL. */}
-                {runNotFound && (
-                  <div
-                    data-testid="shared-run-not-found"
-                    role="status"
-                    style={{
-                      background: 'rgba(245, 158, 11, 0.08)',
-                      border: '1px solid rgba(245, 158, 11, 0.35)',
-                      borderRadius: 12,
-                      padding: '16px 20px',
-                      marginBottom: 20,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 16,
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
-                        This run isn't available
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
-                        The link may have expired or the run was deleted. You
-                        can still run {app.name} with fresh inputs below.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      data-testid="shared-run-not-found-reset"
-                      onClick={handleResetInitialRun}
+            {/* Run surface stays primary. CLS fix (2026-04-18): min-height so
+                the output card's empty state → streaming → done transitions
+                do not push footer content around above the fold. */}
+            <section
+              id="run"
+              ref={runSurfaceRef}
+              data-testid="tab-content-run-primary"
+              data-surface="run"
+              className="run-surface"
+              style={{
+                minHeight: 320,
+              }}
+            >
+              {initialRunLoading ? (
+                <div
+                  data-testid="shared-run-loading"
+                  style={{ color: 'var(--muted)', fontSize: 13, padding: 24, textAlign: 'center' }}
+                >
+                  Loading shared run...
+                </div>
+              ) : (
+                <>
+                  {/* 2026-04-20 (P2 #147): gentle amber "Run not found" card
+                      when /p/:slug?run=<bad-id> hits a 404. Amber, not red —
+                      matches the new error-taxonomy cards from PR #167 for
+                      recoverable / expected states. Renders above the empty
+                      form so the user gets a fresh starting point without
+                      having to edit the URL. */}
+                  {runNotFound && (
+                    <div
+                      data-testid="shared-run-not-found"
+                      role="status"
                       style={{
-                        padding: '8px 14px',
-                        background: 'var(--card)',
-                        border: '1px solid var(--line)',
-                        borderRadius: 8,
-                        fontSize: 13,
-                        fontWeight: 500,
-                        color: 'var(--ink)',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        textDecoration: 'none',
-                        whiteSpace: 'nowrap',
+                        background: 'rgba(245, 158, 11, 0.08)',
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                        borderRadius: 12,
+                        padding: '16px 20px',
+                        marginBottom: 20,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                        flexWrap: 'wrap',
                       }}
                     >
-                      Try this app →
-                    </button>
-                  </div>
-                )}
-                <RunSurface
-                  app={app}
-                  initialRun={initialRun}
-                  initialInputs={samplePrefillInputs ?? undefined}
-                  onResetInitialRun={handleResetInitialRun}
-                  onResult={handleRunResult}
-                />
-                {celebrate && (
-                  <CelebrationCard
-                    slug={app.slug}
-                    copied={shareCopied}
-                    onCopy={() => {
-                      try {
-                        navigator.clipboard.writeText(window.location.href);
-                        setShareCopied(true);
-                        window.setTimeout(() => setShareCopied(false), 1800);
-                      } catch {
-                        /* clipboard blocked — show toast fallback */
-                      }
-                    }}
-                    onDismiss={() => setCelebrate(false)}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>
+                          This run isn't available
+                        </div>
+                        <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5 }}>
+                          The link may have expired or the run was deleted. You
+                          can still run {app.name} with fresh inputs below.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="shared-run-not-found-reset"
+                        onClick={handleResetInitialRun}
+                        style={{
+                          padding: '8px 14px',
+                          background: 'var(--card)',
+                          border: '1px solid var(--line)',
+                          borderRadius: 8,
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: 'var(--ink)',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          textDecoration: 'none',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Try this app →
+                      </button>
+                    </div>
+                  )}
+                  <RunSurface
+                    app={app}
+                    initialRun={initialRun}
+                    initialInputs={samplePrefillInputs ?? undefined}
+                    onResetInitialRun={handleResetInitialRun}
+                    onResult={handleRunResult}
                   />
-                )}
-                {!celebrate && runCompleteRunId && (
-                  <RunCompleteCard
-                    runId={runCompleteRunId}
-                    copied={runShareCopied}
-                    onCopy={() => {
-                      try {
-                        const url = new URL(window.location.href);
-                        url.pathname = buildPublicRunPath(runCompleteRunId);
-                        url.search = '';
-                        navigator.clipboard.writeText(url.toString());
-                        setRunShareCopied(true);
-                        window.setTimeout(() => setRunShareCopied(false), 1800);
-                      } catch {
-                        /* clipboard blocked */
-                      }
-                    }}
-                    onDismiss={() => setRunCompleteRunId(null)}
-                  />
-                )}
-              </>
-            )}
-          </section>
-        )}
+                  {celebrate && (
+                    <CelebrationCard
+                      slug={app.slug}
+                      copied={shareCopied}
+                      onCopy={() => {
+                        try {
+                          navigator.clipboard.writeText(window.location.href);
+                          setShareCopied(true);
+                          window.setTimeout(() => setShareCopied(false), 1800);
+                        } catch {
+                          /* clipboard blocked — show toast fallback */
+                        }
+                      }}
+                      onDismiss={() => setCelebrate(false)}
+                    />
+                  )}
+                  {!celebrate && runCompleteRunId && (
+                    <RunCompleteCard
+                      runId={runCompleteRunId}
+                      copied={runShareCopied}
+                      onCopy={() => {
+                        try {
+                          const url = new URL(window.location.href);
+                          url.pathname = buildPublicRunPath(runCompleteRunId);
+                          url.search = '';
+                          navigator.clipboard.writeText(url.toString());
+                          setRunShareCopied(true);
+                          window.setTimeout(() => setRunShareCopied(false), 1800);
+                        } catch {
+                          /* clipboard blocked */
+                        }
+                      }}
+                      onDismiss={() => setRunCompleteRunId(null)}
+                    />
+                  )}
+                </>
+              )}
+            </section>
 
-        {/* About tab */}
-        {activeTab === 'about' && (
-        <>
+            {aboutExpanded && (
+            <section
+              id="about-panel"
+              data-testid="permalink-about-panel"
+              style={{
+                marginTop: 24,
+                paddingTop: 24,
+                borderTop: '1px solid var(--line)',
+              }}
+            >
         {/* How it works strip */}
         {howItWorks.length > 0 && (
           <section
@@ -1473,108 +1526,88 @@ export function AppPermalinkPage() {
             )}
           </div>
         </section>
-        </>
-        )}
-
-        {/* Install tab. Round 2 polish: only Claude is live on day one.
-            Previously we rendered a 4-card grid with 3 "COMING SOON"
-            tiles (ChatGPT, Notion, Terminal), which made the page feel
-            amateur. Keep one full card for Claude; below it, a single
-            thin waitlist link consolidates the upcoming connectors so
-            the live option does not compete with dead weight. */}
-        {activeTab === 'install' && (
-        <section id="connectors" data-testid="connectors">
-          <h2
-            style={{
-              fontSize: 18,
-              fontWeight: 600,
-              margin: '0 0 14px',
-              color: 'var(--ink)',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            MCP connection
-          </h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr)',
-              gap: 16,
-              maxWidth: 560,
-            }}
-            data-testid="connectors-grid"
-          >
-            <ConnectorCard
-              label="Claude"
-              title="Add to Claude Desktop"
-              desc="Use this app as a tool in Claude."
-              testId="connector-claude"
-              href="https://docs.anthropic.com/en/docs/claude-desktop"
-              badge="MCP"
-              copyValue={mcpEndpoint}
-            />
-          </div>
-          <p
-            data-testid="connectors-more"
-            style={{
-              marginTop: 14,
-              fontSize: 13,
-              color: 'var(--muted)',
-              lineHeight: 1.55,
-            }}
-          >
-            More clients (ChatGPT, Notion, Terminal) coming.{' '}
-            <a
-              href="/#waitlist"
-              data-testid="connectors-waitlist"
-              style={{ color: 'var(--accent)', fontWeight: 500, textDecoration: 'none' }}
-            >
-              Join the waitlist &rarr;
-            </a>
-          </p>
-        </section>
-        )}
-
-        {/* Source tab: OpenAPI + manifest viewer (v1.1 stub). v17: dashed
-            panel on --bg surface, rests inside the frame body. */}
-        {activeTab === 'source' && (
-          <section
-            data-testid="tab-content-source"
-            style={{
-              background: 'var(--bg)',
-              border: '1px dashed var(--line)',
-              borderRadius: 14,
-              padding: '32px 28px',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              style={{
-                display: 'inline-block',
-                padding: '3px 8px',
-                borderRadius: 4,
-                background: 'var(--accent-soft)',
-                color: 'var(--accent)',
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                marginBottom: 12,
-              }}
-            >
-              Coming soon
-            </div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--ink)', margin: '0 0 6px' }}>
-              Inspect the source
-            </h2>
-            <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 auto', maxWidth: 520, lineHeight: 1.55 }}>
-              Browsable OpenAPI spec + floom manifest. Until this ships,
-              grab the spec from <code style={{ fontFamily: 'JetBrains Mono, monospace' }}>/api/hub/{app.slug}/openapi.json</code>.
-            </p>
-          </section>
-        )}
+            </section>
+            )}
           </div>
           {/* /frame body */}
+          <div
+            data-testid="permalink-footer-chips"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 8,
+              padding: '14px 24px',
+              borderTop: '1px solid var(--line)',
+              background: 'var(--card)',
+            }}
+          >
+            <button
+              type="button"
+              data-testid="permalink-footer-chip-about"
+              aria-expanded={aboutExpanded}
+              aria-controls="about-panel"
+              onClick={() => setAboutExpanded(!aboutExpanded)}
+              style={{
+                padding: '7px 12px',
+                minHeight: 36,
+                borderRadius: 999,
+                border: aboutExpanded
+                  ? '1px solid var(--accent-border, var(--line))'
+                  : '1px solid var(--line)',
+                background: aboutExpanded ? 'var(--accent-soft, var(--bg))' : 'var(--bg)',
+                color: aboutExpanded ? 'var(--ink)' : 'var(--muted)',
+                fontSize: 12.5,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              About this app
+            </button>
+            <Link
+              to="/install-in-claude"
+              data-testid="permalink-footer-chip-install"
+              style={{
+                padding: '7px 12px',
+                minHeight: 36,
+                borderRadius: 999,
+                border: '1px solid var(--line)',
+                background: 'var(--bg)',
+                color: 'var(--muted)',
+                fontSize: 12.5,
+                fontWeight: 500,
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              Install in Claude
+            </Link>
+            {githubRepo && (
+              <a
+                href={githubRepo}
+                target="_blank"
+                rel="noreferrer"
+                data-testid="permalink-footer-chip-source"
+                style={{
+                  padding: '7px 12px',
+                  minHeight: 36,
+                  borderRadius: 999,
+                  border: '1px solid var(--line)',
+                  background: 'var(--bg)',
+                  color: 'var(--muted)',
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                Source
+              </a>
+            )}
+          </div>
         </div>
         {/* /frame */}
       </main>
@@ -1625,8 +1658,8 @@ export function AppPermalinkPage() {
           [data-testid="permalink-capability-chips"] { margin-top: 10px !important; }
           [data-testid="permalink-hero"] .permalink-hero-actions { width: 100%; justify-content: flex-start; gap: 8px; }
           [data-testid="hero-version-meta"] { flex-wrap: wrap; row-gap: 4px; }
-          [data-testid="permalink-tabs"] { padding: 12px 14px !important; gap: 8px !important; }
-          [data-testid="permalink-tabs"] button { min-height: 44px; }
+          [data-testid="permalink-footer-chips"] { padding: 12px 14px !important; gap: 8px !important; }
+          [data-testid="permalink-footer-chips"] > * { min-height: 44px !important; }
           [data-testid="permalink-page"] section[data-testid="how-it-works"] { grid-template-columns: 1fr !important; margin-bottom: 28px !important; }
         }
       `}</style>
@@ -1763,145 +1796,6 @@ function RatingsWidget({ summary }: { summary: ReviewSummary }) {
           {summary.count} rating{summary.count === 1 ? '' : 's'}
         </div>
       </div>
-    </div>
-  );
-}
-
-function ConnectorCard({
-  label,
-  title,
-  desc,
-  testId,
-  href,
-  onClick,
-  badge,
-  copyValue,
-  comingSoon,
-}: {
-  label: string;
-  title: string;
-  desc: string;
-  testId: string;
-  href?: string;
-  onClick?: () => void;
-  badge?: React.ReactNode;
-  copyValue?: string;
-  comingSoon?: boolean;
-}) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    if (!copyValue) return;
-    try {
-      void navigator.clipboard.writeText(copyValue).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      });
-    } catch {
-      /* ignore */
-    }
-  };
-  const commonStyle: React.CSSProperties = {
-    background: 'var(--card)',
-    border: '1px solid var(--line)',
-    borderRadius: 14,
-    padding: '18px 20px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    color: 'var(--ink)',
-    textDecoration: 'none',
-    textAlign: 'left',
-    cursor: href || onClick ? 'pointer' : 'default',
-    fontFamily: 'inherit',
-    minHeight: 140,
-  };
-  const inner = (
-    <>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.07em',
-          }}
-        >
-          {label}
-        </span>
-        {(badge || comingSoon) && (
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 999,
-              background: 'var(--accent-soft)',
-              color: 'var(--accent)',
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            {comingSoon ? 'Coming soon' : badge}
-          </span>
-        )}
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
-      <div style={{ fontSize: 13, color: 'var(--muted)', flex: 1 }}>{desc}</div>
-      {copyValue && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            copy();
-          }}
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '6px 10px',
-            border: '1px solid var(--line)',
-            background: 'var(--bg)',
-            borderRadius: 6,
-            cursor: 'pointer',
-            alignSelf: 'flex-start',
-            color: copied ? 'var(--accent)' : 'var(--muted)',
-            fontFamily: 'inherit',
-          }}
-        >
-          {copied ? 'Copied' : 'Copy MCP URL'}
-        </button>
-      )}
-    </>
-  );
-  if (href) {
-    return (
-      <a
-        data-testid={testId}
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        style={commonStyle}
-      >
-        {inner}
-      </a>
-    );
-  }
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        data-testid={testId}
-        onClick={onClick}
-        style={commonStyle}
-      >
-        {inner}
-      </button>
-    );
-  }
-  return (
-    <div data-testid={testId} style={commonStyle}>
-      {inner}
     </div>
   );
 }

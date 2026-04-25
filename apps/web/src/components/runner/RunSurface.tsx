@@ -46,7 +46,7 @@ import { buildPublicRunPath, getRunStartErrorMessage } from '../../lib/publicPer
 import { useDeployEnabled } from '../../lib/flags';
 import { waitlistHref } from '../../lib/waitlistCta';
 import { BYOKModal } from '../BYOKModal';
-import { FreeRunsStrip, useFreeRunsRefresher } from './FreeRunsStrip';
+import { useFreeRunsRefresher } from './FreeRunsStrip';
 import { SampleOutputPreview, hasSampleForSlug } from './SampleOutputPreview';
 
 export interface RunSurfaceResult {
@@ -1059,29 +1059,6 @@ export function RunSurface({
           </button>
         </div>
       )}
-
-      {/* Free-runs strip (2026-04-25): visible BYOK status for the 3
-          launch demo slugs. Renders nothing for every other app, so it's
-          safe to mount unconditionally. See FreeRunsStrip.tsx for the
-          state-machine rationale (remaining / exhausted / user-key). */}
-      <FreeRunsStrip
-        slug={app.slug}
-        refreshKey={freeRunsRefresher.refreshKey}
-        onOpenBYOK={() => {
-          setByokPayload({
-            slug: app.slug,
-            // Proactive-mode defaults — the modal's "exhausted" copy
-            // keys off byokMode, not off payload numbers, so usage=0 /
-            // limit=5 here are only used if the modal ever renders
-            // numeric copy (it currently does not in proactive mode).
-            usage: 0,
-            limit: 5,
-            get_key_url: 'https://aistudio.google.com/app/apikey',
-          });
-          setByokMode('proactive');
-          setByokOpen(true);
-        }}
-      />
 
       {/* Upgrade 2 (2026-04-19): action tab strip for multi-action apps.
           Hidden on single-action apps to preserve the current layout.
