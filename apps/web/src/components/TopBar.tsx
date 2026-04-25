@@ -124,21 +124,30 @@ const menuItemStyle: CSSProperties = {
   borderRadius: 6,
 };
 
-// v17 TopBar — declutter v2 2026-04-24 (#572: "too many nav bar items").
-//   Centre nav (always): Apps · Docs · Pricing                       (3 items)
-//   Right (anon, preview): GH stars · Publish (CTA) · Sign in · Sign up
-//   Right (anon, waitlist): GH stars · Publish (CTA) · Join waitlist
-//   Right (authed):         GH stars · Publish (CTA) · avatar dropdown
-//   Avatar dropdown:        Studio · Me · API keys · Settings · Sign out
+// v17 TopBar — auth-branched chrome 2026-04-25 (project_floom_nav_ia.md).
+//   Anonymous (waitlist visitor / signed-out):
+//     Centre: Apps · Docs · Pricing                                  (3 items)
+//     Right (preview):  GH stars · Publish (CTA) · Sign in · Sign up
+//     Right (waitlist): GH stars · Publish (CTA) · Join waitlist
 //
-// Publish is the single primary action — brand-green pill on the right.
-// On waitlist-prod it opens the waitlist; on preview it routes to
-// /studio/build. Studio + Me are no longer top-level links — they live
-// behind the avatar dropdown so the chrome stays calm for visitors who
-// don't have an account yet. Mirrors Vercel / Linear / Raycast.
+//   Authenticated (deploy mode):
+//     Centre: Studio · My runs                                       (2 items)
+//     Right:  GH stars · + New app (CTA → /studio/build) · avatar dropdown
+//     Avatar dropdown: Profile · API keys · Secrets · Pricing · Docs · Sign out
+//
+// Why the split: Federico 2026-04-25 — "Pricing, Docs etc don't matter
+// so much when I am already logged in, so the nav and the priorities of
+// what to click next change." Discovery items demote to the dropdown for
+// authed users; the centre nav surfaces only their day-to-day work
+// surfaces. MECE labelling: /me = "My runs" (consumer), /studio =
+// "Studio" (creator). URL slugs stay; only the visible label changes.
+//
+// Two clean states only — never a 3rd. Preview vs prod differ in the
+// CTA wording (Publish vs Join waitlist), not the nav structure.
 //
 // Changelog stays in the footer (#572 nav declutter, original 04-23 pass).
-// Mobile: hamburger collapses everything to a vertical column menu.
+// Mobile: hamburger collapses everything to a vertical column menu, with
+// the same anon-vs-authed split.
 export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
@@ -160,6 +169,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
     isAuthenticated && myApps && myApps.length > 0
       ? `Studio (${myApps.length})`
       : 'Studio';
+  // Auth-branched chrome: only flip to the work-focused layout when the
+  // session is authenticated AND we know we're on a deploy-enabled
+  // environment. Both must be true. While the deploy flag is loading
+  // (deployEnabledFlag === null) treat as anon so we don't flash the
+  // 2-item centre nav before settling.
+  const showAuthedChrome = isAuthenticated && deployEnabled;
   const navigate = useNavigate();
   const location = useLocation();
   const dropRef = useRef<HTMLDivElement>(null);
@@ -315,10 +330,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Centre nav (#572): exactly 3 items — Apps · Docs · Pricing.
-            Self-host moved to the landing band's anchor + footer link;
-            Deploy/Publish promoted to the brand-green CTA on the right;
-            Studio + Me hidden behind the avatar dropdown for authed users. */}
+        {/* Centre nav — branches on auth state (project_floom_nav_ia.md).
+            Anonymous: Apps · Docs · Pricing (discovery surfaces).
+            Authenticated: Studio · My runs (work surfaces). Pricing/Docs
+            move to the avatar dropdown — 1 click away when needed. */}
         <nav
           className="topbar-links topbar-links-desktop topbar-centre-nav"
           aria-label="Primary"
@@ -333,44 +348,52 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             gap: 2,
           }}
         >
-          <Link
-            to="/apps"
-            data-testid="topbar-apps"
-            aria-current={isApps ? 'page' : undefined}
-            style={navLinkStyle(isApps)}
-          >
-            Apps
-          </Link>
-          <Link
-            to="/docs"
-            data-testid="topbar-docs"
-            aria-current={isDocs ? 'page' : undefined}
-            style={navLinkStyle(isDocs)}
-          >
-            Docs
-          </Link>
-          <Link
-            to="/pricing"
-            data-testid="topbar-pricing"
-            aria-current={isPricing ? 'page' : undefined}
-            style={navLinkStyle(isPricing)}
-          >
-            Pricing
-          </Link>
-          {/* Studio (#641): 4th nav item, authed-only. Signed-out users
-              still see the 3-item nav (Apps · Docs · Pricing). Studio
-              is the creator's working area and deserves nav-level
-              presence once a user has an account. Deep-link exists in
-              the avatar dropdown too; this just surfaces it. */}
-          {isAuthenticated && (
-            <Link
-              to="/studio"
-              data-testid="topbar-studio"
-              aria-current={isStudio ? 'page' : undefined}
-              style={navLinkStyle(isStudio)}
-            >
-              Studio
-            </Link>
+          {showAuthedChrome ? (
+            <>
+              <Link
+                to="/studio"
+                data-testid="topbar-studio"
+                aria-current={isStudio ? 'page' : undefined}
+                style={navLinkStyle(isStudio)}
+              >
+                {studioNavLabel}
+              </Link>
+              <Link
+                to="/me"
+                data-testid="topbar-my-runs"
+                aria-current={isMe ? 'page' : undefined}
+                style={navLinkStyle(isMe)}
+              >
+                My runs
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                to="/apps"
+                data-testid="topbar-apps"
+                aria-current={isApps ? 'page' : undefined}
+                style={navLinkStyle(isApps)}
+              >
+                Apps
+              </Link>
+              <Link
+                to="/docs"
+                data-testid="topbar-docs"
+                aria-current={isDocs ? 'page' : undefined}
+                style={navLinkStyle(isDocs)}
+              >
+                Docs
+              </Link>
+              <Link
+                to="/pricing"
+                data-testid="topbar-pricing"
+                aria-current={isPricing ? 'page' : undefined}
+                style={navLinkStyle(isPricing)}
+              >
+                Pricing
+              </Link>
+            </>
           )}
         </nav>
 
@@ -390,13 +413,25 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               waitlist-prod (where Sign in / Sign up are hidden). */}
           {!isLoginPage && <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />}
 
-          {/* Primary Publish CTA (#572) — brand-green pill. Always shown
-              (anon + authed alike), hidden only on /login + /signup so the
-              auth pages stay focused. Routes to /studio/build on preview;
-              opens the waitlist on prod. While the deploy flag is loading
-              (deployEnabledFlag === null) we render nothing to avoid the
-              flash. */}
-          {!isLoginPage && deployEnabled && (
+          {/* Primary CTA — brand-green pill. Authed users get "+ New app"
+              (work-focused: take me to the build flow). Anonymous users
+              get "Publish" (discovery-focused: learn what publishing
+              means). Both route to /studio/build in deploy mode; on
+              waitlist-prod the anon variant opens the waitlist instead.
+              Hidden on /login + /signup so auth pages stay focused.
+              While the deploy flag is loading we render nothing to avoid
+              the flash. */}
+          {!isLoginPage && showAuthedChrome && (
+            <Link
+              to="/studio/build"
+              data-testid="topbar-new-app-cta"
+              aria-current={isPublishNav ? 'page' : undefined}
+              style={publishCtaStyle}
+            >
+              + New app
+            </Link>
+          )}
+          {!isLoginPage && !showAuthedChrome && deployEnabled && (
             <Link
               to="/studio/build"
               data-testid="topbar-publish-cta"
@@ -406,7 +441,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               Publish
             </Link>
           )}
-          {!isLoginPage && waitlistMode && (
+          {!isLoginPage && !showAuthedChrome && waitlistMode && (
             <button
               type="button"
               data-testid="topbar-publish-cta-waitlist"
@@ -557,50 +592,66 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     zIndex: 50,
                   }}
                 >
-                  {/* #674 — Dashboard lands first so signed-in users
-                      reach /me (their overview) in one click. Order
-                      per Federico 2026-04-24: Dashboard · Studio ·
-                      Apps I run · Settings · Sign out. "Apps I run"
-                      points at /me/runs. API keys collapsed into
-                      Settings. */}
-                  <Link
-                    to="/me"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-dashboard"
-                    aria-current={isMe ? 'page' : undefined}
-                    style={menuItemStyle}
-                  >
-                    Dashboard
-                  </Link>
-                  <Link
-                    to="/studio"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-studio"
-                    aria-current={isStudio ? 'page' : undefined}
-                    style={menuItemStyle}
-                  >
-                    {studioNavLabel}
-                  </Link>
-                  <Link
-                    to="/me/runs"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-runs"
-                    aria-current={isMe ? 'page' : undefined}
-                    style={menuItemStyle}
-                  >
-                    Apps I run
-                  </Link>
+                  {/* Dropdown order (project_floom_nav_ia.md, 2026-04-25):
+                      Profile · API keys · Secrets · Pricing · Docs · Sign out.
+                      Studio + My runs live in the centre nav now (authed
+                      users get the work-focused 2-item layout); Pricing +
+                      Docs demote here so they stay 1 click away without
+                      cluttering the top bar. */}
                   <Link
                     to="/me/settings"
                     onClick={() => setDropOpen(false)}
                     role="menuitem"
-                    data-testid="topbar-user-settings"
+                    data-testid="topbar-user-profile"
                     style={menuItemStyle}
                   >
-                    Settings
+                    Profile
+                  </Link>
+                  <Link
+                    to="/me/api-keys"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-api-keys"
+                    style={menuItemStyle}
+                  >
+                    API keys
+                  </Link>
+                  <Link
+                    to="/me/secrets"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-secrets"
+                    style={menuItemStyle}
+                  >
+                    Secrets
+                  </Link>
+                  <div
+                    style={{
+                      height: 1,
+                      background: 'rgba(14,14,12,0.08)',
+                      margin: '4px 0',
+                    }}
+                    aria-hidden="true"
+                  />
+                  <Link
+                    to="/pricing"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-pricing"
+                    aria-current={isPricing ? 'page' : undefined}
+                    style={menuItemStyle}
+                  >
+                    Pricing
+                  </Link>
+                  <Link
+                    to="/docs"
+                    onClick={() => setDropOpen(false)}
+                    role="menuitem"
+                    data-testid="topbar-user-docs"
+                    aria-current={isDocs ? 'page' : undefined}
+                    style={menuItemStyle}
+                  >
+                    Docs
                   </Link>
                   <div
                     style={{
@@ -692,77 +743,78 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               </button>
             </div>
 
-            {/* Primary nav links — column list matching desktop labels.
-                #572: Apps · Docs · Pricing only. Self-host moves to the
-                landing band's anchor + footer; Studio + Me move to the
-                authed-only block below; Publish becomes the bottom CTA. */}
-            <Link
-              to="/apps"
-              className="topbar-mobile-link topbar-mobile-link-primary"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              data-testid="topbar-mobile-apps"
-              aria-current={isApps ? 'page' : undefined}
-            >
-              <MobileAppsIcon />
-              <span>Apps</span>
-            </Link>
-
-            <Link
-              to="/docs"
-              className="topbar-mobile-link"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              data-testid="topbar-mobile-docs"
-              aria-current={isDocs ? 'page' : undefined}
-            >
-              Docs
-            </Link>
-
-            <Link
-              to="/pricing"
-              className="topbar-mobile-link"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              data-testid="topbar-mobile-pricing"
-              aria-current={isPricing ? 'page' : undefined}
-            >
-              Pricing
-            </Link>
-
-            {/* Authed-only: Dashboard + Studio + Apps I run + Settings.
-                Mirrors the desktop avatar dropdown order (#641, #674). */}
-            {isAuthenticated && (
+            {/* Mobile menu — branches on auth state, same split as desktop
+                (project_floom_nav_ia.md). Anonymous: Apps · Docs · Pricing
+                + Publish CTA. Authenticated: Studio · My runs · + New app
+                · Pricing · Docs · API keys · Settings · Sign out. */}
+            {showAuthedChrome ? (
               <>
                 <Link
-                  to="/me"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-dashboard"
-                  aria-current={isMe ? 'page' : undefined}
-                >
-                  Dashboard
-                </Link>
-                <Link
                   to="/studio"
-                  className="topbar-mobile-link"
+                  className="topbar-mobile-link topbar-mobile-link-primary"
                   role="menuitem"
                   onClick={() => setMenuOpen(false)}
                   data-testid="topbar-mobile-studio"
                   aria-current={isStudio ? 'page' : undefined}
                 >
-                  {studioNavLabel}
+                  <MobileAppsIcon />
+                  <span>{studioNavLabel}</span>
                 </Link>
                 <Link
-                  to="/me/runs"
+                  to="/me"
                   className="topbar-mobile-link"
                   role="menuitem"
                   onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-runs"
+                  data-testid="topbar-mobile-my-runs"
                   aria-current={isMe ? 'page' : undefined}
                 >
-                  Apps I run
+                  My runs
+                </Link>
+                {!isLoginPage && (
+                  <Link
+                    to="/studio/build"
+                    className="topbar-mobile-cta"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    data-testid="topbar-mobile-new-app"
+                    aria-current={isPublishNav ? 'page' : undefined}
+                    style={{
+                      background: ACCENT,
+                      borderColor: ACCENT,
+                      color: '#fff',
+                    }}
+                  >
+                    + New app
+                  </Link>
+                )}
+                <Link
+                  to="/pricing"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-pricing"
+                  aria-current={isPricing ? 'page' : undefined}
+                >
+                  Pricing
+                </Link>
+                <Link
+                  to="/docs"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-docs"
+                  aria-current={isDocs ? 'page' : undefined}
+                >
+                  Docs
+                </Link>
+                <Link
+                  to="/me/api-keys"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-api-keys"
+                >
+                  API keys
                 </Link>
                 <Link
                   to="/me/settings"
@@ -774,47 +826,82 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   Settings
                 </Link>
               </>
-            )}
+            ) : (
+              <>
+                <Link
+                  to="/apps"
+                  className="topbar-mobile-link topbar-mobile-link-primary"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-apps"
+                  aria-current={isApps ? 'page' : undefined}
+                >
+                  <MobileAppsIcon />
+                  <span>Apps</span>
+                </Link>
 
-            {/* Publish CTA — primary action on mobile too. Above the auth
-                pills so the green pill anchors the bottom of the menu. */}
-            {!isLoginPage && deployEnabled && (
-              <Link
-                to="/studio/build"
-                className="topbar-mobile-cta"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-publish"
-                aria-current={isPublishNav ? 'page' : undefined}
-                style={{
-                  background: ACCENT,
-                  borderColor: ACCENT,
-                  color: '#fff',
-                }}
-              >
-                Publish
-              </Link>
-            )}
-            {!isLoginPage && waitlistMode && (
-              <button
-                type="button"
-                className="topbar-mobile-cta"
-                role="menuitem"
-                data-testid="topbar-mobile-publish-waitlist"
-                onClick={() => {
-                  setMenuOpen(false);
-                  goWaitlistPublish('topbar-publish-mobile');
-                }}
-                style={{
-                  background: ACCENT,
-                  borderColor: ACCENT,
-                  color: '#fff',
-                  cursor: 'pointer',
-                  font: 'inherit',
-                }}
-              >
-                Publish
-              </button>
+                <Link
+                  to="/docs"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-docs"
+                  aria-current={isDocs ? 'page' : undefined}
+                >
+                  Docs
+                </Link>
+
+                <Link
+                  to="/pricing"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-pricing"
+                  aria-current={isPricing ? 'page' : undefined}
+                >
+                  Pricing
+                </Link>
+
+                {/* Publish CTA — anon-only primary action on mobile. */}
+                {!isLoginPage && deployEnabled && (
+                  <Link
+                    to="/studio/build"
+                    className="topbar-mobile-cta"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    data-testid="topbar-mobile-publish"
+                    aria-current={isPublishNav ? 'page' : undefined}
+                    style={{
+                      background: ACCENT,
+                      borderColor: ACCENT,
+                      color: '#fff',
+                    }}
+                  >
+                    Publish
+                  </Link>
+                )}
+                {!isLoginPage && waitlistMode && (
+                  <button
+                    type="button"
+                    className="topbar-mobile-cta"
+                    role="menuitem"
+                    data-testid="topbar-mobile-publish-waitlist"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      goWaitlistPublish('topbar-publish-mobile');
+                    }}
+                    style={{
+                      background: ACCENT,
+                      borderColor: ACCENT,
+                      color: '#fff',
+                      cursor: 'pointer',
+                      font: 'inherit',
+                    }}
+                  >
+                    Publish
+                  </button>
+                )}
+              </>
             )}
 
             {!isAuthenticated && !isLoginPage && deployEnabled && (
