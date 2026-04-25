@@ -67,6 +67,7 @@ const StudioHomePage = lazy(() => import('./pages/StudioHomePage').then(m => ({ 
 const StudioAppsPage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioAppsPage })));
 const StudioBuildPage = lazy(() => import('./pages/StudioBuildPage').then(m => ({ default: m.StudioBuildPage })));
 const StudioAppPage = lazy(() => import('./pages/StudioAppPage').then(m => ({ default: m.StudioAppPage })));
+const StudioRunsPage = lazy(() => import('./pages/StudioRunsPage').then(m => ({ default: m.StudioRunsPage })));
 const StudioAppRunsPage = lazy(() => import('./pages/StudioAppRunsPage').then(m => ({ default: m.StudioAppRunsPage })));
 const StudioAppSecretsPage = lazy(() => import('./pages/StudioAppSecretsPage').then(m => ({ default: m.StudioAppSecretsPage })));
 const StudioAppAccessPage = lazy(() => import('./pages/StudioAppAccessPage').then(m => ({ default: m.StudioAppAccessPage })));
@@ -298,6 +299,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             the heavier app index. Still auth-gated and waitlist-gated. */}
         <Route path="/studio" element={<WaitlistGuard source="studio"><StudioHomePage /></WaitlistGuard>} />
         <Route path="/studio/apps" element={<WaitlistGuard source="studio"><StudioAppsPage /></WaitlistGuard>} />
+        <Route path="/studio/runs" element={<WaitlistGuard source="studio"><StudioRunsPage /></WaitlistGuard>} />
         <Route path="/studio/build" element={<WaitlistGuard source="studio"><StudioBuildPage /></WaitlistGuard>} />
         {/* Design-audit fix 2026-04-22: /studio/new is the create-new-app
             entry point shown in wireframe v17. Funnel it to /studio/build

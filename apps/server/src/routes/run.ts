@@ -762,6 +762,244 @@ slugQuotaRouter.get('/', async (c) => {
 // so the UI can render the app name + icon without a second fetch.
 export const meRouter = new Hono();
 
+type StudioAppSummaryRow = {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string | null;
+  publish_status: string | null;
+  visibility: string | null;
+  created_at: string;
+  updated_at: string;
+  last_run_at: string | null;
+  runs_7d: number;
+};
+
+function isStudioAppLive(publish_status: string | null): boolean {
+  return !publish_status || publish_status === 'published';
+}
+
+function studioRunsDeltaPct(current: number, previous: number): number {
+  if (previous <= 0) return current > 0 ? 100 : 0;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+function feedbackAppSlugFromUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const url = raw.startsWith('/')
+      ? new URL(raw, 'http://localhost')
+      : new URL(raw);
+    const match = /^\/p\/([^/?#]+)/.exec(url.pathname);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadStudioApps(
+  ctx: SessionContext,
+): StudioAppSummaryRow[] {
+  const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === DEFAULT_WORKSPACE_ID;
+  if (isOssLocal) {
+    return db.prepare(
+      `SELECT apps.id, apps.slug, apps.name, apps.icon, apps.publish_status,
+              apps.visibility, apps.created_at, apps.updated_at,
+              (
+                SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+              ) AS last_run_at,
+              (
+                SELECT COUNT(*) FROM runs
+                 WHERE runs.app_id = apps.id
+                   AND runs.started_at >= datetime('now', '-7 days')
+              ) AS runs_7d
+         FROM apps
+        WHERE apps.workspace_id = ?
+        ORDER BY
+          CASE WHEN (
+            SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+          ) IS NULL THEN 1 ELSE 0 END,
+          (
+            SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+          ) DESC,
+          apps.updated_at DESC`
+    ).all(ctx.workspace_id) as StudioAppSummaryRow[];
+  }
+
+  return db.prepare(
+    `SELECT apps.id, apps.slug, apps.name, apps.icon, apps.publish_status,
+            apps.visibility, apps.created_at, apps.updated_at,
+            (
+              SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+            ) AS last_run_at,
+            (
+              SELECT COUNT(*) FROM runs
+               WHERE runs.app_id = apps.id
+                 AND runs.started_at >= datetime('now', '-7 days')
+            ) AS runs_7d
+       FROM apps
+      WHERE apps.workspace_id = ?
+        AND apps.author = ?
+      ORDER BY
+        CASE WHEN (
+          SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+        ) IS NULL THEN 1 ELSE 0 END,
+        (
+          SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+        ) DESC,
+        apps.updated_at DESC`
+  ).all(ctx.workspace_id, ctx.user_id) as StudioAppSummaryRow[];
+}
+
+meRouter.get('/studio/stats', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const apps = loadStudioApps(ctx);
+  const appIds = apps.map((app) => app.id);
+  const appSlugs = new Set(apps.map((app) => app.slug));
+
+  const membersRow = db
+    .prepare('SELECT COUNT(*) AS c FROM workspace_members WHERE workspace_id = ?')
+    .get(ctx.workspace_id) as { c: number } | undefined;
+  const workspaceMemberCount = Number(membersRow?.c || 0);
+
+  let runsCurrent = 0;
+  let runsPrevious = 0;
+  if (appIds.length > 0) {
+    const placeholders = appIds.map(() => '?').join(', ');
+    const currentRow = db
+      .prepare(
+        `SELECT COUNT(*) AS c
+           FROM runs
+          WHERE app_id IN (${placeholders})
+            AND started_at >= datetime('now', '-7 days')`,
+      )
+      .get(...appIds) as { c: number } | undefined;
+    runsCurrent = Number(currentRow?.c || 0);
+
+    const previousRow = db
+      .prepare(
+        `SELECT COUNT(*) AS c
+           FROM runs
+          WHERE app_id IN (${placeholders})
+            AND started_at >= datetime('now', '-14 days')
+            AND started_at < datetime('now', '-7 days')`,
+      )
+      .get(...appIds) as { c: number } | undefined;
+    runsPrevious = Number(previousRow?.c || 0);
+  }
+
+  // Feedback currently has no app_id/read-state columns. We count rows whose
+  // saved URL points at /p/:slug for one of the workspace apps, and because
+  // there's no read marker yet every matched row is "unread" by definition.
+  const feedbackRows = db
+    .prepare('SELECT url FROM feedback ORDER BY created_at DESC')
+    .all() as Array<{ url: string | null }>;
+  let feedbackUnread = 0;
+  const feedbackApps = new Set<string>();
+  for (const row of feedbackRows) {
+    const slug = feedbackAppSlugFromUrl(row.url);
+    if (!slug || !appSlugs.has(slug)) continue;
+    feedbackUnread += 1;
+    feedbackApps.add(slug);
+  }
+
+  const activeCount = apps.filter((app) => isStudioAppLive(app.publish_status)).length;
+  const draftCount = apps.length - activeCount;
+
+  return c.json({
+    workspace: {
+      member_count: workspaceMemberCount,
+    },
+    runs_7d: {
+      count: runsCurrent,
+      previous_count: runsPrevious,
+      delta_pct: studioRunsDeltaPct(runsCurrent, runsPrevious),
+    },
+    apps: {
+      total_count: apps.length,
+      active_count: activeCount,
+      draft_count: draftCount,
+      items: apps.map((app) => ({
+        slug: app.slug,
+        name: app.name,
+        icon: app.icon,
+        publish_status: app.publish_status,
+        visibility: app.visibility,
+        created_at: app.created_at,
+        updated_at: app.updated_at,
+        last_run_at: app.last_run_at,
+        runs_7d: Number(app.runs_7d || 0),
+      })),
+    },
+    feedback: {
+      unread_count: feedbackUnread,
+      apps_count: feedbackApps.size,
+    },
+  });
+});
+
+meRouter.get('/studio/activity', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const limit = Math.max(1, Math.min(100, Number(c.req.query('limit') || 5)));
+  const apps = loadStudioApps(ctx);
+  const appIds = apps.map((app) => app.id);
+
+  if (appIds.length === 0) {
+    return c.json({ runs: [] });
+  }
+
+  const placeholders = appIds.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT runs.id, runs.action, runs.status, runs.duration_ms, runs.started_at,
+              runs.error, runs.user_id, runs.device_id,
+              apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon,
+              users.email AS user_email, users.name AS user_name
+         FROM runs
+         JOIN apps ON apps.id = runs.app_id
+         LEFT JOIN users ON users.id = runs.user_id
+        WHERE runs.app_id IN (${placeholders})
+        ORDER BY runs.started_at DESC
+        LIMIT ?`,
+    )
+    .all(...appIds, limit) as Array<{
+    id: string;
+    action: string;
+    status: string;
+    duration_ms: number | null;
+    started_at: string;
+    error: string | null;
+    user_id: string | null;
+    device_id: string | null;
+    app_slug: string;
+    app_name: string;
+    app_icon: string | null;
+    user_email: string | null;
+    user_name: string | null;
+  }>;
+
+  return c.json({
+    runs: rows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      status: row.status,
+      duration_ms: row.duration_ms,
+      started_at: row.started_at,
+      error: row.error,
+      app_slug: row.app_slug,
+      app_name: row.app_name,
+      app_icon: row.app_icon,
+      user_label:
+        row.user_email ||
+        row.user_name ||
+        (row.device_id ? 'Anonymous user' : 'Unknown user'),
+      // The current runs schema does not persist Claude/Cursor/API provenance.
+      // Returning a truthful umbrella label beats fabricating a finer source.
+      source_label: 'Floom',
+    })),
+  });
+});
+
 meRouter.get('/runs', async (c) => {
   const ctx = await resolveUserContext(c);
   const limit = Math.max(1, Math.min(200, Number(c.req.query('limit') || 50)));

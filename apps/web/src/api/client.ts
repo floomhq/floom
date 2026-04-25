@@ -14,6 +14,8 @@ import type {
   CreatorApp,
   CreatorRun,
   JobRecord,
+  StudioActivityRun,
+  StudioStats,
   UserSecretsList,
   SecretPolicy,
   SecretPoliciesResponse,
@@ -688,6 +690,16 @@ export function switchWorkspace(
   );
 }
 
+export function createWorkspace(body: {
+  name: string;
+  slug?: string;
+}): Promise<{ workspace: { id: string; slug: string; name: string } }> {
+  return request('/api/workspaces', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 // Better Auth endpoints are mounted at /auth/* in cloud mode. The UI calls
 // them directly; in OSS mode these 404, and the UI falls back to a
 // "cloud-mode not enabled" error state on the /login page.
@@ -845,6 +857,18 @@ export function getMyRuns(limit = 50): Promise<{ runs: MeRunSummary[] }> {
 
 export function getMyRun(runId: string): Promise<MeRunDetail> {
   return request<MeRunDetail>(`/api/me/runs/${runId}`);
+}
+
+export function getStudioStats(): Promise<StudioStats> {
+  return request<StudioStats>('/api/me/studio/stats');
+}
+
+export function getStudioActivity(
+  limit = 5,
+): Promise<{ runs: StudioActivityRun[] }> {
+  return request<{ runs: StudioActivityRun[] }>(
+    `/api/me/studio/activity?limit=${limit}`,
+  );
 }
 
 // Note: the previous `getMyTools` / `MeToolSummary` helper (v17) was

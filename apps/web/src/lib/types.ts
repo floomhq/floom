@@ -318,7 +318,7 @@ export interface RunRecord {
 
 // ---------- W4-minimal: session + dashboard types ----------
 
-export type WorkspaceRole = 'admin' | 'editor' | 'viewer';
+export type WorkspaceRole = 'admin' | 'editor' | 'viewer' | 'guest';
 
 export interface SessionWorkspace {
   id: string;
@@ -462,6 +462,53 @@ export interface CreatorApp {
    * server builds that don't emit the field.
    */
   publish_status?: 'draft' | 'pending_review' | 'published' | 'rejected';
+}
+
+export interface StudioAppSummary {
+  slug: string;
+  name: string;
+  icon: string | null;
+  publish_status: 'draft' | 'pending_review' | 'published' | 'rejected' | null;
+  visibility: AppVisibility | null;
+  created_at: string;
+  updated_at: string;
+  last_run_at: string | null;
+  runs_7d: number;
+}
+
+export interface StudioStats {
+  workspace: {
+    member_count: number;
+  };
+  runs_7d: {
+    count: number;
+    previous_count: number;
+    delta_pct: number;
+  };
+  apps: {
+    total_count: number;
+    active_count: number;
+    draft_count: number;
+    items: StudioAppSummary[];
+  };
+  feedback: {
+    unread_count: number;
+    apps_count: number;
+  };
+}
+
+export interface StudioActivityRun {
+  id: string;
+  action: string;
+  status: RunStatus;
+  duration_ms: number | null;
+  started_at: string;
+  error: string | null;
+  app_slug: string;
+  app_name: string;
+  app_icon: string | null;
+  user_label: string;
+  source_label: string;
 }
 
 // ---------- v15.2: per-user encrypted secrets vault ----------
