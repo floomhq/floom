@@ -369,6 +369,19 @@ if (isCloudMode()) {
       return c.json({ error: 'auth_failed', code: error }, 400);
     });
 
+    // Issue #767 (waitlist bypass): in waitlist mode (`isDeployEnabled()`
+    // false), block account-creation auth endpoints before Better Auth runs.
+    // Keep GET /auth/* reachable (session checks, callbacks, etc.).
+    app.use('/auth/*', async (c, next) => {
+      const method = c.req.method;
+      const pathname = new URL(c.req.url).pathname;
+      const isSignupPath = /^\/auth\/(?:sign-up|signup)(?:\/|$)/.test(pathname);
+      if (method === 'POST' && isSignupPath && !isDeployEnabled()) {
+        return c.json({ error: 'sign-up disabled — join the waitlist' }, 403);
+      }
+      return next();
+    });
+
     // Hono `app.on(...)` accepts a method list + path. Better Auth's
     // `handler` consumes the raw `Request` and returns a `Response`, which
     // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
