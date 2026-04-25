@@ -163,7 +163,14 @@ export function ForgotPasswordPage() {
           Remembered it?{' '}
           <Link
             to="/login"
-            style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
+            style={{
+              color: 'var(--accent)',
+              fontWeight: 600,
+              textDecoration: 'none',
+              height: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
           >
             Back to sign in
           </Link>

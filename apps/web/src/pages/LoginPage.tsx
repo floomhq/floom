@@ -545,8 +545,9 @@ export function LoginPage() {
                     fontSize: 14,
                     color: 'var(--muted)',
                     textDecoration: 'underline',
-                    padding: '8px 0',
-                    display: 'inline-block',
+                    height: 44,
+                    display: 'inline-flex',
+                    alignItems: 'center',
                   }}
                 >
                   Forgot password?
@@ -591,8 +592,10 @@ export function LoginPage() {
               color: 'var(--accent)',
               fontWeight: 600,
               cursor: 'pointer',
-              padding: '8px 4px',
-              margin: '-8px -4px',
+              height: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '0 4px',
               font: 'inherit',
             }}
           >
