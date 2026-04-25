@@ -1,0 +1,45 @@
+name: LinkedIn Profile Roaster
+slug: linkedin-roaster
+description: Paste your LinkedIn profile text and get a brutally honest roast with specific rewrites for headline, about intro, and one experience bullet.
+creator: floom
+category: writing
+icon: flame
+actions:
+  roast:
+    label: Roast Profile
+    description: One Gemini 2.5 Flash Lite call that returns 3-5 specific roasts, 3 rewrites, and one top tip.
+    inputs:
+      - name: profile_text
+        label: Profile Text
+        type: textarea
+        required: true
+        placeholder: Paste your LinkedIn headline, About section, and 1-2 key experience entries
+        description: Paste 200-5000 characters from your profile. Keep it focused on About plus your most relevant roles.
+    outputs:
+      - name: roast
+        label: Roast
+        type: table
+      - name: rewrites
+        label: Rewrites
+        type: table
+      - name: top_tip
+        label: Top Tip
+        type: text
+      - name: model
+        label: Model
+        type: text
+      - name: dry_run
+        label: Dry Run
+        type: text
+      - name: cache_hit
+        label: Cache Hit
+        type: text
+runtime: python
+python_dependencies:
+  - google-genai>=1.64.0,<2
+node_dependencies: {}
+secrets_needed:
+  - GEMINI_API_KEY
+output_type: json
+timeout: 10s
+manifest_version: "2.0"

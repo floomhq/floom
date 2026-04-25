@@ -1,0 +1,53 @@
+{
+  "_comment": "Pre-generated fixture for the /p/linkedin-roaster demo sample input. If the user submits the exact sample profile text, main.py returns this blob in under 500ms. Any other input falls through to Gemini or deterministic dry-run.",
+  "generated_with": "sample-fixture",
+  "entries": {
+    "e34bc51f57f451cbb559b1cf253e02b7b782adc955d86e308ce5de04f98530f1": {
+      "roast": [
+        {
+          "observation": "You open with \"Passionate innovation leader\" and \"unlock synergy\", which reads like a buzzword bundle instead of a role value statement.",
+          "sting": "If your headline could fit 5,000 profiles, it is not a positioning advantage."
+        },
+        {
+          "observation": "In About, \"wearing many hats\" and \"thinking outside the box\" are generic claims with zero proof.",
+          "sting": "Recruiters do not hire adjectives, they hire evidence."
+        },
+        {
+          "observation": "Your Acme bullet says \"owned roadmap execution\" and \"improved collaboration\" but gives no measurable before-and-after.",
+          "sting": "Without numbers, this sounds like participation, not impact."
+        },
+        {
+          "observation": "\"Drove AI initiatives and created dashboards used across the business\" names activity, not business outcome.",
+          "sting": "Shipping outputs is nice; showing business lift gets interviews."
+        }
+      ],
+      "rewrites": [
+        {
+          "section": "headline",
+          "original_excerpt": "Passionate innovation leader | Helping companies unlock synergy with AI and data.",
+          "rewritten": "Senior Product Manager | Turn AI strategy into shipped products and measurable business outcomes",
+          "why_better": "It replaces vague motivation language with role clarity and concrete value."
+        },
+        {
+          "section": "about_intro",
+          "original_excerpt": "I am a results-driven professional with 10+ years of experience across strategy, product, and operations.",
+          "rewritten": "Over 10 years in product leadership, I ship cross-functional programs that cut decision latency and improve delivery reliability.",
+          "why_better": "It keeps tenure but adds specific outcomes instead of broad self-description."
+        },
+        {
+          "section": "experience_bullet",
+          "original_excerpt": "Owned roadmap execution, managed cross-functional teams, improved collaboration, and supported leadership priorities.",
+          "rewritten": "Led roadmap execution across product, design, and engineering, reducing cycle time and aligning delivery to top leadership goals.",
+          "why_better": "It upgrades a task list into an action-plus-impact bullet that sounds senior and accountable."
+        }
+      ],
+      "top_tip": "Replace every generic claim with one concrete, quantified outcome so your profile reads credible in a 10-second skim.",
+      "dry_run": false,
+      "cache_hit": false,
+      "model": "sample-fixture"
+    }
+  },
+  "_debug": {
+    "canonical": "{\"profile_text\":\"Headline: Passionate innovation leader | Helping companies unlock synergy with AI and data. About: I am a results-driven professional with 10+ years of experience across strategy, product, and operations. I love wearing many hats, thinking outside the box, and driving digital transformation initiatives that move the needle. I have successfully collaborated cross-functionally with stakeholders at all levels and consistently delivered high-quality solutions in fast-paced environments. Experience: Senior Product Manager at Acme Corp (2022-Present) - Owned roadmap execution, managed cross-functional teams, improved collaboration, and supported leadership priorities. Drove AI initiatives and created dashboards used across the business. Experience: Product Manager at Northstar Labs (2019-2022) - Worked on multiple strategic projects, partnered with engineering and design, and improved internal processes to increase efficiency.\"}"
+  }
+}
