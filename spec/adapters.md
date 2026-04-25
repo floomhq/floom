@@ -383,7 +383,7 @@ Semver expectation:
 - Pre-1.0: minor-version bumps (`0.2.x` to `0.3.x`) MAY be breaking. Adapters SHOULD declare a narrow range like `^0.2` that pins to a single minor.
 - Post-1.0: standard semver applies. `^1.x` ranges are safe across patch and minor bumps.
 
-The protocol version is bumped in the `floomhq/floom` repo under `apps/server/src/adapters/version.ts` (planned location; constant does not exist today, tracked for the first out-of-tree adapter release).
+The protocol version is bumped in the `floomhq/floom` repo under `apps/server/src/adapters/version.ts`.
 
 ### Security
 

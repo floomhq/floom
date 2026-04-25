@@ -35,6 +35,7 @@ import type {
   SecretsAdapter,
   StorageAdapter,
 } from './types.js';
+import semver from 'semver';
 
 import { dockerRuntimeAdapter } from './runtime-docker.js';
 import { proxyRuntimeAdapter } from './runtime-proxy.js';
@@ -42,6 +43,7 @@ import { sqliteStorageAdapter } from './storage-sqlite.js';
 import { betterAuthAdapter } from './auth-better-auth.js';
 import { localSecretsAdapter } from './secrets-local.js';
 import { consoleObservabilityAdapter } from './observability-console.js';
+import { FLOOM_PROTOCOL_VERSION } from './version.js';
 
 export interface AdapterBundle {
   runtime: RuntimeAdapter;
@@ -51,26 +53,78 @@ export interface AdapterBundle {
   observability: ObservabilityAdapter;
 }
 
+interface AdapterModuleExport {
+  name?: string;
+  protocolVersion?: string;
+}
+
 const RUNTIME_IMPLS: Record<string, RuntimeAdapter> = {
   docker: dockerRuntimeAdapter,
   proxy: proxyRuntimeAdapter,
+};
+const RUNTIME_MODULE_EXPORTS: Record<string, AdapterModuleExport | undefined> = {
+  docker: undefined,
+  proxy: undefined,
 };
 
 const STORAGE_IMPLS: Record<string, StorageAdapter> = {
   sqlite: sqliteStorageAdapter,
 };
+const STORAGE_MODULE_EXPORTS: Record<string, AdapterModuleExport | undefined> = {
+  sqlite: undefined,
+};
 
 const AUTH_IMPLS: Record<string, AuthAdapter> = {
   'better-auth': betterAuthAdapter,
+};
+const AUTH_MODULE_EXPORTS: Record<string, AdapterModuleExport | undefined> = {
+  'better-auth': undefined,
 };
 
 const SECRETS_IMPLS: Record<string, SecretsAdapter> = {
   local: localSecretsAdapter,
 };
+const SECRETS_MODULE_EXPORTS: Record<string, AdapterModuleExport | undefined> = {
+  local: undefined,
+};
 
 const OBSERVABILITY_IMPLS: Record<string, ObservabilityAdapter> = {
   console: consoleObservabilityAdapter,
 };
+const OBSERVABILITY_MODULE_EXPORTS: Record<
+  string,
+  AdapterModuleExport | undefined
+> = {
+  console: undefined,
+};
+
+function assertProtocolVersionCompatibility(
+  kind: string,
+  key: string,
+  moduleExport: AdapterModuleExport | undefined,
+): void {
+  const declaredRange = moduleExport?.protocolVersion;
+  if (!declaredRange) return;
+  let compatible = false;
+  try {
+    compatible = semver.satisfies(FLOOM_PROTOCOL_VERSION, declaredRange);
+  } catch {
+    compatible = false;
+  }
+  if (!compatible) {
+    const adapterName =
+      typeof moduleExport?.name === 'string' && moduleExport.name.length > 0
+        ? moduleExport.name
+        : key;
+    throw new Error(
+      `[adapters] adapter '${adapterName}' (kind=${kind}) declares protocolVersion=${JSON.stringify(
+        declaredRange,
+      )} which is incompatible with server FLOOM_PROTOCOL_VERSION=${JSON.stringify(
+        FLOOM_PROTOCOL_VERSION,
+      )}`,
+    );
+  }
+}
 
 function pick<T>(
   kind: string,
@@ -78,6 +132,7 @@ function pick<T>(
   value: string,
   defaultKey: string,
   registry: Record<string, T>,
+  moduleExports: Record<string, AdapterModuleExport | undefined>,
 ): T {
   const effective = value || defaultKey;
   const impl = registry[effective];
@@ -88,6 +143,7 @@ function pick<T>(
         `Supported values: ${supported}. Default: ${defaultKey}.`,
     );
   }
+  assertProtocolVersionCompatibility(kind, effective, moduleExports[effective]);
   return impl;
 }
 
@@ -98,6 +154,7 @@ export function createAdapters(): AdapterBundle {
     process.env.FLOOM_RUNTIME || '',
     'docker',
     RUNTIME_IMPLS,
+    RUNTIME_MODULE_EXPORTS,
   );
   const storage = pick(
     'storage',
@@ -105,6 +162,7 @@ export function createAdapters(): AdapterBundle {
     process.env.FLOOM_STORAGE || '',
     'sqlite',
     STORAGE_IMPLS,
+    STORAGE_MODULE_EXPORTS,
   );
   const auth = pick(
     'auth',
@@ -112,6 +170,7 @@ export function createAdapters(): AdapterBundle {
     process.env.FLOOM_AUTH || '',
     'better-auth',
     AUTH_IMPLS,
+    AUTH_MODULE_EXPORTS,
   );
   const secrets = pick(
     'secrets',
@@ -119,6 +178,7 @@ export function createAdapters(): AdapterBundle {
     process.env.FLOOM_SECRETS || '',
     'local',
     SECRETS_IMPLS,
+    SECRETS_MODULE_EXPORTS,
   );
   const observability = pick(
     'observability',
@@ -126,6 +186,7 @@ export function createAdapters(): AdapterBundle {
     process.env.FLOOM_OBSERVABILITY || '',
     'console',
     OBSERVABILITY_IMPLS,
+    OBSERVABILITY_MODULE_EXPORTS,
   );
 
   return { runtime, storage, auth, secrets, observability };
@@ -141,4 +202,9 @@ export const __testing = {
   AUTH_IMPLS,
   SECRETS_IMPLS,
   OBSERVABILITY_IMPLS,
+  RUNTIME_MODULE_EXPORTS,
+  STORAGE_MODULE_EXPORTS,
+  AUTH_MODULE_EXPORTS,
+  SECRETS_MODULE_EXPORTS,
+  OBSERVABILITY_MODULE_EXPORTS,
 };

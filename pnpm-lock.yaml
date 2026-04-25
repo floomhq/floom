@@ -87,6 +87,9 @@ importers:
       resend:
         specifier: 6.12.0
         version: 6.12.0
+      semver:
+        specifier: ^7.7.3
+        version: 7.7.4
       stripe:
         specifier: 17.7.0
         version: 17.7.0
@@ -106,6 +109,9 @@ importers:
       '@types/node':
         specifier: 20.17.9
         version: 20.17.9
+      '@types/semver':
+        specifier: ^7.7.1
+        version: 7.7.1
       tsx:
         specifier: 4.21.0
         version: 4.21.0
@@ -1494,6 +1500,9 @@ packages:
 
   '@types/react@18.3.12':
     resolution: {integrity: sha512-D2wOSq/d6Agt28q7rSI3jhU7G6aiuzljDGZ2hTZHIkrTLUI+AF3WMeKkEZ9nN2fkBAlcktT6vcZjDFiIhMYEQw==}
+
+  '@types/semver@7.7.1':
+    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
   '@types/ssh2@1.15.5':
     resolution: {integrity: sha512-N1ASjp/nXH3ovBHddRJpli4ozpk6UdDYIX4RJWFa9L1YKnzdhTlVmiGHm4DZnj/jLbqZpes4aeR30EFGQtvhQQ==}
@@ -4352,6 +4361,8 @@ snapshots:
     dependencies:
       '@types/prop-types': 15.7.15
       csstype: 3.2.3
+
+  '@types/semver@7.7.1': {}
 
   '@types/ssh2@1.15.5':
     dependencies:

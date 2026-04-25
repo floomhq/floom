@@ -33,9 +33,10 @@ for (const k of [
   delete process.env[k];
 }
 
-const { createAdapters, __testing } = await import(
-  '../../apps/server/src/adapters/factory.ts'
-);
+const [{ createAdapters, __testing }, { FLOOM_PROTOCOL_VERSION }] = await Promise.all([
+  import('../../apps/server/src/adapters/factory.ts'),
+  import('../../apps/server/src/adapters/version.ts'),
+]);
 
 let passed = 0;
 let failed = 0;
@@ -81,6 +82,46 @@ log('bundle.storage.getApp is fn', typeof bundle.storage.getApp === 'function');
 log('bundle.auth.getSession is fn', typeof bundle.auth.getSession === 'function');
 log('bundle.secrets.get is fn', typeof bundle.secrets.get === 'function');
 log('bundle.observability.increment is fn', typeof bundle.observability.increment === 'function');
+
+// ---- 4. protocol version compatibility ----
+__testing.RUNTIME_MODULE_EXPORTS.docker = {
+  name: 'docker',
+  protocolVersion: '^0.2',
+};
+let compatibleRangeError;
+try {
+  createAdapters();
+} catch (e) {
+  compatibleRangeError = e;
+}
+log('compatible protocol range (^0.2) loads', compatibleRangeError === undefined);
+
+__testing.RUNTIME_MODULE_EXPORTS.docker = {
+  name: 'docker',
+  protocolVersion: '^0.3',
+};
+let incompatibleRangeError;
+try {
+  createAdapters();
+} catch (e) {
+  incompatibleRangeError = e;
+}
+log(
+  'incompatible protocol range throws with both versions',
+  incompatibleRangeError instanceof Error &&
+    incompatibleRangeError.message.includes('"^0.3"') &&
+    incompatibleRangeError.message.includes(`"${FLOOM_PROTOCOL_VERSION}"`),
+  incompatibleRangeError instanceof Error ? incompatibleRangeError.message : String(incompatibleRangeError),
+);
+
+__testing.RUNTIME_MODULE_EXPORTS.docker = undefined;
+let missingFieldError;
+try {
+  createAdapters();
+} catch (e) {
+  missingFieldError = e;
+}
+log('missing protocolVersion is back-compatible', missingFieldError === undefined);
 
 // ---- cleanup ----
 rmSync(tmp, { recursive: true, force: true });
