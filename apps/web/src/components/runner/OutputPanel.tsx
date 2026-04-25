@@ -816,6 +816,26 @@ function metaLabelFor(run: RunRecord): string {
 }
 
 /**
+ * True when the app's error message looks like deliberate consumer
+ * copy (single sentence, ends with a hint, no traceback / exception
+ * names) and is short enough to fit in the error sub. Used to
+ * promote app-supplied error text into the headline area instead
+ * of swallowing it behind the generic "no clear reason" fallback.
+ */
+function looksLikeFriendlyAppError(error: string): string | null {
+  const trimmed = error.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > 220) return null;
+  if (trimmed.includes('\n')) return null;
+  // Stack-trace markers + exception names — bail out, we don't want
+  // to dump these in front of consumers.
+  if (/Traceback|^[A-Z][a-zA-Z]+Error:|\bat\s+\S+:\d+/.test(trimmed)) return null;
+  // Bare HTTP status / generic library noise.
+  if (/^HTTP \d{3}/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
  * Maps a RunRecord to one of the five error-taxonomy classes plus a
  * ready-to-render copy block. Never surfaces the raw HTTP verb
  * ("Forbidden", "Unauthorized") and never claims "can't reach" for a
@@ -977,10 +997,26 @@ export function classifyRunError(
 
   // Legacy runtime_error / generic `status: 'error'` with no shape we
   // recognize: DO NOT claim a specific root cause (that's the bug we
-  // fixed). Surface as upstream_outage with an honest sub: "we don't
-  // know, try again". Still better than pretending it's a network
-  // issue or a user-input issue.
+  // fixed). Surface as upstream_outage with an honest sub.
+  //
+  // 2026-04-25 polish (Federico audit): when the app emits a friendly
+  // single-line `error` message (not a stack trace, not a Python
+  // exception name), surface it directly instead of the generic
+  // "no clear reason" copy. The new launch demos catch their own
+  // failure modes ("Couldn't extract enough readable page text",
+  // "Gemini took too long", etc.) and the user benefits from seeing
+  // that specific hint in the headline area.
   if (type === 'runtime_error' || status === 'error') {
+    const friendly = looksLikeFriendlyAppError(error);
+    if (friendly) {
+      return {
+        klass: 'upstream_outage',
+        meta: 'upstream_outage',
+        severity: 'upstream',
+        headline: `${appName} couldn’t finish.`,
+        sub: friendly,
+      };
+    }
     return {
       klass: 'upstream_outage',
       meta: 'upstream_outage',
