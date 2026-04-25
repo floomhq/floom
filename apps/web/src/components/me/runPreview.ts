@@ -82,3 +82,22 @@ function truncate(str: string, max: number): string {
   if (str.length <= max) return str;
   return `${str.slice(0, max - 1).trimEnd()}…`;
 }
+
+/**
+ * Builds a deep-link to an app surface that prefills the form with a
+ * previous run's inputs. Used by the Re-run affordances on /me — the app
+ * tiles in "Your apps" and the per-row re-run button on "Recent runs".
+ *
+ * If no runId is provided, falls back to the bare app surface.
+ */
+export function buildRerunHref(
+  slug: string,
+  runId?: string | null,
+  action?: string | null,
+): string {
+  if (!runId) return `/p/${slug}`;
+  const search = new URLSearchParams();
+  search.set('rerun', runId);
+  if (action) search.set('action', action);
+  return `/p/${slug}?${search.toString()}`;
+}

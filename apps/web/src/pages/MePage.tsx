@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppIcon } from '../components/AppIcon';
 import { MeLayout } from '../components/me/MeLayout';
 import { ToolTile } from '../components/me/ToolTile';
-import { runPreviewText } from '../components/me/runPreview';
+import { buildRerunHref, runPreviewText } from '../components/me/runPreview';
 import { useMeCompactLayout } from '../components/me/useMeCompactLayout';
 import { Tour } from '../components/onboarding/Tour';
 import { hasOnboarded } from '../lib/onboarding';
@@ -68,7 +68,7 @@ const s: Record<string, CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 0.95fr) minmax(0, 1.35fr) auto',
     gap: 12,
-    padding: '12px 18px',
+    padding: '12px 52px 12px 18px',
     borderBottom: '1px solid var(--line)',
     fontSize: 11,
     fontWeight: 700,
@@ -77,15 +77,41 @@ const s: Record<string, CSSProperties> = {
     color: 'var(--muted)',
     background: 'rgba(250, 248, 243, 0.82)',
   },
+  runRowWrap: {
+    position: 'relative',
+    borderBottom: '1px solid var(--line)',
+  },
   runRow: {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 0.95fr) minmax(0, 1.35fr) auto',
     gap: 12,
     alignItems: 'center',
-    padding: '15px 18px',
+    padding: '15px 52px 15px 18px',
     textDecoration: 'none',
     color: 'var(--ink)',
-    borderBottom: '1px solid var(--line)',
+  },
+  runRerun: {
+    position: 'absolute',
+    top: '50%',
+    right: 14,
+    transform: 'translateY(-50%)',
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    border: '1px solid var(--line)',
+    background: 'rgba(255,255,255,0.92)',
+    color: 'var(--muted)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    textDecoration: 'none',
+    cursor: 'pointer',
+    transition: 'opacity .12s, color .12s, border-color .12s',
+  },
+  runRerunCompact: {
+    position: 'static',
+    transform: 'none',
+    flexShrink: 0,
   },
   appCell: {
     display: 'flex',
@@ -493,38 +519,119 @@ function HomeRunRow({
 }) {
   const appName = run.app_name || run.app_slug || 'App';
   const href = `/r/${encodeURIComponent(run.id)}`;
+  const rerunHref = run.app_slug
+    ? buildRerunHref(run.app_slug, run.id, run.action)
+    : null;
 
   return (
-    <Link
-      to={href}
-      data-testid={`me-run-row-${run.id}`}
+    <div
       style={{
-        ...s.runRow,
-        gridTemplateColumns: compact
-          ? 'minmax(0, 1fr)'
-          : (s.runRow.gridTemplateColumns as string),
-        borderBottom: isLast ? 'none' : s.runRow.borderBottom,
+        ...s.runRowWrap,
+        borderBottom: isLast ? 'none' : s.runRowWrap.borderBottom,
+        display: compact ? 'flex' : 'block',
+        alignItems: compact ? 'center' : undefined,
+        gap: compact ? 12 : undefined,
+        padding: compact ? '15px 18px' : undefined,
+      }}
+      onMouseEnter={(e) => {
+        const btn = e.currentTarget.querySelector<HTMLAnchorElement>(
+          '[data-rerun-btn]',
+        );
+        if (btn) btn.style.opacity = '1';
+      }}
+      onMouseLeave={(e) => {
+        const btn = e.currentTarget.querySelector<HTMLAnchorElement>(
+          '[data-rerun-btn]',
+        );
+        if (btn && !compact) btn.style.opacity = '0';
       }}
     >
-      <div style={s.appCell}>
-        {run.app_slug ? (
-          <span aria-hidden style={s.appIconWrap}>
-            <AppIcon slug={run.app_slug} size={16} />
-          </span>
-        ) : null}
-        <span style={s.appName}>{appName}</span>
-      </div>
-      <span style={s.previewText}>{runPreviewText(run)}</span>
-      <span
+      <Link
+        to={href}
+        data-testid={`me-run-row-${run.id}`}
         style={{
-          ...s.whenText,
-          textAlign: compact ? 'left' : s.whenText.textAlign,
-          whiteSpace: compact ? 'normal' : s.whenText.whiteSpace,
+          ...s.runRow,
+          gridTemplateColumns: compact
+            ? 'minmax(0, 1fr)'
+            : (s.runRow.gridTemplateColumns as string),
+          padding: compact ? 0 : s.runRow.padding,
+          flex: compact ? 1 : undefined,
+          minWidth: compact ? 0 : undefined,
         }}
       >
-        {formatTime(run.started_at)}
-      </span>
-    </Link>
+        <div style={s.appCell}>
+          {run.app_slug ? (
+            <span aria-hidden style={s.appIconWrap}>
+              <AppIcon slug={run.app_slug} size={16} />
+            </span>
+          ) : null}
+          <span style={s.appName}>{appName}</span>
+        </div>
+        <span style={s.previewText}>{runPreviewText(run)}</span>
+        <span
+          style={{
+            ...s.whenText,
+            textAlign: compact ? 'left' : s.whenText.textAlign,
+            whiteSpace: compact ? 'normal' : s.whenText.whiteSpace,
+          }}
+        >
+          {formatTime(run.started_at)}
+        </span>
+      </Link>
+      {rerunHref ? (
+        <Link
+          to={rerunHref}
+          data-rerun-btn
+          data-testid={`me-run-rerun-${run.id}`}
+          aria-label={`Re-run ${appName}`}
+          title={`Re-run ${appName}`}
+          style={{
+            ...s.runRerun,
+            ...(compact ? s.runRerunCompact : {}),
+            opacity: compact ? 1 : 0,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--accent)';
+            e.currentTarget.style.borderColor = 'var(--accent)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--muted)';
+            e.currentTarget.style.borderColor = 'var(--line)';
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.opacity = '1';
+            e.currentTarget.style.color = 'var(--accent)';
+            e.currentTarget.style.borderColor = 'var(--accent)';
+          }}
+          onBlur={(e) => {
+            if (!compact) e.currentTarget.style.opacity = '0';
+            e.currentTarget.style.color = 'var(--muted)';
+            e.currentTarget.style.borderColor = 'var(--line)';
+          }}
+        >
+          <RerunIcon />
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function RerunIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="1.5 3 1.5 7.5 6 7.5" />
+      <path d="M3.2 11A6 6 0 1 0 4.6 4.4L1.5 7.5" />
+    </svg>
   );
 }
 
