@@ -231,7 +231,7 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
         <AudienceCard
           eyebrow="For teams"
           title="Use AI apps that actually work."
-          lede="Score leads, triage tickets, screen resumes. No setup, no code. Install in Claude or run from a browser. Workspace, shared runs, one bill."
+          lede="Compare competitors, audit a landing page, rewrite a pitch. No setup, no code. Install in Claude or run from a browser. Workspace, shared runs, one bill."
           bullets={[
             { text: '3 AI apps, free to run' },
             { text: 'Install in Claude in 30 seconds' },

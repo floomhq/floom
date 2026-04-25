@@ -302,9 +302,9 @@ export function AppsDirectoryPage() {
                 maxWidth: 560,
               }}
             >
-              Real AI doing real work. Score leads, triage tickets, screen
-              CVs. Install in Claude, Cursor, ChatGPT, or run from your
-              browser.
+              Real AI doing real work. Paste a URL, compare competitors,
+              sharpen a pitch. Each run finishes in under five seconds.
+              Install in Claude, Cursor, ChatGPT, or run from your browser.
             </p>
           </div>
         </section>
