@@ -5,6 +5,7 @@
 // numeric fields as muted chips. The alternative (2-col table or JSON
 // dump) buries the answer under the stats.
 import { CopyButton } from './CopyButton';
+import { SectionHeader } from './SectionHeader';
 
 export interface HeadlineWithMetaProps {
   headline: string;
@@ -13,44 +14,55 @@ export interface HeadlineWithMetaProps {
 }
 
 export function HeadlineWithMeta({ headline, headlineLabel, meta }: HeadlineWithMetaProps) {
+  // "Token-shaped" headlines (passwords, UUIDs, generated keys with no
+  // spaces) use the monospace display so the value is selectable as a
+  // single chunk. Prose headlines (next-action, tldr, pricing insight)
+  // use the body sans-serif at a comfortable reading size — much more
+  // readable than mono at 20px.
+  const isToken =
+    typeof headline === 'string' && headline.length <= 64 && !/\s/.test(headline);
+  const hasMeta = meta.length > 0;
   return (
     <div
       data-renderer="HeadlineWithMeta"
-      className="app-expanded-card"
+      className="app-expanded-card floom-output-card"
       style={{ position: 'relative' }}
     >
-      <div style={{ position: 'absolute', top: 12, right: 12 }}>
-        <CopyButton value={headline} label="Copy" />
-      </div>
-      {headlineLabel && (
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            marginBottom: 8,
-          }}
-        >
-          {headlineLabel}
+      {headlineLabel ? (
+        <SectionHeader
+          label={headlineLabel}
+          actions={<CopyButton value={headline} label="Copy" />}
+        />
+      ) : (
+        <div style={{ position: 'absolute', top: 12, right: 12 }}>
+          <CopyButton value={headline} label="Copy" />
         </div>
       )}
       <div
         style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 20,
-          fontWeight: 500,
+          fontFamily: isToken
+            ? "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
+            : 'inherit',
+          fontSize: isToken ? 20 : 16,
+          fontWeight: isToken ? 500 : 450,
           color: 'var(--ink)',
-          lineHeight: 1.4,
-          wordBreak: 'break-all',
+          lineHeight: isToken ? 1.4 : 1.55,
+          // Token (≤64 chars no spaces) → break-all is fine for visual
+          // chunking. Prose → break on word boundaries. Long unbroken
+          // strings (JWTs, base64 >64 chars) fall to the prose branch;
+          // `overflowWrap: anywhere` keeps them inside the card on
+          // narrow viewports instead of overflowing horizontally.
+          // (codex review 2026-04-25)
+          wordBreak: isToken ? 'break-all' : 'normal',
+          overflowWrap: 'anywhere',
           userSelect: 'all',
-          paddingRight: 72,
-          marginBottom: meta.length > 0 ? 14 : 0,
+          paddingRight: headlineLabel ? 0 : 72,
+          marginBottom: hasMeta ? 14 : 0,
         }}
       >
         {headline}
       </div>
-      {meta.length > 0 && (
+      {hasMeta && (
         <div
           style={{
             display: 'flex',
@@ -72,7 +84,7 @@ export function HeadlineWithMeta({ headline, headlineLabel, meta }: HeadlineWith
                 borderRadius: 999,
                 fontSize: 12,
                 color: 'var(--muted)',
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
               }}
             >
               <span style={{ color: 'var(--muted)' }}>{m.label}:</span>

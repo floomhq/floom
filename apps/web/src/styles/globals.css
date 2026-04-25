@@ -1486,3 +1486,54 @@ body:has(.topbar-mobile-menu) {
     opacity: 0.65;
   }
 }
+
+/* ── Output cards: fade-in + multi-section composite polish ──
+   Polish pass 2026-04-25: every output card (KeyValueTable,
+   StringList, RowTable, ScalarBig, HeadlineWithMeta, etc.) gets a
+   subtle 180ms fade-up so multi-section composites feel intentional
+   instead of slot-machine-y. Respects prefers-reduced-motion. */
+.floom-output-card {
+  animation: floom-output-fade-in 200ms ease-out both;
+}
+.floom-auto-composite-multi > * {
+  animation: floom-output-fade-in 200ms ease-out both;
+}
+.floom-auto-composite-multi > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.floom-auto-composite-multi > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.floom-auto-composite-multi > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.floom-auto-composite-multi > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.floom-auto-composite-multi > *:nth-child(n+6) {
+  animation-delay: 200ms;
+}
+@keyframes floom-output-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .floom-output-card,
+  .floom-auto-composite-multi > * {
+    animation: none;
+  }
+}
+
+/* Mobile: tables in output cards must scroll horizontally rather than
+   stretch the page wider than the viewport. RowTable already wraps its
+   <table> in an overflow:auto container, but the KeyValueTable was a
+   raw <table>. Scope to .floom-output-card so unrelated tables
+   elsewhere in the app are unaffected. */
+@media (max-width: 480px) {
+  .floom-output-card {
+    padding: 16px !important;
+  }
+  .floom-output-card table {
+    font-size: 12.5px !important;
+  }
+}

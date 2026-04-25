@@ -14,6 +14,7 @@
 //    and expose a "Show raw" disclosure via JsonRaw elsewhere.
 import { useState } from 'react';
 import { CopyButton } from './CopyButton';
+import { SectionHeader } from './SectionHeader';
 
 export interface RowTableProps {
   rows: Array<Record<string, unknown>>;
@@ -212,52 +213,32 @@ export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runI
   return (
     <div
       data-renderer="RowTable"
-      className="app-expanded-card"
+      className="app-expanded-card floom-output-card"
       style={{ padding: 0, overflow: 'hidden' }}
     >
-      <div
-        style={{
-          padding: '14px 16px',
-          borderBottom: '1px solid var(--line)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}
-        >
-          {label ?? `${rows.length} rows`}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            type="button"
-            data-testid="row-table-download-csv"
-            onClick={downloadCsv}
-            disabled={rows.length === 0}
-            style={{
-              fontSize: 12,
-              padding: '5px 10px',
-              border: '1px solid var(--line)',
-              background: 'var(--card)',
-              color: 'var(--ink)',
-              borderRadius: 6,
-              cursor: rows.length === 0 ? 'not-allowed' : 'pointer',
-              opacity: rows.length === 0 ? 0.5 : 1,
-              fontFamily: 'inherit',
-            }}
-          >
-            Download CSV
-          </button>
-          <CopyButton value={copyValue} label="Copy JSON" />
-        </div>
-      </div>
+      <SectionHeader
+        label={label ?? 'Rows'}
+        hint={label ? `${rows.length} rows` : undefined}
+        bordered
+        actions={
+          <>
+            <button
+              type="button"
+              data-testid="row-table-download-csv"
+              className="output-copy-btn"
+              onClick={downloadCsv}
+              disabled={rows.length === 0}
+              style={{
+                cursor: rows.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: rows.length === 0 ? 0.5 : 1,
+              }}
+            >
+              Download CSV
+            </button>
+            <CopyButton value={copyValue} label="Copy JSON" />
+          </>
+        }
+      />
       <div style={{ maxHeight: 480, overflow: 'auto' }}>
         <table
           style={{
