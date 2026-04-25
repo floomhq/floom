@@ -110,23 +110,23 @@ const STATE_DURATION: Record<DemoState, number> = {
 /**
  * The Python handler body typed character-by-character during Build. Kept
  * deliberately sparse: 70% whitespace so a newcomer can read it, 20% the
- * actual model call, 10% chrome. Matches the real lead-scorer app's shape
- * (examples/lead-scorer/main.py) so the demo is truthful.
+ * actual model call, 10% chrome. Matches the real ai-readiness-audit app's
+ * shape (examples/ai-readiness-audit/main.py) so the demo is truthful.
  */
 const HANDLER_CODE = `from floom import App, action
 from google import genai
 
-app = App("lead-scorer")
+app = App("ai-readiness-audit")
 gem = genai.Client()
 
-@app.action("run")
-def run(lead: str):
-    prompt = f"Score {lead} for our ICP."
+@app.action("audit")
+def audit(url: str):
+    prompt = f"Score {url} for AI readiness."
     resp = gem.models.generate_content(
-        model="gemini-3-pro",
+        model="gemini-2.5-flash-lite",
         contents=prompt,
     )
-    return {"score": 87, "tier": "Strong fit"}
+    return {"score": 8, "tier": "Ready to ship"}
 `;
 
 /** Slash command typed at Deploy. See header comment re: `/floomit` vs
@@ -441,7 +441,7 @@ function EditorSurface({ active, cycle, reducedMotion }: EditorProps) {
     <div style={surfaceStyle} aria-hidden={!active}>
       <div style={EDITOR_GRID} data-hd="editor-grid">
         <aside style={SIDEBAR_STYLE} aria-hidden="true" data-hd="sidebar">
-          <div style={SIDEBAR_SECTION}>lead-scorer</div>
+          <div style={SIDEBAR_SECTION}>ai-readiness-audit</div>
           <div style={{ ...SIDEBAR_ITEM, ...SIDEBAR_ITEM_ACTIVE }}>handler.py</div>
           <div style={SIDEBAR_ITEM}>floom.yaml</div>
           <div style={SIDEBAR_ITEM}>README.md</div>
@@ -470,7 +470,7 @@ function EditorSurface({ active, cycle, reducedMotion }: EditorProps) {
           <div style={TERMINAL_PANE}>
             <div style={TERMINAL_LINE}>
               <span style={PROMPT_SIGN}>&gt;</span>
-              <span style={{ color: '#8b8680' }}>claude code &middot; lead-scorer</span>
+              <span style={{ color: '#8b8680' }}>claude code &middot; ai-readiness-audit</span>
             </div>
             {active && !reducedMotion && codeCap >= HANDLER_CODE.length && (
               <div style={{ ...TERMINAL_LINE, color: '#8b8680' }}>
@@ -660,7 +660,7 @@ function DeploySurface({
               <span style={LIVE_DOT_CORE} />
             </span>
             <div style={DEPLOY_URL_TEXT_WRAP}>
-              <div style={DEPLOY_URL_MAIN}>floom.dev/p/lead-scorer</div>
+              <div style={DEPLOY_URL_MAIN}>floom.dev/p/ai-readiness-audit</div>
               <div style={DEPLOY_URL_META_CARD}>Deployed in 1.2s &middot; HTTPS &middot; edge</div>
             </div>
           </div>
@@ -741,7 +741,9 @@ function RunSurface({
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, [active, cycle, reducedMotion]);
 
-  const score = useCountUp(87, resultReady, 700, reducedMotion);
+  // Readiness score is 0-10 on ai-readiness-audit. 8 keeps it in the
+  // "real but not cherry-picked" zone that reads honest.
+  const score = useCountUp(8, resultReady, 700, reducedMotion);
 
   // 2026-04-29 #664: drop the bright white override that made RUN look
   // like a different product grafted in. Let RUN share the same cream
@@ -769,7 +771,7 @@ function RunSurface({
             Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
           </span>
           <span style={RUN_CONTEXT_SEP} aria-hidden="true">·</span>
-          <span style={RUN_CONTEXT_URL}>floom.dev/p/lead-scorer</span>
+          <span style={RUN_CONTEXT_URL}>floom.dev/p/ai-readiness-audit</span>
         </div>
 
         {/* 2026-04-28: Federico feedback "the use page looks empty and
@@ -787,33 +789,25 @@ function RunSurface({
           {/* LEFT — input column (2fr) ---------------------------------- */}
           <div style={RUN_INPUT_COL}>
             <div style={RUN_APP_HEADER}>
-              <div style={RUN_APP_BADGE} aria-hidden="true">LS</div>
+              <div style={RUN_APP_BADGE} aria-hidden="true">AR</div>
               <div>
-                <div style={RUN_TITLE}>Lead Scorer</div>
-                <div style={RUN_SUB}>Score a lead against your ICP</div>
+                <div style={RUN_TITLE}>AI Readiness Audit</div>
+                <div style={RUN_SUB}>Score a company's AI readiness</div>
               </div>
             </div>
 
             <div style={RUN_FIELDS}>
               <label style={RUN_FIELD}>
-                <span style={RUN_FIELD_LABEL}>Lead website</span>
+                <span style={RUN_FIELD_LABEL}>Company URL</span>
                 <div style={RUN_FIELD_INPUT}>
                   <span style={RUN_FIELD_INPUT_TEXT}>stripe.com</span>
-                </div>
-              </label>
-              <label style={RUN_FIELD}>
-                <span style={RUN_FIELD_LABEL}>Your ICP</span>
-                <div style={RUN_FIELD_INPUT_MULTI}>
-                  <span style={RUN_FIELD_INPUT_TEXT}>
-                    B2B fintech, Series C+, 1,000+ employees, US &amp; EU
-                  </span>
                 </div>
               </label>
             </div>
 
             <button
               type="button"
-              aria-label="Run lead scorer"
+              aria-label="Run AI readiness audit"
               style={{
                 ...RUN_BUTTON,
                 transform: pressed ? 'scale(0.98)' : 'scale(1)',
@@ -826,10 +820,10 @@ function RunSurface({
 
           {/* RIGHT — output column (3fr) -------------------------------- */}
           <div style={RUN_OUTPUT_COL}>
-            <div style={RUN_OUTPUT_HEADER}>
+            <div style={RUN_OUTPUT_HEADER} data-hd="run-output-header">
               <span style={RUN_OUTPUT_LABEL}>Result</span>
               {resultReady && (
-                <span style={RUN_OUTPUT_META}>run_a1f · 1.2s · Gemini 3 Pro</span>
+                <span style={RUN_OUTPUT_META}>run_a1f · 1.2s · Gemini 2.5 Flash</span>
               )}
             </div>
 
@@ -851,14 +845,14 @@ function RunSurface({
                     <span style={{ ...DOT, animationDelay: '.15s' }} />
                     <span style={{ ...DOT, animationDelay: '.3s' }} />
                   </div>
-                  <div style={RUN_THINKING_LABEL}>Scoring lead against ICP…</div>
+                  <div style={RUN_THINKING_LABEL}>Auditing AI readiness…</div>
                 </div>
               )}
               {resultReady && (
                 <div style={RUN_RESULT}>
                   <div style={SCORE_ROW}>
                     <span style={SCORE_BIG}>{score}</span>
-                    <span style={SCORE_OF}>/ 100</span>
+                    <span style={SCORE_OF}>/ 10</span>
                     <span
                       style={{
                         ...TIER_PILL,
@@ -869,7 +863,7 @@ function RunSurface({
                           : 'opacity .25s ease, transform .25s ease',
                       }}
                     >
-                      Strong fit
+                      Ready to ship
                     </span>
                   </div>
 
@@ -889,15 +883,15 @@ function RunSurface({
                     <ul style={RUN_REASONS_LIST}>
                       <li style={RUN_REASON_ITEM}>
                         <span style={RUN_REASON_BULLET} aria-hidden="true" />
-                        Known B2B fintech buyer — serves ICP directly.
+                        Clear AI story across docs, ship-ready positioning.
                       </li>
                       <li style={RUN_REASON_ITEM}>
                         <span style={RUN_REASON_BULLET} aria-hidden="true" />
-                        9,000+ employees, expansion stage, US + EU.
+                        Surfaces real evals + customer case studies publicly.
                       </li>
                       <li style={RUN_REASON_ITEM}>
                         <span style={RUN_REASON_BULLET} aria-hidden="true" />
-                        Funded $8.7B — procurement latency ≤ 30 days.
+                        Risk: no published latency / error guardrails yet.
                       </li>
                     </ul>
                   </div>
@@ -908,7 +902,7 @@ function RunSurface({
             {/* Secondary line: API / MCP / Analytics — small, NOT equal
                 weight. Lives inside the output column so the two columns
                 stay balanced in height. */}
-            <div style={RUN_SECONDARY}>
+            <div style={RUN_SECONDARY} data-hd="run-secondary">
               <span>Also available as</span>
               <span style={RUN_SEC_TAG}>API</span>
               <span style={RUN_SEC_SEP}>&middot;</span>
@@ -968,6 +962,29 @@ const SCOPED_CSS = `
   @media (max-width:480px){
     [data-testid="hero-demo"] pre{font-size:10.5px !important;padding:10px 10px !important;}
     [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{padding:20px 18px;gap:14px}
+  }
+  /* Mobile audit 2026-04-25 (Federico screenshot): the RUN panel's output
+     column was overflowing past the viewport on iPhone-width — the meta
+     line "run_a1f · 1.2s · Gemini 2.5 Flash" and the "Also available as"
+     secondary row both ran off-screen right. Fix: cap output column to
+     100% column width, force meta + secondary rows to wrap rather than
+     single-line, and shorten the meta to the essentials on ≤480px. */
+  @media (max-width:640px){
+    [data-testid="hero-demo"] [data-hd="use-grid"]{
+      overflow-x:hidden;
+    }
+    [data-testid="hero-demo"] [data-hd="use-grid"] > *{
+      min-width:0;
+      max-width:100%;
+    }
+    [data-testid="hero-demo"] [data-hd="run-output-header"]{
+      flex-wrap:wrap !important;
+      row-gap:4px !important;
+    }
+    [data-testid="hero-demo"] [data-hd="run-secondary"]{
+      flex-wrap:wrap !important;
+      row-gap:4px !important;
+    }
   }
 `;
 
@@ -1598,16 +1615,6 @@ const RUN_FIELD_INPUT: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   minHeight: 36,
-};
-
-const RUN_FIELD_INPUT_MULTI: CSSProperties = {
-  background: '#faf8f3',
-  border: '1px solid #e4e1d8',
-  borderRadius: 8,
-  padding: '10px 12px',
-  minHeight: 52,
-  display: 'flex',
-  alignItems: 'flex-start',
 };
 
 const RUN_FIELD_INPUT_TEXT: CSSProperties = {
