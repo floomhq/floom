@@ -119,7 +119,16 @@ export function MeAppsPage() {
 
   const usedApps = useMemo(() => {
     if (runs === null) return null;
-    const seen = new Map<string, { slug: string; name: string; lastUsedAt: string | null }>();
+    const seen = new Map<
+      string,
+      {
+        slug: string;
+        name: string;
+        lastUsedAt: string | null;
+        lastRunId: string;
+        lastRunAction: string;
+      }
+    >();
     for (const run of runs) {
       if (!run.app_slug) continue;
       if (seen.has(run.app_slug)) continue;
@@ -127,6 +136,8 @@ export function MeAppsPage() {
         slug: run.app_slug,
         name: run.app_name || run.app_slug,
         lastUsedAt: run.started_at,
+        lastRunId: run.id,
+        lastRunAction: run.action,
       });
     }
     return Array.from(seen.values());
@@ -177,6 +188,8 @@ export function MeAppsPage() {
                   slug={app.slug}
                   name={app.name}
                   lastUsedAt={app.lastUsedAt}
+                  lastRunId={app.lastRunId}
+                  lastRunAction={app.lastRunAction}
                 />
               ))}
             </div>
