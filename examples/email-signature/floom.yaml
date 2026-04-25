@@ -1,0 +1,93 @@
+name: Email Signature Generator
+slug: email-signature
+description: Generate a polished email signature in HTML, plaintext, and Markdown from one form.
+category: utility
+icon: mail
+actions:
+  generate:
+    label: Generate Signature
+    description: Deterministic signature formatter with optional one-call Gemini tagline mode.
+    inputs:
+      - name: full_name
+        label: Full Name
+        type: text
+        required: true
+        placeholder: e.g. Jane Doe
+        description: Required. 2-80 characters.
+      - name: title
+        label: Title
+        type: text
+        required: false
+        default: ""
+        placeholder: e.g. Founder
+        description: Optional. Up to 80 characters.
+      - name: company
+        label: Company
+        type: text
+        required: false
+        default: ""
+        placeholder: e.g. Acme Labs
+        description: Optional. Up to 80 characters.
+      - name: email
+        label: Email
+        type: text
+        required: false
+        default: ""
+        placeholder: e.g. jane@acme.com
+        description: Optional. Must be a valid email format if provided.
+      - name: phone
+        label: Phone
+        type: text
+        required: false
+        default: ""
+        placeholder: e.g. +1 415 555 0101
+        description: Optional. Up to 30 characters; international formats accepted.
+      - name: calendar_url
+        label: Calendar URL
+        type: url
+        required: false
+        default: ""
+        placeholder: https://cal.com/janedoe
+        description: Optional. Must be HTTPS if provided.
+      - name: website_url
+        label: Website URL
+        type: url
+        required: false
+        default: ""
+        placeholder: https://acme.com
+        description: Optional. Must be HTTPS if provided.
+      - name: linkedin_url
+        label: LinkedIn URL
+        type: url
+        required: false
+        default: ""
+        placeholder: https://www.linkedin.com/in/janedoe
+        description: Optional. Must be HTTPS and contain linkedin.com.
+      - name: tagline_mode
+        label: Tagline Mode
+        type: text
+        required: false
+        default: none
+        placeholder: none or ai
+        description: none (default) for deterministic output, or ai for one Gemini-generated tagline.
+    outputs:
+      - name: html
+        label: HTML Signature
+        type: text
+      - name: plaintext
+        label: Plaintext Signature
+        type: text
+      - name: markdown
+        label: Markdown Signature
+        type: text
+      - name: meta
+        label: Meta
+        type: json
+runtime: python
+python_dependencies:
+  - google-genai>=1.64.0,<2
+node_dependencies: {}
+secrets_needed:
+  - GEMINI_API_KEY
+output_type: json
+manifest_version: "2.0"
