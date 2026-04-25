@@ -4,21 +4,8 @@
 // Auth.
 //
 // These tests DEFINE what the AuthAdapter contract looks like from a
-// caller's perspective. They are expected to FAIL today because the
-// current impl (`adapters/auth-better-auth.ts`) throws "not yet wired"
-// for signIn/signUp/signOut and stores `onUserDelete` listeners in an
-// array that nobody ever reads. That is the point.
-//
-// When a future PR migrates the live Better Auth HTTP handler
-// (/auth/sign-in/email, /auth/sign-up/email, /auth/sign-out,
-// /auth/delete-user) to route through this adapter, this file becomes
-// the green-bar target.
-//
-// IMPORTANT: this suite intentionally `exit 0`s regardless of pass/fail.
-// It is documentation-as-executable-spec, not a CI gate. A "4 failing
-// (expected until migration), 1 passing" output is the desired steady
-// state until the migration lands. Wire it into `pnpm test` only AFTER
-// signIn/signUp/signOut/onUserDelete are implemented for real.
+// caller's perspective. The adapter migration is complete when this file
+// reports 5 passing and exits 0.
 //
 // Run: tsx test/stress/test-adapters-auth-contract.mjs
 
@@ -62,27 +49,17 @@ const { adapters } = await import(
 betterAuth._resetAuthForTests();
 await betterAuth.runAuthMigrations();
 
-let expectedFails = 0;
 let passed = 0;
-let unexpectedPasses = 0;
+let failed = 0;
 
 function ok(label) {
   passed++;
   console.log(`  ok    ${label}`);
 }
 
-function expectedFail(label, reason) {
-  expectedFails++;
-  console.log(
-    `  fail  ${label} (expected until migration): ${reason}`,
-  );
-}
-
-function unexpectedPass(label, detail) {
-  unexpectedPasses++;
-  console.log(
-    `  UNEXPECTED PASS  ${label} :: ${detail} — stub was less stubbed than thought; update the contract test`,
-  );
+function fail(label, reason) {
+  failed++;
+  console.log(`  FAIL  ${label}: ${reason}`);
 }
 
 function rowCount(sql, ...params) {
@@ -94,6 +71,12 @@ function rowCount(sql, ...params) {
   } catch {
     return 0;
   }
+}
+
+function firstCookieFromSetCookie(setCookie) {
+  if (!setCookie) return undefined;
+  const first = setCookie.split(';', 1)[0]?.trim();
+  return first || undefined;
 }
 
 console.log('adapter-auth contract tests');
@@ -119,7 +102,6 @@ try {
         password: 'hunter2-hunter2',
         name: 'Contract Signup',
       });
-      // If we got here, the stub is no longer a stub. Assert the contract.
       const userRows = rowCount(
         `SELECT COUNT(*) AS n FROM "user" WHERE "email" = ?`,
         email,
@@ -129,17 +111,15 @@ try {
       if (userRows >= 1 && hasSession) {
         ok(label);
       } else {
-        unexpectedPass(
+        fail(
           label,
-          `returned without throw but user_rows=${userRows}, hasSession=${hasSession}`,
+          `user_rows=${userRows}, hasSession=${hasSession}`,
         );
       }
     } catch (err) {
-      expectedFail(
+      fail(
         label,
-        `adapters.auth.signUp is not yet wired through Better Auth ` +
-          `(${err && err.message ? err.message.split('\n')[0] : String(err)}). ` +
-          `Migrate it to POST /sign-up/email on Better Auth's HTTP handler.`,
+        err && err.message ? err.message.split('\n')[0] : String(err),
       );
     }
   }
@@ -177,17 +157,15 @@ try {
       if (hasSession && hasToken && result.session.is_authenticated === true) {
         ok(label);
       } else {
-        unexpectedPass(
+        fail(
           label,
-          `returned without throw but hasSession=${hasSession}, hasToken=${hasToken}, is_authenticated=${result?.session?.is_authenticated}`,
+          `hasSession=${hasSession}, hasToken=${hasToken}, is_authenticated=${result?.session?.is_authenticated}`,
         );
       }
     } catch (err) {
-      expectedFail(
+      fail(
         label,
-        `adapters.auth.signIn is not yet wired through Better Auth ` +
-          `(${err && err.message ? err.message.split('\n')[0] : String(err)}). ` +
-          `Migrate it to POST /sign-in/email on Better Auth's HTTP handler.`,
+        err && err.message ? err.message.split('\n')[0] : String(err),
       );
     }
   }
@@ -200,50 +178,33 @@ try {
   // cause a subsequent `adapters.auth.getSession(request-with-that-cookie)`
   // to return null. MUST NOT throw even if the session is already expired.
   //
-  // Today: the stub throws notYetWired('signOut').
   {
     const label = 'signOut invalidates session';
     const email = `signout-${Date.now()}@example.com`;
     const password = 'hunter2-hunter2';
     try {
-      // Synthesize a SessionContext shaped the way the adapter would
-      // return one. We can't run signIn if signIn still throws, so this
-      // call probes signOut directly with a fake session — which is
-      // valid because the contract says signOut MUST NOT throw even if
-      // the session is unknown/expired.
-      const fakeSession = {
-        workspace_id: 'local',
-        user_id: `contract-${email}`,
-        device_id: 'contract-test',
-        is_authenticated: true,
-        email,
-      };
-      await adapters.auth.signOut(fakeSession);
-      // If signOut returned, verify getSession on a request carrying the
-      // (now-invalidated) cookie returns null. We don't have the cookie
-      // yet (signIn is stubbed), so use an empty-headers request: once
-      // signOut + getSession are both wired, this assertion can be
-      // tightened to use the real cookie from signIn above.
-      const emptyReq = new Request('http://localhost:3051/api/anything', {
-        headers: new Headers(),
-      });
-      const after = await adapters.auth.getSession(emptyReq);
-      // In cloud mode, getSession with no cookie should return null.
+      await adapters.auth.signUp({ email, password, name: 'Contract Signout' });
+      const signedIn = await adapters.auth.signIn({ email, password });
+      const cookie = firstCookieFromSetCookie(signedIn.set_cookie);
+      await adapters.auth.signOut(signedIn.session);
+      const after = await adapters.auth.getSession(new Request('http://localhost:3051/api/anything', {
+        headers: new Headers({
+          cookie,
+          host: 'localhost:3051',
+        }),
+      }));
       if (after === null) {
         ok(label);
       } else {
-        unexpectedPass(
+        fail(
           label,
-          `signOut + getSession returned without throw but getSession returned ${JSON.stringify(after)}. ` +
-            `Tighten this test against a real signed-in cookie once signIn works.`,
+          `getSession returned ${JSON.stringify(after)} after signOut`,
         );
       }
     } catch (err) {
-      expectedFail(
+      fail(
         label,
-        `adapters.auth.signOut is not yet wired through Better Auth ` +
-          `(${err && err.message ? err.message.split('\n')[0] : String(err)}). ` +
-          `Migrate it to POST /sign-out on Better Auth's HTTP handler.`,
+        err && err.message ? err.message.split('\n')[0] : String(err),
       );
     }
   }
@@ -257,11 +218,6 @@ try {
   // handler, or whatever the adapter exposes post-migration) MUST
   // invoke the listener with the deleted user id. The adapter MUST
   // invoke every registered callback in registration order.
-  //
-  // Today: `onUserDelete` does not throw (it just pushes into a
-  // `deleteListeners` array) — but nothing ever reads that array, so
-  // the callback never fires. The expected-fail assertion is on the
-  // INVOCATION, not the registration.
   {
     const label = 'onUserDelete fires listeners';
     const invocations = [];
@@ -269,46 +225,35 @@ try {
       adapters.auth.onUserDelete((user_id) => {
         invocations.push(user_id);
       });
-      // Drive a user deletion. Today there is no public adapter method
-      // for "delete a user"; the live flow goes through Better Auth's
-      // POST /auth/delete-user with afterDelete hooking cleanupUserOrphans.
-      // For the contract, we just observe that the listener NEVER fires
-      // because the registered-but-unread deleteListeners array in
-      // auth-better-auth.ts is orphaned state.
-      //
-      // Simulate the expected trigger: directly insert + delete a user
-      // row the same way Better Auth's databaseHook would. A wired
-      // adapter would observe this deletion and invoke the listeners.
-      const uid = `onuserdelete-${Date.now()}`;
-      try {
-        db.prepare(
-          `INSERT INTO "user" (id, email, name, emailVerified, createdAt, updatedAt)
-           VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        ).run(uid, `${uid}@example.com`, 'Contract Delete');
-        db.prepare(`DELETE FROM "user" WHERE id = ?`).run(uid);
-      } catch {
-        // Better Auth table names / columns may vary across versions;
-        // the orphan-state assertion below does not depend on this row
-        // actually existing.
-      }
-      // Give async listeners a microtask tick to run, just in case.
-      await new Promise((resolve) => setImmediate(resolve));
-      if (invocations.length >= 1) {
+      const email = `onuserdelete-${Date.now()}@example.com`;
+      const password = 'hunter2-hunter2';
+      const signedUp = await adapters.auth.signUp({
+        email,
+        password,
+        name: 'Contract Delete',
+      });
+      const cookie = firstCookieFromSetCookie(signedUp.set_cookie);
+      const auth = betterAuth.getAuth();
+      await auth.api.deleteUser({
+        body: { password },
+        headers: new Headers({
+          cookie,
+          host: 'localhost:3051',
+          origin: 'http://localhost:3051',
+        }),
+      });
+      if (invocations.length === 1 && invocations[0] === signedUp.session.user_id) {
         ok(label);
       } else {
-        expectedFail(
+        fail(
           label,
-          `adapters.auth.onUserDelete accepted the listener but it was never invoked — ` +
-            `the deleteListeners array in auth-better-auth.ts is declared but never read. ` +
-            `Wire afterDelete in lib/better-auth.ts to iterate deleteListeners.`,
+          `invocations=${JSON.stringify(invocations)}, expected=${signedUp.session.user_id}`,
         );
       }
     } catch (err) {
-      expectedFail(
+      fail(
         label,
-        `adapters.auth.onUserDelete threw ` +
-          `(${err && err.message ? err.message.split('\n')[0] : String(err)}). ` +
-          `Wire it to the Better Auth afterDelete hook.`,
+        err && err.message ? err.message.split('\n')[0] : String(err),
       );
     }
   }
@@ -332,15 +277,13 @@ try {
         ok(label);
       } else {
         // Cloud mode with no cookie: null is the only correct answer.
-        unexpectedPass(
+        fail(
           label,
           `expected null for unauthenticated cloud-mode request, got ${JSON.stringify(result)}`,
         );
       }
     } catch (err) {
-      console.log(
-        `  FAIL  ${label} (regression!): ${err && err.message ? err.message : String(err)}`,
-      );
+      fail(label, err && err.message ? err.message : String(err));
     }
   }
 } finally {
@@ -353,11 +296,6 @@ try {
 }
 
 console.log(
-  `\n${expectedFails} failing (expected until migration), ${passed} passing` +
-    (unexpectedPasses > 0
-      ? `, ${unexpectedPasses} UNEXPECTED PASSES — update the harness`
-      : ''),
+  `\n${passed} passing, ${failed} failing`,
 );
-// Exit 0 regardless: this suite is documentation, not a CI gate. See the
-// header comment. Wire it into `pnpm test` only after the migration lands.
-process.exit(0);
+process.exit(failed === 0 ? 0 : 1);

@@ -40,13 +40,55 @@ import { provisionPersonalWorkspace } from '../services/workspaces.js';
 // Better Auth's `Auth` type is generic over its options. Inferring the exact
 // concrete type would couple every consumer to the full plugin tuple shape,
 // which TypeScript can't easily widen back to `Auth<BetterAuthOptions>`. We
-// expose a structural type with the bits Floom actually uses (handler +
-// api.getSession). Callers that need additional methods can cast.
+// expose a structural type with the bits Floom actually uses.
 export interface FloomAuth {
   handler: (req: Request) => Promise<Response>;
   api: {
     getSession: (args: { headers: Headers }) => Promise<unknown>;
+    signInEmail: (args: {
+      body: { email: string; password: string; rememberMe?: boolean };
+      headers?: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
+    signUpEmail: (args: {
+      body: {
+        email: string;
+        password: string;
+        name: string;
+        rememberMe?: boolean;
+      };
+      headers?: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
+    signOut: (args: {
+      headers: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
+    deleteUser: (args: {
+      body: { password?: string; token?: string; callbackURL?: string };
+      headers: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
   };
+}
+
+type UserDeleteListener = (user_id: string) => void | Promise<void>;
+
+const userDeleteListeners: UserDeleteListener[] = [];
+
+export function registerAuthUserDeleteListener(cb: UserDeleteListener): void {
+  userDeleteListeners.push(cb);
+}
+
+export async function notifyAuthUserDeleteListeners(user_id: string): Promise<void> {
+  for (const listener of userDeleteListeners) {
+    try {
+      await listener(user_id);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[auth] onUserDelete listener failed for user', user_id, err);
+    }
+  }
 }
 
 /**
@@ -486,7 +528,7 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
         // failure here doesn't leave the user in an inconsistent Better
         // Auth state. We log loudly and keep going; the cleanup is
         // idempotent, so an operator can re-run it manually if needed.
-        afterDelete: async ({ user }: { user: { id: string } }) => {
+        afterDelete: async (user: { id: string }) => {
           if (!user?.id) return;
           try {
             cleanupUserOrphans(user.id);
@@ -497,6 +539,7 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
               err,
             );
           }
+          await notifyAuthUserDeleteListeners(user.id);
         },
       },
     },
