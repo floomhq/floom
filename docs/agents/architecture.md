@@ -1,6 +1,6 @@
 # Agents-Native Floom Architecture (Phase 1 Proposal)
 
-Date: 2026-04-26  
+Date: 2026-04-26
 Status: Investigation proposal for review (no implementation in this phase)
 
 ## Goal

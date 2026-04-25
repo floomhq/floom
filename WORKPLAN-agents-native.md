@@ -1,7 +1,7 @@
 # [investigate] Agents-Native Floom — Architecture + Workplan
 
-Date: 2026-04-26  
-Branch: `codex/agents-native-investigate`  
+Date: 2026-04-26
+Branch: `codex/agents-native-investigate`
 Scope: Phase 1 investigation + architecture/workplan only (no implementation)
 
 ## 1) Current Agent-Facing Surface (Verified)
