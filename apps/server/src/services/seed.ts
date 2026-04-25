@@ -5,7 +5,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Docker from 'dockerode';
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import type { NormalizedManifest } from '../types.js';
 
@@ -138,85 +138,83 @@ export async function seedFromFile(): Promise<{
   // go to 'pending_review' via services/openapi-ingest.ts / docker-image-ingest.ts.
   // ON CONFLICT refreshes seed-owned fields only; we do not overwrite
   // publish_status, stars, featured, hero, etc.
-  const upsertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published')
-     ON CONFLICT(slug) DO UPDATE SET
-       name = excluded.name,
-       description = excluded.description,
-       manifest = excluded.manifest,
-       status = excluded.status,
-       docker_image = excluded.docker_image,
-       code_path = excluded.code_path,
-       category = excluded.category,
-       author = excluded.author,
-       icon = excluded.icon,
-       updated_at = datetime('now')`,
-  );
-  const insertSecret = db.prepare(
-    `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
-  );
-  const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
-  const markAppInactive = db.prepare(
-    `UPDATE apps SET status = 'inactive' WHERE id = ?`,
-  );
-
-  const txn = db.transaction(() => {
-    for (const app of seed.apps) {
-      const existing = existsBySlug.get(app.slug) as { id: string } | undefined;
-      const imageOk = !app.docker_image || imageAvailability.get(app.docker_image);
+  for (const app of seed.apps) {
+    const existing = storage.getApp(app.slug);
+    const imageOk = !app.docker_image || imageAvailability.get(app.docker_image);
 
       // Image is absent on this host: skip the insert, and if a previous
       // boot had already inserted the row (e.g. before this guard landed),
       // mark it inactive so /api/hub (which filters on status='active')
       // stops surfacing it without losing any existing runs.
-      if (!imageOk) {
-        appsSkipped++;
-        if (existing) {
-          markAppInactive.run(existing.id);
-          console.log(
-            `[seed] ${app.slug}: image "${app.docker_image}" not found locally — marking inactive`,
-          );
-        } else {
-          console.log(
-            `[seed] ${app.slug}: image "${app.docker_image}" not found locally — not inserting`,
-          );
-        }
-        continue;
+    if (!imageOk) {
+      appsSkipped++;
+      if (existing) {
+        storage.updateApp(existing.id, { status: 'inactive' });
+        console.log(
+          `[seed] ${app.slug}: image "${app.docker_image}" not found locally — marking inactive`,
+        );
+      } else {
+        console.log(
+          `[seed] ${app.slug}: image "${app.docker_image}" not found locally — not inserting`,
+        );
       }
-
-      const appId = existing ? existing.id : newAppId();
-      upsertApp.run(
-        appId,
-        app.slug,
-        app.name,
-        app.description,
-        JSON.stringify(app.manifest),
-        app.docker_image,
-        // code_path is unused when docker_image is already set; we store
-        // a placeholder so the NOT NULL constraint is satisfied.
-        `reused:${app.marketplace_app_id}`,
-        app.category,
-        app.author,
-        app.icon,
-      );
-      if (!existing) appsAdded++;
-
-      // Per-app secrets
-      const perApp = seed.per_app_secrets[app.slug] || {};
-      for (const [name, value] of Object.entries(perApp)) {
-        const result = insertSecret.run(newSecretId(), name, value, appId);
-        if (result.changes > 0) secretsAdded++;
-      }
+      continue;
     }
 
-    // Global secrets
-    for (const [name, value] of Object.entries(seed.global_secrets)) {
-      const result = insertSecret.run(newSecretId(), name, value, null);
-      if (result.changes > 0) secretsAdded++;
+    const appId = existing ? existing.id : newAppId();
+    if (existing) {
+      storage.updateApp(appId, {
+        name: app.name,
+        description: app.description,
+        manifest: JSON.stringify(app.manifest),
+        status: 'active',
+        docker_image: app.docker_image,
+        code_path: `reused:${app.marketplace_app_id}`,
+        category: app.category,
+        author: app.author,
+        icon: app.icon,
+      });
+    } else {
+      storage.createApp({
+        id: appId,
+        slug: app.slug,
+        name: app.name,
+        description: app.description,
+        manifest: JSON.stringify(app.manifest),
+        status: 'active',
+        docker_image: app.docker_image,
+        code_path: `reused:${app.marketplace_app_id}`,
+        category: app.category,
+        author: app.author,
+        icon: app.icon,
+        publish_status: 'published',
+      });
+      appsAdded++;
     }
-  });
-  txn();
+
+    // Per-app secrets
+    const perApp = seed.per_app_secrets[app.slug] || {};
+    for (const [name, value] of Object.entries(perApp)) {
+      const touched = storage.upsertSecret({
+        id: newSecretId(),
+        name,
+        value,
+        app_id: appId,
+      });
+      if (touched) secretsAdded++;
+    }
+  }
+
+  // Global secrets
+  for (const [name, value] of Object.entries(seed.global_secrets)) {
+    const touched = storage.upsertSecret({
+      id: newSecretId(),
+      name,
+      value,
+      app_id: null,
+    });
+    if (touched) secretsAdded++;
+  }
 
   console.log(
     `[seed] apps added: ${appsAdded}, secrets added: ${secretsAdded}, skipped (image missing): ${appsSkipped}`,

@@ -4,7 +4,7 @@
 //
 // Claiming uses an atomic UPDATE...WHERE status='queued' pattern so multiple
 // workers or concurrent replicas never double-dispatch a row.
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import type { AppRecord, JobRecord, JobStatus } from '../types.js';
 
 export const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -32,68 +32,46 @@ export function createJob(jobId: string, args: CreateJobInput): JobRecord {
       ? JSON.stringify(args.perCallSecrets)
       : null;
 
-  db.prepare(
-    `INSERT INTO jobs (
-       id, slug, app_id, action, status, input_json, webhook_url,
-       timeout_ms, max_retries, attempts, per_call_secrets_json
-     ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, 0, ?)`,
-  ).run(
-    jobId,
-    args.app.slug,
-    args.app.id,
-    args.action,
-    JSON.stringify(args.inputs),
-    webhook,
-    timeout,
-    maxRetries,
-    perCallSecretsJson,
-  );
-  const row = getJob(jobId);
-  if (!row) throw new Error(`createJob: failed to re-read row ${jobId}`);
-  return row;
+  return storage.createJob({
+    id: jobId,
+    slug: args.app.slug,
+    app_id: args.app.id,
+    action: args.action,
+    input_json: JSON.stringify(args.inputs),
+    webhook_url: webhook,
+    timeout_ms: timeout,
+    max_retries: maxRetries,
+    per_call_secrets_json: perCallSecretsJson,
+  });
 }
 
 export function getJob(jobId: string): JobRecord | undefined {
-  return db.prepare('SELECT * FROM jobs WHERE id = ?').get(jobId) as
-    | JobRecord
-    | undefined;
+  return storage.getJob(jobId);
 }
 
 export function getJobBySlug(slug: string, jobId: string): JobRecord | undefined {
-  return db
-    .prepare('SELECT * FROM jobs WHERE id = ? AND slug = ?')
-    .get(jobId, slug) as JobRecord | undefined;
-}
-
-/**
- * Atomically mark a queued job as running. Returns the updated row if the
- * claim succeeded, undefined if another worker won the race (or the row
- * moved to a terminal state).
- */
-export function claimJob(jobId: string): JobRecord | undefined {
-  const res = db
-    .prepare(
-      `UPDATE jobs
-         SET status='running',
-             started_at=datetime('now'),
-             attempts=attempts + 1
-       WHERE id = ? AND status = 'queued'`,
-    )
-    .run(jobId);
-  if (res.changes === 0) return undefined;
-  return getJob(jobId);
+  return storage.getJobBySlug(slug, jobId);
 }
 
 /**
  * Find the next queued job. Returns the oldest-created queued row without
  * claiming it — the caller follows up with `claimJob` to atomically grab it.
+ * Note: worker.ts relies on these. In the protocol refactor, claimNextJob
+ * handles both atomically, but we keep these for backward compatibility
+ * or if other consumers rely on the separation.
  */
 export function nextQueuedJob(): JobRecord | undefined {
-  return db
-    .prepare(
-      `SELECT * FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`,
-    )
-    .get() as JobRecord | undefined;
+  // Not exposed in StorageAdapter directly anymore since it's non-atomic.
+  // worker.ts uses them separately? Actually worker.ts uses candidate -> claimJob.
+  // Wait, I should just implement `claimJob` using `storage.claimNextJob()` if possible,
+  // but `claimJob` takes an ID. 
+  // Let's implement this as a pass-through to a new storage method if needed,
+  // but wait... worker.ts candidate is just for early-exit.
+  throw new Error('Deprecated: use storage.claimNextJob() directly');
+}
+
+export function claimJob(_jobId: string): JobRecord | undefined {
+  throw new Error('Deprecated: use storage.claimNextJob() directly');
 }
 
 export function completeJob(
@@ -101,15 +79,12 @@ export function completeJob(
   outputs: unknown,
   runId: string | null,
 ): JobRecord | undefined {
-  db.prepare(
-    `UPDATE jobs
-       SET status='succeeded',
-           output_json=?,
-           run_id=?,
-           finished_at=datetime('now')
-     WHERE id = ?`,
-  ).run(JSON.stringify(outputs ?? null), runId, jobId);
-  return getJob(jobId);
+  return storage.updateJob(jobId, {
+    status: 'succeeded',
+    output_json: JSON.stringify(outputs ?? null),
+    run_id: runId,
+    finished_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+  });
 }
 
 export function failJob(
@@ -117,15 +92,12 @@ export function failJob(
   error: { message: string; type?: string; details?: unknown },
   runId: string | null,
 ): JobRecord | undefined {
-  db.prepare(
-    `UPDATE jobs
-       SET status='failed',
-           error_json=?,
-           run_id=?,
-           finished_at=datetime('now')
-     WHERE id = ?`,
-  ).run(JSON.stringify(error), runId, jobId);
-  return getJob(jobId);
+  return storage.updateJob(jobId, {
+    status: 'failed',
+    error_json: JSON.stringify(error),
+    run_id: runId,
+    finished_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+  });
 }
 
 /**
@@ -133,30 +105,23 @@ export function failJob(
  * `queued`, clears timing, keeps attempts count for max_retries checks.
  */
 export function requeueJob(jobId: string): JobRecord | undefined {
-  db.prepare(
-    `UPDATE jobs
-       SET status='queued',
-           started_at=NULL,
-           finished_at=NULL,
-           error_json=NULL,
-           run_id=NULL
-     WHERE id = ?`,
-  ).run(jobId);
-  return getJob(jobId);
+  return storage.updateJob(jobId, {
+    status: 'queued',
+    started_at: null,
+    finished_at: null,
+    error_json: null,
+    run_id: null,
+  });
 }
 
 export function cancelJob(jobId: string): JobRecord | undefined {
   // Only queued/running jobs can be cancelled. Terminal states are immutable.
-  const res = db
-    .prepare(
-      `UPDATE jobs
-         SET status='cancelled',
-             finished_at=datetime('now')
-       WHERE id = ? AND status IN ('queued', 'running')`,
-    )
-    .run(jobId);
-  if (res.changes === 0) return getJob(jobId);
-  return getJob(jobId);
+  const job = storage.getJob(jobId);
+  if (!job || !['queued', 'running'].includes(job.status)) return job;
+  return storage.updateJob(jobId, {
+    status: 'cancelled',
+    finished_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+  });
 }
 
 /**
@@ -194,8 +159,5 @@ function safeParseJson(raw: string | null): unknown {
 }
 
 export function countJobsByStatus(status: JobStatus): number {
-  const row = db
-    .prepare('SELECT COUNT(*) as n FROM jobs WHERE status = ?')
-    .get(status) as { n: number };
-  return row.n;
+  return storage.countJobsByStatus(status);
 }

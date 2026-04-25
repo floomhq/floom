@@ -29,7 +29,7 @@ import { metricsRouter } from './routes/metrics.js';
 import { ogRouter } from './routes/og.js';
 import { ghStarsRouter } from './routes/gh-stars.js';
 import { skillRouter } from './routes/skill.js';
-import { db } from './db.js';
+import { storage } from './services/storage.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { initSentry, captureServerError } from './lib/sentry.js';
 import { sendDiscordAlert, logAlertsBootState } from './lib/alerts.js';
@@ -751,6 +751,78 @@ app.get('/openapi.json', (c) =>
           responses: { '200': { description: 'run_id + status' } },
         },
       },
+      '/api/run/{id}': {
+        get: {
+          summary: 'Fetch the latest snapshot of a run',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: 'Run record containing status, outputs, logs, error, etc.' } },
+        },
+      },
+      '/api/run/{id}/stream': {
+        get: {
+          summary: 'Stream stdout logs and status transitions using Server-Sent Events (SSE)',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: 'text/event-stream' } },
+        },
+      },
+      '/api/run/{id}/share': {
+        post: {
+          summary: 'Make a run public to share its outputs',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: '{share_url, public_view_url, is_public: true}' } },
+        },
+      },
+      '/api/{slug}/jobs': {
+        post: {
+          summary: 'Enqueue an async job on an app',
+          parameters: [
+            { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          requestBody: {
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    action: { type: 'string' },
+                    inputs: { type: 'object' },
+                    webhook_url: { type: 'string' },
+                    timeout_ms: { type: 'number' },
+                    max_retries: { type: 'number' },
+                  },
+                },
+              },
+            },
+          },
+          responses: { '202': { description: '{job_id, status: queued, poll_url, cancel_url}' } },
+        },
+      },
+      '/api/{slug}/jobs/{job_id}': {
+        get: {
+          summary: 'Poll the latest status of an async job',
+          parameters: [
+            { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'job_id', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: 'Job record' } },
+        },
+      },
+      '/api/{slug}/jobs/{job_id}/cancel': {
+        post: {
+          summary: 'Cancel a queued or running job',
+          parameters: [
+            { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'job_id', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: { '200': { description: 'Cancelled job record' } },
+        },
+      },
       '/mcp': {
         post: {
           summary: 'MCP admin surface (ingest_app, list_apps, search_apps, get_app)',
@@ -1250,16 +1322,7 @@ if (webDist) {
     // the slug's name doesn't leak to crawlers/preview bots before a
     // human has reviewed it. The SPA + /api/hub/:slug gating still lets
     // the owner reach their own pending app.
-    const row = db
-      .prepare('SELECT name, description, publish_status, visibility FROM apps WHERE slug = ?')
-      .get(slug) as
-      | {
-          name: string | null;
-          description: string | null;
-          publish_status: string | null;
-          visibility: string | null;
-        }
-      | undefined;
+    const row = storage.getApp(slug);
     const isPubliclyListable =
       row &&
       row.publish_status === 'published' &&

@@ -33,7 +33,7 @@
 // locally-seeded app, so the ownership check passes naturally.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { resolveUserContext } from '../services/session.js';
 import * as creatorSecrets from '../services/app_creator_secrets.js';
@@ -57,9 +57,7 @@ function safeManifest(raw: string): NormalizedManifest | null {
 }
 
 function loadApp(slug: string): AppRecord | undefined {
-  return db
-    .prepare('SELECT * FROM apps WHERE slug = ?')
-    .get(slug) as AppRecord | undefined;
+  return storage.getApp(slug);
 }
 
 function isOwner(

@@ -6,7 +6,7 @@
 // root path without interfering with the /api namespace.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { resolveUserContext } from '../services/session.js';
 import { notOwnerResponse, requireAuthenticatedInCloud } from '../lib/auth.js';
 import {
@@ -58,9 +58,7 @@ function ownerOf(app: AppRecord, ctx: { user_id: string; workspace_id: string; i
 }
 
 function slugFor(appId: string): string | undefined {
-  const row = db.prepare('SELECT slug FROM apps WHERE id = ?').get(appId) as
-    | { slug: string }
-    | undefined;
+  const row = storage.getAppById(appId);
   return row?.slug;
 }
 
@@ -72,9 +70,7 @@ hubTriggersRouter.post('/:slug/triggers', async (c) => {
   if (gate) return gate;
 
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!ownerOf(app, ctx)) {
     return notOwnerResponse(c);
@@ -227,9 +223,7 @@ meTriggersRouter.patch('/:id', async (c) => {
 
   // If the caller is editing the action, validate it against the app manifest.
   if (parsed.data.action) {
-    const app = db
-      .prepare('SELECT * FROM apps WHERE id = ?')
-      .get(existing.app_id) as AppRecord | undefined;
+    const app = storage.getAppById(existing.app_id);
     if (!app) {
       return c.json({ error: 'App no longer exists', code: 'app_missing' }, 409);
     }

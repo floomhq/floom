@@ -14,7 +14,8 @@ import { z } from 'zod';
 import { mkdtempSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
+
 import { resolveUserContext } from '../services/session.js';
 import {
   buildIngestHint,
@@ -365,22 +366,7 @@ hubRouter.post('/ingest', async (c) => {
 // author = user_id.
 hubRouter.get('/mine', async (c) => {
   const ctx = await resolveUserContext(c);
-  const rows = db
-    .prepare(
-      `SELECT apps.*, (
-         SELECT COUNT(*) FROM runs WHERE runs.app_id = apps.id
-       ) AS run_count,
-       (
-         SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
-       ) AS last_run_at
-         FROM apps
-        WHERE (apps.workspace_id = ? AND apps.author = ?)
-           OR apps.author = ?
-        ORDER BY apps.updated_at DESC`,
-    )
-    .all(ctx.workspace_id, ctx.user_id, ctx.user_id) as Array<
-    AppRecord & { run_count: number; last_run_at: string | null }
-  >;
+  const rows = storage.listAppsForUser(ctx.workspace_id, ctx.user_id);
 
   return c.json({
     apps: rows.map((row) => ({
@@ -429,7 +415,7 @@ hubRouter.get('/:slug/runs', async (c) => {
   const slug = c.req.param('slug');
   const limit = Math.max(1, Math.min(100, Number(c.req.query('limit') || 20)));
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership check:
@@ -451,33 +437,13 @@ hubRouter.get('/:slug/runs', async (c) => {
   // rows. Even the app author must not see other callers' raw inputs +
   // outputs — those can contain secrets (passwords, API keys, PII).
   // Authed callers scope by user_id; OSS anon falls back to device_id.
-  const scopeClause = ctx.is_authenticated
-    ? 'AND user_id = ?'
-    : 'AND device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
-  const rows = db
-    .prepare(
-      `SELECT id, action, status, inputs, outputs, duration_ms,
-              started_at, finished_at, error, error_type, user_id, device_id
-         FROM runs
-        WHERE app_id = ? ${scopeClause}
-        ORDER BY started_at DESC
-        LIMIT ?`,
-    )
-    .all(app.id, scopeParam, limit) as Array<{
-    id: string;
-    action: string;
-    status: string;
-    inputs: string | null;
-    outputs: string | null;
-    duration_ms: number | null;
-    started_at: string;
-    finished_at: string | null;
-    error: string | null;
-    error_type: string | null;
-    user_id: string | null;
-    device_id: string | null;
-  }>;
+  const filter = { app_id: app.id, limit };
+  if (ctx.is_authenticated) {
+    (filter as any).user_id = ctx.user_id;
+  } else {
+    (filter as any).device_id = ctx.device_id;
+  }
+  const rows = storage.listRuns(filter);
 
   return c.json({
     app: {
@@ -533,7 +499,7 @@ hubRouter.get('/:slug/runs-by-day', async (c) => {
   const daysParam = Number(c.req.query('days') || 7);
   const days = Math.max(1, Math.min(90, Number.isFinite(daysParam) ? Math.floor(daysParam) : 7));
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership check mirrors /:slug/runs exactly (issue #124 semantics).
@@ -552,16 +518,7 @@ hubRouter.get('/:slug/runs-by-day', async (c) => {
   // db.ts) and is always set — it's indexed via idx_runs_app which
   // makes `app_id = ? AND started_at >= ?` a fast index scan.
   const windowStart = `date('now', '-${days - 1} days')`;
-  const rows = db
-    .prepare(
-      `SELECT date(started_at) AS day, COUNT(*) AS count
-         FROM runs
-        WHERE app_id = ?
-          AND date(started_at) >= ${windowStart}
-        GROUP BY day
-        ORDER BY day ASC`,
-    )
-    .all(app.id) as Array<{ day: string; count: number }>;
+  const rows = storage.getAppRunsByDay(app.id, days);
 
   // Zero-fill: build the full N-day window and populate from the
   // sparse result. Using UTC to match the SQLite `date()` truncation.
@@ -583,7 +540,7 @@ hubRouter.delete('/:slug', async (c) => {
   if (gate) return gate;
   const slug = c.req.param('slug');
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Only the author can delete. The OSS "local self-hoster can delete
@@ -630,7 +587,7 @@ hubRouter.patch('/:slug', async (c) => {
   if (gate) return gate;
   const slug = c.req.param('slug');
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership: same rule as DELETE. OSS local self-hoster bypass is scoped
@@ -655,19 +612,11 @@ hubRouter.patch('/:slug', async (c) => {
     );
   }
 
-  const updates: string[] = [];
-  const values: unknown[] = [];
+  const patch: Partial<AppRecord> = {};
   if (parsed.data.visibility) {
-    updates.push('visibility = ?');
-    values.push(parsed.data.visibility);
+    patch.visibility = parsed.data.visibility;
   }
 
-  // primary_action lives in the JSON manifest, not in its own column.
-  // Parse, mutate, write. Validate that the declared primary exists in
-  // `actions`; reject upfront so the 95% typo case doesn't silently
-  // produce a manifest with an invalid primary_action (renderer would
-  // just fall back to the first action, but the creator would think
-  // they'd saved a pin).
   if (parsed.data.primary_action !== undefined) {
     const manifest = safeManifest(app.manifest);
     if (!manifest) {
@@ -692,17 +641,14 @@ hubRouter.patch('/:slug', async (c) => {
       (manifest as NormalizedManifest & { primary_action?: string }).primary_action =
         parsed.data.primary_action;
     }
-    updates.push('manifest = ?');
-    values.push(JSON.stringify(manifest));
+    patch.manifest = JSON.stringify(manifest);
   }
 
-  if (updates.length === 0) {
+  if (Object.keys(patch).length === 0) {
     return c.json({ error: 'No updatable fields in body', code: 'empty_patch' }, 400);
   }
-  updates.push("updated_at = datetime('now')");
-  values.push(app.id);
 
-  db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  storage.updateApp(app.id, patch);
   // Perf fix (2026-04-20): bust the /api/hub 5s cache so visibility /
   // primary_action changes land in the public directory immediately.
   invalidateHubCache();
@@ -762,55 +708,7 @@ hubRouter.get('/', (c) => {
   if (cached !== null) {
     return c.json(cached);
   }
-  // Default store sort (fast-apps wave):
-  //   1. featured desc   — pinned apps always first
-  //   2. avg_run_ms asc  — fastest apps next (NULLs last so unmeasured
-  //      apps do not jump the queue on a default table)
-  //   3. created_at desc — newest third
-  //   4. name asc        — deterministic tiebreak
-  // `sort=name`, `sort=newest`, `sort=category` remain supported for
-  // creator views that want a predictable lexical order.
-  let orderBy =
-    'apps.featured DESC, (apps.avg_run_ms IS NULL) ASC, apps.avg_run_ms ASC, apps.created_at DESC, apps.name ASC';
-  if (sort === 'name') orderBy = 'apps.name ASC';
-  if (sort === 'newest') orderBy = 'apps.created_at DESC';
-  if (sort === 'category') orderBy = 'apps.category, apps.name';
-
-  // Public directory: only apps with visibility='public' (or NULL for
-  // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
-  // Manual publish-review gate (#362): only 'published' apps are listed.
-  // 'pending_review' / 'rejected' / 'draft' apps are hidden from the
-  // public Store regardless of visibility — the creator still sees them
-  // on /api/hub/mine.
-  // Wireframe parity (2026-04-23): `runs_7d` is a correlated subquery
-  // against the runs table, aggregated at read time. No staleness window,
-  // no separate column. The 5-second /api/hub in-memory cache absorbs
-  // the repeated cost in practice. `stars`, `hero`, `thumbnail_url` are
-  // plain row columns (see db.ts migration 2026-04-23).
-  const sql = `SELECT apps.*,
-                      users.name AS author_name,
-                      users.email AS author_email,
-                      (
-                        SELECT COUNT(*) FROM runs
-                         WHERE runs.app_id = apps.id
-                           AND date(runs.started_at) >= date('now','-6 days')
-                      ) AS runs_7d
-                 FROM apps
-                 LEFT JOIN users ON apps.author = users.id
-                 WHERE apps.status = 'active'
-                   AND (apps.visibility = 'public' OR apps.visibility IS NULL)
-                   AND apps.publish_status = 'published'
-                   ${category ? 'AND apps.category = ?' : ''}
-                 ORDER BY ${orderBy}`;
-  const rowsAll = (category
-    ? db.prepare(sql).all(category)
-    : db.prepare(sql).all()) as Array<
-    AppRecord & {
-      author_name: string | null;
-      author_email: string | null;
-      runs_7d: number;
-    }
-  >;
+  const rowsAll = storage.listHubApps({ category, sort });
 
   // Apply FLOOM_STORE_HIDE_SLUGS server-side filter first. This is the
   // canonical place to hide apps from the public directory; the
@@ -887,16 +785,7 @@ hubRouter.get('/', (c) => {
 // apps (see below).
 hubRouter.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db
-    .prepare(
-      `SELECT apps.*, users.name AS author_name, users.email AS author_email
-         FROM apps
-         LEFT JOIN users ON apps.author = users.id
-        WHERE apps.slug = ?`,
-    )
-    .get(slug) as
-    | (AppRecord & { author_name: string | null; author_email: string | null })
-    | undefined;
+  const row = storage.getAppWithAuthor(slug);
   if (!row) return c.json({ error: 'App not found' }, 404);
   // Private app? Only reveal to its owner. Return 404 (not 403) so we
   // don't leak the slug's existence to strangers.
@@ -1007,7 +896,7 @@ hubRouter.post('/:slug/renderer', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
@@ -1083,7 +972,7 @@ hubRouter.delete('/:slug/renderer', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';

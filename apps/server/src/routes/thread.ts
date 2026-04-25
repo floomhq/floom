@@ -1,7 +1,7 @@
 // Run thread persistence. Threads are keyed by a browser-generated id,
 // no user auth: same anon waitlist model as the marketplace.
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { newThreadId, newTurnId } from '../lib/ids.js';
 import type { RunThreadRecord, RunTurnRecord } from '../types.js';
 
@@ -10,21 +10,17 @@ export const threadRouter = new Hono();
 // POST /api/thread — create a new empty thread
 threadRouter.post('/', (c) => {
   const id = newThreadId();
-  db.prepare('INSERT INTO run_threads (id, title) VALUES (?, NULL)').run(id);
+  storage.createThread(id);
   return c.json({ id });
 });
 
 // GET /api/thread/:id — fetch thread + ordered turns
 threadRouter.get('/:id', (c) => {
   const id = c.req.param('id');
-  const thread = db
-    .prepare('SELECT * FROM run_threads WHERE id = ?')
-    .get(id) as RunThreadRecord | undefined;
+  const thread = storage.getThread(id);
   if (!thread) return c.json({ error: 'Thread not found' }, 404);
 
-  const turns = db
-    .prepare('SELECT * FROM run_turns WHERE thread_id = ? ORDER BY turn_index ASC')
-    .all(id) as RunTurnRecord[];
+  const turns = storage.listTurns(id);
 
   return c.json({
     id: thread.id,
@@ -53,27 +49,20 @@ threadRouter.post('/:id/turn', async (c) => {
     return c.json({ error: 'kind must be "user" or "assistant"' }, 400);
   }
 
-  let thread = db
-    .prepare('SELECT * FROM run_threads WHERE id = ?')
-    .get(id) as RunThreadRecord | undefined;
+  let thread = storage.getThread(id);
   if (!thread) {
     // Auto-create thread if missing, so the client can POST straight after
     // generating an id without a round-trip.
-    db.prepare('INSERT INTO run_threads (id, title) VALUES (?, NULL)').run(id);
-    thread = db.prepare('SELECT * FROM run_threads WHERE id = ?').get(id) as RunThreadRecord;
+    storage.createThread(id);
+    thread = storage.getThread(id)!;
   }
 
-  const lastTurn = db
-    .prepare('SELECT MAX(turn_index) as max_idx FROM run_turns WHERE thread_id = ?')
-    .get(id) as { max_idx: number | null };
-  const nextIdx = (lastTurn.max_idx ?? -1) + 1;
+  const maxIdx = storage.getMaxTurnIndex(id);
+  const nextIdx = (maxIdx ?? -1) + 1;
 
   const turnId = newTurnId();
   const payloadJson = JSON.stringify(body.payload ?? {});
-  db.prepare(
-    `INSERT INTO run_turns (id, thread_id, turn_index, kind, payload)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(turnId, id, nextIdx, kind, payloadJson);
+  storage.createTurn({ id: turnId, thread_id: id, turn_index: nextIdx, kind, payload: payloadJson });
 
   // Auto-title from the first user turn.
   if (nextIdx === 0 && kind === 'user' && !thread.title) {
@@ -83,12 +72,10 @@ threadRouter.post('/:id/turn', async (c) => {
         : null;
     if (typeof text === 'string' && text.trim()) {
       const title = text.trim().slice(0, 60);
-      db.prepare(
-        `UPDATE run_threads SET title = ?, updated_at = datetime('now') WHERE id = ?`,
-      ).run(title, id);
+      storage.updateThread(id, { title });
     }
   } else {
-    db.prepare(`UPDATE run_threads SET updated_at = datetime('now') WHERE id = ?`).run(id);
+    storage.updateThread(id, {});
   }
 
   return c.json({

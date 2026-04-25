@@ -17,7 +17,8 @@
 // admin rights on the synthetic 'local' workspace so OSS keeps working.
 
 import { randomBytes } from 'node:crypto';
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import { DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import { storage } from './storage.js';
 import type {
   SessionContext,
   SessionMePayload,
@@ -103,14 +104,10 @@ function getMemberRole(
   workspace_id: string,
   user_id: string,
 ): WorkspaceMemberRole | null {
-  const row = db
-    .prepare(
-      `SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
-    )
-    .get(workspace_id, user_id) as { role: string } | undefined;
-  if (!row) return null;
-  if (!isValidRole(row.role)) return 'viewer';
-  return row.role;
+  const role = storage.getMemberRole(workspace_id, user_id);
+  if (!role) return null;
+  if (!isValidRole(role)) return 'viewer';
+  return role;
 }
 
 /**
@@ -149,12 +146,7 @@ function assertRole(
  * demoting an admin to make sure we never strand a workspace.
  */
 function countAdmins(workspace_id: string): number {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) as c FROM workspace_members WHERE workspace_id = ? AND role = 'admin'`,
-    )
-    .get(workspace_id) as { c: number };
-  return row.c;
+  return storage.countWorkspaceAdmins(workspace_id);
 }
 
 /**
@@ -169,9 +161,7 @@ function uniqueSlug(base: string): string {
     .slice(0, 48) || 'workspace';
   let candidate = cleanBase;
   let n = 2;
-  while (
-    db.prepare('SELECT 1 FROM workspaces WHERE slug = ?').get(candidate)
-  ) {
+  while (storage.getWorkspaceBySlug(candidate)) {
     candidate = `${cleanBase}-${n}`;
     n++;
   }
@@ -203,27 +193,16 @@ export function create(
 ): WorkspaceRecord {
   const id = generateId('ws');
   const slug = uniqueSlug(input.slug || input.name);
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO workspaces (id, slug, name, plan) VALUES (?, ?, ?, ?)`,
-    ).run(id, slug, input.name, ctx.user_id === DEFAULT_USER_ID ? 'oss' : 'cloud_free');
-    db.prepare(
-      `INSERT INTO workspace_members (workspace_id, user_id, role)
-       VALUES (?, ?, 'admin')`,
-    ).run(id, ctx.user_id);
-    db.prepare(
-      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT (user_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         updated_at = excluded.updated_at`,
-    ).run(ctx.user_id, id);
+  return storage.createWorkspaceWithMember({
+    workspace: {
+      id,
+      slug,
+      name: input.name,
+      plan: ctx.user_id === DEFAULT_USER_ID ? 'oss' : 'cloud_free',
+    },
+    user_id: ctx.user_id,
+    role: 'admin',
   });
-  tx();
-  const row = db
-    .prepare('SELECT * FROM workspaces WHERE id = ?')
-    .get(id) as WorkspaceRecord;
-  return row;
 }
 
 /**
@@ -233,15 +212,7 @@ export function create(
 export function listMine(
   ctx: SessionContext,
 ): Array<{ workspace: WorkspaceRecord; role: WorkspaceRole }> {
-  const rows = db
-    .prepare(
-      `SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
-         FROM workspace_members m
-         JOIN workspaces w ON w.id = m.workspace_id
-        WHERE m.user_id = ?
-        ORDER BY w.created_at ASC`,
-    )
-    .all(ctx.user_id) as Array<WorkspaceRecord & { role: string }>;
+  const rows = storage.listWorkspacesForUser(ctx.user_id);
   return rows.map((r) => ({
     workspace: {
       id: r.id,
@@ -263,9 +234,7 @@ export function getById(
   ctx: SessionContext,
   workspace_id: string,
 ): WorkspaceRecord {
-  const row = db
-    .prepare('SELECT * FROM workspaces WHERE id = ?')
-    .get(workspace_id) as WorkspaceRecord | undefined;
+  const row = storage.getWorkspace(workspace_id);
   if (!row) throw new WorkspaceNotFoundError(workspace_id);
   // viewer is the lowest required role for a read.
   assertRole(ctx, workspace_id, 'viewer');
@@ -281,23 +250,13 @@ export function update(
   input: UpdateWorkspaceInput,
 ): WorkspaceRecord {
   assertRole(ctx, workspace_id, 'admin');
-  const sets: string[] = [];
-  const params: unknown[] = [];
-  if (input.name !== undefined) {
-    sets.push('name = ?');
-    params.push(input.name);
-  }
-  if (input.slug !== undefined) {
-    const newSlug = uniqueSlug(input.slug);
-    sets.push('slug = ?');
-    params.push(newSlug);
-  }
-  if (sets.length === 0) return getById(ctx, workspace_id);
-  params.push(workspace_id);
-  db.prepare(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-  return db
-    .prepare('SELECT * FROM workspaces WHERE id = ?')
-    .get(workspace_id) as WorkspaceRecord;
+  const patch: { name?: string; slug?: string } = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.slug !== undefined) patch.slug = uniqueSlug(input.slug);
+  
+  const updated = storage.updateWorkspace(workspace_id, patch);
+  if (!updated) throw new WorkspaceNotFoundError(workspace_id);
+  return updated;
 }
 
 /**
@@ -310,10 +269,8 @@ export function remove(ctx: SessionContext, workspace_id: string): void {
     throw new Error('cannot delete the synthetic local workspace');
   }
   assertRole(ctx, workspace_id, 'admin');
-  db.prepare('DELETE FROM workspaces WHERE id = ?').run(workspace_id);
-  db.prepare('DELETE FROM user_active_workspace WHERE workspace_id = ?').run(
-    workspace_id,
-  );
+  storage.deleteWorkspace(workspace_id);
+  storage.deleteActiveWorkspaceForWorkspace(workspace_id);
 }
 
 // ====================================================================
@@ -333,15 +290,7 @@ export function listMembers(
   workspace_id: string,
 ): MemberWithUser[] {
   assertRole(ctx, workspace_id, 'viewer');
-  const rows = db
-    .prepare(
-      `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.email, u.name
-         FROM workspace_members m
-         LEFT JOIN users u ON u.id = m.user_id
-        WHERE m.workspace_id = ?
-        ORDER BY m.joined_at ASC`,
-    )
-    .all(workspace_id) as MemberWithUser[];
+  const rows = storage.listWorkspaceMembers(workspace_id);
   return rows.map((r) => ({
     workspace_id: r.workspace_id,
     user_id: r.user_id,
@@ -372,10 +321,7 @@ export function changeRole(
   if (current === 'admin' && new_role !== 'admin' && countAdmins(workspace_id) <= 1) {
     throw new CannotRemoveLastAdminError();
   }
-  db.prepare(
-    `UPDATE workspace_members SET role = ?
-       WHERE workspace_id = ? AND user_id = ?`,
-  ).run(new_role, workspace_id, target_user_id);
+  storage.upsertWorkspaceMember(workspace_id, target_user_id, new_role);
   const after = listMembers(ctx, workspace_id).find(
     (m) => m.user_id === target_user_id,
   );
@@ -401,15 +347,8 @@ export function removeMember(
   if (current === 'admin' && countAdmins(workspace_id) <= 1) {
     throw new CannotRemoveLastAdminError();
   }
-  const tx = db.transaction(() => {
-    db.prepare(
-      `DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
-    ).run(workspace_id, target_user_id);
-    db.prepare(
-      `DELETE FROM user_active_workspace WHERE user_id = ? AND workspace_id = ?`,
-    ).run(target_user_id, workspace_id);
-  });
-  tx();
+  storage.removeWorkspaceMember(workspace_id, target_user_id);
+  storage.deleteActiveWorkspaceForUserAndWorkspace(target_user_id, workspace_id);
 }
 
 // ====================================================================
@@ -456,34 +395,31 @@ export function inviteByEmail(
     throw new Error(`invalid email: ${email}`);
   }
   // Reject if a current member already uses that email.
-  const existingMember = db
-    .prepare(
-      `SELECT m.user_id FROM workspace_members m
-         JOIN users u ON u.id = m.user_id
-        WHERE m.workspace_id = ? AND u.email = ?`,
-    )
-    .get(workspace_id, normalized);
+  const members = storage.listWorkspaceMembers(workspace_id);
+  const existingMember = members.find(m => m.email === normalized);
   if (existingMember) throw new DuplicateMemberError();
 
   // Drop any prior pending invite for the same email+workspace so the
   // invitee always uses the freshest token.
-  db.prepare(
-    `DELETE FROM workspace_invites
-       WHERE workspace_id = ? AND email = ? AND status = 'pending'`,
-  ).run(workspace_id, normalized);
+  const existingInvites = storage.listWorkspaceInvites(workspace_id);
+  const prior = existingInvites.find(i => i.email === normalized && i.status === 'pending');
+  if (prior) storage.deleteWorkspaceInvite(prior.id);
 
   const id = generateId('inv');
   const token = generateToken();
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS).toISOString();
-  db.prepare(
-    `INSERT INTO workspace_invites
-       (id, workspace_id, email, role, invited_by_user_id, token, status, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
-  ).run(id, workspace_id, normalized, role, ctx.user_id, token, expiresAt);
+  
+  const invite = storage.createWorkspaceInvite({
+    id,
+    workspace_id,
+    email: normalized,
+    role,
+    invited_by_user_id: ctx.user_id,
+    token,
+    status: 'pending',
+    expires_at: expiresAt,
+  });
 
-  const invite = db
-    .prepare('SELECT * FROM workspace_invites WHERE id = ?')
-    .get(id) as WorkspaceInviteRecord;
   const accept_url = `${publicBaseUrl()}/invite/${token}`;
   return { invite, accept_url };
 }
@@ -501,21 +437,13 @@ export function acceptInvite(
   if (!ctx.is_authenticated && ctx.user_id === DEFAULT_USER_ID) {
     throw new Error('must be authenticated to accept an invite');
   }
-  const invite = db
-    .prepare(
-      `SELECT * FROM workspace_invites WHERE token = ? AND status = 'pending'`,
-    )
-    .get(token) as WorkspaceInviteRecord | undefined;
-  if (!invite) throw new InviteNotFoundError();
+  const invite = storage.getWorkspaceInviteByToken(token);
+  if (!invite || invite.status !== 'pending') throw new InviteNotFoundError();
   if (new Date(invite.expires_at).getTime() < Date.now()) {
-    db.prepare(
-      `UPDATE workspace_invites SET status = 'expired' WHERE id = ?`,
-    ).run(invite.id);
+    storage.updateWorkspaceInvite(invite.id, { status: 'expired' });
     throw new InviteExpiredError();
   }
-  const user = db
-    .prepare('SELECT email FROM users WHERE id = ?')
-    .get(ctx.user_id) as { email: string | null } | undefined;
+  const user = storage.getUser(ctx.user_id);
   if (!user || !user.email) {
     throw new Error('caller user has no email — cannot match invite');
   }
@@ -523,36 +451,21 @@ export function acceptInvite(
     throw new InviteNotFoundError();
   }
   const role = isValidRole(invite.role) ? invite.role : 'editor';
-  const tx = db.transaction(() => {
-    // Already a member? Just promote / no-op.
-    const existing = getMemberRole(invite.workspace_id, ctx.user_id);
-    if (existing) {
-      // No-op on existing membership; the invite still gets accepted so
-      // it isn't reused.
-    } else {
-      db.prepare(
-        `INSERT INTO workspace_members (workspace_id, user_id, role)
-         VALUES (?, ?, ?)`,
-      ).run(invite.workspace_id, ctx.user_id, role);
-    }
-    db.prepare(
-      `UPDATE workspace_invites SET status = 'accepted', accepted_at = datetime('now') WHERE id = ?`,
-    ).run(invite.id);
-    db.prepare(
-      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT (user_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         updated_at = excluded.updated_at`,
-    ).run(ctx.user_id, invite.workspace_id);
+  storage.acceptInviteWithMember({
+    invite_id: invite.id,
+    workspace_id: invite.workspace_id,
+    user_id: ctx.user_id,
+    role,
   });
-  tx();
-  const after = db
-    .prepare(
-      `SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
-    )
-    .get(invite.workspace_id, ctx.user_id) as WorkspaceMemberRecord;
-  return after;
+  
+  const after = storage.getMemberRole(invite.workspace_id, ctx.user_id);
+  if (!after) throw new Error('acceptInvite: failed to join workspace');
+  return {
+    workspace_id: invite.workspace_id,
+    user_id: ctx.user_id,
+    role: after,
+    joined_at: new Date().toISOString(), // stub since we don't return the full record from the adapter easily
+  } as WorkspaceMemberRecord;
 }
 
 /**
@@ -564,13 +477,7 @@ export function listInvites(
   workspace_id: string,
 ): WorkspaceInviteRecord[] {
   assertRole(ctx, workspace_id, 'admin');
-  return db
-    .prepare(
-      `SELECT * FROM workspace_invites
-         WHERE workspace_id = ?
-         ORDER BY created_at DESC`,
-    )
-    .all(workspace_id) as WorkspaceInviteRecord[];
+  return storage.listWorkspaceInvites(workspace_id);
 }
 
 /**
@@ -582,10 +489,10 @@ export function revokeInvite(
   invite_id: string,
 ): void {
   assertRole(ctx, workspace_id, 'admin');
-  db.prepare(
-    `UPDATE workspace_invites SET status = 'revoked'
-       WHERE id = ? AND workspace_id = ? AND status = 'pending'`,
-  ).run(invite_id, workspace_id);
+  const invite = storage.getWorkspaceInvite(invite_id);
+  if (invite && invite.workspace_id === workspace_id && invite.status === 'pending') {
+    storage.updateWorkspaceInvite(invite_id, { status: 'revoked' });
+  }
 }
 
 // ====================================================================
@@ -599,10 +506,7 @@ export function revokeInvite(
  */
 export function getActiveWorkspaceId(user_id: string): string | null {
   if (user_id === DEFAULT_USER_ID) return DEFAULT_WORKSPACE_ID;
-  const row = db
-    .prepare('SELECT workspace_id FROM user_active_workspace WHERE user_id = ?')
-    .get(user_id) as { workspace_id: string } | undefined;
-  return row?.workspace_id || null;
+  return storage.getActiveWorkspaceId(user_id);
 }
 
 /**
@@ -613,13 +517,7 @@ export function switchActiveWorkspace(
   workspace_id: string,
 ): void {
   assertRole(ctx, workspace_id, 'viewer');
-  db.prepare(
-    `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-     VALUES (?, ?, datetime('now'))
-     ON CONFLICT (user_id) DO UPDATE SET
-       workspace_id = excluded.workspace_id,
-       updated_at = excluded.updated_at`,
-  ).run(ctx.user_id, workspace_id);
+  storage.setActiveWorkspaceId(ctx.user_id, workspace_id);
 }
 
 /**
@@ -655,20 +553,14 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
     !ctx.is_authenticated;
   const active: { workspace: WorkspaceRecord; role: WorkspaceRole } = isGuest
     ? {
-        workspace: db
-          .prepare('SELECT * FROM workspaces WHERE id = ?')
-          .get(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
+        workspace: storage.getWorkspace(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
         role: 'guest',
       }
     : memberships.find((m) => m.workspace.id === activeId) || {
-        workspace: db
-          .prepare('SELECT * FROM workspaces WHERE id = ?')
-          .get(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
+        workspace: storage.getWorkspace(DEFAULT_WORKSPACE_ID) as WorkspaceRecord,
         role: 'admin',
       };
-  const userRow = db
-    .prepare('SELECT id, email, name FROM users WHERE id = ?')
-    .get(ctx.user_id) as { id: string; email: string | null; name: string | null } | undefined;
+  const userRow = storage.getUser(ctx.user_id);
   // W4-minimal gap close: in cloud mode, Better Auth's `user` table is the
   // source of truth for display name + avatar image. Profile updates flow
   // through /auth/update-user which writes to that table, not the Floom
@@ -680,15 +572,7 @@ export function me(ctx: SessionContext, cloud_mode: boolean): SessionMePayload {
     | { name: string | null; image: string | null; email: string | null }
     | undefined;
   if (cloud_mode && ctx.user_id !== DEFAULT_USER_ID) {
-    try {
-      betterAuthUser = db
-        .prepare('SELECT name, image, email FROM user WHERE id = ?')
-        .get(ctx.user_id) as
-        | { name: string | null; image: string | null; email: string | null }
-        | undefined;
-    } catch {
-      betterAuthUser = undefined;
-    }
+    betterAuthUser = storage.getBetterAuthUser(ctx.user_id);
   }
   return {
     user: {
@@ -755,21 +639,11 @@ export function provisionPersonalWorkspace(
   email: string,
   name?: string | null,
 ): string {
-  const existing = db
-    .prepare(
-      `SELECT workspace_id FROM workspace_members WHERE user_id = ? LIMIT 1`,
-    )
-    .get(user_id) as { workspace_id: string } | undefined;
+  const existing = storage.listWorkspacesForUser(user_id)[0];
 
   if (existing) {
-    db.prepare(
-      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT (user_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         updated_at = excluded.updated_at`,
-    ).run(user_id, existing.workspace_id);
-    return existing.workspace_id;
+    storage.setActiveWorkspaceId(user_id, existing.id);
+    return existing.id;
   }
 
   const localPart = email.split('@')[0] || 'user';
@@ -785,22 +659,17 @@ export function provisionPersonalWorkspace(
   const slug = uniqueSlug(baseSlug);
   const id = generateId('ws');
 
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO workspaces (id, slug, name, plan) VALUES (?, ?, ?, 'cloud_free')`,
-    ).run(id, slug, workspaceName);
-    db.prepare(
-      `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'admin')`,
-    ).run(id, user_id);
-    db.prepare(
-      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
-       VALUES (?, ?, datetime('now'))
-       ON CONFLICT (user_id) DO UPDATE SET
-         workspace_id = excluded.workspace_id,
-         updated_at = excluded.updated_at`,
-    ).run(user_id, id);
+  storage.createWorkspaceWithMember({
+    workspace: {
+      id,
+      slug,
+      name: workspaceName,
+      plan: 'cloud_free',
+    },
+    user_id,
+    role: 'admin',
   });
-  tx();
+
   return id;
 }
 

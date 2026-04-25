@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { newRunId, newJobId } from '../lib/ids.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { dispatchRun, getRun } from '../services/runner.js';
@@ -205,9 +205,7 @@ function createPerAppMcpServer(
       },
       async (rawInputs) => {
         recordMcpToolCall(toolName);
-        const fresh = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as
-          | AppRecord
-          | undefined;
+        const fresh = storage.getAppById(app.id);
         if (!fresh) {
           return {
             isError: true,
@@ -257,11 +255,8 @@ function createPerAppMcpServer(
         if (actionSecretsNeeded.length > 0) {
           const available = new Set<string>();
           // Server-side persisted secrets
-          const rows = db
-            .prepare(
-              "SELECT name FROM secrets WHERE (app_id IS NULL OR app_id = ?) AND value != ''",
-            )
-            .all(fresh.id) as { name: string }[];
+          const secrets = storage.listAdminSecrets(fresh.id);
+          const rows = secrets.filter(s => !!s.value);
           for (const r of rows) available.add(r.name);
           // Per-call secrets
           for (const k of Object.keys(perCallSecrets || {})) available.add(k);
@@ -318,9 +313,15 @@ function createPerAppMcpServer(
           };
         }
 
-        db.prepare(
-          `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
-        ).run(runId, fresh.id, actionName, JSON.stringify(validated));
+        storage.createRun({
+          id: runId,
+          app_id: fresh.id,
+          action: actionName,
+          inputs: validated,
+          workspace_id: ctx?.workspace_id || 'local',
+          user_id: ctx?.user_id,
+          device_id: ctx?.device_id,
+        });
         // Parity with POST /api/run + POST /api/:slug/run: pass the
         // resolved SessionContext so dispatchRun can merge the caller's
         // user-vault secrets. Without this every authed MCP consumer
@@ -836,8 +837,8 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
         (category ? ' AND category = ?' : '') +
         ' ORDER BY featured DESC, name ASC';
       const rows = (category
-        ? db.prepare(sql).all(category)
-        : db.prepare(sql).all()) as AppRecord[];
+        ? storage.listHubApps({ category })
+        : storage.listHubApps({})) as AppRecord[];
       // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
       // listings so Claude Desktop + Cursor clients don't surface them in
       // discovery. Same regex as server /api/hub. Fixtures are still
@@ -929,9 +930,7 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       },
     },
     async ({ slug }) => {
-      const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-        | AppRecord
-        | undefined;
+      const row = storage.getApp(slug);
       if (!row) {
         return {
           isError: true,
@@ -1036,7 +1035,7 @@ mcpRouter.all('/search', async (c) => {
 // /mcp/app/:slug — per-app MCP
 mcpRouter.all('/app/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const row = storage.getApp(slug);
   if (!row) {
     // Wrap unknown-app errors in a JSON-RPC envelope so MCP clients see a
     // protocol-level error, not a bare HTTP 404. Return 200 per JSON-RPC

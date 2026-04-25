@@ -1,5 +1,4 @@
-// Adapter interfaces for the Floom reference server (Stage 2 of the protocol
-// opening, 2026-04-20).
+// Adapter interfaces for the Floom reference server
 //
 // The reference implementation in this repo pins ONE concrete impl for each
 // of the five concerns below — Docker + HTTP proxy for runtime, SQLite for
@@ -20,22 +19,40 @@
 
 import type {
   AppRecord,
+  AppReviewRecord,
+  AppCreatorSecretRecord,
+  AppSecretPolicyRecord,
+  ConnectionRecord,
   ErrorType,
   JobRecord,
   JobStatus,
   NormalizedManifest,
   RunRecord,
   RunStatus,
+  RunThreadRecord,
+  RunTurnRecord,
   SecretRecord,
   SessionContext,
+  StripeAccountRecord,
+  StripeWebhookEventRecord,
+  TriggerRecord,
+  TriggerType,
   UserRecord,
+  UserSecretRecord,
+  WorkspaceInviteRecord,
+  WorkspaceMemberRecord,
+  WorkspaceMemberRole,
   WorkspaceRecord,
-  WorkspaceRole,
 } from '../types.js';
 
 // =====================================================================
 // Shared shapes
 // =====================================================================
+
+export interface MemberWithUser extends WorkspaceMemberRecord {
+  email: string | null;
+  name: string | null;
+}
 
 /**
  * Normalized result returned by every `RuntimeAdapter.execute` call.
@@ -85,6 +102,7 @@ export interface RunListFilter {
   workspace_id?: string;
   user_id?: string;
   status?: RunStatus;
+  before_started_at?: string;
   limit?: number;
   offset?: number;
 }
@@ -123,7 +141,7 @@ export interface RunListFilter {
  *     never log them) and MUST NOT appear in `outputs`.
  *   - Output shape — `outputs` is the app's successful return payload,
  *     unmodified. Errors go to `error` / `error_type`, not to `outputs`.
- *     (The one exception is `detectSilentError` in runner.ts — see
+ *     (The one exception is `detectSilentError` in local-docker.ts — see
  *     spec/adapters.md.)
  *   - Log capture — stdout + stderr (or equivalent) is captured to
  *     `logs` so the /p/:slug surface and `GET /api/run/:id` can show the
@@ -155,6 +173,7 @@ export interface RuntimeAdapter {
     inputs: Record<string, unknown>,
     secrets: Record<string, string>,
     ctx: SessionContext,
+    run_id: string,
     onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
   ): Promise<RuntimeResult>;
 }
@@ -195,14 +214,74 @@ export interface RuntimeAdapter {
  *     MUST either upsert or throw a deterministic error; callers retry
  *     on network failure.
  */
+export interface HubListFilter {
+  category?: string | null;
+  sort?: string;
+}
+
 export interface StorageAdapter {
   // ---------- apps ----------
   getApp(slug: string): AppRecord | undefined;
   getAppById(id: string): AppRecord | undefined;
+  getAppWithAuthor(slug: string): (AppRecord & { author_name: string | null; author_email: string | null }) | undefined;
   listApps(filter?: AppListFilter): AppRecord[];
   createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): AppRecord;
-  updateApp(slug: string, patch: Partial<AppRecord>): AppRecord | undefined;
-  deleteApp(slug: string): boolean;
+  updateApp(id: string, patch: Partial<AppRecord>): AppRecord | undefined;
+  deleteApp(id: string): boolean;
+  setFeaturedApps(slugs: string[]): number;
+  refreshAppAvgRunMs(id: string): void;
+  listAppsForUser(workspace_id: string, user_id: string): Array<AppRecord & { run_count: number; last_run_at: string | null }>;
+  getAppRunsByDay(app_id: string, days: number): Array<{ day: string; count: number }>;
+  listHubApps(filter: HubListFilter): Array<
+    AppRecord & {
+      author_name: string | null;
+      author_email: string | null;
+      runs_7d: number;
+    }
+  >;
+
+  // ---------- app reviews ----------
+  getAppReviewSummary(slug: string): { count: number; avg: number };
+  listAppReviews(slug: string, limit: number): Array<AppReviewRecord & { author_name: string | null; author_email: string | null }>;
+  getAppReview(workspace_id: string, slug: string, user_id: string): AppReviewRecord | undefined;
+  getAppReviewById(id: string): AppReviewRecord | undefined;
+  createAppReview(input: Omit<AppReviewRecord, 'created_at' | 'updated_at'>): AppReviewRecord;
+  updateAppReview(id: string, patch: Partial<AppReviewRecord>): AppReviewRecord | undefined;
+
+  // ---------- waitlist ----------
+  upsertWaitlistSignup(input: {
+    email: string;
+    source: string | null;
+    user_agent: string | null;
+    ip_hash: string | null;
+    deploy_repo_url: string | null;
+    deploy_intent: string | null;
+  }): { inserted: boolean; id: string };
+
+  // ---------- threads + turns ----------
+  createThread(id: string, title?: string | null): RunThreadRecord;
+  getThread(id: string): RunThreadRecord | undefined;
+  updateThread(id: string, patch: { title?: string | null; updated_at?: string }): void;
+  listTurns(thread_id: string): RunTurnRecord[];
+  createTurn(input: Omit<RunTurnRecord, 'created_at'>): RunTurnRecord;
+  getMaxTurnIndex(thread_id: string): number | null;
+  countThreads(): number;
+  countApps(): number;
+  getRunStatusCounts(): Array<{ status: string; count: number }>;
+  getActiveUsersLast24h(): number;
+
+  // ---------- feedback ----------
+  createFeedback(input: {
+    id: string;
+    workspace_id: string | null;
+    user_id: string | null;
+    device_id: string | null;
+    email: string | null;
+    url: string | null;
+    text: string;
+    ip_hash: string;
+  }): void;
+  listFeedback(limit: number): any[];
 
   // ---------- runs ----------
   createRun(input: {
@@ -211,6 +290,9 @@ export interface StorageAdapter {
     thread_id?: string | null;
     action: string;
     inputs: Record<string, unknown> | null;
+    workspace_id: string;
+    user_id?: string | null;
+    device_id?: string | null;
   }): RunRecord;
   getRun(id: string): RunRecord | undefined;
   listRuns(filter?: RunListFilter): RunRecord[];
@@ -238,16 +320,131 @@ export interface StorageAdapter {
   // ---------- jobs (async queue) ----------
   createJob(input: Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'> & { status?: JobStatus }): JobRecord;
   getJob(id: string): JobRecord | undefined;
+  getJobBySlug(slug: string, id: string): JobRecord | undefined;
   /** Atomic dequeue — returns undefined when the queue is empty. */
   claimNextJob(): JobRecord | undefined;
-  updateJob(id: string, patch: Partial<JobRecord>): void;
+  updateJob(id: string, patch: Partial<JobRecord>): JobRecord | undefined;
+  countJobsByStatus(status: JobStatus): number;
 
   // ---------- workspaces + users ----------
   getWorkspace(id: string): WorkspaceRecord | undefined;
-  listWorkspacesForUser(user_id: string): Array<WorkspaceRecord & { role: WorkspaceRole }>;
+  getWorkspaceBySlug(slug: string): WorkspaceRecord | undefined;
+  listWorkspacesForUser(user_id: string): Array<WorkspaceRecord & { role: WorkspaceMemberRole }>;
+  createWorkspace(input: { id: string; slug: string; name: string; plan: string }): WorkspaceRecord;
+  updateWorkspace(id: string, patch: { name?: string; slug?: string; wrapped_dek?: string | null }): WorkspaceRecord | undefined;
+  deleteWorkspace(id: string): void;
+
   getUser(id: string): UserRecord | undefined;
   getUserByEmail(email: string): UserRecord | undefined;
   createUser(input: Omit<UserRecord, 'created_at'>): UserRecord;
+  getBetterAuthUser(id: string): { name: string | null; image: string | null; email: string | null } | undefined;
+
+  // ---------- members ----------
+  getMemberRole(workspace_id: string, user_id: string): WorkspaceMemberRole | null;
+  listWorkspaceMembers(workspace_id: string): MemberWithUser[];
+  upsertWorkspaceMember(workspace_id: string, user_id: string, role: WorkspaceMemberRole): void;
+  removeWorkspaceMember(workspace_id: string, user_id: string): void;
+  countWorkspaceAdmins(workspace_id: string): number;
+
+  // ---------- invites ----------
+  getWorkspaceInvite(id: string): WorkspaceInviteRecord | undefined;
+  getWorkspaceInviteByToken(token: string): WorkspaceInviteRecord | undefined;
+  listWorkspaceInvites(workspace_id: string): WorkspaceInviteRecord[];
+  createWorkspaceInvite(input: Omit<WorkspaceInviteRecord, 'created_at' | 'accepted_at'>): WorkspaceInviteRecord;
+  updateWorkspaceInvite(id: string, patch: Partial<WorkspaceInviteRecord>): void;
+  deleteWorkspaceInvite(id: string): void;
+
+  // ---------- active workspace ----------
+  getActiveWorkspaceId(user_id: string): string | null;
+  setActiveWorkspaceId(user_id: string, workspace_id: string): void;
+  deleteActiveWorkspaceForWorkspace(workspace_id: string): void;
+  deleteActiveWorkspaceForUserAndWorkspace(user_id: string, workspace_id: string): void;
+
+  // ---------- combined / atomic operations ----------
+  /** Create workspace + add member + set active in one go */
+  createWorkspaceWithMember(input: {
+    workspace: { id: string; slug: string; name: string; plan: string };
+    user_id: string;
+    role: WorkspaceMemberRole;
+  }): WorkspaceRecord;
+
+  /** Accept invite + add member + set active + update invite status */
+  acceptInviteWithMember(input: {
+    invite_id: string;
+    workspace_id: string;
+    user_id: string;
+    role: WorkspaceMemberRole;
+  }): void;
+
+  // ---------- user secrets ----------
+  listUserSecrets(workspace_id: string, user_id: string): UserSecretRecord[];
+  upsertUserSecret(input: Omit<UserSecretRecord, 'created_at' | 'updated_at'>): void;
+  deleteUserSecret(workspace_id: string, user_id: string, key: string): void;
+
+  // ---------- app creator secrets ----------
+  listAppCreatorSecrets(workspace_id: string, app_id: string): AppCreatorSecretRecord[];
+  upsertAppCreatorSecret(input: Omit<AppCreatorSecretRecord, 'created_at' | 'updated_at'>): void;
+  deleteAppCreatorSecret(workspace_id: string, app_id: string, key: string): void;
+
+  // ---------- app secret policies ----------
+  listAppSecretPolicies(app_id: string): AppSecretPolicyRecord[];
+  getAppSecretPolicy(app_id: string, key: string): AppSecretPolicyRecord | undefined;
+  upsertAppSecretPolicy(input: Omit<AppSecretPolicyRecord, 'updated_at'>): void;
+  deleteAppSecretPolicy(app_id: string, key: string): void;
+
+  // ---------- triggers ----------
+  getTrigger(id: string): TriggerRecord | undefined;
+  getTriggerByWebhookPath(path: string): TriggerRecord | undefined;
+  listTriggersForUser(user_id: string): TriggerRecord[];
+  listTriggersForApp(app_id: string): TriggerRecord[];
+  createTrigger(input: any): TriggerRecord;
+  updateTrigger(id: string, patch: any): TriggerRecord | undefined;
+  deleteTrigger(id: string): boolean;
+  readyScheduleTriggers(nowMs: number): TriggerRecord[];
+  claimScheduleTrigger(id: string, readNextRun: number, nextMs: number, nowMs: number, lastFired: boolean): boolean;
+  markWebhookFired(id: string, nowMs: number): void;
+  recordWebhookDelivery(triggerId: string, requestId: string, nowMs: number, ttlMs: number): boolean;
+  getJobTriggerContext(jobId: string): { trigger_id: string; trigger_type: TriggerType } | undefined;
+  setJobTriggerContext(jobId: string, triggerId: string, triggerType: TriggerType): void;
+
+  // ---------- stripe connect ----------
+  getStripeAccount(workspace_id: string, user_id: string): StripeAccountRecord | undefined;
+  getStripeAccountByStripeId(stripe_account_id: string): StripeAccountRecord | undefined;
+  createStripeAccount(input: any): StripeAccountRecord;
+  updateStripeAccount(stripe_account_id: string, patch: any): StripeAccountRecord | undefined;
+  recordStripeWebhookEvent(input: any): void;
+  isStripeWebhookEventProcessed(event_id: string): boolean;
+  listStripeWebhookEvents(limit: number): StripeWebhookEventRecord[];
+  getStripeWebhookEvent(event_id: string): StripeWebhookEventRecord | undefined;
+
+  // ---------- sessions & rekey ----------
+  rekeyDevice(device_id: string, user_id: string, workspace_id: string, default_user_id: string): any;
+  updateUser(id: string, patch: { name?: string | null; email?: string | null; image?: string | null; composio_user_id?: string | null }): UserRecord | undefined;
+  upsertUser(input: any): UserRecord;
+  cleanupUserOrphans(userId: string, defaultWorkspaceId: string): void;
+  purgeUnverifiedAuthSessions(): number;
+
+  // ---------- app memory ----------
+  getAppMemory(workspace_id: string, app_slug: string, user_id: string, key: string): string | undefined;
+  setAppMemory(input: any): void;
+  deleteAppMemory(workspace_id: string, app_slug: string, user_id: string, key: string): boolean;
+  listAppMemory(workspace_id: string, app_slug: string, user_id: string): any[];
+  listAppMemoryKeys(workspace_id: string, app_slug: string, user_id: string, keys: string[]): any[];
+
+  // ---------- embeddings ----------
+  upsertEmbedding(appId: string, text: string, vector: Buffer): void;
+  listMissingEmbeddings(): AppRecord[];
+  listAllEmbeddings(): any[];
+
+  // ---------- connections ----------
+  upsertConnection(input: any): ConnectionRecord;
+  getConnection(workspace_id: string, owner_kind: string, owner_id: string, provider: string): ConnectionRecord | undefined;
+  getConnectionByComposioId(workspace_id: string, owner_kind: string, owner_id: string, composio_connection_id: string): ConnectionRecord | undefined;
+  listConnections(filter: { workspace_id: string; owner_kind: string; owner_id: string; status?: string }): ConnectionRecord[];
+  updateConnection(id: string, patch: any): ConnectionRecord | undefined;
+
+  // ---------- secrets ----------
+  upsertSecret(input: { id: string; name: string; value: string; app_id: string }): void;
 
   // ---------- admin secret pointers ----------
   // Ciphertext for user/creator secrets is owned by SecretsAdapter. This
@@ -256,6 +453,14 @@ export interface StorageAdapter {
   listAdminSecrets(app_id?: string | null): SecretRecord[];
   upsertAdminSecret(name: string, value: string, app_id?: string | null): void;
   deleteAdminSecret(name: string, app_id?: string | null): boolean;
+  
+  // ---------- internal ----------
+  /**
+   * Returns the underlying driver instance (e.g. better-sqlite3.Database).
+   * Used sparingly by modules that need to pass a driver to a 3rd party
+   * library (like Better Auth).
+   */
+  getRawDatabase(): any;
 }
 
 // =====================================================================
@@ -412,6 +617,14 @@ export interface SecretsAdapter {
     workspace_id: string,
     keys: string[],
   ): Record<string, string>;
+
+  // ---------- internal ----------
+  /**
+   * Returns the underlying driver instance (e.g. better-sqlite3.Database).
+   * Used sparingly by modules that need to pass a driver to a 3rd party
+   * library (like Better Auth).
+   */
+  getRawDatabase(): any;
 }
 
 // =====================================================================

@@ -5,11 +5,12 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import { DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { newRunId } from '../lib/ids.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
+import { storage } from '../services/storage.js';
 import { checkAppVisibility, hasValidAdminBearer } from '../lib/auth.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { resolveUserContext } from '../services/session.js';
@@ -23,11 +24,11 @@ import {
   recordFreeRun,
 } from '../lib/byok-gate.js';
 import type {
-  AppRecord,
   NormalizedManifest,
   RunRecord,
   SessionContext,
 } from '../types.js';
+import type { RunListFilter } from '../adapters/types.js';
 
 /**
  * BYOK header: callers can pass their own Gemini API key on a per-run basis.
@@ -67,16 +68,15 @@ async function loadAuthorizedRunApp(
   c: Context,
   appId: string,
 ): Promise<{ app: RunAppAccessRow | undefined; blocked: Response | null }> {
-  const app = db
-    .prepare('SELECT slug, visibility, author FROM apps WHERE id = ?')
-    .get(appId) as RunAppAccessRow | undefined;
+  const app = storage.getAppById(appId);
   if (!app) return { app: undefined, blocked: null };
+  const runAccessRow: RunAppAccessRow = { slug: app.slug, visibility: app.visibility, author: app.author };
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
     author: app.author,
     ctx,
   });
-  return { app, blocked };
+  return { app: runAccessRow, blocked };
 }
 
 /**
@@ -201,7 +201,7 @@ runRouter.post('/', async (c) => {
   if (typeof body.app_slug !== 'string') {
     return c.json({ error: '"app_slug" is required' }, 400);
   }
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(body.app_slug) as AppRecord | undefined;
+  const row = storage.getApp(body.app_slug as string);
   if (!row) return c.json({ error: `App not found: ${body.app_slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
@@ -291,19 +291,16 @@ runRouter.post('/', async (c) => {
   // visibility check (private apps need the caller's user_id).
   const runId = newRunId();
   const threadId = typeof body.thread_id === 'string' ? body.thread_id : null;
-  db.prepare(
-    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)
-     VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-  ).run(
-    runId,
-    row.id,
-    threadId,
-    actionName,
-    JSON.stringify(validated),
-    ctx.workspace_id,
-    ctx.user_id,
-    ctx.device_id,
-  );
+  storage.createRun({
+    id: runId,
+    app_id: row.id,
+    thread_id: threadId,
+    action: actionName,
+    inputs: validated,
+    workspace_id: ctx.workspace_id,
+    user_id: ctx.user_id,
+    device_id: ctx.device_id,
+  });
 
   // W4-minimal gap close: pass the resolved session context so the runner
   // can look up per-user secrets (user_secrets table). Without this, the
@@ -502,7 +499,7 @@ runRouter.post('/:id/share', async (c) => {
   }
 
   // Idempotent flip. SQLite returns changes=0 on a no-op UPDATE which is fine.
-  db.prepare(`UPDATE runs SET is_public = 1 WHERE id = ?`).run(id);
+  storage.updateRun(id, { is_public: 1 } as any); // using any for now since is_public is not in patch shape
 
   const publicUrl = `/api/run/${encodeURIComponent(id)}`;
   const shareUrl = `/r/${encodeURIComponent(id)}`;
@@ -571,7 +568,8 @@ export const slugRunRouter = new Hono<{ Variables: { slug: string } }>();
 
 slugRunRouter.post('/', async (c) => {
   const slug = c.req.param('slug');
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!slug) return c.json({ error: 'Missing slug' }, 400);
+  const row = storage.getApp(slug);
   if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
@@ -652,18 +650,16 @@ slugRunRouter.post('/', async (c) => {
   // W4M.1: scope the run by the current session. `ctx` already resolved
   // for the visibility check above.
   const runId = newRunId();
-  db.prepare(
-    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)
-     VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?)`,
-  ).run(
-    runId,
-    row.id,
-    actionName,
-    JSON.stringify(validated),
-    ctx.workspace_id,
-    ctx.user_id,
-    ctx.device_id,
-  );
+  storage.createRun({
+    id: runId,
+    app_id: row.id,
+    thread_id: null,
+    action: actionName,
+    inputs: validated,
+    workspace_id: ctx.workspace_id,
+    user_id: ctx.user_id,
+    device_id: ctx.device_id,
+  });
 
   // W4-minimal gap close: pass the resolved session context so the runner
   // can look up per-user secrets (user_secrets table). Without this, the
@@ -1007,38 +1003,22 @@ meRouter.get('/runs', async (c) => {
   // Two filters: authenticated caller scopes by user_id; anonymous caller
   // scopes by device_id. Both also check workspace_id so cross-workspace
   // leaks are impossible.
-  const scopeClause = ctx.is_authenticated
-    ? 'runs.workspace_id = ? AND runs.user_id = ?'
-    : 'runs.workspace_id = ? AND runs.device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
-
-  const rows = db
-    .prepare(
-      `SELECT runs.id, runs.action, runs.status, runs.duration_ms,
-              runs.started_at, runs.finished_at, runs.error, runs.error_type,
-              runs.inputs, runs.outputs,
-              apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
-         FROM runs
-         LEFT JOIN apps ON apps.id = runs.app_id
-        WHERE ${scopeClause}
-        ORDER BY runs.started_at DESC
-        LIMIT ?`,
-    )
-    .all(ctx.workspace_id, scopeParam, limit) as Array<{
-    id: string;
-    action: string;
-    status: string;
-    duration_ms: number | null;
-    started_at: string;
-    finished_at: string | null;
-    error: string | null;
-    error_type: string | null;
-    inputs: string | null;
-    outputs: string | null;
-    app_slug: string | null;
-    app_name: string | null;
-    app_icon: string | null;
-  }>;
+  const filter: RunListFilter = { workspace_id: ctx.workspace_id, limit };
+  if (ctx.is_authenticated) {
+    filter.user_id = ctx.user_id;
+  } else if (ctx.device_id) {
+    (filter as any).device_id = ctx.device_id;
+  }
+  const runs = storage.listRuns(filter);
+  const rows = runs.map(run => {
+    const app = storage.getAppById(run.app_id);
+    return {
+      ...run,
+      app_slug: app?.slug ?? null,
+      app_name: app?.name ?? null,
+      app_icon: app?.icon ?? null,
+    };
+  });
 
   return c.json({
     runs: rows.map((r) => {
@@ -1094,42 +1074,20 @@ meRouter.get('/runs', async (c) => {
 meRouter.get('/runs/:id', async (c) => {
   const ctx = await resolveUserContext(c);
   const id = c.req.param('id');
-
-  const scopeClause = ctx.is_authenticated
-    ? 'runs.workspace_id = ? AND runs.user_id = ?'
-    : 'runs.workspace_id = ? AND runs.device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
-
-  const row = db
-    .prepare(
-      `SELECT runs.*, apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
-         FROM runs LEFT JOIN apps ON apps.id = runs.app_id
-        WHERE runs.id = ? AND ${scopeClause}
-        LIMIT 1`,
-    )
-    .get(id, ctx.workspace_id, scopeParam) as
-    | {
-        id: string;
-        app_id: string;
-        thread_id: string | null;
-        action: string;
-        inputs: string | null;
-        outputs: string | null;
-        logs: string;
-        status: string;
-        error: string | null;
-        error_type: string | null;
-        upstream_status: number | null;
-        duration_ms: number | null;
-        started_at: string;
-        finished_at: string | null;
-        app_slug: string | null;
-        app_name: string | null;
-        app_icon: string | null;
-      }
-    | undefined;
-
-  if (!row) return c.json({ error: 'Run not found' }, 404);
+  const run = storage.getRun(id);
+  if (!run || run.workspace_id !== ctx.workspace_id) return c.json({ error: 'Run not found' }, 404);
+  if (ctx.is_authenticated) {
+    if (run.user_id !== ctx.user_id) return c.json({ error: 'Run not found' }, 404);
+  } else {
+    if (run.device_id !== ctx.device_id) return c.json({ error: 'Run not found' }, 404);
+  }
+  const app = storage.getAppById(run.app_id);
+  const row = {
+    ...run,
+    app_slug: app?.slug ?? null,
+    app_name: app?.name ?? null,
+    app_icon: app?.icon ?? null,
+  };
 
   return c.json({
     id: row.id,

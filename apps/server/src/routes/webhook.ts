@@ -17,8 +17,8 @@
 // middleware (FLOOM_AUTH_TOKEN) would require a bearer token and external
 // senders can't provide one. The HMAC signature is the auth.
 import { Hono } from 'hono';
-import { db } from '../db.js';
 import { AUTH_DOCS_URL, AUTH_HINT_SIGNATURE } from '../lib/auth.js';
+import { storage } from '../services/storage.js';
 import { newJobId } from '../lib/ids.js';
 import { createJob } from '../services/jobs.js';
 import {
@@ -87,9 +87,7 @@ webhookRouter.post('/:path', async (c) => {
 
   // Load the app; 409 if it's been deleted out from under us (the FK cascade
   // would normally delete the trigger too, but be defensive).
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(trigger.app_id) as AppRecord | undefined;
+  const app = storage.getAppById(trigger.app_id);
   if (!app) {
     return c.json({ error: 'App no longer exists', code: 'app_missing' }, 409);
   }

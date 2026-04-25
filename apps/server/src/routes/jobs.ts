@@ -9,7 +9,7 @@
 // The background worker (services/worker.ts) drains the queue and fires the
 // creator's webhook_url on completion.
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { newJobId } from '../lib/ids.js';
 import { createJob, formatJob, getJobBySlug, cancelJob } from '../services/jobs.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
@@ -33,9 +33,7 @@ function buildJobUrls(publicUrl: string, slug: string, jobId: string) {
  */
 jobsRouter.post('/', async (c) => {
   const slug = c.req.param('slug') || '';
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const row = storage.getApp(slug);
   if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
@@ -142,9 +140,7 @@ jobsRouter.post('/', async (c) => {
 jobsRouter.get('/:job_id', async (c) => {
   const slug = c.req.param('slug') || '';
   const jobId = c.req.param('job_id') || '';
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
@@ -163,9 +159,7 @@ jobsRouter.get('/:job_id', async (c) => {
 jobsRouter.post('/:job_id/cancel', async (c) => {
   const slug = c.req.param('slug') || '';
   const jobId = c.req.param('job_id') || '';
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {

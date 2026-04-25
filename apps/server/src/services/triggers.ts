@@ -16,7 +16,7 @@
 // storage.
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import parser from 'cron-parser';
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { newTriggerId } from '../lib/ids.js';
 import type { TriggerRecord, TriggerType } from '../types.js';
 
@@ -140,81 +140,58 @@ export function createTrigger(input: CreateTriggerInput): TriggerRecord {
       throw new Error(`invalid cron_expression: ${check.error}`);
     }
     const next = nextCronFireMs(input.cron_expression, now, input.tz);
-    db.prepare(
-      `INSERT INTO triggers (
-         id, app_id, user_id, workspace_id, action, inputs, trigger_type,
-         cron_expression, tz, next_run_at, enabled, retry_policy,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 'schedule', ?, ?, ?, 1, ?, ?, ?)`,
-    ).run(
+    return storage.createTrigger({
       id,
-      input.app_id,
-      input.user_id,
-      input.workspace_id,
-      input.action,
-      inputsJson,
-      input.cron_expression,
-      input.tz || 'UTC',
-      next,
-      retryJson,
-      now,
-      now,
-    );
+      app_id: input.app_id,
+      user_id: input.user_id,
+      workspace_id: input.workspace_id,
+      action: input.action,
+      inputs: inputsJson,
+      trigger_type: 'schedule',
+      cron_expression: input.cron_expression,
+      tz: input.tz || 'UTC',
+      next_run_at: next,
+      enabled: 1,
+      retry_policy: retryJson,
+      created_at: now,
+      updated_at: now,
+    });
   } else {
     // webhook: generate secret + url path server-side.
     const secret = generateWebhookSecret();
     const path = generateWebhookUrlPath();
-    db.prepare(
-      `INSERT INTO triggers (
-         id, app_id, user_id, workspace_id, action, inputs, trigger_type,
-         webhook_secret, webhook_url_path, enabled, retry_policy,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 'webhook', ?, ?, 1, ?, ?, ?)`,
-    ).run(
+    return storage.createTrigger({
       id,
-      input.app_id,
-      input.user_id,
-      input.workspace_id,
-      input.action,
-      inputsJson,
-      secret,
-      path,
-      retryJson,
-      now,
-      now,
-    );
+      app_id: input.app_id,
+      user_id: input.user_id,
+      workspace_id: input.workspace_id,
+      action: input.action,
+      inputs: inputsJson,
+      trigger_type: 'webhook',
+      webhook_secret: secret,
+      webhook_url_path: path,
+      enabled: 1,
+      retry_policy: retryJson,
+      created_at: now,
+      updated_at: now,
+    });
   }
-  const row = getTrigger(id);
-  if (!row) throw new Error(`createTrigger: failed to re-read ${id}`);
-  return row;
 }
 
 export function getTrigger(id: string): TriggerRecord | undefined {
-  return db.prepare('SELECT * FROM triggers WHERE id = ?').get(id) as
-    | TriggerRecord
-    | undefined;
+  return storage.getTrigger(id);
 }
 
 export function getTriggerByWebhookPath(path: string): TriggerRecord | undefined {
-  return db
-    .prepare('SELECT * FROM triggers WHERE webhook_url_path = ?')
-    .get(path) as TriggerRecord | undefined;
+  return storage.getTriggerByWebhookPath(path);
 }
 
 export function listTriggersForUser(userId: string): TriggerRecord[] {
-  return db
-    .prepare(
-      'SELECT * FROM triggers WHERE user_id = ? ORDER BY created_at DESC',
-    )
-    .all(userId) as TriggerRecord[];
+  return storage.listTriggersForUser(userId);
 }
 
 export function listTriggersForApp(appId: string): TriggerRecord[] {
-  return db
-    .prepare(
-      'SELECT * FROM triggers WHERE app_id = ? ORDER BY created_at DESC',
-    )
-    .all(appId) as TriggerRecord[];
+  return storage.listTriggersForApp(appId);
 }
 
 /**
@@ -223,16 +200,7 @@ export function listTriggersForApp(appId: string): TriggerRecord[] {
  * double-dispatch across multiple workers or replicas.
  */
 export function readyScheduleTriggers(nowMs: number): TriggerRecord[] {
-  return db
-    .prepare(
-      `SELECT * FROM triggers
-        WHERE trigger_type = 'schedule'
-          AND enabled = 1
-          AND next_run_at IS NOT NULL
-          AND next_run_at <= ?
-        ORDER BY next_run_at ASC`,
-    )
-    .all(nowMs) as TriggerRecord[];
+  return storage.readyScheduleTriggers(nowMs);
 }
 
 /**
@@ -252,19 +220,7 @@ export function advanceSchedule(
   const row = getTrigger(id);
   if (!row || row.trigger_type !== 'schedule' || !row.cron_expression) return row;
   const next = nextCronFireMs(row.cron_expression, nowMs, row.tz);
-  if (skipCatchUp) {
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ?`,
-    ).run(next, nowMs, id);
-  } else {
-    db.prepare(
-      `UPDATE triggers
-          SET next_run_at = ?,
-              last_fired_at = ?,
-              updated_at = ?
-        WHERE id = ?`,
-    ).run(next, nowMs, nowMs, id);
-  }
+  storage.claimScheduleTrigger(id, row.next_run_at!, next, nowMs, !skipCatchUp);
   return getTrigger(id);
 }
 
@@ -273,9 +229,7 @@ export function advanceSchedule(
  * successful signature verification + enqueue. Does NOT touch next_run_at.
  */
 export function markWebhookFired(id: string, nowMs: number): void {
-  db.prepare(
-    `UPDATE triggers SET last_fired_at = ?, updated_at = ? WHERE id = ?`,
-  ).run(nowMs, nowMs, id);
+  storage.markWebhookFired(id, nowMs);
 }
 
 export function updateTrigger(
@@ -326,16 +280,17 @@ export function updateTrigger(
   }
 
   if (updates.length === 0) return row;
-  updates.push('updated_at = ?');
-  values.push(now);
-  values.push(id);
-  db.prepare(`UPDATE triggers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-  return getTrigger(id);
+  const patchObj: Record<string, any> = {};
+  for (let i = 0; i < updates.length; i++) {
+    const key = updates[i].split(' = ')[0];
+    patchObj[key] = values[i];
+  }
+  patchObj.updated_at = now;
+  return storage.updateTrigger(id, patchObj);
 }
 
 export function deleteTrigger(id: string): boolean {
-  const res = db.prepare('DELETE FROM triggers WHERE id = ?').run(id);
-  return res.changes > 0;
+  return storage.deleteTrigger(id);
 }
 
 // ---------- Idempotency (incoming webhook dedupe) ----------
@@ -355,22 +310,7 @@ export function recordWebhookDelivery(
   requestId: string,
   nowMs: number,
 ): boolean {
-  // Lazy GC: rows older than 24h are stale and can be dropped. The
-  // incoming webhook path is low-volume enough that doing the DELETE
-  // inline is cheaper than a separate scheduler. Runs at most a few
-  // times per hour.
-  db.prepare(
-    'DELETE FROM trigger_webhook_deliveries WHERE received_at < ?',
-  ).run(nowMs - DEDUPE_TTL_MS);
-
-  const res = db
-    .prepare(
-      `INSERT OR IGNORE INTO trigger_webhook_deliveries
-         (trigger_id, request_id, received_at)
-       VALUES (?, ?, ?)`,
-    )
-    .run(triggerId, requestId, nowMs);
-  return res.changes > 0;
+  return storage.recordWebhookDelivery(triggerId, requestId, nowMs, DEDUPE_TTL_MS);
 }
 
 // ---------- Serialization for API responses ----------

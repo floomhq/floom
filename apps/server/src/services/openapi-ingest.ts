@@ -16,7 +16,7 @@ import $RefParser from '@apidevtools/json-schema-ref-parser';
 // still come from the shared contract — erased at compile time.
 import { parseRendererManifest } from '../lib/renderer-manifest.js';
 import type { RendererManifest } from '@floom/renderer/contract';
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
 import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
@@ -1602,23 +1602,6 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
   // each creator's entry to files inside the same directory.
   const manifestDir = dirname(isAbsolute(configPath) ? configPath : resolvePath(configPath));
 
-  const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
-  // Operator-declared apps (FLOOM_APPS_CONFIG) skip the publish-review gate —
-  // the operator explicitly listed them in apps.yaml, no admin approval
-  // needed. They land as 'published'. User-driven ingest (Studio /build,
-  // MCP ingest_app) routes through ingestAppFromSpec instead, which
-  // applies the 'pending_review' default.
-  const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
-  );
-  const updateApp = db.prepare(
-    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, updated_at=datetime('now') WHERE slug=?`,
-  );
-  const insertSecret = db.prepare(
-    `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
-  );
-
   let apps_ingested = 0;
   let apps_failed = 0;
   const errors: Array<{ slug: string; error: string }> = [];
@@ -1677,7 +1660,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         );
       }
 
-      const existing = existsBySlug.get(appSpec.slug) as { id: string } | undefined;
+      const existing = storage.getApp(appSpec.slug);
 
       // Build auth_config blob from the apps.yaml entry.
       const authConfig: Record<string, string> = {};
@@ -1729,55 +1712,67 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       }
 
       if (existing) {
-        updateApp.run(
-          manifest.name,
-          appSpec.description || manifest.description,
-          JSON.stringify(manifest),
-          appSpec.category || null,
-          resolvedBaseUrl || null,
-          appSpec.auth || null,
-          authConfigJson,
-          appSpec.openapi_spec_url || null,
-          specCached,
+        storage.updateApp(existing.id, {
+          name: manifest.name,
+          description: appSpec.description || manifest.description,
+          manifest: JSON.stringify(manifest),
+          category: appSpec.category || null,
+          base_url: resolvedBaseUrl || null,
+          auth_type: appSpec.auth || null,
+          auth_config: authConfigJson,
+          openapi_spec_url: appSpec.openapi_spec_url || null,
+          openapi_spec_cached: specCached,
           visibility,
-          isAsync,
-          webhookUrl,
-          timeoutMs,
-          retries,
-          asyncMode,
-          appSpec.slug,
-        );
+          is_async: isAsync,
+          webhook_url: webhookUrl,
+          timeout_ms: timeoutMs,
+          retries: retries,
+          async_mode: asyncMode,
+        });
         // Insert placeholder secrets if not already present (so the UI shows them)
         for (const name of secretNames) {
-          insertSecret.run(newSecretId(), name, '', existing.id);
+          storage.upsertSecret({
+            id: newSecretId(),
+            name,
+            value: '',
+            app_id: existing.id,
+          });
         }
         console.log(`[openapi-ingest] updated ${appSpec.slug}`);
       } else {
         const appId = newAppId();
-        insertApp.run(
-          appId,
-          appSpec.slug,
-          manifest.name,
-          appSpec.description || manifest.description,
-          JSON.stringify(manifest),
-          `proxied:${appSpec.slug}`,
-          appSpec.category || null,
-          appSpec.icon || null,
-          resolvedBaseUrl || null,
-          appSpec.auth || null,
-          authConfigJson,
-          appSpec.openapi_spec_url || null,
-          specCached,
+        storage.createApp({
+          id: appId,
+          slug: appSpec.slug,
+          name: manifest.name,
+          description: appSpec.description || manifest.description,
+          manifest: JSON.stringify(manifest),
+          status: 'active',
+          code_path: `proxied:${appSpec.slug}`,
+          category: appSpec.category || null,
+          icon: appSpec.icon || null,
+          app_type: 'proxied',
+          base_url: resolvedBaseUrl || null,
+          auth_type: appSpec.auth || null,
+          auth_config: authConfigJson,
+          openapi_spec_url: appSpec.openapi_spec_url || null,
+          openapi_spec_cached: specCached,
           visibility,
-          isAsync,
-          webhookUrl,
-          timeoutMs,
-          retries,
-          asyncMode,
-        );
+          is_async: isAsync,
+          webhook_url: webhookUrl,
+          timeout_ms: timeoutMs,
+          retries: retries,
+          async_mode: asyncMode,
+          publish_status: 'published',
+        });
         // Insert placeholder secrets
         for (const name of secretNames) {
-          insertSecret.run(newSecretId(), name, '', appId);
+          storage.upsertSecret({
+            id: newSecretId(),
+            name,
+            value: '',
+            app_id: appId,
+          });
         }
         console.log(`[openapi-ingest] inserted ${appSpec.slug}`);
       }
@@ -1872,8 +1867,7 @@ export class SlugTakenError extends Error {
 export function deriveSlugSuggestions(base: string): string[] {
   // Cap the base so base + '-NN' still fits the 48-char slug ceiling.
   const truncated = base.slice(0, 40);
-  const exists = db.prepare('SELECT 1 FROM apps WHERE slug = ?');
-  const isFree = (s: string) => !exists.get(s);
+  const isFree = (s: string) => !storage.getApp(s);
 
   // Numeric: petstore-2, petstore-3, ...
   let numeric = `${truncated}-2`;
@@ -2329,9 +2323,7 @@ export async function ingestAppFromSpec(args: {
   // On collision, attach three recovery suggestions (numeric / version /
   // random suffix) so the UI can render clickable pills instead of a
   // dead-end error (audit 2026-04-20, Fix 2).
-  const existing = db
-    .prepare('SELECT id, workspace_id, visibility FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string; visibility: string } | undefined;
+  const existing = storage.getApp(slug);
   if (existing && existing.workspace_id !== args.workspace_id && existing.workspace_id !== 'local') {
     throw new SlugTakenError(slug, deriveSlugSuggestions(slug));
   }
@@ -2360,66 +2352,50 @@ export async function ingestAppFromSpec(args: {
   const resolvedBaseUrl = resolveBaseUrl(derefed, appSpec, openapi_url || undefined);
 
   if (existing) {
-    db.prepare(
-      `UPDATE apps SET
-         name=?, description=?, manifest=?, category=?, app_type='proxied',
-         base_url=?, auth_type=?, auth_config=NULL, openapi_spec_url=?,
-         openapi_spec_cached=?, visibility=?, is_async=0,
-         webhook_url=NULL, timeout_ms=NULL, retries=0, async_mode=NULL,
-         workspace_id=?, author=?, updated_at=datetime('now')
-       WHERE slug=?`,
-    ).run(
-      manifest.name,
-      description || manifest.description,
-      JSON.stringify(manifest),
-      args.category || null,
-      resolvedBaseUrl || null,
-      'none',
-      openapi_url || null,
-      specCached,
+    storage.updateApp(existing.id, {
+      name: manifest.name,
+      description: description || manifest.description,
+      manifest: JSON.stringify(manifest),
+      category: args.category || null,
+      app_type: 'proxied',
+      base_url: resolvedBaseUrl || null,
+      auth_type: 'none',
+      auth_config: null,
+      openapi_spec_url: openapi_url || null,
+      openapi_spec_cached: specCached,
       visibility,
-      args.workspace_id,
-      args.author_user_id,
-      slug,
-    );
+      is_async: 0,
+      webhook_url: null,
+      timeout_ms: null,
+      retries: 0,
+      async_mode: null,
+      workspace_id: args.workspace_id,
+      author: args.author_user_id,
+    });
     return { slug, name, created: false };
   }
 
   const appId = newAppId();
-  // Manual publish-review gate (#362): user-driven ingest (Studio /build,
-  // MCP ingest_app, and anything else that ends up here) lands as
-  // 'pending_review'. An admin flips it to 'published' via
-  // POST /api/admin/apps/:slug/publish-status before it appears on the
-  // public Store. Re-ingesting an existing app hits the UPDATE branch
-  // above and leaves publish_status alone, so a published app stays
-  // published when its spec refreshes.
-  db.prepare(
-    `INSERT INTO apps (
-       id, slug, name, description, manifest, status, docker_image, code_path,
-       category, author, icon, app_type, base_url, auth_type, auth_config,
-       openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
-       timeout_ms, retries, async_mode, workspace_id, publish_status
-     ) VALUES (
-       ?, ?, ?, ?, ?, 'active', NULL, ?,
-       ?, ?, NULL, 'proxied', ?, 'none', NULL,
-       ?, ?, ?, 0, NULL,
-       NULL, 0, NULL, ?, 'pending_review'
-     )`,
-  ).run(
-    appId,
+  storage.createApp({
+    id: appId,
     slug,
-    manifest.name,
-    description || manifest.description,
-    JSON.stringify(manifest),
-    `proxied:${slug}`,
-    args.category || null,
-    args.author_user_id,
-    resolvedBaseUrl || null,
-    openapi_url || null,
-    specCached,
+    name: manifest.name,
+    description: description || manifest.description,
+    manifest: JSON.stringify(manifest),
+    status: 'active',
+    code_path: `proxied:${slug}`,
+    category: args.category || null,
+    author: args.author_user_id,
+    app_type: 'proxied',
+    base_url: resolvedBaseUrl || null,
+    auth_type: 'none',
+    openapi_spec_url: openapi_url || null,
+    openapi_spec_cached: specCached,
     visibility,
-    args.workspace_id,
-  );
+    is_async: 0,
+    workspace_id: args.workspace_id,
+    publish_status: 'pending_review',
+  });
 
   return { slug, name, created: true };
 }

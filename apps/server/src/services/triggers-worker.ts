@@ -17,14 +17,14 @@
 //
 // One worker per process is enough (cron accuracy is 30s). Multiple
 // replicas are safe because the claim uses BEGIN IMMEDIATE.
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { newJobId } from '../lib/ids.js';
 import { createJob } from './jobs.js';
 import {
   nextCronFireMs,
   readyScheduleTriggers,
 } from './triggers.js';
-import type { AppRecord, TriggerRecord } from '../types.js';
+import type { TriggerRecord } from '../types.js';
 
 const POLL_INTERVAL_MS = Number(process.env.FLOOM_TRIGGERS_POLL_MS || 30_000);
 const CATCH_UP_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -103,27 +103,20 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
       `[triggers-worker] trigger=${trigger.id} drifted ${Math.round(drift / 1000)}s (> 1h), skipping catch-up`,
     );
     const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-    // Claim: only update if no one else already advanced it.
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at = ?`,
-    ).run(nextMs, now, trigger.id, readNextRun);
+    storage.claimScheduleTrigger(trigger.id, readNextRun, nextMs, now, false);
     return false;
   }
 
   // Load the app; if it's been deleted under us (CASCADE would normally
   // remove the trigger, but belt-and-suspenders), skip.
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(trigger.app_id) as AppRecord | undefined;
+  const app = storage.getApp(trigger.app_id);
   if (!app || app.status !== 'active') {
     console.warn(
       `[triggers-worker] trigger=${trigger.id} app missing or inactive, skipping`,
     );
     // Still advance so we don't hot-loop.
     const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at = ?`,
-    ).run(nextMs, now, trigger.id, readNextRun);
+    storage.claimScheduleTrigger(trigger.id, readNextRun, nextMs, now, false);
     return false;
   }
 
@@ -140,9 +133,7 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
       `[triggers-worker] trigger=${trigger.id} action="${trigger.action}" not in manifest, skipping`,
     );
     const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at = ?`,
-    ).run(nextMs, now, trigger.id, readNextRun);
+    storage.claimScheduleTrigger(trigger.id, readNextRun, nextMs, now, false);
     return false;
   }
 
@@ -156,16 +147,8 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
   // Claim step: advance next_run_at atomically. If another worker won
   // the race, our UPDATE changes 0 rows and we skip the fire.
   const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-  const claim = db
-    .prepare(
-      `UPDATE triggers
-          SET next_run_at = ?,
-              last_fired_at = ?,
-              updated_at = ?
-        WHERE id = ? AND next_run_at = ?`,
-    )
-    .run(nextMs, now, now, trigger.id, readNextRun);
-  if (claim.changes === 0) {
+  const claim = storage.claimScheduleTrigger(trigger.id, readNextRun, nextMs, now, true);
+  if (!claim) {
     return false; // another worker won
   }
 
@@ -222,25 +205,7 @@ function markJobTriggerContext(
   triggerType: 'schedule' | 'webhook',
 ): void {
   jobTriggerContext.set(jobId, { trigger_id: triggerId, trigger_type: triggerType });
-  // Durable fallback: stash in a side table so a restart doesn't lose
-  // context for in-flight jobs. Created lazily on first use to avoid
-  // boot-time schema ordering issues.
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS job_trigger_context (
-        job_id TEXT PRIMARY KEY,
-        trigger_id TEXT NOT NULL,
-        trigger_type TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-    `);
-    db.prepare(
-      `INSERT OR REPLACE INTO job_trigger_context (job_id, trigger_id, trigger_type, created_at)
-       VALUES (?, ?, ?, ?)`,
-    ).run(jobId, triggerId, triggerType, Date.now());
-  } catch (err) {
-    console.warn('[triggers-worker] could not persist job trigger context:', err);
-  }
+  storage.setJobTriggerContext(jobId, triggerId, triggerType);
 }
 
 export function getJobTriggerContext(
@@ -248,20 +213,12 @@ export function getJobTriggerContext(
 ): { trigger_id: string; trigger_type: 'schedule' | 'webhook' } | null {
   const mem = jobTriggerContext.get(jobId);
   if (mem) return mem;
-  try {
-    const row = db
-      .prepare(
-        'SELECT trigger_id, trigger_type FROM job_trigger_context WHERE job_id = ?',
-      )
-      .get(jobId) as { trigger_id: string; trigger_type: string } | undefined;
-    if (row) {
-      return {
-        trigger_id: row.trigger_id,
-        trigger_type: row.trigger_type as 'schedule' | 'webhook',
-      };
-    }
-  } catch {
-    // table doesn't exist yet; no context
+  const row = storage.getJobTriggerContext(jobId);
+  if (row) {
+    return {
+      trigger_id: row.trigger_id,
+      trigger_type: row.trigger_type as 'schedule' | 'webhook',
+    };
   }
   return null;
 }

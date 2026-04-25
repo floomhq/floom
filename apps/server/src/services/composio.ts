@@ -24,7 +24,7 @@
 // the same call shape. This is how the unit tests exercise the full
 // path without a live Composio API key.
 
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { newConnectionId } from '../lib/ids.js';
 import type {
   ConnectionMetadata,
@@ -311,21 +311,9 @@ function upsertConnection(
   const metadata_json = metadata ? JSON.stringify(metadata) : null;
   const id = newConnectionId();
 
-  db.prepare(
-    `INSERT INTO connections
-       (id, workspace_id, owner_kind, owner_id, provider,
-        composio_connection_id, composio_account_id, status,
-        metadata_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-     ON CONFLICT (workspace_id, owner_kind, owner_id, provider)
-       DO UPDATE SET composio_connection_id = excluded.composio_connection_id,
-                     composio_account_id = excluded.composio_account_id,
-                     status = excluded.status,
-                     metadata_json = excluded.metadata_json,
-                     updated_at = datetime('now')`,
-  ).run(
+  const row = storage.upsertConnection({
     id,
-    ctx.workspace_id,
+    workspace_id: ctx.workspace_id,
     owner_kind,
     owner_id,
     provider,
@@ -333,23 +321,9 @@ function upsertConnection(
     composio_account_id,
     status,
     metadata_json,
-  );
+  });
 
-  // ON CONFLICT DO UPDATE on a UNIQUE doesn't bind the pre-existing id,
-  // so always re-read the row by the natural key to return a stable record.
-  const row = db
-    .prepare(
-      `SELECT * FROM connections
-         WHERE workspace_id = ?
-           AND owner_kind = ?
-           AND owner_id = ?
-           AND provider = ?`,
-    )
-    .get(ctx.workspace_id, owner_kind, owner_id, provider) as Record<
-    string,
-    unknown
-  >;
-  return rowToRecord(row);
+  return rowToRecord(row as any);
 }
 
 // ---------- public API ----------
@@ -446,20 +420,12 @@ export async function finishConnection(
   // otherwise we refuse to touch it — Composio would happily return the
   // data but Floom must not let user A "finish" user B's connection.
   const { owner_kind, owner_id } = contextOwner(ctx);
-  const row = db
-    .prepare(
-      `SELECT * FROM connections
-         WHERE workspace_id = ?
-           AND owner_kind = ?
-           AND owner_id = ?
-           AND composio_connection_id = ?`,
-    )
-    .get(
-      ctx.workspace_id,
-      owner_kind,
-      owner_id,
-      composio_connection_id,
-    ) as Record<string, unknown> | undefined;
+  const row = storage.getConnectionByComposioId(
+    ctx.workspace_id,
+    owner_kind,
+    owner_id,
+    composio_connection_id,
+  );
   if (!row) {
     throw new ConnectionNotFoundError(
       `no connection ${composio_connection_id} owned by ${owner_kind}:${owner_id}`,
@@ -521,18 +487,13 @@ export function listConnections(
   opts?: { status?: ConnectionStatus },
 ): ConnectionRecord[] {
   const { owner_kind, owner_id } = contextOwner(ctx);
-  let sql = `SELECT * FROM connections
-               WHERE workspace_id = ?
-                 AND owner_kind = ?
-                 AND owner_id = ?`;
-  const params: unknown[] = [ctx.workspace_id, owner_kind, owner_id];
-  if (opts?.status) {
-    sql += ` AND status = ?`;
-    params.push(opts.status);
-  }
-  sql += ` ORDER BY provider`;
-  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
-  return rows.map(rowToRecord);
+  const rows = storage.listConnections({
+    workspace_id: ctx.workspace_id,
+    owner_kind,
+    owner_id,
+    status: opts?.status,
+  });
+  return rows.map(r => rowToRecord(r as any));
 }
 
 /**
@@ -543,19 +504,9 @@ export function getConnection(
   provider: string,
 ): ConnectionRecord | null {
   const { owner_kind, owner_id } = contextOwner(ctx);
-  const row = db
-    .prepare(
-      `SELECT * FROM connections
-         WHERE workspace_id = ?
-           AND owner_kind = ?
-           AND owner_id = ?
-           AND provider = ?`,
-    )
-    .get(ctx.workspace_id, owner_kind, owner_id, provider) as
-    | Record<string, unknown>
-    | undefined;
+  const row = storage.getConnection(ctx.workspace_id, owner_kind, owner_id, provider);
   if (!row) return null;
-  return rowToRecord(row);
+  return rowToRecord(row as any);
 }
 
 /**
@@ -588,12 +539,9 @@ export async function revokeConnection(
     }
   }
 
-  db.prepare(
-    `UPDATE connections
-       SET status = 'revoked',
-           updated_at = datetime('now')
-     WHERE id = ?`,
-  ).run(existing.id);
+  storage.updateConnection(existing.id, {
+    status: 'revoked',
+  });
 
   return { ...existing, status: 'revoked' };
 }

@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { ingestOpenApiApps } from './openapi-ingest.js';
 
 /**
@@ -336,18 +336,7 @@ export async function startFastApps(): Promise<FastAppsBootResult> {
     // store. Idempotent: re-running updates featured=1 on the same slugs.
     // Apps that are not present in the DB are silently skipped because the
     // WHERE clause filters by slug.
-    const markFeatured = db.prepare(
-      `UPDATE apps SET featured = 1, updated_at = datetime('now') WHERE slug = ?`,
-    );
-    const featuredTxn = db.transaction((slugs: string[]) => {
-      let touched = 0;
-      for (const slug of slugs) {
-        const r = markFeatured.run(slug);
-        if (r.changes > 0) touched++;
-      }
-      return touched;
-    });
-    const pinned = featuredTxn(Array.from(FEATURED_SLUGS));
+    const pinned = storage.setFeaturedApps(Array.from(FEATURED_SLUGS));
     console.log(`[fast-apps] marked ${pinned} apps featured`);
     return {
       enabled: true,

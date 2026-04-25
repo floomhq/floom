@@ -11,7 +11,7 @@
 //        for the target slug. See routes/hub.ts for the matching filter.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { hasValidAdminBearer } from '../lib/auth.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
 import type { AppRecord } from '../types.js';
@@ -63,14 +63,10 @@ adminRouter.post('/apps/:slug/publish-status', async (c) => {
     );
   }
 
-  const app = db
-    .prepare('SELECT id, slug, publish_status FROM apps WHERE slug = ?')
-    .get(slug) as Pick<AppRecord, 'id' | 'slug' | 'publish_status'> | undefined;
+  const app = storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
-  db.prepare(
-    `UPDATE apps SET publish_status = ?, updated_at = datetime('now') WHERE id = ?`,
-  ).run(parsed.data.status, app.id);
+  storage.updateApp(app.id, { publish_status: parsed.data.status });
 
   // The /api/hub list endpoint caches responses for 5s. Bust it so the
   // newly-published app shows up on the Store immediately.

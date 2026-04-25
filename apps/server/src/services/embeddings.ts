@@ -1,6 +1,6 @@
 // Embeddings service. Used by the app picker.
 // Falls back to keyword scoring when OPENAI_API_KEY is missing.
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { isTestFixture } from '../lib/hub-filter.js';
 import type { AppRecord } from '../types.js';
 
@@ -61,10 +61,7 @@ export async function upsertAppEmbedding(appId: string, text: string): Promise<v
   try {
     const vec = await fetchEmbedding(text);
     const buf = float32ToBuffer(vec);
-    db.prepare(
-      `INSERT INTO embeddings (app_id, text, vector) VALUES (?, ?, ?)
-       ON CONFLICT(app_id) DO UPDATE SET text = excluded.text, vector = excluded.vector, updated_at = datetime('now')`,
-    ).run(appId, text, buf);
+    storage.upsertEmbedding(appId, text, buf);
   } catch (err) {
     console.error('[embeddings] upsert failed:', err);
   }
@@ -79,14 +76,7 @@ export async function backfillAppEmbeddings(): Promise<void> {
     console.log('[embeddings] OPENAI_API_KEY missing — picker will use keyword fallback');
     return;
   }
-  const apps = db
-    .prepare(
-      `SELECT a.id, a.name, a.description, a.category
-       FROM apps a
-       LEFT JOIN embeddings e ON e.app_id = a.id
-       WHERE e.app_id IS NULL`,
-    )
-    .all() as Array<Pick<AppRecord, 'id' | 'name' | 'description' | 'category'>>;
+  const apps = storage.listMissingEmbeddings() as Array<Pick<AppRecord, 'id' | 'name' | 'description' | 'category'>>;
 
   if (apps.length === 0) return;
   console.log(`[embeddings] backfilling ${apps.length} apps`);
@@ -110,15 +100,9 @@ export interface PickResult {
  * Vector search when OPENAI_API_KEY is set, keyword fallback otherwise.
  */
 export async function pickApps(query: string, limit = 3): Promise<PickResult[]> {
-  const allAppsRaw = db
-    .prepare(
-      "SELECT id, slug, name, description, category, icon FROM apps" +
-        " WHERE status = 'active'" +
-        " AND (visibility = 'public' OR visibility IS NULL)",
-    )
-    .all() as Array<
-    Pick<AppRecord, 'id' | 'slug' | 'name' | 'description' | 'category' | 'icon'>
-  >;
+  const allAppsRaw = storage.listApps({
+    visibility: 'public',
+  }).filter(a => a.status === 'active');
 
   // Issue #144: strip E2E / PRR / audit fixtures from semantic search
   // results so MCP clients (Claude Desktop, Cursor, /mcp/search) never
@@ -134,9 +118,7 @@ export async function pickApps(query: string, limit = 3): Promise<PickResult[]> 
     try {
       const queryVec = await fetchEmbedding(query);
       const queryBuf = float32ToBuffer(queryVec);
-      const embedRows = db
-        .prepare('SELECT app_id, vector FROM embeddings')
-        .all() as Array<{ app_id: string; vector: Buffer }>;
+      const embedRows = storage.listAllEmbeddings() as Array<{ app_id: string; vector: Buffer }>;
       const vecMap = new Map(embedRows.map((r) => [r.app_id, r.vector]));
       scored = allApps.map((app) => {
         const vec = vecMap.get(app.id);

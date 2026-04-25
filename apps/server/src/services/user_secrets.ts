@@ -28,7 +28,8 @@ import {
 } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import { db, DATA_DIR } from '../db.js';
+import { DATA_DIR } from '../db.js';
+import { storage } from './storage.js';
 import type { SessionContext, WorkspaceRecord } from '../types.js';
 
 const MASTER_KEY_FILE = join(DATA_DIR, '.floom-master-key');
@@ -162,9 +163,7 @@ function loadWorkspaceDek(workspace_id: string): Buffer {
   const cached = dekCache.get(workspace_id);
   if (cached) return cached;
 
-  const row = db
-    .prepare('SELECT wrapped_dek FROM workspaces WHERE id = ?')
-    .get(workspace_id) as { wrapped_dek: string | null } | undefined;
+  const row = storage.getWorkspace(workspace_id);
   if (!row) {
     throw new SecretDecryptError(`workspace ${workspace_id} does not exist`);
   }
@@ -178,10 +177,7 @@ function loadWorkspaceDek(workspace_id: string): Buffer {
   // First use — mint a fresh DEK, wrap it, persist, cache.
   const fresh = randomBytes(32);
   const wrapped = wrapDek(fresh);
-  db.prepare('UPDATE workspaces SET wrapped_dek = ? WHERE id = ?').run(
-    wrapped,
-    workspace_id,
-  );
+  storage.updateWorkspace(workspace_id, { wrapped_dek: wrapped });
   dekCache.set(workspace_id, fresh);
   return fresh;
 }
@@ -242,16 +238,7 @@ export function decryptValue(
  * Never logs the plaintext.
  */
 export function get(ctx: SessionContext, key: string): string | null {
-  const row = db
-    .prepare(
-      `SELECT ciphertext, nonce, auth_tag FROM user_secrets
-         WHERE workspace_id = ?
-           AND user_id = ?
-           AND key = ?`,
-    )
-    .get(ctx.workspace_id, ctx.user_id, key) as
-    | { ciphertext: string; nonce: string; auth_tag: string }
-    | undefined;
+  const row = storage.listUserSecrets(ctx.workspace_id, ctx.user_id).find(s => s.key === key);
   if (!row) return null;
   return decryptValue(ctx.workspace_id, row.ciphertext, row.nonce, row.auth_tag);
 }
@@ -262,27 +249,24 @@ export function get(ctx: SessionContext, key: string): string | null {
  */
 export function set(ctx: SessionContext, key: string, plaintext: string): void {
   const { ciphertext, nonce, auth_tag } = encryptValue(ctx.workspace_id, plaintext);
-  db.prepare(
-    `INSERT INTO user_secrets (workspace_id, user_id, key, ciphertext, nonce, auth_tag, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT (workspace_id, user_id, key)
-       DO UPDATE SET ciphertext = excluded.ciphertext,
-                     nonce = excluded.nonce,
-                     auth_tag = excluded.auth_tag,
-                     updated_at = datetime('now')`,
-  ).run(ctx.workspace_id, ctx.user_id, key, ciphertext, nonce, auth_tag);
+  storage.upsertUserSecret({
+    workspace_id: ctx.workspace_id,
+    user_id: ctx.user_id,
+    key,
+    ciphertext,
+    nonce,
+    auth_tag,
+  });
 }
 
 /**
  * Delete a single secret. Returns true if a row was removed.
  */
 export function del(ctx: SessionContext, key: string): boolean {
-  const res = db
-    .prepare(
-      `DELETE FROM user_secrets WHERE workspace_id = ? AND user_id = ? AND key = ?`,
-    )
-    .run(ctx.workspace_id, ctx.user_id, key);
-  return res.changes > 0;
+  const before = storage.listUserSecrets(ctx.workspace_id, ctx.user_id).length;
+  storage.deleteUserSecret(ctx.workspace_id, ctx.user_id, key);
+  const after = storage.listUserSecrets(ctx.workspace_id, ctx.user_id).length;
+  return before > after;
 }
 
 /**
@@ -292,13 +276,10 @@ export function del(ctx: SessionContext, key: string): boolean {
  * asks.
  */
 export function listMasked(ctx: SessionContext): { key: string; updated_at: string }[] {
-  return db
-    .prepare(
-      `SELECT key, updated_at FROM user_secrets
-         WHERE workspace_id = ? AND user_id = ?
-         ORDER BY key`,
-    )
-    .all(ctx.workspace_id, ctx.user_id) as { key: string; updated_at: string }[];
+  return storage.listUserSecrets(ctx.workspace_id, ctx.user_id).map(s => ({
+    key: s.key,
+    updated_at: s.updated_at,
+  }));
 }
 
 /**
@@ -315,20 +296,7 @@ export function loadForRun(
   keys: string[],
 ): Record<string, string> {
   if (keys.length === 0) return {};
-  const placeholders = keys.map(() => '?').join(', ');
-  const rows = db
-    .prepare(
-      `SELECT key, ciphertext, nonce, auth_tag FROM user_secrets
-         WHERE workspace_id = ?
-           AND user_id = ?
-           AND key IN (${placeholders})`,
-    )
-    .all(ctx.workspace_id, ctx.user_id, ...keys) as {
-    key: string;
-    ciphertext: string;
-    nonce: string;
-    auth_tag: string;
-  }[];
+  const rows = storage.listUserSecrets(ctx.workspace_id, ctx.user_id).filter(s => keys.includes(s.key));
   const out: Record<string, string> = {};
   for (const row of rows) {
     try {
@@ -352,7 +320,5 @@ export function loadForRun(
  * needs to know whether a wrapped_dek is present (for rewrap visibility).
  */
 export function getWorkspace(workspace_id: string): WorkspaceRecord | undefined {
-  return db
-    .prepare('SELECT * FROM workspaces WHERE id = ?')
-    .get(workspace_id) as WorkspaceRecord | undefined;
+  return storage.getWorkspace(workspace_id);
 }

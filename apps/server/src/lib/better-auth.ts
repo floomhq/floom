@@ -27,7 +27,7 @@ import { betterAuth } from 'better-auth';
 import { getMigrations } from 'better-auth/db/migration';
 import { organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { cleanupUserOrphans } from '../services/cleanup.js';
 import {
   renderResetPasswordEmail,
@@ -203,7 +203,7 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
     // Pass the existing better-sqlite3 instance directly; Better Auth's
     // Kysely adapter detects the SqliteDatabase shape. Tables are created
     // on boot by `runAuthMigrations()`, not lazily on first query.
-    database: db,
+    database: storage.getRawDatabase(),
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -430,13 +430,13 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
             try {
               // Priority 1: Mirror user into Floom's users table.
               // auth_provider 'better-auth' identifies these as cloud-managed accounts.
-              db.prepare(
-                `INSERT INTO users (id, email, name, auth_provider, auth_subject)
-                 VALUES (?, ?, ?, 'better-auth', ?)
-                 ON CONFLICT (id) DO UPDATE SET
-                   email = excluded.email,
-                   name = excluded.name`,
-              ).run(user.id, user.email, user.name || null, user.id);
+              storage.upsertUser({
+                id: user.id,
+                email: user.email,
+                name: user.name || null,
+                auth_provider: 'better-auth',
+                auth_subject: user.id,
+              });
 
               // Priority 2: Provision the personal workspace.
               // provisionPersonalWorkspace is idempotent: if the user somehow
@@ -619,15 +619,7 @@ export async function runAuthMigrations(): Promise<{
 
 export function purgeUnverifiedAuthSessions(): number {
   if (!isCloudMode()) return 0;
-  const result = db
-    .prepare(
-      `DELETE FROM "session"
-        WHERE "userId" IN (
-          SELECT "id" FROM "user" WHERE COALESCE("emailVerified", 0) = 0
-        )`,
-    )
-    .run();
-  return Number(result.changes || 0);
+  return storage.purgeUnverifiedAuthSessions();
 }
 
 /**

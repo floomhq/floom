@@ -13,7 +13,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { resolveUserContext } from '../services/session.js';
 import type { AppReviewRecord } from '../types.js';
 
@@ -48,25 +48,10 @@ reviewsRouter.get('/:slug/reviews', async (c) => {
 
   // Summary: count + average rating across ALL workspaces. Reviews are
   // per-app, not per-workspace, so a single app's review list is global.
-  const summary = db
-    .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(AVG(rating), 0) AS avg
-         FROM app_reviews
-        WHERE app_slug = ?`,
-    )
-    .get(slug) as { count: number; avg: number };
+  const summary = storage.getAppReviewSummary(slug);
 
   // Recent reviews with a joined display name from users.
-  const rows = db
-    .prepare(
-      `SELECT app_reviews.*, users.name AS author_name, users.email AS author_email
-         FROM app_reviews
-         LEFT JOIN users ON users.id = app_reviews.user_id
-        WHERE app_reviews.app_slug = ?
-        ORDER BY app_reviews.created_at DESC
-        LIMIT ?`,
-    )
-    .all(slug, limit) as Array<AppReviewRecord & { author_name: string | null; author_email: string | null }>;
+  const rows = storage.listAppReviews(slug, limit);
 
   return c.json({
     summary: {
@@ -91,9 +76,7 @@ reviewsRouter.post('/:slug/reviews', async (c) => {
   const slug = c.req.param('slug') || '';
 
   // Confirm the app exists so we don't accumulate orphan reviews.
-  const app = db
-    .prepare('SELECT id FROM apps WHERE slug = ?')
-    .get(slug) as { id: string } | undefined;
+  const app = storage.getApp(slug);
   if (!app) {
     return c.json({ error: 'App not found', code: 'app_not_found' }, 404);
   }
@@ -114,41 +97,26 @@ reviewsRouter.post('/:slug/reviews', async (c) => {
   const { rating, title, body: reviewBody } = parsed.data;
 
   const now = new Date().toISOString();
-  const existing = db
-    .prepare(
-      `SELECT id FROM app_reviews
-        WHERE workspace_id = ? AND app_slug = ? AND user_id = ?`,
-    )
-    .get(ctx.workspace_id, slug, ctx.user_id) as { id: string } | undefined;
+  const existing = storage.getAppReview(ctx.workspace_id, slug, ctx.user_id);
 
   let id: string;
   if (existing) {
     id = existing.id;
-    db.prepare(
-      `UPDATE app_reviews
-          SET rating = ?, title = ?, body = ?, updated_at = ?
-        WHERE id = ?`,
-    ).run(rating, title ?? null, reviewBody ?? null, now, id);
+    storage.updateAppReview(id, { rating, title: title ?? null, body: reviewBody ?? null });
   } else {
     id = `rev_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-    db.prepare(
-      `INSERT INTO app_reviews
-        (id, workspace_id, app_slug, user_id, rating, title, body, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
+    storage.createAppReview({
       id,
-      ctx.workspace_id,
-      slug,
-      ctx.user_id,
+      workspace_id: ctx.workspace_id,
+      app_slug: slug,
+      user_id: ctx.user_id,
       rating,
-      title ?? null,
-      reviewBody ?? null,
-      now,
-      now,
-    );
+      title: title ?? null,
+      body: reviewBody ?? null,
+    });
   }
 
-  const row = db.prepare('SELECT * FROM app_reviews WHERE id = ?').get(id) as AppReviewRecord;
+  const row = storage.getAppReviewById(id)!;
   return c.json({ review: serialize(row, ctx.email?.split('@')[0] || null) }, existing ? 200 : 201);
 });
 

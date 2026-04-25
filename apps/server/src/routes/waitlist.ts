@@ -22,8 +22,8 @@
 
 import { Hono } from 'hono';
 import { createHash, randomUUID } from 'node:crypto';
-import { db } from '../db.js';
 import { renderWaitlistConfirmationEmail, sendEmail } from '../lib/email.js';
+import { storage } from '../services/storage.js';
 import { extractIp, isRateLimitDisabled } from '../lib/rate-limit.js';
 import { hasValidAdminBearer } from '../lib/auth.js';
 
@@ -185,36 +185,7 @@ export function insertWaitlistSignup(opts: {
   deploy_repo_url: string | null;
   deploy_intent: string | null;
 }): WaitlistInsertResult {
-  const id = `wl_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
-  try {
-    db.prepare(
-      `INSERT INTO waitlist_signups (id, email, source, user_agent, ip_hash, deploy_repo_url, deploy_intent)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      opts.email,
-      opts.source,
-      opts.user_agent,
-      opts.ip_hash,
-      opts.deploy_repo_url,
-      opts.deploy_intent,
-    );
-    return { inserted: true, id };
-  } catch (err) {
-    // UNIQUE constraint on LOWER(email) → duplicate. Return the existing
-    // row's id so callers can still correlate without leaking that the
-    // email was pre-existing to the HTTP caller.
-    const msg = (err as Error).message || '';
-    if (msg.includes('UNIQUE') || msg.includes('constraint')) {
-      const existing = db
-        .prepare(
-          `SELECT id FROM waitlist_signups WHERE LOWER(email) = LOWER(?) LIMIT 1`,
-        )
-        .get(opts.email) as { id: string } | undefined;
-      return { inserted: false, id: existing?.id ?? null };
-    }
-    throw err;
-  }
+  return storage.upsertWaitlistSignup(opts);
 }
 
 // The confirmation email renderer lives in `lib/email.ts` alongside every

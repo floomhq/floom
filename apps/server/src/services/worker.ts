@@ -9,21 +9,18 @@
 //
 // One worker per server process. Multiple replicas are safe because claimJob
 // uses an atomic UPDATE...WHERE status='queued'.
-import { db } from '../db.js';
 import { newRunId } from '../lib/ids.js';
+import { storage } from './storage.js';
 import {
-  claimJob,
   completeJob,
   failJob,
   getJob,
-  nextQueuedJob,
   requeueJob,
 } from './jobs.js';
 import { dispatchRun, getRun } from './runner.js';
 import { deliverWebhook, type WebhookPayload } from './webhook.js';
 import { getJobTriggerContext } from './triggers-worker.js';
 import type {
-  AppRecord,
   JobRecord,
   NormalizedManifest,
   RunRecord,
@@ -74,14 +71,10 @@ export function stopJobWorker(): void {
  * deterministically without waiting for the setTimeout loop.
  */
 export async function processOneJob(): Promise<JobRecord | null> {
-  const candidate = nextQueuedJob();
-  if (!candidate) return null;
-  const claimed = claimJob(candidate.id);
-  if (!claimed) return null; // another worker won
+  const claimed = storage.claimNextJob();
+  if (!claimed) return null;
 
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(claimed.app_id) as AppRecord | undefined;
+  const app = storage.getAppById(claimed.app_id);
   if (!app) {
     failJob(claimed.id, { message: `App ${claimed.app_id} not found` }, null);
     await deliverCompletion(claimed.id);
@@ -110,9 +103,13 @@ export async function processOneJob(): Promise<JobRecord | null> {
     : undefined;
 
   const runId = newRunId();
-  db.prepare(
-    `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
-  ).run(runId, app.id, claimed.action, JSON.stringify(inputs));
+  storage.createRun({
+    id: runId,
+    app_id: app.id,
+    action: claimed.action,
+    inputs,
+    workspace_id: app.workspace_id,
+  });
 
   dispatchRun(app, manifest, runId, claimed.action, inputs, perCallSecrets);
 
@@ -120,10 +117,12 @@ export async function processOneJob(): Promise<JobRecord | null> {
 
   if (!run) {
     // Timed out. Mark the run as timeout if we can, mark the job failed.
-    db.prepare(
-      `UPDATE runs SET status='timeout', error='Job timeout exceeded',
-        error_type='timeout', finished_at=datetime('now') WHERE id = ?`,
-    ).run(runId);
+    storage.updateRun(runId, {
+      status: 'timeout',
+      error: 'Job timeout exceeded',
+      error_type: 'timeout',
+      finished: true,
+    });
     await handleFailure(claimed.id, {
       message: `Job exceeded timeout_ms=${claimed.timeout_ms}`,
       type: 'timeout',

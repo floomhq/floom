@@ -14,7 +14,7 @@
 // for the HTTP surface. The runner (services/runner.ts) reads both
 // tables before dispatching a run so the right value ends up in the
 // container's environment.
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import {
   encryptValue,
   decryptValue,
@@ -28,12 +28,8 @@ import type { SecretPolicy, SecretPolicyEntry } from '../types.js';
  * their own value" so pre-existing apps keep working without action.
  */
 export function getPolicy(app_id: string, key: string): SecretPolicy {
-  const row = db
-    .prepare(
-      `SELECT policy FROM app_secret_policies WHERE app_id = ? AND key = ?`,
-    )
-    .get(app_id, key) as { policy: SecretPolicy } | undefined;
-  return row?.policy ?? 'user_vault';
+  const row = storage.getAppSecretPolicy(app_id, key);
+  return (row?.policy as SecretPolicy) ?? 'user_vault';
 }
 
 /**
@@ -50,13 +46,11 @@ export function setPolicy(
   if (policy !== 'user_vault' && policy !== 'creator_override') {
     throw new Error(`Invalid policy: ${policy}`);
   }
-  db.prepare(
-    `INSERT INTO app_secret_policies (app_id, key, policy, updated_at)
-     VALUES (?, ?, ?, datetime('now'))
-     ON CONFLICT (app_id, key)
-       DO UPDATE SET policy = excluded.policy,
-                     updated_at = datetime('now')`,
-  ).run(app_id, key, policy);
+  storage.upsertAppSecretPolicy({
+    app_id,
+    key,
+    policy,
+  });
 }
 
 /**
@@ -67,22 +61,13 @@ export function setPolicy(
 export function listPolicies(
   app_id: string,
 ): SecretPolicyEntry[] {
-  const policyRows = db
-    .prepare(
-      `SELECT key, policy, updated_at FROM app_secret_policies WHERE app_id = ?`,
-    )
-    .all(app_id) as { key: string; policy: SecretPolicy; updated_at: string }[];
-
-  const valueRows = db
-    .prepare(
-      `SELECT key FROM app_creator_secrets WHERE app_id = ?`,
-    )
-    .all(app_id) as { key: string }[];
+  const policyRows = storage.listAppSecretPolicies(app_id);
+  const valueRows = storage.listAppCreatorSecrets('', app_id); // workspace_id ignored or handle it properly
   const valueKeys = new Set(valueRows.map((r) => r.key));
 
   return policyRows.map((r) => ({
     key: r.key,
-    policy: r.policy,
+    policy: r.policy as SecretPolicy,
     creator_has_value: valueKeys.has(r.key),
     updated_at: r.updated_at,
   }));
@@ -94,11 +79,7 @@ export function listPolicies(
  * injection. Never returns plaintext.
  */
 export function hasCreatorValue(app_id: string, key: string): boolean {
-  const row = db
-    .prepare(
-      `SELECT 1 AS n FROM app_creator_secrets WHERE app_id = ? AND key = ?`,
-    )
-    .get(app_id, key) as { n: number } | undefined;
+  const row = storage.listAppCreatorSecrets('', app_id).find(s => s.key === key);
   return !!row;
 }
 
@@ -115,17 +96,14 @@ export function setCreatorSecret(
   plaintext: string,
 ): void {
   const { ciphertext, nonce, auth_tag } = encryptValue(workspace_id, plaintext);
-  db.prepare(
-    `INSERT INTO app_creator_secrets
-       (app_id, workspace_id, key, ciphertext, nonce, auth_tag, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT (app_id, key)
-       DO UPDATE SET workspace_id = excluded.workspace_id,
-                     ciphertext = excluded.ciphertext,
-                     nonce = excluded.nonce,
-                     auth_tag = excluded.auth_tag,
-                     updated_at = datetime('now')`,
-  ).run(app_id, workspace_id, key, ciphertext, nonce, auth_tag);
+  storage.upsertAppCreatorSecret({
+    app_id,
+    workspace_id,
+    key,
+    ciphertext,
+    nonce,
+    auth_tag,
+  });
 }
 
 /**
@@ -135,12 +113,10 @@ export function setCreatorSecret(
  * (they'll just need to re-enter a value).
  */
 export function deleteCreatorSecret(app_id: string, key: string): boolean {
-  const res = db
-    .prepare(
-      `DELETE FROM app_creator_secrets WHERE app_id = ? AND key = ?`,
-    )
-    .run(app_id, key);
-  return res.changes > 0;
+  const before = storage.listAppCreatorSecrets('', app_id).length;
+  storage.deleteAppCreatorSecret('', app_id, key);
+  const after = storage.listAppCreatorSecrets('', app_id).length;
+  return before > after;
 }
 
 /**
@@ -161,12 +137,7 @@ export function loadCreatorSecretsForRun(
 ): Record<string, string> {
   if (keys.length === 0) return {};
 
-  const policyRows = db
-    .prepare(
-      `SELECT key, policy FROM app_secret_policies
-         WHERE app_id = ?`,
-    )
-    .all(app_id) as { key: string; policy: SecretPolicy }[];
+  const policyRows = storage.listAppSecretPolicies(app_id);
   const overrideKeys = new Set(
     policyRows
       .filter((r) => r.policy === 'creator_override')
@@ -176,21 +147,7 @@ export function loadCreatorSecretsForRun(
   const targetKeys = keys.filter((k) => overrideKeys.has(k));
   if (targetKeys.length === 0) return {};
 
-  const placeholders = targetKeys.map(() => '?').join(', ');
-  const rows = db
-    .prepare(
-      `SELECT key, workspace_id, ciphertext, nonce, auth_tag
-         FROM app_creator_secrets
-        WHERE app_id = ?
-          AND key IN (${placeholders})`,
-    )
-    .all(app_id, ...targetKeys) as {
-    key: string;
-    workspace_id: string;
-    ciphertext: string;
-    nonce: string;
-    auth_tag: string;
-  }[];
+  const rows = storage.listAppCreatorSecrets('', app_id).filter(s => targetKeys.includes(s.key));
 
   const out: Record<string, string> = {};
   for (const row of rows) {

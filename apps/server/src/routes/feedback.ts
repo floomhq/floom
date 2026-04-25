@@ -15,7 +15,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { resolveUserContext } from '../services/session.js';
 import { AUTH_DOCS_URL } from '../lib/auth.js';
 import {
@@ -93,20 +93,16 @@ feedbackRouter.post('/', async (c) => {
   const { text, email, url } = parsed.data;
 
   const id = `fb_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-  db.prepare(
-    `INSERT INTO feedback
-       (id, workspace_id, user_id, device_id, email, url, text, ip_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
+  storage.createFeedback({
     id,
-    ctx.workspace_id || null,
-    ctx.is_authenticated ? ctx.user_id : null,
-    ctx.device_id || null,
-    email || null,
-    url || null,
+    workspace_id: ctx.workspace_id || null,
+    user_id: ctx.is_authenticated ? ctx.user_id : null,
+    device_id: ctx.device_id || null,
+    email: email || null,
+    url: url || null,
     text,
-    ipHash,
-  );
+    ip_hash: ipHash,
+  });
 
   // Also log to stdout so Federico sees new feedback in docker logs
   // without needing to run a SQL query.
@@ -211,9 +207,7 @@ feedbackRouter.get('/', async (c) => {
     );
   }
   const limit = Math.max(1, Math.min(500, Number(c.req.query('limit') || 100)));
-  const rows = db
-    .prepare('SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?')
-    .all(limit);
+  const rows = storage.listFeedback(limit);
   return c.json({ feedback: rows });
 });
 

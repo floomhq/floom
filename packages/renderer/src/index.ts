@@ -13,4 +13,5 @@
 export * from './contract/index.js';
 export * from './outputs/index.js';
 export * from './inputs/index.js';
+export * from './json/index.js';
 export { RendererShell, RendererErrorBoundary, resolveRenderTarget } from './RendererShell.js';

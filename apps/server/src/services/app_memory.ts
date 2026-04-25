@@ -15,7 +15,7 @@
 //
 // The `device_id` column stays populated so the re-key transaction can
 // find these rows on login (see session.ts rekeyDevice).
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import type { NormalizedManifest, SessionContext } from '../types.js';
 
 export class MemoryKeyNotAllowedError extends Error {
@@ -44,12 +44,10 @@ function assertAllowed(manifest: NormalizedManifest | null, key: string): void {
  * or the manifest is corrupted. Pure helper — doesn't touch ctx.
  */
 function loadManifest(app_slug: string): NormalizedManifest | null {
-  const row = db
-    .prepare('SELECT manifest FROM apps WHERE slug = ?')
-    .get(app_slug) as { manifest: string } | undefined;
-  if (!row) return null;
+  const app = storage.getApp(app_slug);
+  if (!app) return null;
   try {
-    return JSON.parse(row.manifest) as NormalizedManifest;
+    return JSON.parse(app.manifest || '{}') as NormalizedManifest;
   } catch {
     return null;
   }
@@ -65,22 +63,12 @@ export function get(
   key: string,
 ): unknown | null {
   assertAllowed(loadManifest(app_slug), key);
-  const row = db
-    .prepare(
-      `SELECT value FROM app_memory
-         WHERE workspace_id = ?
-           AND app_slug = ?
-           AND user_id = ?
-           AND key = ?`,
-    )
-    .get(ctx.workspace_id, app_slug, ctx.user_id, key) as
-    | { value: string }
-    | undefined;
-  if (!row) return null;
+  const value = storage.getAppMemory(ctx.workspace_id, app_slug, ctx.user_id, key);
+  if (value === undefined) return null;
   try {
-    return JSON.parse(row.value);
+    return JSON.parse(value);
   } catch {
-    return row.value;
+    return value;
   }
 }
 
@@ -96,21 +84,14 @@ export function set(
 ): void {
   assertAllowed(loadManifest(app_slug), key);
   const json = JSON.stringify(value ?? null);
-  db.prepare(
-    `INSERT INTO app_memory (workspace_id, app_slug, user_id, device_id, key, value, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT (workspace_id, app_slug, user_id, key)
-       DO UPDATE SET value = excluded.value,
-                     device_id = COALESCE(excluded.device_id, app_memory.device_id),
-                     updated_at = datetime('now')`,
-  ).run(
-    ctx.workspace_id,
+  storage.setAppMemory({
+    workspace_id: ctx.workspace_id,
     app_slug,
-    ctx.user_id,
-    ctx.device_id,
+    user_id: ctx.user_id,
+    device_id: ctx.device_id,
     key,
-    json,
-  );
+    value: json,
+  });
 }
 
 /**
@@ -123,16 +104,7 @@ export function del(
 ): boolean {
   // No manifest check on delete — if the manifest changed and a key was
   // removed, we still want the user to be able to clean it up.
-  const res = db
-    .prepare(
-      `DELETE FROM app_memory
-         WHERE workspace_id = ?
-           AND app_slug = ?
-           AND user_id = ?
-           AND key = ?`,
-    )
-    .run(ctx.workspace_id, app_slug, ctx.user_id, key);
-  return res.changes > 0;
+  return storage.deleteAppMemory(ctx.workspace_id, app_slug, ctx.user_id, key);
 }
 
 /**
@@ -143,18 +115,7 @@ export function list(
   ctx: SessionContext,
   app_slug: string,
 ): Record<string, unknown> {
-  const rows = db
-    .prepare(
-      `SELECT key, value FROM app_memory
-         WHERE workspace_id = ?
-           AND app_slug = ?
-           AND user_id = ?
-         ORDER BY key`,
-    )
-    .all(ctx.workspace_id, app_slug, ctx.user_id) as {
-    key: string;
-    value: string;
-  }[];
+  const rows = storage.listAppMemory(ctx.workspace_id, app_slug, ctx.user_id);
   const out: Record<string, unknown> = {};
   for (const row of rows) {
     try {
@@ -180,19 +141,7 @@ export function loadForRun(
   const manifest = loadManifest(app_slug);
   const allowed = manifest?.memory_keys || [];
   if (allowed.length === 0) return {};
-  const placeholders = allowed.map(() => '?').join(', ');
-  const rows = db
-    .prepare(
-      `SELECT key, value FROM app_memory
-         WHERE workspace_id = ?
-           AND app_slug = ?
-           AND user_id = ?
-           AND key IN (${placeholders})`,
-    )
-    .all(ctx.workspace_id, app_slug, ctx.user_id, ...allowed) as {
-    key: string;
-    value: string;
-  }[];
+  const rows = storage.listAppMemoryKeys(ctx.workspace_id, app_slug, ctx.user_id, allowed);
   const out: Record<string, unknown> = {};
   for (const row of rows) {
     try {

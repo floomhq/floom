@@ -3,8 +3,8 @@
 // Results are cached for 15s so a busy scrape doesn't hammer SQLite.
 
 import { Hono } from 'hono';
-import { db } from '../db.js';
 import { AUTH_DOCS_URL } from '../lib/auth.js';
+import { storage } from '../services/storage.js';
 import { snapshotMcpToolCalls, snapshotRateLimitHits } from '../lib/metrics-counters.js';
 
 export const metricsRouter = new Hono();
@@ -29,15 +29,13 @@ function collectMetrics(): string {
   const lines: string[] = [];
 
   // floom_apps_total
-  const apps = (db.prepare('SELECT COUNT(*) as c FROM apps').get() as { c: number }).c;
+  const apps = storage.countApps();
   lines.push('# HELP floom_apps_total Total number of registered apps in the Floom hub.');
   lines.push('# TYPE floom_apps_total gauge');
   lines.push(`floom_apps_total ${apps}`);
 
   // floom_runs_total{status=...}
-  const statusRows = db
-    .prepare(`SELECT status, COUNT(*) as count FROM runs GROUP BY status`)
-    .all() as Array<{ status: string; count: number }>;
+  const statusRows = storage.getRunStatusCounts();
   const statusCounts = new Map<string, number>();
   for (const r of statusRows) statusCounts.set(r.status, r.count);
   lines.push('# HELP floom_runs_total Total runs grouped by status.');
@@ -55,15 +53,7 @@ function collectMetrics(): string {
   // `device_id` also counts; anonymous visitors have user_id='local' and a
   // unique device_id, so we union the two. COALESCE so NULL user_id rows
   // fall back to device_id.
-  const activeUsers = (
-    db
-      .prepare(
-        `SELECT COUNT(DISTINCT COALESCE(user_id, '') || ':' || COALESCE(device_id, '')) as c
-         FROM runs
-         WHERE started_at >= datetime('now', '-1 day')`,
-      )
-      .get() as { c: number }
-  ).c;
+  const activeUsers = storage.getActiveUsersLast24h();
   lines.push('# HELP floom_active_users_last_24h Distinct (user_id, device_id) pairs that ran an app in the past 24h.');
   lines.push('# TYPE floom_active_users_last_24h gauge');
   lines.push(`floom_active_users_last_24h ${activeUsers}`);

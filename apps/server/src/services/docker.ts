@@ -6,7 +6,7 @@ import { writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NormalizedManifest } from '../types.js';
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import {
   CONTAINER_INPUTS_DIR,
   materializeFileInputs,
@@ -215,9 +215,7 @@ export async function runAppContainer(opts: {
 
   let imageName = opts.image;
   if (!imageName) {
-    const appRow = db
-      .prepare('SELECT docker_image FROM apps WHERE id = ?')
-      .get(opts.appId) as { docker_image: string | null } | undefined;
+    const appRow = storage.getAppById(opts.appId);
     imageName = appRow?.docker_image || imageTag(opts.appId);
   }
 

@@ -1,6 +1,6 @@
 // POST /api/parse — natural-language prompt → structured inputs for a specific app.
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import { parsePrompt } from '../services/parser.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
@@ -19,9 +19,7 @@ parseRouter.post('/', async (c) => {
     return c.json({ error: '"app_slug" is required' }, 400);
   }
 
-  const row = db
-    .prepare('SELECT * FROM apps WHERE slug = ?')
-    .get(body.app_slug) as AppRecord | undefined;
+  const row = storage.getApp(body.app_slug);
   if (!row) return c.json({ error: `App not found: ${body.app_slug}` }, 404);
 
   let manifest: NormalizedManifest;

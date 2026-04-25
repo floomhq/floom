@@ -35,9 +35,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from '../db.js';
 import { alertLaunchDemoInactive } from '../lib/alerts.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
+import { storage } from './storage.js';
 import type { NormalizedManifest } from '../types.js';
 
 export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
@@ -403,18 +403,15 @@ function demoSecretKeys(): string[] {
  * is unset.
  */
 function seedLaunchDemoSecretsFromEnv(logger: SeedLogger = console): void {
-  const selectGlobal = db.prepare(
-    "SELECT id FROM secrets WHERE name = ? AND app_id IS NULL",
-  );
-  const insertGlobal = db.prepare(
-    'INSERT INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, NULL)',
-  );
-  for (const key of demoSecretKeys()) {
+  const needs = demoSecretKeys();
+  for (const key of needs) {
     const envVal = process.env[key];
     if (!envVal || envVal.length < 20) continue;
-    const existing = selectGlobal.get(key) as { id: string } | undefined;
+    
+    const existing = storage.listAdminSecrets(null).find(s => s.name === key);
     if (existing) continue;
-    insertGlobal.run(newSecretId(), key, envVal);
+    
+    storage.upsertAdminSecret(key, envVal, null);
     logger.log(`[launch-demos] seeded global ${key} from env`);
   }
 }
@@ -484,13 +481,10 @@ export async function resolveDemoImageTag(opts: {
 // guard below makes it a no-op. Network post is best-effort inside
 // alertLaunchDemoInactive; a webhook outage never blocks seeding.
 function markLaunchDemoInactive(slug: string, detail: string): void {
-  const row = db
-    .prepare('SELECT id, status FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; status: string } | undefined;
+  const row = storage.getApp(slug);
   if (!row || row.status === 'inactive') return;
-  db.prepare(
-    "UPDATE apps SET status = 'inactive', updated_at = datetime('now') WHERE id = ?",
-  ).run(row.id);
+  
+  storage.updateApp(row.id, { status: 'inactive' });
   console.warn(`[launch-demos] ${slug}: marking inactive (${detail})`);
   alertLaunchDemoInactive(slug, detail);
 }
@@ -537,56 +531,6 @@ export async function seedLaunchDemos(
     return { apps_added: 0, apps_existing: 0, apps_failed: 0 };
   }
 
-  const existsBySlug = db.prepare(
-    'SELECT id, status, docker_image FROM apps WHERE slug = ?',
-  );
-  // Launch-demo apps are first-party showcases — always 'published'. User
-  // ingestion paths (openapi-ingest / docker-image-ingest) go through the
-  // manual review gate (publish_status='pending_review' by default).
-  //
-  // Wireframe parity (2026-04-23): seed hero=1 on the 3 AI demo apps so
-  // the /apps grid renders the accent "HERO" tag per v17 store.html. All
-  // three slugs in DEMOS are the bounded AI demos (competitor-lens,
-  // ai-readiness-audit, pitch-coach) so a blanket hero=1 is correct here;
-  // if a non-hero demo is added later, gate this on demo.slug.
-  // Note: we force app_type='docker', visibility='public', base_url=NULL on
-  // every insert + update. Production incident 2026-04-25: a prior
-  // preseed attempt had left ai-readiness-audit rows with
-  // app_type='proxied' + base_url='http://172.17.0.1:4310' +
-  // visibility='private'. The older updateApp kept those stale fields,
-  // and the next seed refreshed only name/desc/image/etc. The runner
-  // then tried to POST HTTP to the dead proxied URL instead of running
-  // the Docker image, and /api/hub filtered the private row out. Force
-  // the showcase shape on every seed so stale rows heal themselves.
-  const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, publish_status, hero, app_type, visibility, base_url)
-     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'published', 1, 'docker', 'public', NULL)`,
-  );
-  const updateApp = db.prepare(
-    `UPDATE apps
-       SET name = ?,
-           description = ?,
-           manifest = ?,
-           status = 'active',
-           docker_image = ?,
-           code_path = ?,
-           category = ?,
-           author = ?,
-           icon = ?,
-           hero = 1,
-           app_type = 'docker',
-           visibility = 'public',
-           base_url = NULL,
-           updated_at = datetime('now')
-     WHERE id = ?`,
-  );
-  const markAppActive = db.prepare(
-    `UPDATE apps
-       SET status = 'active',
-           updated_at = datetime('now')
-     WHERE id = ?`,
-  );
-
   let added = 0;
   let existing = 0;
   let failed = 0;
@@ -603,15 +547,10 @@ export async function seedLaunchDemos(
     'competitor-analyzer',
     'resume-screener',
   ];
-  const markPreviousInactive = db.prepare(
-    `UPDATE apps
-       SET status = 'inactive',
-           updated_at = datetime('now')
-     WHERE slug = ? AND status != 'inactive'`,
-  );
   for (const oldSlug of PREVIOUS_SHOWCASE_SLUGS) {
-    const info = markPreviousInactive.run(oldSlug) as { changes: number };
-    if (info.changes > 0) {
+    const row = storage.getApp(oldSlug);
+    if (row && row.status !== 'inactive') {
+      storage.updateApp(row.id, { status: 'inactive' });
       logger.log(
         `[launch-demos] ${oldSlug}: marked inactive (2026-04-25 roster swap)`,
       );
@@ -632,11 +571,7 @@ export async function seedLaunchDemos(
       continue;
     }
 
-    // Insert the DB row if missing. Existing launch demos are refreshed in
-    // place so preview picks up current manifests + image tags after deploy.
-    const row = existsBySlug.get(demo.slug) as
-      | { id: string; status: string; docker_image: string | null }
-      | undefined;
+    const row = storage.getApp(demo.slug);
     const resolvedImage = await resolveDemoImageTag({
       contextPath,
       demo,
@@ -646,7 +581,7 @@ export async function seedLaunchDemos(
     });
     if (resolvedImage.kind === 'keep_previous') {
       if (row) {
-        markAppActive.run(row.id);
+        storage.updateApp(row.id, { status: 'active' });
         keptPrevious++;
         existing++;
         logger.warn(
@@ -683,17 +618,21 @@ export async function seedLaunchDemos(
     const codePath = `reused:launch-demo:${demo.slug}:${imageTag.split(':')[1]}`;
     const manifestJson = JSON.stringify(demo.manifest);
     if (row) {
-      updateApp.run(
-        demo.name,
-        demo.description,
-        manifestJson,
-        imageTag,
-        codePath,
-        demo.category,
-        demo.author,
-        demo.icon,
-        row.id,
-      );
+      storage.updateApp(row.id, {
+        name: demo.name,
+        description: demo.description,
+        manifest: manifestJson,
+        status: 'active',
+        docker_image: imageTag,
+        code_path: codePath,
+        category: demo.category,
+        author: demo.author,
+        icon: demo.icon,
+        hero: 1,
+        app_type: 'docker',
+        visibility: 'public',
+        base_url: null as any,
+      });
       if (row.docker_image !== imageTag) {
         logger.log(
           `[launch-demos] ${demo.slug}: refreshed existing app to ${imageTag}`,
@@ -707,18 +646,24 @@ export async function seedLaunchDemos(
       continue;
     }
     const appId = newAppId();
-    insertApp.run(
-      appId,
-      demo.slug,
-      demo.name,
-      demo.description,
-      manifestJson,
-      imageTag,
-      codePath,
-      demo.category,
-      demo.author,
-      demo.icon,
-    );
+    storage.createApp({
+      id: appId,
+      slug: demo.slug,
+      name: demo.name,
+      description: demo.description,
+      manifest: manifestJson,
+      status: 'active',
+      docker_image: imageTag,
+      code_path: codePath,
+      category: demo.category,
+      author: demo.author,
+      icon: demo.icon,
+      publish_status: 'published',
+      hero: 1,
+      app_type: 'docker',
+      visibility: 'public',
+      base_url: null as any,
+    });
     added++;
     logger.log(`[launch-demos] ${demo.slug}: inserted (app_id=${appId})`);
   }

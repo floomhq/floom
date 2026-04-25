@@ -14,7 +14,7 @@
 // SVG is used deliberately (no native image deps). Modern crawlers
 // (Discord, Slack, OG parsers, most previewers) render SVG og:image.
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { storage } from '../services/storage.js';
 import type { AppRecord } from '../types.js';
 
 export const ogRouter = new Hono();
@@ -149,16 +149,7 @@ ogRouter.get('/:slugPng{[a-z0-9][a-z0-9-]*\\.svg}', (c) => {
   const param = c.req.param('slugPng');
   const slug = param.replace(/\.svg$/, '');
 
-  const row = db
-    .prepare(
-      `SELECT apps.*, users.name AS author_name, users.email AS author_email
-         FROM apps
-         LEFT JOIN users ON apps.author = users.id
-        WHERE apps.slug = ?`,
-    )
-    .get(slug) as
-    | (AppRecord & { author_name: string | null; author_email: string | null })
-    | undefined;
+  const row = storage.getAppWithAuthor(slug);
 
   let copy: OgCopy;
   if (!row) {

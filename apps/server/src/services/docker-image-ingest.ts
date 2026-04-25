@@ -33,7 +33,7 @@
 //     still write the policy row; the run just errors cleanly with
 //     missing_secret instead of the creator discovering at run time.
 import Docker from 'dockerode';
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { normalizeManifest, ManifestError } from './manifest.js';
 import { slugify, SlugTakenError, deriveSlugSuggestions } from './openapi-ingest.js';
@@ -416,9 +416,7 @@ export async function ingestAppFromDockerImage(args: {
   // Slug collision guard. Mirrors ingestAppFromSpec: same workspace can
   // re-publish to update the row; other workspaces get a SlugTakenError with
   // three recovery suggestions so the UI can render pills.
-  const existing = db
-    .prepare('SELECT id, workspace_id, visibility FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string; visibility: string } | undefined;
+  const existing = storage.getApp(slug);
   if (
     existing &&
     existing.workspace_id !== args.workspace_id &&
@@ -451,60 +449,36 @@ export async function ingestAppFromDockerImage(args: {
   if (existing) {
     appId = existing.id;
     created = false;
-    db.prepare(
-      `UPDATE apps SET
-         name=?, description=?, manifest=?, category=?, app_type='docker',
-         docker_image=?, base_url=NULL, auth_type=NULL, auth_config=NULL,
-         openapi_spec_url=NULL, openapi_spec_cached=NULL, visibility=?,
-         is_async=0, webhook_url=NULL, timeout_ms=NULL, retries=0,
-         async_mode=NULL, workspace_id=?, author=?, updated_at=datetime('now')
-       WHERE slug=?`,
-    ).run(
+    storage.updateApp(appId, {
       name,
       description,
-      manifestJson,
-      args.category || null,
-      args.docker_image_ref,
+      manifest: manifestJson,
+      category: args.category || null,
+      app_type: 'docker',
+      docker_image: args.docker_image_ref,
       visibility,
-      args.workspace_id,
-      args.author_user_id,
-      slug,
-    );
+      workspace_id: args.workspace_id,
+      author: args.author_user_id,
+    });
   } else {
     appId = newAppId();
     created = true;
-    // Manual publish-review gate (#362): docker-image ingest via MCP is
-    // user-driven, so new apps land as 'pending_review' and only show up
-    // on the public Store after an admin flips them. Re-ingesting an
-    // existing slug hits the UPDATE branch above and leaves publish_status
-    // untouched — a previously-published app keeps its slot.
-    db.prepare(
-      `INSERT INTO apps (
-         id, slug, name, description, manifest, status, docker_image, code_path,
-         category, author, icon, app_type, base_url, auth_type, auth_config,
-         openapi_spec_url, openapi_spec_cached, visibility, is_async,
-         webhook_url, timeout_ms, retries, async_mode, workspace_id, publish_status
-       ) VALUES (
-         ?, ?, ?, ?, ?, 'active', ?, ?,
-         ?, ?, NULL, 'docker', NULL, NULL, NULL,
-         NULL, NULL, ?, 0,
-         NULL, NULL, 0, NULL, ?, 'pending_review'
-       )`,
-    ).run(
-      appId,
+    storage.createApp({
+      id: appId,
       slug,
       name,
       description,
-      manifestJson,
-      args.docker_image_ref,
-      // code_path is unused when docker_image is set (same as seed.ts); we
-      // store a placeholder so the NOT NULL constraint is satisfied.
-      `docker-image:${slug}`,
-      args.category || null,
-      args.author_user_id,
+      manifest: manifestJson,
+      status: 'active',
+      docker_image: args.docker_image_ref,
+      code_path: `docker-image:${slug}`,
+      category: args.category || null,
+      author: args.author_user_id,
+      app_type: 'docker',
       visibility,
-      args.workspace_id,
-    );
+      workspace_id: args.workspace_id,
+      publish_status: 'pending_review',
+    });
   }
 
   // Wire secret bindings. Each (envKey → vaultKey) becomes:
@@ -515,11 +489,13 @@ export async function ingestAppFromDockerImage(args: {
   //      skip step 3; runs will surface missing_secret until the creator
   //      populates their vault and republishes.
   if (args.secret_bindings && Object.keys(args.secret_bindings).length > 0) {
-    const insertSecret = db.prepare(
-      `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
-    );
     for (const [envKey, vaultKey] of Object.entries(args.secret_bindings)) {
-      insertSecret.run(newSecretId(), envKey, '', appId);
+      storage.upsertSecret({
+        id: newSecretId(),
+        name: envKey,
+        value: '',
+        app_id: appId,
+      });
       setPolicy(appId, envKey, 'creator_override');
 
       // Best-effort: copy the caller's current vault value into creator storage.

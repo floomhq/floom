@@ -27,7 +27,7 @@
 // in-memory fake. The test harness uses this to run the full service
 // without a live Stripe API key. See `test/stress/test-w33-*.mjs`.
 
-import { db } from '../db.js';
+import { storage } from './storage.js';
 import {
   newStripeAccountRowId,
   newStripeWebhookEventRowId,
@@ -428,12 +428,7 @@ export function getCallerAccount(
   ctx: SessionContext,
 ): StripeAccountRecord | null {
   const ownerId = getCallerOwnerId(ctx);
-  const row = db
-    .prepare(
-      `SELECT * FROM stripe_accounts
-         WHERE workspace_id = ? AND user_id = ?`,
-    )
-    .get(ctx.workspace_id, ownerId) as Record<string, unknown> | undefined;
+  const row = storage.getStripeAccount(ctx.workspace_id, ownerId);
   if (!row) return null;
   return rowToAccount(row);
 }
@@ -446,9 +441,7 @@ export function getCallerAccount(
 export function getAccountByStripeId(
   stripe_account_id: string,
 ): StripeAccountRecord | null {
-  const row = db
-    .prepare(`SELECT * FROM stripe_accounts WHERE stripe_account_id = ?`)
-    .get(stripe_account_id) as Record<string, unknown> | undefined;
+  const row = storage.getStripeAccountByStripeId(stripe_account_id);
   if (!row) return null;
   return rowToAccount(row);
 }
@@ -514,24 +507,20 @@ export async function createExpressAccount(
     stripeAccountId = acct.id;
 
     const id = newStripeAccountRowId();
-    db.prepare(
-      `INSERT INTO stripe_accounts
-         (id, workspace_id, user_id, stripe_account_id, account_type,
-          country, charges_enabled, payouts_enabled, details_submitted,
-          requirements_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-    ).run(
+    storage.createStripeAccount({
       id,
-      ctx.workspace_id,
-      ownerId,
-      stripeAccountId,
+      workspace_id: ctx.workspace_id,
+      user_id: ownerId,
+      stripe_account_id: stripeAccountId,
       account_type,
       country,
-      acct.charges_enabled ? 1 : 0,
-      acct.payouts_enabled ? 1 : 0,
-      acct.details_submitted ? 1 : 0,
-      acct.requirements ? JSON.stringify(acct.requirements) : null,
-    );
+      charges_enabled: acct.charges_enabled ? 1 : 0,
+      payouts_enabled: acct.payouts_enabled ? 1 : 0,
+      details_submitted: acct.details_submitted ? 1 : 0,
+      requirements_json: acct.requirements ? JSON.stringify(acct.requirements) : null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
   }
 
   let link: StripeAccountLinkObject;
@@ -603,21 +592,13 @@ export function persistAccountState(
       `no local stripe_accounts row for ${stripe_account_id}`,
     );
   }
-  db.prepare(
-    `UPDATE stripe_accounts
-        SET charges_enabled = ?,
-            payouts_enabled = ?,
-            details_submitted = ?,
-            requirements_json = ?,
-            updated_at = datetime('now')
-      WHERE stripe_account_id = ?`,
-  ).run(
-    acct.charges_enabled ? 1 : 0,
-    acct.payouts_enabled ? 1 : 0,
-    acct.details_submitted ? 1 : 0,
-    acct.requirements ? JSON.stringify(acct.requirements) : null,
-    stripe_account_id,
-  );
+  storage.updateStripeAccount(stripe_account_id, {
+    charges_enabled: acct.charges_enabled ? 1 : 0,
+    payouts_enabled: acct.payouts_enabled ? 1 : 0,
+    details_submitted: acct.details_submitted ? 1 : 0,
+    requirements_json: acct.requirements ? JSON.stringify(acct.requirements) : null,
+    updated_at: new Date().toISOString(),
+  });
   const updated = getAccountByStripeId(stripe_account_id);
   if (!updated) {
     throw new StripeClientError(
@@ -952,24 +933,18 @@ export function handleWebhookEvent(
 ): WebhookHandleResult {
   // Try to insert the dedupe row first. If it conflicts, this is a retry.
   let firstSeen = false;
-  try {
-    db.prepare(
-      `INSERT INTO stripe_webhook_events
-         (id, event_id, event_type, livemode, payload, received_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-    ).run(
-      newStripeWebhookEventRowId(),
-      event.id,
-      event.type,
-      event.livemode ? 1 : 0,
-      JSON.stringify(event),
-    );
-    firstSeen = true;
-  } catch (err) {
-    // SQLITE_CONSTRAINT_UNIQUE on event_id → already processed.
-    const msg = (err as Error).message || '';
-    if (!/UNIQUE/i.test(msg)) throw err;
+  if (storage.isStripeWebhookEventProcessed(event.id)) {
     firstSeen = false;
+  } else {
+    storage.recordStripeWebhookEvent({
+      id: newStripeWebhookEventRowId(),
+      event_id: event.id,
+      event_type: event.type,
+      livemode: event.livemode ? 1 : 0,
+      payload: JSON.stringify(event),
+      received_at: new Date().toISOString(),
+    });
+    firstSeen = true;
   }
 
   if (firstSeen) {
@@ -1027,22 +1002,14 @@ export function listWebhookEvents(opts?: {
   limit?: number;
 }): StripeWebhookEventRecord[] {
   const limit = Math.max(1, Math.min(200, opts?.limit || 50));
-  const rows = db
-    .prepare(
-      `SELECT * FROM stripe_webhook_events
-         ORDER BY received_at DESC
-         LIMIT ?`,
-    )
-    .all(limit) as Record<string, unknown>[];
+  const rows = storage.listStripeWebhookEvents(limit);
   return rows.map(rowToWebhookEvent);
 }
 
 export function getWebhookEventById(
   event_id: string,
 ): StripeWebhookEventRecord | null {
-  const row = db
-    .prepare(`SELECT * FROM stripe_webhook_events WHERE event_id = ?`)
-    .get(event_id) as Record<string, unknown> | undefined;
+  const row = storage.getStripeWebhookEvent(event_id);
   if (!row) return null;
   return rowToWebhookEvent(row);
 }
