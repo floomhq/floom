@@ -1,0 +1,19 @@
+{
+  "_comment": "Pre-generated fixture for /p/email-signature sample input. If canonical hash matches, main.py returns this object instantly (<100ms).",
+  "generated_with": "sample-fixture",
+  "entries": {
+    "8c02b43365303658a15cf102ba89a3fa76c129a36f220abff9b407677b5dc3f0": {
+      "html": "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;color:#111111;line-height:1.35;\"><tr><td style=\"font-size:18px;font-weight:700;padding:0 0 4px 0;\">Jane Doe</td></tr><tr><td style=\"font-size:14px;color:#374151;padding:0 0 6px 0;\">Founder &amp; CEO | Acme Labs</td></tr><tr><td style=\"font-size:13px;color:#111111;padding:0 0 4px 0;\"><a href=\"mailto:jane.doe@acme.com\" style=\"color:#111111;text-decoration:none;\">jane.doe@acme.com</a> &nbsp;|&nbsp; +1 415 555 0101</td></tr><tr><td style=\"font-size:13px;color:#0f4c81;padding:0 0 8px 0;\"><a href=\"https://cal.com/jane-doe\" style=\"color:#0f4c81;text-decoration:none;\">Calendar</a> &nbsp;|&nbsp; <a href=\"https://acme.com\" style=\"color:#0f4c81;text-decoration:none;\">Website</a> &nbsp;|&nbsp; <a href=\"https://www.linkedin.com/in/jane-doe\" style=\"color:#0f4c81;text-decoration:none;\">LinkedIn</a></td></tr><tr><td style=\"border-top:1px solid #d1d5db;padding-top:8px;font-size:11px;color:#6b7280;\">Made with Floom \u00b7 <a href=\"https://floom.dev/p/email-signature\" style=\"color:#6b7280;text-decoration:none;\">floom.dev/p/email-signature</a></td></tr></table>",
+      "plaintext": "Jane Doe\nFounder & CEO | Acme Labs\njane.doe@acme.com | +1 415 555 0101\nCalendar: https://cal.com/jane-doe | Website: https://acme.com | LinkedIn: https://www.linkedin.com/in/jane-doe\n\nMade with Floom \u00b7 floom.dev/p/email-signature",
+      "markdown": "**Jane Doe**\nFounder & CEO | Acme Labs\n[Email](mailto:jane.doe@acme.com) | Phone: +1 415 555 0101\n[Calendar](https://cal.com/jane-doe) | [Website: acme.com](https://acme.com) | [LinkedIn](https://www.linkedin.com/in/jane-doe)\n\n---\nMade with Floom \u00b7 [floom.dev/p/email-signature](https://floom.dev/p/email-signature)",
+      "meta": {
+        "has_tagline": false,
+        "tagline_source": "none",
+        "made_with_floom": "https://floom.dev/p/email-signature"
+      }
+    }
+  },
+  "_debug": {
+    "canonical": "{\"calendar_url\":\"https://cal.com/jane-doe\",\"company\":\"Acme Labs\",\"email\":\"jane.doe@acme.com\",\"full_name\":\"Jane Doe\",\"linkedin_url\":\"https://www.linkedin.com/in/jane-doe\",\"phone\":\"+1 415 555 0101\",\"tagline_mode\":\"none\",\"title\":\"Founder & CEO\",\"website_url\":\"https://acme.com\"}"
+  }
+}
