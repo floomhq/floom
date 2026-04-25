@@ -1,0 +1,37 @@
+{
+  "_comment": "Fixture for the canonical landing-copy example input.",
+  "generated_with": "sample-fixture",
+  "entries": {
+    "fc4a4227a4e9cc6623a9fc2691b1766ff5585637bfda91238fce3455de90c104": {
+      "h1": "Qualify leads before reps waste time",
+      "sub": "Ops teams score inbound leads against your ICP before sales takes the first call.",
+      "bullets": [
+        {
+          "label": "Paste inbound lead",
+          "copy": "Drop in a lead profile and get a fit score in seconds."
+        },
+        {
+          "label": "See scoring logic",
+          "copy": "Each score includes clear reasons your team can act on immediately."
+        },
+        {
+          "label": "Route top matches",
+          "copy": "Push high-fit leads to reps first and keep low-fit noise out."
+        }
+      ],
+      "primary_cta": "Try it free",
+      "secondary_cta": "See it score",
+      "social_proof_line": "Used by 200+ early founders to prioritize high-fit pipeline faster.",
+      "alternates": [
+        "Score inbound leads before your team jumps in",
+        "Know fit before your reps call"
+      ],
+      "dry_run": false,
+      "cache_hit": false,
+      "model": "sample-fixture"
+    }
+  },
+  "_debug": {
+    "canonical": "{\"app_idea\":\"A tool for ops teams to score inbound leads against their ICP using AI.\",\"audience\":\"\"}"
+  }
+}
