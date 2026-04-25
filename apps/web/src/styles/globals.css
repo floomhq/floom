@@ -76,9 +76,25 @@ body {
 }
 
 /* React-specific adjustments: remove the wireframe dev nav offset so the
-   topbar sits flush against the top. */
+   topbar sits flush against the top. Federico audit 2026-04-25: footer
+   was floating mid-page on short routes (e.g. /p/&lt;slug&gt; with the run
+   card collapsed). Make page-root a flex column at viewport height so
+   the footer pins to the bottom on every page; pages that already use
+   page-root for content layout (forms, cards) stay unaffected because
+   children just stack vertically as before. */
 .page-root {
   padding-top: 0 !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.page-root > main,
+.page-root > [id="main"] {
+  flex: 1 0 auto;
+}
+.page-root > footer,
+.page-root > [data-floom-footer] {
+  flex: 0 0 auto;
 }
 .topbar {
   top: 0 !important;
