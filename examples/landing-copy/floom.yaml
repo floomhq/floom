@@ -1,0 +1,60 @@
+name: Landing Copy
+slug: landing-copy
+description: Turn a raw app idea into punchy landing-page hero copy with headline, subline, feature bullets, and CTAs.
+category: writing
+icon: wand
+actions:
+  generate:
+    label: Generate Landing Copy
+    description: |
+      One Gemini 2.5 Flash Lite call. Returns concise, modern hero copy:
+      headline, subline, three bullets, CTAs, social proof line, and two
+      alternate headlines.
+    inputs:
+      - name: app_idea
+        label: App Idea
+        type: textarea
+        required: true
+        placeholder: e.g. A tool for ops teams to score inbound leads against their ICP using AI.
+        description: |
+          20-500 characters. 1-2 sentences describing what the product does.
+      - name: audience
+        label: Audience (optional)
+        type: text
+        required: false
+        placeholder: e.g. B2B SaaS ops teams
+        description: |
+          Optional 0-100 characters. Who this is for. If omitted, inferred from
+          the app idea.
+    outputs:
+      - name: h1
+        label: Headline
+        type: text
+      - name: sub
+        label: Supporting line
+        type: text
+      - name: bullets
+        label: Feature row
+        type: table
+      - name: primary_cta
+        label: Primary CTA
+        type: text
+      - name: secondary_cta
+        label: Secondary CTA
+        type: text
+      - name: social_proof_line
+        label: Social proof
+        type: text
+      - name: alternates
+        label: Alternate headlines
+        type: list
+      - name: model
+        label: Model
+        type: text
+runtime: python
+python_dependencies:
+  - google-genai>=1.64.0,<2
+node_dependencies: {}
+secrets_needed:
+  - GEMINI_API_KEY
+manifest_version: "2.0"
