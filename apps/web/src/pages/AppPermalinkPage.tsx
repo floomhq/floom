@@ -29,6 +29,10 @@ import { FeedbackButton } from '../components/FeedbackButton';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 import { Confetti } from '../components/Confetti';
 import { ShareModal } from '../components/share/ShareModal';
+import {
+  ClaudeSkillModal,
+  ClaudeSkillIcon,
+} from '../components/share/ClaudeSkillModal';
 import { getApp, getAppReviews, getRun, shareRun, ApiError } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
@@ -88,6 +92,10 @@ export function AppPermalinkPage() {
   // was removed in the same change.
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareModalUrl, setShareModalUrl] = useState<string>('');
+  // PR #761 follow-up: front-door for the /p/:slug/skill.md backend
+  // route. The hero CTA "Install as Claude Skill" opens this modal,
+  // which shows the curl one-liner + an example Claude Code prompt.
+  const [claudeSkillModalOpen, setClaudeSkillModalOpen] = useState(false);
 
   // v16 restructure: /p/:slug is tabbed now (Run / About / Install / Source).
   // Run is the default — the previous product-page layout made users scroll
@@ -361,6 +369,24 @@ export function AppPermalinkPage() {
     if (sample == null) return null;
     return { [first.name]: sample };
   }, [app, runIdFromUrl, rerunIdFromUrl]);
+
+  // First declared input on the primary (or first-declared) action,
+  // surfaced to the Claude Skill modal so the example prompt reads
+  // "Run lead-scorer with company_url=…" instead of a placeholder.
+  // Returns null when the manifest declares no inputs — the modal
+  // collapses to a generic "Run <slug>" example in that case.
+  const claudeSkillFirstInput = useMemo<string | null>(() => {
+    if (!app) return null;
+    const actions = app.manifest?.actions ?? {};
+    const primary =
+      app.manifest?.primary_action && actions[app.manifest.primary_action]
+        ? app.manifest.primary_action
+        : Object.keys(actions)[0];
+    if (!primary) return null;
+    const action = actions[primary];
+    const first = action?.inputs?.[0];
+    return first?.name ?? null;
+  }, [app]);
 
   // Issue #255 (2026-04-21): the celebration card ("Your app is live —
   // send to coworkers") must only fire for the creator who JUST pressed
@@ -1017,6 +1043,34 @@ export function AppPermalinkPage() {
                 flexWrap: 'wrap',
               }}
             >
+              {/* PR #761 front-door: "Install as Claude Skill" trigger
+                  for the /p/:slug/skill.md backend route. Same chrome as
+                  the Share button so the two CTAs read as a pair (no new
+                  colours, no gradients). Sits to the LEFT of Share so
+                  the primary social affordance (Share) keeps its
+                  rightmost position in the hero action cluster. */}
+              <button
+                type="button"
+                data-testid="cta-install-claude-skill"
+                aria-label="Install as Claude Skill"
+                onClick={() => setClaudeSkillModalOpen(true)}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                  background: 'var(--card)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <ClaudeSkillIcon /> Install as Claude Skill
+              </button>
               <button
                 type="button"
                 data-testid="cta-share"
@@ -1634,6 +1688,16 @@ export function AppPermalinkPage() {
           appName={app.name}
           visibility={app.visibility}
           shareUrl={shareModalUrl || (typeof window !== 'undefined' ? window.location.href : '')}
+        />
+      )}
+
+      {app && (
+        <ClaudeSkillModal
+          open={claudeSkillModalOpen}
+          onClose={() => setClaudeSkillModalOpen(false)}
+          slug={app.slug}
+          appName={app.name}
+          firstInputName={claudeSkillFirstInput}
         />
       )}
 
