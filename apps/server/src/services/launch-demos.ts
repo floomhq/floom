@@ -115,6 +115,8 @@ export const DEMOS: LaunchDemo[] = [
       actions: {
         analyze: {
           label: 'Compare Pages',
+          description:
+            'Fetches both pages in parallel (5s cap, 500KB max), extracts the readable text, and runs a single Gemini 2.5 Flash Lite call with strict JSON schema. Returns positioning, pricing, and unique-angle diffs in under 5 seconds.',
           inputs: [
             {
               name: 'your_url',
@@ -170,6 +172,8 @@ export const DEMOS: LaunchDemo[] = [
       actions: {
         audit: {
           label: 'Run Audit',
+          description:
+            'Fetches the page (5s cap, 500KB max), extracts the readable text, and runs a single Gemini 2.5 Flash Lite call with strict JSON schema. Returns a 0-10 readiness score, three risks, three opportunities, and one concrete next step in under 5 seconds.',
           inputs: [
             {
               name: 'company_url',
@@ -215,6 +219,8 @@ export const DEMOS: LaunchDemo[] = [
       actions: {
         coach: {
           label: 'Coach Pitch',
+          description:
+            'Runs a single Gemini 2.5 Flash Lite call with strict JSON schema against your pitch (20-500 chars). Returns three direct critiques with VC-style reactions, three rewrites in different angles (user-outcome / market-size / technical-moat), and a one-line TL;DR of the biggest issue. Under 5 seconds.',
           inputs: [
             {
               name: 'pitch',
