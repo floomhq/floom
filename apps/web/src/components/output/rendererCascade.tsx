@@ -264,6 +264,137 @@ function pluckMarkdownSidecar(outObj: Record<string, unknown>): string | null {
   return null;
 }
 
+// Output names that are "meta" — not user-facing artefacts. Skipped by
+// the multi-section composite path (issue #781, 2026-04-25): apps like
+// ai-readiness-audit declare `model` / `cache_hit` / `dry_run` as
+// outputs alongside the actual results. The model name belongs in the
+// bottom chip, the cache/dry-run flags are status, and surfacing the
+// audited URL as its own card is noise. Keep them off the stack.
+const META_OUTPUT_NAMES = new Set([
+  'model',
+  'meta',
+  'cache_hit',
+  'dry_run',
+  'cached',
+  'total',
+  'scored',
+  'failed',
+  'duration_ms',
+  'company_url',
+  'audited_url',
+]);
+
+/**
+ * Render a single declared output spec as a section. Picks the right
+ * library component based on the spec's declared type and the runtime
+ * value's shape. Returns `null` for empty / missing values so the
+ * caller can skip the section entirely (no empty cards in the stack).
+ */
+function renderDeclaredSection(
+  spec: OutputSpec,
+  value: unknown,
+  ctx: AutoPickCtx | undefined,
+  key: string,
+): ReactElement | null {
+  if (value === undefined || value === null) return null;
+  const label = spec.label;
+  const appSlug = ctx?.appSlug;
+  const runId = ctx?.runId;
+  // html → FileDownload with preview
+  if (spec.type === 'html' && typeof value === 'string' && value.length > 0) {
+    return (
+      <FileDownload
+        key={key}
+        filename={`${spec.name}.html`}
+        mime="text/html"
+        bytes={typeof btoa === 'function' ? btoa(unescape(encodeURIComponent(value))) : undefined}
+        previewHtml={value}
+      />
+    );
+  }
+  // image → ImageView when value looks like a data: or http(s) image URL
+  if (spec.type === 'image' && typeof value === 'string' && value.length > 0) {
+    return <ImageView key={key} src={value} label={label} />;
+  }
+  // table / json with array-of-objects → RowTable
+  if (
+    (spec.type === 'table' || spec.type === 'json') &&
+    isArrayOfFlatObjects(value) &&
+    value.length > 0
+  ) {
+    return <RowTable key={key} rows={value} label={label} appSlug={appSlug} runId={runId} />;
+  }
+  // json with array-of-strings → StringList
+  if (spec.type === 'json' && isArrayOfStrings(value)) {
+    return <StringList key={key} items={value} label={label} />;
+  }
+  // markdown → Markdown (long form text)
+  if (spec.type === 'markdown' && typeof value === 'string' && value.length > 0) {
+    return <Markdown key={key} content={value} />;
+  }
+  // number → ScalarBig
+  if (spec.type === 'number' && typeof value === 'number') {
+    return <ScalarBig key={key} value={value} label={label} />;
+  }
+  // text → TextBig for short scalars; Markdown for long-form prose with
+  // newlines. Booleans declared as `text` (cache_hit, dry_run) get
+  // filtered upstream by META_OUTPUT_NAMES; if they slip through we
+  // skip empty/false values so a stale flag doesn't fill a section.
+  if (spec.type === 'text') {
+    if (typeof value === 'string' && value.length > 0) {
+      const langHint = /^\s*[\[{]/.test(value)
+        ? 'json'
+        : /^\s*</.test(value)
+        ? 'xml'
+        : undefined;
+      if (langHint) {
+        return <CodeBlock key={key} code={value} language={langHint} />;
+      }
+      if (value.length < 240 && !value.includes('\n')) {
+        return (
+          <HeadlineWithMeta key={key} headline={value} headlineLabel={label} meta={[]} />
+        );
+      }
+      return <Markdown key={key} content={value} />;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return <ScalarBig key={key} value={value} label={label} />;
+    }
+  }
+  // json fallback: nested object → KeyValueTable
+  if (spec.type === 'json' && value && typeof value === 'object' && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length > 0 && entries.length <= 30) {
+      return <KeyValueTable key={key} entries={entries} label={label} />;
+    }
+  }
+  return null;
+}
+
+function isRenderableValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as object).length > 0;
+  return true;
+}
+
+/**
+ * Reorder declared outputs so the `rows_field`-hinted spec comes first,
+ * preserving the relative order of the rest. Mirrors the single-table
+ * path's behaviour for the multi-section composite.
+ */
+function orderSpecsWithHint(
+  specs: OutputSpec[],
+  hint: string | undefined,
+): OutputSpec[] {
+  if (!hint) return specs;
+  const idx = specs.findIndex((s) => s.name === hint);
+  if (idx <= 0) return specs;
+  const pick = specs[idx];
+  return [pick, ...specs.slice(0, idx), ...specs.slice(idx + 1)];
+}
+
 function autoPick(
   outputs: OutputSpec[],
   runOutput: unknown,
@@ -302,6 +433,61 @@ function autoPick(
   for (const spec of orderedTableSpecs) {
     const raw = outObj[spec.name];
     if (!isArrayOfFlatObjects(raw) || raw.length === 0) continue;
+    // Issue #781 (2026-04-25): when an app declares MULTIPLE non-meta
+    // outputs (e.g. competitor-lens has positioning + pricing +
+    // pricing_insight + unique_to_you + unique_to_competitor), the
+    // legacy single-table+sidecar shape would render only the first
+    // table and silently drop the rest. Flip into the multi-section
+    // composite path so every declared artefact gets surfaced. We only
+    // do this when 2+ "user-facing" outputs are non-empty so the
+    // existing "table + summary" composite (and its tests) are
+    // unchanged for that exact shape.
+    const userFacingSpecs = outputs.filter(
+      (s) =>
+        !META_OUTPUT_NAMES.has(s.name) &&
+        s.type !== 'html' &&
+        isRenderableValue(outObj[s.name]),
+    );
+    const isClassicTablePlusSummary =
+      userFacingSpecs.length === 2 &&
+      userFacingSpecs.some((s) => s.name === spec.name) &&
+      userFacingSpecs.some((s) => MARKDOWN_FIELD_NAMES.includes(s.name));
+    if (userFacingSpecs.length >= 2 && !isClassicTablePlusSummary) {
+      const sections: ReactElement[] = [];
+      // Render in declared order so creators control narrative; if a
+      // `rows_field` hint exists, hoist that spec to the front so the
+      // primary table still wins (Issue #470 contract preserved).
+      const orderedSpecs = orderSpecsWithHint(outputs, hint);
+      for (const s of orderedSpecs) {
+        if (META_OUTPUT_NAMES.has(s.name)) continue;
+        if (!isRenderableValue(outObj[s.name])) continue;
+        const el = renderDeclaredSection(s, outObj[s.name], ctx, s.name);
+        if (el) sections.push(el);
+      }
+      if (sections.length > 0) {
+        const modelChip = readMetaModelChip(runOutput);
+        const children: ReactElement[] = [...sections];
+        if (modelChip) {
+          children.push(
+            <ModelChip
+              key="__model_chip"
+              model={modelChip.model}
+              cacheHit={modelChip.cacheHit}
+            />,
+          );
+        }
+        return (
+          <div
+            className="floom-auto-composite-output floom-auto-composite-multi"
+            data-renderer="composite"
+            data-multi="true"
+            style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+          >
+            {children}
+          </div>
+        );
+      }
+    }
     const md = pluckMarkdownSidecar(outObj);
     const table = (
       <RowTable
@@ -344,6 +530,50 @@ function autoPick(
       );
     }
     return table;
+  }
+
+  // 2b. No table-shaped data, but several declared non-meta outputs
+  // exist with values — render them all as a stacked composite
+  // (e.g. ai-readiness-audit: number score + 2 string-arrays + a
+  // rationale + a next_action, no table at all).
+  const userFacingSpecs = outputs.filter(
+    (s) =>
+      !META_OUTPUT_NAMES.has(s.name) &&
+      s.type !== 'html' &&
+      isRenderableValue(outObj[s.name]),
+  );
+  if (userFacingSpecs.length >= 2) {
+    const sections: ReactElement[] = [];
+    const orderedSpecs = orderSpecsWithHint(outputs, ctx?.rowsFieldHint);
+    for (const s of orderedSpecs) {
+      if (META_OUTPUT_NAMES.has(s.name)) continue;
+      if (!isRenderableValue(outObj[s.name])) continue;
+      const el = renderDeclaredSection(s, outObj[s.name], ctx, s.name);
+      if (el) sections.push(el);
+    }
+    if (sections.length >= 2) {
+      const modelChip = readMetaModelChip(runOutput);
+      const children: ReactElement[] = [...sections];
+      if (modelChip) {
+        children.push(
+          <ModelChip
+            key="__model_chip"
+            model={modelChip.model}
+            cacheHit={modelChip.cacheHit}
+          />,
+        );
+      }
+      return (
+        <div
+          className="floom-auto-composite-output floom-auto-composite-multi"
+          data-renderer="composite"
+          data-multi="true"
+          style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+        >
+          {children}
+        </div>
+      );
+    }
   }
 
   // 3. Markdown-style text → Markdown (keeps PR #7 behaviour)
