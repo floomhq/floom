@@ -406,6 +406,29 @@ db.exec(`
   );
 `);
 
+// ---------- agent_tokens: scoped machine credentials for agents ----------
+// Token plaintext is shown exactly once by the mint endpoint. The database
+// stores only a SHA-256 hash plus a short display prefix, bound to one
+// workspace and one minting user.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_tokens (
+    id TEXT PRIMARY KEY,
+    prefix TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    label TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('read', 'read-write', 'publish-only')),
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT,
+    rate_limit_per_minute INTEGER NOT NULL DEFAULT 60
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(hash);
+  CREATE INDEX IF NOT EXISTS idx_agent_tokens_user_revoked
+    ON agent_tokens(user_id, revoked_at);
+`);
+
 // ---------- alter existing tables to add multi-tenant columns ----------
 // Idempotent column-add migrations (same pattern as app_type + is_async
 // above). Every alter uses DEFAULT 'local' so pre-existing v0.2/v0.3 rows
@@ -946,8 +969,9 @@ db.exec(`
 // Manual publish-review gate (#362) lands v12: apps.publish_status.
 // Deploy waitlist (launch 2026-04-27) lands v13: waitlist_signups.
 // v14: waitlist_signups.deploy_repo_url + deploy_intent (#454).
+// v15: agent_tokens for agents-native phase 2A backend.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 14) {
-  db.pragma('user_version = 14');
+if (currentUserVersion < 15) {
+  db.pragma('user_version = 15');
 }

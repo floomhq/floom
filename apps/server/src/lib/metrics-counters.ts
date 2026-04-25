@@ -8,7 +8,7 @@
 // internal-tooling scale; swap for Redis / StatsD when we shard.
 
 type ToolName = string;
-type RateLimitScope = 'ip' | 'user' | 'app' | 'mcp_ingest';
+type RateLimitScope = 'ip' | 'user' | 'app' | 'agent_token' | 'mcp_ingest';
 
 const mcpToolCalls = new Map<ToolName, number>();
 const rateLimitHits = new Map<RateLimitScope, number>();

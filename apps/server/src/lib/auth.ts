@@ -16,6 +16,7 @@
 // stop casual abuse when a self-hoster exposes port 3051 to the internet.
 import type { Context, MiddlewareHandler } from 'hono';
 import type { SessionContext } from '../types.js';
+import { getPresentedAgentToken } from './agent-tokens.js';
 import { isCloudMode } from './better-auth.js';
 
 // Actionable hints embedded in every 401/403 auth response. Single source
@@ -100,6 +101,7 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   if (path === '/api/gh-stars' || path === '/api/gh-stars/') return next();
 
   const got = presentedToken(c);
+  if (got && getPresentedAgentToken(c)) return next();
   if (!got || !constantTimeEqual(got, expected)) {
     return c.json(
       {

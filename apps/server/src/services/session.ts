@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
 import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { getAuth, isCloudMode } from '../lib/better-auth.js';
+import { agentContextToSessionContext, getAgentTokenContext } from '../lib/agent-tokens.js';
 import type { RekeyResult, SessionContext } from '../types.js';
 import {
   getActiveWorkspaceId,
@@ -113,6 +114,11 @@ export function getOrCreateDeviceId(c: Context): string {
  */
 export async function resolveUserContext(c: Context): Promise<SessionContext> {
   const device_id = getOrCreateDeviceId(c);
+  const agentAuth = getAgentTokenContext(c);
+  if (agentAuth) {
+    return agentContextToSessionContext(agentAuth, device_id);
+  }
+
   const ossCtx: SessionContext = {
     workspace_id: DEFAULT_WORKSPACE_ID,
     user_id: DEFAULT_USER_ID,

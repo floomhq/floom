@@ -160,6 +160,19 @@ Floom is a runtime for AI apps that exposes each app over web, MCP, and HTTP sur
 Launch apps:
 ${appLines}
 
+Agent quickstart:
+- Mint a token while logged into Floom:
+  \`curl -sS -X POST ${baseUrl}/api/me/agent-keys -H 'content-type: application/json' -d '{"label":"local-agent","scope":"read-write"}'\`
+- Store the returned \`raw_token\` immediately. It is shown once and Floom stores only its SHA-256 hash plus display prefix.
+- Send it on headless calls:
+  \`Authorization: Bearer floom_agent_<token>\`
+- Scopes: \`read\` unlocks discovery/read contexts, \`read-write\` covers read plus run/write surfaces as they land, and \`publish-only\` is reserved for publish/review operations.
+- Rate limits: every agent token has its own per-minute quota, default 60/min, stacked on the existing IP and user limits.
+- Phase map: MCP read/run arrives in 2B, REST read/run in 2C, write tools in 2D, and the CLI in 2E. The web token page is deferred until phase 2A-UI after v18 wireframes lock.
+
+Long-form guide:
+\`${baseUrl}/docs/agents/quickstart.md\`
+
 Install one app as a skill with:
 \`${baseUrl}/p/<slug>/skill.md\`
 `;

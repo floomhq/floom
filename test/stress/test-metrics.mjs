@@ -98,10 +98,11 @@ process.env.METRICS_TOKEN = 'right-token-secret-value-xyz';
       body.includes('floom_runs_total{status="timeout"}'),
   );
   log(
-    'rate_limit_hits_total emits all four scopes',
+    'rate_limit_hits_total emits all five scopes',
     body.includes('floom_rate_limit_hits_total{scope="ip"}') &&
       body.includes('floom_rate_limit_hits_total{scope="user"}') &&
       body.includes('floom_rate_limit_hits_total{scope="app"}') &&
+      body.includes('floom_rate_limit_hits_total{scope="agent_token"}') &&
       body.includes('floom_rate_limit_hits_total{scope="mcp_ingest"}'),
   );
   log(

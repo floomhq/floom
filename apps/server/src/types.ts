@@ -381,6 +381,28 @@ export interface SessionContext {
   auth_session_id?: string;
   /** User email (cloud mode), surfaced to the UI by /api/session/me. */
   email?: string;
+  /** Agent token principal id when authenticated via Authorization bearer. */
+  agent_token_id?: string;
+  /** Coarse agent-token scope attached to the bearer principal. */
+  agent_token_scope?: AgentTokenScope;
+  /** Per-token request budget applied by the rate-limit layer. */
+  agent_token_rate_limit_per_minute?: number;
+}
+
+export type AgentTokenScope = 'read' | 'read-write' | 'publish-only';
+
+export interface AgentTokenRecord {
+  id: string;
+  prefix: string;
+  hash: string;
+  label: string;
+  scope: AgentTokenScope;
+  workspace_id: string;
+  user_id: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  rate_limit_per_minute: number;
 }
 
 // =====================================================================

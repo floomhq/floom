@@ -15,7 +15,7 @@ import { extractIp } from './client-ip.js';
 import { recordRateLimitHit } from './metrics-counters.js';
 import { sendDiscordAlert } from './alerts.js';
 
-type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
+type Scope = 'ip' | 'user' | 'app' | 'agent_token' | 'mcp_ingest';
 
 function envNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -51,6 +51,8 @@ export const defaultWriteAnonPerMinute = (): number =>
   envNumber('FLOOM_WRITE_RATE_LIMIT_IP_PER_MINUTE', 30);
 export const defaultWriteUserPerMinute = (): number =>
   envNumber('FLOOM_WRITE_RATE_LIMIT_USER_PER_MINUTE', 60);
+export const defaultAgentTokenPerMinute = (): number =>
+  envNumber('FLOOM_AGENT_TOKEN_RATE_LIMIT_PER_MINUTE', 60);
 
 // Re-export: historical import path is ../lib/rate-limit.js
 export { extractIp } from './client-ip.js';
@@ -283,6 +285,23 @@ function applyLimitHeaders(
   c.header('X-RateLimit-Scope', scope);
 }
 
+function checkAgentTokenLimit(
+  ctx: SessionContext,
+  now: number,
+): { result: CheckResult; limit: number } | null {
+  if (!ctx.agent_token_id) return null;
+  const limit = ctx.agent_token_rate_limit_per_minute || defaultAgentTokenPerMinute();
+  return {
+    limit,
+    result: incrementAndCheck(
+      `agent_token:${ctx.agent_token_id}`,
+      limit,
+      60 * 1000,
+      now,
+    ),
+  };
+}
+
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const WRITE_RATE_LIMIT_SKIP_PATHS = new Set([
   '/api/run',
@@ -336,6 +355,10 @@ export function runRateLimitMiddleware(
     const primaryScope: Scope = ctx.is_authenticated ? 'user' : 'ip';
     const p = incrementAndCheck(primaryKey, primaryCap, windowMs, now);
     if (!p.allowed) return rateLimitResponse(c, primaryScope, p, primaryCap);
+    const agentLimit = checkAgentTokenLimit(ctx, now);
+    if (agentLimit && !agentLimit.result.allowed) {
+      return rateLimitResponse(c, 'agent_token', agentLimit.result, agentLimit.limit);
+    }
 
     // Per-(IP, app) cap applies in both auth states.
     const slug = c.req.param('slug');
@@ -345,11 +368,27 @@ export function runRateLimitMiddleware(
       if (!r.allowed) return rateLimitResponse(c, 'app', r, appCap);
       // Advertise the *tightest* remaining budget so a well-behaved client
       // paces itself against whichever bucket will trip first. Primary vs
-      // per-app: pick the smaller remaining.
-      if (r.remaining < p.remaining) applyLimitHeaders(c, r, appCap, 'app');
-      else applyLimitHeaders(c, p, primaryCap, primaryScope);
+      // per-app vs agent token: pick the smaller remaining.
+      const advertised = [
+        { result: p, limit: primaryCap, scope: primaryScope },
+        { result: r, limit: appCap, scope: 'app' as const },
+        ...(agentLimit
+          ? [
+              {
+                result: agentLimit.result,
+                limit: agentLimit.limit,
+                scope: 'agent_token' as const,
+              },
+            ]
+          : []),
+      ].sort((a, b) => a.result.remaining - b.result.remaining)[0];
+      applyLimitHeaders(c, advertised.result, advertised.limit, advertised.scope);
     } else {
-      applyLimitHeaders(c, p, primaryCap, primaryScope);
+      if (agentLimit && agentLimit.result.remaining < p.remaining) {
+        applyLimitHeaders(c, agentLimit.result, agentLimit.limit, 'agent_token');
+      } else {
+        applyLimitHeaders(c, p, primaryCap, primaryScope);
+      }
     }
     return next();
   };
@@ -391,7 +430,15 @@ export function writeRateLimitMiddleware(
     if (!result.allowed) {
       return writeRateLimitResponse(c, scope, result, limit);
     }
-    applyLimitHeaders(c, result, limit, scope);
+    const agentLimit = checkAgentTokenLimit(ctx, now);
+    if (agentLimit && !agentLimit.result.allowed) {
+      return writeRateLimitResponse(c, 'agent_token', agentLimit.result, agentLimit.limit);
+    }
+    if (agentLimit && agentLimit.result.remaining < result.remaining) {
+      applyLimitHeaders(c, agentLimit.result, agentLimit.limit, 'agent_token');
+    } else {
+      applyLimitHeaders(c, result, limit, scope);
+    }
     return next();
   };
 }
@@ -406,6 +453,19 @@ export function checkMcpIngestLimit(
   ip: string,
 ): { allowed: true } | { allowed: false; retryAfterSec: number } {
   if (isRateLimitDisabled()) return { allowed: true };
+  if (ctx.agent_token_id) {
+    const tokenLimit = ctx.agent_token_rate_limit_per_minute || defaultAgentTokenPerMinute();
+    const tokenResult = incrementAndCheck(
+      `agent_token:${ctx.agent_token_id}`,
+      tokenLimit,
+      60 * 1000,
+      Date.now(),
+    );
+    if (!tokenResult.allowed) {
+      recordRateLimitHit('agent_token');
+      return { allowed: false, retryAfterSec: tokenResult.retryAfterSec };
+    }
+  }
   const key = ctx.is_authenticated
     ? `mcp_ingest:user:${ctx.user_id}`
     : `mcp_ingest:ip:${ip}`;

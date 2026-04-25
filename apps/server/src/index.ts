@@ -25,6 +25,7 @@ import { stripeRouter } from './routes/stripe.js';
 import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
 import { meAppsRouter } from './routes/me_apps.js';
+import { agentKeysRouter } from './routes/agent_keys.js';
 import { metricsRouter } from './routes/metrics.js';
 import { ogRouter } from './routes/og.js';
 import { ghStarsRouter } from './routes/gh-stars.js';
@@ -39,6 +40,7 @@ import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { startFastApps } from './services/fast-apps-sidecar.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
+import { agentTokenAuthMiddleware } from './lib/agent-tokens.js';
 import {
   getAuth,
   getAuthForRequest,
@@ -222,6 +224,9 @@ process.on('uncaughtException', (err) => {
 app.use('/api/*', globalAuthMiddleware);
 app.use('/mcp/*', globalAuthMiddleware);
 app.use('/p/*', globalAuthMiddleware);
+app.use('/api/*', agentTokenAuthMiddleware);
+app.use('/mcp/*', agentTokenAuthMiddleware);
+app.use('/p/*', agentTokenAuthMiddleware);
 if (process.env.FLOOM_AUTH_TOKEN) {
   console.log('[auth] FLOOM_AUTH_TOKEN is set — bearer auth required on all /api, /mcp, /p routes');
 }
@@ -321,6 +326,7 @@ app.route('/api/stripe', stripeRouter);
 // W4-minimal: per-user run history, reviews, product feedback. /api/me
 // owns the scoped dashboard queries; /api/apps/:slug/reviews powers the
 // /p/:slug review surface; /api/feedback accepts in-app feedback.
+app.route('/api/me/agent-keys', agentKeysRouter);
 app.route('/api/me', meRouter);
 // Secrets-policy feature: creator + viewer surface for per-app secret
 // policies and creator-owned secret values. Mounted at /api/me/apps so
