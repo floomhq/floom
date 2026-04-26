@@ -128,21 +128,25 @@ export default {
 
 ### 3. Run the conformance tests locally
 
-The per-adapter contract test suites (`test/stress/test-adapters-<name>-contract.mjs`) are **planned**; they do not ship today. The pattern they will follow:
+The per-adapter contract suites live at `test/stress/test-adapters-<concern>-contract.mjs`. Use the runner from a Floom checkout so it selects your adapter through the same env var path the server uses:
 
 ```
 # clone the Floom repo
 git clone https://github.com/floomhq/floom.git
 cd floom
 
-# point the relevant env var at your local build
-export FLOOM_STORAGE=/absolute/path/to/@floom-community/storage-postgres/dist/index.js
-
-# run the contract suite for your concern
-npx tsx test/stress/test-adapters-storage-contract.mjs
+pnpm install
+pnpm test:conformance --concern storage --adapter /absolute/path/to/@floom-community/storage-postgres/dist/index.js
 ```
 
-Until that suite lands, copy the assertion list from `spec/adapters.md` "Conformance tests" into a local harness in your own repo (`test/contract.mjs`) and run it against your adapter directly. The `test/stress/test-adapters-factory.mjs` file in `floomhq/floom` is the closest working reference for how to spin up an adapter instance and drive it.
+Concern names are `runtime`, `storage`, `auth`, `secrets`, and `observability`. The adapter value can be an in-tree key (`sqlite`, `better-auth`, `local`, `console`, `proxy`), an npm module specifier, or a local ESM file path:
+
+```bash
+pnpm test:conformance --concern storage --adapter @floom-community/storage-postgres
+pnpm test:conformance --concern runtime --adapter ./local-adapters/runtime-k8s.js
+```
+
+The runner prints the suite output and exits non-zero when any assertion fails.
 
 ### 4. Wire it into a local Floom server
 
@@ -176,4 +180,4 @@ The known-adapters list will live here once the first out-of-tree adapter ships.
 
 ## Current migration targets
 
-Migration target for the AuthAdapter: the failing tests in [`test/stress/test-adapters-auth-contract.mjs`](../test/stress/test-adapters-auth-contract.mjs) define the green-bar target. A signed-off auth migration makes all four tests pass.
+Migration target for adapter work: every concern has an executable contract suite under `test/stress/test-adapters-<concern>-contract.mjs`, and the runner command above is the green-bar gate for third-party implementations.

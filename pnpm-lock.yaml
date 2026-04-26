@@ -214,6 +214,8 @@ importers:
         specifier: 5.6.3
         version: 5.6.3
 
+  packages/conformance-runner: {}
+
   packages/detect:
     devDependencies:
       '@types/node':

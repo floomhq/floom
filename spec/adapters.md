@@ -246,7 +246,7 @@ The runner parses the container's stdout for the `__FLOOM_RESULT__` marker (see 
 
 ## Conformance tests
 
-A Floom adapter is conformant iff a fresh server instance with that adapter selected passes the assertion suite for its concern. The reference server ships one integration test today (`test/stress/test-adapters-factory.mjs`); per-adapter contract suites are expected to live next to it as `test/stress/test-adapters-<name>-contract.mjs` and to be runnable against any registered impl via `FLOOM_<CONCERN>=<name>`.
+A Floom adapter is conformant iff a fresh server instance with that adapter selected passes the assertion suite for its concern. The reference server ships factory wiring coverage (`test/stress/test-adapters-factory.mjs`) plus per-adapter contract suites at `test/stress/test-adapters-<concern>-contract.mjs`. The conformance runner selects the target implementation via `FLOOM_<CONCERN>=<name-or-module>` and executes the matching suite.
 
 Language below follows RFC 2119: **MUST**, **SHOULD**, **MAY**.
 
@@ -265,7 +265,7 @@ A conformant impl SHOULD also honor `app.memory_mb` as a hard cap; violation SHO
 
 An impl MAY skip the OOM test if it documents that memory limits are enforced out-of-band.
 
-Reference test skeleton: `test/stress/test-adapters-runtime-contract.mjs` (planned; does not exist yet).
+Reference suite: `test/stress/test-adapters-runtime-contract.mjs`.
 
 ### StorageAdapter
 
@@ -281,7 +281,7 @@ A conformant `StorageAdapter` MUST pass:
 - **transactional read-after-write**: `createRun` followed immediately by `getRun(id)` on another process/connection returns the row. In-flight buffering that lets another reader see a partial row is forbidden.
 - **idempotent delete**: deleting a non-existent row returns `false` (StorageAdapter) or equivalent, never throws.
 
-Reference test skeleton: `test/stress/test-adapters-storage-contract.mjs` (planned). Today's coverage lives in `test/stress/test-adapters-factory.mjs` (factory wiring) and `test/stress/test-adapters-seed-launchdemos.mjs` (end-to-end sanity through `adapters.storage`).
+Reference suite: `test/stress/test-adapters-storage-contract.mjs`. Related coverage lives in `test/stress/test-adapters-factory.mjs` (factory wiring) and `test/stress/test-adapters-seed-launchdemos.mjs` (end-to-end sanity through `adapters.storage`).
 
 ### AuthAdapter
 
@@ -312,7 +312,7 @@ A conformant `SecretsAdapter` MUST pass:
 
 A conformant impl SHOULD use authenticated encryption (AES-GCM, ChaCha20-Poly1305, or a vendor-managed equivalent). Raw AES-CBC without an HMAC is non-conformant.
 
-Reference test skeleton: `test/stress/test-adapters-secrets-contract.mjs` (planned). Related coverage: `test/stress/test-app-creator-secrets.mjs`.
+Reference suite: `test/stress/test-adapters-secrets-contract.mjs`. Related coverage: `test/stress/test-app-creator-secrets.mjs`.
 
 ### ObservabilityAdapter
 
@@ -325,11 +325,25 @@ A conformant `ObservabilityAdapter` MUST pass:
 
 A conformant impl MAY batch, buffer, or sample internally. The suite does not assert delivery guarantees; it asserts the interface contract.
 
-Reference test skeleton: `test/stress/test-adapters-observability-contract.mjs` (planned).
+Reference suite: `test/stress/test-adapters-observability-contract.mjs`.
 
 ### Running the suite
 
-Today: `npx tsx test/stress/test-adapters-factory.mjs` exercises factory wiring against default impls. A per-adapter contract suite lands with the first third-party adapter (target: v0.3). Until then, third-party implementers SHOULD copy the assertion list above into a local harness and run it against their adapter directly.
+Run the factory wiring smoke test:
+
+```bash
+npx tsx test/stress/test-adapters-factory.mjs
+```
+
+Run a concern-specific contract suite against any registered in-tree value, package specifier, or local module path:
+
+```bash
+pnpm test:conformance --concern storage --adapter sqlite
+pnpm test:conformance --concern runtime --adapter ./my-runtime-adapter.mjs
+pnpm test:conformance --concern auth --adapter @floom-community/auth-example
+```
+
+The runner returns non-zero when the suite reports any failing assertion. Direct suite execution (`npx tsx test/stress/test-adapters-storage-contract.mjs`) prints the same assertions against the default implementation.
 
 ---
 
