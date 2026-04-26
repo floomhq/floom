@@ -218,7 +218,7 @@ interface ObservabilityAdapter {
 
 ### How to write one
 
-Forward the four methods to your backend of choice. OpenTelemetry, Datadog, StatsD, New Relic, Honeycomb all fit cleanly. The no-op default is literally four empty function bodies — useful as a fallback when no DSN / endpoint is configured.
+Forward the four methods to your backend of choice. OpenTelemetry is the recommended pattern for production adapters because it keeps Floom vendor-neutral while supporting Datadog, Grafana, Honeycomb, New Relic, Jaeger, and other OTLP-compatible backends. Datadog, StatsD, New Relic, and Honeycomb-specific adapters also fit cleanly. The no-op default is literally four empty function bodies — useful as a fallback when no DSN / endpoint is configured.
 
 ---
 
