@@ -27,7 +27,10 @@ process.env.BETTER_AUTH_SECRET =
 process.env.BETTER_AUTH_URL = 'http://localhost:3051';
 delete process.env.RESEND_API_KEY;
 
-// Strip the selection env vars so the factory returns the reference impls.
+// Strip selection env vars for direct runs so the factory returns the
+// reference impls. The conformance runner sets FLOOM_CONFORMANCE_CONCERN to
+// preserve the selected concern under test.
+const selectedConcern = process.env.FLOOM_CONFORMANCE_CONCERN;
 for (const k of [
   'FLOOM_RUNTIME',
   'FLOOM_STORAGE',
@@ -35,6 +38,7 @@ for (const k of [
   'FLOOM_SECRETS',
   'FLOOM_OBSERVABILITY',
 ]) {
+  if (selectedConcern && k === `FLOOM_${selectedConcern.toUpperCase()}`) continue;
   delete process.env[k];
 }
 

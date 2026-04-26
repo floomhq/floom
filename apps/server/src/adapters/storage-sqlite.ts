@@ -146,7 +146,15 @@ export const sqliteStorageAdapter: StorageAdapter = {
   },
 
   deleteApp(slug: string): boolean {
-    const res = db.prepare('DELETE FROM apps WHERE slug = ?').run(slug);
+    const row = db
+      .prepare('SELECT id FROM apps WHERE slug = ?')
+      .get(slug) as { id: string } | undefined;
+    if (!row) return false;
+    const remove = db.transaction((appId: string) => {
+      db.prepare('DELETE FROM secrets WHERE app_id = ?').run(appId);
+      return db.prepare('DELETE FROM apps WHERE id = ?').run(appId);
+    });
+    const res = remove(row.id);
     return res.changes > 0;
   },
 

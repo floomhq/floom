@@ -18,6 +18,30 @@ import type { RuntimeAdapter, RuntimeResult } from './types.js';
 import { runAppContainer } from '../services/docker.js';
 import { parseEntrypointOutput, extractUserLogs, detectSilentError } from '../services/runner.js';
 
+function redactSecrets(value: unknown, secrets: Record<string, string>): unknown {
+  const needles = Object.values(secrets).filter((v) => v.length > 0);
+  if (needles.length === 0) return value;
+  if (typeof value === 'string') {
+    let redacted = value;
+    for (const secret of needles) {
+      redacted = redacted.split(secret).join('[redacted]');
+    }
+    return redacted;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSecrets(item, secrets));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+        key,
+        redactSecrets(nested, secrets),
+      ]),
+    );
+  }
+  return value;
+}
+
 export const dockerRuntimeAdapter: RuntimeAdapter = {
   async execute(
     app: AppRecord,
@@ -48,6 +72,7 @@ export const dockerRuntimeAdapter: RuntimeAdapter = {
 
     const userLogs =
       extractUserLogs(result.stdout) + (result.stderr ? '\n' + result.stderr : '');
+    const safeUserLogs = redactSecrets(userLogs, secrets) as string;
 
     if (result.timedOut) {
       return {
@@ -56,7 +81,7 @@ export const dockerRuntimeAdapter: RuntimeAdapter = {
         error: 'Run timed out',
         error_type: 'timeout',
         duration_ms: result.durationMs,
-        logs: userLogs,
+        logs: safeUserLogs,
       };
     }
 
@@ -67,38 +92,42 @@ export const dockerRuntimeAdapter: RuntimeAdapter = {
         error: 'Container ran out of memory. Increase RUNNER_MEMORY.',
         error_type: 'oom',
         duration_ms: result.durationMs,
-        logs: userLogs,
+        logs: safeUserLogs,
       };
     }
 
     const parsed = parseEntrypointOutput(result.stdout);
     if (parsed && parsed.ok === true) {
-      const silent = detectSilentError(parsed.outputs);
+      const safeOutputs = redactSecrets(parsed.outputs, secrets);
+      const silent = detectSilentError(safeOutputs);
       if (silent) {
         return {
           status: 'error',
-          outputs: parsed.outputs ?? null,
+          outputs: safeOutputs ?? null,
           error: silent,
           error_type: 'runtime_error',
           duration_ms: result.durationMs,
-          logs: userLogs,
+          logs: safeUserLogs,
         };
       }
       return {
         status: 'success',
-        outputs: parsed.outputs ?? null,
+        outputs: safeOutputs ?? null,
         duration_ms: result.durationMs,
-        logs: userLogs,
+        logs: safeUserLogs,
       };
     }
     if (parsed && parsed.ok === false) {
       return {
         status: 'error',
         outputs: null,
-        error: parsed.error || 'Unknown error',
+        error: (redactSecrets(parsed.error, secrets) as string | undefined) || 'Unknown error',
         error_type: parsed.error_type || 'runtime_error',
         duration_ms: result.durationMs,
-        logs: (parsed.logs ? parsed.logs + '\n' : '') + userLogs,
+        logs: redactSecrets(
+          (parsed.logs ? parsed.logs + '\n' : '') + userLogs,
+          secrets,
+        ) as string,
       };
     }
     return {
@@ -110,7 +139,7 @@ export const dockerRuntimeAdapter: RuntimeAdapter = {
           : `Container exited with code ${result.exitCode}`,
       error_type: 'floom_internal_error',
       duration_ms: result.durationMs,
-      logs: result.stdout + '\n' + result.stderr,
+      logs: redactSecrets(result.stdout + '\n' + result.stderr, secrets) as string,
     };
   },
 };
