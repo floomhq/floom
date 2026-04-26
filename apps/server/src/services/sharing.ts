@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
 import { db } from '../db.js';
 import { newAppInviteId, newVisibilityAuditId } from '../lib/ids.js';
 import { auditLog } from './audit-log.js';
+import { generateLinkShareToken } from '../lib/link-share-token.js';
 import type {
   AppInviteState,
   AppRecord,
@@ -9,8 +9,6 @@ import type {
   AppVisibilityState,
   SessionContext,
 } from '../types.js';
-
-const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 export const VISIBILITY_STATES = [
   'private',
@@ -94,19 +92,6 @@ export function isPubliclyRunnableVisibility(value: string | null | undefined): 
   return value === 'public_live' || value === 'public';
 }
 
-export function generateLinkShareToken(): string {
-  let token = '';
-  while (token.length < 24) {
-    const bytes = randomBytes(24);
-    for (const byte of bytes) {
-      if (byte >= 248) continue;
-      token += BASE62[byte % BASE62.length];
-      if (token.length === 24) break;
-    }
-  }
-  return token;
-}
-
 export function verifyLinkToken(slug: string, providedKey: string | null | undefined): boolean {
   if (!providedKey) return false;
   const row = db
@@ -147,24 +132,56 @@ export function canAccessApp(
   app: Pick<AppRecord, 'id' | 'author' | 'workspace_id' | 'link_share_token'> & {
     slug?: string | null;
     visibility: AppVisibility | string | null | undefined;
+    link_share_requires_auth?: number | boolean | null;
   },
   ctx: SessionContext,
   linkToken?: string | null,
 ): boolean {
-  if (app.visibility === 'auth-required') return true;
   const visibility = canonicalVisibility(app.visibility);
   if (visibility === 'public_live') return true;
   if (visibility === 'private' || visibility === 'pending_review' || visibility === 'changes_requested') {
     return readOwnerMatches(app, ctx);
   }
   if (visibility === 'link') {
-    if (app.slug) return verifyLinkToken(app.slug, linkToken);
-    return Boolean(app.link_share_token && linkToken && app.link_share_token === linkToken);
+    const validToken = app.slug
+      ? verifyLinkToken(app.slug, linkToken)
+      : Boolean(app.link_share_token && linkToken && app.link_share_token === linkToken);
+    if (!validToken) return false;
+    if (app.link_share_requires_auth) return ctx.is_authenticated;
+    return true;
   }
   if (visibility === 'invited') {
     return readOwnerMatches(app, ctx) || userHasAcceptedInvite(app.id, ctx.user_id);
   }
   return false;
+}
+
+export type AppAccessDecision = { ok: true } | { ok: false; status: 401 | 404 };
+
+export function getAppAccessDecision(
+  app: Pick<AppRecord, 'id' | 'author' | 'workspace_id' | 'link_share_token'> & {
+    slug?: string | null;
+    visibility: AppVisibility | string | null | undefined;
+    link_share_requires_auth?: number | boolean | null;
+  },
+  ctx: SessionContext,
+  linkToken?: string | null,
+): AppAccessDecision {
+  const visibility = canonicalVisibility(app.visibility);
+  if (visibility !== 'link') {
+    return canAccessApp(app, ctx, linkToken) ? { ok: true } : { ok: false, status: 404 };
+  }
+
+  const validToken = app.slug
+    ? verifyLinkToken(app.slug, linkToken)
+    : Boolean(app.link_share_token && linkToken && app.link_share_token === linkToken);
+  if (validToken && (!app.link_share_requires_auth || ctx.is_authenticated)) {
+    return { ok: true };
+  }
+  if (app.link_share_requires_auth && !ctx.is_authenticated && (!linkToken || validToken)) {
+    return { ok: false, status: 401 };
+  }
+  return { ok: false, status: 404 };
 }
 
 export function assertLegalTransition(

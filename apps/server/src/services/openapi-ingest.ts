@@ -19,6 +19,7 @@ import type { RendererManifest } from '@floom/renderer/contract';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { auditLog } from './audit-log.js';
+import { generateLinkShareToken } from '../lib/link-share-token.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
 import { normalizeMaxRunRetentionDays } from './run-retention-sweeper.js';
 import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
@@ -52,14 +53,15 @@ interface OpenApiAppSpec {
   category?: string;
   icon?: string;
   /**
-   * Per-app visibility. Defaults to public.
-   *  - public: anyone can run the app, listed in /api/hub
-   *  - auth-required: caller must present a valid bearer token matching
-   *    FLOOM_AUTH_TOKEN env var (see apps/server/src/routes/*.ts)
-   *  - private: only the app's author can run/see it. Never listed in
-   *    the public directory; accessible via /api/hub/mine.
+   * Per-app visibility. Defaults to public for operator apps.
    */
-  visibility?: 'public' | 'auth-required' | 'private';
+  visibility?: 'public' | 'auth-required' | 'private' | 'link';
+  /**
+   * Link-shared apps can require a signed-in Floom session in addition to
+   * the link token. Legacy `auth_required` maps to this flag at publish time.
+   */
+  link_share_requires_auth?: boolean;
+  auth_required?: boolean;
   // ---------- async job queue fields (v0.3.0) ----------
   /**
    * When true, the app runs through the Floom job queue instead of the
@@ -131,6 +133,77 @@ interface OpenApiAppSpec {
    * reads "UUID format" in the form while still submitting `version: "v4"`.
    */
   input_labels?: Record<string, string>;
+}
+
+type PublishVisibility = 'public' | 'private' | 'link';
+
+function resolvePublishSharing(args: {
+  slug: string;
+  visibility?: string;
+  linkShareRequiresAuth?: boolean;
+  legacyAuthRequired?: boolean;
+  defaultVisibility: PublishVisibility;
+  existingVisibility?: string | null;
+  existingLinkShareToken?: string | null;
+  source: string;
+}): {
+  visibility: PublishVisibility;
+  linkShareRequiresAuth: 0 | 1;
+  linkShareToken: string | null;
+} {
+  if (args.legacyAuthRequired !== undefined && args.linkShareRequiresAuth !== undefined) {
+    throw new Error(
+      `${args.slug}: auth_required is deprecated; use link_share_requires_auth, not both fields`,
+    );
+  }
+
+  const legacyVisibilityAuthRequired = args.visibility === 'auth-required';
+  if (args.legacyAuthRequired !== undefined || legacyVisibilityAuthRequired) {
+    const field = args.legacyAuthRequired !== undefined ? 'auth_required' : 'visibility: auth-required';
+    const action =
+      args.legacyAuthRequired === true || legacyVisibilityAuthRequired
+        ? "mapping to visibility='link' and link_share_requires_auth=true"
+        : 'use link_share_requires_auth instead';
+    console.warn(
+      `[${args.source}] ${args.slug}: ${field} is deprecated; ${action}.`,
+    );
+  }
+  if (args.legacyAuthRequired === true || legacyVisibilityAuthRequired) {
+    return {
+      visibility: 'link',
+      linkShareRequiresAuth: 1,
+      linkShareToken: args.existingLinkShareToken || generateLinkShareToken(),
+    };
+  }
+
+  if (args.linkShareRequiresAuth === true) {
+    return {
+      visibility: 'link',
+      linkShareRequiresAuth: 1,
+      linkShareToken: args.existingLinkShareToken || generateLinkShareToken(),
+    };
+  }
+
+  const requestedVisibility =
+    args.visibility === 'public' || args.visibility === 'private' || args.visibility === 'link'
+      ? args.visibility
+      : null;
+  const visibility =
+    requestedVisibility ||
+    (args.existingVisibility === 'public' ||
+    args.existingVisibility === 'private' ||
+    args.existingVisibility === 'link'
+      ? args.existingVisibility
+      : args.defaultVisibility);
+
+  return {
+    visibility,
+    linkShareRequiresAuth: 0,
+    linkShareToken:
+      visibility === 'link'
+        ? args.existingLinkShareToken || generateLinkShareToken()
+        : null,
+  };
 }
 
 interface AppsConfig {
@@ -1612,18 +1685,20 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
   // each creator's entry to files inside the same directory.
   const manifestDir = dirname(isAbsolute(configPath) ? configPath : resolvePath(configPath));
 
-  const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
+  const existsBySlug = db.prepare(
+    'SELECT id, visibility, link_share_token FROM apps WHERE slug = ?',
+  );
   // Operator-declared apps (FLOOM_APPS_CONFIG) skip the publish-review gate —
   // the operator explicitly listed them in apps.yaml, no admin approval
   // needed. They land as 'published'. User-driven ingest (Studio /build,
   // MCP ingest_app) routes through ingestAppFromSpec instead, which
   // applies the 'pending_review' default.
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode, max_run_retention_days, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, link_share_requires_auth, link_share_token, is_async, webhook_url, timeout_ms, retries, async_mode, max_run_retention_days, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
   );
   const updateApp = db.prepare(
-    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, max_run_retention_days=?, updated_at=datetime('now') WHERE slug=?`,
+    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, link_share_requires_auth=?, link_share_token=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, max_run_retention_days=?, updated_at=datetime('now') WHERE slug=?`,
   );
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
@@ -1687,7 +1762,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         );
       }
 
-      const existing = existsBySlug.get(appSpec.slug) as { id: string } | undefined;
+      const existing = existsBySlug.get(appSpec.slug) as
+        | { id: string; visibility: string | null; link_share_token: string | null }
+        | undefined;
 
       // Build auth_config blob from the apps.yaml entry.
       const authConfig: Record<string, string> = {};
@@ -1697,7 +1774,16 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       if (appSpec.oauth2_scopes) authConfig.oauth2_scopes = appSpec.oauth2_scopes;
       const authConfigJson =
         Object.keys(authConfig).length > 0 ? JSON.stringify(authConfig) : null;
-      const visibility = appSpec.visibility || 'public';
+      const sharing = resolvePublishSharing({
+        slug: appSpec.slug,
+        visibility: appSpec.visibility,
+        linkShareRequiresAuth: appSpec.link_share_requires_auth,
+        legacyAuthRequired: appSpec.auth_required,
+        defaultVisibility: 'public',
+        existingVisibility: existing?.visibility,
+        existingLinkShareToken: existing?.link_share_token,
+        source: 'openapi-ingest',
+      });
       // v0.3.0 async fields
       const isAsync = appSpec.async === true ? 1 : 0;
       const webhookUrl = appSpec.webhook_url || null;
@@ -1752,7 +1838,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           authConfigJson,
           appSpec.openapi_spec_url || null,
           specCached,
-          visibility,
+          sharing.visibility,
+          sharing.linkShareRequiresAuth,
+          sharing.linkShareToken,
           isAsync,
           webhookUrl,
           timeoutMs,
@@ -1782,7 +1870,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           authConfigJson,
           appSpec.openapi_spec_url || null,
           specCached,
-          visibility,
+          sharing.visibility,
+          sharing.linkShareRequiresAuth,
+          sharing.linkShareToken,
           isAsync,
           webhookUrl,
           timeoutMs,
@@ -2295,7 +2385,9 @@ export async function ingestAppFromUrl(args: {
   author_user_id: string;
   actor_token_id?: string | null;
   actor_ip?: string | null;
-  visibility?: 'public' | 'private' | 'auth-required';
+  visibility?: 'public' | 'private' | 'auth-required' | 'link';
+  link_share_requires_auth?: boolean;
+  auth_required?: boolean;
   max_run_retention_days?: number | null;
   allowPrivateNetwork?: boolean;
 }): Promise<{ slug: string; name: string; created: boolean }> {
@@ -2333,7 +2425,9 @@ export async function ingestAppFromSpec(args: {
   actor_token_id?: string | null;
   actor_ip?: string | null;
   /** When omitted, new apps default to `private`. */
-  visibility?: 'public' | 'private' | 'auth-required';
+  visibility?: 'public' | 'private' | 'auth-required' | 'link';
+  link_share_requires_auth?: boolean;
+  auth_required?: boolean;
   max_run_retention_days?: number | null;
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const openapi_url = args.openapi_url || '';
@@ -2351,21 +2445,24 @@ export async function ingestAppFromSpec(args: {
   // random suffix) so the UI can render clickable pills instead of a
   // dead-end error (audit 2026-04-20, Fix 2).
   const existing = db
-    .prepare('SELECT id, workspace_id, visibility, publish_status FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string; visibility: string; publish_status: string | null } | undefined;
+    .prepare('SELECT id, workspace_id, visibility, link_share_token, publish_status FROM apps WHERE slug = ?')
+    .get(slug) as
+    | { id: string; workspace_id: string; visibility: string; link_share_token: string | null; publish_status: string | null }
+    | undefined;
   if (existing && existing.workspace_id !== args.workspace_id && existing.workspace_id !== 'local') {
     throw new SlugTakenError(slug, deriveSlugSuggestions(slug));
   }
 
-  let visibility: 'public' | 'private' | 'auth-required';
-  if (args.visibility !== undefined) {
-    visibility = args.visibility;
-  } else if (existing) {
-    visibility =
-      (existing.visibility as 'public' | 'private' | 'auth-required') || 'public';
-  } else {
-    visibility = 'private';
-  }
+  const sharing = resolvePublishSharing({
+    slug,
+    visibility: args.visibility,
+    linkShareRequiresAuth: args.link_share_requires_auth,
+    legacyAuthRequired: args.auth_required,
+    defaultVisibility: 'private',
+    existingVisibility: existing?.visibility,
+    existingLinkShareToken: existing?.link_share_token,
+    source: 'openapi-ingest',
+  });
 
   const maxRunRetentionDays = normalizeMaxRunRetentionDays(args.max_run_retention_days);
   const appSpec: OpenApiAppSpec = {
@@ -2387,7 +2484,7 @@ export async function ingestAppFromSpec(args: {
       `UPDATE apps SET
          name=?, description=?, manifest=?, category=?, app_type='proxied',
          base_url=?, auth_type=?, auth_config=NULL, openapi_spec_url=?,
-         openapi_spec_cached=?, visibility=?, is_async=0,
+         openapi_spec_cached=?, visibility=?, link_share_requires_auth=?, link_share_token=?, is_async=0,
          webhook_url=NULL, timeout_ms=NULL, retries=0, async_mode=NULL,
          max_run_retention_days=?, workspace_id=?, author=?, updated_at=datetime('now')
        WHERE slug=?`,
@@ -2400,7 +2497,9 @@ export async function ingestAppFromSpec(args: {
       'none',
       openapi_url || null,
       specCached,
-      visibility,
+      sharing.visibility,
+      sharing.linkShareRequiresAuth,
+      sharing.linkShareToken,
       maxRunRetentionDays,
       args.workspace_id,
       args.author_user_id,
@@ -2421,7 +2520,7 @@ export async function ingestAppFromSpec(args: {
       },
       after: {
         slug,
-        visibility,
+        visibility: sharing.visibility,
         publish_status: existing.publish_status,
       },
       metadata: {
@@ -2446,12 +2545,12 @@ export async function ingestAppFromSpec(args: {
     `INSERT INTO apps (
        id, slug, name, description, manifest, status, docker_image, code_path,
        category, author, icon, app_type, base_url, auth_type, auth_config,
-       openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
+       openapi_spec_url, openapi_spec_cached, visibility, link_share_requires_auth, link_share_token, is_async, webhook_url,
        timeout_ms, retries, async_mode, max_run_retention_days, workspace_id, publish_status
      ) VALUES (
        ?, ?, ?, ?, ?, 'active', NULL, ?,
        ?, ?, NULL, 'proxied', ?, 'none', NULL,
-       ?, ?, ?, 0, NULL,
+       ?, ?, ?, ?, ?, 0, NULL,
        NULL, 0, NULL, ?, ?, 'pending_review'
      )`,
   ).run(
@@ -2466,7 +2565,9 @@ export async function ingestAppFromSpec(args: {
     resolvedBaseUrl || null,
     openapi_url || null,
     specCached,
-    visibility,
+    sharing.visibility,
+    sharing.linkShareRequiresAuth,
+    sharing.linkShareToken,
     maxRunRetentionDays,
     args.workspace_id,
   );
@@ -2482,7 +2583,7 @@ export async function ingestAppFromSpec(args: {
     before: null,
     after: {
       slug,
-      visibility,
+      visibility: sharing.visibility,
       publish_status: 'pending_review',
     },
     metadata: {

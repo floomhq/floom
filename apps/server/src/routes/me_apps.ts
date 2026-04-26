@@ -370,9 +370,11 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
+    slug: app.slug,
     author: app.author,
     workspace_id: app.workspace_id,
     link_share_token: app.link_share_token,
+    link_share_requires_auth: app.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;

@@ -493,11 +493,19 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           .optional()
           .describe('Category tag (e.g. "productivity", "data", "ai").'),
         visibility: z
-          .enum(['public', 'private', 'auth-required'])
+          .enum(['public', 'private', 'link', 'auth-required'])
           .optional()
           .describe(
-            'Visibility override. Docker apps default to "private" in cloud mode, "public" in OSS local mode. OpenAPI apps keep existing defaults.',
+            'Visibility override. Use "link" for secret-link sharing. "auth-required" is deprecated.',
           ),
+        link_share_requires_auth: z
+          .boolean()
+          .optional()
+          .describe('When true, publish as a link-shared app that also requires sign-in.'),
+        auth_required: z
+          .boolean()
+          .optional()
+          .describe('Deprecated. Use link_share_requires_auth. Supplying both is invalid.'),
         max_run_retention_days: z
           .number()
           .int()
@@ -648,7 +656,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
             docker_image_ref,
             manifest: args.manifest,
             secret_bindings: args.secret_bindings as Record<string, string> | undefined,
-            visibility: args.visibility as 'public' | 'private' | 'auth-required' | undefined,
+            visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+            link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+            auth_required: args.auth_required as boolean | undefined,
             ctx,
           });
         } else if (openapi_url) {
@@ -656,6 +666,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           result = await ingestAppFromUrl({
             ...common,
             openapi_url,
+            visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+            link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+            auth_required: args.auth_required as boolean | undefined,
             allowPrivateNetwork:
               ctx.workspace_id === 'local' && ctx.user_id === 'local',
           });
@@ -665,6 +678,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           result = await ingestAppFromSpec({
             ...common,
             spec: openapi_spec as Parameters<typeof ingestAppFromSpec>[0]['spec'],
+            visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+            link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+            auth_required: args.auth_required as boolean | undefined,
           });
         }
         return {
@@ -1235,9 +1251,11 @@ mcpRouter.all('/app/:slug', async (c) => {
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
+    slug: row.slug,
     author: row.author,
     workspace_id: row.workspace_id,
     link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;

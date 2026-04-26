@@ -41,7 +41,7 @@ import {
   setHubCache,
 } from '../lib/hub-cache.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
-import { canAccessApp, canonicalVisibility } from '../services/sharing.js';
+import { canonicalVisibility, getAppAccessDecision } from '../services/sharing.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -130,7 +130,9 @@ const IngestBody = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*$/)
     .optional(),
   category: z.string().max(48).optional(),
-  visibility: z.enum(['public', 'private', 'auth-required']).optional(),
+  visibility: z.enum(['public', 'private', 'link', 'auth-required']).optional(),
+  link_share_requires_auth: z.boolean().optional(),
+  auth_required: z.boolean().optional(),
   max_run_retention_days: z.number().int().min(1).max(3650).optional(),
 });
 
@@ -332,6 +334,8 @@ hubRouter.post('/ingest', async (c) => {
       slug: parsed.data.slug,
       category: parsed.data.category,
       visibility: parsed.data.visibility,
+      link_share_requires_auth: parsed.data.link_share_requires_auth,
+      auth_required: parsed.data.auth_required,
       max_run_retention_days: parsed.data.max_run_retention_days,
       workspace_id: ctx.workspace_id,
       author_user_id: ctx.user_id,
@@ -639,7 +643,7 @@ hubRouter.delete('/:slug', async (c) => {
 // edits still go through re-ingest so the updated_at bookkeeping stays
 // tight; they can be added here later when the Studio grows inline-edit UI.
 const PatchBody = z.object({
-  visibility: z.enum(['public', 'private', 'auth-required']).optional(),
+  visibility: z.enum(['public', 'private']).optional(),
   // null clears; a string pins; omitted means "don't touch".
   primary_action: z.union([z.string().min(1).max(128), z.null()]).optional(),
 });
@@ -948,15 +952,12 @@ hubRouter.get('/:slug', async (c) => {
     | undefined;
   if (!row) return c.json({ error: 'App not found' }, 404);
   const ctx = await resolveUserContext(c);
-  if (
-    !canAccessApp(row, ctx, c.req.query('key') || null) &&
-    !(row.visibility === 'auth-required')
-  ) {
+  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  if (!access.ok) {
+    if (access.status === 401) {
+      return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+    }
     return c.json({ error: 'App not found' }, 404);
-  }
-  if (row.visibility === 'auth-required' && row.publish_status !== 'published') {
-    const isOwner = !!row.author && ctx.user_id === row.author;
-    if (!isOwner) return c.json({ error: 'App not found' }, 404);
   }
   const manifest = safeManifest(row.manifest);
   const bundle = getBundleResult(slug);

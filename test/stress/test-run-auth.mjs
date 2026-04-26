@@ -344,3 +344,4 @@ log('OSS anon same box: sees outputs', r.text.indexOf('SELFHOST-OUTPUT') !== -1)
 console.log(`\n${passed + failed} checks, ${passed} passed, ${failed} failed`);
 rmSync(tmp, { recursive: true, force: true });
 if (failed > 0) process.exit(1);
+process.exit(0);
