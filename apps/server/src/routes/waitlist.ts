@@ -10,10 +10,11 @@
 //   - Idempotent: duplicate emails return 200 `{ok: true}` with the same
 //     shape. Never leak whether the email was new.
 //   - Stores SHA-256(ip || WAITLIST_IP_HASH_SECRET) hex, never the raw IP.
-//   - Sends a plain-text + HTML Resend confirmation via lib/email.ts. If
-//     RESEND_API_KEY is unset (self-host / dev), logs a warning + still
-//     persists the signup — per the spec, don't fail the signup just
-//     because email delivery isn't configured.
+//   - Sends a plain-text + HTML Resend confirmation via lib/email.ts. Outside
+//     the Resend-required production signal, if RESEND_API_KEY is unset
+//     (self-host / dev / preview), logs a warning + still persists the signup
+//     — per the spec, don't fail the signup just because email delivery isn't
+//     configured.
 //
 // Also mounted at /api/deploy-waitlist as a backward-compat alias so any
 // marketing form that already POSTs there keeps working. The legacy
@@ -290,8 +291,9 @@ waitlistRouter.post('/', async (c) => {
 
   // Fire-and-forget the confirmation email. We DON'T block the response
   // on it: Resend can be slow (>1s) and the signup must feel instant.
-  // The spec explicitly allows persist-without-send when RESEND_API_KEY
-  // is missing; lib/email.ts already logs a warning + stdout-fallbacks.
+  // Outside the Resend-required production signal, the spec explicitly allows
+  // persist-without-send when RESEND_API_KEY is missing; lib/email.ts already
+  // logs a warning + stdout-fallbacks.
   const publicUrl =
     process.env.PUBLIC_URL ||
     process.env.BETTER_AUTH_URL ||

@@ -35,6 +35,7 @@ import { skillRouter } from './routes/skill.js';
 import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { captureServerError } from './lib/sentry.js';
+import { enforceStartupChecks } from './lib/startup-checks.js';
 import { sendDiscordAlert, logAlertsBootState } from './lib/alerts.js';
 import { seedFromFile } from './services/seed.js';
 import { seedLaunchDemos } from './services/launch-demos.js';
@@ -70,6 +71,8 @@ import { isDeployEnabled } from './services/workspaces.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+
+enforceStartupChecks();
 
 // Optional Discord alerts. No-op when DISCORD_ALERTS_WEBHOOK_URL is unset.
 // Logs one line at boot so operators can verify wiring via docker logs.

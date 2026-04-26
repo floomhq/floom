@@ -5,11 +5,13 @@
 // we currently support; the hard part (DKIM, SPF, DMARC on send.floom.dev)
 // is already done at the DNS layer.
 //
-// Graceful degradation: when `RESEND_API_KEY` is unset, every call logs
-// the intended payload to stdout and returns. This keeps local dev and
-// self-host installs that don't want to touch email provider accounts
-// working — the password-reset URL shows up in the server log so an
-// operator can copy/paste it. Boot does NOT crash when the key is absent.
+// Graceful degradation: outside the Resend-required production signal
+// (NODE_ENV=production with non-preview PUBLIC_URL), when `RESEND_API_KEY` is
+// unset, every call logs the intended payload to stdout and returns. This keeps
+// local dev, preview, and self-host installs that don't want to touch email
+// provider accounts working — the password-reset URL shows up in the server log
+// so an operator can copy/paste it. Production boot fails fast in startup
+// checks when the key is absent.
 //
 // Sender: `Floom <noreply@send.floom.dev>`. The `send.floom.dev` subdomain
 // carries the Resend DKIM key (resend._domainkey.floom.dev). Root floom.dev

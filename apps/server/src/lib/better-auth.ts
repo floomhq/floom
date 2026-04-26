@@ -208,10 +208,11 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       enabled: true,
       requireEmailVerification: true,
       autoSignIn: false,
-      // SMTP via Resend (2026-04-20). When RESEND_API_KEY is unset the
-      // handler in ./email.ts falls back to stdout — Better Auth won't
-      // crash, the reset URL just appears in the server log instead of
-      // the user's inbox. `url` is built by Better Auth from
+      // SMTP via Resend (2026-04-20). Outside the Resend-required production
+      // signal, when RESEND_API_KEY is unset the handler in ./email.ts falls
+      // back to stdout: Better Auth won't crash, the reset URL just appears
+      // in the server log instead of the user's inbox. `url` is built by
+      // Better Auth from
       // `${baseURL}/auth/reset-password/${token}?callbackURL=...`; it
       // redirects through the built-in verification endpoint to the
       // frontend's /reset-password page, which is the canonical pattern
