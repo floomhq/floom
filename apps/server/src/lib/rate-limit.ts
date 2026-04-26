@@ -95,6 +95,19 @@ interface CheckResult {
   resetAt: number;
 }
 
+export interface RunRateLimitBlock {
+  ok: false;
+  status: 429;
+  body: {
+    error: 'rate_limit_exceeded';
+    retry_after_seconds: number;
+    scope: Scope;
+  };
+  headers: Record<string, string>;
+}
+
+export type RunRateLimitGateResult = { ok: true } | RunRateLimitBlock;
+
 function incrementAndCheck(
   key: string,
   limit: number,
@@ -217,30 +230,31 @@ export function __resetAbuseStoreForTests(): void {
   abuseStore.clear();
 }
 
-function rateLimitResponse(
+function buildRateLimitBlock(
   c: Context,
   scope: Scope,
   result: CheckResult,
   limit: number,
-): Response {
+): RunRateLimitBlock {
   recordRateLimitHit(scope);
   noteRateLimitHitForAbuse(extractIp(c), scope, Date.now());
   const retryAfter = clampRetryAfter(result.retryAfterSec);
-  return c.json(
-    {
+  return {
+    ok: false,
+    status: 429,
+    body: {
       error: 'rate_limit_exceeded',
       retry_after_seconds: retryAfter,
       scope,
     },
-    429,
-    {
+    headers: {
       'Retry-After': String(retryAfter),
       'X-RateLimit-Limit': String(limit),
       'X-RateLimit-Remaining': '0',
       'X-RateLimit-Reset': String(result.resetAt),
       'X-RateLimit-Scope': scope,
     },
-  );
+  };
 }
 
 function writeRateLimitResponse(
@@ -336,63 +350,72 @@ export function runRateLimitMiddleware(
   resolveCtx: (c: Context) => Promise<SessionContext>,
 ): MiddlewareHandler {
   return async (c, next) => {
-    if (isRateLimitDisabled()) return next();
-    // Admin bypass (2026-04-21): when FLOOM_AUTH_TOKEN is configured AND
-    // the caller presents the matching bearer, skip rate-limit entirely.
-    // This unblocks ops sweeps, monitoring, and catalog rebuilds from the
-    // server operator without opening the limit up publicly. Returns false
-    // when no token is configured, so OSS mode still enforces the caps.
-    if (hasValidAdminBearer(c)) return next();
-    const now = Date.now();
-    const windowMs = 3600 * 1000;
-    const ip = extractIp(c);
     const ctx = await resolveCtx(c);
-
-    // Authed → user bucket (higher cap). Anon → IP bucket.
-    const primaryKey = ctx.is_authenticated ? `user:${ctx.user_id}` : `ip:${ip}`;
-    const primaryCap = ctx.is_authenticated
-      ? defaultUserPerHour()
-      : defaultAnonPerHour();
-    const primaryScope: Scope = ctx.is_authenticated ? 'user' : 'ip';
-    const p = incrementAndCheck(primaryKey, primaryCap, windowMs, now);
-    if (!p.allowed) return rateLimitResponse(c, primaryScope, p, primaryCap);
-    const agentLimit = checkAgentTokenLimit(ctx, now);
-    if (agentLimit && !agentLimit.result.allowed) {
-      return rateLimitResponse(c, 'agent_token', agentLimit.result, agentLimit.limit);
-    }
-
-    // Per-(IP, app) cap applies in both auth states.
-    const slug = c.req.param('slug');
-    if (slug) {
-      const appCap = defaultPerAppPerHour();
-      const r = incrementAndCheck(`app:${ip}:${slug}`, appCap, windowMs, now);
-      if (!r.allowed) return rateLimitResponse(c, 'app', r, appCap);
-      // Advertise the *tightest* remaining budget so a well-behaved client
-      // paces itself against whichever bucket will trip first. Primary vs
-      // per-app vs agent token: pick the smaller remaining.
-      const advertised = [
-        { result: p, limit: primaryCap, scope: primaryScope },
-        { result: r, limit: appCap, scope: 'app' as const },
-        ...(agentLimit
-          ? [
-              {
-                result: agentLimit.result,
-                limit: agentLimit.limit,
-                scope: 'agent_token' as const,
-              },
-            ]
-          : []),
-      ].sort((a, b) => a.result.remaining - b.result.remaining)[0];
-      applyLimitHeaders(c, advertised.result, advertised.limit, advertised.scope);
-    } else {
-      if (agentLimit && agentLimit.result.remaining < p.remaining) {
-        applyLimitHeaders(c, agentLimit.result, agentLimit.limit, 'agent_token');
-      } else {
-        applyLimitHeaders(c, p, primaryCap, primaryScope);
-      }
-    }
+    const gate = checkRunRateLimit(c, ctx);
+    if (!gate.ok) return c.json(gate.body, gate.status, gate.headers);
     return next();
   };
+}
+
+export function checkRunRateLimit(
+  c: Context,
+  ctx: SessionContext,
+  slugOverride?: string | null,
+): RunRateLimitGateResult {
+  if (isRateLimitDisabled()) return { ok: true };
+  // Admin bypass (2026-04-21): when FLOOM_AUTH_TOKEN is configured AND
+  // the caller presents the matching bearer, skip rate-limit entirely.
+  // This unblocks ops sweeps, monitoring, and catalog rebuilds from the
+  // server operator without opening the limit up publicly. Returns false
+  // when no token is configured, so OSS mode still enforces the caps.
+  if (hasValidAdminBearer(c)) return { ok: true };
+  const now = Date.now();
+  const windowMs = 3600 * 1000;
+  const ip = extractIp(c);
+
+  // Authed → user bucket (higher cap). Anon → IP bucket.
+  const primaryKey = ctx.is_authenticated ? `user:${ctx.user_id}` : `ip:${ip}`;
+  const primaryCap = ctx.is_authenticated
+    ? defaultUserPerHour()
+    : defaultAnonPerHour();
+  const primaryScope: Scope = ctx.is_authenticated ? 'user' : 'ip';
+  const p = incrementAndCheck(primaryKey, primaryCap, windowMs, now);
+  if (!p.allowed) return buildRateLimitBlock(c, primaryScope, p, primaryCap);
+  const agentLimit = checkAgentTokenLimit(ctx, now);
+  if (agentLimit && !agentLimit.result.allowed) {
+    return buildRateLimitBlock(c, 'agent_token', agentLimit.result, agentLimit.limit);
+  }
+
+  // Per-(IP, app) cap applies in both auth states.
+  const slug = slugOverride ?? c.req.param('slug');
+  if (slug) {
+    const appCap = defaultPerAppPerHour();
+    const r = incrementAndCheck(`app:${ip}:${slug}`, appCap, windowMs, now);
+    if (!r.allowed) return buildRateLimitBlock(c, 'app', r, appCap);
+    // Advertise the *tightest* remaining budget so a well-behaved client
+    // paces itself against whichever bucket will trip first. Primary vs
+    // per-app vs agent token: pick the smaller remaining.
+    const advertised = [
+      { result: p, limit: primaryCap, scope: primaryScope },
+      { result: r, limit: appCap, scope: 'app' as const },
+      ...(agentLimit
+        ? [
+            {
+              result: agentLimit.result,
+              limit: agentLimit.limit,
+              scope: 'agent_token' as const,
+            },
+          ]
+        : []),
+    ].sort((a, b) => a.result.remaining - b.result.remaining)[0];
+    applyLimitHeaders(c, advertised.result, advertised.limit, advertised.scope);
+  } else if (agentLimit && agentLimit.result.remaining < p.remaining) {
+    applyLimitHeaders(c, agentLimit.result, agentLimit.limit, 'agent_token');
+  } else {
+    applyLimitHeaders(c, p, primaryCap, primaryScope);
+  }
+
+  return { ok: true };
 }
 
 /**

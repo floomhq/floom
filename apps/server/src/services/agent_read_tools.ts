@@ -3,6 +3,14 @@ import { Buffer } from 'node:buffer';
 import type { Context } from 'hono';
 import { db } from '../db.js';
 import { newRunId } from '../lib/ids.js';
+import {
+  extractByokInputSecret,
+  extractUserApiKey,
+  runByokGate,
+  runGate,
+  type RunGateResult,
+} from '../lib/run-gate.js';
+import { isByokGated } from '../lib/byok-gate.js';
 import { validateInputs, ManifestError } from './manifest.js';
 import { dispatchRun, getRun } from './runner.js';
 import type {
@@ -18,24 +26,30 @@ export type AgentToolErrorCode =
   | 'not_found'
   | 'not_accessible'
   | 'invalid_input'
+  | 'rate_limit_exceeded'
+  | 'request_body_too_large'
+  | 'byok_required'
   | 'runtime_error';
 
 export class AgentToolError extends Error {
   code: AgentToolErrorCode;
   status: number;
   details?: unknown;
+  headers?: Record<string, string>;
 
   constructor(
     code: AgentToolErrorCode,
     message: string,
     status: number,
     details?: unknown,
+    headers?: Record<string, string>,
   ) {
     super(message);
     this.name = 'AgentToolError';
     this.code = code;
     this.status = status;
     this.details = details;
+    this.headers = headers;
   }
 }
 
@@ -50,6 +64,20 @@ export interface RunAppArgs {
   slug: string;
   action?: string;
   inputs?: Record<string, unknown>;
+}
+
+function throwRunGateError(gate: Exclude<RunGateResult, { ok: true }>): never {
+  const code =
+    typeof gate.body.error === 'string'
+      ? (gate.body.error as AgentToolErrorCode)
+      : 'runtime_error';
+  const message =
+    typeof gate.body.message === 'string'
+      ? gate.body.message
+      : code === 'rate_limit_exceeded'
+        ? 'Rate limit exceeded.'
+        : 'Run request rejected.';
+  throw new AgentToolError(code, message, gate.status, gate.body, gate.headers);
 }
 
 export interface ListRunsArgs {
@@ -282,10 +310,14 @@ export function getAppSkill(
 }
 
 export async function runApp(
+  c: Context,
   ctx: SessionContext,
   args: RunAppArgs,
 ): Promise<Record<string, unknown>> {
   requireReadScope(ctx);
+  const gate = runGate(c, ctx, { slug: args.slug });
+  if (!gate.ok) throwRunGateError(gate);
+
   const app = loadAccessibleApp(ctx, args.slug);
   if (!canRunApp(app, ctx)) {
     throw new AgentToolError(
@@ -309,9 +341,22 @@ export async function runApp(
     );
   }
 
+  const rawInputs = args.inputs ?? {};
+  const byokInput = isByokGated(app.slug)
+    ? extractByokInputSecret(rawInputs)
+    : { apiKey: null, inputs: rawInputs };
+  const byok = runByokGate(
+    c,
+    ctx,
+    app.slug,
+    extractUserApiKey(c) ?? byokInput.apiKey,
+    { allowUserVaultKey: true },
+  );
+  if (!byok.ok) throwRunGateError(byok);
+
   let validated: Record<string, unknown>;
   try {
-    validated = validateInputs(actionSpec, args.inputs ?? {});
+    validated = validateInputs(actionSpec, byokInput.inputs);
   } catch (err) {
     const e = err as ManifestError;
     throw new AgentToolError('invalid_input', e.message, 400, { field: e.field });
@@ -330,7 +375,7 @@ export async function runApp(
     ctx.user_id,
     ctx.device_id,
   );
-  dispatchRun(app, manifest, runId, actionName, validated, undefined, ctx);
+  dispatchRun(app, manifest, runId, actionName, validated, byok.perCallSecrets, ctx);
   const fresh = await waitForRun(runId);
   return formatAgentRun(fresh, app.slug, manifest.runtime);
 }
@@ -484,11 +529,18 @@ export function listMyRuns(
 export function agentToolErrorBody(err: unknown): {
   status: number;
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
 } {
   if (err instanceof AgentToolError) {
+    const details =
+      err.details && typeof err.details === 'object' && !Array.isArray(err.details)
+        ? (err.details as Record<string, unknown>)
+        : null;
     return {
       status: err.status,
+      headers: err.headers,
       body: {
+        ...(details ?? {}),
         error: err.code,
         message: err.message,
         details: err.details ?? undefined,

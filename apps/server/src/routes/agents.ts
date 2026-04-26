@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
+import { runGate } from '../lib/run-gate.js';
 import { resolveUserContext } from '../services/session.js';
 import {
   AgentToolError,
@@ -19,10 +20,14 @@ function numericLimit(raw: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function jsonError(body: Record<string, unknown>, status: number): Response {
+function jsonError(
+  body: Record<string, unknown>,
+  status: number,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(extraHeaders ?? {}) },
   });
 }
 
@@ -38,13 +43,15 @@ agentsRouter.get('/apps', async (c) => {
       }),
     );
   } catch (err) {
-    const { status, body } = agentToolErrorBody(err);
-    return jsonError(body, status);
+    const { status, body, headers } = agentToolErrorBody(err);
+    return jsonError(body, status, headers);
   }
 });
 
 agentsRouter.post('/run', async (c) => {
   const ctx = await resolveUserContext(c);
+  const bodyGate = runGate(c, ctx, { checkRate: false });
+  if (!bodyGate.ok) return c.json(bodyGate.body, bodyGate.status, bodyGate.headers);
   const parsed = await parseJsonBody(c);
   if (parsed.kind === 'error') return bodyParseError(c, parsed);
   const body = parsed.value as {
@@ -61,15 +68,15 @@ agentsRouter.post('/run', async (c) => {
         ? (body.inputs as Record<string, unknown>)
         : {};
     return c.json(
-      await runApp(ctx, {
+      await runApp(c, ctx, {
         slug: body.slug,
         action: typeof body.action === 'string' ? body.action : undefined,
         inputs,
       }),
     );
   } catch (err) {
-    const { status, body: errorBody } = agentToolErrorBody(err);
-    return jsonError(errorBody, status);
+    const { status, body: errorBody, headers } = agentToolErrorBody(err);
+    return jsonError(errorBody, status, headers);
   }
 });
 
@@ -85,8 +92,8 @@ agentsRouter.get('/runs', async (c) => {
       }),
     );
   } catch (err) {
-    const { status, body } = agentToolErrorBody(err);
-    return jsonError(body, status);
+    const { status, body, headers } = agentToolErrorBody(err);
+    return jsonError(body, status, headers);
   }
 });
 
@@ -95,8 +102,8 @@ agentsRouter.get('/runs/:run_id', async (c) => {
   try {
     return c.json(getAgentRun(ctx, c.req.param('run_id')));
   } catch (err) {
-    const { status, body } = agentToolErrorBody(err);
-    return jsonError(body, status);
+    const { status, body, headers } = agentToolErrorBody(err);
+    return jsonError(body, status, headers);
   }
 });
 
@@ -105,7 +112,7 @@ agentsRouter.get('/apps/:slug/skill', async (c) => {
   try {
     return c.json(getAppSkill(c, ctx, c.req.param('slug')));
   } catch (err) {
-    const { status, body } = agentToolErrorBody(err);
-    return jsonError(body, status);
+    const { status, body, headers } = agentToolErrorBody(err);
+    return jsonError(body, status, headers);
   }
 });

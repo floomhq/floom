@@ -16,11 +16,15 @@ import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
 import { extractIp } from '../lib/rate-limit.js';
 import {
-  byokRequiredResponse,
+  extractUserApiKey,
+  runByokGate,
+  runGate,
+  type RunGateResult,
+} from '../lib/run-gate.js';
+import {
   decideByok,
   hashUserAgent,
   isByokGated,
-  recordFreeRun,
 } from '../lib/byok-gate.js';
 import type {
   AppRecord,
@@ -29,33 +33,11 @@ import type {
   SessionContext,
 } from '../types.js';
 
-/**
- * BYOK header: callers can pass their own Gemini API key on a per-run basis.
- * When present AND the app is in BYOK_GATED_SLUGS, the server:
- *   1. Does NOT count the run against the 5/day free budget.
- *   2. Injects the key as a per-call secret (GEMINI_API_KEY).
- *   3. Never logs or persists the value (it's merged into mergedSecrets for
- *      this single dispatchRun call only).
- *
- * Header name kept lowercase on read (Hono normalizes) and well-known so
- * the frontend and any curl-user can discover it in the 429 payload docs.
- */
-const USER_API_KEY_HEADER = 'x-user-api-key';
-
-function extractUserApiKey(c: Context): string | null {
-  const raw = c.req.header(USER_API_KEY_HEADER);
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  // Minimum plausible length for a Google AI Studio key (prefix "AIza" +
-  // 35 chars). We don't hard-validate here — the dry-run path inside the
-  // container is the real authority on whether the key works — but a
-  // blank/near-blank header should fall through to free-quota instead of
-  // being treated as "user provided a key".
-  if (trimmed.length < 20) return null;
-  return trimmed;
-}
-
 export const runRouter = new Hono();
+
+function runGateResponse(c: Context, gate: Exclude<RunGateResult, { ok: true }>): Response {
+  return c.json(gate.body, gate.status, gate.headers);
+}
 
 type RunAppAccessRow = {
   slug: string;
@@ -184,6 +166,10 @@ function formatPublicShareView(
 }
 
 runRouter.post('/', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const bodyGate = runGate(c, ctx, { checkRate: false });
+  if (!bodyGate.ok) return runGateResponse(c, bodyGate);
+
   // 2026-04-20 (P2 #146): malformed JSON used to fall through to
   // `catch(() => ({}))` and silently become an empty body — which, for actions
   // with no required inputs, resulted in a 200 + run_id on junk input.
@@ -201,12 +187,14 @@ runRouter.post('/', async (c) => {
   if (typeof body.app_slug !== 'string') {
     return c.json({ error: '"app_slug" is required' }, 400);
   }
+  const gate = runGate(c, ctx, { slug: body.app_slug, checkBody: false });
+  if (!gate.ok) return runGateResponse(c, gate);
+
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(body.app_slug) as AppRecord | undefined;
   if (!row) return c.json({ error: `App not found: ${body.app_slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
     author: row.author,
     ctx,
@@ -247,44 +235,9 @@ runRouter.post('/', async (c) => {
   // Admin bearers bypass (internal ops / monitoring). Everyone else is
   // treated the same for launch — cloud auth'd callers share the same budget
   // as anon. We can split later if abuse materializes.
-  const bypassBecauseAdmin = hasValidAdminBearer(c);
   const userApiKey = extractUserApiKey(c);
-  const perCallSecrets: Record<string, string> = {};
-  if (isByokGated(row.slug) && !bypassBecauseAdmin) {
-    const ip = extractIp(c);
-    // Defense-in-depth against pure-IP bypass (CSO P1-2, 2026-04-23): the
-    // (ip + UA-hash) combo makes two browsers behind the same NAT get
-    // separate budgets, and the subnet-burst detector inside decideByok
-    // tightens the limit to 1 free run for a /24 under attack. Not a
-    // silver bullet; a headless bot rotating both IP AND UA from a proxy
-    // pool can still exhaust, but this raises the cost meaningfully.
-    const uaHash = hashUserAgent(c.req.header('user-agent'));
-    const decision = decideByok(ip, row.slug, userApiKey !== null, undefined, uaHash);
-    if (decision.block) {
-      return c.json(
-        byokRequiredResponse(row.slug, decision.usage, decision.limit),
-        429,
-      );
-    }
-    if (userApiKey) {
-      // BYOK path: inject the caller's key for this run only. perCallSecrets
-      // is transient — dispatchRun merges it into the per-run secrets bag
-      // and never writes it to disk. Do NOT record against the free budget;
-      // the user is paying their own API bill.
-      perCallSecrets.GEMINI_API_KEY = userApiKey;
-    } else {
-      // Free path: count this run against the 24h budget BEFORE dispatch so
-      // a burst of 6 concurrent requests can't all slip through the
-      // usage<5 check.
-      recordFreeRun(ip, row.slug, undefined, uaHash);
-      if (decision.tightened) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[byok-gate] subnet burst tightened limit ip=${ip} slug=${row.slug}`,
-        );
-      }
-    }
-  }
+  const byokGate = runByokGate(c, ctx, row.slug, userApiKey);
+  if (!byokGate.ok) return runGateResponse(c, byokGate);
 
   // W4M.1: scope the run by the current session so /api/me/runs can filter
   // by user_id / device_id. `ctx` was already resolved above for the
@@ -319,7 +272,7 @@ runRouter.post('/', async (c) => {
     runId,
     actionName,
     validated,
-    Object.keys(perCallSecrets).length > 0 ? perCallSecrets : undefined,
+    byokGate.perCallSecrets,
     ctx,
   );
 
@@ -571,12 +524,18 @@ export const slugRunRouter = new Hono<{ Variables: { slug: string } }>();
 
 slugRunRouter.post('/', async (c) => {
   const slug = c.req.param('slug');
+  const ctx = await resolveUserContext(c);
+  const bodyGate = runGate(c, ctx, { slug, checkRate: false });
+  if (!bodyGate.ok) return runGateResponse(c, bodyGate);
+
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
   if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const ctx = await resolveUserContext(c);
+  const gate = runGate(c, ctx, { slug, checkBody: false });
+  if (!gate.ok) return runGateResponse(c, gate);
+
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
     author: row.author,
     ctx,
@@ -623,31 +582,9 @@ slugRunRouter.post('/', async (c) => {
   // the slug-based endpoint is the same product surface (e.g. curl users,
   // self-host), so it shares the same 5-free-runs-then-BYOK rule for the
   // 3 hero demo apps.
-  const bypassBecauseAdminSlug = hasValidAdminBearer(c);
   const userApiKeySlug = extractUserApiKey(c);
-  const perCallSecretsSlug: Record<string, string> = {};
-  if (isByokGated(row.slug) && !bypassBecauseAdminSlug) {
-    const ip = extractIp(c);
-    const uaHashSlug = hashUserAgent(c.req.header('user-agent'));
-    const decision = decideByok(ip, row.slug, userApiKeySlug !== null, undefined, uaHashSlug);
-    if (decision.block) {
-      return c.json(
-        byokRequiredResponse(row.slug, decision.usage, decision.limit),
-        429,
-      );
-    }
-    if (userApiKeySlug) {
-      perCallSecretsSlug.GEMINI_API_KEY = userApiKeySlug;
-    } else {
-      recordFreeRun(ip, row.slug, undefined, uaHashSlug);
-      if (decision.tightened) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[byok-gate] subnet burst tightened limit ip=${ip} slug=${row.slug}`,
-        );
-      }
-    }
-  }
+  const byokGate = runByokGate(c, ctx, row.slug, userApiKeySlug);
+  if (!byokGate.ok) return runGateResponse(c, byokGate);
 
   // W4M.1: scope the run by the current session. `ctx` already resolved
   // for the visibility check above.
@@ -676,7 +613,7 @@ slugRunRouter.post('/', async (c) => {
     runId,
     actionName,
     validated,
-    Object.keys(perCallSecretsSlug).length > 0 ? perCallSecretsSlug : undefined,
+    byokGate.perCallSecrets,
     ctx,
   );
 

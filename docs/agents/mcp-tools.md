@@ -115,6 +115,8 @@ curl -sS -X POST https://floom.dev/api/agents/run \
   -d '{"slug":"lead-scorer","inputs":{"company":"Acme"}}'
 ```
 
+BYOK-gated launch apps (`lead-scorer`, `competitor-analyzer`, `resume-screener`) share the same 5 free runs per user/IP across web, MCP, and REST. After that budget is used, agents must pass `gemini_api_key` in `inputs`, forward `X-User-Api-Key`, or rely on a `GEMINI_API_KEY` already configured in the user's account secrets.
+
 ## `get_run`
 
 Args:

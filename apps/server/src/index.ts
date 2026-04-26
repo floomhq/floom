@@ -234,28 +234,24 @@ if (process.env.FLOOM_AUTH_TOKEN) {
   console.log('[auth] FLOOM_AUTH_TOKEN is set — bearer auth required on all /api, /mcp, /p routes');
 }
 
-// Rate limiting for run surfaces. Applied to POST-heavy paths that actually
-// execute an app. Health / hub list / /me/runs / MCP tools/list stay
-// unthrottled so frontend polls and service discovery aren't affected.
+// Rate limiting for run surfaces. Direct run handlers call the shared
+// runGate helper after they know the target slug; queued jobs and HTTP ingest
+// still use middleware because the route path carries their budget identity.
 // Routes covered:
-//   - POST /api/run               (body-keyed slug, legacy)
-//   - POST /api/:slug/run         (slug-keyed, primary for paste-first)
 //   - POST /api/:slug/jobs        (async enqueue)
-//   - POST /mcp/app/:slug         (per-app MCP tool calls)
 //   - POST /api/hub/ingest        (HTTP ingest; MCP ingest_app has its own daily cap)
-// The MCP admin root (/mcp) is rate-limited separately inside the tool
-// handler (ingest_app only, 10/day).
+//   - POST /mcp and /mcp/* body-size guard (run_app rate gates inline)
 const rateLimit = runRateLimitMiddleware(resolveUserContext);
 const writeRateLimit = writeRateLimitMiddleware(resolveUserContext);
 // Body-size guard runs BEFORE the rate-limit check so an attacker can't
 // burn rate-limit budget with oversized bodies (we reject 413 before
 // incrementing the counter). Launch-hardening 2026-04-23 for the 3 hero
-// demo apps; all run surfaces share the same 8 MiB cap.
-app.use('/api/run', runBodyLimit, rateLimit);
-app.use('/api/agents/run', runBodyLimit, rateLimit);
-app.use('/api/:slug/run', runBodyLimit, rateLimit);
+// demo apps; all run surfaces share the same 8 MiB cap. /mcp root needs the
+// guard here because MCP transports parse the JSON-RPC body before a tool
+// handler can inspect whether the call is run_app.
+app.use('/mcp', runBodyLimit);
+app.use('/mcp/*', runBodyLimit);
 app.use('/api/:slug/jobs', runBodyLimit, rateLimit);
-app.use('/mcp/app/:slug', runBodyLimit, rateLimit);
 // Security H2 (audit 2026-04-23): /api/hub/ingest was the only
 // unauthenticated-in-OSS write surface missing from the run-rate-limit
 // umbrella. The MCP equivalent (`ingest_app` tool) already has its own

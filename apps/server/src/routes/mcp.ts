@@ -37,6 +37,7 @@ import {
   checkAppVisibility,
 } from '../lib/auth.js';
 import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
+import { runGate } from '../lib/run-gate.js';
 import { filterTestFixtures } from '../lib/hub-filter.js';
 import { recordMcpToolCall } from '../lib/metrics-counters.js';
 import {
@@ -182,6 +183,7 @@ function buildZodSchema(
 }
 
 function createPerAppMcpServer(
+  c: Context,
   app: AppRecord,
   ctx?: SessionContext,
 ): McpServer {
@@ -227,6 +229,20 @@ function createPerAppMcpServer(
             isError: true,
             content: [{ type: 'text' as const, text: `App is ${fresh.status}, cannot run` }],
           };
+        }
+        if (ctx) {
+          const gate = runGate(c, ctx, { slug: fresh.slug });
+          if (!gate.ok) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({ ...gate.body, status: gate.status }, null, 2),
+                },
+              ],
+            };
+          }
         }
 
         // Extract the Floom MCP _auth extension from the raw inputs before
@@ -1099,7 +1115,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
       recordMcpToolCall('run_app');
       try {
         return mcpJson(
-          await runApp(ctx, {
+          await runApp(c, ctx, {
             slug,
             action,
             inputs: inputs as Record<string, unknown> | undefined,
@@ -1212,6 +1228,6 @@ mcpRouter.all('/app/:slug', async (c) => {
   // Reuse the ctx we already resolved for the visibility check. The MCP
   // tool handler forwards it to dispatchRun so per-user vault secrets
   // reach the runner, matching POST /api/run + POST /api/:slug/run.
-  const server = createPerAppMcpServer(row, ctx);
+  const server = createPerAppMcpServer(c, row, ctx);
   return handleMcp(server, c.req.raw);
 });
