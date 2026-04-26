@@ -111,10 +111,12 @@ export function TryTheseApps({ apps = DEFAULT_CARDS }: TryTheseAppsProps = {}) {
       </p>
 
       {/* Row: grid on desktop, snap-scroll carousel on mobile */}
-      <div className="try-these-row" data-testid="try-these-row" style={ROW_STYLE}>
-        {apps.map((app) => (
-          <TryAppCard key={app.slug} app={app} />
-        ))}
+      <div className="try-these-carousel-wrapper" style={{ position: 'relative' }}>
+        <div className="try-these-row" data-testid="try-these-row" style={ROW_STYLE}>
+          {apps.map((app) => (
+            <TryAppCard key={app.slug} app={app} />
+          ))}
+        </div>
       </div>
 
       <style>{SCOPED_CSS}</style>
@@ -232,7 +234,7 @@ const ICON_TILE: CSSProperties = {
 
 const CATEGORY_PILL: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10.5,
+  fontSize: 12,
   letterSpacing: '0.12em',
   fontWeight: 700,
 };
@@ -304,6 +306,17 @@ const SCOPED_CSS = `
     box-shadow: 0 10px 24px -16px rgba(14,14,12,0.25);
   }
   @media (max-width: 780px) {
+    .try-these-carousel-wrapper::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: -20px;
+      bottom: 0;
+      width: 60px;
+      background: linear-gradient(to right, transparent, var(--bg));
+      pointer-events: none;
+      z-index: 2;
+    }
     .try-these-row {
       display: flex !important;
       grid-template-columns: none !important;

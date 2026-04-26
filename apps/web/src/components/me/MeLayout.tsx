@@ -64,7 +64,7 @@ const s: Record<string, CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 700,
     letterSpacing: '0.02em',
     flexShrink: 0,
@@ -77,7 +77,7 @@ const s: Record<string, CSSProperties> = {
     flex: 1,
   },
   greetingHello: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: 600,
     color: 'rgba(17, 24, 39, 0.58)',
     lineHeight: 1.2,

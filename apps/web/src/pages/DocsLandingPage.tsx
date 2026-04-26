@@ -43,7 +43,7 @@ const mainStyle: CSSProperties = {
 
 const crumbsStyle: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: 'var(--muted)',
   marginBottom: 12,
   letterSpacing: '0.02em',
@@ -102,7 +102,7 @@ const codeBlockStyle: CSSProperties = {
   background: 'var(--card)',
   color: 'var(--ink)',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 12.5,
+  fontSize: 14,
   lineHeight: 1.7,
   padding: '18px 20px',
   borderRadius: 10,
@@ -121,7 +121,7 @@ const heroCodeBlockStyle: CSSProperties = {
   background: '#1b1a17',
   color: '#f5f4ef',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 13,
+  fontSize: 14,
   lineHeight: 1.75,
   padding: '18px 20px',
   borderRadius: 12,
@@ -156,11 +156,12 @@ const pillStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 8,
-  padding: '9px 14px',
+  /* Reached 44px height (issue #588) */
+  padding: '15px 14px',
   borderRadius: 10,
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 500,
   textDecoration: 'none',
   color: 'var(--ink)',
@@ -168,7 +169,7 @@ const pillStyle: CSSProperties = {
 
 const pillKeyStyle: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: 'var(--muted)',
   fontWeight: 400,
 };
@@ -185,7 +186,8 @@ const mrCardStyle: CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
   borderRadius: 10,
-  padding: '14px 16px',
+  /* Bumped hit target to 44px+ (issue #588) */
+  padding: '16px 16px',
   textDecoration: 'none',
   color: 'inherit',
   display: 'block',
@@ -193,7 +195,7 @@ const mrCardStyle: CSSProperties = {
 
 const mrKicker: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10,
+  fontSize: 12,
   color: 'var(--muted)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
@@ -208,7 +210,7 @@ const mrTitle: CSSProperties = {
 };
 
 const mrSubtitle: CSSProperties = {
-  fontSize: 12.5,
+  fontSize: 14,
   color: 'var(--muted)',
   lineHeight: 1.45,
 };
@@ -233,7 +235,7 @@ const surfaceCardStyle: CSSProperties = {
 
 const surfaceNameStyle: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: 'var(--accent)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
@@ -264,7 +266,7 @@ const specTableStyle: CSSProperties = {
   maxWidth: 640,
   borderCollapse: 'collapse',
   margin: '14px 0 24px',
-  fontSize: 13.5,
+  fontSize: 14,
   border: '1px solid var(--line)',
   borderRadius: 10,
   overflow: 'hidden',
@@ -274,7 +276,7 @@ const specThStyle: CSSProperties = {
   fontWeight: 600,
   color: 'var(--ink)',
   background: 'var(--bg)',
-  fontSize: 12.5,
+  fontSize: 14,
   letterSpacing: '0.02em',
   padding: '10px 14px',
   textAlign: 'left',
@@ -291,7 +293,7 @@ const specTdStyle: CSSProperties = {
 const specTdMonoStyle: CSSProperties = {
   ...specTdStyle,
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 12.5,
+  fontSize: 14,
   color: 'var(--accent)',
   fontWeight: 600,
   whiteSpace: 'nowrap',
@@ -300,7 +302,7 @@ const specTdMonoStyle: CSSProperties = {
 const specTdNoteStyle: CSSProperties = {
   ...specTdStyle,
   color: 'var(--muted)',
-  fontSize: 12.5,
+  fontSize: 14,
 };
 
 const discordFootStyle: CSSProperties = {
@@ -471,7 +473,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
             <div style={surfaceCardStyle}>
               <span style={surfaceNameStyle}>Discover</span>
               <div style={surfaceTitleStyle}>Find apps</div>
-              <p style={{ ...pStyle, fontSize: 12.5, margin: 0 }}>
+              <p style={{ ...pStyle, fontSize: 14, margin: 0 }}>
                 JSON list of live apps with manifests. Read-only, no auth.
               </p>
               <span style={surfaceToolStyle}>mcp.floom.dev/search</span>
@@ -479,7 +481,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
             <div style={surfaceCardStyle}>
               <span style={surfaceNameStyle}>Run</span>
               <div style={surfaceTitleStyle}>Run an app</div>
-              <p style={{ ...pStyle, fontSize: 12.5, margin: 0 }}>
+              <p style={{ ...pStyle, fontSize: 14, margin: 0 }}>
                 One MCP endpoint per app. Invoke with JSON, get structured JSON back.
               </p>
               <span style={surfaceToolStyle}>
@@ -489,7 +491,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
             <div style={surfaceCardStyle}>
               <span style={surfaceNameStyle}>Manage</span>
               <div style={surfaceTitleStyle}>Your apps</div>
-              <p style={{ ...pStyle, fontSize: 12.5, margin: 0 }}>
+              <p style={{ ...pStyle, fontSize: 14, margin: 0 }}>
                 {deployEnabled ? (
                   <>Create, update, rotate secrets. Web UI, not an MCP endpoint.</>
                 ) : (
@@ -626,7 +628,7 @@ docker run -d -p 3000:3000 \\
               </h4>
               <p
                 style={{
-                  fontSize: 13,
+                  fontSize: 14,
                   color: 'var(--muted)',
                   margin: 0,
                   lineHeight: 1.5,

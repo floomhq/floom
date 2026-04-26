@@ -359,6 +359,7 @@ export function AppsDirectoryPage() {
               across fetch. */}
           <div
             data-testid="apps-chips"
+            className="apps-chips-carousel"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -368,6 +369,21 @@ export function AppsDirectoryPage() {
             }}
             aria-hidden={categories.length <= 1 ? 'true' : undefined}
           >
+            <style>{`
+              @media (max-width: 640px) {
+                .apps-chips-carousel {
+                  flex-wrap: nowrap !important;
+                  overflow-x: auto !important;
+                  padding-bottom: 8px !important;
+                  margin-bottom: -8px !important;
+                  -webkit-overflow-scrolling: touch;
+                  scrollbar-width: none;
+                  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+                  -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+                }
+                .apps-chips-carousel::-webkit-scrollbar { display: none; }
+              }
+            `}</style>
             {categories.length > 1 &&
               categories.map((cat) => (
                 <button

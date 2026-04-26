@@ -343,7 +343,7 @@ export function HeroDemo() {
 
       <Tracker state={state} onJump={jumpTo} reducedMotion={reducedMotion} />
 
-      <div style={CANVAS_STYLE}>
+      <div style={CANVAS_STYLE} data-hd="canvas">
         <EditorSurface
           active={state === 'build'}
           cycle={cycle}
@@ -392,6 +392,7 @@ function Tracker({
               onClick={() => onJump(s)}
               aria-pressed={on}
               data-testid={`hero-tracker-${s}`}
+              data-hd="tracker-pill"
               style={{
                 ...TRACKER_PILL,
                 color: on ? 'var(--ink, #0e0e0c)' : 'var(--muted, #8b8680)',
@@ -452,7 +453,7 @@ function EditorSurface({ active, cycle, reducedMotion }: EditorProps) {
             <div style={TAB_ROW}>
               <div style={{ ...TAB_STYLE, ...TAB_ACTIVE }}>handler.py</div>
             </div>
-            <div style={GUTTER_WRAP}>
+            <div style={GUTTER_WRAP} data-hd="gutter-wrap">
               <div style={GUTTER}>
                 {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => (
                   <span key={i}>{i + 1}</span>
@@ -671,7 +672,7 @@ function DeploySurface({
           <div style={TAB_ROW}>
             <div style={{ ...TAB_STYLE, ...TAB_ACTIVE }}>handler.py</div>
           </div>
-          <div style={{ ...GUTTER_WRAP, flex: 1 }}>
+          <div style={{ ...GUTTER_WRAP, flex: 1 }} data-hd="gutter-wrap">
             <div style={GUTTER}>
               {Array.from({ length: Math.max(lineCount, 1) }).map((_, i) => (
                 <span key={i}>{i + 1}</span>
@@ -765,7 +766,7 @@ function RunSurface({
             tells a complete 3-beat story and this line is the bridge from
             Deploy's payoff moment into the live app. The live-URL chip on
             the right reinforces "this is actually a real page now". */}
-        <div style={RUN_CONTEXT}>
+        <div style={RUN_CONTEXT} data-hd="run-context">
           <span style={RUN_CONTEXT_DOT} aria-hidden="true" />
           <span>
             Just deployed via <code style={RUN_CONTEXT_CODE}>/floomit</code>
@@ -935,11 +936,13 @@ const SCOPED_CSS = `
     100%{transform:scale(2.4);opacity:0}
   }
   @media (max-width:860px){
-    [data-testid="hero-demo"] [data-hd="editor-grid"]{grid-template-columns:1fr}
-    [data-testid="hero-demo"] [data-hd="sidebar"]{display:none}
-    [data-testid="hero-demo"] [data-hd="deploy-grid"]{grid-template-columns:1fr}
-    [data-testid="hero-demo"] [data-hd="deploy-grid"] > :last-child{display:none}
-    [data-testid="hero-demo"] [data-hd="use-grid"]{grid-template-columns:1fr;gap:10px}
+    [data-testid="hero-demo"] [data-hd="canvas"]{height:880px !important}
+    [data-testid="hero-demo"] [data-hd="editor-grid"]{grid-template-columns:1fr !important}
+    [data-testid="hero-demo"] [data-hd="sidebar"]{display:none !important}
+    [data-testid="hero-demo"] [data-hd="deploy-grid"]{grid-template-columns:1fr !important}
+    [data-testid="hero-demo"] [data-hd="deploy-grid"] > :last-child{display:block !important}
+    [data-testid="hero-demo"] [data-hd="use-grid"]{grid-template-columns:1fr !important;gap:10px !important}
+    [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{border-right:0 !important; border-bottom:1px solid #ece8de !important}
   }
   /* Mobile: code snippet was overflowing past the viewport on ≤640px.
      Shrink font + tighten padding so the full Python snippet fits, and
@@ -952,16 +955,26 @@ const SCOPED_CSS = `
      cue when the code still overflows at 375px. The fade is a pure CSS
      mask — doesn't eat a DOM node, doesn't affect desktop. */
   @media (max-width:640px){
-    [data-testid="hero-demo"] pre{font-size:11px !important;line-height:1.6 !important;padding:10px 12px !important;}
+    [data-testid="hero-demo"] pre{font-size:12px !important;line-height:1.6 !important;padding:10px 12px !important;}
     [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{padding:20px 18px;gap:14px}
     [data-testid="hero-demo"] [data-hd="editor-pane"]{
       -webkit-mask-image:linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
       mask-image:linear-gradient(to right, #000 0, #000 calc(100% - 18px), transparent 100%);
     }
+    /* Audit 2026-04-25: Ensure the code container itself can scroll on mobile
+       if the snippet is too wide for the masked area. */
+    [data-testid="hero-demo"] [data-hd="gutter-wrap"] {
+      overflow-x: auto !important;
+      -webkit-overflow-scrolling: touch;
+    }
   }
   @media (max-width:480px){
-    [data-testid="hero-demo"] pre{font-size:10.5px !important;padding:10px 10px !important;}
+    [data-testid="hero-demo"] pre{font-size:12px !important;padding:10px 10px !important;}
     [data-testid="hero-demo"] [data-hd="deploy-grid"] > :first-child{padding:20px 18px;gap:14px}
+    /* Audit 2026-04-25: Increase tracker pill font size for legibility on small screens */
+    [data-testid="hero-demo"] [data-hd="tracker-pill"] {
+      font-size: 12px !important;
+    }
   }
   /* Mobile audit 2026-04-25 (Federico screenshot): the RUN panel's output
      column was overflowing past the viewport on iPhone-width — the meta
@@ -984,6 +997,12 @@ const SCOPED_CSS = `
     [data-testid="hero-demo"] [data-hd="run-secondary"]{
       flex-wrap:wrap !important;
       row-gap:4px !important;
+    }
+    /* Fix for the "clipped right column" audit: ensure the Run context
+       bar wraps cleanly on mobile. */
+    [data-testid="hero-demo"] [data-hd="run-context"] {
+      flex-wrap: wrap !important;
+      gap: 4px 10px !important;
     }
   }
 `;
@@ -1025,10 +1044,10 @@ const TRACKER_PILL: CSSProperties = {
   border: 0,
   cursor: 'pointer',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10.5,
+  fontSize: 12.5,
   letterSpacing: '0.08em',
   fontWeight: 600,
-  padding: '4px 0 10px',
+  padding: '12px 0',
   textAlign: 'center',
   transition: 'color .25s ease',
 };
@@ -1108,13 +1127,13 @@ const EDITOR_GRID: CSSProperties = {
 const SIDEBAR_STYLE: CSSProperties = {
   borderRight: '1px solid #ece8de',
   padding: '14px 10px',
-  fontSize: 11,
+  fontSize: 12.5,
   color: '#8b8680',
   background: '#f0ede5',
 };
 
 const SIDEBAR_SECTION: CSSProperties = {
-  fontSize: 10,
+  fontSize: 12,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
   color: '#a8a49b',
@@ -1158,7 +1177,7 @@ const TAB_ROW: CSSProperties = {
 
 const TAB_STYLE: CSSProperties = {
   padding: '7px 14px',
-  fontSize: 11,
+  fontSize: 12.5,
   color: '#6a665f',
   borderRight: '1px solid #ece8de',
 };
@@ -1276,7 +1295,7 @@ const DEPLOY_HEADER_ROW: CSSProperties = {
 };
 
 const DEPLOY_HEADER_LABEL: CSSProperties = {
-  fontSize: 11,
+  fontSize: 12.5,
   letterSpacing: '0.14em',
   fontWeight: 700,
   color: '#6a665f',
@@ -1400,7 +1419,7 @@ const DEPLOY_URL_MAIN: CSSProperties = {
 
 const DEPLOY_URL_META_CARD: CSSProperties = {
   fontFamily: "'Inter', system-ui, sans-serif",
-  fontSize: 11.5,
+  fontSize: 12.5,
   color: '#6a665f',
 };
 
@@ -1465,7 +1484,7 @@ const RUN_CONTEXT: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  fontSize: 11,
+  fontSize: 12.5,
   color: '#8b8680',
   letterSpacing: '0.02em',
   flexWrap: 'wrap',
@@ -1482,7 +1501,7 @@ const RUN_CONTEXT_DOT: CSSProperties = {
 
 const RUN_CONTEXT_CODE: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: '#2a2825',
   background: '#f5f4f0',
   padding: '1px 6px',
@@ -1495,7 +1514,7 @@ const RUN_CONTEXT_SEP: CSSProperties = {
 
 const RUN_CONTEXT_URL: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: '#6a665f',
 };
 
@@ -1597,7 +1616,7 @@ const RUN_FIELD: CSSProperties = {
 };
 
 const RUN_FIELD_LABEL: CSSProperties = {
-  fontSize: 10.5,
+  fontSize: 12,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   color: '#8b8680',
@@ -1646,7 +1665,7 @@ const RUN_OUTPUT_HEADER: CSSProperties = {
 };
 
 const RUN_OUTPUT_LABEL: CSSProperties = {
-  fontSize: 10.5,
+  fontSize: 12,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   color: '#8b8680',
@@ -1655,7 +1674,7 @@ const RUN_OUTPUT_LABEL: CSSProperties = {
 
 const RUN_OUTPUT_META: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10.5,
+  fontSize: 12,
   color: '#a8a49b',
 };
 
@@ -1747,7 +1766,7 @@ const TIER_PILL: CSSProperties = {
   border: '1px solid #d1fae5',
   borderRadius: 999,
   padding: '3px 11px',
-  fontSize: 11.5,
+  fontSize: 12,
   fontWeight: 600,
   marginLeft: 4,
 };
@@ -1765,7 +1784,7 @@ const RUN_REASONS: CSSProperties = {
 };
 
 const RUN_REASONS_TITLE: CSSProperties = {
-  fontSize: 10.5,
+  fontSize: 12,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
   color: '#8b8680',
@@ -1782,7 +1801,7 @@ const RUN_REASONS_LIST: CSSProperties = {
 };
 
 const RUN_REASON_ITEM: CSSProperties = {
-  fontSize: 12.5,
+  fontSize: 14,
   color: '#2a2825',
   lineHeight: 1.45,
   display: 'flex',
@@ -1809,7 +1828,7 @@ const RUN_SECONDARY: CSSProperties = {
 
 const RUN_SEC_TAG: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10.5,
+  fontSize: 12,
   color: '#8b8680',
   letterSpacing: '0.04em',
 };

@@ -184,7 +184,7 @@ export function MeRail({
                     <span
                       title="Private app — visible only to you"
                       style={{
-                        fontSize: 10,
+                        fontSize: 12,
                         fontWeight: 600,
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',
@@ -233,7 +233,7 @@ export function MeRail({
                   background: 'transparent',
                   border: '1px dashed var(--line)',
                   borderRadius: 8,
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: 500,
                   color: 'var(--muted)',
                   cursor: 'pointer',
@@ -278,7 +278,7 @@ export function MeRail({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 700,
                 flexShrink: 0,
                 overflow: 'hidden',
@@ -310,7 +310,7 @@ export function MeRail({
               {user.email && (
                 <div
                   style={{
-                    fontSize: 11,
+                    fontSize: 12,
                     color: 'var(--muted)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -353,7 +353,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: 700,
         textTransform: 'uppercase',
         letterSpacing: '0.08em',
@@ -370,7 +370,7 @@ function RailHint({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        fontSize: 12,
+        fontSize: 13,
         color: 'var(--muted)',
         padding: '6px 10px 10px',
         lineHeight: 1.5,
@@ -438,7 +438,7 @@ function ThreadRow({ run, active }: { run: MeRunSummary; active: boolean }) {
       {time && (
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--muted)',
             flexShrink: 0,
             fontVariantNumeric: 'tabular-nums',

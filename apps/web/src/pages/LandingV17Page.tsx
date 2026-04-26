@@ -549,6 +549,28 @@ export function LandingV17Page() {
       <PublicFooter />
       <FeedbackButton />
 
+      {/* Responsive tweaks: hero typography + stacking */}
+      <style>{`
+        @media (max-width: 1040px) {
+          .landing-v17 .hero-headline { font-size: 56px !important; }
+          .landing-v17 .steps { grid-template-columns: 1fr !important; gap: 14px !important; }
+        }
+        @media (max-width: 780px) {
+          .landing-v17 .hero-headline { font-size: 44px !important; }
+          .landing-v17 .hero-sub { font-size: 16px !important; line-height: 1.4 !important; letter-spacing: -0.01em !important; }
+        }
+        @media (max-width: 640px) {
+          .landing-v17 [data-testid="hero"] { padding: 40px 16px 32px !important; }
+          .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
+          .landing-v17 .hero-sub { font-size: 15px !important; line-height: 1.4 !important; margin-bottom: 20px !important; }
+          .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
+          .landing-v17 .hero-ctas a { width: 100% !important; }
+          .landing-v17 .works-with { gap: 16px 24px !important; }
+          .landing-v17 .dual { grid-template-columns: 1fr !important; }
+          .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
+          .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
+        }
+      `}</style>
     </div>
   );
 }

@@ -163,7 +163,14 @@ export function ForgotPasswordPage() {
           Remembered it?{' '}
           <Link
             to="/login"
-            style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
+            style={{
+              color: 'var(--accent)',
+              fontWeight: 600,
+              textDecoration: 'none',
+              height: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
+            }}
           >
             Back to sign in
           </Link>
@@ -184,11 +191,11 @@ const labelStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  padding: '10px 12px',
+  padding: '12px 14px',
   border: '1px solid var(--line)',
   borderRadius: 8,
   background: 'var(--card)',
-  fontSize: 14,
+  fontSize: 16,
   color: 'var(--ink)',
   fontFamily: 'inherit',
   marginBottom: 8,

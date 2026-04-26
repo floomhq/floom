@@ -27,7 +27,7 @@ const WRAP_STYLE: CSSProperties = {
 
 const EYEBROW_STYLE: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: 'var(--accent)',
   letterSpacing: '0.1em',
   textTransform: 'uppercase',
@@ -68,7 +68,8 @@ const BTN_ACCENT: CSSProperties = {
   color: '#fff',
   border: '1px solid var(--accent)',
   borderRadius: 12,
-  padding: '14px 22px',
+  /* Reached 44px+ (issue #588) */
+  padding: '15px 22px',
   fontSize: 15,
   fontWeight: 600,
   textDecoration: 'none',
@@ -83,7 +84,8 @@ const BTN_SECONDARY: CSSProperties = {
   color: 'var(--ink)',
   border: '1px solid var(--line)',
   borderRadius: 10,
-  padding: '11px 18px',
+  /* Reached 44px+ (issue #588) */
+  padding: '15px 18px',
   fontSize: 14,
   fontWeight: 600,
   textDecoration: 'none',

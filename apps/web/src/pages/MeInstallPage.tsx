@@ -313,7 +313,7 @@ function CopyRow({ value }: { value: string }) {
           background: 'var(--bg)',
           border: '1px solid var(--line)',
           borderRadius: 6,
-          fontSize: 11,
+          fontSize: 12,
           color: copied ? '#1a7f37' : 'var(--muted)',
           cursor: 'pointer',
           fontFamily: 'inherit',

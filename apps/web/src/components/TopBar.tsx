@@ -50,9 +50,9 @@ const navLinkBase: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: '7px 10px',
+  padding: '12px 10px',
   borderRadius: 6,
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 500,
   lineHeight: 1,
   textDecoration: 'none',
@@ -67,9 +67,10 @@ function navLinkStyle(active: boolean): CSSProperties {
 const signInStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  padding: '7px 14px',
+  /* Standardize hit target to 44px (issue #588) */
+  padding: '12px 14px',
   borderRadius: 6,
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 500,
   lineHeight: 1,
   textDecoration: 'none',
@@ -82,9 +83,10 @@ const signInStyle: CSSProperties = {
 const signUpStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  padding: '7px 14px',
+  /* Standardize hit target to 44px (issue #588) */
+  padding: '12px 14px',
   borderRadius: 6,
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   lineHeight: 1,
   textDecoration: 'none',
@@ -101,9 +103,10 @@ const signUpStyle: CSSProperties = {
 const publishCtaStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  padding: '7px 14px',
+  /* Standardize hit target to 44px (issue #588) */
+  padding: '12px 14px',
   borderRadius: 6,
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   lineHeight: 1,
   textDecoration: 'none',
@@ -117,8 +120,8 @@ const publishCtaStyle: CSSProperties = {
 
 const menuItemStyle: CSSProperties = {
   display: 'block',
-  padding: '8px 12px',
-  fontSize: 13,
+  padding: '10px 12px',
+  fontSize: 14,
   color: INK,
   textDecoration: 'none',
   borderRadius: 6,
@@ -277,6 +280,9 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             textDecoration: 'none',
             color: INK,
             flexShrink: 0,
+            /* Increase tap target to 44px (issue #559) */
+            padding: '11px 8px',
+            margin: '-11px -8px',
           }}
           aria-label="floom — home"
         >
@@ -538,7 +544,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 700,
                     }}
                     data-testid="topbar-user-avatar-initial"

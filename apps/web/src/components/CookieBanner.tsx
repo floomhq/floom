@@ -84,13 +84,25 @@ export function CookieBanner() {
 
   // Auto-collapse the mobile pill once the banner is visible. Skipped on
   // desktop (no pill there) and when the strip is already expanded.
+  // 2026-04-25: added scroll listener to collapse faster on scroll (issue #559).
   useEffect(() => {
     if (!visible || !isMobile || expanded || pillCollapsed) return undefined;
+
+    const handleScroll = () => {
+      if (window.scrollY > 20) {
+        setPillCollapsed(true);
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
     const t = window.setTimeout(
       () => setPillCollapsed(true),
       MOBILE_PILL_AUTO_COLLAPSE_MS,
     );
-    return () => window.clearTimeout(t);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.clearTimeout(t);
+    };
   }, [visible, isMobile, expanded, pillCollapsed]);
 
   const showStrip = visible && (!isMobile || expanded);

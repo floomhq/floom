@@ -331,7 +331,7 @@ export function MeAppSecretsPage({
 
               <p
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   color: 'var(--muted)',
                   marginTop: 24,
                   lineHeight: 1.5,
@@ -562,7 +562,7 @@ function CreatorSecretRow({ slug, entry, onPolicyChanged }: CreatorSecretRowProp
               <span
                 data-testid={`creator-secret-status-set-${key}`}
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   fontWeight: 600,
                   color: 'var(--accent)',
                   background: 'var(--accent-soft)',
@@ -577,7 +577,7 @@ function CreatorSecretRow({ slug, entry, onPolicyChanged }: CreatorSecretRowProp
               <span
                 data-testid={`creator-secret-status-unset-${key}`}
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   fontWeight: 600,
                   color: 'var(--muted)',
                   background: 'var(--bg)',
@@ -808,7 +808,7 @@ function SecretRow({ secretKey, entry, onSave, onRemove }: SecretRowProps) {
           <span
             data-testid={`secret-status-set-${secretKey}`}
             style={{
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 600,
               color: 'var(--accent)',
               background: 'var(--accent-soft)',
@@ -823,7 +823,7 @@ function SecretRow({ secretKey, entry, onSave, onRemove }: SecretRowProps) {
           <span
             data-testid={`secret-status-unset-${secretKey}`}
             style={{
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: 600,
               color: 'var(--muted)',
               background: 'var(--bg)',
@@ -836,7 +836,7 @@ function SecretRow({ secretKey, entry, onSave, onRemove }: SecretRowProps) {
           </span>
         )}
         {entry?.updated_at && (
-          <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             updated {formatTimestamp(entry.updated_at)}
           </span>
         )}

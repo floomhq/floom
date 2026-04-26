@@ -44,7 +44,7 @@ const SERIF: React.CSSProperties = {
 
 const EYEBROW: React.CSSProperties = {
   ...MONO,
-  fontSize: 11,
+  fontSize: 12,
   fontWeight: 700,
   color: ACCENT,
   textTransform: 'uppercase',
@@ -259,7 +259,7 @@ function FaqEntry({ q, a }: FaqItem) {
       {open && (
         <p
           style={{
-            fontSize: 13.5,
+            fontSize: 14,
             color: MUTED,
             lineHeight: 1.6,
             margin: '12px 0 0',
@@ -454,7 +454,7 @@ export function PricingPage() {
                   </div>
                   <div
                     style={{
-                      fontSize: 13,
+                      fontSize: 14,
                       color: MUTED,
                       lineHeight: 1.55,
                     }}
@@ -464,7 +464,7 @@ export function PricingPage() {
                 </div>
                 <div
                   style={{
-                    fontSize: 13.5,
+                    fontSize: 14,
                     fontWeight: 600,
                     color: INK,
                     whiteSpace: 'nowrap',
@@ -482,7 +482,7 @@ export function PricingPage() {
             data-testid="pricing-specs-inline"
             style={{
               ...MONO,
-              fontSize: 11.5,
+              fontSize: 12,
               color: MUTED,
               margin: '16px 0 22px',
               letterSpacing: '0.02em',
@@ -591,7 +591,7 @@ export function PricingPage() {
             </h3>
             <p
               style={{
-                fontSize: 13.5,
+                fontSize: 14,
                 color: MUTED,
                 lineHeight: 1.55,
                 margin: 0,
@@ -612,7 +612,7 @@ export function PricingPage() {
           <code
             style={{
               ...MONO,
-              fontSize: 12,
+              fontSize: 14,
               color: INK,
               background: STUDIO_BG,
               border: `1px solid ${LINE}`,

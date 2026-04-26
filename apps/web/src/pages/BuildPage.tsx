@@ -737,9 +737,9 @@ function DetectingStep({ progress }: { progress: ProgressLine[] }) {
     >
       <div
         style={{
-          fontSize: 11,
+          fontSize: 13,
           color: '#a19d8e',
-          letterSpacing: '0.1em',
+          letterSpacing: '0.05em',
           textTransform: 'uppercase',
           marginBottom: 14,
         }}

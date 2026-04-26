@@ -7,7 +7,7 @@ import { ToolTile } from '../components/me/ToolTile';
 import { buildRerunHref, runPreviewText } from '../components/me/runPreview';
 import { useMeCompactLayout } from '../components/me/useMeCompactLayout';
 import { Tour } from '../components/onboarding/Tour';
-import { hasOnboarded } from '../lib/onboarding';
+import { hasOnboarded, resetOnboarding } from '../lib/onboarding';
 import { useSession, clearSession, refreshSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import { formatTime } from '../lib/time';
@@ -204,24 +204,34 @@ const s: Record<string, CSSProperties> = {
     flexWrap: 'wrap',
   },
   settingsLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 44,
+    padding: '0 4px',
     fontSize: 13.5,
     fontWeight: 600,
     color: 'var(--muted)',
     textDecoration: 'none',
   },
-  settingsSeparator: {
-    fontSize: 13.5,
-    color: 'var(--muted)',
-  },
   settingsButton: {
-    padding: 0,
-    border: 'none',
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 44,
+    padding: '0 4px',
     background: 'none',
+    border: 'none',
+    margin: 0,
     fontSize: 13.5,
     fontWeight: 600,
     color: 'var(--muted)',
     cursor: 'pointer',
     fontFamily: 'inherit',
+  },
+  settingsSeparator: {
+    fontSize: 13.5,
+    color: 'var(--muted)',
+    opacity: 0.4,
+    userSelect: 'none',
   },
   notice: {
     display: 'flex',
@@ -366,6 +376,11 @@ export function MePage() {
     }
   }
 
+  function handleRestartTour() {
+    resetOnboarding();
+    window.location.reload();
+  }
+
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
@@ -486,6 +501,17 @@ export function MePage() {
               <Link to="/me/settings" style={s.settingsLink}>
                 Profile
               </Link>
+              <span aria-hidden style={s.settingsSeparator}>
+                ·
+              </span>
+              <button
+                type="button"
+                onClick={handleRestartTour}
+                data-testid="me-restart-tour"
+                style={s.settingsButton}
+              >
+                Restart tour
+              </button>
               <span aria-hidden style={s.settingsSeparator}>
                 ·
               </span>

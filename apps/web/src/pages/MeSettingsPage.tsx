@@ -750,7 +750,7 @@ function StubPanel({
           borderRadius: 4,
           background: 'var(--accent-soft)',
           color: 'var(--accent)',
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: 700,
           textTransform: 'uppercase',
           letterSpacing: '0.06em',

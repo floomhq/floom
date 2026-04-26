@@ -83,7 +83,7 @@ const LEAD_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 8,
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   color: 'var(--ink)',
   letterSpacing: '-0.005em',
@@ -112,7 +112,7 @@ const EXAMPLES_ROW: CSSProperties = {
 
 const EXAMPLES_PREFIX: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 10.5,
+  fontSize: 12,
   letterSpacing: '0.1em',
   textTransform: 'uppercase',
   color: 'var(--muted)',
@@ -124,7 +124,7 @@ const ITEM_STYLE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 5,
-  fontSize: 12,
+  fontSize: 14,
   color: 'var(--muted)',
   fontWeight: 500,
   opacity: 0.85,

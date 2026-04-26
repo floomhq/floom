@@ -157,7 +157,7 @@ export function MeAppRunPage() {
               )}
 
               {missingKeys === null && !(secrets.error && !secrets.entries) && (
-                <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>
+                <div style={{ fontSize: 14, color: 'var(--muted)' }}>Loading…</div>
               )}
 
               {missingKeys && missingKeys.length > 0 && (
@@ -222,7 +222,7 @@ function SecretsFetchError({
             color: '#fff',
             border: 'none',
             borderRadius: 6,
-            fontSize: 12,
+            fontSize: 12.5,
             fontWeight: 600,
             cursor: 'pointer',
             fontFamily: 'inherit',

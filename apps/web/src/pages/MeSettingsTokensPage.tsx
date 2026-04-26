@@ -106,7 +106,7 @@ export function MeSettingsTokensPage() {
       <div data-testid="tokens-page" style={{ maxWidth: 720 }}>
         <nav
           aria-label="Breadcrumb"
-          style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
+          style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 16 }}
         >
           <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
             /me
@@ -247,7 +247,7 @@ export function MeSettingsTokensPage() {
               {createError && (
                 <div
                   data-testid="tokens-create-error"
-                  style={{ fontSize: 12, color: '#c2321f', width: '100%' }}
+                  style={{ fontSize: 12.5, color: '#c2321f', width: '100%' }}
                 >
                   {createError}
                 </div>
@@ -297,7 +297,7 @@ export function MeSettingsTokensPage() {
                   gridTemplateColumns: '1.3fr 0.9fr 0.9fr auto',
                   gap: 12,
                   padding: '8px 4px',
-                  fontSize: 11,
+                  fontSize: 12.5,
                   fontWeight: 700,
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
@@ -327,7 +327,7 @@ export function MeSettingsTokensPage() {
           )}
         </section>
 
-        <p style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.55, maxWidth: 620 }}>
+        <p style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.55, maxWidth: 620 }}>
           Keys are hashed at rest and only shown in full at creation time.
           Revoking a key takes effect immediately on the next request.
         </p>
@@ -433,7 +433,7 @@ function DisplayOnceCallout({
             border: '1px solid var(--accent-border)',
             borderRadius: 8,
             fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 12,
+            fontSize: 12.5,
             background: 'var(--card)',
             color: 'var(--ink)',
             boxSizing: 'border-box',
@@ -455,7 +455,7 @@ function DisplayOnceCallout({
           border: '1px solid var(--accent-border)',
           borderRadius: 8,
           padding: '12px 14px',
-          fontSize: 12,
+          fontSize: 12.5,
           color: 'var(--ink)',
           lineHeight: 1.6,
         }}
@@ -465,7 +465,7 @@ function DisplayOnceCallout({
           style={{
             display: 'block',
             fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 12,
+            fontSize: 12.5,
             background: 'var(--bg)',
             padding: '8px 10px',
             borderRadius: 6,
@@ -549,7 +549,7 @@ function KeyRow({
           <code
             style={{
               fontFamily: 'JetBrains Mono, monospace',
-              fontSize: 11,
+              fontSize: 12.5,
               color: 'var(--muted)',
             }}
           >
@@ -557,10 +557,10 @@ function KeyRow({
           </code>
         )}
       </div>
-      <div role="cell" style={{ fontSize: 12, color: 'var(--muted)' }}>
+      <div role="cell" style={{ fontSize: 12.5, color: 'var(--muted)' }}>
         {formatRelative(record.createdAt)}
       </div>
-      <div role="cell" style={{ fontSize: 12, color: 'var(--muted)' }}>
+      <div role="cell" style={{ fontSize: 12.5, color: 'var(--muted)' }}>
         {record.lastRequest ? formatRelative(record.lastRequest) : '—'}
       </div>
       <div role="cell" style={{ textAlign: 'right' }}>
@@ -653,7 +653,7 @@ const placeholderStyle: React.CSSProperties = {
 
 const codeStyle: React.CSSProperties = {
   fontFamily: 'JetBrains Mono, monospace',
-  fontSize: 12,
+  fontSize: 12.5,
   background: 'var(--bg)',
   padding: '1px 6px',
   borderRadius: 4,

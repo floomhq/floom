@@ -80,7 +80,7 @@ const s: Record<string, CSSProperties> = {
     lineHeight: 1.45,
   },
   badge: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: 700,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',

@@ -59,7 +59,7 @@ const COL_STYLE: CSSProperties = {
 
 const EYEBROW_STYLE: CSSProperties = {
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-  fontSize: 11,
+  fontSize: 12,
   color: 'var(--accent)',
   letterSpacing: '0.1em',
   textTransform: 'uppercase',
@@ -95,7 +95,7 @@ const LI_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'flex-start',
   gap: 10,
-  fontSize: 13.5,
+  fontSize: 14,
   color: 'var(--ink)',
 };
 
@@ -113,8 +113,9 @@ const btnStyle = (kind: 'ink' | 'accent' | 'secondary'): CSSProperties => ({
   justifyContent: 'center',
   gap: 8,
   borderRadius: 10,
-  padding: '11px 17px',
-  fontSize: 13.5,
+  /* Reached 44px (issue #588) */
+  padding: '15px 17px',
+  fontSize: 14,
   fontWeight: 600,
   textDecoration: 'none',
   border: '1px solid',
