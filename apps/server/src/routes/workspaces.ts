@@ -37,6 +37,7 @@ import {
 } from '../services/workspaces.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
+import { deleteWorkspaceRuns } from '../services/run-retention-sweeper.js';
 import type { WorkspaceMemberRole, WorkspaceRecord } from '../types.js';
 
 export const workspacesRouter = new Hono();
@@ -258,6 +259,26 @@ workspacesRouter.delete('/:id', async (c) => {
   try {
     ws.remove(ctx, id);
     return c.json({ ok: true });
+  } catch (err) {
+    const m = mapError(err);
+    return c.json(m.body, m.status);
+  }
+});
+
+/**
+ * DELETE /api/workspaces/:id/runs
+ * Admin-only bulk deletion for all runs belonging to apps owned by the
+ * workspace.
+ */
+workspacesRouter.delete('/:id/runs', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id') || '';
+  try {
+    ws.assertRole(ctx, id, 'admin');
+    const result = deleteWorkspaceRuns(ctx, id);
+    return c.json({ ok: true, ...result });
   } catch (err) {
     const m = mapError(err);
     return c.json(m.body, m.status);

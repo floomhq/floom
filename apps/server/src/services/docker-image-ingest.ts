@@ -444,6 +444,7 @@ export async function ingestAppFromDockerImage(args: {
     `${name} (Docker image)`;
 
   const manifestJson = JSON.stringify(manifest);
+  const maxRunRetentionDays = manifest.max_run_retention_days ?? null;
 
   let appId: string;
   let created: boolean;
@@ -457,7 +458,7 @@ export async function ingestAppFromDockerImage(args: {
          docker_image=?, base_url=NULL, auth_type=NULL, auth_config=NULL,
          openapi_spec_url=NULL, openapi_spec_cached=NULL, visibility=?,
          is_async=0, webhook_url=NULL, timeout_ms=NULL, retries=0,
-         async_mode=NULL, workspace_id=?, author=?, updated_at=datetime('now')
+         async_mode=NULL, max_run_retention_days=?, workspace_id=?, author=?, updated_at=datetime('now')
        WHERE slug=?`,
     ).run(
       name,
@@ -466,6 +467,7 @@ export async function ingestAppFromDockerImage(args: {
       args.category || null,
       args.docker_image_ref,
       visibility,
+      maxRunRetentionDays,
       args.workspace_id,
       args.author_user_id,
       slug,
@@ -483,12 +485,12 @@ export async function ingestAppFromDockerImage(args: {
          id, slug, name, description, manifest, status, docker_image, code_path,
          category, author, icon, app_type, base_url, auth_type, auth_config,
          openapi_spec_url, openapi_spec_cached, visibility, is_async,
-         webhook_url, timeout_ms, retries, async_mode, workspace_id, publish_status
+         webhook_url, timeout_ms, retries, async_mode, max_run_retention_days, workspace_id, publish_status
        ) VALUES (
          ?, ?, ?, ?, ?, 'active', ?, ?,
          ?, ?, NULL, 'docker', NULL, NULL, NULL,
          NULL, NULL, ?, 0,
-         NULL, NULL, 0, NULL, ?, 'pending_review'
+         NULL, NULL, 0, NULL, ?, ?, 'pending_review'
        )`,
     ).run(
       appId,
@@ -503,6 +505,7 @@ export async function ingestAppFromDockerImage(args: {
       args.category || null,
       args.author_user_id,
       visibility,
+      maxRunRetentionDays,
       args.workspace_id,
     );
   }

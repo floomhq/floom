@@ -113,6 +113,11 @@ if (!appCols.includes('timeout_ms')) {
 if (!appCols.includes('retries')) {
   db.exec(`ALTER TABLE apps ADD COLUMN retries INTEGER NOT NULL DEFAULT 0`);
 }
+// ADR-011 run retention. NULL means indefinite retention. The sweeper only
+// acts on apps with an explicit positive day count.
+if (!appCols.includes('max_run_retention_days')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN max_run_retention_days INTEGER`);
+}
 // Client contract for async apps: 'poll' (default), 'webhook', or 'stream'.
 // Stored for the manifest advertisement; runtime behavior is the same today.
 if (!appCols.includes('async_mode')) {
@@ -553,6 +558,27 @@ db.exec(
   `CREATE INDEX IF NOT EXISTS idx_runs_workspace_user ON runs(workspace_id, user_id)`,
 );
 db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_device ON runs(device_id) WHERE device_id IS NOT NULL`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_app_finished ON runs(app_id, finished_at)`);
+
+// ADR-011 audit trail for destructive run-deletion operations. Payloads are
+// intentionally metadata-only; inputs, outputs, and logs never get copied here.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS run_deletion_audit (
+    id TEXT PRIMARY KEY,
+    actor_user_id TEXT,
+    workspace_id TEXT,
+    action TEXT NOT NULL,
+    run_id TEXT,
+    app_id TEXT,
+    deleted_count INTEGER NOT NULL,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_run_deletion_audit_actor
+    ON run_deletion_audit(actor_user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_run_deletion_audit_workspace
+    ON run_deletion_audit(workspace_id, created_at);
+`);
 
 // run_threads: workspace_id + user_id + device_id
 const threadCols = (db

@@ -19,6 +19,7 @@ import type { RendererManifest } from '@floom/renderer/contract';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
+import { normalizeMaxRunRetentionDays } from './run-retention-sweeper.js';
 import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
 
 // ---------- config schema ----------
@@ -86,6 +87,11 @@ interface OpenApiAppSpec {
    * 'stream' is reserved for future streaming support.
    */
   async_mode?: 'poll' | 'webhook' | 'stream';
+  /**
+   * ADR-011: optional creator-declared maximum retention for completed
+   * run rows. Omitted means indefinite retention.
+   */
+  max_run_retention_days?: number;
   /**
    * Optional free-text reason this app is blocked and cannot be run by
    * self-hosters. Surfaced in /api/hub and rendered as a warning pill on
@@ -844,6 +850,9 @@ export function specToManifest(
     ...(appSpec.blocked_reason ? { blocked_reason: appSpec.blocked_reason } : {}),
     ...(license ? { license } : {}),
     ...(appSpec.render ? { render: appSpec.render } : {}),
+    ...(appSpec.max_run_retention_days
+      ? { max_run_retention_days: appSpec.max_run_retention_days }
+      : {}),
   };
 }
 
@@ -1609,11 +1618,11 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
   // MCP ingest_app) routes through ingestAppFromSpec instead, which
   // applies the 'pending_review' default.
   const insertApp = db.prepare(
-    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode, publish_status)
-     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
+    `INSERT INTO apps (id, slug, name, description, manifest, status, docker_image, code_path, category, author, icon, app_type, base_url, auth_type, auth_config, openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url, timeout_ms, retries, async_mode, max_run_retention_days, publish_status)
+     VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, 'proxied', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
   );
   const updateApp = db.prepare(
-    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, updated_at=datetime('now') WHERE slug=?`,
+    `UPDATE apps SET name=?, description=?, manifest=?, category=?, app_type='proxied', base_url=?, auth_type=?, auth_config=?, openapi_spec_url=?, openapi_spec_cached=?, visibility=?, is_async=?, webhook_url=?, timeout_ms=?, retries=?, async_mode=?, max_run_retention_days=?, updated_at=datetime('now') WHERE slug=?`,
   );
   const insertSecret = db.prepare(
     `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
@@ -1700,6 +1709,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           ? appSpec.retries
           : 0;
       const asyncMode = appSpec.async_mode || (isAsync ? 'poll' : null);
+      const maxRunRetentionDays = normalizeMaxRunRetentionDays(
+        appSpec.max_run_retention_days,
+      );
 
       // Parse + compile custom renderer if declared. We parse first (pure,
       // may throw with a clear error) and then bundle (side-effecting,
@@ -1745,6 +1757,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           timeoutMs,
           retries,
           asyncMode,
+          maxRunRetentionDays,
           appSpec.slug,
         );
         // Insert placeholder secrets if not already present (so the UI shows them)
@@ -1774,6 +1787,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
           timeoutMs,
           retries,
           asyncMode,
+          maxRunRetentionDays,
         );
         // Insert placeholder secrets
         for (const name of secretNames) {
@@ -2279,6 +2293,7 @@ export async function ingestAppFromUrl(args: {
   workspace_id: string;
   author_user_id: string;
   visibility?: 'public' | 'private' | 'auth-required';
+  max_run_retention_days?: number | null;
   allowPrivateNetwork?: boolean;
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const { openapi_url } = args;
@@ -2314,6 +2329,7 @@ export async function ingestAppFromSpec(args: {
   author_user_id: string;
   /** When omitted, new apps default to `private`. */
   visibility?: 'public' | 'private' | 'auth-required';
+  max_run_retention_days?: number | null;
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const openapi_url = args.openapi_url || '';
   const derefed = await dereferenceSpec(args.spec);
@@ -2346,6 +2362,7 @@ export async function ingestAppFromSpec(args: {
     visibility = 'private';
   }
 
+  const maxRunRetentionDays = normalizeMaxRunRetentionDays(args.max_run_retention_days);
   const appSpec: OpenApiAppSpec = {
     slug,
     type: 'proxied',
@@ -2354,6 +2371,7 @@ export async function ingestAppFromSpec(args: {
     description,
     category: args.category,
     auth: 'none',
+    ...(maxRunRetentionDays ? { max_run_retention_days: maxRunRetentionDays } : {}),
   };
 
   const manifest = specToManifest(derefed, appSpec, deriveSecretsFromSpec(derefed));
@@ -2366,7 +2384,7 @@ export async function ingestAppFromSpec(args: {
          base_url=?, auth_type=?, auth_config=NULL, openapi_spec_url=?,
          openapi_spec_cached=?, visibility=?, is_async=0,
          webhook_url=NULL, timeout_ms=NULL, retries=0, async_mode=NULL,
-         workspace_id=?, author=?, updated_at=datetime('now')
+         max_run_retention_days=?, workspace_id=?, author=?, updated_at=datetime('now')
        WHERE slug=?`,
     ).run(
       manifest.name,
@@ -2378,6 +2396,7 @@ export async function ingestAppFromSpec(args: {
       openapi_url || null,
       specCached,
       visibility,
+      maxRunRetentionDays,
       args.workspace_id,
       args.author_user_id,
       slug,
@@ -2398,12 +2417,12 @@ export async function ingestAppFromSpec(args: {
        id, slug, name, description, manifest, status, docker_image, code_path,
        category, author, icon, app_type, base_url, auth_type, auth_config,
        openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
-       timeout_ms, retries, async_mode, workspace_id, publish_status
+       timeout_ms, retries, async_mode, max_run_retention_days, workspace_id, publish_status
      ) VALUES (
        ?, ?, ?, ?, ?, 'active', NULL, ?,
        ?, ?, NULL, 'proxied', ?, 'none', NULL,
        ?, ?, ?, 0, NULL,
-       NULL, 0, NULL, ?, 'pending_review'
+       NULL, 0, NULL, ?, ?, 'pending_review'
      )`,
   ).run(
     appId,
@@ -2418,6 +2437,7 @@ export async function ingestAppFromSpec(args: {
     openapi_url || null,
     specCached,
     visibility,
+    maxRunRetentionDays,
     args.workspace_id,
   );
 

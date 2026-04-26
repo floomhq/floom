@@ -89,6 +89,9 @@ export interface Manifest {
    * Egress allowlist (host:port patterns). Not enforced by e2b today.
    */
   egressAllowlist?: string[];
+
+  /** Optional per-app run retention in days. Omitted means indefinite. */
+  max_run_retention_days?: number;
 }
 
 export interface RunTiming {

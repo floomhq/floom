@@ -72,6 +72,17 @@ function assertStringArray(value: unknown, field: string): asserts value is stri
   }
 }
 
+function validateMaxRetentionDays(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ManifestError(`${field} must be a positive integer`, field);
+  }
+  if (value < 1 || value > 3650) {
+    throw new ManifestError(`${field} must be between 1 and 3650`, field);
+  }
+  return value;
+}
+
 function validateInput(raw: unknown, prefix: string): InputSpec {
   assertObject(raw, prefix);
   assertString(raw.name, `${prefix}.name`);
@@ -264,6 +275,10 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     assertStringArray(raw.apt_packages, 'apt_packages');
     apt_packages.push(...(raw.apt_packages as string[]));
   }
+  const maxRunRetentionDays = validateMaxRetentionDays(
+    raw.max_run_retention_days,
+    'max_run_retention_days',
+  );
 
   return {
     name: raw.name,
@@ -278,6 +293,7 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     ...(typeof raw.license === 'string' && raw.license.trim().length > 0
       ? { license: raw.license.trim() }
       : {}),
+    ...(maxRunRetentionDays ? { max_run_retention_days: maxRunRetentionDays } : {}),
   };
 }
 
