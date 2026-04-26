@@ -61,7 +61,10 @@ interface AdapterModuleExport<T = unknown> {
   name?: unknown;
   protocolVersion?: unknown;
   adapter?: T;
+  create?: unknown;
 }
+
+type AdapterCreateOptions = Record<string, unknown>;
 
 const EXPECTED_METHODS: Record<AdapterKind, readonly string[]> = {
   runtime: ['execute'],
@@ -193,8 +196,8 @@ function assertAdapterSurface(
   kind: AdapterKind,
   key: string,
   moduleExport: AdapterModuleExport,
+  adapter: unknown,
 ): void {
-  const adapter = moduleExport.adapter;
   if (typeof adapter !== 'object' || adapter === null) {
     throw new Error(
       `[adapters] adapter '${adapterName(
@@ -222,6 +225,7 @@ function validateDynamicModule<T>(
   kind: AdapterKind,
   key: string,
   moduleExport: unknown,
+  createOptions: AdapterCreateOptions = {},
 ): T {
   if (typeof moduleExport !== 'object' || moduleExport === null) {
     throw new Error(
@@ -253,14 +257,30 @@ function validateDynamicModule<T>(
   }
 
   assertProtocolVersionCompatibility(kind, key, typed);
-  assertAdapterSurface(kind, key, typed);
-  return typed.adapter as T;
+  if (typed.adapter !== undefined) {
+    assertAdapterSurface(kind, key, typed, typed.adapter);
+    return typed.adapter as T;
+  }
+  if (typeof typed.create === 'function') {
+    const adapter = (typed.create as (opts: AdapterCreateOptions) => unknown)(
+      createOptions,
+    );
+    assertAdapterSurface(kind, key, typed, adapter);
+    return adapter as T;
+  }
+  throw new Error(
+    `[adapters] adapter '${adapterName(
+      typed,
+      key,
+    )}' (kind=${kind}) is missing an adapter object or create function`,
+  );
 }
 
 async function importDynamicAdapter<T>(
   kind: AdapterKind,
   env: string,
   value: string,
+  createOptions: AdapterCreateOptions = {},
 ): Promise<T> {
   try {
     const imported = (await import(importTargetFor(value))) as {
@@ -273,7 +293,7 @@ async function importDynamicAdapter<T>(
         )} is missing a default export`,
       );
     }
-    return validateDynamicModule<T>(kind, value, imported.default);
+    return validateDynamicModule<T>(kind, value, imported.default, createOptions);
   } catch (e) {
     if (
       e instanceof Error &&
@@ -281,6 +301,7 @@ async function importDynamicAdapter<T>(
         e.message.includes('protocolVersion') ||
         e.message.includes('missing required methods') ||
         e.message.includes('missing an adapter object') ||
+        e.message.includes('missing an adapter object or create function') ||
         e.message.includes('missing a default export'))
     ) {
       throw e;
@@ -302,10 +323,11 @@ async function pick<T>(
   defaultKey: string,
   registry: Record<string, T>,
   moduleExports: Record<string, AdapterModuleExport | undefined>,
+  createOptions: AdapterCreateOptions = {},
 ): Promise<T> {
   const effective = value || defaultKey;
   if (isDynamicSpecifier(effective)) {
-    return importDynamicAdapter<T>(kind, env, effective);
+    return importDynamicAdapter<T>(kind, env, effective, createOptions);
   }
 
   const impl = registry[effective];
@@ -318,6 +340,42 @@ async function pick<T>(
   }
   assertProtocolVersionCompatibility(kind, effective, moduleExports[effective]);
   return impl;
+}
+
+function magicLinkAuthFactoryOptions(storage: StorageAdapter): AdapterCreateOptions {
+  const conformanceMagicLink =
+    process.env.FLOOM_CONFORMANCE_CONCERN === 'auth' &&
+    (process.env.FLOOM_AUTH_MODE === 'magic-link' ||
+      (process.env.FLOOM_CONFORMANCE_ADAPTER || '').includes('auth-magic-link'));
+  return {
+    storage,
+    resendApiKey:
+      process.env.FLOOM_AUTH_RESEND_API_KEY ||
+      process.env.RESEND_API_KEY ||
+      (conformanceMagicLink ? 'test-resend-api-key' : ''),
+    fromEmail:
+      process.env.FLOOM_AUTH_FROM_EMAIL ||
+      process.env.FLOOM_FROM_EMAIL ||
+      'Floom <login@floom.dev>',
+    jwtSecret:
+      process.env.FLOOM_AUTH_JWT_SECRET ||
+      process.env.BETTER_AUTH_SECRET ||
+      process.env.FLOOM_MASTER_KEY ||
+      (conformanceMagicLink ? 'test-magic-link-jwt-secret' : ''),
+    jwtIssuer: process.env.FLOOM_AUTH_JWT_ISSUER || 'floom',
+    baseUrl:
+      process.env.FLOOM_APP_URL ||
+      process.env.BETTER_AUTH_URL ||
+      process.env.PUBLIC_URL ||
+      'http://localhost:3051',
+    sendEmail:
+      process.env.FLOOM_AUTH_MAGIC_LINK_SEND === 'false'
+        ? false
+        : !conformanceMagicLink,
+    exposeTokenForTests:
+      process.env.FLOOM_AUTH_MAGIC_LINK_EXPOSE_TOKEN === 'true' ||
+      conformanceMagicLink,
+  };
 }
 
 export async function createAdapters(): Promise<AdapterBundle> {
@@ -344,6 +402,7 @@ export async function createAdapters(): Promise<AdapterBundle> {
     'better-auth',
     AUTH_IMPLS,
     AUTH_MODULE_EXPORTS,
+    magicLinkAuthFactoryOptions(storage),
   );
   const secrets = await pick(
     'secrets',
