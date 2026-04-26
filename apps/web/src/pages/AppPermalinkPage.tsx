@@ -66,6 +66,20 @@ const GITHUB_REPOS: Record<string, string> = {
   'ig-nano-scout': 'https://github.com/floomhq/floom/tree/main/examples/ig-nano-scout',
 };
 
+// v23 PR-D (2026-04-26): per-slug hero subhead override for the 3 launch
+// demos. The wireframe ships a sales-tone one-liner that explains what the
+// app does + what to expect, instead of the generic markdown-stripped
+// `app.description`. Federico-locked copy. Non-launch slugs fall through
+// to the existing `headerDescription` derivation (description-as-subhead).
+const HERO_SUBHEAD: Record<string, string> = {
+  'competitor-lens':
+    'Paste 2 URLs (yours + competitor). Get the positioning, pricing, and angle diff in under 5 seconds.',
+  'ai-readiness-audit':
+    'Paste a company URL. Get a readiness score, 3 risks, 3 opportunities, and one concrete next step.',
+  'pitch-coach':
+    'Paste a 20-500 char startup pitch. Get 3 direct critiques, 3 rewrites by angle, and a one-line TL;DR.',
+};
+
 export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -314,7 +328,12 @@ export function AppPermalinkPage() {
   // markdown syntax + collapses whitespace so a multi-line or markdown
   // description still renders as one clean line above the tabs. The full
   // rich description still renders (markdown-formatted) in the About tab.
+  //
+  // v23 PR-D (2026-04-26): the 3 launch demos override this with a
+  // sales-tone one-liner from HERO_SUBHEAD (Federico-locked). Everything
+  // else falls through to the markdown-stripped `app.description`.
   const headerDescription = useMemo<string>(() => {
+    if (app?.slug && HERO_SUBHEAD[app.slug]) return HERO_SUBHEAD[app.slug];
     if (!app?.description) return '';
     return app.description
       // drop fenced code blocks entirely
@@ -330,7 +349,7 @@ export function AppPermalinkPage() {
       // collapse whitespace
       .replace(/\s+/g, ' ')
       .trim();
-  }, [app?.description]);
+  }, [app?.description, app?.slug]);
 
   // Compute sample input pre-fill for the first input of each action.
   // Only fires on first visit (no shared-run ?run=<id>) so that a direct
@@ -913,9 +932,16 @@ export function AppPermalinkPage() {
                     color: 'var(--muted)',
                     margin: '2px 0 0',
                     lineHeight: 1.5,
+                    // v23 PR-D: allow up to 2 lines (was nowrap+ellipsis).
+                    // The launch-demo HERO_SUBHEAD copy is intentionally
+                    // sentence-shaped and would clip mid-word at narrow
+                    // widths under the old single-line ellipsis. Two-line
+                    // clamp keeps the hero compact without truncating the
+                    // sales-tone subhead.
                     overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 2,
                     maxWidth: '100%',
                   }}
                 >

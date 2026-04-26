@@ -41,7 +41,7 @@ import { StreamingTerminal } from './StreamingTerminal';
 import { ARRAY_INPUT_NAMES, InputField, maybePrependHttps } from './InputField';
 import { useSession } from '../../hooks/useSession';
 import * as api from '../../api/client';
-import { ApiError, CsvRowCapExceededError, FileInputTooLargeError } from '../../api/client';
+import { ApiError, CsvRowCapExceededError, FileInputTooLargeError, getAppQuota, readUserGeminiKey } from '../../api/client';
 import { buildPublicRunPath, getRunStartErrorMessage } from '../../lib/publicPermalinks';
 import { useDeployEnabled } from '../../lib/flags';
 import { waitlistHref } from '../../lib/waitlistCta';
@@ -549,6 +549,32 @@ export function RunSurface({
   // and re-reads localStorage for the user-key presence. No-op when the
   // slug isn't gated — the strip renders nothing in that case.
   const freeRunsRefresher = useFreeRunsRefresher();
+
+  // v23 PR-D (2026-04-26): inline rate-limited upsell. We mirror the
+  // FreeRunsStrip's quota fetch so the OutputSlot can render an inline
+  // RateLimitedCard when the user has exhausted their free runs and
+  // hasn't pasted a Gemini key — instead of (or alongside) the existing
+  // BYOKModal which still fires for the click-Run-before-quota-loads
+  // race. See decision doc §3.6 + §7.3 for the dual-render rule.
+  const [byokExhausted, setByokExhausted] = useState(false);
+  const [quotaResetWindowMs, setQuotaResetWindowMs] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const q = await getAppQuota(app.slug);
+      if (cancelled) return;
+      const hasKey = readUserGeminiKey() !== null;
+      const remaining = q.remaining ?? Math.max(0, (q.limit ?? 0) - (q.usage ?? 0));
+      // Only count as exhausted on gated slugs without a saved user key.
+      // Saved key → unlimited (server skips the BYOK gate). Non-gated →
+      // server never returns 429 byok_required, so the upsell is moot.
+      setByokExhausted(q.gated === true && !hasKey && remaining <= 0);
+      setQuotaResetWindowMs(q.window_ms ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [app.slug, freeRunsRefresher.refreshKey]);
 
   // #626 v17 run banner state — the banner (top of output area) shows a
   // live mm:ss timer + "Running: <action>..." label during streaming/job
@@ -1217,9 +1243,43 @@ export function RunSurface({
             inputErrors={state.inputErrors}
             runLabel={runLabel}
             running={state.phase === 'streaming' || state.phase === 'job'}
+            // v23 PR-D (2026-04-26): InputCard mode flag drives the
+            // 4-state visual treatment locked by Federico Delta 3:
+            //   'edit'     — default editable form (idle / error / after Edit & rerun)
+            //   'locked'   — fields readable, dimmed, submit shows Running…
+            //   'recap'    — submitted values shown read-only, Run again / Edit & rerun CTAs
+            //   'disabled' — quota exhausted, fields and submit greyed out
+            // Input column is ALWAYS visible across phases per Delta 3.
+            mode={
+              state.phase === 'streaming' || state.phase === 'job'
+                ? 'locked'
+                : state.phase === 'done'
+                  ? 'recap'
+                  : state.phase === 'ready' && byokExhausted
+                    ? 'disabled'
+                    : 'edit'
+            }
+            runStartedAt={runStartedAt}
             onChange={handleInputChange}
             onRun={handleRun}
             onReset={handleReset}
+            onEditRerun={() => {
+              // "Edit & rerun" path: drop the run state back to ready
+              // (re-enables fields) but KEEP the inputs so the user can
+              // tweak them and re-submit. Distinct from full Reset
+              // (which clears the inputs) and from Run again (which
+              // re-submits the same inputs unmodified).
+              setState((s) => ({
+                ...s,
+                phase: 'ready',
+                run: undefined,
+                runId: undefined,
+                logs: undefined,
+                errorMessage: undefined,
+                inputErrors: undefined,
+              }));
+              onResetInitialRun?.();
+            }}
             hasInputs={hasInputs}
           />
         </section>
@@ -1235,8 +1295,20 @@ export function RunSurface({
             appAsPickResult={appAsPickResult}
             state={state}
             refinable={refinable}
+            byokExhausted={byokExhausted}
+            quotaResetWindowMs={quotaResetWindowMs}
             onCancelJob={handleCancelJob}
             onCancelStream={handleCancelStream}
+            onOpenBYOK={() => {
+              setByokPayload({
+                slug: app.slug,
+                usage: 5,
+                limit: 5,
+                get_key_url: 'https://aistudio.google.com/app/apikey',
+              });
+              setByokMode('exhausted');
+              setByokOpen(true);
+            }}
             onIterate={(prompt) => {
               setState((s) => ({
                 ...s,
@@ -1287,9 +1359,31 @@ interface InputCardProps {
   runLabel: string;
   running: boolean;
   hasInputs: boolean;
+  /**
+   * v23 PR-D Delta 3 (2026-04-26): visual mode for the input card. The
+   * column stays MOUNTED across every phase per Federico's locked
+   * "input + output co-visible" rule; this flag picks the visual treatment.
+   *   'edit'     — default editable form
+   *   'locked'   — fields visible + readable but dimmed (running)
+   *   'recap'    — values shown read-only with Run again / Edit & rerun (done)
+   *   'disabled' — fields greyed out, submit unusable (quota exhausted)
+   */
+  mode: 'edit' | 'locked' | 'recap' | 'disabled';
+  /**
+   * Wall-clock start time of the in-flight run (locked mode only).
+   * Used to render a small "Running for Xs" label inside the locked
+   * input. Null when not running.
+   */
+  runStartedAt: number | null;
   onChange: (name: string, value: unknown) => void;
   onRun: () => void;
   onReset: () => void;
+  /**
+   * Recap-mode "Edit & rerun" handler: unlocks the fields back to edit
+   * mode without resubmitting. Wired by RunSurface to drop the run state
+   * back to phase='ready' while preserving the inputs.
+   */
+  onEditRerun: () => void;
 }
 
 function InputCard({
@@ -1300,9 +1394,12 @@ function InputCard({
   runLabel,
   running,
   hasInputs,
+  mode,
+  runStartedAt,
   onChange,
   onRun,
   onReset,
+  onEditRerun,
 }: InputCardProps) {
   // Fix 5 (2026-04-19): progressive disclosure of optional inputs.
   // Required fields render inline, optional fields stay collapsed behind
@@ -1319,13 +1416,153 @@ function InputCard({
     return { required: req, optional: opt };
   }, [actionSpec.inputs]);
 
+  // v23 PR-D Delta 3 (2026-04-26): mode-driven visual treatment.
+  //   'locked'   — fields visible + readable but de-emphasized; submit shows Running…
+  //   'disabled' — fields greyed out (rate-limited; can't submit until BYOK)
+  //   'recap'    — render the recap card branch below (early return)
+  //   'edit'     — default editable form
+  const lockedVisual = mode === 'locked';
+  const disabledVisual = mode === 'disabled';
+  const dimWrapStyle: React.CSSProperties =
+    lockedVisual
+      ? { opacity: 0.78, pointerEvents: 'none' }
+      : disabledVisual
+        ? { opacity: 0.55, pointerEvents: 'none' }
+        : {};
+  // INPUT eyebrow label per v23 wireframe — small mono uppercase token
+  // above the form that names the column. In locked mode it gains a
+  // "· SUBMITTED" suffix so the visitor sees what just happened.
+  const inputEyebrow =
+    lockedVisual ? 'INPUT · SUBMITTED' : disabledVisual ? 'INPUT · LIMIT REACHED' : 'INPUT';
+
+  // Recap-mode branch. After a successful run the input column flips to
+  // a read-only summary of what produced the output below, plus twin
+  // CTAs: Run again (re-submit same inputs) and Edit & rerun (unlock
+  // fields for tweaks). Decision doc §3.4.
+  if (mode === 'recap' && hasInputs) {
+    return (
+      <div
+        className="run-surface-card"
+        data-testid="run-surface-input-card"
+        data-mode="recap"
+      >
+        <div
+          className="run-surface-input-eyebrow"
+          data-testid="run-surface-input-eyebrow"
+          style={{
+            fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+            fontSize: 10.5,
+            color: 'var(--muted)',
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            fontWeight: 600,
+            marginBottom: 12,
+          }}
+        >
+          INPUT · SUBMITTED
+        </div>
+        <div
+          className="run-surface-recap-fields"
+          data-testid="run-surface-recap-fields"
+          style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+        >
+          {actionSpec.inputs.map((inp) => {
+            const raw = inputs[inp.name];
+            const display = formatRecapValue(raw);
+            if (display == null) return null;
+            return (
+              <div
+                key={inp.name}
+                data-testid={`run-surface-recap-${inp.name}`}
+                style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--muted)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {inp.label || inp.name}
+                </span>
+                <span
+                  style={{
+                    fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+                    fontSize: 13,
+                    color: 'var(--ink)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={display}
+                >
+                  {display}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="run-surface-actions" style={{ marginTop: 18 }}>
+          <button
+            type="button"
+            className="btn-primary"
+            data-testid="run-surface-run-again-btn"
+            onClick={onRun}
+            style={{ height: 44, minHeight: 44, padding: '0 22px', fontSize: 15 }}
+          >
+            Run again
+            <RunArrow />
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            data-testid="run-surface-edit-rerun-btn"
+            onClick={onEditRerun}
+          >
+            Edit & rerun
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="run-surface-card" data-testid="run-surface-input-card">
+    <div
+      className="run-surface-card"
+      data-testid="run-surface-input-card"
+      data-mode={mode}
+    >
+      {/* v23 PR-D: small "INPUT" mono eyebrow above the form. Picks up a
+          "· SUBMITTED" suffix in locked mode so the running state reads
+          as "this is what we just sent" (Federico Delta 3). */}
+      <div
+        className="run-surface-input-eyebrow"
+        data-testid="run-surface-input-eyebrow"
+        style={{
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+          fontSize: 10.5,
+          color: 'var(--muted)',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          fontWeight: 600,
+          marginBottom: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        <span>{inputEyebrow}</span>
+        {lockedVisual && runStartedAt != null && (
+          <RunningEyebrowTimer startedAt={runStartedAt} />
+        )}
+      </div>
       {hasInputs ? (
         <form
+          style={dimWrapStyle}
+          aria-disabled={lockedVisual || disabledVisual}
           onSubmit={(e) => {
             e.preventDefault();
-            if (!running) onRun();
+            if (!running && !disabledVisual) onRun();
           }}
         >
           <div className="run-surface-fields" data-testid="run-surface-fields-required">
@@ -1415,14 +1652,17 @@ function InputCard({
           <div className="run-surface-actions">
             {/* a11y 2026-04-20: aria-busy + aria-disabled announce "busy"
                 during an active run. Spinner icon is aria-hidden so the
-                label ("Running…" / "Run") is the only thing SRs read. */}
+                label ("Running…" / "Run") is the only thing SRs read.
+                v23 PR-D: in disabled mode (rate-limited) the button reads
+                "Run (limit reached)" and stays unclickable — quota
+                upsell sits in the output slot, not here. */}
             <button
               type="submit"
               className="btn-primary"
               data-testid="run-surface-run-btn"
               aria-busy={running}
-              aria-disabled={running}
-              disabled={running}
+              aria-disabled={running || disabledVisual}
+              disabled={running || disabledVisual}
               style={{ height: 44, minHeight: 44, padding: '0 24px', fontSize: 15 }}
             >
               {running ? (
@@ -1430,6 +1670,8 @@ function InputCard({
                   <RunSpinner />
                   <span>Running…</span>
                 </>
+              ) : disabledVisual ? (
+                <span>Run (limit reached)</span>
               ) : (
                 <>
                   {runLabel}
@@ -1441,16 +1683,18 @@ function InputCard({
               type="button"
               className="btn-ghost"
               onClick={onReset}
-              disabled={running}
+              disabled={running || disabledVisual}
             >
               Reset
             </button>
           </div>
         </form>
       ) : (
-        <div className="run-surface-empty-input">
+        <div className="run-surface-empty-input" style={dimWrapStyle}>
           <p className="run-surface-empty-copy">
-            This app takes no input. Click {runLabel} to generate.
+            {mode === 'recap'
+              ? `Result generated. Click ${runLabel} to generate another.`
+              : `This app takes no input. Click ${runLabel} to generate.`}
           </p>
           <div className="run-surface-actions">
             <button
@@ -1458,9 +1702,9 @@ function InputCard({
               className="btn-primary"
               data-testid="run-surface-run-btn"
               aria-busy={running}
-              aria-disabled={running}
+              aria-disabled={running || disabledVisual}
               onClick={onRun}
-              disabled={running}
+              disabled={running || disabledVisual}
               style={{ height: 44, minHeight: 44, padding: '0 28px', fontSize: 15 }}
             >
               {running ? (
@@ -1468,6 +1712,8 @@ function InputCard({
                   <RunSpinner />
                   <span>Running…</span>
                 </>
+              ) : disabledVisual ? (
+                <span>Run (limit reached)</span>
               ) : (
                 <>
                   {runLabel}
@@ -1523,6 +1769,74 @@ function RunSpinner() {
   );
 }
 
+/**
+ * v23 PR-D Delta 3 helper: render a submitted input value as a single
+ * line of recap text. Files surface as `name (size)`, arrays as a
+ * comma-joined preview, plain primitives as themselves. Returns null
+ * for empty / unset values so empty optional fields are skipped from
+ * the recap card entirely (clean visual, no `(empty)` filler).
+ */
+export function formatRecapValue(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    const head = value
+      .slice(0, 3)
+      .map((v) => (typeof v === 'string' ? v : JSON.stringify(v)))
+      .join(', ');
+    return value.length > 3 ? `${head}, +${value.length - 3} more` : head;
+  }
+  if (typeof File !== 'undefined' && value instanceof File) {
+    const kb = Math.round(value.size / 1024);
+    return `${value.name} (${kb} KB)`;
+  }
+  if (typeof value === 'object') {
+    try {
+      const json = JSON.stringify(value);
+      return json.length > 80 ? `${json.slice(0, 77)}…` : json;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * v23 PR-D Delta 3 helper: small live-ticking timer rendered next to the
+ * "INPUT · SUBMITTED" eyebrow during the running state. Uses the same
+ * formatElapsed() format as the run-banner so the two timers on screen
+ * agree. Updates once per second. Aria-hidden — the run-banner already
+ * announces elapsed time to assistive tech.
+ */
+function RunningEyebrowTimer({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const elapsed = Math.max(0, now - startedAt);
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+        fontSize: 10.5,
+        fontWeight: 600,
+        color: 'var(--accent, #047857)',
+      }}
+    >
+      {formatElapsed(elapsed)}
+    </span>
+  );
+}
+
 // ── Output slot ────────────────────────────────────────────────────────────
 
 interface OutputSlotProps {
@@ -1530,6 +1844,26 @@ interface OutputSlotProps {
   appAsPickResult: PickResult;
   state: RunState;
   refinable: boolean;
+  /**
+   * v23 PR-D (2026-04-26): true when the gated quota for this slug is
+   * empty AND the visitor doesn't have a saved Gemini key. Drives the
+   * inline RateLimitedCard render path on phase==='ready'. Already-done
+   * runs render their output regardless of quota (decision doc §7.2).
+   */
+  byokExhausted: boolean;
+  /**
+   * Quota window length in ms (e.g. 86_400_000 for 24h). Today the API
+   * returns no `resets_at`; we surface a static "Resets at midnight UTC"
+   * fallback when the meter renders. Reserved for a future API delta —
+   * console.warn to make a missing field visible to maintainers.
+   */
+  quotaResetWindowMs: number | null;
+  /**
+   * Open the BYOK modal in 'exhausted' mode. RateLimitedCard's "Add
+   * your Gemini key" CTA wires here; the modal is the same one the
+   * existing 429 fallback path uses.
+   */
+  onOpenBYOK: () => void;
   onCancelJob: () => void;
   onCancelStream: () => void;
   onIterate: (prompt: string) => void;
@@ -1546,12 +1880,25 @@ function OutputSlot({
   appAsPickResult,
   state,
   refinable,
+  byokExhausted,
+  quotaResetWindowMs,
+  onOpenBYOK,
   onCancelJob,
   onCancelStream,
   onIterate,
   onRetry,
 }: OutputSlotProps) {
   if (state.phase === 'ready') {
+    if (byokExhausted) {
+      return (
+        <RateLimitedCard
+          appName={app.name}
+          slug={app.slug}
+          windowMs={quotaResetWindowMs}
+          onOpenBYOK={onOpenBYOK}
+        />
+      );
+    }
     return (
       <EmptyOutputCard
         slug={app.slug}
@@ -1591,6 +1938,7 @@ function OutputSlot({
     return (
       <FriendlyStartupError
         rawMessage={state.errorMessage || 'Try again.'}
+        runId={state.runId}
         onRetry={onRetry}
       />
     );
@@ -1860,6 +2208,348 @@ function EmptyOutputSkeleton({ outputType }: { outputType: OutputType | undefine
   );
 }
 
+// ── Rate-limited inline upsell (v23 PR-D Delta 11) ─────────────────────────
+//
+// When a gated launch slug's free-run budget is exhausted AND the visitor
+// has no saved Gemini key, the output column flips from EmptyOutputCard to
+// RateLimitedCard. This is the inline counterpart to BYOKModal — visible
+// without an extra click, with all three escape paths (BYOK / signup /
+// self-host) shown side-by-side. Federico-locked decisions baked in:
+//   - Single neutral palette (var(--card) bg, var(--line) border).
+//     NO category tints, NO warm-dark `--code` background despite the
+//     v23 wireframe — Federico's prompt overrides: "single neutral palette".
+//   - Vocabulary: "BYOK key" + "Gemini key" — never "API key".
+//   - NO "Upgrade to Pro" CTA — Pro doesn't exist pre-launch.
+//   - The static "Resets at midnight UTC" reset line is a fallback because
+//     /api/:slug/quota does not currently expose `resets_at`. If the API
+//     gains that field later, surface the live timer here.
+
+function RateLimitedCard({
+  appName,
+  slug: _slug,
+  windowMs,
+  onOpenBYOK,
+}: {
+  appName: string;
+  slug: string;
+  windowMs: number | null;
+  onOpenBYOK: () => void;
+}) {
+  // The decision doc flagged a missing `resets_at` field on the quota
+  // response. Until the API ships it we render a static reset hint
+  // ("Resets at midnight UTC") and emit a console.warn so the gap is
+  // visible to maintainers when the card mounts. window_ms is honored
+  // when present, but it's a window length, not a wall-clock reset, so
+  // we only show it as supplemental detail.
+  useEffect(() => {
+    if (windowMs == null) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[RateLimitedCard] quota response had no window_ms / resets_at; falling back to static reset copy',
+      );
+    }
+  }, [windowMs]);
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--card)',
+    border: '1px solid var(--line)',
+    borderRadius: 12,
+    padding: '22px 22px 20px',
+    minHeight: 280,
+  };
+
+  return (
+    <div
+      className="run-surface-card"
+      data-testid="run-surface-rate-limited"
+      style={cardStyle}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          aria-hidden="true"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 9,
+            background: 'var(--bg)',
+            border: '1px solid var(--line)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--muted)',
+            flexShrink: 0,
+          }}
+        >
+          {/* clock glyph — neutral, not alarmist (Federico Delta 11) */}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3
+            style={{
+              fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+              fontWeight: 700,
+              fontSize: 17,
+              letterSpacing: '-0.01em',
+              lineHeight: 1.3,
+              margin: '0 0 4px',
+              color: 'var(--ink)',
+            }}
+          >
+            You've used today's free runs.
+          </h3>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)', lineHeight: 1.55 }}>
+            Floom covers 5 free runs per day on {appName}. Pick one of the
+            options below to keep going right now.
+          </p>
+        </div>
+      </div>
+
+      {/* Meter — full bar so the visitor immediately sees "yes, used up". */}
+      <div
+        data-testid="run-surface-rate-limited-meter"
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--line)',
+          borderRadius: 10,
+          padding: '12px 14px',
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+            fontSize: 10.5,
+            color: 'var(--muted)',
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            fontWeight: 600,
+            marginBottom: 8,
+          }}
+        >
+          Today's usage
+        </div>
+        <div
+          style={{
+            height: 8,
+            background: 'var(--line)',
+            borderRadius: 999,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: '100%',
+              background: 'var(--accent, #047857)',
+            }}
+          />
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 8,
+            fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+            fontSize: 11.5,
+            color: 'var(--muted)',
+          }}
+        >
+          <span>
+            <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>5 / 5</strong> runs used
+          </span>
+          <span>Resets at midnight UTC</span>
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        {/* Recommended: paste your own Gemini key. Accent fill so it's the
+            obvious primary action; opens the existing BYOKModal so the
+            user-facing flow is identical to the post-429 fallback path. */}
+        <button
+          type="button"
+          data-testid="run-surface-rate-limited-byok"
+          onClick={onOpenBYOK}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 14px',
+            border: '1px solid var(--accent, #047857)',
+            background: 'var(--accent, #047857)',
+            color: '#fff',
+            borderRadius: 10,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            textAlign: 'left',
+            width: '100%',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              background: 'rgba(255,255,255,0.18)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zM21 2l-9.6 9.6M15.5 7.5l3 3" />
+            </svg>
+          </span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span
+              style={{
+                display: 'block',
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: '#fff',
+              }}
+            >
+              Add your Gemini key for unlimited runs
+            </span>
+            <span
+              style={{
+                display: 'block',
+                fontSize: 11.5,
+                color: 'rgba(255,255,255,0.85)',
+                marginTop: 2,
+                lineHeight: 1.5,
+              }}
+            >
+              Free key from Google AI Studio. Stays in your browser, never
+              logged on Floom.
+            </span>
+          </span>
+          <span
+            aria-hidden="true"
+            style={{
+              color: '#fff',
+              fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              fontWeight: 700,
+              background: 'rgba(255,255,255,0.18)',
+              padding: '3px 8px',
+              borderRadius: 999,
+              fontSize: 9.5,
+              flexShrink: 0,
+            }}
+          >
+            Recommended
+          </span>
+        </button>
+
+        {/* Self-host fallback — link to docs/SELF_HOST.md. Federico's prompt
+            removed "Upgrade to Pro" so the secondary slot is split between
+            "self-host" and the optional sign-in (rendered via existing
+            top-bar). Sign-in is not duplicated here because it's already
+            in the global top-bar; surfacing it twice would crowd the card
+            and the v23 wireframe also keeps it discreet. */}
+        <a
+          href="https://github.com/floomhq/floom/blob/main/docs/SELF_HOST.md"
+          target="_blank"
+          rel="noreferrer"
+          data-testid="run-surface-rate-limited-self-host"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 14px',
+            border: '1px solid var(--line)',
+            background: 'var(--card)',
+            color: 'var(--ink)',
+            borderRadius: 10,
+            textDecoration: 'none',
+            fontFamily: 'inherit',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              background: 'var(--bg)',
+              border: '1px solid var(--line)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: 'var(--muted)',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="20" height="12" rx="2" />
+              <path d="M6 11h.01M10 11h.01M14 11h.01" />
+            </svg>
+          </span>
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span
+              style={{
+                display: 'block',
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: 'var(--ink)',
+              }}
+            >
+              Self-host Floom
+            </span>
+            <span
+              style={{
+                display: 'block',
+                fontSize: 11.5,
+                color: 'var(--muted)',
+                marginTop: 2,
+                lineHeight: 1.5,
+              }}
+            >
+              Run this app on your own infra with your own keys. MIT-licensed.
+            </span>
+          </span>
+          <span aria-hidden="true" style={{ color: 'var(--muted)' }}>→</span>
+        </a>
+      </div>
+
+      <p
+        style={{
+          margin: '14px 0 0',
+          paddingTop: 14,
+          borderTop: '1px solid var(--line)',
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+          fontSize: 11,
+          color: 'var(--muted)',
+          lineHeight: 1.55,
+        }}
+      >
+        <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>Or wait it out.</strong>{' '}
+        Free runs reset every day at midnight UTC. Come back tomorrow.
+      </p>
+    </div>
+  );
+}
+
 // ── Friendly pre-run error card (Issue #358) ────────────────────────────────
 //
 // When a run can't even start (network error, server 4xx, validation miss,
@@ -1940,9 +2630,18 @@ export function humanizeStartupError(raw: string): {
 
 function FriendlyStartupError({
   rawMessage,
+  runId,
   onRetry,
 }: {
   rawMessage: string;
+  /**
+   * v23 PR-D: when the run actually got far enough to mint an id (e.g.
+   * the SSE stream returned an error mid-flight rather than failing at
+   * dispatch), surface a "View full run log" link to /me/runs/:id so
+   * authenticated owners can inspect the logs server-side. Optional —
+   * pre-dispatch failures land here without an id.
+   */
+  runId?: string;
   onRetry: () => void;
 }) {
   const { headline, sub } = humanizeStartupError(rawMessage);
@@ -1963,7 +2662,38 @@ function FriendlyStartupError({
         >
           Try again
         </button>
+        {runId && (
+          <Link
+            to={`/me/runs/${runId}`}
+            data-testid="run-surface-error-view-log"
+            style={{
+              fontSize: 13,
+              color: 'var(--muted)',
+              textDecoration: 'none',
+              padding: '0 4px',
+            }}
+          >
+            View full run log &rarr;
+          </Link>
+        )}
       </div>
+      {/* v23 PR-D: gentle help line. Lists the most common causes the
+          launch demos surface (URL fetch failures, blocked sites, model
+          hiccups) so non-devs have a starting point without diving into
+          the raw error. */}
+      <p
+        className="run-surface-error-help"
+        data-testid="run-surface-error-help"
+        style={{
+          margin: '10px 0 0',
+          fontSize: 12.5,
+          color: 'var(--muted)',
+          lineHeight: 1.5,
+        }}
+      >
+        Common causes: typo in the URL, the site is offline, or it blocks
+        programmatic access.
+      </p>
       {rawMessage && rawMessage !== sub && (
         <details
           className="run-surface-error-details"
@@ -2283,4 +3013,5 @@ export const __test__ = {
   summarizeOutputs,
   statusDotColor,
   formatWhen,
+  formatRecapValue,
 };
