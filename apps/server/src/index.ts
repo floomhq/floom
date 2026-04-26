@@ -26,6 +26,7 @@ import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
 import { meAppsRouter } from './routes/me_apps.js';
 import { agentKeysRouter } from './routes/agent_keys.js';
+import { agentsRouter } from './routes/agents.js';
 import { metricsRouter } from './routes/metrics.js';
 import { ogRouter } from './routes/og.js';
 import { ghStarsRouter } from './routes/gh-stars.js';
@@ -164,6 +165,8 @@ app.use('/api/health/*', openCors);
 app.use('/api/gh-stars', openCors);
 app.use('/api/gh-stars/*', openCors);
 app.use('/api/run', openCors);
+app.use('/api/agents', openCors);
+app.use('/api/agents/*', openCors);
 app.use('/api/:slug/run', openCors);
 app.use('/api/:slug/jobs', openCors);
 app.use('/mcp/*', openCors);
@@ -249,6 +252,7 @@ const writeRateLimit = writeRateLimitMiddleware(resolveUserContext);
 // incrementing the counter). Launch-hardening 2026-04-23 for the 3 hero
 // demo apps; all run surfaces share the same 8 MiB cap.
 app.use('/api/run', runBodyLimit, rateLimit);
+app.use('/api/agents/run', runBodyLimit, rateLimit);
 app.use('/api/:slug/run', runBodyLimit, rateLimit);
 app.use('/api/:slug/jobs', runBodyLimit, rateLimit);
 app.use('/mcp/app/:slug', runBodyLimit, rateLimit);
@@ -282,6 +286,7 @@ app.route('/api/parse', parseRouter);
 app.route('/api/pick', pickRouter);
 app.route('/api/thread', threadRouter);
 app.route('/api/run', runRouter);
+app.route('/api/agents', agentsRouter);
 app.route('/mcp', mcpRouter);
 // Slug-based run endpoint: POST /api/:slug/run
 // Registered after /api/run to avoid prefix collision.

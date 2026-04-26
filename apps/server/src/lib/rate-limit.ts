@@ -305,6 +305,7 @@ function checkAgentTokenLimit(
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const WRITE_RATE_LIMIT_SKIP_PATHS = new Set([
   '/api/run',
+  '/api/agents/run',
   '/api/hub/ingest',
   '/api/feedback',
   '/api/waitlist',
