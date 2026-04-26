@@ -38,7 +38,7 @@ import {
 } from '../lib/auth.js';
 import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
 import { runGate } from '../lib/run-gate.js';
-import { filterTestFixtures } from '../lib/hub-filter.js';
+import { publicHubApps } from '../lib/hub-filter.js';
 import { recordMcpToolCall } from '../lib/metrics-counters.js';
 import {
   agentToolErrorBody,
@@ -891,11 +891,10 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       const rows = (category
         ? db.prepare(sql).all(ctx.user_id, category)
         : db.prepare(sql).all(ctx.user_id)) as AppRecord[];
-      // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
-      // listings so Claude Desktop + Cursor clients don't surface them in
-      // discovery. Same regex as server /api/hub. Fixtures are still
-      // accessible via `get_app` with the explicit slug.
-      const rowsNoFixtures = filterTestFixtures(rows);
+      // Issue #144 + launch curation: MCP gallery listings use the same
+      // public hub filter as `/api/hub`. Explicit `get_app` by slug keeps
+      // direct access working for unlisted apps.
+      const rowsNoFixtures = publicHubApps(rows);
       const needle = typeof keyword === 'string' ? keyword.toLowerCase() : null;
       const filtered = needle
         ? rowsNoFixtures.filter((r) =>

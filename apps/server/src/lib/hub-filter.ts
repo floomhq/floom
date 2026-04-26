@@ -1,11 +1,11 @@
 // Server-side mirror of apps/web/src/lib/hub-filter.ts.
 //
-// Slugs and descriptions that match these patterns are QA / E2E / PRR test
-// fixtures. They get ingested by the automated test suite and the OpenAPI
-// detect fallback. They're harmless on disk, but they must never leak out
-// of /api/hub or the MCP list/search surfaces — fresh consumers who see
-// "Swagger Petstore" or "E2E Stopwatch 1" lose trust, and MCP clients
-// (Claude Desktop, Cursor) surface them in discovery results.
+// Public hub curation mirror for apps/web/src/lib/hub-filter.ts.
+//
+// Launch mode keeps the hosted public roster to the 3 showcase apps plus
+// the 7 utility apps. Fixture filtering always stays on by default because
+// QA / E2E / PRR rows get ingested by automated tests and must never leak
+// out of /api/hub or MCP list/search surfaces.
 //
 // Issue #144 (2026-04-20): the web `/apps` directory filtered these
 // client-side via `apps/web/src/lib/hub-filter.ts`, but raw API + MCP
@@ -20,6 +20,27 @@ export interface HubFilterApp {
   slug: string;
   description?: string | null;
 }
+
+export const SHOWCASE_SLUGS = new Set<string>([
+  'competitor-lens',
+  'ai-readiness-audit',
+  'pitch-coach',
+]);
+
+export const BROWSE_SLUGS = new Set<string>([
+  'json-format',
+  'uuid',
+  'jwt-decode',
+  'password',
+  'hash',
+  'base64',
+  'word-count',
+]);
+
+export const LAUNCH_LISTED_SLUGS = new Set<string>([
+  ...SHOWCASE_SLUGS,
+  ...BROWSE_SLUGS,
+]);
 
 // Slug prefixes used by test fixtures. Case-insensitive.
 //   swagger-petstore*              — OpenAPI detect fallback (sample spec)
@@ -60,4 +81,32 @@ export function isTestFixture(app: HubFilterApp): boolean {
  */
 export function filterTestFixtures<T extends HubFilterApp>(apps: T[]): T[] {
   return apps.filter((a) => !isTestFixture(a));
+}
+
+export interface HubFilterOptions {
+  selfHost?: boolean;
+  includeFixtures?: boolean;
+  launchMode?: boolean;
+}
+
+export function isLaunchModeEnabled(): boolean {
+  return process.env.FLOOM_LAUNCH_MODE === 'true';
+}
+
+export function isPubliclyListed(
+  app: HubFilterApp,
+  opts: HubFilterOptions = {},
+): boolean {
+  if (!opts.includeFixtures && isTestFixture(app)) return false;
+  if (opts.selfHost) return true;
+  const launchMode = opts.launchMode ?? isLaunchModeEnabled();
+  if (!launchMode) return true;
+  return LAUNCH_LISTED_SLUGS.has(app.slug);
+}
+
+export function publicHubApps<T extends HubFilterApp>(
+  apps: T[],
+  opts: HubFilterOptions = {},
+): T[] {
+  return apps.filter((app) => isPubliclyListed(app, opts));
 }
