@@ -21,7 +21,7 @@ Federico's split:
 | `app-page-input-mode.html` | `/p/:slug` | Split-view run surface — input-expanded mode | Variant |
 | `use-app.html` | `/p/:slug` | Running + complete state | Variant — run-banner + stream-feed live here |
 | `install-in-claude.html` | `/install/:slug` | Per-app install in Claude / Cursor | Deep-link from Share modal |
-| `deploy-from-github.html` | `/studio/build` | Publish flow — paste GH URL, detect, preview, run, publish | |
+| `deploy-from-github.html` | `/studio/build` | Publish flow — paste GH URL, detect, preview, run, publish | Backend endpoint: `POST /api/studio/build/from-github`; see [`docs/studio/github-deploy.md`](./studio/github-deploy.md). |
 | `me.html` | `/me` | User home dashboard | **Aspirational, current wireframe is "too techie and not consumer ready" per Federico 2026-04-24 — diverge toward consumer UX** |
 | `me-apps.html` | `/me/apps` | Installed apps the user uses | Consumer view |
 | `me-secrets.html` | `/me/secrets` | Secrets vault (user's BYOK keys) | Consumer view |

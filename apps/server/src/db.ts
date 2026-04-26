@@ -237,6 +237,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 `);
 
+// ---------- builds (Studio GitHub public-repo deploys, ADR-015) ----------
+// Each row tracks one async repo clone/build/publish attempt. Initial v1 launch
+// scope is public GitHub repos only; private-repo GitHub App support lands in a
+// separate week-1 task.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS builds (
+    build_id TEXT PRIMARY KEY,
+    app_slug TEXT,
+    github_url TEXT NOT NULL,
+    repo_owner TEXT NOT NULL,
+    repo_name TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    manifest_path TEXT,
+    manifest_options TEXT,
+    requested_name TEXT,
+    requested_slug TEXT,
+    workspace_id TEXT NOT NULL DEFAULT 'local',
+    user_id TEXT NOT NULL DEFAULT 'local',
+    status TEXT NOT NULL DEFAULT 'detecting',
+    error TEXT,
+    docker_image TEXT,
+    commit_sha TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_builds_status ON builds(status);
+  CREATE INDEX IF NOT EXISTS idx_builds_app_slug ON builds(app_slug);
+  CREATE INDEX IF NOT EXISTS idx_builds_repo_branch
+    ON builds(repo_owner, repo_name, branch, completed_at);
+`);
+
 // ---------- secrets (global or per-app) ----------
 db.exec(`
   CREATE TABLE IF NOT EXISTS secrets (

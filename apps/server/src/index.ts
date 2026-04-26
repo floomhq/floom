@@ -32,6 +32,7 @@ import { metricsRouter } from './routes/metrics.js';
 import { ogRouter } from './routes/og.js';
 import { ghStarsRouter } from './routes/gh-stars.js';
 import { skillRouter } from './routes/skill.js';
+import { studioBuildRouter } from './routes/studio-build.js';
 import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
 import { captureServerError } from './lib/sentry.js';
@@ -61,6 +62,7 @@ import {
 import { resolveUserContext } from './services/session.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
+import { startGithubBuildWorker } from './services/github-deploy.js';
 import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
 import { securityHeaders, noIndexPreview, isPreviewEnv } from './middleware/security.js';
 import { runBodyLimit } from './middleware/body-size.js';
@@ -152,6 +154,7 @@ app.use('/api/memory/*', restrictedCors);
 app.use('/api/secrets/*', restrictedCors);
 app.use('/api/stripe/*', restrictedCors);
 app.use('/api/feedback/*', restrictedCors);
+app.use('/api/studio/build/*', restrictedCors);
 // Admin surface is bearer-authed; same CORS policy as other restricted routes
 // so a misconfigured cross-origin page can't call it with credentials.
 app.use('/api/admin/*', restrictedCors);
@@ -277,6 +280,7 @@ app.route('/api/admin', adminRouter);
 // Prometheus-style metrics. Exempt from the global auth gate above; metrics
 // owns its own METRICS_TOKEN bearer auth. 404 when the env var is unset.
 app.route('/api/metrics', metricsRouter);
+app.route('/api/studio/build', studioBuildRouter);
 app.route('/api/hub', hubRouter);
 app.route('/api/parse', parseRouter);
 app.route('/api/pick', pickRouter);
@@ -1610,6 +1614,10 @@ async function boot(): Promise<void> {
   if (process.env.FLOOM_DISABLE_TRIGGERS_WORKER !== 'true') {
     startTriggersWorker();
   }
+
+  // ADR-015 GitHub deploys: resume any in-flight public-repo builds after
+  // process restarts. New builds are also enqueued directly by the route.
+  startGithubBuildWorker();
 
   // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its
   // seven deterministic utility apps. Opt-out via FLOOM_FAST_APPS=false.

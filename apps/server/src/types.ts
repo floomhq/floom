@@ -10,7 +10,13 @@ export type InputType =
   | 'enum'
   | 'boolean'
   | 'date'
-  | 'file';
+  | 'file'
+  | 'file/csv'
+  | 'file/image'
+  | 'file/pdf'
+  | 'file/audio'
+  | 'array'
+  | 'object';
 
 export type OutputType =
   | 'text'

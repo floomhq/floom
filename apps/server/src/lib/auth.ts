@@ -99,6 +99,9 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   // hosted instance with FLOOM_AUTH_TOKEN set still lets unauthenticated
   // visitors see the number on their own landing page.
   if (path === '/api/gh-stars' || path === '/api/gh-stars/') return next();
+  // GitHub push webhooks authenticate with X-Hub-Signature-256. External
+  // senders cannot present Floom's bearer token, so the route verifies HMAC.
+  if (path === '/api/studio/build/github-webhook') return next();
 
   const got = presentedToken(c);
   if (got && getPresentedAgentToken(c)) return next();
