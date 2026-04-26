@@ -2620,14 +2620,11 @@ input { font-family: inherit; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-weight: 600;
-=======
   color: var(--muted);
->>>>>>> 709930b (feat(me-apps): v23 PR-J — installed apps with banners + tag filter + hero card)
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 3px 7px;
-<<<<<<< HEAD
   color: var(--muted);
 }
 .studio-page .apps-grid .app .thumb .thumb-icon {
