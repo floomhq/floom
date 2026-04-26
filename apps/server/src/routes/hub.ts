@@ -33,7 +33,7 @@ import {
   RENDERERS_DIR,
 } from '../services/renderer-bundler.js';
 import { notOwnerResponse, requireAuthenticatedInCloud } from '../lib/auth.js';
-import { filterTestFixtures } from '../lib/hub-filter.js';
+import { publicHubApps } from '../lib/hub-filter.js';
 import {
   getHubCache,
   hubCacheKey,
@@ -875,12 +875,11 @@ hubRouter.get('/', (c) => {
       ? rowsAll
       : rowsAll.filter((row) => !HIDDEN_SLUGS.has(row.slug.toLowerCase()));
 
-  // Issue #144: strip E2E / PRR / audit test fixtures unless the caller
-  // explicitly opted in via `?include_fixtures=true`. Previously this
-  // filter lived client-side only (apps/web/src/lib/hub-filter.ts), which
-  // meant raw `curl /api/hub` + MCP `list_apps` callers saw 13+ fixture
-  // slugs like `e2e-stopwatch-*`, `my-renderer-test`, `swagger-petstore`.
-  const rows = includeFixtures ? rowsHidden : filterTestFixtures(rowsHidden);
+  // Issue #144: strip E2E / PRR / audit fixtures unless the caller opts
+  // into `?include_fixtures=true`. Launch mode adds the web-side
+  // LAUNCH_LISTED_SLUGS allowlist server-side so raw `/api/hub` callers
+  // see the same curated 3 showcase + 7 utility roster as the storefront.
+  const rows = publicHubApps(rowsHidden, { includeFixtures });
 
   const body = rows.map((row) => {
     const manifest = safeManifest(row.manifest);
