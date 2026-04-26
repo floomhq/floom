@@ -15,6 +15,7 @@ import { db } from '../db.js';
 import { hasValidAdminBearer } from '../lib/auth.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
 import { resolveUserContext } from '../services/session.js';
+import { listPendingAccountDeletes } from '../services/account-deletion.js';
 import {
   canonicalVisibility,
   listAuditRows,
@@ -227,4 +228,8 @@ adminRouter.get('/audit-log', (c) => {
     metadata: row.metadata ? JSON.parse(row.metadata) : null,
   }));
   return c.json({ audit_log: rows });
+});
+
+adminRouter.get('/pending-deletes', (c) => {
+  return c.json({ users: listPendingAccountDeletes() });
 });

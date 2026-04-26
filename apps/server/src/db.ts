@@ -407,6 +407,13 @@ if (!userCols2.includes('image')) {
 if (!userCols2.includes('is_admin')) {
   db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`);
 }
+if (!userCols2.includes('deleted_at')) {
+  db.exec(`ALTER TABLE users ADD COLUMN deleted_at TEXT`);
+}
+if (!userCols2.includes('delete_at')) {
+  db.exec(`ALTER TABLE users ADD COLUMN delete_at TEXT`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_users_pending_delete ON users(delete_at) WHERE deleted_at IS NOT NULL`);
 
 function normalizeAdminEmail(value: string): string {
   return value.trim().toLowerCase();

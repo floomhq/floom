@@ -20,10 +20,60 @@ export function cleanupUserOrphans(userId: string): void {
   const runCleanup = db.transaction(() => {
     // 1. Find workspaces where user is a member (inside transaction for consistency)
     const memberships = db
-      .prepare('SELECT workspace_id FROM workspace_members WHERE user_id = ?')
-      .all(userId) as { workspace_id: string }[];
+      .prepare('SELECT workspace_id, role FROM workspace_members WHERE user_id = ?')
+      .all(userId) as { workspace_id: string; role: string }[];
+
+    // If the departing user is the sole admin in a shared workspace,
+    // promote the next most-active member before the FK removes the
+    // membership row. Activity is approximated by run count in that
+    // workspace, with joined_at as the deterministic fallback.
+    for (const { workspace_id, role } of memberships) {
+      if (workspace_id === DEFAULT_WORKSPACE_ID || role !== 'admin') continue;
+      const counts = db
+        .prepare(
+          `SELECT
+             COUNT(*) AS member_count,
+             SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) AS admin_count
+           FROM workspace_members
+           WHERE workspace_id = ?`,
+        )
+        .get(workspace_id) as { member_count: number; admin_count: number | null };
+      if (counts.member_count <= 1 || Number(counts.admin_count || 0) > 1) continue;
+      const successor = db
+        .prepare(
+          `SELECT m.user_id
+             FROM workspace_members m
+             LEFT JOIN runs r
+               ON r.workspace_id = m.workspace_id
+              AND r.user_id = m.user_id
+            WHERE m.workspace_id = ?
+              AND m.user_id != ?
+            GROUP BY m.user_id, m.joined_at
+            ORDER BY COUNT(r.id) DESC, m.joined_at ASC
+            LIMIT 1`,
+        )
+        .get(workspace_id, userId) as { user_id: string } | undefined;
+      if (successor) {
+        db.prepare(
+          `UPDATE workspace_members
+              SET role = 'admin'
+            WHERE workspace_id = ? AND user_id = ?`,
+        ).run(workspace_id, successor.user_id);
+      }
+    }
 
     // 2. Clear global user state
+    db.prepare('DELETE FROM workspace_invites WHERE invited_by_user_id = ?').run(userId);
+    db.prepare('DELETE FROM app_invites WHERE invited_by_user_id = ?').run(userId);
+    db.prepare('UPDATE app_invites SET invited_user_id = NULL WHERE invited_user_id = ?').run(userId);
+    db.prepare('DELETE FROM agent_tokens WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM user_secrets WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM app_memory WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM runs WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM run_threads WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM app_reviews WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM feedback WHERE user_id = ?').run(userId);
+
     // a. Delete per-app secrets for the private apps we're about to drop.
     //    `secrets.app_id` has no FK CASCADE on apps, so without this the
     //    secret rows would survive as orphans after the app row is gone
