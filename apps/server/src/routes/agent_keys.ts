@@ -10,6 +10,7 @@ import {
   newAgentTokenId,
 } from '../lib/agent-tokens.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
+import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
 import * as workspaces from '../services/workspaces.js';
 import type { AgentTokenRecord, AgentTokenScope, SessionContext } from '../types.js';
@@ -145,6 +146,20 @@ agentKeysRouter.post('/', async (c) => {
     row.revoked_at,
     row.rate_limit_per_minute,
   );
+  auditLog({
+    actor: getAuditActor(c, ctx),
+    action: 'agent_token.minted',
+    target: { type: 'agent_token', id: row.id },
+    before: null,
+    after: {
+      label: row.label,
+      scope: row.scope,
+      workspace_id: row.workspace_id,
+      revoked: false,
+      rate_limit_per_minute: row.rate_limit_per_minute,
+    },
+    metadata: { prefix: row.prefix },
+  });
 
   return c.json(
     {
@@ -180,11 +195,37 @@ agentKeysRouter.post('/:id/revoke', async (c) => {
   if (gate) return gate;
 
   const id = c.req.param('id');
+  const before = db
+    .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
+    .get(id, ctx.user_id) as AgentTokenRecord | undefined;
   db.prepare(
     `UPDATE agent_tokens
        SET revoked_at = COALESCE(revoked_at, ?)
-     WHERE id = ?
+    WHERE id = ?
        AND user_id = ?`,
   ).run(new Date().toISOString(), id, ctx.user_id);
+  if (before) {
+    const after = db
+      .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
+      .get(id, ctx.user_id) as AgentTokenRecord | undefined;
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'agent_token.revoked',
+      target: { type: 'agent_token', id },
+      before: {
+        label: before.label,
+        scope: before.scope,
+        workspace_id: before.workspace_id,
+        revoked: before.revoked_at !== null,
+      },
+      after: {
+        label: after?.label || before.label,
+        scope: after?.scope || before.scope,
+        workspace_id: after?.workspace_id || before.workspace_id,
+        revoked: true,
+      },
+      metadata: { prefix: before.prefix },
+    });
+  }
   return new Response(null, { status: 204 });
 });

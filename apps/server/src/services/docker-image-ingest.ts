@@ -37,6 +37,7 @@ import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
 import { normalizeManifest, ManifestError } from './manifest.js';
 import { slugify, SlugTakenError, deriveSlugSuggestions } from './openapi-ingest.js';
+import { auditLog } from './audit-log.js';
 import { setPolicy, setCreatorSecret } from './app_creator_secrets.js';
 import * as userSecrets from './user_secrets.js';
 import type { NormalizedManifest, SessionContext } from '../types.js';
@@ -343,6 +344,8 @@ export async function ingestAppFromDockerImage(args: {
   secret_bindings?: SecretBindings;
   workspace_id: string;
   author_user_id: string;
+  actor_token_id?: string | null;
+  actor_ip?: string | null;
   /**
    * Visibility override. Defaults to 'private' for cloud workspaces (so
    * user-published apps never land in the public hub by accident) and
@@ -418,8 +421,8 @@ export async function ingestAppFromDockerImage(args: {
   // re-publish to update the row; other workspaces get a SlugTakenError with
   // three recovery suggestions so the UI can render pills.
   const existing = db
-    .prepare('SELECT id, workspace_id, visibility FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string; visibility: string } | undefined;
+    .prepare('SELECT id, workspace_id, visibility, publish_status FROM apps WHERE slug = ?')
+    .get(slug) as { id: string; workspace_id: string; visibility: string; publish_status: string | null } | undefined;
   if (
     existing &&
     existing.workspace_id !== args.workspace_id &&
@@ -544,6 +547,34 @@ export async function ingestAppFromDockerImage(args: {
       }
     }
   }
+
+  auditLog({
+    actor: {
+      userId: args.author_user_id,
+      tokenId: args.actor_token_id || null,
+      ip: args.actor_ip || null,
+    },
+    action: 'app.published',
+    target: { type: 'app', id: appId },
+    before: existing
+      ? {
+          slug,
+          visibility: existing.visibility,
+          publish_status: existing.publish_status,
+        }
+      : null,
+    after: {
+      slug,
+      visibility,
+      publish_status: existing?.publish_status || 'pending_review',
+    },
+    metadata: {
+      created,
+      source: 'docker_image',
+      workspace_id: args.workspace_id,
+      docker_image_ref: args.docker_image_ref,
+    },
+  });
 
   return { slug, name, created };
 }

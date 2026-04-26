@@ -1,8 +1,6 @@
 // Admin surface for Floom operators. Small set of endpoints guarded by the
 // shared FLOOM_AUTH_TOKEN bearer (same token used by the global-auth gate
-// for self-host deployments). Intentionally minimal — no UI queue, no audit
-// log. If FLOOM_AUTH_TOKEN is unset on the server, every admin endpoint
-// returns 404 so the surface is invisible in OSS public mode.
+// for self-host deployments) or a signed-in admin user.
 //
 // Current endpoints:
 //   POST /api/admin/apps/:slug/publish-status
@@ -13,12 +11,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db.js';
 import { hasValidAdminBearer } from '../lib/auth.js';
+import { isCloudMode } from '../lib/better-auth.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
+import { auditLog, getAuditActor, getAuditLogEntry, queryAuditLog } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
 import { listPendingAccountDeletes } from '../services/account-deletion.js';
 import {
   canonicalVisibility,
-  listAuditRows,
   transitionVisibility,
 } from '../services/sharing.js';
 import type { AppRecord } from '../types.js';
@@ -30,6 +29,9 @@ export const adminRouter = new Hono();
 adminRouter.use('*', async (c, next) => {
   if (hasValidAdminBearer(c)) return next();
   const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Unauthorized', code: 'auth_required' }, 401);
+  }
   const user = db
     .prepare(`SELECT is_admin FROM users WHERE id = ?`)
     .get(ctx.user_id) as { is_admin: number } | undefined;
@@ -74,6 +76,7 @@ adminRouter.post('/apps/:slug/publish-status', async (c) => {
     );
   }
 
+  const ctx = await resolveUserContext(c);
   const app = db
     .prepare('SELECT id, slug, publish_status FROM apps WHERE slug = ?')
     .get(slug) as Pick<AppRecord, 'id' | 'slug' | 'publish_status'> | undefined;
@@ -86,6 +89,19 @@ adminRouter.post('/apps/:slug/publish-status', async (c) => {
   // The /api/hub list endpoint caches responses for 5s. Bust it so the
   // newly-published app shows up on the Store immediately.
   invalidateHubCache();
+  auditLog({
+    actor: getAuditActor(c, ctx),
+    action:
+      parsed.data.status === 'published'
+        ? 'admin.app_approved'
+        : parsed.data.status === 'rejected'
+          ? 'admin.app_rejected'
+          : 'admin.app_publish_status_changed',
+    target: { type: 'app', id: app.id },
+    before: { publish_status: app.publish_status },
+    after: { publish_status: parsed.data.status },
+    metadata: { slug },
+  });
 
   // eslint-disable-next-line no-console
   console.log(
@@ -159,6 +175,8 @@ adminRouter.post('/review-queue/:slug/approve', async (c) => {
   }
   const next = transitionVisibility(app, 'public_live', {
     actorUserId: ctx.user_id,
+    actorTokenId: ctx.agent_token_id,
+    actorIp: getAuditActor(c, ctx).ip,
     reason: 'admin_approve',
   });
   invalidateHubCache();
@@ -189,6 +207,8 @@ adminRouter.post('/review-queue/:slug/reject', async (c) => {
   }
   const next = transitionVisibility(app, 'changes_requested', {
     actorUserId: ctx.user_id,
+    actorTokenId: ctx.agent_token_id,
+    actorIp: getAuditActor(c, ctx).ip,
     reason: 'admin_reject',
     comment: parsed.data.comment,
   });
@@ -214,6 +234,8 @@ adminRouter.post('/apps/:slug/takedown', async (c) => {
   }
   const next = transitionVisibility(app, 'private', {
     actorUserId: ctx.user_id,
+    actorTokenId: ctx.agent_token_id,
+    actorIp: getAuditActor(c, ctx).ip,
     reason: 'admin_takedown',
     metadata: { reason: parsed.data?.reason || 'emergency_takedown' },
   });
@@ -221,12 +243,65 @@ adminRouter.post('/apps/:slug/takedown', async (c) => {
   return c.json({ ok: true, app: serializeReviewApp(next) });
 });
 
+const AuditQuerySchema = z.object({
+  actor_user_id: z.string().min(1).max(256).optional(),
+  target: z
+    .string()
+    .min(3)
+    .max(512)
+    .regex(/^[a-z_][a-z0-9_]*:.+$/)
+    .optional(),
+  app_id: z.string().min(1).max(256).optional(),
+  action: z.string().min(1).max(128).regex(/^[a-z0-9_.-]+$/).optional(),
+  since: z
+    .string()
+    .datetime({ offset: true })
+    .or(z.string().regex(/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/))
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+adminRouter.get('/audit-log/:id', (c) => {
+  const id = c.req.param('id') || '';
+  if (!/^audit_[A-Za-z0-9_-]+/.test(id)) {
+    return c.json({ error: 'Invalid audit log id', code: 'invalid_id' }, 400);
+  }
+  const entry = getAuditLogEntry(id);
+  if (!entry) return c.json({ error: 'Audit log entry not found', code: 'not_found' }, 404);
+  return c.json({ entry });
+});
+
 adminRouter.get('/audit-log', (c) => {
-  const appId = c.req.query('app_id') || null;
-  const rows = listAuditRows(appId).map((row) => ({
-    ...row,
-    metadata: row.metadata ? JSON.parse(row.metadata) : null,
-  }));
+  const parsed = AuditQuerySchema.safeParse({
+    actor_user_id: c.req.query('actor_user_id') || undefined,
+    target: c.req.query('target') || undefined,
+    app_id: c.req.query('app_id') || undefined,
+    action: c.req.query('action') || undefined,
+    since: c.req.query('since') || undefined,
+    limit: c.req.query('limit') || undefined,
+  });
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid query parameters', code: 'invalid_query', details: parsed.error.flatten() }, 400);
+  }
+  let targetType: string | undefined;
+  let targetId: string | undefined;
+  if (parsed.data.target) {
+    const separator = parsed.data.target.indexOf(':');
+    targetType = parsed.data.target.slice(0, separator);
+    targetId = parsed.data.target.slice(separator + 1);
+  }
+  if (parsed.data.app_id) {
+    targetType = 'app';
+    targetId = parsed.data.app_id;
+  }
+  const rows = queryAuditLog({
+    actor_user_id: parsed.data.actor_user_id,
+    target_type: targetType,
+    target_id: targetId,
+    action: parsed.data.action,
+    since: parsed.data.since,
+    limit: parsed.data.limit,
+  });
   return c.json({ audit_log: rows });
 });
 

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { db } from '../db.js';
 import { newAppInviteId, newVisibilityAuditId } from '../lib/ids.js';
+import { auditLog } from './audit-log.js';
 import type {
   AppInviteState,
   AppRecord,
@@ -42,6 +43,8 @@ export type TransitionReason =
 
 export interface TransitionOptions {
   actorUserId: string;
+  actorTokenId?: string | null;
+  actorIp?: string | null;
   reason: TransitionReason;
   comment?: string | null;
   rotateLinkToken?: boolean;
@@ -196,7 +199,11 @@ function auditTransition(
   fromState: string | null,
   toState: string,
   actorUserId: string,
+  actorTokenId: string | null | undefined,
+  actorIp: string | null | undefined,
   reason: string,
+  beforeState: Record<string, unknown>,
+  afterState: Record<string, unknown>,
   metadata?: Record<string, unknown>,
 ): void {
   db.prepare(
@@ -212,6 +219,24 @@ function auditTransition(
     reason,
     metadata ? JSON.stringify(metadata) : null,
   );
+  auditLog({
+    actor: { userId: actorUserId, tokenId: actorTokenId || null, ip: actorIp || null },
+    action:
+      reason === 'admin_approve'
+        ? 'admin.app_approved'
+        : reason === 'admin_reject'
+          ? 'admin.app_rejected'
+          : reason === 'admin_takedown'
+            ? 'admin.app_takedown'
+            : 'app.visibility_changed',
+    target: { type: 'app', id: appId },
+    before: beforeState,
+    after: afterState,
+    metadata: {
+      reason,
+      ...(metadata || {}),
+    },
+  });
 }
 
 export function transitionVisibility(
@@ -257,10 +282,21 @@ export function transitionVisibility(
         WHERE id = ?`,
     ).run(...values);
 
-    auditTransition(app.id, from, to, options.actorUserId, options.reason, {
-      ...(options.metadata || {}),
-      ...(options.comment ? { comment: options.comment } : {}),
-    });
+    auditTransition(
+      app.id,
+      from,
+      to,
+      options.actorUserId,
+      options.actorTokenId,
+      options.actorIp,
+      options.reason,
+      { visibility: from, publish_status: app.publish_status },
+      { visibility: to, publish_status: publishStatus },
+      {
+        ...(options.metadata || {}),
+        ...(options.comment ? { comment: options.comment } : {}),
+      },
+    );
 
     return db.prepare(`SELECT * FROM apps WHERE id = ?`).get(app.id) as AppRecord;
   });

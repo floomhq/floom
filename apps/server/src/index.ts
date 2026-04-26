@@ -67,6 +67,7 @@ import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
 import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
 import { startRunRetentionSweeper } from './services/run-retention-sweeper.js';
+import { startAuditLogRetentionSweeper } from './services/audit-log.js';
 import { securityHeaders, noIndexPreview, isPreviewEnv } from './middleware/security.js';
 import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
@@ -1712,6 +1713,10 @@ async function boot(): Promise<void> {
 
   if (process.env.FLOOM_DISABLE_ACCOUNT_DELETE_SWEEPER !== 'true') {
     startAccountDeleteSweeper();
+  }
+
+  if (process.env.FLOOM_DISABLE_AUDIT_SWEEPER !== 'true') {
+    startAuditLogRetentionSweeper();
   }
 
   // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its

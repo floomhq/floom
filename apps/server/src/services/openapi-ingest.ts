@@ -18,6 +18,7 @@ import { parseRendererManifest } from '../lib/renderer-manifest.js';
 import type { RendererManifest } from '@floom/renderer/contract';
 import { db } from '../db.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
+import { auditLog } from './audit-log.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
 import { normalizeMaxRunRetentionDays } from './run-retention-sweeper.js';
 import type { NormalizedManifest, InputSpec, OutputSpec } from '../types.js';
@@ -2292,6 +2293,8 @@ export async function ingestAppFromUrl(args: {
   category?: string;
   workspace_id: string;
   author_user_id: string;
+  actor_token_id?: string | null;
+  actor_ip?: string | null;
   visibility?: 'public' | 'private' | 'auth-required';
   max_run_retention_days?: number | null;
   allowPrivateNetwork?: boolean;
@@ -2327,6 +2330,8 @@ export async function ingestAppFromSpec(args: {
   category?: string;
   workspace_id: string;
   author_user_id: string;
+  actor_token_id?: string | null;
+  actor_ip?: string | null;
   /** When omitted, new apps default to `private`. */
   visibility?: 'public' | 'private' | 'auth-required';
   max_run_retention_days?: number | null;
@@ -2346,8 +2351,8 @@ export async function ingestAppFromSpec(args: {
   // random suffix) so the UI can render clickable pills instead of a
   // dead-end error (audit 2026-04-20, Fix 2).
   const existing = db
-    .prepare('SELECT id, workspace_id, visibility FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string; visibility: string } | undefined;
+    .prepare('SELECT id, workspace_id, visibility, publish_status FROM apps WHERE slug = ?')
+    .get(slug) as { id: string; workspace_id: string; visibility: string; publish_status: string | null } | undefined;
   if (existing && existing.workspace_id !== args.workspace_id && existing.workspace_id !== 'local') {
     throw new SlugTakenError(slug, deriveSlugSuggestions(slug));
   }
@@ -2401,6 +2406,31 @@ export async function ingestAppFromSpec(args: {
       args.author_user_id,
       slug,
     );
+    auditLog({
+      actor: {
+        userId: args.author_user_id,
+        tokenId: args.actor_token_id || null,
+        ip: args.actor_ip || null,
+      },
+      action: 'app.published',
+      target: { type: 'app', id: existing.id },
+      before: {
+        slug,
+        visibility: existing.visibility,
+        publish_status: existing.publish_status,
+      },
+      after: {
+        slug,
+        visibility,
+        publish_status: existing.publish_status,
+      },
+      metadata: {
+        created: false,
+        source: 'openapi',
+        workspace_id: args.workspace_id,
+        openapi_url: openapi_url || null,
+      },
+    });
     return { slug, name, created: false };
   }
 
@@ -2440,6 +2470,28 @@ export async function ingestAppFromSpec(args: {
     maxRunRetentionDays,
     args.workspace_id,
   );
+
+  auditLog({
+    actor: {
+      userId: args.author_user_id,
+      tokenId: args.actor_token_id || null,
+      ip: args.actor_ip || null,
+    },
+    action: 'app.published',
+    target: { type: 'app', id: appId },
+    before: null,
+    after: {
+      slug,
+      visibility,
+      publish_status: 'pending_review',
+    },
+    metadata: {
+      created: true,
+      source: 'openapi',
+      workspace_id: args.workspace_id,
+      openapi_url: openapi_url || null,
+    },
+  });
 
   return { slug, name, created: true };
 }

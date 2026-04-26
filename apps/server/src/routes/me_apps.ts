@@ -35,6 +35,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
+import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
 import * as creatorSecrets from '../services/app_creator_secrets.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
@@ -166,6 +167,8 @@ meAppsRouter.patch('/:slug/sharing', async (c) => {
   try {
     nextApp = transitionVisibility(app, to, {
       actorUserId: ctx.user_id,
+      actorTokenId: ctx.agent_token_id,
+      actorIp: getAuditActor(c, ctx).ip,
       reason:
         to === 'private'
           ? current === 'public_live'
@@ -278,6 +281,8 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
     try {
       transitionVisibility(app, 'invited', {
         actorUserId: ctx.user_id,
+        actorTokenId: ctx.agent_token_id,
+        actorIp: getAuditActor(c, ctx).ip,
         reason: 'owner_set_invited',
         metadata: { invite_id: invite.id },
       });
@@ -313,6 +318,8 @@ meAppsRouter.post('/:slug/sharing/submit-review', async (c) => {
   try {
     const next = transitionVisibility(app, 'pending_review', {
       actorUserId: ctx.user_id,
+      actorTokenId: ctx.agent_token_id,
+      actorIp: getAuditActor(c, ctx).ip,
       reason: canonicalVisibility(app.visibility) === 'changes_requested' ? 'owner_resubmit_review' : 'owner_submit_review',
     });
     invalidateHubCache();
@@ -332,6 +339,8 @@ meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
   try {
     const next = transitionVisibility(app, 'private', {
       actorUserId: ctx.user_id,
+      actorTokenId: ctx.agent_token_id,
+      actorIp: getAuditActor(c, ctx).ip,
       reason: 'owner_withdraw_review',
     });
     invalidateHubCache();
@@ -453,7 +462,21 @@ meAppsRouter.put('/:slug/secret-policies/:key', async (c) => {
   }
 
   try {
+    const previousPolicy = creatorSecrets.getPolicy(app.id, key);
     creatorSecrets.setPolicy(app.id, key, parsed.data.policy as SecretPolicy);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.policy_updated',
+      target: { type: 'secret', id: `${app.id}:${key}` },
+      before: { policy: previousPolicy },
+      after: { policy: parsed.data.policy },
+      metadata: {
+        app_id: app.id,
+        slug: app.slug,
+        key,
+        workspace_id: app.workspace_id || ctx.workspace_id,
+      },
+    });
     return c.json({ ok: true, policy: parsed.data.policy });
   } catch (err) {
     return c.json(
@@ -536,12 +559,27 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
   }
 
   try {
+    const existed = creatorSecrets.hasCreatorValue(app.id, key);
     creatorSecrets.setCreatorSecret(
       app.id,
       app.workspace_id || ctx.workspace_id,
       key,
       parsed.data.value,
     );
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.updated',
+      target: { type: 'secret', id: `${app.id}:${key}` },
+      before: { exists: existed },
+      after: { exists: true },
+      metadata: {
+        app_id: app.id,
+        slug: app.slug,
+        key,
+        workspace_id: app.workspace_id || ctx.workspace_id,
+        scope: 'creator_override',
+      },
+    });
     return c.json({ ok: true, key });
   } catch (err) {
     if (err instanceof SecretDecryptError) {
@@ -577,7 +615,23 @@ meAppsRouter.delete('/:slug/creator-secrets/:key', async (c) => {
   }
 
   try {
+    const existed = creatorSecrets.hasCreatorValue(app.id, key);
     const removed = creatorSecrets.deleteCreatorSecret(app.id, key);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.deleted',
+      target: { type: 'secret', id: `${app.id}:${key}` },
+      before: { exists: existed },
+      after: { exists: existed && !removed },
+      metadata: {
+        app_id: app.id,
+        slug: app.slug,
+        key,
+        workspace_id: app.workspace_id || ctx.workspace_id,
+        scope: 'creator_override',
+        removed,
+      },
+    });
     return c.json({ ok: true, removed });
   } catch (err) {
     return c.json(
@@ -606,6 +660,20 @@ meAppsRouter.delete('/:slug', async (c) => {
   }
 
   try {
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'app.deleted',
+      target: { type: 'app', id: app.id },
+      before: {
+        slug: app.slug,
+        visibility: app.visibility,
+        publish_status: app.publish_status,
+        workspace_id: app.workspace_id,
+        author: app.author,
+      },
+      after: null,
+      metadata: { slug: app.slug },
+    });
     deleteAppRecordById(app.id);
     return c.json({ ok: true });
   } catch (err) {

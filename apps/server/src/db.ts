@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -182,6 +183,28 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor_user_id TEXT,
+    actor_token_id TEXT,
+    actor_ip TEXT,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    before_state TEXT,
+    after_state TEXT,
+    metadata TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_log_actor_user
+    ON audit_log(actor_user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_target
+    ON audit_log(target_type, target_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_action
+    ON audit_log(action);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_created_desc
+    ON audit_log(created_at DESC);
+
   CREATE TABLE IF NOT EXISTS app_visibility_audit (
     id TEXT PRIMARY KEY,
     app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
@@ -195,6 +218,70 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_app_visibility_audit_app_created
     ON app_visibility_audit(app_id, created_at DESC);
 `);
+
+const legacyVisibilityAuditRows = db
+  .prepare(
+    `SELECT id, app_id, from_state, to_state, actor_user_id, reason, metadata, created_at
+       FROM app_visibility_audit`,
+  )
+  .all() as Array<{
+    id: string;
+    app_id: string;
+    from_state: string | null;
+    to_state: string;
+    actor_user_id: string;
+    reason: string;
+    metadata: string | null;
+    created_at: string;
+  }>;
+const hasMigratedVisibilityAuditRow = db.prepare(
+  `SELECT 1 FROM audit_log
+    WHERE target_type = 'app'
+      AND target_id = ?
+      AND created_at = ?
+      AND metadata LIKE ?`,
+);
+const insertMigratedVisibilityAuditRow = db.prepare(
+  `INSERT INTO audit_log
+     (id, actor_user_id, actor_token_id, actor_ip, action, target_type, target_id,
+      before_state, after_state, metadata, created_at)
+   VALUES (?, ?, NULL, NULL, ?, 'app', ?, ?, ?, ?, ?)`,
+);
+function migratedVisibilityAction(reason: string): string {
+  if (reason === 'admin_approve') return 'admin.app_approved';
+  if (reason === 'admin_reject') return 'admin.app_rejected';
+  if (reason === 'admin_takedown') return 'admin.app_takedown';
+  return 'app.visibility_changed';
+}
+for (const row of legacyVisibilityAuditRows) {
+  const marker = `"legacy_app_visibility_audit_id":"${row.id}"`;
+  if (hasMigratedVisibilityAuditRow.get(row.app_id, row.created_at, `%${marker}%`)) {
+    continue;
+  }
+  let legacyMetadata: Record<string, unknown> = {};
+  if (row.metadata) {
+    try {
+      legacyMetadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    } catch {
+      legacyMetadata = { legacy_metadata_parse_error: true };
+    }
+  }
+  const metadata = JSON.stringify({
+    ...legacyMetadata,
+    legacy_app_visibility_audit_id: row.id,
+    legacy_reason: row.reason,
+  });
+  insertMigratedVisibilityAuditRow.run(
+    `audit_${randomUUID()}`,
+    row.actor_user_id,
+    migratedVisibilityAction(row.reason),
+    row.app_id,
+    row.from_state === null ? null : JSON.stringify({ visibility: row.from_state }),
+    JSON.stringify({ visibility: row.to_state }),
+    metadata,
+    row.created_at,
+  );
+}
 
 // Store-catalog wireframe parity (2026-04-23). v17 `store.html` shows
 // each card with a 120px thumbnail, a star count, a runs-7d count, and
@@ -1085,8 +1172,9 @@ db.exec(`
 // Deploy waitlist (launch 2026-04-27) lands v13: waitlist_signups.
 // v14: waitlist_signups.deploy_repo_url + deploy_intent (#454).
 // v15: agent_tokens for agents-native phase 2A backend.
+// v16: audit_log (ADR-013), generalized from app_visibility_audit.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 15) {
-  db.pragma('user_version = 15');
+if (currentUserVersion < 16) {
+  db.pragma('user_version = 16');
 }

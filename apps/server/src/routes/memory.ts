@@ -15,6 +15,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { resolveUserContext } from '../services/session.js';
+import { auditLog, getAuditActor } from '../services/audit-log.js';
 import * as appMemory from '../services/app_memory.js';
 import * as userSecrets from '../services/user_secrets.js';
 import { MemoryKeyNotAllowedError } from '../services/app_memory.js';
@@ -170,7 +171,22 @@ secretsRouter.post('/', async (c) => {
     );
   }
   try {
+    const existed = userSecrets
+      .listMasked(ctx)
+      .some((entry) => entry.key === parsed.data.key);
     userSecrets.set(ctx, parsed.data.key, parsed.data.value);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.updated',
+      target: { type: 'secret', id: `${ctx.workspace_id}:${ctx.user_id}:${parsed.data.key}` },
+      before: { exists: existed },
+      after: { exists: true },
+      metadata: {
+        workspace_id: ctx.workspace_id,
+        key: parsed.data.key,
+        scope: 'user_vault',
+      },
+    });
     return c.json({ ok: true, key: parsed.data.key });
   } catch (err) {
     if (err instanceof SecretDecryptError) {
@@ -195,7 +211,23 @@ secretsRouter.delete('/:key', async (c) => {
   if (gate) return gate;
   const key = c.req.param('key') || '';
   try {
+    const existed = userSecrets
+      .listMasked(ctx)
+      .some((entry) => entry.key === key);
     const removed = userSecrets.del(ctx, key);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.deleted',
+      target: { type: 'secret', id: `${ctx.workspace_id}:${ctx.user_id}:${key}` },
+      before: { exists: existed },
+      after: { exists: !removed && existed },
+      metadata: {
+        workspace_id: ctx.workspace_id,
+        key,
+        scope: 'user_vault',
+        removed,
+      },
+    });
     return c.json({ ok: true, removed });
   } catch (err) {
     return c.json(

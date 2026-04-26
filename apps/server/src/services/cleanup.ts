@@ -1,6 +1,7 @@
 import { db, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
 import { deleteRunsForUserAccount } from './run-retention-sweeper.js';
+import { auditLog } from './audit-log.js';
 
 /**
  * Cleanup orphaned Floom data when a user is deleted from Better Auth.
@@ -23,6 +24,23 @@ export function cleanupUserOrphans(userId: string): void {
     const memberships = db
       .prepare('SELECT workspace_id, role FROM workspace_members WHERE user_id = ?')
       .all(userId) as { workspace_id: string; role: string }[];
+
+    const user = db
+      .prepare('SELECT id FROM users WHERE id = ?')
+      .get(userId) as { id: string } | undefined;
+    auditLog({
+      actor: { userId },
+      action: 'account.deleted',
+      target: { type: 'user', id: userId },
+      before: user
+        ? {
+            id: user.id,
+            workspace_ids: memberships.map((membership) => membership.workspace_id),
+          }
+        : { id: userId },
+      after: null,
+      metadata: { mode: 'hard_delete' },
+    });
 
     // If the departing user is the sole admin in a shared workspace,
     // promote the next most-active member before the FK removes the

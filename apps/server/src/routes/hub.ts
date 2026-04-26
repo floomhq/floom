@@ -24,6 +24,7 @@ import {
   SlugTakenError,
   SpecNotFoundError,
 } from '../services/openapi-ingest.js';
+import { auditLog, getAuditActor } from '../services/audit-log.js';
 import {
   bundleRenderer,
   forgetBundle,
@@ -334,6 +335,8 @@ hubRouter.post('/ingest', async (c) => {
       max_run_retention_days: parsed.data.max_run_retention_days,
       workspace_id: ctx.workspace_id,
       author_user_id: ctx.user_id,
+      actor_token_id: ctx.agent_token_id,
+      actor_ip: getAuditActor(c, ctx).ip,
       allowPrivateNetwork: ctx.workspace_id === 'local' && ctx.user_id === 'local',
     });
     // Perf fix (2026-04-20): bust the /api/hub 5s cache so the newly
@@ -600,6 +603,20 @@ hubRouter.delete('/:slug', async (c) => {
     return notOwnerResponse(c);
   }
 
+  auditLog({
+    actor: getAuditActor(c, ctx),
+    action: 'app.deleted',
+    target: { type: 'app', id: app.id },
+    before: {
+      slug: app.slug,
+      visibility: app.visibility,
+      publish_status: app.publish_status,
+      workspace_id: app.workspace_id,
+      author: app.author,
+    },
+    after: null,
+    metadata: { slug },
+  });
   deleteAppRecordById(app.id);
   // Runs are dropped by ON DELETE CASCADE (see db.ts CREATE TABLE runs).
   return c.json({ ok: true, slug });
@@ -706,6 +723,32 @@ hubRouter.patch('/:slug', async (c) => {
   values.push(app.id);
 
   db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  if (parsed.data.visibility && parsed.data.visibility !== app.visibility) {
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'app.visibility_changed',
+      target: { type: 'app', id: app.id },
+      before: { visibility: app.visibility },
+      after: { visibility: parsed.data.visibility },
+      metadata: { slug },
+    });
+  }
+  if (parsed.data.primary_action !== undefined) {
+    const previousManifest = safeManifest(app.manifest);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'app.updated',
+      target: { type: 'app', id: app.id },
+      before: {
+        primary_action:
+          previousManifest && 'primary_action' in previousManifest
+            ? (previousManifest as NormalizedManifest & { primary_action?: string }).primary_action || null
+            : null,
+      },
+      after: { primary_action: parsed.data.primary_action },
+      metadata: { slug, field: 'primary_action' },
+    });
+  }
   // Perf fix (2026-04-20): bust the /api/hub 5s cache so visibility /
   // primary_action changes land in the public directory immediately.
   invalidateHubCache();

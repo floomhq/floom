@@ -638,6 +638,8 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
             args.max_run_retention_days as number | undefined,
           workspace_id: ctx.workspace_id,
           author_user_id: ctx.user_id,
+          actor_token_id: ctx.agent_token_id,
+          actor_ip: ip,
         };
         let result: { slug: string; name: string; created: boolean };
         if (docker_image_ref) {

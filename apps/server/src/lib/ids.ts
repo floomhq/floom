@@ -1,4 +1,5 @@
 import { customAlphabet } from 'nanoid';
+import { randomUUID } from 'node:crypto';
 
 const alphabet = '0123456789abcdefghjkmnpqrstvwxyz';
 const makeId = (prefix: string) => {
@@ -15,6 +16,7 @@ export const newJobId = makeId('job');
 export const newConnectionId = makeId('con');
 export const newAppInviteId = makeId('ainv');
 export const newVisibilityAuditId = makeId('vaud');
+export const newAuditLogId = () => `audit_${randomUUID()}`;
 // W3.3: Stripe Connect partner app
 export const newStripeAccountRowId = makeId('sa');
 export const newStripeWebhookEventRowId = makeId('swe');
