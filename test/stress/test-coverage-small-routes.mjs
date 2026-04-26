@@ -306,7 +306,7 @@ try {
   const adminNoToken = await request(adminRouter, 'POST', '/apps/parser-app/publish-status', {
     status: 'published',
   });
-  log('admin without token is cloaked as 404', adminNoToken.status === 404);
+  log('admin without token rejects with 403', adminNoToken.status === 403);
   process.env.FLOOM_AUTH_TOKEN = 'admin-secret';
   const adminBadToken = await request(
     adminRouter,
@@ -315,7 +315,7 @@ try {
     { status: 'published' },
     { authorization: 'Bearer wrong' },
   );
-  log('admin wrong token is cloaked as 404', adminBadToken.status === 404);
+  log('admin wrong token rejects with 403', adminBadToken.status === 403);
   const adminBadBody = await request(
     adminRouter,
     'POST',
