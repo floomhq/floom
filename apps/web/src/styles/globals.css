@@ -446,6 +446,13 @@ body:has(.topbar-mobile-menu) {
   .topbar-mobile-scrim {
     display: none !important;
   }
+  /* v23 TopBar precursor: the mobile fixed-bottom-right Copy-for-Claude
+     pill is visible at <769px only — desktop already exposes the same
+     affordance in the TopBar right cluster, so a duplicate floating pill
+     would just be visual clutter. */
+  .topbar-mcp-mobile {
+    display: none !important;
+  }
 }
 
 /* a11y 2026-04-20: WCAG 2.5.5 touch target (44x44) for small footer

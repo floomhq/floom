@@ -4,10 +4,12 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Logo } from './Logo';
 import { useSession, clearSession } from '../hooks/useSession';
 import { useMyApps } from '../hooks/useMyApps';
+import { useSecrets } from '../hooks/useSecrets';
 import * as api from '../api/client';
 import { useDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 import { GitHubStarsBadge } from './GitHubStarsBadge';
+import { CopyForClaudeButton } from './CopyForClaudeButton';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface Props {
@@ -131,16 +133,19 @@ const menuItemStyle: CSSProperties = {
 //     Right (waitlist): GH stars · Publish (CTA) · Join waitlist
 //
 //   Authenticated (deploy mode):
-//     Centre: Studio · My runs                                       (2 items)
-//     Right:  GH stars · + New app (CTA → /studio/build) · avatar dropdown
-//     Avatar dropdown: Profile · API keys · Secrets · Pricing · Docs · Sign out
+//     Centre: Studio · My account                                    (2 items)
+//     Right:  GH stars · Copy for Claude · + New app · avatar dropdown
+//     Avatar dropdown: header (name + email) · Apps store · BYOK keys ·
+//                      Agent tokens · Settings · — · Pricing · Docs ·
+//                      — · Sign out
 //
 // Why the split: Federico 2026-04-25 — "Pricing, Docs etc don't matter
 // so much when I am already logged in, so the nav and the priorities of
 // what to click next change." Discovery items demote to the dropdown for
 // authed users; the centre nav surfaces only their day-to-day work
-// surfaces. MECE labelling: /me = "My runs" (consumer), /studio =
-// "Studio" (creator). URL slugs stay; only the visible label changes.
+// surfaces. MECE labelling: /me = "My account" (consumer, v23 rename
+// 2026-04-26), /studio = "Studio" (creator). URL slugs stay; only the
+// visible label changes.
 //
 // Two clean states only — never a 3rd. Preview vs prod differ in the
 // CTA wording (Publish vs Join waitlist), not the nav structure.
@@ -364,7 +369,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                 aria-current={isMe ? 'page' : undefined}
                 style={navLinkStyle(isMe)}
               >
-                My runs
+                My account
               </Link>
             </>
           ) : (
@@ -412,6 +417,15 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               and GH becomes the single rightmost affordance on
               waitlist-prod (where Sign in / Sign up are hidden). */}
           {!isLoginPage && <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />}
+
+          {/* Copy-for-Claude — globally present (anon + authed). Sits
+              between centre nav and CTA/avatar cluster (Federico-locked
+              2026-04-26). Hidden only on auth pages so they stay focused.
+              The popover handles its own state, click-outside, and Esc.
+              Anon centre nav: Apps · Docs · Pricing → Copy-for-Claude →
+              Sign in / Sign up. Authed: Studio · My account →
+              Copy-for-Claude → + New app → avatar. */}
+          {!isLoginPage && <CopyForClaudeButton />}
 
           {/* Primary CTA — brand-green pill. Authed users get "+ New app"
               (work-focused: take me to the build flow). Anonymous users
@@ -586,45 +600,55 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     background: BG,
                     border: '1px solid rgba(14,14,12,0.12)',
                     borderRadius: 8,
-                    minWidth: 200,
+                    minWidth: 240,
                     boxShadow: '0 4px 16px rgba(14,14,12,0.08)',
                     padding: 4,
                     zIndex: 50,
                   }}
                 >
-                  {/* Dropdown order (project_floom_nav_ia.md, 2026-04-25):
-                      Profile · API keys · Secrets · Pricing · Docs · Sign out.
-                      Studio + My runs live in the centre nav now (authed
-                      users get the work-focused 2-item layout); Pricing +
-                      Docs demote here so they stay 1 click away without
-                      cluttering the top bar. */}
-                  <Link
-                    to="/me/settings"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-profile"
-                    style={menuItemStyle}
+                  {/* v23 dropdown shape (Federico-locked 2026-04-26):
+                      header (name + email) · Apps store · BYOK keys ·
+                      Agent tokens · Settings · — · Pricing · Docs · — ·
+                      Sign out. Counts after labels (Apps · 5 etc) when
+                      session caches are populated; omit gracefully
+                      otherwise. Vocabulary lock: NEVER write "API keys"
+                      in user-visible copy on this surface. */}
+                  <div
+                    style={{
+                      padding: '8px 12px 6px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                    }}
+                    aria-hidden="true"
                   >
-                    Profile
-                  </Link>
-                  <Link
-                    to="/me/api-keys"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-api-keys"
-                    style={menuItemStyle}
-                  >
-                    API keys
-                  </Link>
-                  <Link
-                    to="/me/secrets"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-secrets"
-                    style={menuItemStyle}
-                  >
-                    Secrets
-                  </Link>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: INK,
+                        lineHeight: 1.2,
+                      }}
+                      data-testid="topbar-user-header-name"
+                    >
+                      {userLabel}
+                    </span>
+                    {user?.email && (
+                      <span
+                        style={{
+                          fontSize: 11.5,
+                          color: MUTED,
+                          lineHeight: 1.2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        data-testid="topbar-user-header-email"
+                      >
+                        {user.email}
+                      </span>
+                    )}
+                  </div>
                   <div
                     style={{
                       height: 1,
@@ -633,26 +657,51 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     }}
                     aria-hidden="true"
                   />
-                  <Link
+                  <DropdownItem
+                    to="/apps"
+                    label="Apps store"
+                    count={myApps?.length}
+                    testId="topbar-user-apps-store"
+                    onSelect={() => setDropOpen(false)}
+                    active={isApps}
+                  />
+                  <ByokKeysDropdownItem
+                    onSelect={() => setDropOpen(false)}
+                  />
+                  <DropdownItem
+                    to="/me/agent-keys"
+                    label="Agent tokens"
+                    testId="topbar-user-agent-tokens"
+                    onSelect={() => setDropOpen(false)}
+                  />
+                  <DropdownItem
+                    to="/me/settings"
+                    label="Settings"
+                    testId="topbar-user-settings"
+                    onSelect={() => setDropOpen(false)}
+                  />
+                  <div
+                    style={{
+                      height: 1,
+                      background: 'rgba(14,14,12,0.08)',
+                      margin: '4px 0',
+                    }}
+                    aria-hidden="true"
+                  />
+                  <DropdownItem
                     to="/pricing"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-pricing"
-                    aria-current={isPricing ? 'page' : undefined}
-                    style={menuItemStyle}
-                  >
-                    Pricing
-                  </Link>
-                  <Link
+                    label="Pricing"
+                    testId="topbar-user-pricing"
+                    onSelect={() => setDropOpen(false)}
+                    active={isPricing}
+                  />
+                  <DropdownItem
                     to="/docs"
-                    onClick={() => setDropOpen(false)}
-                    role="menuitem"
-                    data-testid="topbar-user-docs"
-                    aria-current={isDocs ? 'page' : undefined}
-                    style={menuItemStyle}
-                  >
-                    Docs
-                  </Link>
+                    label="Docs"
+                    testId="topbar-user-docs"
+                    onSelect={() => setDropOpen(false)}
+                    active={isDocs}
+                  />
                   <div
                     style={{
                       height: 1,
@@ -702,6 +751,18 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
       </div>
+
+      {/* Mobile fixed-bottom-right Copy-for-Claude pill (Federico-locked
+          2026-04-26, v23 wireframe line 484-487). Visible only at the
+          mobile breakpoint via CSS (`.topbar-mcp-mobile`). Hidden on
+          /login + /signup so auth surfaces stay focused. Reuses the
+          shared CopyForClaudeButton in mobile variant — same popover,
+          same context-aware row 3 logic. */}
+      {!isLoginPage && (
+        <div className="topbar-mcp-mobile" data-testid="topbar-mcp-mobile">
+          <CopyForClaudeButton variant="mobile" />
+        </div>
+      )}
 
       {/* Mobile menu drawer */}
       {menuOpen && (
@@ -768,7 +829,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   data-testid="topbar-mobile-my-runs"
                   aria-current={isMe ? 'page' : undefined}
                 >
-                  My runs
+                  My account
                 </Link>
                 {!isLoginPage && (
                   <Link
@@ -808,13 +869,31 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                   Docs
                 </Link>
                 <Link
-                  to="/me/api-keys"
+                  to="/apps"
                   className="topbar-mobile-link"
                   role="menuitem"
                   onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-api-keys"
+                  data-testid="topbar-mobile-apps-store"
                 >
-                  API keys
+                  Apps store
+                </Link>
+                <Link
+                  to="/me/secrets"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-byok-keys"
+                >
+                  BYOK keys
+                </Link>
+                <Link
+                  to="/me/agent-keys"
+                  className="topbar-mobile-link"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  data-testid="topbar-mobile-agent-tokens"
+                >
+                  Agent tokens
                 </Link>
                 <Link
                   to="/me/settings"
@@ -966,6 +1045,79 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
         </>
       )}
     </header>
+  );
+}
+
+// BYOK keys dropdown row. Wrapped in its own component so `useSecrets()`
+// only fires `/api/secrets` when the dropdown actually mounts (i.e. the
+// authed avatar is rendered AND open) — anon users never trigger the
+// fetch. Count omitted gracefully while loading or when entries is null.
+function ByokKeysDropdownItem({ onSelect }: { onSelect: () => void }) {
+  const { entries } = useSecrets();
+  return (
+    <DropdownItem
+      to="/me/secrets"
+      label="BYOK keys"
+      count={entries?.length}
+      testId="topbar-user-byok-keys"
+      onSelect={onSelect}
+    />
+  );
+}
+
+// Avatar dropdown row with optional `count` tag rendered as a monospace
+// suffix per v23 spec ("Apps · 5", "BYOK keys · 3"). Counts are sourced
+// from session-scoped caches (useMyApps, useSecrets) — undefined/null/0
+// hide the tag gracefully so empty states don't render "Apps · 0".
+function DropdownItem({
+  to,
+  label,
+  count,
+  testId,
+  onSelect,
+  active,
+}: {
+  to: string;
+  label: string;
+  count?: number;
+  testId: string;
+  onSelect: () => void;
+  active?: boolean;
+}) {
+  return (
+    <Link
+      to={to}
+      onClick={onSelect}
+      role="menuitem"
+      data-testid={testId}
+      aria-current={active ? 'page' : undefined}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '8px 12px',
+        fontSize: 13,
+        color: INK,
+        textDecoration: 'none',
+        borderRadius: 6,
+        gap: 12,
+      }}
+    >
+      <span>{label}</span>
+      {typeof count === 'number' && count > 0 && (
+        <span
+          style={{
+            fontFamily:
+              '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 11,
+            color: MUTED,
+          }}
+          aria-label={`${count} items`}
+        >
+          {count}
+        </span>
+      )}
+    </Link>
   );
 }
 

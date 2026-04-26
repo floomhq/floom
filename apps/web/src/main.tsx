@@ -267,15 +267,25 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/me/secrets" element={<WaitlistGuard source="me"><MeSecretsPage /></WaitlistGuard>} />
         <Route path="/me/runs/:runId" element={<WaitlistGuard source="me"><MeRunDetailPage /></WaitlistGuard>} />
         <Route path="/me/settings" element={<WaitlistGuard source="me"><MeSettingsPage /></WaitlistGuard>} />
-        {/* /me/api-keys — canonical location for personal API keys
-            (Fede 2026-04-23: "API keys shouldn't sit in studio"). Keys are
-            account-scoped: users need them for both building and running.
-            /me/settings/tokens kept as a redirect so existing links/docs
-            still resolve. The underlying MeSettingsTokensPage is unchanged. */}
-        <Route path="/me/api-keys" element={<WaitlistGuard source="me"><MeSettingsTokensPage /></WaitlistGuard>} />
+        {/* /me/agent-keys — canonical location for "Agent tokens"
+            (vocabulary lock per `keys-decision.md`: "API keys" is banned
+            from user-visible copy on this surface, including the URL).
+            The underlying page component file rename
+            MeSettingsTokensPage.tsx → MeAgentKeysPage.tsx happens in PR-G
+            (keys impl); this PR-A only flips the route URL + adds the
+            back-compat redirect. Both routes serve the same page for 30
+            days; old URL is then deprecated.
+            /me/api-keys redirects → /me/agent-keys.
+            /me/settings/tokens redirects directly → /me/agent-keys (no
+            double-hop) so existing docs/links land in one redirect. */}
+        <Route path="/me/agent-keys" element={<WaitlistGuard source="me"><MeSettingsTokensPage /></WaitlistGuard>} />
+        <Route
+          path="/me/api-keys"
+          element={<Navigate to="/me/agent-keys" replace />}
+        />
         <Route
           path="/me/settings/tokens"
-          element={<Navigate to="/me/api-keys" replace />}
+          element={<Navigate to="/me/agent-keys" replace />}
         />
         {/* v16 studio restructure 2026-04-18: creator-context pages moved
             to /studio/*. Legacy /me/apps/:slug (owner context) redirects
