@@ -12,34 +12,18 @@
 //     index.html, which we removed in the same PR.
 //     `application/ld+json` is a data block, not executable, so it's
 //     exempt from script-src.
-//   - `style-src 'self' https://fonts.googleapis.com 'unsafe-inline'`.
-//     We split into the two sub-directives:
-//     * `style-src-elem 'self' https://fonts.googleapis.com 'unsafe-inline'`
-//       — stylesheets must come from same-origin or Google Fonts, and we
-//       also allow runtime `<style>` tags. 18 React components across the
-//       app render JSX `<style>{`@media ...`}</style>` tags to carry their
-//       responsive behaviour (AppGrid, AppPermalinkPage, PricingPage,
-//       AboutPage, LandingV17Page, HeroAppTiles, LayersGrid, ProofRow,
-//       etc.). Before 2026-04-24 we had `'unsafe-inline'` stripped from
-//       this directive (pentest MED #380), which silently killed EVERY
-//       one of those `@media` rules — mobile `/apps` stacked 4 tiles in a
-//       73.5px-wide column, `/p/:slug` mobile grid was broken, etc. The
-//       responsive regression is far worse than the pentest finding it
-//       was meant to close, so we've reinstated `'unsafe-inline'` here
-//       and filed a follow-up (tracked in docs/ops/security-headers.md)
-//       to migrate those inline `<style>` blocks into static CSS modules.
-//       Once that migration lands, we can re-remove `'unsafe-inline'` from
-//       `style-src-elem`.
-//     * `style-src-attr 'unsafe-inline'` — allows `style="..."` attributes
-//       only. 1,100+ React components use `style={{...}}` props across
-//       the codebase; nonce/hash per-render is infeasible at SPA scale.
+//   - `style-src 'self' https://fonts.googleapis.com` and
+//     `style-src-elem 'self' https://fonts.googleapis.com`.
+//     Inline `<style>` blocks were migrated to bundled CSS (issue #380
+//     phase 2), so style elements no longer require `'unsafe-inline'`.
+//   - `style-src-attr 'unsafe-inline'` remains intentional for now so
+//     existing React `style={{...}}` props continue to render. The
+//     follow-up migration for those attrs is tracked separately.
 //   - `img-src 'self' data: https:` — OG images, external icon CDNs
 //     (SimpleIcons, svgl, favicons), and data: for inline SVG sprites.
-//   - `connect-src 'self' https://api.github.com` — same-origin API
-//     calls plus the GitHub star-count fetch in components/home/BuiltBy.tsx.
-//     Sentry is only wired on the server; the browser bundle does not
-//     ship its own DSN. If we add a browser-side Sentry later, we'll
-//     need to allowlist `https://*.ingest.sentry.io` here.
+//   - `connect-src 'self' https://api.github.com https://*.ingest.sentry.io
+//     https://*.ingest.us.sentry.io` — same-origin API calls, GitHub
+//     star-count fetches, and optional browser Sentry ingest.
 //   - `font-src 'self' https://fonts.gstatic.com` — Google Fonts is
 //     loaded via `fonts.googleapis.com` (stylesheet, matched by
 //     style-src-elem) which in turn references `fonts.gstatic.com` for
@@ -100,16 +84,14 @@ import type { MiddlewareHandler } from 'hono';
 export const TOP_LEVEL_CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  // Style policies: we allow inline <style> tags until the JSX-<style>
-  // responsive blocks (18 files) are migrated to static CSS modules.
-  // See docs/ops/security-headers.md for the tracking item and the
-  // block comment above for the full rationale.
-  "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
-  "style-src-elem 'self' https://fonts.googleapis.com 'unsafe-inline'",
+  "style-src 'self' https://fonts.googleapis.com",
+  "style-src-elem 'self' https://fonts.googleapis.com",
+  // TODO(security#380): keep `style-src-attr 'unsafe-inline'` until we
+  // migrate the 2058 React JSX inline style props under apps/web.
   "style-src-attr 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self' https://api.github.com",
+  "connect-src 'self' https://api.github.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io",
   "frame-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",

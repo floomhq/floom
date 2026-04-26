@@ -58,6 +58,9 @@ python_dependencies:
   - google-genai==1.64.0
 secrets_needed:
   - GEMINI_API_KEY
+network:
+  allowed_domains:
+    - generativelanguage.googleapis.com
 ```
 
 ## `floom.yaml` reference
@@ -76,7 +79,24 @@ Top-level fields (see [spec/protocol.md §3](https://github.com/floomhq/floom/bl
 | `node_dependencies` | object | no | Package -> version map. |
 | `apt_packages` | string[] | no | OS packages available at runtime. |
 | `secrets_needed` | string[] | no | Env var names the app needs. |
+| `network.allowed_domains` | string[] | yes for new hosted apps | Outbound domains the container can reach. `[]` blocks all outbound network. |
 | `primary_action` | string | no | Which action to show by default in the runner. |
+
+### Network policy
+
+Hosted app containers are outbound-denied by default. Declare each external
+API the app needs:
+
+```yaml
+network:
+  allowed_domains:
+    - api.openai.com
+    - "*.example-api.com"
+```
+
+Use exact domains or `*.domain` globs. `*`, URLs, ports, and IP literals are
+rejected. See `docs/security/network-policy.md` for the runtime model and
+legacy compatibility behavior.
 
 ### Action spec
 

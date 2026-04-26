@@ -29,6 +29,10 @@ import { FeedbackButton } from '../components/FeedbackButton';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 import { Confetti } from '../components/Confetti';
 import { ShareModal } from '../components/share/ShareModal';
+import {
+  ClaudeSkillModal,
+  ClaudeSkillIcon,
+} from '../components/share/ClaudeSkillModal';
 import { getApp, getAppReviews, getRun, shareRun, ApiError } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
@@ -62,6 +66,20 @@ const GITHUB_REPOS: Record<string, string> = {
   'ig-nano-scout': 'https://github.com/floomhq/floom/tree/main/examples/ig-nano-scout',
 };
 
+// v23 PR-D (2026-04-26): per-slug hero subhead override for the 3 launch
+// demos. The wireframe ships a sales-tone one-liner that explains what the
+// app does + what to expect, instead of the generic markdown-stripped
+// `app.description`. Federico-locked copy. Non-launch slugs fall through
+// to the existing `headerDescription` derivation (description-as-subhead).
+const HERO_SUBHEAD: Record<string, string> = {
+  'competitor-lens':
+    'Paste 2 URLs (yours + competitor). Get the positioning, pricing, and angle diff in under 5 seconds.',
+  'ai-readiness-audit':
+    'Paste a company URL. Get a readiness score, 3 risks, 3 opportunities, and one concrete next step.',
+  'pitch-coach':
+    'Paste a 20-500 char startup pitch. Get 3 direct critiques, 3 rewrites by angle, and a one-line TL;DR.',
+};
+
 export function AppPermalinkPage() {
   const { slug } = useParams<{ slug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -88,6 +106,10 @@ export function AppPermalinkPage() {
   // was removed in the same change.
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareModalUrl, setShareModalUrl] = useState<string>('');
+  // PR #761 follow-up: front-door for the /p/:slug/skill.md backend
+  // route. The hero CTA "Install as Claude Skill" opens this modal,
+  // which shows the curl one-liner + an example Claude Code prompt.
+  const [claudeSkillModalOpen, setClaudeSkillModalOpen] = useState(false);
 
   // v16 restructure: /p/:slug is tabbed now (Run / About / Install / Source).
   // Run is the default — the previous product-page layout made users scroll
@@ -306,7 +328,12 @@ export function AppPermalinkPage() {
   // markdown syntax + collapses whitespace so a multi-line or markdown
   // description still renders as one clean line above the tabs. The full
   // rich description still renders (markdown-formatted) in the About tab.
+  //
+  // v23 PR-D (2026-04-26): the 3 launch demos override this with a
+  // sales-tone one-liner from HERO_SUBHEAD (Federico-locked). Everything
+  // else falls through to the markdown-stripped `app.description`.
   const headerDescription = useMemo<string>(() => {
+    if (app?.slug && HERO_SUBHEAD[app.slug]) return HERO_SUBHEAD[app.slug];
     if (!app?.description) return '';
     return app.description
       // drop fenced code blocks entirely
@@ -322,7 +349,7 @@ export function AppPermalinkPage() {
       // collapse whitespace
       .replace(/\s+/g, ' ')
       .trim();
-  }, [app?.description]);
+  }, [app?.description, app?.slug]);
 
   // Compute sample input pre-fill for the first input of each action.
   // Only fires on first visit (no shared-run ?run=<id>) so that a direct
@@ -361,6 +388,24 @@ export function AppPermalinkPage() {
     if (sample == null) return null;
     return { [first.name]: sample };
   }, [app, runIdFromUrl, rerunIdFromUrl]);
+
+  // First declared input on the primary (or first-declared) action,
+  // surfaced to the Claude Skill modal so the example prompt reads
+  // "Run lead-scorer with company_url=…" instead of a placeholder.
+  // Returns null when the manifest declares no inputs — the modal
+  // collapses to a generic "Run <slug>" example in that case.
+  const claudeSkillFirstInput = useMemo<string | null>(() => {
+    if (!app) return null;
+    const actions = app.manifest?.actions ?? {};
+    const primary =
+      app.manifest?.primary_action && actions[app.manifest.primary_action]
+        ? app.manifest.primary_action
+        : Object.keys(actions)[0];
+    if (!primary) return null;
+    const action = actions[primary];
+    const first = action?.inputs?.[0];
+    return first?.name ?? null;
+  }, [app]);
 
   // Issue #255 (2026-04-21): the celebration card ("Your app is live —
   // send to coworkers") must only fire for the creator who JUST pressed
@@ -887,9 +932,16 @@ export function AppPermalinkPage() {
                     color: 'var(--muted)',
                     margin: '2px 0 0',
                     lineHeight: 1.5,
+                    // v23 PR-D: allow up to 2 lines (was nowrap+ellipsis).
+                    // The launch-demo HERO_SUBHEAD copy is intentionally
+                    // sentence-shaped and would clip mid-word at narrow
+                    // widths under the old single-line ellipsis. Two-line
+                    // clamp keeps the hero compact without truncating the
+                    // sales-tone subhead.
                     overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 2,
                     maxWidth: '100%',
                   }}
                 >
@@ -1017,6 +1069,34 @@ export function AppPermalinkPage() {
                 flexWrap: 'wrap',
               }}
             >
+              {/* PR #761 front-door: "Install as Claude Skill" trigger
+                  for the /p/:slug/skill.md backend route. Same chrome as
+                  the Share button so the two CTAs read as a pair (no new
+                  colours, no gradients). Sits to the LEFT of Share so
+                  the primary social affordance (Share) keeps its
+                  rightmost position in the hero action cluster. */}
+              <button
+                type="button"
+                data-testid="cta-install-claude-skill"
+                aria-label="Install as Claude Skill"
+                onClick={() => setClaudeSkillModalOpen(true)}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                  background: 'var(--card)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <ClaudeSkillIcon /> Install as Claude Skill
+              </button>
               <button
                 type="button"
                 data-testid="cta-share"
@@ -1637,44 +1717,16 @@ export function AppPermalinkPage() {
         />
       )}
 
-      {/* Mobile polish for /p/:slug. The hero row already wraps; these
-          just tighten paddings, let the title wrap (no more mid-word
-          ellipsis on narrow screens), make tab chips tap-friendly, and
-          keep the meta-row from pushing content off-screen.
+      {app && (
+        <ClaudeSkillModal
+          open={claudeSkillModalOpen}
+          onClose={() => setClaudeSkillModalOpen(false)}
+          slug={app.slug}
+          appName={app.name}
+          firstInputName={claudeSkillFirstInput}
+        />
+      )}
 
-          Mobile-audit fix (2026-04-23, issues #560/#561/#562):
-          * hero-description was clamped to 2 lines via -webkit-line-clamp,
-            but the mobile override ALSO set `overflow: visible`, which
-            disables the clamp. Result: description overflowed vertically
-            and the capability-chips sibling ("Runtime: python",
-            "Secrets: GEMINI_API_KEY") rendered on top of lines 3+.
-            Fix: pin `overflow: hidden` with the clamp so the description
-            truncates cleanly and chips sit below.
-          * capability chips now get an explicit top margin on mobile so
-            there's always air between them and the description (prevents
-            the visual overlap even if the clamp ever relaxes). */}
-      <style>{`
-        @media (max-width: 640px) {
-          [data-testid="permalink-page"] { padding: 16px 14px 64px !important; }
-          [data-testid="permalink-page"] .app-page-frame { border-radius: 14px !important; }
-          [data-testid="permalink-hero"] { padding: 14px 16px 12px !important; gap: 10px !important; }
-          [data-testid="permalink-hero"] h1 { white-space: normal !important; font-size: 18px !important; }
-          [data-testid="hero-description"] {
-            white-space: normal !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            display: -webkit-box !important;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-          }
-          [data-testid="permalink-capability-chips"] { margin-top: 10px !important; }
-          [data-testid="permalink-hero"] .permalink-hero-actions { width: 100%; justify-content: flex-start; gap: 8px; }
-          [data-testid="hero-version-meta"] { flex-wrap: wrap; row-gap: 4px; }
-          [data-testid="permalink-tabs"] { padding: 12px 14px !important; gap: 8px !important; }
-          [data-testid="permalink-tabs"] button { min-height: 44px; }
-          [data-testid="permalink-page"] section[data-testid="how-it-works"] { grid-template-columns: 1fr !important; margin-bottom: 28px !important; }
-        }
-      `}</style>
     </div>
   );
 }

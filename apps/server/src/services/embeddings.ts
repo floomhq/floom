@@ -114,7 +114,7 @@ export async function pickApps(query: string, limit = 3): Promise<PickResult[]> 
     .prepare(
       "SELECT id, slug, name, description, category, icon FROM apps" +
         " WHERE status = 'active'" +
-        " AND (visibility = 'public' OR visibility IS NULL)",
+        " AND (visibility = 'public_live' OR visibility = 'public' OR visibility IS NULL)",
     )
     .all() as Array<
     Pick<AppRecord, 'id' | 'slug' | 'name' | 'description' | 'category' | 'icon'>

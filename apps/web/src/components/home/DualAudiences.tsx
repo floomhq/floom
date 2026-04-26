@@ -209,6 +209,7 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
             { text: 'One JSON spec, no framework to learn' },
             { text: 'Auto-generated landing page and MCP install' },
             { text: "Free tier runs on Floom's Gemini key" },
+            { text: 'Self-host with one Docker command' },
           ]}
           primary={
             waitlistMode
@@ -236,8 +237,9 @@ export function DualAudiences(_: DualAudiencesProps = {}) {
             { text: '3 AI apps, free to run' },
             { text: 'Install in Claude in 30 seconds' },
             { text: 'Workspace, roles, audit log on Team plan' },
+            { text: 'BYOK for unlimited runs' },
           ]}
-          primary={{ label: 'Browse the store', to: '/apps', kind: 'accent' }}
+          primary={{ label: 'Browse the apps', to: '/apps', kind: 'accent' }}
           secondary={{ label: 'See pricing', to: '/pricing' }}
         />
       </div>

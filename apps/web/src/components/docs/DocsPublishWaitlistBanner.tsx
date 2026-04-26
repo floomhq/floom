@@ -90,14 +90,6 @@ export function DocsPublishWaitlistBanner() {
           ×
         </button>
       </div>
-      <style>{`
-        @media (max-width: 720px) {
-          [data-testid="docs-publish-waitlist-banner"] {
-            padding-left: 20px !important;
-            padding-right: 20px !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

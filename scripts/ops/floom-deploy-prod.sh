@@ -26,7 +26,10 @@
 #      backup to .bak.prod-<ts>.
 #   4. docker compose up -d --no-deps floom-mcp-preview
 #   5. Health-check http://127.0.0.1:3051/api/health for up to 60s
-#   6. On failure: restore the prod compose backup and restart the prod
+#   6. Run launch-apps-real-run-gate.sh against :3051 and assert each
+#      launch app completes with dry_run=false and model!="dry-run"
+#      under the API budget.
+#   7. On failure: restore the prod compose backup and restart the prod
 #      container only. NEVER touches the preview compose or container.
 #
 # Env var differences are preserved in the compose file itself. In
@@ -47,6 +50,8 @@ echo "=== prod deploy started $(date --iso-8601=seconds) ==="
 PROD_COMPOSE_DIR=/opt/floom-mcp-preview
 PROD_SERVICE=floom-mcp-preview
 PROD_HEALTH_URL="http://127.0.0.1:3051/api/health"
+PROD_GATE_BASE_URL="http://127.0.0.1:3051"
+GATE_SCRIPT="${REPO}/scripts/ops/launch-apps-real-run-gate.sh"
 
 # Preview compose — READ-ONLY, used only to pick a default image tag.
 PREVIEW_COMPOSE="/opt/floom-preview-launch/docker-compose.yml"
@@ -92,6 +97,7 @@ resolve_tag() {
 
 TAG=$(resolve_tag "$raw")
 echo "[resolve] IMAGE_TAG=${TAG}"
+echo "[sentry] prod promotes this prebuilt image; source maps are uploaded during the preview build for the same tag when SENTRY_AUTH_TOKEN is configured"
 
 if ! docker image inspect "$TAG" > /dev/null 2>&1; then
   echo "[image] FAILED: ${TAG} not found in local docker registry."
@@ -139,13 +145,18 @@ for i in $(seq 1 12); do
   sleep 5
 done
 
-if [ "$HEALTHY" = "1" ]; then
+if [ "$HEALTHY" = "1" ] && "$GATE_SCRIPT" --base-url "$PROD_GATE_BASE_URL"; then
   echo "=== prod deploy done $(date --iso-8601=seconds) tag=${TAG} ==="
   exit 0
 fi
 
-echo "[health] FAILED ${PROD_HEALTH_URL} after 60s"
-echo "=== HEALTHCHECK FAILED, rolling back prod (preview untouched) ==="
+if [ "$HEALTHY" != "1" ]; then
+  echo "[health] FAILED ${PROD_HEALTH_URL} after 60s"
+  echo "=== HEALTHCHECK FAILED, rolling back prod (preview untouched) ==="
+else
+  echo "[gate] FAILED launch-app real-run gate on ${PROD_GATE_BASE_URL}"
+  echo "=== POST-DEPLOY GATE FAILED, rolling back prod (preview untouched) ==="
+fi
 cp "$BACKUP" "${PROD_COMPOSE_DIR}/docker-compose.yml"
 (cd "$PROD_COMPOSE_DIR" && docker compose up -d --no-deps "$PROD_SERVICE") || true
 

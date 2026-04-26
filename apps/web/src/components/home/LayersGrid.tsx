@@ -161,14 +161,6 @@ export function LayersGrid() {
         </div>
       </div>
 
-      <style>{`
-        @media (max-width: 1040px) {
-          .layers-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-        }
-        @media (max-width: 640px) {
-          .layers-grid { grid-template-columns: minmax(0, 1fr) !important; }
-        }
-      `}</style>
     </section>
   );
 }

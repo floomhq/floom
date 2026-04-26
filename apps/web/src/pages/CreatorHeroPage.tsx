@@ -939,35 +939,6 @@ export function CreatorHeroPage() {
       <PublicFooter />
       <FeedbackButton />
 
-      {/* Inline responsive tweaks v4: hero typography shrinks in steps so
-         the full hero (logos + H1 + CTA + app tiles) fits on the first
-         fold at every viewport. */}
-      <style>{`
-        /* Goosebumps pass 2026-04-20: step-down sequence from the 72px
-           desktop H1. Each step keeps the vertical rhythm (margins
-           retained proportionally) so the hero never looks crowded. */
-        @media (max-width: 1040px) {
-          .hero-headline { font-size: 60px !important; }
-        }
-        @media (max-width: 780px) {
-          .hero-headline { font-size: 48px !important; margin-bottom: 18px !important; }
-          .hero-accent { font-size: 17px !important; }
-          .hero-works-with { gap: 10px !important; }
-        }
-        @media (max-width: 640px) {
-          [data-testid="hero"] { padding: 52px 20px 60px !important; }
-          .hero-headline { font-size: 36px !important; line-height: 1.05 !important; margin-bottom: 14px !important; }
-          .hero-accent { font-size: 15px !important; margin-bottom: 6px !important; }
-          .hero-sub-positioning { font-size: 14px !important; margin-bottom: 26px !important; }
-          .hero-input { flex-direction: column !important; align-items: stretch !important; padding: 10px !important; }
-          .hero-input input { padding: 14px !important; font-size: 13.5px !important; }
-          .hero-input button { width: 100% !important; padding: 14px !important; justify-content: center !important; }
-          .hero-cta-row { flex-direction: column !important; gap: 10px !important; }
-          .hero-works-with { margin-bottom: 16px !important; }
-          .integration-logos { flex-direction: column !important; gap: 10px !important; }
-          .live-apps-header { flex-direction: column !important; align-items: flex-start !important; }
-        }
-      `}</style>
     </div>
   );
 }

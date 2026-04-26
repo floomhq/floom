@@ -17,21 +17,14 @@ Five things get wired in this document:
    launch funnel: landings → publishes → runs (set `VITE_POSTHOG_KEY`,
    section 5).
 
-### Consent gate (GDPR Art. 6(1)(a))
+### Telemetry gate
 
-The two **frontend** telemetry SDKs — browser Sentry and PostHog — are
-third-party processors. Events leave the EU and land in their ingest
-pipelines. They stay fully dark until the user picks **"Accept all"** in
-the cookie banner. "Essential only" keeps both SDKs quiet: no DSN call,
-no transport spin-up, no PII leak on first paint. The gate lives in
-[`apps/web/src/lib/consent.ts`](../apps/web/src/lib/consent.ts); the
-banner calls `setConsent` and inlines `initBrowserSentry()` + `initPostHog()`
-on upgrade and `closeBrowserSentry()` + `closePostHog()` on downgrade so
-the choice applies mid-session without a reload.
+Browser and backend Sentry are controlled by their DSN env vars. Empty DSN
+keeps each SDK fully dark. When configured, browser Sentry initializes before
+React mounts so launch-day client exceptions are captured immediately.
 
-The **backend** Sentry integration is NOT consent-gated — server errors
-don't carry user PII through the scrubbed payload, and operators need
-crash visibility regardless of individual consent choices.
+PostHog remains consent-gated. The cookie banner controls only product
+analytics: `initPostHog()` on "Accept all" and `closePostHog()` on downgrade.
 
 ---
 
@@ -48,9 +41,9 @@ pre-launch Floom traffic.
 
 1. Sign up at [sentry.io](https://sentry.io).
 2. Create a **Node.js** project → `floom-server` → copy the DSN. This goes
-   into `SENTRY_DSN`.
+   into `SENTRY_SERVER_DSN`.
 3. Create a **React** project → `floom-web` → copy the DSN. This goes into
-   `VITE_SENTRY_DSN`.
+   `VITE_SENTRY_WEB_DSN`.
 
 ### Step 2: Set the two DSNs
 
@@ -58,8 +51,8 @@ The two DSNs behave very differently:
 
 | Variable | When it's read | How to change |
 |---|---|---|
-| `SENTRY_DSN` | **Runtime** (container boot) | Edit `.env`, restart container |
-| `VITE_SENTRY_DSN` | **Build time** (baked into JS bundle) | Edit `.env`, **rebuild image**, redeploy |
+| `SENTRY_SERVER_DSN` | **Runtime** (container boot) | Edit `.env`, restart container |
+| `VITE_SENTRY_WEB_DSN` | **Build time** (baked into JS bundle) | Edit `.env`, **rebuild image**, redeploy |
 
 This is a Vite constraint: anything prefixed `VITE_` is inlined into the
 JavaScript at `vite build` time. Changing the runtime env var after the fact
@@ -69,12 +62,12 @@ does nothing because the string isn't looked up at runtime.
 
 ```bash
 # /opt/floom-mcp-preview/.env — append two lines
-SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<server-project-id>
-VITE_SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<web-project-id>
+SENTRY_SERVER_DSN=https://<key>@o<org>.ingest.sentry.io/<server-project-id>
+VITE_SENTRY_WEB_DSN=https://<key>@o<org>.ingest.sentry.io/<web-project-id>
 
 # Rebuild (only needed for VITE_ vars) from the repo root:
 docker build \
-  --build-arg VITE_SENTRY_DSN=$VITE_SENTRY_DSN \
+  --build-arg VITE_SENTRY_WEB_DSN=$VITE_SENTRY_WEB_DSN \
   -t floom-preview-local:$(date +%Y%m%d-%H%M)-sentry \
   -f docker/Dockerfile .
 
@@ -100,8 +93,8 @@ curl -X POST https://preview.floom.dev/api/run \
 
 Expected: a new issue appears in your Sentry project dashboard within ~30
 seconds. If it doesn't, check `docker logs floom-mcp-preview 2>&1 | grep
-sentry` — the boot log should say `[sentry] initialized`. No such log means
-`SENTRY_DSN` didn't make it into the container environment.
+sentry` — the boot log contains `[sentry] ready service=floom-server`. No such log means
+`SENTRY_SERVER_DSN` didn't make it into the container environment.
 
 ---
 
@@ -131,7 +124,7 @@ export SENTRY_ORG=floom
 export SENTRY_PROJECT=floom-web
 
 docker build \
-  --build-arg VITE_SENTRY_DSN=$VITE_SENTRY_DSN \
+  --build-arg VITE_SENTRY_WEB_DSN=$VITE_SENTRY_WEB_DSN \
   --build-arg SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN \
   --build-arg SENTRY_ORG=$SENTRY_ORG \
   --build-arg SENTRY_PROJECT=$SENTRY_PROJECT \
@@ -333,7 +326,7 @@ The tracked events (hard-coded in
    1M events/month). Prefer the EU cloud for data residency.
 2. Copy the project API key.
 3. Add to the **build-time** env (PostHog runs in the browser bundle,
-   same build-time constraint as `VITE_SENTRY_DSN`):
+   same build-time constraint as `VITE_SENTRY_WEB_DSN`):
 
    ```bash
    # /opt/floom-mcp-preview/.env
@@ -372,13 +365,13 @@ the network layer cannot be recalled — documented on `/cookies`.
 
 | Symptom | Fix |
 |---|---|
-| `[sentry] initialized` missing from boot logs | `SENTRY_DSN` is not in the container env. Check the compose file and `.env`. |
+| `[sentry] ready service=floom-server` missing from boot logs | `SENTRY_SERVER_DSN` is not in the container env. Check the compose file and `.env`. |
 | Server errors not appearing in Sentry | Check `docker logs floom-mcp-preview \| grep unhandled`. If errors are logged but not sent, the DSN is wrong. |
 | Browser errors show minified stacks | Source maps not uploaded. Rebuild with `SENTRY_AUTH_TOKEN` set. |
-| Browser errors not appearing in Sentry at all | `VITE_SENTRY_DSN` is build-time — confirm you rebuilt the image after setting it. |
+| Browser errors not appearing in Sentry at all | `VITE_SENTRY_WEB_DSN` is build-time — confirm you rebuilt the image after setting it. |
 | Heartbeat alerts never fire | `curl -X POST` the webhook by hand to confirm it works. Check `/var/log/syslog` for cron failures. |
 | Heartbeat alerts keep firing on healthy target | Look at exit code of `curl -s -o /dev/null -w '%{http_code}' <target>` from the Hetzner box — cert or network issue. |
 | `[discord-alerts] disabled` in boot logs | `DISCORD_ALERTS_WEBHOOK_URL` is missing or doesn't start with `https://discord.com/api/webhooks/`. Fix the env var, restart. |
 | Discord alerts never fire despite `[discord-alerts] enabled` | The per-title debounce is 60s. Trigger a NEW error class, or wait a minute. If still nothing, `curl -X POST` the webhook by hand to verify it works. |
 | PostHog events not appearing | Consent gate is the most common cause. Open DevTools → Application → Local Storage, confirm `floom.cookie-consent = all`. If `essential`, click "Cookie settings" in the footer and upgrade. If consent is `all` but still no events, `VITE_POSTHOG_KEY` likely wasn't set at build time — rebuild the image. |
-| Frontend Sentry not capturing errors | Same consent gate applies. Confirm `floom.cookie-consent = all` in localStorage, then confirm `VITE_SENTRY_DSN` was set at build time (Network tab → search for requests to `*.ingest.sentry.io`). |
+| Frontend Sentry not capturing errors | `VITE_SENTRY_WEB_DSN` was not present at build time, or the DSN is wrong. Rebuild and search the Network tab for requests to `*.ingest.sentry.io`. |

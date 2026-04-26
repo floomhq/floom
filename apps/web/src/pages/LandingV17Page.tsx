@@ -21,13 +21,11 @@
  * The existing CreatorHeroPage.tsx is kept in the tree for reference;
  * main.tsx wires "/" to this page.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
 
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
-import { AppStripe } from '../components/public/AppStripe';
 import { FeedbackButton } from '../components/FeedbackButton';
 
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
@@ -42,6 +40,7 @@ import { ThreeSurfacesDiagram } from '../components/home/ThreeSurfacesDiagram';
 import { FitBand } from '../components/home/FitBand';
 import { WhosBehind } from '../components/home/WhosBehind';
 import { DiscordCta } from '../components/home/DiscordCta';
+import { ShowcaseGridV23 } from '../components/home/ShowcaseGridV23';
 
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
@@ -165,13 +164,13 @@ export function LandingV17Page() {
               <WorksWithBelt />
             </div>
 
-            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
+            {/* H1 — locked copy. v23 ships clamp(44, 7vw, 72) desktop, balance wrap. */}
             <h1
               className="hero-headline"
               style={{
                 fontFamily: 'var(--font-display)',
                 fontWeight: 800,
-                fontSize: 64,
+                fontSize: 'clamp(44px, 7vw, 72px)',
                 lineHeight: 1.02,
                 letterSpacing: '-0.025em',
                 color: 'var(--ink)',
@@ -182,7 +181,8 @@ export function LandingV17Page() {
               Ship AI apps <span style={{ color: 'var(--accent)' }}>fast.</span>
             </h1>
 
-            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22). */}
+            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22).
+                v23 lock: "+" not "and" (matches positioning memory). */}
             <p
               className="hero-sub"
               data-testid="hero-sub-positioning"
@@ -196,49 +196,25 @@ export function LandingV17Page() {
                 margin: '0 auto 28px',
               }}
             >
-              The protocol and runtime for agentic work.
+              The protocol + runtime for agentic work.
             </p>
 
-            {/* CTA — runtime-gated by DEPLOY_ENABLED. Preview keeps the
-                original install-first branch; waitlist mode swaps the
-                builder CTA into the primary slot so floom.dev leads with
-                the waitlist while still exposing a "try one now" path in
-                Claude beside it. */}
+            {/* CTA — v23 lock: accent "Run in Claude" leads, ink secondary
+                follows. Same hierarchy in both deploy + waitlist mode
+                (try-the-product first, signup second). Matches the
+                "free for launch, rate-limited not paywalled" positioning. */}
             <div
               className="hero-ctas"
               style={{
                 display: 'flex',
-                flexDirection: deployEnabled ? 'column' : 'row',
+                flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexWrap: 'wrap',
-                gap: deployEnabled ? 10 : 12,
+                gap: 12,
                 marginBottom: 4,
               }}
             >
-              {!deployEnabled && (
-                <Link
-                  to={waitlistHeroHref}
-                  data-testid="hero-cta-deploy"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    background: 'var(--ink)',
-                    color: '#fff',
-                    border: '1px solid var(--ink)',
-                    borderRadius: 999,
-                    padding: '14px 26px',
-                    fontSize: 15,
-                    fontWeight: 600,
-                    textDecoration: 'none',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  Join the waitlist
-                </Link>
-              )}
               <Link
                 to={runInClaudeHref}
                 data-testid="hero-cta-run-in-claude"
@@ -247,36 +223,77 @@ export function LandingV17Page() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 8,
-                  background: deployEnabled ? 'var(--ink)' : 'var(--card)',
-                  color: deployEnabled ? '#fff' : 'var(--ink)',
-                  border: `1px solid ${deployEnabled ? 'var(--ink)' : 'var(--line)'}`,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: '1px solid var(--accent)',
                   borderRadius: 999,
-                  padding: deployEnabled ? '14px 24px' : '13px 18px',
+                  padding: '14px 26px',
                   fontSize: 15,
                   fontWeight: 600,
                   textDecoration: 'none',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {deployEnabled ? 'Run this in Claude' : 'Run in Claude'}
+                Run in Claude
               </Link>
-              {deployEnabled && (
-                <Link
-                  to="/signup"
-                  data-testid="hero-cta-deploy"
+              <Link
+                to={deployEnabled ? '/signup' : waitlistHeroHref}
+                data-testid="hero-cta-deploy"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--ink)',
+                  color: '#fff',
+                  border: '1px solid var(--ink)',
+                  borderRadius: 999,
+                  padding: '14px 24px',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {deployEnabled ? 'Deploy your own' : 'Join waitlist'}
+              </Link>
+            </div>
+
+            {/* Hero meta strip (v23) — three-fact mono row under CTAs.
+                Live dot before "3 live apps" cues credibility without
+                pulling focus from the H1. */}
+            <div
+              data-testid="hero-meta-strip"
+              style={{
+                marginTop: 18,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 14,
+                flexWrap: 'wrap',
+                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                fontSize: 11.5,
+                color: 'var(--muted)',
+                letterSpacing: '0.02em',
+              }}
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  aria-hidden="true"
                   style={{
-                    fontSize: 13,
-                    color: 'var(--muted)',
-                    textDecoration: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: 'var(--accent)',
+                    boxShadow: '0 0 0 3px rgba(4, 120, 87, 0.18)',
                   }}
-                >
-                  Deploy your own
-                  <ArrowRight size={13} aria-hidden="true" />
-                </Link>
-              )}
+                />
+                3 live apps
+              </span>
+              <span aria-hidden="true">&middot;</span>
+              <span>MIT-licensed core</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>Self-host in 1 command</span>
             </div>
           </div>
 
@@ -298,87 +315,153 @@ export function LandingV17Page() {
           <CliReference />
         </section>
 
-        {/* HOW IT WORKS — 3 steps */}
+        {/* SHOWCASE — v23 editorial 1-hero + 2-compact grid with neutral
+            run-result banner thumbs (Federico-locked: NO category tints).
+            Replaces the prior <AppStripe variant="landing"/> × 3 pattern. */}
+        <ShowcaseGridV23 stripes={stripes} />
+
+        {/* HOW IT WORKS — v23 styled band: warm studio bg + top/bottom
+            borders + 3-node numbered timeline above the cards (Delta 11.1).
+            Full-bleed background; inner content stays at the 1180 grid. */}
         <section
           data-testid="how-it-works"
-          style={{ padding: '72px 28px', maxWidth: 1240, margin: '0 auto' }}
+          style={{
+            background: 'var(--studio, #f5f4f0)',
+            borderTop: '1px solid var(--line)',
+            borderBottom: '1px solid var(--line)',
+            padding: '64px 28px',
+          }}
         >
-          <SectionEyebrow>How it works</SectionEyebrow>
-          <h2
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 800,
-              fontSize: 34,
-              lineHeight: 1.1,
-              letterSpacing: '-0.025em',
-              textAlign: 'center',
-              margin: '0 auto 28px',
-              maxWidth: 760,
-            }}
-          >
-            From idea to shipped app in 3 steps.
-          </h2>
-          <div
-            className="steps"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 18,
-              maxWidth: 1180,
-              margin: '0 auto',
-            }}
-          >
-            {STEPS.map((s) => (
-              <div
-                key={s.num}
-                className="step"
-                style={{
-                  background: 'var(--card)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 12,
-                  padding: '24px 22px',
-                  position: 'relative',
-                }}
-              >
+          <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+            <div style={{ textAlign: 'center' }}>
+              <SectionEyebrow>How it works</SectionEyebrow>
+            </div>
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontWeight: 800,
+                fontSize: 32,
+                lineHeight: 1.1,
+                letterSpacing: '-0.025em',
+                textAlign: 'center',
+                margin: '0 auto 20px',
+                maxWidth: 560,
+              }}
+            >
+              From idea to shipped app in 3 steps.
+            </h2>
+
+            {/* 3-node timeline above cards (v23 Delta 11.1) */}
+            <div
+              className="step-timeline"
+              data-testid="how-it-works-timeline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0,
+                maxWidth: 520,
+                margin: '0 auto 28px',
+                padding: '8px 0',
+              }}
+            >
+              {[1, 2, 3].map((n, idx) => (
+                <Fragment key={n}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 34,
+                      height: 34,
+                      borderRadius: 999,
+                      background: 'var(--accent-soft, #ecfdf5)',
+                      border: '1.5px solid var(--accent-border, #d1fae5)',
+                      color: 'var(--accent)',
+                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {n}
+                  </span>
+                  {idx < 2 && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        flex: 1,
+                        height: 2,
+                        background: 'var(--line)',
+                        margin: '0 6px',
+                      }}
+                    />
+                  )}
+                </Fragment>
+              ))}
+            </div>
+
+            <div
+              className="steps"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 18,
+                maxWidth: 1180,
+                margin: '0 auto',
+              }}
+            >
+              {STEPS.map((s) => (
                 <div
+                  key={s.num}
+                  className="step"
                   style={{
-                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                    fontSize: 11,
-                    color: 'var(--muted)',
-                    letterSpacing: '0.08em',
-                    fontWeight: 600,
-                    marginBottom: 12,
+                    background: 'var(--card)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 12,
+                    padding: '24px 22px',
+                    position: 'relative',
                   }}
                 >
-                  {s.num} &middot; {s.kicker}
+                  <div
+                    style={{
+                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                      fontSize: 11,
+                      color: 'var(--muted)',
+                      letterSpacing: '0.08em',
+                      fontWeight: 600,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {s.num} &middot; {s.kicker}
+                  </div>
+                  <h3
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 600,
+                      margin: '0 0 8px',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {s.title}
+                  </h3>
+                  <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55, margin: 0 }}>
+                    {s.body}
+                  </p>
+                  <div
+                    style={{
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: '1px solid var(--line)',
+                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                      fontSize: 11.5,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    {s.mono}
+                  </div>
                 </div>
-                <h3
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 600,
-                    margin: '0 0 8px',
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {s.title}
-                </h3>
-                <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55, margin: 0 }}>
-                  {s.body}
-                </p>
-                <div
-                  style={{
-                    marginTop: 14,
-                    paddingTop: 14,
-                    borderTop: '1px solid var(--line)',
-                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                    fontSize: 11.5,
-                    color: 'var(--muted)',
-                  }}
-                >
-                  {s.mono}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </section>
 
@@ -395,63 +478,13 @@ export function LandingV17Page() {
         <ThreeSurfacesDiagram />
 
         {/* FIT BAND — who it's for / who it's not for (#543). Honest
-            about the shape before the visitor signs up. Placed between
-            the diagram and the showcase so the filter happens before
-            the product gallery. */}
+            about the shape before the visitor signs up. */}
         <FitBand />
 
-        {/* SHOWCASE — 3 apps */}
-        <section
-          data-testid="showcase"
-          style={{
-            padding: '72px 28px',
-            maxWidth: 1240,
-            margin: '0 auto',
-            borderTop: '1px solid var(--line)',
-          }}
-        >
-          <SectionEyebrow>Showcase</SectionEyebrow>
-          <h2
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 800,
-              fontSize: 34,
-              lineHeight: 1.1,
-              letterSpacing: '-0.025em',
-              textAlign: 'center',
-              margin: '0 auto 10px',
-              maxWidth: 760,
-            }}
-          >
-            Three apps Floom already runs in production.
-          </h2>
-          <p
-            style={{
-              fontSize: 15.5,
-              color: 'var(--muted)',
-              textAlign: 'center',
-              maxWidth: 620,
-              margin: '0 auto 40px',
-            }}
-          >
-            Real AI doing real work. All three deploy from a single GitHub repo.
-          </p>
-          <div style={{ display: 'grid', gap: 12, maxWidth: 820, margin: '0 auto' }}>
-            {stripes.map((s) => (
-              <AppStripe
-                key={s.slug}
-                slug={s.slug}
-                name={s.name}
-                description={s.description}
-                category={s.category}
-                variant="landing"
-              />
-            ))}
-          </div>
-        </section>
-
-        {/* PUBLISH-CTA BOX */}
-        <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
+        {/* PUBLISH-CTA BOX — v23 anchor target for `#waitlist` topbar/footer
+            links. Section id stays attached to the wrapper so the section
+            jumps land at the correct scroll offset under sticky chrome. */}
+        <section id="waitlist" style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
           <PublishCtaBox />
         </section>
 
@@ -549,28 +582,6 @@ export function LandingV17Page() {
       <PublicFooter />
       <FeedbackButton />
 
-      {/* Responsive tweaks: hero typography + stacking */}
-      <style>{`
-        @media (max-width: 1040px) {
-          .landing-v17 .hero-headline { font-size: 56px !important; }
-          .landing-v17 .steps { grid-template-columns: 1fr !important; gap: 14px !important; }
-        }
-        @media (max-width: 780px) {
-          .landing-v17 .hero-headline { font-size: 44px !important; }
-          .landing-v17 .hero-sub { font-size: 16px !important; }
-        }
-        @media (max-width: 640px) {
-          .landing-v17 [data-testid="hero"] { padding: 40px 16px 32px !important; }
-          .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
-          .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
-          .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
-          .landing-v17 .hero-ctas a { width: 100% !important; }
-          .landing-v17 .works-with { gap: 16px 24px !important; }
-          .landing-v17 .dual { grid-template-columns: 1fr !important; }
-          .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
-          .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
-        }
-      `}</style>
     </div>
   );
 }
@@ -595,6 +606,6 @@ const STEPS = [
     kicker: 'SHARE',
     title: 'Share a link. Install anywhere.',
     body: 'Runs in Claude, Cursor, ChatGPT, a browser, or behind an API key.',
-    mono: 'floom.dev/a/your-app',
+    mono: 'floom.dev/p/your-app',
   },
 ];

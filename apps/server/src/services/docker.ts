@@ -11,6 +11,7 @@ import {
   CONTAINER_INPUTS_DIR,
   materializeFileInputs,
 } from '../lib/file-inputs.js';
+import { prepareDockerNetworkPolicy } from './network-policy.js';
 
 const docker = new Docker();
 
@@ -18,7 +19,6 @@ export const BUILD_TIMEOUT = Number(process.env.BUILD_TIMEOUT || 600_000);
 export const RUNNER_TIMEOUT = Number(process.env.RUNNER_TIMEOUT || 300_000);
 export const RUNNER_MEMORY = process.env.RUNNER_MEMORY || '512m';
 export const RUNNER_CPUS = Number(process.env.RUNNER_CPUS || 1);
-export const RUNNER_NETWORK = process.env.RUNNER_NETWORK || 'bridge';
 
 function parseMemory(value: string): number {
   const match = value.trim().toLowerCase().match(/^(\d+)([kmg])?$/);
@@ -181,17 +181,16 @@ export async function runAppContainer(opts: {
   action: string;
   inputs: Record<string, unknown>;
   secrets: Record<string, string>;
+  manifest: NormalizedManifest;
   image?: string;
   timeoutMs?: number;
   memory?: string;
   cpus?: number;
-  network?: string;
   onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void;
 }): Promise<RunResult> {
   const timeoutMs = opts.timeoutMs ?? RUNNER_TIMEOUT;
   const memoryBytes = parseMemory(opts.memory ?? RUNNER_MEMORY);
   const cpus = opts.cpus ?? RUNNER_CPUS;
-  const network = opts.network ?? RUNNER_NETWORK;
 
   // Materialize any `{__file, content_b64}` envelopes in `inputs` to
   // a host temp dir, rewriting the input values to in-container paths
@@ -211,7 +210,9 @@ export async function runAppContainer(opts: {
     action: opts.action,
     inputs: materialized.inputs,
   });
-  const env = Object.entries(opts.secrets).map(([k, v]) => `${k}=${v}`);
+  const env = [
+    ...Object.entries(opts.secrets).map(([k, v]) => `${k}=${v}`),
+  ];
 
   let imageName = opts.image;
   if (!imageName) {
@@ -221,7 +222,10 @@ export async function runAppContainer(opts: {
     imageName = appRow?.docker_image || imageTag(opts.appId);
   }
 
+  let networkPolicy;
   try {
+    networkPolicy = await prepareDockerNetworkPolicy(docker, opts.runId, opts.manifest);
+    env.push(...networkPolicy.env);
     let container;
     try {
       container = await docker.createContainer({
@@ -239,7 +243,7 @@ export async function runAppContainer(opts: {
           Memory: memoryBytes,
           MemorySwap: memoryBytes,
           NanoCpus: Math.floor(cpus * 1e9),
-          NetworkMode: network,
+          NetworkMode: networkPolicy.networkMode,
           Binds: binds,
           // Sandbox hardening (2026-04-23, CSO P1-1):
           //   no-new-privileges — blocks setuid escalation inside container
@@ -362,6 +366,7 @@ export async function runAppContainer(opts: {
     // a long-lived dev server piling up per-run tmp dirs is a real foot-
     // gun — clean up proactively.
     materialized.cleanup();
+    if (networkPolicy) await networkPolicy.cleanup();
   }
 }
 

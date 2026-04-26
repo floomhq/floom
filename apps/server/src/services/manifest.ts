@@ -8,6 +8,7 @@ import type {
   OutputSpec,
   OutputType,
 } from '../types.js';
+import { validateNetworkPolicy } from './network-policy.js';
 import {
   assertFileEnvelope,
   countCsvRowsFast,
@@ -31,6 +32,12 @@ const INPUT_TYPES: InputType[] = [
   'boolean',
   'date',
   'file',
+  'file/csv',
+  'file/image',
+  'file/pdf',
+  'file/audio',
+  'array',
+  'object',
 ];
 
 const OUTPUT_TYPES: OutputType[] = [
@@ -70,6 +77,17 @@ function assertStringArray(value: unknown, field: string): asserts value is stri
   if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
     throw new ManifestError(`${field} must be an array of strings`, field);
   }
+}
+
+function validateMaxRetentionDays(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ManifestError(`${field} must be a positive integer`, field);
+  }
+  if (value < 1 || value > 3650) {
+    throw new ManifestError(`${field} must be between 1 and 3650`, field);
+  }
+  return value;
 }
 
 function validateInput(raw: unknown, prefix: string): InputSpec {
@@ -175,7 +193,10 @@ function validateAction(raw: unknown, actionName: string): ActionSpec {
  * Parse + validate a manifest. Accepts both v1.0 (single-action, flat shape)
  * and v2.0 (multi-action). Returns the normalized v2 shape.
  */
-export function normalizeManifest(raw: unknown): NormalizedManifest {
+export function normalizeManifest(
+  raw: unknown,
+  opts: { requireNetworkDeclaration?: boolean } = {},
+): NormalizedManifest {
   assertObject(raw, 'manifest');
   assertString(raw.name, 'name');
   assertString(raw.description, 'description');
@@ -225,6 +246,17 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     secrets_needed.push(...raw.secrets_needed);
   }
 
+  const network =
+    raw.network !== undefined
+      ? validateNetworkPolicy(raw.network, 'network')
+      : undefined;
+  if (raw.network === undefined && opts.requireNetworkDeclaration) {
+    throw new ManifestError(
+      'network.allowed_domains must be declared explicitly for new apps',
+      'network.allowed_domains',
+    );
+  }
+
   let actions: Record<string, ActionSpec>;
   if (version === '1.0') {
     if (!Array.isArray(raw.inputs)) {
@@ -264,6 +296,10 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     assertStringArray(raw.apt_packages, 'apt_packages');
     apt_packages.push(...(raw.apt_packages as string[]));
   }
+  const maxRunRetentionDays = validateMaxRetentionDays(
+    raw.max_run_retention_days,
+    'max_run_retention_days',
+  );
 
   return {
     name: raw.name,
@@ -274,10 +310,12 @@ export function normalizeManifest(raw: unknown): NormalizedManifest {
     node_dependencies,
     secrets_needed,
     manifest_version: version as '1.0' | '2.0',
+    ...(network ? { network } : {}),
     ...(apt_packages.length > 0 && { apt_packages }),
     ...(typeof raw.license === 'string' && raw.license.trim().length > 0
       ? { license: raw.license.trim() }
       : {}),
+    ...(maxRunRetentionDays ? { max_run_retention_days: maxRunRetentionDays } : {}),
   };
 }
 

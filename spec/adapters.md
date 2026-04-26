@@ -197,7 +197,7 @@ Adapters are free to use HashiCorp Vault, AWS Secrets Manager, GCP Secret Manage
 
 **Purpose.** Captures errors and emits counter / timing / gauge metrics. Optional — a Floom server with neither wired up still runs; callers get a default no-op adapter.
 
-The reference impl is split: `apps/server/src/lib/sentry.ts` for error capture (no-op when `SENTRY_DSN` is unset), and `apps/server/src/lib/metrics-counters.ts` for in-process counters surfaced at `GET /api/metrics` as Prometheus text.
+The reference impl is split: `apps/server/src/lib/sentry.ts` for error capture (no-op when `SENTRY_SERVER_DSN` is unset), and `apps/server/src/lib/metrics-counters.ts` for in-process counters surfaced at `GET /api/metrics` as Prometheus text.
 
 ### Signature
 

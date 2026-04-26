@@ -1,23 +1,19 @@
 // Optional Sentry wiring for the Floom server.
 //
-// The integration is a no-op when `SENTRY_DSN` is unset — the preview image
-// ships without a DSN so Sentry stays off until a self-hoster or Floom Cloud
-// wires it in via env. When the DSN is present we initialize once at boot,
-// then `captureException` is safe to call from any route.
-//
-// Design:
-//   - Hard-import `@sentry/node` is cheap (a few MB at boot) and gives us
-//     predictable behavior; we only call `init()` conditionally.
-//   - `beforeSend` scrubs common secret-ish keys before anything leaves the
-//     process so we never leak tokens / passwords / API keys into Sentry.
-//   - The public surface is two functions: `initSentry()` called once from
-//     `index.ts`, and `captureServerError(err, context?)` used by error
-//     handlers. Both are safe to call whether Sentry is enabled or not.
+// The integration is a no-op when `SENTRY_SERVER_DSN` is unset. `index.ts`
+// imports the tiny sentry-init side-effect module before route imports so
+// process handlers and SDK patching are installed as early as ESM allows.
+// `captureServerError(err, context?)` is safe to call whether Sentry is
+// enabled or not.
 
 import * as Sentry from '@sentry/node';
-import { SERVER_VERSION } from './server-version.js';
 
 const SECRET_KEY_PATTERN = /(password|token|api[_-]?key|authorization|secret|cookie)/i;
+const SENSITIVE_HEADER_NAMES = new Set(['authorization', 'cookie', 'x-api-key']);
+const SENSITIVE_URL_PARAM_PATTERN = /(token|api[_-]?key|key|secret|password|authorization|cookie)/i;
+const SERVICE_NAME = 'floom-server';
+
+type MutableRecord = Record<string, unknown>;
 
 /**
  * Recursively redact any object key that matches the secret pattern. Returns
@@ -45,38 +41,128 @@ function scrubSecrets(value: unknown, depth = 0): unknown {
   return value;
 }
 
+function scrubSensitiveUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_URL_PARAM_PATTERN.test(key)) {
+        url.searchParams.set(key, '[Scrubbed]');
+      }
+    }
+    return url.toString();
+  } catch {
+    return rawUrl.replace(
+      /([?&][^=]*(?:token|api[_-]?key|key|secret|password|authorization|cookie)[^=]*=)[^&]*/gi,
+      '$1[Scrubbed]',
+    );
+  }
+}
+
+function scrubHeaders(headers: unknown): unknown {
+  if (!headers || typeof headers !== 'object') return headers;
+  const record = headers as MutableRecord;
+  for (const key of Object.keys(record)) {
+    if (SENSITIVE_HEADER_NAMES.has(key.toLowerCase())) {
+      delete record[key];
+    }
+  }
+  return record;
+}
+
+function scrubRequest(request: unknown): unknown {
+  if (!request || typeof request !== 'object') return request;
+  const record = request as MutableRecord;
+  delete record.data;
+  delete record.body;
+  delete record.cookies;
+  if (typeof record.url === 'string') {
+    record.url = scrubSensitiveUrl(record.url);
+  }
+  if ('headers' in record) {
+    scrubHeaders(record.headers);
+  }
+  return scrubSecrets(record);
+}
+
+function scrubBreadcrumbs(breadcrumbs: unknown): unknown {
+  if (!Array.isArray(breadcrumbs)) return breadcrumbs;
+  for (const breadcrumb of breadcrumbs) {
+    if (!breadcrumb || typeof breadcrumb !== 'object') continue;
+    const record = breadcrumb as MutableRecord;
+    if (typeof record.message === 'string') {
+      record.message = scrubSensitiveUrl(record.message);
+    }
+    if ('data' in record) {
+      scrubSecrets(record.data);
+    }
+  }
+  return breadcrumbs;
+}
+
+export function scrubSentryEvent<T extends { request?: unknown; extra?: unknown; contexts?: unknown; breadcrumbs?: unknown }>(
+  event: T,
+): T {
+  if (event.request) scrubRequest(event.request);
+  if (event.extra) scrubSecrets(event.extra);
+  if (event.contexts) scrubSecrets(event.contexts);
+  if (event.breadcrumbs) scrubBreadcrumbs(event.breadcrumbs);
+  return event;
+}
+
 let initialized = false;
+let startupLogged = false;
+
+function readEnvironment(): string {
+  const publicUrl = process.env.PUBLIC_URL || '';
+  const inferredFromUrl = publicUrl.includes('preview.')
+    ? 'preview'
+    : publicUrl.includes('floom.dev')
+      ? 'prod'
+      : undefined;
+  return (
+    process.env.SENTRY_ENVIRONMENT ||
+    process.env.FLOOM_ENV ||
+    inferredFromUrl ||
+    process.env.NODE_ENV ||
+    'development'
+  );
+}
+
+function readCommitSha(): string {
+  return process.env.COMMIT_SHA || process.env.SENTRY_RELEASE || 'unknown';
+}
 
 export function initSentry(): void {
   if (initialized) return;
-  const dsn = process.env.SENTRY_DSN;
-  if (!dsn) return; // no-op when unconfigured
-  // `SENTRY_ENVIRONMENT` lets operators override when NODE_ENV doesn't
-  // match the Sentry-side environment label (e.g. 'preview' vs 'production'
-  // both running NODE_ENV=production).
-  const environment =
-    process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'development';
-  // Tag the release so Sentry can group issues by deploy. `SENTRY_RELEASE`
-  // wins if set (CI can inject a git sha); otherwise we fall back to the
-  // server's package.json version so every event has some release tag.
-  const release = process.env.SENTRY_RELEASE || `floom-server@${SERVER_VERSION}`;
+  const dsn = process.env.SENTRY_SERVER_DSN;
+  if (!dsn) {
+    if (!startupLogged) {
+      console.log('[sentry] DSN not set, error tracking disabled');
+      startupLogged = true;
+    }
+    return;
+  }
+  const environment = readEnvironment();
+  const commit = readCommitSha();
+  const release = process.env.SENTRY_RELEASE || (commit !== 'unknown' ? `floom-server@${commit}` : undefined);
   Sentry.init({
     dsn,
     environment,
-    release,
+    ...(release ? { release } : {}),
     tracesSampleRate: 0.1,
+    initialScope(scope) {
+      scope.setTag('service', SERVICE_NAME);
+      scope.setTag('env', environment);
+      scope.setTag('commit', commit);
+      return scope;
+    },
     beforeSend(event) {
-      // Scrub request + extra payloads. Sentry's default scrubbing handles
-      // top-level secret fields but we want to catch nested ones too.
-      if (event.request) scrubSecrets(event.request);
-      if (event.extra) scrubSecrets(event.extra);
-      if (event.contexts) scrubSecrets(event.contexts);
-      return event;
+      return scrubSentryEvent(event);
     },
   });
   initialized = true;
   console.log(
-    `[sentry] initialized (environment=${environment}, release=${release})`,
+    `[sentry] ready service=${SERVICE_NAME} env=${environment} commit=${commit}`,
   );
 }
 
@@ -98,4 +184,14 @@ export function captureServerError(err: unknown, context?: Record<string, unknow
 }
 
 // Exposed for tests.
-export const __testing = { scrubSecrets };
+export const __testing = {
+  scrubSecrets,
+  scrubSensitiveUrl,
+  scrubHeaders,
+  scrubRequest,
+  scrubSentryEvent,
+  resetForTests() {
+    initialized = false;
+    startupLogged = false;
+  },
+};

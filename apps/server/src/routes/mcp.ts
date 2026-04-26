@@ -37,8 +37,17 @@ import {
   checkAppVisibility,
 } from '../lib/auth.js';
 import { checkMcpIngestLimit, extractIp } from '../lib/rate-limit.js';
+import { runGate } from '../lib/run-gate.js';
 import { filterTestFixtures } from '../lib/hub-filter.js';
 import { recordMcpToolCall } from '../lib/metrics-counters.js';
+import {
+  agentToolErrorBody,
+  discoverApps,
+  getAgentRun,
+  getAppSkill,
+  listMyRuns,
+  runApp,
+} from '../services/agent_read_tools.js';
 import type {
   ActionSpec,
   AppRecord,
@@ -174,6 +183,7 @@ function buildZodSchema(
 }
 
 function createPerAppMcpServer(
+  c: Context,
   app: AppRecord,
   ctx?: SessionContext,
 ): McpServer {
@@ -219,6 +229,20 @@ function createPerAppMcpServer(
             isError: true,
             content: [{ type: 'text' as const, text: `App is ${fresh.status}, cannot run` }],
           };
+        }
+        if (ctx) {
+          const gate = runGate(c, ctx, { slug: fresh.slug });
+          if (!gate.ok) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({ ...gate.body, status: gate.status }, null, 2),
+                },
+              ],
+            };
+          }
         }
 
         // Extract the Floom MCP _auth extension from the raw inputs before
@@ -380,6 +404,7 @@ function serializeHubApp(
     secrets_needed: manifest?.secrets_needed ?? [],
     featured: row.featured === 1,
     avg_run_ms: row.avg_run_ms,
+    max_run_retention_days: row.max_run_retention_days,
     created_at: row.created_at,
     permalink: `${baseUrl}/p/${row.slug}`,
     mcp_url: `${baseUrl}/mcp/app/${row.slug}`,
@@ -468,11 +493,26 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           .optional()
           .describe('Category tag (e.g. "productivity", "data", "ai").'),
         visibility: z
-          .enum(['public', 'private', 'auth-required'])
+          .enum(['public', 'private', 'link', 'auth-required'])
           .optional()
           .describe(
-            'Visibility override. Docker apps default to "private" in cloud mode, "public" in OSS local mode. OpenAPI apps keep existing defaults.',
+            'Visibility override. Use "link" for secret-link sharing. "auth-required" is deprecated.',
           ),
+        link_share_requires_auth: z
+          .boolean()
+          .optional()
+          .describe('When true, publish as a link-shared app that also requires sign-in.'),
+        auth_required: z
+          .boolean()
+          .optional()
+          .describe('Deprecated. Use link_share_requires_auth. Supplying both is invalid.'),
+        max_run_retention_days: z
+          .number()
+          .int()
+          .min(1)
+          .max(3650)
+          .optional()
+          .describe('Optional run retention window in days. Omitted means indefinite.'),
       },
     },
     async (args) => {
@@ -602,8 +642,12 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           description: args.description as string | undefined,
           slug: args.slug as string | undefined,
           category: args.category as string | undefined,
+          max_run_retention_days:
+            args.max_run_retention_days as number | undefined,
           workspace_id: ctx.workspace_id,
           author_user_id: ctx.user_id,
+          actor_token_id: ctx.agent_token_id,
+          actor_ip: ip,
         };
         let result: { slug: string; name: string; created: boolean };
         if (docker_image_ref) {
@@ -612,7 +656,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
             docker_image_ref,
             manifest: args.manifest,
             secret_bindings: args.secret_bindings as Record<string, string> | undefined,
-            visibility: args.visibility as 'public' | 'private' | 'auth-required' | undefined,
+            visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+            link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+            auth_required: args.auth_required as boolean | undefined,
             ctx,
           });
         } else if (openapi_url) {
@@ -620,6 +666,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           result = await ingestAppFromUrl({
             ...common,
             openapi_url,
+            visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+            link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+            auth_required: args.auth_required as boolean | undefined,
             allowPrivateNetwork:
               ctx.workspace_id === 'local' && ctx.user_id === 'local',
           });
@@ -629,6 +678,9 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           result = await ingestAppFromSpec({
             ...common,
             spec: openapi_spec as Parameters<typeof ingestAppFromSpec>[0]['spec'],
+            visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+            link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+            auth_required: args.auth_required as boolean | undefined,
           });
         }
         return {
@@ -828,16 +880,17 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
     },
     async ({ category, keyword, limit }) => {
       const lim = typeof limit === 'number' ? limit : 50;
-      // MCP list_apps is a public admin surface — only expose public apps.
-      // Private apps are owner-only and never show up in gallery-wide listings.
+      // MCP list_apps exposes public apps plus the caller's own apps. This
+      // keeps freshly-ingested private apps discoverable to the creator without
+      // leaking another user's private slug.
       let sql =
         "SELECT * FROM apps WHERE status = 'active'" +
-        " AND (visibility = 'public' OR visibility IS NULL)" +
+        " AND (visibility = 'public_live' OR visibility = 'public' OR visibility IS NULL OR author = ?)" +
         (category ? ' AND category = ?' : '') +
         ' ORDER BY featured DESC, name ASC';
       const rows = (category
-        ? db.prepare(sql).all(category)
-        : db.prepare(sql).all()) as AppRecord[];
+        ? db.prepare(sql).all(ctx.user_id, category)
+        : db.prepare(sql).all(ctx.user_id)) as AppRecord[];
       // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
       // listings so Claude Desktop + Cursor clients don't surface them in
       // discovery. Same regex as server /api/hub. Fixtures are still
@@ -1007,6 +1060,148 @@ function createSearchMcpServer(baseUrl: string): McpServer {
   return server;
 }
 
+function mcpJson(payload: unknown) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function mcpError(err: unknown) {
+  const { status, body } = agentToolErrorBody(err);
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({ ...body, status }, null, 2),
+      },
+    ],
+  };
+}
+
+function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
+  const server = new McpServer({
+    name: 'floom-agent-read',
+    version: '0.5.0',
+  });
+
+  server.registerTool(
+    'discover_apps',
+    {
+      title: 'Discover Floom apps',
+      description:
+        'List apps this agent token can discover. Returns public live apps plus apps owned by the token user.',
+      inputSchema: {
+        category: z.string().max(48).optional(),
+        q: z.string().max(120).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+    },
+    async ({ category, q, limit, cursor }) => {
+      recordMcpToolCall('discover_apps');
+      try {
+        return mcpJson(discoverApps(c, ctx, { category, q, limit, cursor }));
+      } catch (err) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_app_skill',
+    {
+      title: 'Get app skill',
+      description:
+        'Return the markdown skill text for one accessible app, wrapped in an MCP tool result.',
+      inputSchema: {
+        slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+      },
+    },
+    async ({ slug }) => {
+      recordMcpToolCall('get_app_skill');
+      try {
+        return mcpJson(getAppSkill(c, ctx, slug));
+      } catch (err) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'run_app',
+    {
+      title: 'Run app',
+      description:
+        'Run a Floom app through the same runner path as POST /api/run. read tokens can run public live apps; read-write tokens can also run owned private apps.',
+      inputSchema: {
+        slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+        action: z.string().min(1).max(120).optional(),
+        inputs: z.record(z.unknown()).optional(),
+      },
+    },
+    async ({ slug, action, inputs }) => {
+      recordMcpToolCall('run_app');
+      try {
+        return mcpJson(
+          await runApp(c, ctx, {
+            slug,
+            action,
+            inputs: inputs as Record<string, unknown> | undefined,
+          }),
+        );
+      } catch (err) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_run',
+    {
+      title: 'Get run',
+      description:
+        'Fetch a previous run by id when this token user owns it, or when the run has been explicitly shared from a public live app.',
+      inputSchema: {
+        run_id: z.string().min(1).max(128),
+      },
+    },
+    async ({ run_id }) => {
+      recordMcpToolCall('get_run');
+      try {
+        return mcpJson(getAgentRun(ctx, run_id));
+      } catch (err) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'list_my_runs',
+    {
+      title: 'List my runs',
+      description:
+        'Paginated run history for runs performed by this token user.',
+      inputSchema: {
+        slug: z.string().min(1).max(48).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+        since_ts: z.string().optional(),
+      },
+    },
+    async ({ slug, limit, cursor, since_ts }) => {
+      recordMcpToolCall('list_my_runs');
+      try {
+        return mcpJson(listMyRuns(ctx, { slug, limit, cursor, since_ts }));
+      } catch (err) {
+        return mcpError(err);
+      }
+    },
+  );
+
+  return server;
+}
+
 async function handleMcp(server: McpServer, rawRequest: Request): Promise<Response> {
   const transport = new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,
@@ -1020,6 +1215,9 @@ async function handleMcp(server: McpServer, rawRequest: Request): Promise<Respon
 // per-app handler as the empty slug "".
 mcpRouter.all('/', async (c: Context) => {
   const ctx = await resolveUserContext(c);
+  if (ctx.agent_token_id) {
+    return handleMcp(createAgentReadMcpServer(c, ctx), c.req.raw);
+  }
   const ip = extractIp(c);
   const baseUrl = getPublicBaseUrl(c);
   const server = createAdminMcpServer({ ctx, ip, baseUrl });
@@ -1052,13 +1250,18 @@ mcpRouter.all('/app/:slug', async (c) => {
   }
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
+    slug: row.slug,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;
   // Reuse the ctx we already resolved for the visibility check. The MCP
   // tool handler forwards it to dispatchRun so per-user vault secrets
   // reach the runner, matching POST /api/run + POST /api/:slug/run.
-  const server = createPerAppMcpServer(row, ctx);
+  const server = createPerAppMcpServer(c, row, ctx);
   return handleMcp(server, c.req.raw);
 });

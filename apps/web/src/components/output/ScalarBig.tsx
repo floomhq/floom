@@ -4,6 +4,7 @@
 // Copy button for boolean (not useful). Used by the v16 renderer cascade
 // when the run output is a scalar we'd otherwise JSON-dump.
 import { CopyButton } from './CopyButton';
+import { SectionHeader } from './SectionHeader';
 
 export interface ScalarBigProps {
   value: number | boolean | string;
@@ -32,37 +33,31 @@ export function ScalarBig({ value, label }: ScalarBigProps) {
   return (
     <div
       data-renderer="ScalarBig"
-      className="app-expanded-card"
+      className="app-expanded-card floom-output-card"
       style={{ position: 'relative' }}
     >
-      {copyable && (
+      {label ? (
+        <SectionHeader
+          label={label}
+          actions={copyable ? <CopyButton value={display} label="Copy" /> : undefined}
+        />
+      ) : copyable ? (
         <div style={{ position: 'absolute', top: 12, right: 12 }}>
           <CopyButton value={display} label="Copy" />
         </div>
-      )}
-      {label && (
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            marginBottom: 8,
-          }}
-        >
-          {label}
-        </div>
-      )}
+      ) : null}
       <div
         style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 28,
+          fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 44,
           fontWeight: 600,
           color: 'var(--ink)',
-          lineHeight: 1.2,
-          paddingRight: copyable ? 72 : 0,
+          lineHeight: 1.1,
+          letterSpacing: '-0.01em',
+          paddingRight: !label && copyable ? 72 : 0,
           wordBreak: 'break-all',
           userSelect: 'all',
+          fontVariantNumeric: 'tabular-nums',
         }}
       >
         {display}

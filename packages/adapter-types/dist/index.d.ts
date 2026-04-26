@@ -1,4 +1,4 @@
-export type InputType = 'text' | 'textarea' | 'url' | 'number' | 'enum' | 'boolean' | 'date' | 'file';
+export type InputType = 'text' | 'textarea' | 'url' | 'number' | 'enum' | 'boolean' | 'date' | 'file' | 'file/csv' | 'file/image' | 'file/pdf' | 'file/audio' | 'array' | 'object';
 export type OutputType = 'text' | 'json' | 'table' | 'number' | 'html' | 'markdown' | 'pdf' | 'image' | 'file';
 export interface InputSpec {
     name: string;
@@ -36,7 +36,11 @@ export interface NormalizedManifest {
     memory_keys?: string[];
     blocked_reason?: string;
     license?: string;
+    network?: {
+        allowed_domains: string[];
+    };
     render?: RenderConfig;
+    max_run_retention_days?: number;
     primary_action?: string;
 }
 export interface RenderConfig {
@@ -50,6 +54,9 @@ export interface AuthConfig {
     oauth2_scopes?: string;
 }
 export type AsyncMode = 'poll' | 'webhook' | 'stream';
+export type AppVisibilityState = 'private' | 'link' | 'invited' | 'pending_review' | 'public_live' | 'changes_requested';
+export type LegacyAppVisibility = 'public' | 'auth-required';
+export type AppVisibility = AppVisibilityState | LegacyAppVisibility;
 export interface AppRecord {
     id: string;
     slug: string;
@@ -68,12 +75,19 @@ export interface AppRecord {
     auth_config: string | null;
     openapi_spec_url: string | null;
     openapi_spec_cached: string | null;
-    visibility: 'public' | 'auth-required' | 'private';
+    visibility: AppVisibility;
+    link_share_token: string | null;
+    link_share_requires_auth: 0 | 1;
+    review_submitted_at: string | null;
+    review_decided_at: string | null;
+    review_decided_by: string | null;
+    review_comment: string | null;
     is_async: 0 | 1;
     webhook_url: string | null;
     timeout_ms: number | null;
     retries: number;
     async_mode: AsyncMode | null;
+    max_run_retention_days: number | null;
     workspace_id: string;
     memory_keys: string | null;
     featured: 0 | 1;
@@ -149,8 +163,14 @@ export interface UserRecord {
     name: string | null;
     auth_provider: string;
     auth_subject: string | null;
+    image?: string | null;
+    is_admin?: 0 | 1;
+    deleted_at?: string | null;
+    delete_at?: string | null;
+    composio_user_id?: string | null;
     created_at: string;
 }
+export type AgentTokenScope = 'read' | 'read-write' | 'publish-only';
 export type WorkspaceMemberRole = 'admin' | 'editor' | 'viewer';
 export type WorkspaceRole = WorkspaceMemberRole | 'guest';
 export interface SessionContext {
@@ -161,6 +181,9 @@ export interface SessionContext {
     auth_user_id?: string;
     auth_session_id?: string;
     email?: string;
+    agent_token_id?: string;
+    agent_token_scope?: AgentTokenScope;
+    agent_token_rate_limit_per_minute?: number;
 }
 export interface RuntimeResult {
     status: RunStatus;
@@ -173,7 +196,7 @@ export interface RuntimeResult {
 }
 export interface AppListFilter {
     workspace_id?: string;
-    visibility?: 'public' | 'auth-required' | 'private';
+    visibility?: AppVisibility;
     category?: string;
     featured?: boolean;
     limit?: number;
@@ -242,6 +265,7 @@ export interface UserWriteInput {
     auth_provider?: string;
     auth_subject?: string | null;
     image?: string | null;
+    is_admin?: 0 | 1;
     composio_user_id?: string | null;
 }
 export type UserWriteColumn = Exclude<keyof UserWriteInput, 'id'>;

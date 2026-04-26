@@ -198,18 +198,6 @@ export function HeroAppTiles({ tiles, totalCount }: HeroAppTilesProps) {
         );
       })}
 
-      <style>{`
-        @media (max-width: 900px) {
-          .hero-app-tiles {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
-        @media (max-width: 520px) {
-          .hero-app-tiles {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

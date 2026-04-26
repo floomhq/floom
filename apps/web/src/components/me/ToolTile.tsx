@@ -15,6 +15,7 @@ import type { CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { AppIcon } from '../AppIcon';
 import { formatTime } from '../../lib/time';
+import { buildRerunHref } from './runPreview';
 
 interface Props {
   slug: string;
@@ -145,16 +146,4 @@ export function ToolTile({
       </Link>
     </article>
   );
-}
-
-function buildRerunHref(
-  slug: string,
-  runId?: string | null,
-  action?: string | null,
-): string {
-  if (!runId) return `/p/${slug}`;
-  const search = new URLSearchParams();
-  search.set('rerun', runId);
-  if (action) search.set('action', action);
-  return `/p/${slug}?${search.toString()}`;
 }

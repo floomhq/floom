@@ -45,7 +45,7 @@ function redactSecrets(value: unknown, secrets: Record<string, string>): unknown
 export const dockerRuntimeAdapter: RuntimeAdapter = {
   async execute(
     app: AppRecord,
-    _manifest: NormalizedManifest,
+    manifest: NormalizedManifest,
     action: string,
     inputs: Record<string, unknown>,
     secrets: Record<string, string>,
@@ -66,6 +66,7 @@ export const dockerRuntimeAdapter: RuntimeAdapter = {
       action,
       inputs,
       secrets,
+      manifest,
       image,
       onOutput,
     });

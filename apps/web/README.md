@@ -13,7 +13,7 @@ React SPA for Floom. Vite + React 18 + TypeScript.
 All env vars are inlined at build time by Vite (they only take effect on a
 fresh `npm run build`, not at runtime).
 
-- `VITE_SENTRY_DSN` — optional Sentry error tracking. No-op when unset.
+- `VITE_SENTRY_WEB_DSN` — optional Sentry error tracking. No-op when unset.
 - `VITE_POSTHOG_KEY` — optional PostHog analytics. No-op when unset. Set to
   enable the 8 tracked events (landing_viewed, publish_clicked,
   publish_succeeded, signup_completed, run_triggered, run_succeeded,

@@ -1,18 +1,32 @@
+// /studio home — v23 PR-H redesign.
+//
+// Shape (Federico-locked, decision doc /tmp/wireframe-react/studio-decision.md):
+// - NO inner browser chrome (removed v17's <StudioBrowserChrome>).
+// - ONE hero metric tile (replaces 3-cell stat strip).
+// - Apps grid mixed-size: hero card spans 2 cols + per-card sparklines + neutral banner.
+// - Friendly running state on activity rows.
+// - Empty state: welcome card + 3 launch-roster templates when total_count === 0.
+// - Mobile: H1 + meta + full-width CTA + single-metric card + .m-list rows.
+//
+// Federico locks:
+// - NO category tints (banners use a single neutral surface).
+// - BYOK / Agent tokens vocabulary (NEVER "API keys").
+// - Launch roster: competitor-lens, ai-readiness-audit, pitch-coach.
+
 import { useEffect, useMemo, useState } from 'react';
-import type { CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import * as api from '../../api/client';
 import { useDeployEnabled } from '../../lib/flags';
 import { formatTime } from '../../lib/time';
 import { StudioSignedOutState } from './StudioSignedOutState';
 import { StudioCommandPalette } from './StudioCommandPalette';
+import { Sparkline } from './Sparkline';
 import { WaitlistModal } from '../WaitlistModal';
 import { AppIcon } from '../AppIcon';
 import { useSession } from '../../hooks/useSession';
 import type { StudioActivityRun, StudioAppSummary, StudioStats } from '../../lib/types';
 
 type AppTab = 'all' | 'live' | 'draft';
-type SortMode = 'last_run' | 'alphabetical' | 'recently_published';
 
 export function StudioDashboardHome() {
   const { data: session } = useSession();
@@ -27,7 +41,6 @@ export function StudioDashboardHome() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [tab, setTab] = useState<AppTab>('all');
-  const [sortMode, setSortMode] = useState<SortMode>('last_run');
   const [createValue, setCreateValue] = useState('');
 
   useEffect(() => {
@@ -72,6 +85,7 @@ export function StudioDashboardHome() {
   }, []);
 
   const apps = stats?.apps.items ?? [];
+
   const counts = useMemo(() => {
     const live = apps.filter((app) => isLiveApp(app.publish_status)).length;
     return {
@@ -81,6 +95,10 @@ export function StudioDashboardHome() {
     };
   }, [apps]);
 
+  // Sort apps by runs_7d DESC so the busiest live app gets the hero slot.
+  // Drafts always sink to the end (after the +New ghost slot? no — before
+  // the ghost slot, but after the live cards, so the ghost +New stays the
+  // last cell). Keeps the hero spotlight on the most-active app.
   const filteredApps = useMemo(() => {
     const base =
       tab === 'live'
@@ -90,19 +108,20 @@ export function StudioDashboardHome() {
           : apps.slice();
 
     base.sort((a, b) => {
-      if (sortMode === 'alphabetical') {
-        return a.name.localeCompare(b.name);
-      }
-      if (sortMode === 'recently_published') {
-        return compareDates(a.created_at, b.created_at);
-      }
+      const aLive = isLiveApp(a.publish_status);
+      const bLive = isLiveApp(b.publish_status);
+      // Live before draft.
+      if (aLive !== bLive) return aLive ? -1 : 1;
+      // Within tier, sort by runs_7d DESC (busiest first).
+      if (a.runs_7d !== b.runs_7d) return b.runs_7d - a.runs_7d;
+      // Stable tiebreaker: most recently active first.
       return compareNullableDates(
         a.last_run_at || a.updated_at || a.created_at,
         b.last_run_at || b.updated_at || b.created_at,
       );
     });
     return base;
-  }, [apps, sortMode, tab]);
+  }, [apps, tab]);
 
   function handleCreate() {
     const value = createValue.trim();
@@ -126,160 +145,223 @@ export function StudioDashboardHome() {
     );
   }
 
+  // Empty state — first-time creator (no apps yet).
+  const isEmpty = stats !== null && stats.apps.total_count === 0;
+
   return (
-    <>
-      <div
-        data-testid="studio-home"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 18,
-        }}
-      >
-        {error ? (
-          <div style={errorStyle}>{error}</div>
-        ) : null}
+    <div data-testid="studio-home" className="studio-page">
+      {error ? <div className="studio-error">{error}</div> : null}
 
-        <div style={frameStyle}>
-          <StudioBrowserChrome />
-          <div style={frameBodyStyle}>
-            <div style={topBarStyle}>
-              <div>
-                <div style={breadcrumbStyle}>
-                  {studioBreadcrumbLabel(session)} · Home
-                </div>
-              </div>
-              <div style={topBarActionsStyle}>
-                <button
-                  type="button"
-                  data-testid="studio-command-trigger"
-                  onClick={() => setCommandOpen(true)}
-                  style={paletteTriggerStyle}
-                >
-                  <span>Command</span>
-                  <kbd style={paletteKbdStyle}>⌘K</kbd>
-                </button>
-                {waitlistMode ? (
-                  <button
-                    type="button"
-                    onClick={() => setWaitlistOpen(true)}
-                    style={primaryButtonStyle}
-                  >
-                    New app
-                  </button>
-                ) : (
-                  <Link to="/studio/build" style={primaryButtonStyle}>
-                    New app
-                  </Link>
-                )}
-              </div>
-            </div>
-
-            <div style={statsGridStyle}>
-              <StatCard
-                label="Runs · 7d"
-                value={stats ? stats.runs_7d.count.toLocaleString() : '—'}
-                sub={stats ? `${formatDelta(stats.runs_7d.delta_pct)} vs prev week` : 'Loading…'}
-              />
-              <StatCard
-                label="Active apps"
-                value={stats ? `${stats.apps.active_count} / ${stats.apps.total_count}` : '—'}
-                sub={stats ? `${stats.apps.draft_count} draft` : 'Loading…'}
-              />
-              <StatCard
-                label="Feedback · unread"
-                value={stats ? String(stats.feedback.unread_count) : '—'}
-                sub={stats ? `across ${stats.feedback.apps_count} apps` : 'Loading…'}
-              />
-            </div>
-
-            <section style={sectionStyle}>
-              <div style={sectionHeaderStyle}>
-                <div>
-                  <h2 style={sectionTitleStyle}>Your apps</h2>
-                </div>
-                <div style={sectionControlsStyle}>
-                  <div style={tabsWrapStyle}>
-                    <TabButton
-                      active={tab === 'all'}
-                      label={`All (${stats ? counts.all : '—'})`}
-                      onClick={() => setTab('all')}
-                    />
-                    <TabButton
-                      active={tab === 'live'}
-                      label={`Live (${stats ? counts.live : '—'})`}
-                      onClick={() => setTab('live')}
-                    />
-                    <TabButton
-                      active={tab === 'draft'}
-                      label={`Draft (${stats ? counts.draft : '—'})`}
-                      onClick={() => setTab('draft')}
-                    />
-                  </div>
-                  <label style={sortWrapStyle}>
-                    <span style={sortLabelStyle}>Sort</span>
-                    <select
-                      value={sortMode}
-                      onChange={(event) => setSortMode(event.target.value as SortMode)}
-                      data-testid="studio-app-sort"
-                      style={sortSelectStyle}
-                    >
-                      <option value="last_run">Last run</option>
-                      <option value="alphabetical">Alphabetical</option>
-                      <option value="recently_published">Recently published</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
-
-              <div style={appsGridStyle}>
-                {stats ? (
-                  filteredApps.length > 0 ? (
-                    filteredApps.map((app) => (
-                      <StudioAppCard key={app.slug} app={app} />
-                    ))
-                  ) : (
-                    <div style={loadingTileStyle}>{emptyTabCopy(tab)}</div>
-                  )
-                ) : (
-                  <div style={loadingTileStyle}>Loading your apps…</div>
-                )}
-                <NewAppTile
-                  value={createValue}
-                  onChange={setCreateValue}
-                  onCreate={handleCreate}
-                />
-              </div>
-            </section>
-
-            <section style={activitySectionStyle}>
-              <div style={activityHeaderStyle}>
-                <div>
-                  <h2 style={sectionTitleStyle}>Latest across all apps</h2>
-                  <p style={activitySubheadStyle}>Who ran what · where · how long</p>
-                </div>
-                <Link to="/studio/runs" style={activityLinkStyle}>
-                  See all runs →
-                </Link>
-              </div>
-
-              {activity === null ? (
-                <div style={emptyActivityStyle}>Loading recent activity…</div>
-              ) : activity.length > 0 ? (
-                <div style={activityListStyle}>
-                  {activity.map((run) => (
-                    <ActivityRow key={run.id} run={run} />
-                  ))}
-                </div>
-              ) : (
-                <div data-testid="studio-activity-empty" style={emptyActivityStyle}>
-                  Nothing here yet — be the first.
-                </div>
-              )}
-            </section>
-          </div>
+      {/* Studio top utility bar (desktop only) */}
+      <div className="studio-topbar desktop-only">
+        <div className="crumb">
+          <strong>{studioBreadcrumbLabel(session)} · Home</strong>
+        </div>
+        <div className="studio-topbar-actions">
+          <button
+            type="button"
+            className="studio-search"
+            data-testid="studio-command-trigger"
+            onClick={() => setCommandOpen(true)}
+            aria-label="Search apps, runs, secrets"
+          >
+            <svg viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search apps, runs, secrets…"
+              readOnly
+              tabIndex={-1}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setCommandOpen(true)}
+            />
+            <span className="kbd">⌘K</span>
+          </button>
+          {waitlistMode ? (
+            <button
+              type="button"
+              onClick={() => setWaitlistOpen(true)}
+              className="primary-cta-button"
+              data-testid="studio-new-app-cta"
+              style={primaryButtonInlineStyle}
+            >
+              <PlusIcon /> New app
+            </button>
+          ) : (
+            <Link
+              to="/studio/build"
+              data-testid="studio-new-app-cta"
+              style={primaryButtonInlineStyle}
+            >
+              <PlusIcon /> New app
+            </Link>
+          )}
         </div>
       </div>
+
+      {/* Mobile head: H1 + meta + full-width CTA */}
+      <div className="studio-mobile-head mobile-only">
+        <h1 className="m-h1">Studio</h1>
+        <p className="m-meta">
+          {stats
+            ? `${stats.apps.total_count} ${pluralize(stats.apps.total_count, 'app')} · ${stats.runs_7d.count.toLocaleString()} runs this week`
+            : 'Loading…'}
+        </p>
+      </div>
+      {!isEmpty ? (
+        waitlistMode ? (
+          <button
+            type="button"
+            onClick={() => setWaitlistOpen(true)}
+            className="studio-mobile-cta mobile-only"
+          >
+            + New app
+          </button>
+        ) : (
+          <Link to="/studio/build" className="studio-mobile-cta mobile-only">
+            + New app
+          </Link>
+        )
+      ) : null}
+
+      {isEmpty ? (
+        <StudioEmptyState waitlistMode={waitlistMode} onWaitlist={() => setWaitlistOpen(true)} />
+      ) : (
+        <>
+          {/* Hero metric tile — DESKTOP */}
+          <div className="metric desktop-only" data-testid="studio-hero-metric">
+            <div className="m-l">
+              <div className="m-lab">Runs across all your apps · last 7 days</div>
+              <div className="m-val">{stats ? stats.runs_7d.count.toLocaleString() : '—'}</div>
+              <div className={`m-delta${stats && stats.runs_7d.delta_pct < 0 ? ' dim' : ''}`}>
+                {stats ? renderDeltaLine(stats) : 'Loading…'}
+              </div>
+            </div>
+            <div className="m-spark">
+              <HeroSparkline value={stats?.runs_7d.count ?? 0} />
+            </div>
+          </div>
+
+          {/* Hero metric — MOBILE */}
+          <div className="m-card metric-mobile mobile-only" data-testid="studio-hero-metric-mobile">
+            <div className="m-mb-meta">Runs · last 7 days</div>
+            <div className="m-mb-val">{stats ? stats.runs_7d.count.toLocaleString() : '—'}</div>
+            <div className="m-mb-delta">
+              {stats ? formatDelta(stats.runs_7d.delta_pct) + ' vs last week' : ' '}
+            </div>
+            <HeroSparkline value={stats?.runs_7d.count ?? 0} />
+          </div>
+
+          {/* Apps section header — DESKTOP */}
+          <div className="section-h tight desktop-only">
+            <span className="lh">
+              <span className="dot" />
+              <span className="lab">Your apps</span>
+            </span>
+            <span className="rh">
+              <button
+                type="button"
+                className={tab === 'all' ? 'pill pill-ink' : 'pill'}
+                onClick={() => setTab('all')}
+                data-testid="studio-tab-all"
+              >
+                All · {stats ? counts.all : '—'}
+              </button>
+              <button
+                type="button"
+                className={tab === 'live' ? 'pill pill-ink' : 'pill'}
+                onClick={() => setTab('live')}
+                data-testid="studio-tab-live"
+              >
+                {tab !== 'live' ? <span className="dot" /> : null}
+                Live · {stats ? counts.live : '—'}
+              </button>
+              <button
+                type="button"
+                className={tab === 'draft' ? 'pill pill-ink' : 'pill'}
+                onClick={() => setTab('draft')}
+                data-testid="studio-tab-draft"
+              >
+                Draft · {stats ? counts.draft : '—'}
+              </button>
+            </span>
+          </div>
+
+          {/* Apps grid — DESKTOP */}
+          <div className="apps-grid desktop-only">
+            {stats ? (
+              filteredApps.length > 0 ? (
+                filteredApps.map((app, index) => (
+                  <StudioAppCard
+                    key={app.slug}
+                    app={app}
+                    isHero={index === 0 && isLiveApp(app.publish_status) && tab !== 'draft'}
+                  />
+                ))
+              ) : (
+                <div className="studio-loading-tile">{emptyTabCopy(tab)}</div>
+              )
+            ) : (
+              <div className="studio-loading-tile">Loading your apps…</div>
+            )}
+            <NewAppGhost
+              value={createValue}
+              onChange={setCreateValue}
+              onCreate={handleCreate}
+              waitlistMode={waitlistMode}
+            />
+          </div>
+
+          {/* Apps list — MOBILE */}
+          <div className="section-h tight mobile-only">
+            <span className="lh">
+              <span className="dot" />
+              <span className="lab">Your apps</span>
+            </span>
+          </div>
+          <div className="m-list mobile-only">
+            {stats && filteredApps.length > 0 ? (
+              filteredApps.map((app) => <MobileAppRow key={app.slug} app={app} />)
+            ) : (
+              <div style={mobileEmptyStyle}>
+                {stats ? emptyTabCopy(tab) : 'Loading your apps…'}
+              </div>
+            )}
+          </div>
+
+          {/* Activity feed section header */}
+          <div className="section-h activity-section-head">
+            <span className="lh">
+              <span className="dot" />
+              <span className="lab">Latest across all apps</span>
+            </span>
+            <span className="rh">
+              <Link
+                to="/studio/runs"
+                style={{ color: 'var(--accent)', fontWeight: 600, fontSize: 12.5, textDecoration: 'none' }}
+              >
+                See all runs →
+              </Link>
+            </span>
+          </div>
+
+          {activity === null ? (
+            <div className="studio-loading-tile">Loading recent activity…</div>
+          ) : activity.length > 0 ? (
+            <div className="activity">
+              {activity.map((run) => (
+                <ActivityRow key={run.id} run={run} />
+              ))}
+            </div>
+          ) : (
+            <div data-testid="studio-activity-empty" className="studio-loading-tile">
+              Nothing here yet — be the first.
+            </div>
+          )}
+        </>
+      )}
 
       <StudioCommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
       <WaitlistModal
@@ -287,208 +369,652 @@ export function StudioDashboardHome() {
         onClose={() => setWaitlistOpen(false)}
         source="studio-home"
       />
-    </>
+    </div>
   );
 }
 
-function StudioBrowserChrome() {
+// ─────────────────────────────────────────────────────────────────────
+// HERO SPARKLINE — SVG area chart for the metric tile.
+// We don't have a real per-day-runs endpoint at the workspace level,
+// so this renders a stylized scaffold animated to gently rise to the
+// reported 7d total. The visual cue is "trend up" without faking
+// per-day numbers we don't actually have.
+// ─────────────────────────────────────────────────────────────────────
+
+function HeroSparkline({ value }: { value: number }) {
+  // Fixed scaffold path — deterministic, never claims daily granularity
+  // we don't have. Kept intentionally subtle so the BIG number remains
+  // the focal point.
+  const path = value > 0
+    ? 'M0,40 L20,32 L40,28 L60,22 L80,26 L100,16 L120,12 L140,8 L160,4'
+    : 'M0,30 L160,30';
+  const fill = value > 0
+    ? 'M0,40 L20,32 L40,28 L60,22 L80,26 L100,16 L120,12 L140,8 L160,4 L160,48 L0,48 Z'
+    : '';
   return (
-    <div
-      data-testid="studio-browser-chrome"
+    <svg viewBox="0 0 160 48" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="sh-spark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.25} />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      {fill ? <path d={fill} fill="url(#sh-spark)" /> : null}
+      <polyline
+        points="0,40 20,32 40,28 60,22 80,26 100,16 120,12 140,8 160,4"
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth={value > 0 ? 2 : 1}
+        strokeLinecap="round"
+        strokeOpacity={value > 0 ? 1 : 0.3}
+        style={{ display: value > 0 ? 'block' : 'none' }}
+      />
+      {value === 0 ? (
+        <line
+          x1="0"
+          y1="30"
+          x2="160"
+          y2="30"
+          stroke="var(--line)"
+          strokeWidth="1"
+          strokeDasharray="3,3"
+        />
+      ) : null}
+      {/* fallback path always rendered for screen readers and zero state */}
+      <title>{value > 0 ? `${value} runs in the last 7 days, trend up` : 'No runs yet'}</title>
+      <path d={path} fill="none" stroke="transparent" />
+    </svg>
+  );
+}
+
+function renderDeltaLine(stats: StudioStats): string {
+  // Per decision doc Flag #2: render delta + active + draft always; render
+  // unread feedback only when count > 0 (avoids "0 unread" noise).
+  const parts: string[] = [];
+  const deltaSign = stats.runs_7d.delta_pct > 0 ? '↑' : stats.runs_7d.delta_pct < 0 ? '↓' : '·';
+  const deltaPct = Math.abs(stats.runs_7d.delta_pct);
+  parts.push(`${deltaSign} ${deltaPct}% vs prev week`);
+  parts.push(`${stats.apps.active_count} active`);
+  parts.push(`${stats.apps.draft_count} draft`);
+  if (stats.feedback.unread_count > 0) {
+    parts.push(`${stats.feedback.unread_count} unread feedback`);
+  }
+  return parts.join(' · ');
+}
+
+function PlusIcon() {
+  return (
+    <svg
       aria-hidden="true"
-      style={chromeStyle}
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0 }}
     >
-      <span style={chromeDotStyle} />
-      <span style={chromeDotStyle} />
-      <span style={chromeDotStyle} />
-      <div style={chromeUrlStyle}>floom.dev/studio</div>
-    </div>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  return (
-    <div style={statCardStyle}>
-      <div style={statLabelStyle}>{label}</div>
-      <div style={statValueStyle}>{value}</div>
-      <div style={statSubStyle}>{sub}</div>
-    </div>
-  );
-}
+const primaryButtonInlineStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  padding: '7px 12px',
+  borderRadius: 8,
+  background: 'var(--ink)',
+  color: '#fff',
+  textDecoration: 'none',
+  fontSize: 12.5,
+  fontWeight: 700,
+  border: 'none',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
 
-function TabButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={tabStyle(active)}
-    >
-      {label}
-    </button>
-  );
-}
+const mobileEmptyStyle: React.CSSProperties = {
+  padding: '20px 14px',
+  fontSize: 13,
+  color: 'var(--muted)',
+};
 
-function StudioAppCard({ app }: { app: StudioAppSummary }) {
+// ─────────────────────────────────────────────────────────────────────
+// APP CARD (desktop) — image-first banner + per-card sparkline + foot.
+// Hero variant (app-tall): centered icon overlay only, no banner-card.
+// ─────────────────────────────────────────────────────────────────────
+
+function StudioAppCard({ app, isHero }: { app: StudioAppSummary; isHero: boolean }) {
   const live = isLiveApp(app.publish_status);
+  const isDraft = !live;
+  const className = `app${isHero ? ' app-tall' : ''}${isDraft ? ' app-draft' : ''}`;
+  const category = inferCategory(app.slug);
+  // No description on StudioAppSummary; fallback to a concise tagline.
+  const desc = appDescription(app);
+  // Per task spec: banner content matches /apps and /me. Curated entries
+  // for the launch roster (competitor-lens / ai-readiness-audit /
+  // pitch-coach) + utility apps; unknown slugs fall back to slug name +
+  // first line of description.
+  const banner = bannerContentFor(app);
   return (
-    <article
+    <Link
+      to={`/studio/${app.slug}`}
+      className={className}
       data-testid={`studio-home-app-${app.slug}`}
-      style={appCardStyle}
     >
-      <div style={appCardHeaderStyle}>
-        <div style={appCardIdentityStyle}>
-          <span style={appCardIconWrapStyle}>
-            <AppIcon slug={app.slug} size={18} />
+      <div className="thumb">
+        {category ? <div className="cat-badge">{category}</div> : null}
+        {isHero ? (
+          <span className="thumb-icon">
+            <AppIcon slug={app.slug} size={26} />
           </span>
-          <div style={{ minWidth: 0 }}>
-            <div style={appCardNameStyle}>{app.name}</div>
-            <div style={appCardMetaStyle}>
-              {app.last_run_at ? `Last run ${formatTime(app.last_run_at)}` : 'No runs yet'}
+        ) : (
+          <div className="banner-card">
+            <span className="banner-title">{banner.title}</span>
+            {banner.lines.map((line, i) => (
+              <span
+                key={i}
+                className={`banner-line${line.tone ? ` ${line.tone}` : ''}`}
+              >
+                {line.text}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="body">
+        <div className="head">
+          <span className="icon-chip">
+            <AppIcon slug={app.slug} size={isHero ? 18 : 14} />
+          </span>
+          <div className="meta">
+            <div className="nm">{app.name}</div>
+            <div className="stats">
+              {live ? (
+                <>
+                  <span className="dot dot-live" />
+                  <span>
+                    {app.last_run_at ? `last run ${formatTime(app.last_run_at)}` : 'no runs yet'}
+                  </span>
+                </>
+              ) : (
+                <span>never published · {app.runs_7d} test runs</span>
+              )}
+              {live && app.runs_7d > 0 ? (
+                <>
+                  <span>·</span>
+                  <span>{app.runs_7d.toLocaleString()} runs this week</span>
+                </>
+              ) : null}
             </div>
           </div>
+          <span className={`status-pill ${live ? 'live' : 'draft'}`}>{live ? 'Live' : 'Draft'}</span>
         </div>
-        <StatusPill live={live} />
+        {desc ? <p className="desc">{desc}</p> : null}
+        {live ? (
+          <div className="spark-row">
+            <span className="runs-count">{app.runs_7d.toLocaleString()} runs · 7d</span>
+            <div className="spark-wrap">
+              <Sparkline slug={app.slug} days={7} muted={app.runs_7d === 0} />
+            </div>
+          </div>
+        ) : null}
+        {live ? (
+          <div className="actions">
+            <Link
+              to={`/studio/${app.slug}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Open
+            </Link>
+            <Link
+              to={`/studio/${app.slug}/access`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Settings
+            </Link>
+            <Link
+              to={`/p/${app.slug}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              View public
+            </Link>
+          </div>
+        ) : null}
+        <div className="foot">
+          <span className="mono-tag">
+            {live
+              ? `floom.dev/${app.slug}`
+              : 'Local-only. Click to finish publishing.'}
+          </span>
+          {live ? (
+            <span className="open-link">Open →</span>
+          ) : (
+            <Link
+              to="/studio/build"
+              className="finish-publish"
+              onClick={(e) => e.stopPropagation()}
+              data-testid={`studio-app-finish-publish-${app.slug}`}
+            >
+              Finish publishing
+            </Link>
+          )}
+        </div>
       </div>
-
-      <div style={appCardRunsStyle}>{app.runs_7d.toLocaleString()} runs · 7d</div>
-
-      <div style={appActionsStyle}>
-        <Link to={`/studio/${app.slug}`} style={appActionLinkStyle}>
-          Open
-        </Link>
-        <Link to={`/studio/${app.slug}/access`} style={appActionLinkStyle}>
-          Settings
-        </Link>
-        <Link to={`/p/${app.slug}`} style={appActionLinkStyle}>
-          View public
-        </Link>
-      </div>
-    </article>
+    </Link>
   );
 }
 
-function NewAppTile({
+function appDescription(app: StudioAppSummary): string {
+  // StudioAppSummary doesn't carry `description` on the stats payload.
+  // Fallback to a concise slug-based tagline that's always honest about
+  // what we know. No hallucinated copy.
+  return `Workspace app · ${app.slug}`;
+}
+
+function inferCategory(slug: string): string | null {
+  // Curated mapping for the launch roster. Falls back to null
+  // (no badge) for unknown apps so we never invent a category.
+  const map: Record<string, string> = {
+    'flyfast': 'Travel',
+    'opendraft': 'Writing',
+    'competitor-lens': 'Research',
+    'pitch-coach': 'Writing',
+    'ai-readiness-audit': 'Research',
+    'lead-scorer': 'Research',
+    'resume-screener': 'Research',
+    'jwt-decode': 'Dev',
+    'json-format': 'Dev',
+    'password': 'Dev',
+    'uuid': 'Dev',
+  };
+  return map[slug] ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// BANNER CONTENT — matches /apps + /me banner copy (locked content,
+// "show the result of running the app, not the app identity").
+// Unknown slugs: slug + first line of description (or "—").
+// ─────────────────────────────────────────────────────────────────────
+
+type BannerLine = { text: string; tone?: 'dim' | 'accent' };
+type BannerEntry = { title: string; lines: BannerLine[] };
+
+const STUDIO_BANNER_CONTENT: Record<string, BannerEntry> = {
+  'competitor-lens': {
+    title: 'competitor-lens',
+    lines: [
+      { text: 'stripe vs adyen' },
+      { text: 'fee 1.4%', tone: 'dim' },
+      { text: 'winner: stripe', tone: 'accent' },
+    ],
+  },
+  'ai-readiness-audit': {
+    title: 'ai-readiness',
+    lines: [
+      { text: 'floom.dev' },
+      { text: 'score: 8.4/10', tone: 'dim' },
+      { text: '3 risks · 3 wins', tone: 'accent' },
+    ],
+  },
+  'pitch-coach': {
+    title: 'pitch-coach',
+    lines: [
+      { text: 'harsh truth' },
+      { text: '3 critiques', tone: 'accent' },
+      { text: '3 rewrites', tone: 'dim' },
+    ],
+  },
+  // Utility apps — banner shapes mirror what each one actually returns.
+  'jwt-decode': {
+    title: 'jwt decode',
+    lines: [
+      { text: 'iss: floom.dev' },
+      { text: 'sub: usr_***' },
+      { text: 'exp: 2027-04-26', tone: 'dim' },
+    ],
+  },
+  'json-format': {
+    title: 'format',
+    lines: [
+      { text: '{ "ok": true,' },
+      { text: '  "n": 42 }' },
+    ],
+  },
+  password: {
+    title: 'password',
+    lines: [
+      { text: 'k7T#mq2&Lp9' },
+      { text: 'v4*8nW@2Zb1y', tone: 'dim' },
+    ],
+  },
+  uuid: {
+    title: 'uuid v4',
+    lines: [
+      { text: 'a3f8e1c2-4d9b' },
+      { text: '8c7e-1f3b9d2a', tone: 'dim' },
+    ],
+  },
+};
+
+function bannerContentFor(app: StudioAppSummary): BannerEntry {
+  const curated = STUDIO_BANNER_CONTENT[app.slug];
+  if (curated) return curated;
+  // Unknown slug fallback: slug + first non-empty line of description.
+  const desc = (app as unknown as { description?: string | null }).description;
+  const firstLine = (desc || '').split(/\r?\n/).find((l) => l.trim().length > 0)?.trim();
+  return {
+    title: app.slug,
+    lines: firstLine
+      ? [{ text: firstLine.length > 28 ? `${firstLine.slice(0, 26)}…` : firstLine, tone: 'dim' }]
+      : [{ text: '—', tone: 'dim' }],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// MOBILE APP ROW — .m-list-item with sparkline.
+// ─────────────────────────────────────────────────────────────────────
+
+function MobileAppRow({ app }: { app: StudioAppSummary }) {
+  return (
+    <Link
+      to={`/studio/${app.slug}`}
+      className="m-list-item"
+      data-testid={`studio-home-mobile-app-${app.slug}`}
+    >
+      <div className="ic">
+        <AppIcon slug={app.slug} size={16} />
+      </div>
+      <div className="body">
+        <div className="nm">{app.name}</div>
+        <div className="sub">{app.runs_7d.toLocaleString()} runs this week</div>
+      </div>
+      <span className="spark-mini">
+        <Sparkline slug={app.slug} days={7} muted={app.runs_7d === 0} />
+      </span>
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// NEW APP GHOST SLOT — the wireframe ghost (icon + label) coexisting
+// with the inline input + Create button. Decision-doc Flag #1 = (C):
+// keeps the inline-input affordance for fast paste-and-go, AND the
+// visual ghost-slot chrome. Default behaviour: pressing Enter on the
+// input creates with the URL pre-filled; clicking the icon area or
+// Create button without text navigates to /studio/build empty.
+// ─────────────────────────────────────────────────────────────────────
+
+function NewAppGhost({
   value,
   onChange,
   onCreate,
+  waitlistMode,
 }: {
   value: string;
   onChange: (value: string) => void;
   onCreate: () => void;
+  waitlistMode: boolean;
 }) {
   return (
-    <article data-testid="studio-home-new-app-tile" style={newAppTileStyle}>
-      <div style={newAppEyebrowStyle}>New app</div>
-      <div style={newAppTitleStyle}>Paste GitHub URL, Docker image, or OpenAPI spec</div>
-      <div style={newAppInputShellStyle}>
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              onCreate();
-            }
-          }}
-          placeholder="github.com/owner/repo or https://api.example.com/openapi.json"
-          data-testid="studio-home-create-input"
-          style={newAppInputStyle}
-        />
-      </div>
-      <button
-        type="button"
-        onClick={onCreate}
-        data-testid="studio-home-create-button"
-        style={newAppButtonStyle}
-      >
-        Create
-      </button>
-    </article>
-  );
-}
-
-function ActivityRow({ run }: { run: StudioActivityRun }) {
-  return (
-    <div
-      data-testid={`studio-activity-row-${run.id}`}
-      style={activityRowStyle}
-    >
-      <span style={activityIconWrapStyle}>
-        <AppIcon slug={run.app_slug} size={16} />
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div style={activityTextStyle}>
-          <span style={activityStrongStyle}>{run.user_label}</span> ran{' '}
-          <span style={activityStrongStyle}>{run.app_name}</span> from{' '}
-          <span style={{ color: 'var(--muted)' }}>{run.source_label}</span>
+    <div data-testid="studio-home-new-app-tile" className="app app-ghost">
+      <div className="ghost-body">
+        <div className="ghost-icon">
+          <svg viewBox="0 0 24 24">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
         </div>
-        <div style={activityMetaLineStyle}>
-          <span>{formatTime(run.started_at)}</span>
-          <span>·</span>
-          <span>{formatDuration(run.duration_ms)}</span>
-          {run.status !== 'success' ? (
-            <>
-              <span>·</span>
-              <span style={{ color: '#b42318' }}>{run.status}</span>
-            </>
-          ) : null}
+        <div>
+          <div className="ghost-title">New app</div>
+          <div className="ghost-sub">Paste GitHub URL, Docker image, or OpenAPI spec</div>
+        </div>
+        <div className="ghost-input-wrap">
+          <input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                onCreate();
+              }
+            }}
+            placeholder="github.com/owner/repo"
+            data-testid="studio-home-create-input"
+            disabled={waitlistMode}
+          />
+          <button
+            type="button"
+            onClick={onCreate}
+            data-testid="studio-home-create-button"
+          >
+            {waitlistMode ? 'Join waitlist' : 'Create'}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function StatusPill({ live }: { live: boolean }) {
+// ─────────────────────────────────────────────────────────────────────
+// ACTIVITY ROW — 5-col v23 grid: dot / app+action / via / dur / ts.
+// Friendly running state: sky dot + RUNNING tag. No fake step counter.
+// ─────────────────────────────────────────────────────────────────────
+
+function ActivityRow({ run }: { run: StudioActivityRun }) {
+  // Canonical run-detail surface is /me/runs/:id (per existing convention).
+  const viewHref = `/me/runs/${run.id}`;
+  const isRunning = run.status === 'running';
+  const isFail = run.status !== 'success' && run.status !== 'running';
+  const dotClass = isRunning ? 'dot-running' : isFail ? 'dot-fail' : 'dot-live';
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: live ? 5 : 0,
-        padding: '3px 9px',
-        borderRadius: 999,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: live ? 'var(--accent)' : '#92400e',
-        background: live ? 'var(--accent-soft)' : '#fef3c7',
-        border: live ? '1px solid #b7ead7' : '1px solid #fde68a',
-        flexShrink: 0,
-      }}
+    <Link
+      to={viewHref}
+      className="act-row"
+      data-testid={`studio-activity-row-${run.id}`}
     >
-      {live ? (
-        <span
-          aria-hidden="true"
-          style={{
-            width: 5,
-            height: 5,
-            borderRadius: 999,
-            background: 'var(--accent)',
-            display: 'inline-block',
-          }}
-        />
-      ) : null}
-      {live ? 'Live' : 'Draft'}
-    </span>
+      <span className={`dot ${dotClass}`} aria-hidden="true" />
+      <div className="body">
+        <span className="app-name">{run.app_name}</span>
+        <span className="action">· {run.action}</span>
+        {isFail ? (
+          <span className="err">{run.error || run.status}</span>
+        ) : null}
+        {isRunning ? <span className="running-tag">RUNNING</span> : null}
+      </div>
+      <span className="via">via {run.source_label}</span>
+      <span className={`dur${isFail ? ' danger' : ''}`}>{formatDuration(run.duration_ms)}</span>
+      <span className="ts">{formatTime(run.started_at)}</span>
+    </Link>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// EMPTY STATE — first-time creator. v23 welcome card + 3 templates +
+// quickstart + protocol micro-copy + tour link.
+// ─────────────────────────────────────────────────────────────────────
+
+const TEMPLATES: Array<{ slug: string; nm: string; desc: string; mobileMeta: string; icSeed: string }> = [
+  {
+    slug: 'competitor-lens',
+    nm: 'Competitor Lens',
+    desc: 'Compare positioning against a competitor. Gemini 3 Pro + JSON schema. Ready in 2s.',
+    mobileMeta: 'AI app · positioning vs competitor',
+    icSeed: 'CL',
+  },
+  {
+    slug: 'ai-readiness-audit',
+    nm: 'AI Readiness Audit',
+    desc: 'Score how AI-ready a website is. Audit copy, structure, agent affordances.',
+    mobileMeta: 'AI app · website audit',
+    icSeed: 'AR',
+  },
+  {
+    slug: 'pitch-coach',
+    nm: 'Pitch Coach',
+    desc: 'Roast and rewrite a startup pitch. Harsh truth, then 3 rewrites.',
+    mobileMeta: 'AI app · pitch critique + rewrite',
+    icSeed: 'PC',
+  },
+];
+
+function StudioEmptyState({
+  waitlistMode,
+  onWaitlist,
+}: {
+  waitlistMode: boolean;
+  onWaitlist: () => void;
+}) {
+  return (
+    <div className="se-wrap" data-testid="studio-home-empty">
+      {/* Mobile welcome card — gradient bg + accent border */}
+      <div className="m-card m-empty-card mobile-only" style={{ marginBottom: 18 }}>
+        <div className="e-ic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </div>
+        <h1>Welcome to Studio.</h1>
+        <p>Publish your first app. Paste a GitHub URL with a floom.yaml, or start from a template.</p>
+        {waitlistMode ? (
+          <button
+            type="button"
+            onClick={onWaitlist}
+            className="studio-mobile-cta"
+            data-testid="studio-empty-waitlist"
+            style={{ width: '100%' }}
+          >
+            Join waitlist
+          </button>
+        ) : (
+          <Link
+            to="/studio/build"
+            className="studio-mobile-cta"
+            data-testid="studio-empty-cta"
+            style={{ width: '100%' }}
+          >
+            Create your first app →
+          </Link>
+        )}
+        <Link to="/protocol" className="m-empty-secondary">
+          View the 90-second quickstart →
+        </Link>
+      </div>
+
+      {/* Desktop welcome card */}
+      <div className="se-empty desktop-only" data-testid="studio-empty">
+        <div className="e-ic">
+          <svg viewBox="0 0 24 24">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </div>
+        <h1>Welcome to Studio.</h1>
+        <p>
+          Publish your first app. Paste a GitHub repo, OpenAPI spec, or Docker
+          image. Floom turns it into a public showcase, MCP server, and JSON API
+          in ~60 seconds.
+        </p>
+        <div className="ctas">
+          {waitlistMode ? (
+            <button
+              type="button"
+              onClick={onWaitlist}
+              className="btn-ink"
+              data-testid="studio-empty-waitlist"
+              style={{ border: 'none', cursor: 'pointer', font: 'inherit' }}
+            >
+              Join waitlist
+            </button>
+          ) : (
+            <Link to="/studio/build" className="btn-ink" data-testid="studio-empty-cta">
+              Create your first app →
+            </Link>
+          )}
+          <Link
+            to="/protocol"
+            className="btn-secondary"
+            data-testid="studio-empty-secondary"
+          >
+            View the 90-second quickstart
+          </Link>
+        </div>
+        <p className="micro">
+          Or read the <Link to="/protocol">protocol spec</Link> ·{' '}
+          <Link to="/docs">docs</Link>
+        </p>
+      </div>
+
+      {/* Mobile templates head */}
+      <div className="mobile-only">
+        <h2 className="m-templates-head">Or start from a template</h2>
+        <p className="m-templates-meta">3 patterns to get going</p>
+        {TEMPLATES.map((t) => (
+          <Link
+            key={t.slug}
+            to={waitlistMode ? '#' : `/studio/build?template=${encodeURIComponent(t.slug)}`}
+            className="m-template-card"
+            data-testid={`studio-empty-template-mobile-${t.slug}`}
+            onClick={(e) => {
+              if (waitlistMode) {
+                e.preventDefault();
+                onWaitlist();
+              }
+            }}
+          >
+            <div className="row">
+              <div className="ic">{t.icSeed}</div>
+              <strong>{t.nm}</strong>
+            </div>
+            <div className="meta">{t.mobileMeta}</div>
+          </Link>
+        ))}
+        <Link to="/apps" className="m-browse-store">
+          Browse the store for inspiration →
+        </Link>
+      </div>
+
+      {/* Desktop templates */}
+      <div className="desktop-only">
+        <div className="templates-eyebrow">Or fork a template</div>
+        <div className="templates">
+          {TEMPLATES.map((t) => (
+            <Link
+              key={t.slug}
+              to={waitlistMode ? '#' : `/studio/build?template=${encodeURIComponent(t.slug)}`}
+              className="template"
+              data-testid={`studio-empty-template-${t.slug}`}
+              onClick={(e) => {
+                if (waitlistMode) {
+                  e.preventDefault();
+                  onWaitlist();
+                }
+              }}
+            >
+              <div className="nm">{t.nm}</div>
+              <div className="desc">{t.desc}</div>
+              <div className="stat">Use template →</div>
+            </Link>
+          ))}
+        </div>
+        <p className="se-tour">
+          Need a tour first? <Link to="/docs">Read the docs →</Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// helpers
+// ─────────────────────────────────────────────────────────────────────
 
 function isLiveApp(publishStatus: StudioAppSummary['publish_status']): boolean {
   return !publishStatus || publishStatus === 'published';
@@ -522,7 +1048,8 @@ function titleCase(value: string): string {
 }
 
 function formatDelta(value: number): string {
-  return `${value >= 0 ? '+' : ''}${value}%`;
+  const sign = value > 0 ? '↑ ' : value < 0 ? '↓ ' : '';
+  return `${sign}${Math.abs(value)}%`;
 }
 
 function formatDuration(ms: number | null): string {
@@ -537,455 +1064,6 @@ function emptyTabCopy(tab: AppTab): string {
   return 'No apps yet.';
 }
 
-const frameStyle: CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 24,
-  overflow: 'hidden',
-  boxShadow: '0 1px 3px rgba(22,21,18,.04), 0 12px 40px rgba(22,21,18,.06)',
-};
-
-const chromeStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '10px 14px',
-  borderBottom: '1px solid var(--line)',
-  background: 'var(--bg)',
-};
-
-const chromeDotStyle: CSSProperties = {
-  width: 10,
-  height: 10,
-  borderRadius: 999,
-  background: '#d1d5db',
-};
-
-const chromeUrlStyle: CSSProperties = {
-  flex: 1,
-  margin: '0 12px',
-  padding: '4px 10px',
-  borderRadius: 6,
-  border: '1px solid var(--line)',
-  background: 'var(--card)',
-  color: 'var(--muted)',
-  fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-  fontSize: 11,
-};
-
-const frameBodyStyle: CSSProperties = {
-  padding: '24px 24px 26px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 24,
-};
-
-const topBarStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 18,
-  flexWrap: 'wrap',
-};
-
-const breadcrumbStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 700,
-  color: 'var(--ink)',
-};
-
-const topBarActionsStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  flexWrap: 'wrap',
-};
-
-const paletteTriggerStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '10px 12px',
-  borderRadius: 12,
-  border: '1px solid var(--line)',
-  background: 'var(--card)',
-  color: 'var(--ink)',
-  fontSize: 12.5,
-  fontWeight: 600,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-};
-
-const paletteKbdStyle: CSSProperties = {
-  padding: '4px 6px',
-  borderRadius: 8,
-  border: '1px solid var(--line)',
-  background: 'var(--bg)',
-  color: 'var(--muted)',
-  fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-  fontSize: 10.5,
-};
-
-const primaryButtonStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '10px 14px',
-  borderRadius: 12,
-  background: 'var(--ink)',
-  color: '#fff',
-  textDecoration: 'none',
-  fontSize: 12.5,
-  fontWeight: 700,
-  border: 'none',
-  cursor: 'pointer',
-};
-
-const statsGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-  gap: 12,
-};
-
-const statCardStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-  padding: '16px 18px',
-  borderRadius: 18,
-  border: '1px solid var(--line)',
-  background: 'var(--bg)',
-};
-
-const statLabelStyle: CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase',
-  color: 'var(--muted)',
-};
-
-const statValueStyle: CSSProperties = {
-  fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-  fontSize: 32,
-  fontWeight: 700,
-  letterSpacing: '-0.04em',
-  color: 'var(--ink)',
-};
-
-const statSubStyle: CSSProperties = {
-  fontSize: 12,
-  color: 'var(--muted)',
-};
-
-const sectionStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 16,
-};
-
-const sectionHeaderStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 16,
-  flexWrap: 'wrap',
-};
-
-const sectionTitleStyle: CSSProperties = {
-  margin: 0,
-  fontFamily: 'var(--font-display)',
-  fontSize: 28,
-  fontWeight: 400,
-  letterSpacing: '-0.03em',
-  lineHeight: 1.05,
-  color: 'var(--ink)',
-};
-
-const sectionControlsStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 12,
-  flexWrap: 'wrap',
-};
-
-const tabsWrapStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  flexWrap: 'wrap',
-};
-
-function tabStyle(active: boolean): CSSProperties {
-  return {
-    padding: '9px 12px',
-    borderRadius: 999,
-    border: active ? '1px solid #b7ead7' : '1px solid var(--line)',
-    background: active ? 'var(--accent-soft)' : 'var(--card)',
-    color: active ? 'var(--accent)' : 'var(--muted)',
-    fontSize: 12.5,
-    fontWeight: 700,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  };
+function pluralize(n: number, word: string): string {
+  return n === 1 ? word : `${word}s`;
 }
-
-const sortWrapStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 8,
-};
-
-const sortLabelStyle: CSSProperties = {
-  fontSize: 12,
-  color: 'var(--muted)',
-};
-
-const sortSelectStyle: CSSProperties = {
-  padding: '9px 12px',
-  borderRadius: 12,
-  border: '1px solid var(--line)',
-  background: 'var(--card)',
-  color: 'var(--ink)',
-  fontSize: 12.5,
-  fontFamily: 'inherit',
-};
-
-const appsGridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-  gap: 14,
-};
-
-const appCardStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 14,
-  padding: '16px',
-  borderRadius: 18,
-  border: '1px solid var(--line)',
-  background: 'var(--card)',
-};
-
-const appCardHeaderStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 12,
-};
-
-const appCardIdentityStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 12,
-  minWidth: 0,
-};
-
-const appCardIconWrapStyle: CSSProperties = {
-  width: 42,
-  height: 42,
-  borderRadius: 14,
-  border: '1px solid var(--line)',
-  background: 'var(--bg)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flexShrink: 0,
-};
-
-const appCardNameStyle: CSSProperties = {
-  fontSize: 15,
-  fontWeight: 700,
-  color: 'var(--ink)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-
-const appCardMetaStyle: CSSProperties = {
-  marginTop: 3,
-  fontSize: 12,
-  color: 'var(--muted)',
-};
-
-const appCardRunsStyle: CSSProperties = {
-  fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-  fontSize: 12,
-  color: 'var(--muted)',
-};
-
-const appActionsStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 14,
-  flexWrap: 'wrap',
-  marginTop: 'auto',
-};
-
-const appActionLinkStyle: CSSProperties = {
-  fontSize: 12.5,
-  fontWeight: 700,
-  color: 'var(--accent)',
-  textDecoration: 'none',
-};
-
-const newAppTileStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 14,
-  padding: '16px',
-  borderRadius: 18,
-  border: '1px dashed var(--line)',
-  background: 'var(--bg)',
-};
-
-const newAppEyebrowStyle: CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: '0.1em',
-  textTransform: 'uppercase',
-  color: 'var(--accent)',
-};
-
-const newAppTitleStyle: CSSProperties = {
-  fontSize: 16,
-  fontWeight: 700,
-  lineHeight: 1.4,
-  color: 'var(--ink)',
-};
-
-const newAppInputShellStyle: CSSProperties = {
-  borderRadius: 14,
-  border: '1px solid var(--line)',
-  background: 'var(--card)',
-  padding: '10px 12px',
-};
-
-const newAppInputStyle: CSSProperties = {
-  width: '100%',
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--ink)',
-  fontSize: 13,
-  fontFamily: 'inherit',
-  outline: 'none',
-};
-
-const newAppButtonStyle: CSSProperties = {
-  alignSelf: 'flex-start',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '10px 14px',
-  borderRadius: 12,
-  border: 'none',
-  background: 'var(--ink)',
-  color: '#fff',
-  fontSize: 12.5,
-  fontWeight: 700,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-};
-
-const activitySectionStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 14,
-};
-
-const activityHeaderStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 16,
-  flexWrap: 'wrap',
-};
-
-const activitySubheadStyle: CSSProperties = {
-  margin: '6px 0 0',
-  fontSize: 13,
-  color: 'var(--muted)',
-};
-
-const activityLinkStyle: CSSProperties = {
-  fontSize: 12.5,
-  fontWeight: 700,
-  color: 'var(--accent)',
-  textDecoration: 'none',
-};
-
-const activityListStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  borderRadius: 18,
-  border: '1px solid var(--line)',
-  overflow: 'hidden',
-  background: 'var(--card)',
-};
-
-const activityRowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '36px minmax(0, 1fr)',
-  gap: 12,
-  alignItems: 'center',
-  padding: '14px 16px',
-  borderBottom: '1px solid var(--line)',
-};
-
-const activityIconWrapStyle: CSSProperties = {
-  width: 36,
-  height: 36,
-  borderRadius: 12,
-  border: '1px solid var(--line)',
-  background: 'var(--bg)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const activityTextStyle: CSSProperties = {
-  fontSize: 13.5,
-  lineHeight: 1.5,
-  color: 'var(--ink)',
-};
-
-const activityStrongStyle: CSSProperties = {
-  fontWeight: 700,
-};
-
-const activityMetaLineStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  marginTop: 4,
-  fontSize: 12,
-  color: 'var(--muted)',
-};
-
-const emptyActivityStyle: CSSProperties = {
-  padding: '24px 18px',
-  borderRadius: 18,
-  border: '1px dashed var(--line)',
-  background: 'var(--bg)',
-  fontSize: 13,
-  color: 'var(--muted)',
-};
-
-const loadingTileStyle: CSSProperties = {
-  padding: '18px',
-  borderRadius: 18,
-  border: '1px dashed var(--line)',
-  background: 'var(--bg)',
-  fontSize: 13,
-  color: 'var(--muted)',
-};
-
-const errorStyle: CSSProperties = {
-  padding: '14px 16px',
-  borderRadius: 16,
-  border: '1px solid #f4b7b1',
-  background: '#fdecea',
-  color: '#5c2d26',
-  fontSize: 13.5,
-  lineHeight: 1.6,
-};

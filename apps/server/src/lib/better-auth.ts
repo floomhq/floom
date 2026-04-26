@@ -29,7 +29,7 @@ import { organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import { db } from '../db.js';
 import type { UserWriteColumn, UserWriteInput } from '../adapters/types.js';
-import { cleanupUserOrphans } from '../services/cleanup.js';
+import { initiateAccountSoftDelete } from '../services/account-deletion.js';
 import {
   renderResetPasswordEmail,
   renderVerificationEmail,
@@ -259,10 +259,11 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       enabled: true,
       requireEmailVerification: true,
       autoSignIn: false,
-      // SMTP via Resend (2026-04-20). When RESEND_API_KEY is unset the
-      // handler in ./email.ts falls back to stdout — Better Auth won't
-      // crash, the reset URL just appears in the server log instead of
-      // the user's inbox. `url` is built by Better Auth from
+      // SMTP via Resend (2026-04-20). Outside the Resend-required production
+      // signal, when RESEND_API_KEY is unset the handler in ./email.ts falls
+      // back to stdout: Better Auth won't crash, the reset URL just appears
+      // in the server log instead of the user's inbox. `url` is built by
+      // Better Auth from
       // `${baseURL}/auth/reset-password/${token}?callbackURL=...`; it
       // redirects through the built-in verification endpoint to the
       // frontend's /reset-password page, which is the canonical pattern
@@ -535,23 +536,18 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       // `password` kwarg on the body verifies the caller owns the credentials.
       deleteUser: {
         enabled: true,
-        // 2026-04-20: Better Auth fires afterDelete after it's already
-        // committed the user row. Wrap the Floom cleanup in try/catch so a
-        // failure here doesn't leave the user in an inconsistent Better
-        // Auth state. We log loudly and keep going; the cleanup is
-        // idempotent, so an operator can re-run it manually if needed.
-        afterDelete: async (user: { id: string }) => {
-          if (!user?.id) return;
-          try {
-            cleanupUserOrphans(user.id);
-          } catch (err) {
-            console.error(
-              '[auth] cleanupUserOrphans failed for user',
-              user.id,
-              err,
-            );
-          }
+        // ADR-012: the full server shadows /auth/delete-user and routes it
+        // through the account soft-delete service. This hook is a final
+        // guard for direct auth.handler callers; throwing prevents Better
+        // Auth from hard-deleting the credential row after the tombstone is
+        // written.
+        beforeDelete: async (
+          user: { id: string; email?: string | null },
+        ): Promise<void> => {
+          if (!user?.id || !user.email) return;
+          initiateAccountSoftDelete(user.id, user.email);
           await notifyAuthUserDeleteListeners(user.id);
+          throw new Error('account_soft_delete_intercepted');
         },
       },
     },
@@ -568,11 +564,22 @@ export function getAuth(): FloomAuth | null {
     cachedAuth = null;
     return null;
   }
-  const built = betterAuth(buildAuthOptions());
+  const built = betterAuth(buildAuthOptions()) as unknown as FloomAuth;
+  const originalDeleteUser = built.api.deleteUser.bind(built.api);
+  built.api.deleteUser = async (args) => {
+    try {
+      return await originalDeleteUser(args);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'account_soft_delete_intercepted') {
+        return { ok: true };
+      }
+      throw err;
+    }
+  };
   // Cast through `unknown` to widen the deeply-generic Better Auth return
   // type to the structural FloomAuth interface above. The shape is verified
   // by the integration test that round-trips a getSession call.
-  cachedAuth = built as unknown as FloomAuth;
+  cachedAuth = built;
   return cachedAuth;
 }
 

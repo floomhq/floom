@@ -17,7 +17,7 @@ process.env.FLOOM_SEED_LAUNCH_DEMOS = 'false';
 // 3051 or any of the sibling stress tests.
 process.env.PORT = process.env.PORT || '38517';
 delete process.env.METRICS_TOKEN;
-delete process.env.SENTRY_DSN;
+delete process.env.SENTRY_SERVER_DSN;
 delete process.env.FLOOM_AUTH_TOKEN;
 
 let passed = 0;
@@ -98,10 +98,11 @@ process.env.METRICS_TOKEN = 'right-token-secret-value-xyz';
       body.includes('floom_runs_total{status="timeout"}'),
   );
   log(
-    'rate_limit_hits_total emits all four scopes',
+    'rate_limit_hits_total emits all five scopes',
     body.includes('floom_rate_limit_hits_total{scope="ip"}') &&
       body.includes('floom_rate_limit_hits_total{scope="user"}') &&
       body.includes('floom_rate_limit_hits_total{scope="app"}') &&
+      body.includes('floom_rate_limit_hits_total{scope="agent_token"}') &&
       body.includes('floom_rate_limit_hits_total{scope="mcp_ingest"}'),
   );
   log(

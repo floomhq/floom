@@ -9,8 +9,9 @@ name: Deploy preview
 # Flow: push main -> wait for CI (typecheck + test) to pass -> SSH to AX41 ->
 # the forced-command deploy key runs /usr/local/sbin/floom-deploy-preview.sh
 # which rebuilds the image, rolls the preview container with --no-deps,
-# health-checks :3052, and rolls back to the previous compose if the new
-# image fails to come up. Prod compose + container are not touched.
+# health-checks :3052, runs launch-app real-run gate checks, and rolls back
+# to the previous compose if health or gate checks fail. Prod compose +
+# container are not touched.
 
 on:
   push:

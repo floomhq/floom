@@ -36,8 +36,10 @@ import Docker from 'dockerode';
 import { db } from '../db.js';
 import { adapters } from '../adapters/index.js';
 import { newAppId, newSecretId } from '../lib/ids.js';
+import { generateLinkShareToken } from '../lib/link-share-token.js';
 import { normalizeManifest, ManifestError } from './manifest.js';
 import { slugify, SlugTakenError, deriveSlugSuggestions } from './openapi-ingest.js';
+import { auditLog } from './audit-log.js';
 import { setPolicy, setCreatorSecret } from './app_creator_secrets.js';
 import * as userSecrets from './user_secrets.js';
 import type { NormalizedManifest, SessionContext } from '../types.js';
@@ -123,6 +125,7 @@ function synthesizeDefaultManifest(
     node_dependencies: {},
     secrets_needed: secrets,
     manifest_version: '2.0',
+    network: { allowed_domains: [] },
   };
 }
 
@@ -343,12 +346,16 @@ export async function ingestAppFromDockerImage(args: {
   secret_bindings?: SecretBindings;
   workspace_id: string;
   author_user_id: string;
+  actor_token_id?: string | null;
+  actor_ip?: string | null;
   /**
    * Visibility override. Defaults to 'private' for cloud workspaces (so
    * user-published apps never land in the public hub by accident) and
    * 'public' for the synthetic 'local' workspace (OSS mode).
    */
-  visibility?: 'public' | 'private' | 'auth-required';
+  visibility?: 'public' | 'private' | 'auth-required' | 'link';
+  link_share_requires_auth?: boolean;
+  auth_required?: boolean;
   /**
    * Injected by tests to swap the Docker client for a mock. Production
    * callers leave this undefined and we build a default client against the
@@ -394,7 +401,7 @@ export async function ingestAppFromDockerImage(args: {
   let manifest: NormalizedManifest;
   if (args.manifest !== undefined) {
     try {
-      manifest = normalizeManifest(args.manifest);
+      manifest = normalizeManifest(args.manifest, { requireNetworkDeclaration: true });
     } catch (err) {
       if (err instanceof ManifestError) throw err;
       throw new DockerImageIngestError(
@@ -418,8 +425,10 @@ export async function ingestAppFromDockerImage(args: {
   // re-publish to update the row; other workspaces get a SlugTakenError with
   // three recovery suggestions so the UI can render pills.
   const existing = db
-    .prepare('SELECT id, workspace_id, visibility FROM apps WHERE slug = ?')
-    .get(slug) as { id: string; workspace_id: string; visibility: string } | undefined;
+    .prepare('SELECT id, workspace_id, visibility, link_share_token, publish_status FROM apps WHERE slug = ?')
+    .get(slug) as
+    | { id: string; workspace_id: string; visibility: string; link_share_token: string | null; publish_status: string | null }
+    | undefined;
   if (
     existing &&
     existing.workspace_id !== args.workspace_id &&
@@ -428,16 +437,46 @@ export async function ingestAppFromDockerImage(args: {
     throw new SlugTakenError(slug, deriveSlugSuggestions(slug));
   }
 
-  // Visibility: default to private for cloud workspaces, public for OSS 'local'.
-  let visibility: 'public' | 'private' | 'auth-required';
-  if (args.visibility !== undefined) {
-    visibility = args.visibility;
-  } else if (existing) {
-    visibility =
-      (existing.visibility as 'public' | 'private' | 'auth-required') || 'private';
-  } else {
-    visibility = args.workspace_id === 'local' ? 'public' : 'private';
+  if (args.auth_required !== undefined && args.link_share_requires_auth !== undefined) {
+    throw new DockerImageIngestError(
+      'manifest_invalid',
+      `${slug}: auth_required is deprecated; use link_share_requires_auth, not both fields`,
+    );
   }
+  const legacyVisibilityAuthRequired = args.visibility === 'auth-required';
+  if (args.auth_required !== undefined || legacyVisibilityAuthRequired) {
+    const field = args.auth_required !== undefined ? 'auth_required' : 'visibility: auth-required';
+    const action =
+      args.auth_required === true || legacyVisibilityAuthRequired
+        ? "mapping to visibility='link' and link_share_requires_auth=true"
+        : 'use link_share_requires_auth instead';
+    console.warn(
+      `[docker-image-ingest] ${slug}: ${field} is deprecated; ${action}.`,
+    );
+  }
+  const requestedVisibility =
+    args.auth_required === true ||
+    legacyVisibilityAuthRequired ||
+    args.link_share_requires_auth === true
+      ? 'link'
+      : args.visibility === 'public' || args.visibility === 'private' || args.visibility === 'link'
+        ? args.visibility
+        : null;
+  const visibility =
+    requestedVisibility ||
+    (existing?.visibility === 'public' ||
+    existing?.visibility === 'private' ||
+    existing?.visibility === 'link'
+      ? existing.visibility
+      : 'private');
+  const linkShareRequiresAuth =
+    args.auth_required === true ||
+    legacyVisibilityAuthRequired ||
+    args.link_share_requires_auth === true
+      ? 1
+      : 0;
+  const linkShareToken =
+    visibility === 'link' ? existing?.link_share_token || generateLinkShareToken() : null;
 
   const description =
     args.description ||
@@ -445,6 +484,7 @@ export async function ingestAppFromDockerImage(args: {
     `${name} (Docker image)`;
 
   const manifestJson = JSON.stringify(manifest);
+  const maxRunRetentionDays = manifest.max_run_retention_days ?? null;
 
   let appId: string;
   let created: boolean;
@@ -469,11 +509,14 @@ export async function ingestAppFromDockerImage(args: {
       openapi_spec_url: null,
       openapi_spec_cached: null,
       visibility,
+      link_share_requires_auth: linkShareRequiresAuth,
+      link_share_token: linkShareToken,
       is_async: 0,
       webhook_url: null,
       timeout_ms: null,
       retries: 0,
       async_mode: null,
+      max_run_retention_days: maxRunRetentionDays,
       workspace_id: args.workspace_id,
       author: args.author_user_id,
     });
@@ -510,11 +553,14 @@ export async function ingestAppFromDockerImage(args: {
       openapi_spec_url: null,
       openapi_spec_cached: null,
       visibility,
+      link_share_requires_auth: linkShareRequiresAuth,
+      link_share_token: linkShareToken,
       is_async: 0,
       webhook_url: null,
       timeout_ms: null,
       retries: 0,
       async_mode: null,
+      max_run_retention_days: maxRunRetentionDays,
       workspace_id: args.workspace_id,
       publish_status: 'pending_review',
     } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
@@ -553,6 +599,34 @@ export async function ingestAppFromDockerImage(args: {
       }
     }
   }
+
+  auditLog({
+    actor: {
+      userId: args.author_user_id,
+      tokenId: args.actor_token_id || null,
+      ip: args.actor_ip || null,
+    },
+    action: 'app.published',
+    target: { type: 'app', id: appId },
+    before: existing
+      ? {
+          slug,
+          visibility: existing.visibility,
+          publish_status: existing.publish_status,
+        }
+      : null,
+    after: {
+      slug,
+      visibility,
+      publish_status: existing?.publish_status || 'pending_review',
+    },
+    metadata: {
+      created,
+      source: 'docker_image',
+      workspace_id: args.workspace_id,
+      docker_image_ref: args.docker_image_ref,
+    },
+  });
 
   return { slug, name, created };
 }

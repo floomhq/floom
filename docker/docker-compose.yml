@@ -55,15 +55,15 @@ services:
       # RESEND_FROM: "Floom <noreply@send.floom.dev>"
       #
       # Observability (optional; all three are no-ops when unset):
-      # - SENTRY_DSN: error tracking for server exceptions
-      # - VITE_SENTRY_DSN: error tracking for the browser bundle (BUILD-TIME,
+      # - SENTRY_SERVER_DSN: error tracking for server exceptions
+      # - VITE_SENTRY_WEB_DSN: error tracking for the browser bundle (BUILD-TIME,
       #   must be baked at image build with --build-arg, not at container run)
       # - DISCORD_ALERTS_WEBHOOK_URL: Discord channel webhook for 5xx alerts,
       #   repeated-429 abuse signals, unhandledRejection / uncaughtException.
       #   Rate-limited to 1 alert / minute / title so a regression storm
       #   collapses to a steady stream instead of a firehose.
       # See docs/OBSERVABILITY_SETUP.md for the full wiring walk-through.
-      # SENTRY_DSN: ""
+      # SENTRY_SERVER_DSN: ""
       # DISCORD_ALERTS_WEBHOOK_URL: ""
       #
       # Secrets for your apps (add as many as needed — any env var matching

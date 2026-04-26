@@ -8,11 +8,10 @@
 // Mobile (<768px, #104): small bottom-left "Cookies" pill; tap expands to
 // the same strip treatment with a close control.
 //
-// Storage + consent lives in `lib/consent.ts` (so the telemetry modules
-// can read the choice without importing React). This component calls
-// `setConsent` AND inlines `initBrowserSentry` / `initPostHog` (on "Accept
-// all") and their close equivalents (on the "all" -> "essential" downgrade)
-// so the choice applies in the same session without a reload.
+// Storage + consent lives in `lib/consent.ts` (so telemetry modules can read
+// the choice without importing React). This component calls `setConsent` and
+// controls PostHog analytics immediately without a reload. Sentry error
+// tracking is controlled by its DSN and starts before React mounts.
 //
 // Root-padding sizing (audit 2026-04-24): the old implementation reserved
 // a hardcoded 84px on `<html>`. That fit a single-line banner at ≥1200px
@@ -31,7 +30,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getConsent, setConsent, type Consent } from '../lib/consent';
-import { initBrowserSentry, closeBrowserSentry } from '../lib/sentry';
 import { initPostHog, closePostHog } from '../lib/posthog';
 
 /** Viewport width below this uses the collapsed mobile pill first. */
@@ -157,10 +155,8 @@ export function CookieBanner() {
     const previous = getConsent();
     setConsent(choice);
     if (choice === 'all') {
-      initBrowserSentry();
       initPostHog();
     } else if (previous === 'all') {
-      closeBrowserSentry();
       closePostHog();
     }
     setVisible(false);

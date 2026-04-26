@@ -8,6 +8,9 @@
 
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 let passed = 0;
 let failed = 0;
@@ -25,9 +28,9 @@ function log(label, ok, detail) {
 function runCase(payload) {
   return spawnSync(
     'python3',
-    [resolve('examples/competitor-analyzer/main.py'), JSON.stringify(payload)],
+    [resolve(repoRoot, 'examples/competitor-analyzer/main.py'), JSON.stringify(payload)],
     {
-      cwd: resolve('.'),
+      cwd: repoRoot,
       encoding: 'utf8',
       env: { ...process.env, GEMINI_API_KEY: '' },
     },

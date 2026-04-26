@@ -90,8 +90,8 @@ function collectMetrics(): string {
   lines.push('# HELP floom_rate_limit_hits_total Total 429 responses emitted by the rate limiter, grouped by scope.');
   lines.push('# TYPE floom_rate_limit_hits_total counter');
   const rlSnap = snapshotRateLimitHits();
-  // Emit all four scopes so the series is always present.
-  for (const scope of ['ip', 'user', 'app', 'mcp_ingest']) {
+  // Emit every scope so the series is always present.
+  for (const scope of ['ip', 'user', 'app', 'agent_token', 'mcp_ingest']) {
     const n = rlSnap[scope] || 0;
     lines.push(`floom_rate_limit_hits_total{scope="${scope}"} ${n}`);
   }

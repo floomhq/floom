@@ -42,7 +42,10 @@ Behavior:
    only. Backup goes to `docker-compose.yml.bak.auto-<ts>`.
 4. `docker compose up -d --no-deps floom-preview-launch`.
 5. Health-checks `http://127.0.0.1:3052/api/health` for up to 60 s.
-6. On failure, restores the preview compose backup and rolls preview
+6. Runs `scripts/ops/launch-apps-real-run-gate.sh` against preview:
+   each launch app must finish with `dry_run=false`, `model!="dry-run"`,
+   and under the run-time budget (30s default).
+7. On failure (health or gate), restores the preview compose backup and rolls preview
    back. Prod compose and container are never touched.
 
 ### Where it runs
@@ -73,7 +76,10 @@ Behavior:
    confused during a cross-contamination check).
 4. `docker compose up -d --no-deps floom-mcp-preview`.
 5. Health-checks `http://127.0.0.1:3051/api/health` for up to 60 s.
-6. On failure, restores the prod compose backup and rolls prod back.
+6. Runs `scripts/ops/launch-apps-real-run-gate.sh` against prod:
+   each launch app must finish with `dry_run=false`, `model!="dry-run"`,
+   and under the run-time budget (30s default).
+7. On failure (health or gate), restores the prod compose backup and rolls prod back.
    Preview compose and container are never touched.
 
 ### Where it runs

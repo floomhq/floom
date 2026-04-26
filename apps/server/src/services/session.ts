@@ -18,14 +18,27 @@
 //      request after login.
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import {
+  db,
+  DEFAULT_USER_ID,
+  DEFAULT_WORKSPACE_ID,
+  isSeededAdminEmail,
+} from '../db.js';
 import { adapters } from '../adapters/index.js';
 import { getAuth, isCloudMode } from '../lib/better-auth.js';
+import { agentContextToSessionContext, getAgentTokenContext } from '../lib/agent-tokens.js';
 import type { RekeyResult, SessionContext } from '../types.js';
 import {
   getActiveWorkspaceId,
   provisionPersonalWorkspace,
 } from './workspaces.js';
+import { linkPendingEmailInvites } from './sharing.js';
+import {
+  getUserDeletionState,
+  isDeleteExpired,
+  permanentDeleteAccount,
+  revokeAccountSessions,
+} from './account-deletion.js';
 
 const COOKIE_NAME = 'floom_device';
 // 10 years in seconds — the cookie is a stable device id, not a session.
@@ -114,6 +127,11 @@ export function getOrCreateDeviceId(c: Context): string {
  */
 export async function resolveUserContext(c: Context): Promise<SessionContext> {
   const device_id = getOrCreateDeviceId(c);
+  const agentAuth = getAgentTokenContext(c);
+  if (agentAuth) {
+    return agentContextToSessionContext(agentAuth, device_id);
+  }
+
   const ossCtx: SessionContext = {
     workspace_id: DEFAULT_WORKSPACE_ID,
     user_id: DEFAULT_USER_ID,
@@ -171,6 +189,7 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
   // Idempotent: inserts auth_provider/auth_subject on first sight, then
   // refreshes profile fields on subsequent calls.
   const userId = session.user.id;
+  const isSeededAdmin = isSeededAdminEmail(session.user.email);
   await adapters.storage.upsertUser(
     {
       id: userId,
@@ -179,9 +198,24 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
       image: session.user.image || null,
       auth_provider: 'better-auth',
       auth_subject: userId,
+      ...(isSeededAdmin ? { is_admin: 1 as const } : {}),
     },
-    ['email', 'name', 'image'],
+    isSeededAdmin
+      ? ['email', 'name', 'image', 'is_admin']
+      : ['email', 'name', 'image'],
   );
+
+  const deletionState = getUserDeletionState(userId);
+  if (deletionState?.deleted_at) {
+    if (isDeleteExpired(deletionState)) {
+      permanentDeleteAccount(userId);
+    } else {
+      revokeAccountSessions(userId);
+    }
+    return ossCtx;
+  }
+
+  linkPendingEmailInvites(userId, session.user.email);
 
   // Resolve the active workspace. If the user has none yet (brand-new
   // account, no invite accepted, no manual create), bootstrap a default

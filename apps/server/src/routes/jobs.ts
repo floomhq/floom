@@ -42,7 +42,12 @@ jobsRouter.post('/', async (c) => {
   }
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
+    slug: row.slug,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;
@@ -148,7 +153,12 @@ jobsRouter.get('/:job_id', async (c) => {
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
+    slug: app.slug,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
+    link_share_requires_auth: app.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;
@@ -169,7 +179,12 @@ jobsRouter.post('/:job_id/cancel', async (c) => {
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
+    slug: app.slug,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
+    link_share_requires_auth: app.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;

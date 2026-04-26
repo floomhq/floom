@@ -6,7 +6,7 @@ Floom ships basic operator observability now, plus per-run logs for users. It do
 
 - `GET /api/health` for a simple liveness check.
 - `GET /api/metrics` for Prometheus-style metrics when `METRICS_TOKEN` is configured.
-- Optional **Sentry** on the server when `SENTRY_DSN` is set.
+- Optional **Sentry** on the server when `SENTRY_SERVER_DSN` is set.
 - Per-run logs and status on the run detail surfaces.
 
 ## Metrics

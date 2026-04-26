@@ -55,18 +55,27 @@ NAME=$(read_field name)
 DESC=$(read_field description)
 SPEC=$(read_field openapi_spec_url)
 VIS=$(read_field visibility)
+RETENTION_DAYS=$(read_field max_run_retention_days)
 [[ -z "$VIS" ]] && VIS="private"
+LINK_SHARE_REQUIRES_AUTH=$(read_field link_share_requires_auth)
+AUTH_REQUIRED=$(read_field auth_required)
 
 if [[ -n "$SPEC" ]]; then
   BODY=$(python3 -c "
 import json
-print(json.dumps({
+body = {
     'openapi_url': '$SPEC',
     'slug': '$SLUG',
     'name': '$NAME',
     'description': '$DESC',
     'visibility': '$VIS',
-}))")
+    **({'link_share_requires_auth': True} if '$LINK_SHARE_REQUIRES_AUTH'.lower() == 'true' else {}),
+    **({'auth_required': True} if '$AUTH_REQUIRED'.lower() == 'true' else {}),
+}
+retention = '$RETENTION_DAYS'
+if retention:
+    body['max_run_retention_days'] = int(retention)
+print(json.dumps(body))")
 
   if [[ "$DRY_RUN" == "1" ]]; then
     export FLOOM_DRY_RUN=1

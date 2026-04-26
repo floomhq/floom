@@ -81,7 +81,7 @@ apps:
     # oauth2_token_url: ...         # required when auth: oauth2_client_credentials
     # oauth2_scopes: "read write"   # optional scopes
     secrets: [PETSTORE_TOKEN]       # env var names to pick up as per-app secrets
-    visibility: public       # public | auth-required (requires FLOOM_AUTH_TOKEN)
+    visibility: public       # public | private | link
     display_name: Petstore
     description: "OpenAPI 3.0 reference pet store."
     category: developer-tools
@@ -451,7 +451,7 @@ Always mount `/data` to a named volume or a host directory. `docker run --rm` wi
 - **Do not combine `FLOOM_AUTH_TOKEN` with `FLOOM_CLOUD_MODE=true` on the same deployment.** Both systems read `Authorization: Bearer <value>` from the same header. The global middleware matches the operator token first and rejects the request before Better Auth sees it, so every signed-in user's API key is silently 401'd. Pick one per deployment: `FLOOM_AUTH_TOKEN` for a single-tenant or CI-guarded box, `FLOOM_CLOUD_MODE` for a multi-user Floom. If you need an operator kill-switch on a Cloud deployment, run a second private instance and put the token there. See the comment block above `FLOOM_AUTH_TOKEN` in `docker/.env.example`.
 - **Avoid `-v /var/run/docker.sock:/var/run/docker.sock` unless you trust everyone who can reach port 3051.** Mounting the Docker socket inside a container exposed to the network grants host root.
 - **FLOOM_SEED_APPS is off by default** for exactly this reason: it requires the Docker socket mount.
-- **Per-app visibility** (`visibility: auth-required` in apps.yaml) lets you keep some apps public while gating specific ones behind `FLOOM_AUTH_TOKEN`.
+- **Per-app link sharing** (`visibility: link` plus `link_share_requires_auth: true` in `floom.yaml`) lets you share a secret link that also requires a signed-in Floom session. The legacy `auth_required` manifest field is deprecated and maps to this model during publish.
 
 ## Troubleshooting
 
@@ -796,7 +796,7 @@ nothing leaves the box until you opt in.
 Free-tier Sentry (5K errors/month) is plenty for internal-tooling scale.
 
 1. Sign up at [sentry.io](https://sentry.io), create a project, copy the DSN.
-2. Set `SENTRY_DSN` (server) and `VITE_SENTRY_DSN` (web) in your `.env`.
+2. Set `SENTRY_SERVER_DSN` (server) and `VITE_SENTRY_WEB_DSN` (web) in your `.env`.
 3. Restart the container. The server logs `[sentry] initialized` on boot.
 
 When either DSN is unset, the SDK is a no-op — safe to deploy without any

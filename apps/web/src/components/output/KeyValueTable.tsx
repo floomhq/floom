@@ -8,6 +8,7 @@
 // Plain scalars render inline.
 import { useState } from 'react';
 import { CopyButton } from './CopyButton';
+import { SectionHeader } from './SectionHeader';
 import { StringList } from './StringList';
 
 function isArrayOfStrings(v: unknown): v is string[] {
@@ -61,36 +62,20 @@ export function KeyValueTable({ entries, label }: KeyValueTableProps) {
   return (
     <div
       data-renderer="KeyValueTable"
-      className="app-expanded-card"
+      className="app-expanded-card floom-output-card"
       style={{ position: 'relative' }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          marginBottom: 10,
-          gap: 12,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}
-        >
-          {label ?? 'Result'}
-        </div>
-        <CopyButton value={allJson} label="Copy JSON" />
-      </div>
+      <SectionHeader
+        label={label ?? 'Result'}
+        actions={<CopyButton value={allJson} label="Copy JSON" />}
+      />
       <table
         style={{
           width: '100%',
           borderCollapse: 'collapse',
           fontSize: 13,
-          lineHeight: 1.5,
+          lineHeight: 1.55,
+          tableLayout: 'fixed',
         }}
       >
         <tbody>

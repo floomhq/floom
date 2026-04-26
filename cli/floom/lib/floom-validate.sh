@@ -6,6 +6,7 @@
 #   2. Required fields present: name, slug, description.
 #   3. Slug matches ^[a-z0-9][a-z0-9-]{0,47}$.
 #   4. Either openapi_spec_url OR (runtime + actions) is present.
+#   5. network.allowed_domains is valid when present.
 #
 # Exit 0 on success, 1 on any validation failure. First error wins and is
 # printed to stderr with the exact field name.
@@ -85,6 +86,84 @@ if has_runtime:
     if not isinstance(actions, dict) or not actions:
         print("floom-validate: actions must be a non-empty mapping", file=sys.stderr)
         sys.exit(1)
+
+retention = m.get("max_run_retention_days")
+if retention is not None:
+    if not isinstance(retention, int) or isinstance(retention, bool):
+        print(
+            "floom-validate: max_run_retention_days must be a positive integer",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if retention < 1 or retention > 3650:
+        print(
+            "floom-validate: max_run_retention_days must be between 1 and 3650",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+def valid_domain(host):
+    if not isinstance(host, str) or not host or len(host) > 253 or ".." in host:
+        return False
+    labels = host.split(".")
+    if len(labels) < 2:
+        return False
+    return all(
+        0 < len(label) <= 63
+        and not label.startswith("-")
+        and not label.endswith("-")
+        and re.match(r"^[a-z0-9-]+$", label)
+        for label in labels
+    )
+
+network = m.get("network", {"allowed_domains": []})
+if network is None or not isinstance(network, dict):
+    print("floom-validate: network must be a mapping", file=sys.stderr)
+    sys.exit(1)
+allowed = network.get("allowed_domains", [])
+if not isinstance(allowed, list) or any(not isinstance(d, str) for d in allowed):
+    print("floom-validate: network.allowed_domains must be a list of strings", file=sys.stderr)
+    sys.exit(1)
+if len(allowed) > 20:
+    print("floom-validate: network.allowed_domains can contain at most 20 domains", file=sys.stderr)
+    sys.exit(1)
+for i, raw_domain in enumerate(allowed):
+    domain = raw_domain.strip().lower().rstrip(".")
+    if domain == "*":
+        print(f"floom-validate: network.allowed_domains[{i}] cannot be '*'", file=sys.stderr)
+        sys.exit(1)
+    if "/" in domain or "@" in domain or ":" in domain or re.match(r"^(\d{1,3}\.){3}\d{1,3}$", domain) or domain == "::1":
+        print(
+            f"floom-validate: network.allowed_domains[{i}] must be a domain or '*.domain' glob",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if domain.startswith("*."):
+        if not valid_domain(domain[2:]):
+            print(f"floom-validate: invalid wildcard domain: {raw_domain}", file=sys.stderr)
+            sys.exit(1)
+    elif "*" in domain:
+        print(
+            f"floom-validate: network.allowed_domains[{i}] wildcard must use '*.domain'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    elif not valid_domain(domain):
+        print(f"floom-validate: invalid domain: {raw_domain}", file=sys.stderr)
+        sys.exit(1)
+
+if "auth_required" in m and "link_share_requires_auth" in m:
+    print(
+        "floom-validate: auth_required is deprecated; use link_share_requires_auth, not both fields",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+if "auth_required" in m:
+    print(
+        "floom-validate: warning: auth_required is deprecated; use link_share_requires_auth",
+        file=sys.stderr,
+    )
 
 print("ok")
 PY

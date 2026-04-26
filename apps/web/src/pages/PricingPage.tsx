@@ -687,27 +687,6 @@ export function PricingPage() {
         ))}
       </section>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Responsive overrides                                                 */}
-      {/* ------------------------------------------------------------------ */}
-      <style>{`
-        @media (max-width: 700px) {
-          .selfhost-inner {
-            grid-template-columns: 1fr !important;
-          }
-        }
-        @media (max-width: 640px) {
-          /* Mobile polish: serif headlines are oversized at 52/72px on a
-             375px viewport. Scale them down so the hero + free-card fit
-             above the fold without wrapping awkwardly. */
-          [data-testid="pricing-hero"] { padding: 36px 20px 8px !important; }
-          [data-testid="pricing-hero"] h1 { font-size: 34px !important; line-height: 1.08 !important; }
-          [data-testid="pricing-hero"] p { font-size: 15px !important; }
-          [data-testid="pricing-free-card"] { padding: 0 16px !important; margin: 24px auto 36px !important; }
-          [data-testid="pricing-free-card"] > div { padding: 28px 20px 24px !important; }
-          [data-testid="pricing-free-card"] > div > div:first-of-type { font-size: 56px !important; }
-        }
-      `}</style>
     </PageShell>
   );
 }

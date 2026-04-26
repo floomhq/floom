@@ -54,7 +54,8 @@ jobs:
           echo "  3. Swap image tag in /opt/floom-mcp-preview/docker-compose.yml"
           echo "  4. docker compose up -d --no-deps floom-mcp-preview"
           echo "  5. Health-check http://127.0.0.1:3051/api/health"
-          echo "  6. On failure: restore prod compose backup, restart prod."
+          echo "  6. Run launch-app real-run gate (/api/run + no-dry-run checks)"
+          echo "  7. On failure: restore prod compose backup, restart prod."
           echo "  (Preview compose + container are never touched.)"
           echo "=================================================="
 

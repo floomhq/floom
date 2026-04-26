@@ -24,6 +24,11 @@ function log(label, ok, detail) {
   }
 }
 
+function directiveValue(csp, directive) {
+  const m = csp.match(new RegExp(`${directive}\\s+([^;]+)`));
+  return (m?.[1] || '').trim();
+}
+
 // Build a tiny Hono app that mirrors how apps/server/src/index.ts mounts
 // the middleware: before any routes.
 const app = new Hono();
@@ -85,26 +90,40 @@ app.get('/renderer/foo/frame.html', (c) => {
     res.headers.get('referrer-policy') === 'strict-origin-when-cross-origin',
   );
 
-  // 2026-04-24: We re-allow 'unsafe-inline' for style-src-elem because
-  // the app has 18 React components that render JSX `<style>{`@media…`}</style>`
-  // blocks for responsive layout. Stripping unsafe-inline (pentest MED #380)
-  // silently killed every one of those media queries — mobile /apps
-  // stacked 4 tiles into 73.5px columns, /p/:slug mobile grid broke, etc.
-  // Tracking issue for migrating the JSX <style> tags to static CSS
-  // modules in docs/ops/security-headers.md; once that migration lands
-  // we can re-strip 'unsafe-inline' from style-src-elem.
+  const styleSrc = directiveValue(csp, 'style-src');
+  const styleSrcElem = directiveValue(csp, 'style-src-elem');
+  const styleSrcAttr = directiveValue(csp, 'style-src-attr');
+  const connectSrc = directiveValue(csp, 'connect-src');
   log(
-    "landing: style-src-elem includes 'unsafe-inline' (JSX <style> compat)",
-    /style-src-elem [^;]*'unsafe-inline'/.test(csp),
-    `got=${csp}`,
+    "landing: style-src contains self",
+    styleSrc.includes("'self'"),
+    `got=${styleSrc}`,
   );
   log(
-    'landing: style-src-elem keeps same-origin + Google Fonts',
-    csp.includes("style-src-elem 'self' https://fonts.googleapis.com 'unsafe-inline'"),
+    "landing: style-src excludes 'unsafe-inline'",
+    !styleSrc.includes("'unsafe-inline'"),
+    `got=${styleSrc}`,
   );
   log(
-    "landing: style-src-attr allows inline (React style={{}} compat)",
-    csp.includes("style-src-attr 'unsafe-inline'"),
+    "landing: style-src-elem excludes 'unsafe-inline'",
+    !styleSrcElem.includes("'unsafe-inline'"),
+    `got=${styleSrcElem}`,
+  );
+  log(
+    "landing: style-src-attr includes 'unsafe-inline' (intentional)",
+    styleSrcAttr.includes("'unsafe-inline'"),
+    `got=${styleSrcAttr}`,
+  );
+  log(
+    'landing: connect-src allows GitHub stars API',
+    connectSrc.includes('https://api.github.com'),
+    `got=${connectSrc}`,
+  );
+  log(
+    'landing: connect-src allows Sentry ingest',
+    connectSrc.includes('https://*.ingest.sentry.io') &&
+      connectSrc.includes('https://*.ingest.us.sentry.io'),
+    `got=${connectSrc}`,
   );
 
   // Pentest MED #379 — Permissions-Policy + Cross-Origin isolation family.

@@ -41,6 +41,7 @@ The normalized manifest shape (v2.0):
   "runtime": "python",
   "apt_packages": ["jq"],
   "secrets_needed": [],
+  "network": { "allowed_domains": [] },
   "actions": {
     "analyze": {
       "label": "Analyze Repo",
@@ -72,6 +73,7 @@ The normalized manifest shape (v2.0):
 | `node_dependencies` | `Record<string, string>` | no | Package → version map. |
 | `apt_packages` | `string[]` | no | OS packages available at runtime. |
 | `secrets_needed` | `string[]` | no | Names of env vars the app needs (§9). |
+| `network.allowed_domains` | `string[]` | yes for new hosted apps | Outbound domain allowlist. Empty list means no outbound network (§11). |
 | `memory_keys` | `string[]` | no | Keys writable to per-user app memory. |
 | `blocked_reason` | string | no | Free-text reason the app can't run (surfaced on the store). |
 | `license` | string | no | SPDX identifier (e.g. `"MIT"`), set from `info.license` at ingest. |
@@ -349,7 +351,31 @@ Source: [`services/runner.ts`](../apps/server/src/services/runner.ts), [`service
 
 ---
 
-## 11. Extensibility — what's replaceable
+## 11. Outbound Network Policy
+
+Hosted Docker app containers are outbound-denied by default. New manifests
+declare:
+
+```json
+{
+  "network": {
+    "allowed_domains": ["api.openai.com", "*.example-api.com"]
+  }
+}
+```
+
+`allowed_domains: []` blocks all outbound network. Entries are exact domains
+or `*.domain` globs. Servers reject `*`, URLs, ports, IP literals, invalid
+domains, and lists over 20 entries. At runtime, allowed hosts that resolve to
+private or local IPs are blocked.
+
+Persisted pre-ADR-016 manifests that omit `network` receive a compatibility
+allowlist for `api.openai.com`, `generativelanguage.googleapis.com`, and
+`api.anthropic.com`.
+
+---
+
+## 12. Extensibility — what's replaceable
 
 Floom is a protocol, not a single implementation. Adapter interfaces for the five pluggable concerns are formalized in [adapters.md](./adapters.md). The reference implementation ships in this repo (Docker + HTTP proxy runtime, SQLite storage, Better Auth, encrypted-column secrets, in-process metrics + Sentry). Alternate implementations welcome via PRs that conform to the interface contracts.
 

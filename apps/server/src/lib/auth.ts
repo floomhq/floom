@@ -4,9 +4,9 @@
 //   1. Global auth (FLOOM_AUTH_TOKEN env var) — if set, every /api/*, /mcp/*,
 //      and /p/* call must present a matching Authorization: Bearer <token>
 //      header (or ?access_token=... for GET endpoints). Health remains open.
-//   2. Per-app auth (app.visibility === 'auth-required') — on top of any
-//      global auth, the specific app can be gated even when global auth is
-//      off. Uses the same FLOOM_AUTH_TOKEN bearer check.
+//   2. Link-share auth (app.visibility === 'link' plus
+//      link_share_requires_auth=1) — the link token must be valid and the
+//      caller must have an authenticated Floom session.
 //   3. Per-app privacy (app.visibility === 'private') — only the app's
 //      author (user_id) can run/list/view it. Used for user-owned apps
 //      like ig-nano-scout that should never appear in the public directory.
@@ -16,7 +16,9 @@
 // stop casual abuse when a self-hoster exposes port 3051 to the internet.
 import type { Context, MiddlewareHandler } from 'hono';
 import type { SessionContext } from '../types.js';
+import { getPresentedAgentToken } from './agent-tokens.js';
 import { isCloudMode } from './better-auth.js';
+import { getAppAccessDecision } from '../services/sharing.js';
 
 // Actionable hints embedded in every 401/403 auth response. Single source
 // of truth so the ax-eval baseline fix (#536) can't drift across routes.
@@ -98,8 +100,12 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   // hosted instance with FLOOM_AUTH_TOKEN set still lets unauthenticated
   // visitors see the number on their own landing page.
   if (path === '/api/gh-stars' || path === '/api/gh-stars/') return next();
+  // GitHub push webhooks authenticate with X-Hub-Signature-256. External
+  // senders cannot present Floom's bearer token, so the route verifies HMAC.
+  if (path === '/api/studio/build/github-webhook') return next();
 
   const got = presentedToken(c);
+  if (got && getPresentedAgentToken(c)) return next();
   if (!got || !constantTimeEqual(got, expected)) {
     return c.json(
       {
@@ -114,7 +120,15 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   return next();
 };
 
-export type AppVisibility = 'public' | 'auth-required' | 'private';
+export type AppVisibility =
+  | 'public'
+  | 'auth-required'
+  | 'private'
+  | 'link'
+  | 'invited'
+  | 'pending_review'
+  | 'public_live'
+  | 'changes_requested';
 
 /**
  * Per-app auth check. Call at the top of a route handler where `app` has
@@ -127,10 +141,52 @@ export type AppVisibility = 'public' | 'auth-required' | 'private';
 export function checkAppVisibility(
   c: Context,
   visibility: AppVisibility | string | null | undefined,
-  owner?: { author?: string | null; ctx?: SessionContext | null },
+  owner?: {
+    app_id?: string | null;
+    slug?: string | null;
+    author?: string | null;
+    workspace_id?: string | null;
+    link_share_token?: string | null;
+    link_share_requires_auth?: number | boolean | null;
+    ctx?: SessionContext | null;
+  },
 ): Response | null {
   const v = (visibility || 'public') as AppVisibility;
-  if (v === 'public') return null;
+  if (v === 'public' || v === 'public_live') return null;
+
+  if (v === 'link' || v === 'invited' || v === 'pending_review' || v === 'changes_requested') {
+    const ctx = owner?.ctx ?? null;
+    const appId = owner?.app_id ?? null;
+    if (!ctx || !appId) {
+      return c.json({ error: 'App not found', code: 'not_found' }, 404);
+    }
+    const decision = getAppAccessDecision(
+      {
+        id: appId,
+        slug: owner?.slug ?? null,
+        author: owner?.author ?? null,
+        workspace_id: owner?.workspace_id ?? 'local',
+        visibility: v,
+        link_share_token: owner?.link_share_token ?? null,
+        link_share_requires_auth: owner?.link_share_requires_auth ?? false,
+      },
+      ctx,
+      c.req.query('key') || null,
+    );
+    if (decision.ok) return null;
+    if (decision.status === 401) {
+      return c.json(
+        {
+          error: 'Authentication required. Sign in and retry.',
+          code: 'auth_required',
+          hint: AUTH_HINT_CLOUD,
+          docs_url: AUTH_DOCS_URL,
+        },
+        401,
+      );
+    }
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
 
   if (v === 'private') {
     const author = owner?.author ?? null;
@@ -148,33 +204,7 @@ export function checkAppVisibility(
     return null;
   }
 
-  // 'auth-required' — falls back to the shared FLOOM_AUTH_TOKEN bearer check.
-  const expected = getExpectedToken();
-  if (!expected) {
-    return c.json(
-      {
-        error:
-          'App requires authentication but FLOOM_AUTH_TOKEN is not set on the server. Set the env var and retry.',
-        code: 'auth_required',
-        hint: AUTH_HINT_SELFHOST,
-        docs_url: AUTH_DOCS_URL,
-      },
-      401,
-    );
-  }
-  const got = presentedToken(c);
-  if (!got || !constantTimeEqual(got, expected)) {
-    return c.json(
-      {
-        error: 'Unauthorized: app requires a bearer token',
-        code: 'auth_required',
-        hint: AUTH_HINT_SELFHOST,
-        docs_url: AUTH_DOCS_URL,
-      },
-      401,
-    );
-  }
-  return null;
+  return c.json({ error: 'App not found', code: 'not_found' }, 404);
 }
 
 /**

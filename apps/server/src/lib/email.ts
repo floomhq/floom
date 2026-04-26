@@ -5,11 +5,13 @@
 // we currently support; the hard part (DKIM, SPF, DMARC on send.floom.dev)
 // is already done at the DNS layer.
 //
-// Graceful degradation: when `RESEND_API_KEY` is unset, every call logs
-// the intended payload to stdout and returns. This keeps local dev and
-// self-host installs that don't want to touch email provider accounts
-// working — the password-reset URL shows up in the server log so an
-// operator can copy/paste it. Boot does NOT crash when the key is absent.
+// Graceful degradation: outside the Resend-required production signal
+// (NODE_ENV=production with non-preview PUBLIC_URL), when `RESEND_API_KEY` is
+// unset, every call logs the intended payload to stdout and returns. This keeps
+// local dev, preview, and self-host installs that don't want to touch email
+// provider accounts working — the password-reset URL shows up in the server log
+// so an operator can copy/paste it. Production boot fails fast in startup
+// checks when the key is absent.
 //
 // Sender: `Floom <noreply@send.floom.dev>`. The `send.floom.dev` subdomain
 // carries the Resend DKIM key (resend._domainkey.floom.dev). Root floom.dev
@@ -522,6 +524,55 @@ export function renderWaitlistConfirmationEmail(
       preheader:
         "We're rolling out Publish in small batches. While you wait, three apps are free to run right now.",
       unsubscribeUrl: input.unsubscribeUrl,
+    }),
+    text,
+  };
+}
+
+export interface AppInviteTemplateInput {
+  appName: string;
+  inviterName?: string | null;
+  acceptUrl: string;
+}
+
+export function renderAppInviteEmail(input: AppInviteTemplateInput): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const subject = `You're invited to ${input.appName} on Floom`;
+  const inviter = input.inviterName || 'A Floom user';
+  const safeAppName = escapeHtml(input.appName);
+  const safeInviter = escapeHtml(inviter);
+
+  const body = [
+    bodyParagraph(`${safeInviter} invited you to run <strong>${safeAppName}</strong> on Floom.`),
+    bodyParagraph(
+      'Create or sign in to your account, then accept the invite to get access.',
+    ),
+    ctaButton(input.acceptUrl, 'Open invite'),
+    fallbackLink(input.acceptUrl),
+    mutedParagraph('If you were not expecting this invite, you can ignore this email.'),
+  ].join('\n');
+
+  const text = [
+    `${inviter} invited you to run ${input.appName} on Floom.`,
+    '',
+    'Create or sign in to your account, then accept the invite to get access:',
+    input.acceptUrl,
+    '',
+    'If you were not expecting this invite, you can ignore this email.',
+    '',
+    'Floom, Inc. · Wilmington, DE',
+    'hello@floom.dev',
+  ].join('\n');
+
+  return {
+    subject,
+    html: baseLayout({
+      heading: 'You have a Floom invite',
+      body,
+      preheader: `${inviter} invited you to run ${input.appName}.`,
     }),
     text,
   };

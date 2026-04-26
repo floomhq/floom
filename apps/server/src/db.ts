@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { generateLinkShareToken } from './lib/link-share-token.js';
 
 export const DATA_DIR = process.env.DATA_DIR || './data';
 export const APPS_DIR = join(DATA_DIR, 'apps');
@@ -74,10 +76,107 @@ if (!appCols.includes('openapi_spec_cached')) {
 if (!appCols.includes('auth_config')) {
   db.exec(`ALTER TABLE apps ADD COLUMN auth_config TEXT`);
 }
-// Per-app visibility: 'public' (default) or 'auth-required'.
+// Per-app visibility. New rows default to owner-only; legacy `public` and
+// `auth-required` rows are still understood by the runtime for migrations and
+// older self-host fixtures.
 if (!appCols.includes('visibility')) {
-  db.exec(`ALTER TABLE apps ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`);
+  db.exec(`ALTER TABLE apps ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`);
 }
+if (!appCols.includes('link_share_token')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN link_share_token TEXT`);
+}
+if (!appCols.includes('link_share_requires_auth')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN link_share_requires_auth INTEGER NOT NULL DEFAULT 0`);
+}
+if (!appCols.includes('review_submitted_at')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_submitted_at TEXT`);
+}
+if (!appCols.includes('review_decided_at')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_decided_at TEXT`);
+}
+if (!appCols.includes('review_decided_by')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_decided_by TEXT REFERENCES users(id)`);
+}
+if (!appCols.includes('review_comment')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_comment TEXT`);
+}
+
+export function migrateLegacyAuthRequiredColumn(): void {
+  const columns = (db.prepare(`PRAGMA table_info(apps)`).all() as { name: string }[]).map(
+    (r) => r.name,
+  );
+  const hasAuthRequiredColumn = columns.includes('auth_required');
+  const legacyRows = hasAuthRequiredColumn
+    ? (db
+        .prepare(
+          `SELECT id, slug, visibility, auth_required, link_share_token
+             FROM apps
+            WHERE auth_required = 1
+               OR visibility = 'auth-required'`,
+        )
+        .all() as Array<{
+        id: string;
+        slug: string;
+        visibility: string | null;
+        auth_required: number | null;
+        link_share_token: string | null;
+      }>)
+    : (db
+        .prepare(
+          `SELECT id, slug, visibility, 0 AS auth_required, link_share_token
+             FROM apps
+            WHERE visibility = 'auth-required'`,
+        )
+        .all() as Array<{
+        id: string;
+        slug: string;
+        visibility: string | null;
+        auth_required: number | null;
+        link_share_token: string | null;
+      }>);
+
+  if (legacyRows.length > 0) {
+    const migrate = db.transaction(() => {
+      const updateLegacy = db.prepare(
+        `UPDATE apps
+            SET visibility = ?,
+                link_share_requires_auth = 1,
+                link_share_token = ?,
+                review_comment = CASE
+                  WHEN ? = 1 THEN 'ADR-008 migration flagged legacy public auth_required app for review'
+                  ELSE review_comment
+                END,
+                updated_at = datetime('now')
+          WHERE id = ?`,
+      );
+
+      for (const row of legacyRows) {
+        const legacyColumnEnabled = row.auth_required === 1;
+        const impossiblePublicState =
+          legacyColumnEnabled &&
+          (row.visibility === 'public' || row.visibility === 'public_live');
+        if (impossiblePublicState) {
+          console.warn(
+            `[db] ADR-008 legacy auth_required app ${row.slug} had public visibility; setting private and flagging for review.`,
+          );
+        }
+        updateLegacy.run(
+          impossiblePublicState ? 'private' : 'link',
+          row.link_share_token || generateLinkShareToken(),
+          impossiblePublicState ? 1 : 0,
+          row.id,
+        );
+      }
+    });
+    migrate();
+  }
+
+  if (hasAuthRequiredColumn) {
+    db.exec(`ALTER TABLE apps DROP COLUMN auth_required`);
+  }
+}
+
+migrateLegacyAuthRequiredColumn();
 // Async job queue fields (v0.3.0) — nullable for backward compatibility.
 // When `is_async` is 1, calls go through the job queue (POST /api/:slug/jobs)
 // and MCP tools/call returns immediately with a job-started message.
@@ -95,6 +194,11 @@ if (!appCols.includes('timeout_ms')) {
 // Per-app retry count on job failure. Default 0 when NULL.
 if (!appCols.includes('retries')) {
   db.exec(`ALTER TABLE apps ADD COLUMN retries INTEGER NOT NULL DEFAULT 0`);
+}
+// ADR-011 run retention. NULL means indefinite retention. The sweeper only
+// acts on apps with an explicit positive day count.
+if (!appCols.includes('max_run_retention_days')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN max_run_retention_days INTEGER`);
 }
 // Client contract for async apps: 'poll' (default), 'webhook', or 'stream'.
 // Stored for the manifest advertisement; runtime behavior is the same today.
@@ -139,6 +243,126 @@ if (!appCols.includes('publish_status')) {
   db.exec(`UPDATE apps SET publish_status = 'published'`);
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_publish_status ON apps(publish_status)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_visibility ON apps(visibility)`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_invites (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    invited_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    invited_email TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending_email', 'pending_accept', 'accepted', 'revoked', 'declined')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    accepted_at TEXT,
+    revoked_at TEXT,
+    invited_by_user_id TEXT NOT NULL REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_invites_app_user
+    ON app_invites(app_id, invited_user_id);
+  CREATE INDEX IF NOT EXISTS idx_app_invites_email
+    ON app_invites(invited_email);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor_user_id TEXT,
+    actor_token_id TEXT,
+    actor_ip TEXT,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    before_state TEXT,
+    after_state TEXT,
+    metadata TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_log_actor_user
+    ON audit_log(actor_user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_target
+    ON audit_log(target_type, target_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_action
+    ON audit_log(action);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_created_desc
+    ON audit_log(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS app_visibility_audit (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    actor_user_id TEXT NOT NULL REFERENCES users(id),
+    reason TEXT NOT NULL,
+    metadata TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_visibility_audit_app_created
+    ON app_visibility_audit(app_id, created_at DESC);
+`);
+
+const legacyVisibilityAuditRows = db
+  .prepare(
+    `SELECT id, app_id, from_state, to_state, actor_user_id, reason, metadata, created_at
+       FROM app_visibility_audit`,
+  )
+  .all() as Array<{
+    id: string;
+    app_id: string;
+    from_state: string | null;
+    to_state: string;
+    actor_user_id: string;
+    reason: string;
+    metadata: string | null;
+    created_at: string;
+  }>;
+const hasMigratedVisibilityAuditRow = db.prepare(
+  `SELECT 1 FROM audit_log
+    WHERE target_type = 'app'
+      AND target_id = ?
+      AND created_at = ?
+      AND metadata LIKE ?`,
+);
+const insertMigratedVisibilityAuditRow = db.prepare(
+  `INSERT INTO audit_log
+     (id, actor_user_id, actor_token_id, actor_ip, action, target_type, target_id,
+      before_state, after_state, metadata, created_at)
+   VALUES (?, ?, NULL, NULL, ?, 'app', ?, ?, ?, ?, ?)`,
+);
+function migratedVisibilityAction(reason: string): string {
+  if (reason === 'admin_approve') return 'admin.app_approved';
+  if (reason === 'admin_reject') return 'admin.app_rejected';
+  if (reason === 'admin_takedown') return 'admin.app_takedown';
+  return 'app.visibility_changed';
+}
+for (const row of legacyVisibilityAuditRows) {
+  const marker = `"legacy_app_visibility_audit_id":"${row.id}"`;
+  if (hasMigratedVisibilityAuditRow.get(row.app_id, row.created_at, `%${marker}%`)) {
+    continue;
+  }
+  let legacyMetadata: Record<string, unknown> = {};
+  if (row.metadata) {
+    try {
+      legacyMetadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    } catch {
+      legacyMetadata = { legacy_metadata_parse_error: true };
+    }
+  }
+  const metadata = JSON.stringify({
+    ...legacyMetadata,
+    legacy_app_visibility_audit_id: row.id,
+    legacy_reason: row.reason,
+  });
+  insertMigratedVisibilityAuditRow.run(
+    `audit_${randomUUID()}`,
+    row.actor_user_id,
+    migratedVisibilityAction(row.reason),
+    row.app_id,
+    row.from_state === null ? null : JSON.stringify({ visibility: row.from_state }),
+    JSON.stringify({ visibility: row.to_state }),
+    metadata,
+    row.created_at,
+  );
+}
 
 // Store-catalog wireframe parity (2026-04-23). v17 `store.html` shows
 // each card with a 120px thumbnail, a star count, a runs-7d count, and
@@ -235,6 +459,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_slug_status ON jobs(slug, status);
   CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
   CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+`);
+
+// ---------- builds (Studio GitHub public-repo deploys, ADR-015) ----------
+// Each row tracks one async repo clone/build/publish attempt. Initial v1 launch
+// scope is public GitHub repos only; private-repo GitHub App support lands in a
+// separate week-1 task.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS builds (
+    build_id TEXT PRIMARY KEY,
+    app_slug TEXT,
+    github_url TEXT NOT NULL,
+    repo_owner TEXT NOT NULL,
+    repo_name TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    manifest_path TEXT,
+    manifest_options TEXT,
+    requested_name TEXT,
+    requested_slug TEXT,
+    workspace_id TEXT NOT NULL DEFAULT 'local',
+    user_id TEXT NOT NULL DEFAULT 'local',
+    status TEXT NOT NULL DEFAULT 'detecting',
+    error TEXT,
+    docker_image TEXT,
+    commit_sha TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_builds_status ON builds(status);
+  CREATE INDEX IF NOT EXISTS idx_builds_app_slug ON builds(app_slug);
+  CREATE INDEX IF NOT EXISTS idx_builds_repo_branch
+    ON builds(repo_owner, repo_name, branch, completed_at);
 `);
 
 // ---------- secrets (global or per-app) ----------
@@ -353,6 +609,44 @@ const userCols2 = (db.prepare(`PRAGMA table_info(users)`).all() as {
 if (!userCols2.includes('image')) {
   db.exec(`ALTER TABLE users ADD COLUMN image TEXT`);
 }
+if (!userCols2.includes('is_admin')) {
+  db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`);
+}
+if (!userCols2.includes('deleted_at')) {
+  db.exec(`ALTER TABLE users ADD COLUMN deleted_at TEXT`);
+}
+if (!userCols2.includes('delete_at')) {
+  db.exec(`ALTER TABLE users ADD COLUMN delete_at TEXT`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_users_pending_delete ON users(delete_at) WHERE deleted_at IS NOT NULL`);
+
+function normalizeAdminEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function isSeededAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalized = normalizeAdminEmail(email);
+  if (!normalized) return false;
+  return (process.env.FLOOM_ADMIN_EMAILS || '')
+    .split(',')
+    .map(normalizeAdminEmail)
+    .filter(Boolean)
+    .includes(normalized);
+}
+
+export function seedAdminUsersFromEnv(): void {
+  const emails = (process.env.FLOOM_ADMIN_EMAILS || '')
+    .split(',')
+    .map(normalizeAdminEmail)
+    .filter(Boolean);
+  if (emails.length === 0) return;
+  for (const email of emails) {
+    db.prepare(`UPDATE users SET is_admin = 1 WHERE LOWER(email) = ?`).run(email);
+  }
+}
+
+seedAdminUsersFromEnv();
 
 // ---------- workspace_members (user <-> workspace <-> role) ----------
 db.exec(`
@@ -406,6 +700,29 @@ db.exec(`
   );
 `);
 
+// ---------- agent_tokens: scoped machine credentials for agents ----------
+// Token plaintext is shown exactly once by the mint endpoint. The database
+// stores only a SHA-256 hash plus a short display prefix, bound to one
+// workspace and one minting user.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_tokens (
+    id TEXT PRIMARY KEY,
+    prefix TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    label TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('read', 'read-write', 'publish-only')),
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at TEXT,
+    rate_limit_per_minute INTEGER NOT NULL DEFAULT 60
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_hash ON agent_tokens(hash);
+  CREATE INDEX IF NOT EXISTS idx_agent_tokens_user_revoked
+    ON agent_tokens(user_id, revoked_at);
+`);
+
 // ---------- alter existing tables to add multi-tenant columns ----------
 // Idempotent column-add migrations (same pattern as app_type + is_async
 // above). Every alter uses DEFAULT 'local' so pre-existing v0.2/v0.3 rows
@@ -448,6 +765,27 @@ db.exec(
   `CREATE INDEX IF NOT EXISTS idx_runs_workspace_user ON runs(workspace_id, user_id)`,
 );
 db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_device ON runs(device_id) WHERE device_id IS NOT NULL`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_runs_app_finished ON runs(app_id, finished_at)`);
+
+// ADR-011 audit trail for destructive run-deletion operations. Payloads are
+// intentionally metadata-only; inputs, outputs, and logs never get copied here.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS run_deletion_audit (
+    id TEXT PRIMARY KEY,
+    actor_user_id TEXT,
+    workspace_id TEXT,
+    action TEXT NOT NULL,
+    run_id TEXT,
+    app_id TEXT,
+    deleted_count INTEGER NOT NULL,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_run_deletion_audit_actor
+    ON run_deletion_audit(actor_user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_run_deletion_audit_workspace
+    ON run_deletion_audit(workspace_id, created_at);
+`);
 
 // run_threads: workspace_id + user_id + device_id
 const threadCols = (db
@@ -946,8 +1284,10 @@ db.exec(`
 // Manual publish-review gate (#362) lands v12: apps.publish_status.
 // Deploy waitlist (launch 2026-04-27) lands v13: waitlist_signups.
 // v14: waitlist_signups.deploy_repo_url + deploy_intent (#454).
+// v15: agent_tokens for agents-native phase 2A backend.
+// v16: audit_log (ADR-013), generalized from app_visibility_audit.
 const currentUserVersion = (db.prepare(`PRAGMA user_version`).get() as { user_version: number })
   .user_version;
-if (currentUserVersion < 14) {
-  db.pragma('user_version = 14');
+if (currentUserVersion < 16) {
+  db.pragma('user_version = 16');
 }

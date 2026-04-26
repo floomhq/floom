@@ -121,11 +121,6 @@ export function WhyFloom() {
         </div>
       </div>
 
-      <style>{`
-        @media (max-width: 900px) {
-          .why-grid { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
     </section>
   );
 }

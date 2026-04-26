@@ -3,12 +3,12 @@
 //
 // The helper is wrapped around `@sentry/node` so Floom can ship without
 // a DSN (self-host default). The hard requirement from #311: the preview
-// image must boot cleanly with SENTRY_DSN unset, and `captureServerError`
+// image must boot cleanly with SENTRY_SERVER_DSN unset, and `captureServerError`
 // must be safe to call from the error handler regardless.
 //
 // We test:
 //   1. initSentry() is a no-op (sentryEnabled() stays false) when
-//      SENTRY_DSN is not set.
+//      SENTRY_SERVER_DSN is not set.
 //   2. captureServerError() does NOT throw when Sentry is disabled.
 //   3. The secret scrubber redacts password/token/api-key/authorization/
 //      secret/cookie keys at any nesting depth (contract for beforeSend).
@@ -60,8 +60,8 @@ process.stdout.write(JSON.stringify({ enabled: sentryEnabled(), ...result, scrub
 `,
   );
   const env = { ...process.env, ...envOverrides };
-  // Scope-scrub: explicitly delete SENTRY_DSN if the caller asked to unset.
-  if (envOverrides.SENTRY_DSN === undefined) delete env.SENTRY_DSN;
+  // Scope-scrub: explicitly delete SENTRY_SERVER_DSN if the caller asked to unset.
+  if (envOverrides.SENTRY_SERVER_DSN === undefined) delete env.SENTRY_SERVER_DSN;
   const result = spawnSync(
     process.execPath,
     ['--import', 'tsx', runner],
@@ -72,21 +72,21 @@ process.stdout.write(JSON.stringify({ enabled: sentryEnabled(), ...result, scrub
       `runner failed: status=${result.status}\nstdout=${result.stdout}\nstderr=${result.stderr}`,
     );
   }
-  return JSON.parse(result.stdout);
+  return JSON.parse(result.stdout.trim().split('\n').pop());
 }
 
 // ---------------------------------------------------------------------------
 // 1. No-op when DSN absent — the preview-self-host case.
 // ---------------------------------------------------------------------------
 const unset = runCase(
-  { SENTRY_DSN: undefined },
+  { SENTRY_SERVER_DSN: undefined },
   `
 initSentry();
 captureServerError(new Error('boom'), { path: '/api/run' });
 `,
 );
 log(
-  'sentryEnabled() = false when SENTRY_DSN is unset',
+  'sentryEnabled() = false when SENTRY_SERVER_DSN is unset',
   unset.enabled === false,
   `enabled=${unset.enabled}`,
 );

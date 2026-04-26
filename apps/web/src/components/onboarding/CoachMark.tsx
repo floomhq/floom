@@ -291,14 +291,6 @@ export function CoachMark({
         </div>
       </div>
 
-      {/* Keyframes for the pulse animation, scoped via a stable name. */}
-      <style>{`
-        @keyframes floom-onboarding-pulse {
-          0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
-          70%  { box-shadow: 0 0 0 14px rgba(16, 185, 129, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-      `}</style>
     </>
   );
 }

@@ -24,6 +24,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
 import * as ws from '../services/workspaces.js';
 import {
@@ -37,6 +38,7 @@ import {
 } from '../services/workspaces.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
+import { deleteWorkspaceRuns } from '../services/run-retention-sweeper.js';
 import type { WorkspaceMemberRole, WorkspaceRecord } from '../types.js';
 
 export const workspacesRouter = new Hono();
@@ -264,6 +266,26 @@ workspacesRouter.delete('/:id', async (c) => {
   }
 });
 
+/**
+ * DELETE /api/workspaces/:id/runs
+ * Admin-only bulk deletion for all runs belonging to apps owned by the
+ * workspace.
+ */
+workspacesRouter.delete('/:id/runs', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id') || '';
+  try {
+    ws.assertRole(ctx, id, 'admin');
+    const result = deleteWorkspaceRuns(ctx, id);
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    const m = mapError(err);
+    return c.json(m.body, m.status);
+  }
+});
+
 // --------------------------------------------------------------------
 // Members
 // --------------------------------------------------------------------
@@ -312,7 +334,16 @@ workspacesRouter.patch('/:id/members/:user_id', async (c) => {
     );
   }
   try {
+    const before = ws.listMembers(ctx, id).find((m) => m.user_id === target);
     const updated = ws.changeRole(ctx, id, target, parsed.data.role as WorkspaceMemberRole);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'workspace_member.role_changed',
+      target: { type: 'workspace_member', id: `${id}:${target}` },
+      before: before ? { role: before.role } : null,
+      after: { role: updated.role },
+      metadata: { workspace_id: id, user_id: target },
+    });
     return c.json({ member: updated });
   } catch (err) {
     const m = mapError(err);
@@ -331,7 +362,16 @@ workspacesRouter.delete('/:id/members/:user_id', async (c) => {
   const id = c.req.param('id') || '';
   const target = c.req.param('user_id') || '';
   try {
+    const before = ws.listMembers(ctx, id).find((m) => m.user_id === target);
     ws.removeMember(ctx, id, target);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'workspace_member.removed',
+      target: { type: 'workspace_member', id: `${id}:${target}` },
+      before: before ? { role: before.role } : null,
+      after: null,
+      metadata: { workspace_id: id, user_id: target },
+    });
     return c.json({ ok: true });
   } catch (err) {
     const m = mapError(err);
@@ -445,6 +485,14 @@ workspacesRouter.post('/:id/members/accept-invite', async (c) => {
   }
   try {
     const member = ws.acceptInvite(ctx, parsed.data.token);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'workspace_member.added',
+      target: { type: 'workspace_member', id: `${member.workspace_id}:${member.user_id}` },
+      before: null,
+      after: { role: member.role },
+      metadata: { workspace_id: member.workspace_id, user_id: member.user_id, source: 'invite' },
+    });
     return c.json({ member });
   } catch (err) {
     const m = mapError(err);

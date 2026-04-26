@@ -117,7 +117,7 @@ function getMemberRole(
  * Throw if the caller is not at least the required role on the target
  * workspace. Local user always has admin on `local`.
  */
-function assertRole(
+export function assertRole(
   ctx: SessionContext,
   workspace_id: string,
   required: WorkspaceMemberRole,

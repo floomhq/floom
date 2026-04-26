@@ -15,6 +15,54 @@ import {
   REQUIRED_FIELDS,
 } from './schema.ts';
 
+const MAX_ALLOWED_DOMAINS = 20;
+
+function isIpLiteral(value: string): boolean {
+  return (
+    /^(\d{1,3}\.){3}\d{1,3}$/.test(value) ||
+    value === '::1' ||
+    value.includes(':')
+  );
+}
+
+function isValidDomain(value: string): boolean {
+  if (value.length < 1 || value.length > 253 || value.includes('..')) return false;
+  const labels = value.split('.');
+  if (labels.length < 2) return false;
+  return labels.every(
+    (label) =>
+      label.length > 0 &&
+      label.length <= 63 &&
+      !label.startsWith('-') &&
+      !label.endsWith('-') &&
+      /^[a-z0-9-]+$/i.test(label),
+  );
+}
+
+function validateAllowedDomain(value: string): string | null {
+  const normalized = value.trim().toLowerCase().replace(/\.$/, '');
+  if (normalized === '*') return 'network.allowed_domains cannot contain "*"';
+  if (
+    normalized.includes('/') ||
+    normalized.includes('@') ||
+    isIpLiteral(normalized)
+  ) {
+    return `network.allowed_domains entry "${value}" must be a domain name or "*.domain" glob`;
+  }
+  if (normalized.startsWith('*.')) {
+    const suffix = normalized.slice(2);
+    return isValidDomain(suffix)
+      ? null
+      : `network.allowed_domains entry "${value}" is not a valid wildcard domain`;
+  }
+  if (normalized.includes('*')) {
+    return `network.allowed_domains entry "${value}" must use the "*.domain" wildcard form`;
+  }
+  return isValidDomain(normalized)
+    ? null
+    : `network.allowed_domains entry "${value}" is not a valid domain`;
+}
+
 export interface ParseResult {
   ok: boolean;
   manifest?: Manifest;
@@ -130,6 +178,15 @@ export function parseManifest(yamlSource: string): ParseResult {
     }
   }
 
+  const retentionDays = obj['max_run_retention_days'];
+  if (retentionDays !== undefined) {
+    if (typeof retentionDays !== 'number' || !Number.isInteger(retentionDays)) {
+      errors.push('max_run_retention_days must be a positive integer');
+    } else if (retentionDays < 1 || retentionDays > 3650) {
+      errors.push('max_run_retention_days must be between 1 and 3650');
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -159,6 +216,40 @@ export function parseManifest(yamlSource: string): ParseResult {
     manifest.egressAllowlist = (obj['egressAllowlist'] as unknown[]).filter(
       (s): s is string => typeof s === 'string',
     );
+  }
+  if (typeof retentionDays === 'number') {
+    manifest.max_run_retention_days = retentionDays;
+  }
+
+  if ('network' in obj) {
+    const network = obj['network'];
+    if (!network || typeof network !== 'object' || Array.isArray(network)) {
+      return { ok: false, errors: ['network must be a mapping'] };
+    }
+    const allowed = (network as Record<string, unknown>)['allowed_domains'];
+    if (allowed !== undefined) {
+      if (!Array.isArray(allowed) || allowed.some((entry) => typeof entry !== 'string')) {
+        return {
+          ok: false,
+          errors: ['network.allowed_domains must be a list of strings'],
+        };
+      }
+      if (allowed.length > MAX_ALLOWED_DOMAINS) {
+        return {
+          ok: false,
+          errors: [`network.allowed_domains can contain at most ${MAX_ALLOWED_DOMAINS} domains`],
+        };
+      }
+      for (const entry of allowed) {
+        const error = validateAllowedDomain(entry);
+        if (error) return { ok: false, errors: [error] };
+      }
+      manifest.network = { allowed_domains: allowed.map((entry) => entry.trim().toLowerCase().replace(/\.$/, '')) };
+    } else {
+      manifest.network = { allowed_domains: [] };
+    }
+  } else {
+    manifest.network = { allowed_domains: [] };
   }
 
   return { ok: true, manifest, errors: [] };

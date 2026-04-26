@@ -1,19 +1,16 @@
 #!/usr/bin/env node
-// Contract tests for the consent-gated frontend telemetry (#311).
+// Contract tests for frontend telemetry (#311).
 //
 // Two third-party processors boot from the web bundle — Sentry (errors)
-// and PostHog (product analytics). Both are required to stay dark until
-// the user picks "Accept all" in the cookie banner (GDPR Art. 6(1)(a)
-// consent). This test captures the gating contract that protects Floom
-// from leaking PII before the user has consented.
+// and PostHog (product analytics). Sentry is controlled by
+// VITE_SENTRY_WEB_DSN so launch-day errors are captured before React
+// mounts. PostHog remains consent-gated.
 //
 // The web app uses Vite + import.meta.env, so we can't import the modules
 // directly in Node. We verify the contract in two layers:
 //
 //   1. Pure predicate matrix — `shouldInitBrowserSentry` and
-//      `shouldInitPostHog` live in the source as pure functions. We
-//      re-derive them inline and exhaustively check the (consent x key)
-//      matrix.
+//      `shouldInitPostHog` live in the source as pure functions.
 //   2. Source-string invariants — assert the production modules export
 //      those predicates with the exact (consent === 'all' && key-present)
 //      shape so this test's inline copies can't drift from production.
@@ -42,15 +39,13 @@ const log = (label, ok, detail) => {
 // ---------------------------------------------------------------------------
 // 1. Pure predicate matrix — Sentry.
 // ---------------------------------------------------------------------------
-function shouldInitSentry(consent, dsn) {
-  return consent === 'all' && Boolean(dsn);
+function shouldInitSentry(dsn) {
+  return Boolean(dsn);
 }
 
-log('Sentry: essential + dsn  -> false', shouldInitSentry('essential', 'https://x') === false);
-log('Sentry: null + dsn        -> false', shouldInitSentry(null, 'https://x') === false);
-log('Sentry: all + no dsn      -> false', shouldInitSentry('all', undefined) === false);
-log('Sentry: all + empty dsn   -> false', shouldInitSentry('all', '') === false);
-log('Sentry: all + dsn         -> true', shouldInitSentry('all', 'https://x') === true);
+log('Sentry: no dsn      -> false', shouldInitSentry(undefined) === false);
+log('Sentry: empty dsn   -> false', shouldInitSentry('') === false);
+log('Sentry: dsn         -> true', shouldInitSentry('https://x') === true);
 
 // ---------------------------------------------------------------------------
 // 2. Pure predicate matrix — PostHog.
@@ -89,22 +84,22 @@ const mainSrc = readFileSync(
   'utf8',
 );
 
-// Invariant: Sentry gating predicate is `consent === 'all' && Boolean(dsn)`.
+// Invariant: Sentry gating predicate is `Boolean(dsn)`.
 log(
-  "Sentry source contains `consent === 'all'` predicate",
-  /consent\s*===\s*'all'\s*&&\s*Boolean\(dsn\)/.test(sentrySrc),
+  'Sentry source contains `Boolean(dsn)` predicate',
+  /return\s+Boolean\(dsn\)/.test(sentrySrc),
 );
 log(
   'Sentry source exports `shouldInitBrowserSentry`',
   /export function shouldInitBrowserSentry/.test(sentrySrc),
 );
 log(
-  'Sentry source calls `getConsent()` from init path',
-  /getConsent\(\)/.test(sentrySrc),
+  'Sentry source reads `VITE_SENTRY_WEB_DSN`',
+  /VITE_SENTRY_WEB_DSN/.test(sentrySrc),
 );
 log(
-  'Sentry source exposes `closeBrowserSentry` for downgrade flow',
-  /export function closeBrowserSentry/.test(sentrySrc),
+  'Sentry source samples browser traces at 5%',
+  /tracesSampleRate:\s*0\.05/.test(sentrySrc),
 );
 
 // Invariant: PostHog gating predicate is `consent === 'all' && Boolean(key ...)`.
@@ -142,28 +137,22 @@ log(
   /floom:cookie-consent-change/.test(consentSrc),
 );
 
-// Invariant: CookieBanner uses the consent module and triggers telemetry
-// init/close in-session (no page reload required).
+// Invariant: CookieBanner uses the consent module and controls PostHog
+// in-session (no page reload required).
 log(
   'CookieBanner imports `setConsent` from consent module',
   /setConsent/.test(cookieBannerSrc) && /from ['\"]\.\.\/lib\/consent/.test(cookieBannerSrc),
-);
-log(
-  'CookieBanner initialises browser Sentry on "Accept all"',
-  /initBrowserSentry\(\)/.test(cookieBannerSrc),
 );
 log(
   'CookieBanner initialises PostHog on "Accept all"',
   /initPostHog\(\)/.test(cookieBannerSrc),
 );
 log(
-  'CookieBanner flushes telemetry on downgrade',
-  /closeBrowserSentry\(\)/.test(cookieBannerSrc) &&
-    /closePostHog\(\)/.test(cookieBannerSrc),
+  'CookieBanner flushes PostHog on downgrade',
+  /closePostHog\(\)/.test(cookieBannerSrc),
 );
 
-// Invariant: main.tsx boot calls init fns, NOT inline Sentry.init (which
-// would bypass the consent gate).
+// Invariant: main.tsx boot calls init fns, NOT inline Sentry.init.
 log(
   'main.tsx boot calls `initBrowserSentry()`',
   /initBrowserSentry\(\)/.test(mainSrc),
@@ -173,7 +162,7 @@ log(
   /initPostHog\(\)/.test(mainSrc),
 );
 log(
-  'main.tsx does NOT call `Sentry.init(` directly (consent-gate bypass)',
+  'main.tsx does NOT call `Sentry.init(` directly',
   !/Sentry\.init\(/.test(mainSrc),
 );
 

@@ -1,0 +1,8 @@
+/.github/workflows/* @federicodeponte
+/.github/CODEOWNERS @federicodeponte
+/scripts/ops/** @federicodeponte
+/docker/** @federicodeponte
+/Dockerfile* @federicodeponte
+/apps/server/src/middleware/** @federicodeponte
+/apps/server/src/lib/better-auth.ts @federicodeponte
+/apps/server/src/lib/rate-limit.ts @federicodeponte

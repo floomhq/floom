@@ -7,6 +7,7 @@
 - [Self-host](./SELF_HOST.md) — running a full Floom instance via Docker.
 - [Roadmap](./ROADMAP.md) — pre-1.0 priorities and what's shipped.
 - [Rollback](./ROLLBACK.md) — rolling a deploy back to a previous tag.
+- [Agent tokens quickstart](./agents/quickstart.md) — mint, use, revoke, scope, and rate-limit headless agent tokens.
 
 ## Product
 

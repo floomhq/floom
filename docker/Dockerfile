@@ -60,18 +60,21 @@ COPY examples/resume-screener ./examples/resume-screener
 RUN pnpm install --frozen-lockfile
 
 # Sentry build-time args. All optional:
-#   - VITE_SENTRY_DSN is baked into the web bundle so the browser knows where
-#     to POST errors. Unset = Sentry stays dark on the client.
+#   - VITE_SENTRY_WEB_DSN is baked into the web bundle so the browser knows
+#     where to POST errors. Unset = Sentry stays dark on the client.
 #   - SENTRY_AUTH_TOKEN/ORG/PROJECT wire @sentry/vite-plugin to upload source
 #     maps during the Vite build, then delete .map files from dist/ so the
 #     runtime image doesn't ship them. All three unset = plugin no-ops and
 #     maps are generated but not uploaded.
-# Pass at build time: docker build --build-arg VITE_SENTRY_DSN=... ...
-ARG VITE_SENTRY_DSN
+# Pass at build time: docker build --build-arg VITE_SENTRY_WEB_DSN=... ...
+ARG VITE_SENTRY_WEB_DSN
+ARG COMMIT_SHA
 ARG SENTRY_AUTH_TOKEN
 ARG SENTRY_ORG
 ARG SENTRY_PROJECT
-ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
+ENV VITE_SENTRY_WEB_DSN=${VITE_SENTRY_WEB_DSN}
+ENV VITE_COMMIT_SHA=${COMMIT_SHA}
+ENV COMMIT_SHA=${COMMIT_SHA}
 ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
 ENV SENTRY_ORG=${SENTRY_ORG}
 ENV SENTRY_PROJECT=${SENTRY_PROJECT}
@@ -96,6 +99,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
 ENV PORT=3051
+ARG COMMIT_SHA
+ENV COMMIT_SHA=${COMMIT_SHA}
 # PORT can be overridden at runtime (e.g. docker run -e PORT=3000 ...)
 
 RUN npm install -g pnpm@9.0.0

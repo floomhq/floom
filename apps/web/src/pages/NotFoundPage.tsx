@@ -432,39 +432,6 @@ export function NotFoundPage() {
           pills. Reuse PublicFooter so 404 exposes the same trust links
           (Docs / GitHub / Privacy / Terms / Cookies) as the landing. */}
       <PublicFooter />
-      <style>{`
-        .not-found-pop-card:hover {
-          border-color: var(--muted) !important;
-          transform: translateY(-1px);
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        }
-        .not-found-pop-card svg {
-          width: 16px;
-          height: 16px;
-          fill: none;
-          stroke: currentColor;
-          stroke-width: 1.75;
-          stroke-linecap: round;
-          stroke-linejoin: round;
-        }
-        @media (max-width: 720px) {
-          .not-found-pop-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-        @media (max-width: 640px) {
-          .not-found-inner {
-            padding: 28px 16px 32px !important;
-          }
-          .not-found-inner .headline {
-            font-size: 36px !important;
-            word-break: break-word;
-          }
-          .not-found-inner .subhead {
-            font-size: 15px !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

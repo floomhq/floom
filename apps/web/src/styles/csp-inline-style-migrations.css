@@ -1,0 +1,338 @@
+/* Issue #380 phase 2: migrate static JSX <style> blocks into bundled CSS.
+   This file intentionally mirrors the old rules 1:1 (with route scoping
+   where needed) so CSP can drop style-src 'unsafe-inline' for elements. */
+
+@media (max-width: 720px) {
+  .about-who-cards { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 640px) {
+  .about-triad { grid-template-columns: 1fr !important; gap: 6px !important; }
+}
+
+@media (max-width: 640px) {
+  [data-testid="permalink-page"] { padding: 16px 14px 64px !important; }
+  [data-testid="permalink-page"] .app-page-frame { border-radius: 14px !important; }
+  [data-testid="permalink-hero"] { padding: 14px 16px 12px !important; gap: 10px !important; }
+  [data-testid="permalink-hero"] h1 { white-space: normal !important; font-size: 18px !important; }
+  [data-testid="hero-description"] {
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+  [data-testid="permalink-capability-chips"] { margin-top: 10px !important; }
+  [data-testid="permalink-hero"] .permalink-hero-actions { width: 100%; justify-content: flex-start; gap: 8px; }
+  [data-testid="hero-version-meta"] { flex-wrap: wrap; row-gap: 4px; }
+  [data-testid="permalink-tabs"] { padding: 12px 14px !important; gap: 8px !important; }
+  [data-testid="permalink-tabs"] button { min-height: 44px; }
+  [data-testid="permalink-page"] section[data-testid="how-it-works"] { grid-template-columns: 1fr !important; margin-bottom: 28px !important; }
+}
+
+@media (max-width: 640px) {
+  /* v17 store.html: compact header on mobile.
+     Keep h1 at 28px so the wireframe's "34px" feels right on
+     desktop without crushing on phones. iOS-zoom guard: bump
+     search input to 16px+ on focus-able viewports (Safari
+     auto-zooms inputs <16px). */
+  .apps-headline { font-size: 28px !important; }
+  [data-testid="apps-header"] { padding: 28px 16px 12px !important; }
+  [data-testid="apps-toolbar"] { padding: 14px 16px !important; gap: 10px !important; }
+  [data-testid="apps-chips"] { gap: 6px !important; }
+  [data-testid="apps-search"] { font-size: 16px !important; }
+  /* Hide the command-k hint on touch viewports. */
+  .apps-search-kbd { display: none !important; }
+  /* Results section: smaller gutter, smaller bottom padding. */
+  [data-testid="apps-directory"] main > section:last-of-type { padding: 20px 16px 48px !important; }
+}
+
+/* Mirror AppGrid breakpoints so the loading skeleton collapses the
+   same way as the real grid: 4 -> 3 -> 2 -> 1. Keeps grid shape stable
+   across the load transition. */
+@media (max-width: 1024px) {
+  .apps-grid-skeleton { grid-template-columns: repeat(3, 1fr) !important; }
+}
+@media (max-width: 760px) {
+  .apps-grid-skeleton { grid-template-columns: repeat(2, 1fr) !important; }
+}
+@media (max-width: 480px) {
+  .apps-grid-skeleton { grid-template-columns: 1fr !important; }
+}
+@keyframes apps-skeleton-shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+@media (max-width: 700px) {
+  .selfhost-inner {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 640px) {
+  /* Mobile polish: serif headlines are oversized at 52/72px on a
+     375px viewport. Scale them down so the hero + free-card fit
+     above the fold without wrapping awkwardly. */
+  [data-testid="pricing-hero"] { padding: 36px 20px 8px !important; }
+  [data-testid="pricing-hero"] h1 { font-size: 34px !important; line-height: 1.08 !important; }
+  [data-testid="pricing-hero"] p { font-size: 15px !important; }
+  [data-testid="pricing-free-card"] { padding: 0 16px !important; margin: 24px auto 36px !important; }
+  [data-testid="pricing-free-card"] > div { padding: 28px 20px 24px !important; }
+  [data-testid="pricing-free-card"] > div > div:first-of-type { font-size: 56px !important; }
+}
+
+.not-found-pop-card:hover {
+  border-color: var(--muted) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+.not-found-pop-card svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (max-width: 720px) {
+  .not-found-pop-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 640px) {
+  .not-found-inner {
+    padding: 28px 16px 32px !important;
+  }
+  .not-found-inner .headline {
+    font-size: 36px !important;
+    word-break: break-word;
+  }
+  .not-found-inner .subhead {
+    font-size: 15px !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .install-in-claude-main {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+@media (max-width: 640px) {
+  .install-mcp-tablist {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+  .install-mcp-tablist button {
+    padding: 12px 12px !important;
+  }
+}
+
+@media (max-width: 1040px) {
+  .landing-v17 .hero-headline { font-size: 56px !important; }
+  .landing-v17 .steps { grid-template-columns: 1fr !important; gap: 14px !important; }
+}
+@media (max-width: 780px) {
+  .landing-v17 .hero-headline { font-size: 44px !important; }
+  .landing-v17 .hero-sub { font-size: 16px !important; }
+}
+@media (max-width: 640px) {
+  .landing-v17 [data-testid="hero"] { padding: 40px 16px 32px !important; }
+  .landing-v17 .hero-headline { font-size: 34px !important; line-height: 1.06 !important; }
+  .landing-v17 .hero-sub { font-size: 15px !important; margin-bottom: 20px !important; }
+  .landing-v17 .hero-ctas { flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
+  .landing-v17 .hero-ctas a { width: 100% !important; }
+  .landing-v17 .works-with { gap: 16px 24px !important; }
+  .landing-v17 .dual { grid-template-columns: 1fr !important; }
+  .landing-v17 .publish-cta { grid-template-columns: 1fr !important; text-align: left !important; }
+  .landing-v17 .limits { grid-template-columns: 1fr !important; gap: 10px !important; text-align: left !important; }
+}
+
+/* Scope creator hero rules to its route root so they do not leak. */
+@media (max-width: 1040px) {
+  [data-testid="creator-hero"] .hero-headline { font-size: 60px !important; }
+}
+@media (max-width: 780px) {
+  [data-testid="creator-hero"] .hero-headline { font-size: 48px !important; margin-bottom: 18px !important; }
+  [data-testid="creator-hero"] .hero-accent { font-size: 17px !important; }
+  [data-testid="creator-hero"] .hero-works-with { gap: 10px !important; }
+}
+@media (max-width: 640px) {
+  [data-testid="creator-hero"] [data-testid="hero"] { padding: 52px 20px 60px !important; }
+  [data-testid="creator-hero"] .hero-headline { font-size: 36px !important; line-height: 1.05 !important; margin-bottom: 14px !important; }
+  [data-testid="creator-hero"] .hero-accent { font-size: 15px !important; margin-bottom: 6px !important; }
+  [data-testid="creator-hero"] .hero-sub-positioning { font-size: 14px !important; margin-bottom: 26px !important; }
+  [data-testid="creator-hero"] .hero-input { flex-direction: column !important; align-items: stretch !important; padding: 10px !important; }
+  [data-testid="creator-hero"] .hero-input input { padding: 14px !important; font-size: 13.5px !important; }
+  [data-testid="creator-hero"] .hero-input button { width: 100% !important; padding: 14px !important; justify-content: center !important; }
+  [data-testid="creator-hero"] .hero-cta-row { flex-direction: column !important; gap: 10px !important; }
+  [data-testid="creator-hero"] .hero-works-with { margin-bottom: 16px !important; }
+  [data-testid="creator-hero"] .integration-logos { flex-direction: column !important; gap: 10px !important; }
+  [data-testid="creator-hero"] .live-apps-header { flex-direction: column !important; align-items: flex-start !important; }
+}
+
+/* Browse-grid responsive breakpoints — v23 wireframe parity (apps-v23.html
+   lines 78-80): 4 -> 3 -> 2 -> 1 columns. Replaces the prior #679 fix
+   (`auto-fill, minmax(240px, 360px)`) with the wireframe spec; the
+   showcase row above the grid is what kept that #679 single-card-stretch
+   pain off the most-likely paths (3 launch apps render up there). */
+@media (max-width: 1024px) {
+  .apps-grid-4col { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 760px) {
+  .apps-grid-4col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
+}
+@media (max-width: 480px) {
+  .apps-grid-4col { grid-template-columns: 1fr !important; gap: 12px !important; }
+}
+
+/* Showcase row responsive breakpoints (apps-v23.html lines 46-47).
+   3 -> 2 -> 1 across the same widths. */
+@media (max-width: 1024px) {
+  .apps-showcase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 640px) {
+  .apps-showcase-grid { grid-template-columns: 1fr !important; }
+}
+/* Keyboard-focus ring on cards (hover is already wired via JS).
+   Uses the brand accent so it reads clearly against the card. */
+[data-testid^="app-grid-card-"]:focus-visible {
+  outline: 2px solid var(--accent, #047857);
+  outline-offset: 2px;
+  border-color: var(--ink) !important;
+}
+
+[data-testid="feedback-trigger"] {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 900;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted, #8a8a8a);
+  border: 1px solid var(--line, rgba(0,0,0,0.12));
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  opacity: 0.6;
+  transition: opacity 120ms ease, color 120ms ease,
+    border-color 120ms ease, background 120ms ease;
+}
+[data-testid="feedback-trigger"]::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+[data-testid="feedback-trigger"]:hover,
+[data-testid="feedback-trigger"]:focus-visible {
+  opacity: 1;
+  color: var(--accent, #1a7f37);
+  border-color: var(--accent, #1a7f37);
+  background: var(--card, rgba(255,255,255,0.85));
+}
+[data-testid="feedback-trigger"]:focus-visible {
+  outline: 2px solid var(--accent, #1a7f37);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  [data-testid="feedback-trigger"] {
+    bottom: 12px;
+    right: 12px;
+  }
+}
+
+@media (max-width: 720px) {
+  [data-testid="docs-publish-waitlist-banner"] {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+}
+
+@media (max-width: 980px) {
+  .launch-answers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 640px) {
+  .launch-answers-grid { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+@media (max-width: 900px) {
+  .hero-app-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+@media (max-width: 520px) {
+  .hero-app-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .proof-row {
+    gap: 24px !important;
+  }
+}
+@keyframes proof-shimmer {
+  0%   { opacity: 0.35; }
+  50%  { opacity: 0.75; }
+  100% { opacity: 0.35; }
+}
+
+@media (max-width: 900px) {
+  .why-grid { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 1040px) {
+  .layers-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 640px) {
+  .layers-grid { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+.arch-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+.arch-node {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 24px;
+  border-radius: 14px;
+  min-width: 260px;
+  max-width: min(440px, 100%);
+  box-sizing: border-box;
+  text-align: center;
+}
+@media (max-width: 360px) {
+  .arch-node { min-width: 0; width: 100%; }
+}
+.arch-spec {
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.arch-runtime {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 18px 28px;
+  box-shadow: 0 8px 24px rgba(5,150,105,0.18);
+}
+@media (max-width: 640px) {
+  .arch-surfaces { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .arch-node { min-width: 240px; padding: 12px 16px; }
+}
+
+@keyframes floom-onboarding-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  70%  { box-shadow: 0 0 0 14px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}

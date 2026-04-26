@@ -15,7 +15,7 @@ import { extractIp } from './client-ip.js';
 import { recordRateLimitHit } from './metrics-counters.js';
 import { sendDiscordAlert } from './alerts.js';
 
-type Scope = 'ip' | 'user' | 'app' | 'mcp_ingest';
+type Scope = 'ip' | 'user' | 'app' | 'agent_token' | 'mcp_ingest';
 
 function envNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -47,6 +47,12 @@ export const defaultPerAppPerHour = (): number =>
   envNumber('FLOOM_RATE_LIMIT_APP_PER_HOUR', 500);
 export const defaultMcpIngestPerDay = (): number =>
   envNumber('FLOOM_RATE_LIMIT_MCP_INGEST_PER_DAY', 10);
+export const defaultWriteAnonPerMinute = (): number =>
+  envNumber('FLOOM_WRITE_RATE_LIMIT_IP_PER_MINUTE', 30);
+export const defaultWriteUserPerMinute = (): number =>
+  envNumber('FLOOM_WRITE_RATE_LIMIT_USER_PER_MINUTE', 60);
+export const defaultAgentTokenPerMinute = (): number =>
+  envNumber('FLOOM_AGENT_TOKEN_RATE_LIMIT_PER_MINUTE', 60);
 
 // Re-export: historical import path is ../lib/rate-limit.js
 export { extractIp } from './client-ip.js';
@@ -88,6 +94,19 @@ interface CheckResult {
   /** Epoch seconds when the current window's earliest activity rolls off. */
   resetAt: number;
 }
+
+export interface RunRateLimitBlock {
+  ok: false;
+  status: 429;
+  body: {
+    error: 'rate_limit_exceeded';
+    retry_after_seconds: number;
+    scope: Scope;
+  };
+  headers: Record<string, string>;
+}
+
+export type RunRateLimitGateResult = { ok: true } | RunRateLimitBlock;
 
 function incrementAndCheck(
   key: string,
@@ -211,7 +230,34 @@ export function __resetAbuseStoreForTests(): void {
   abuseStore.clear();
 }
 
-function rateLimitResponse(
+function buildRateLimitBlock(
+  c: Context,
+  scope: Scope,
+  result: CheckResult,
+  limit: number,
+): RunRateLimitBlock {
+  recordRateLimitHit(scope);
+  noteRateLimitHitForAbuse(extractIp(c), scope, Date.now());
+  const retryAfter = clampRetryAfter(result.retryAfterSec);
+  return {
+    ok: false,
+    status: 429,
+    body: {
+      error: 'rate_limit_exceeded',
+      retry_after_seconds: retryAfter,
+      scope,
+    },
+    headers: {
+      'Retry-After': String(retryAfter),
+      'X-RateLimit-Limit': String(limit),
+      'X-RateLimit-Remaining': '0',
+      'X-RateLimit-Reset': String(result.resetAt),
+      'X-RateLimit-Scope': scope,
+    },
+  };
+}
+
+function writeRateLimitResponse(
   c: Context,
   scope: Scope,
   result: CheckResult,
@@ -223,8 +269,7 @@ function rateLimitResponse(
   return c.json(
     {
       error: 'rate_limit_exceeded',
-      retry_after_seconds: retryAfter,
-      scope,
+      retryAfter,
     },
     429,
     {
@@ -254,6 +299,46 @@ function applyLimitHeaders(
   c.header('X-RateLimit-Scope', scope);
 }
 
+function checkAgentTokenLimit(
+  ctx: SessionContext,
+  now: number,
+): { result: CheckResult; limit: number } | null {
+  if (!ctx.agent_token_id) return null;
+  const limit = ctx.agent_token_rate_limit_per_minute || defaultAgentTokenPerMinute();
+  return {
+    limit,
+    result: incrementAndCheck(
+      `agent_token:${ctx.agent_token_id}`,
+      limit,
+      60 * 1000,
+      now,
+    ),
+  };
+}
+
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const WRITE_RATE_LIMIT_SKIP_PATHS = new Set([
+  '/api/run',
+  '/api/agents/run',
+  '/api/hub/ingest',
+  '/api/feedback',
+  '/api/waitlist',
+  '/api/deploy-waitlist',
+]);
+const WRITE_RATE_LIMIT_SKIP_PATTERNS = [
+  /^\/api\/[^/]+\/run\/?$/,
+  /^\/api\/[^/]+\/jobs\/?$/,
+];
+
+export function isWriteRateLimitSkippedPath(pathname: string): boolean {
+  const normalized =
+    pathname.length > 1 && pathname.endsWith('/')
+      ? pathname.slice(0, -1)
+      : pathname;
+  if (WRITE_RATE_LIMIT_SKIP_PATHS.has(normalized)) return true;
+  return WRITE_RATE_LIMIT_SKIP_PATTERNS.some((rx) => rx.test(normalized));
+}
+
 // ---------- middleware ----------
 
 /**
@@ -265,40 +350,118 @@ export function runRateLimitMiddleware(
   resolveCtx: (c: Context) => Promise<SessionContext>,
 ): MiddlewareHandler {
   return async (c, next) => {
+    const ctx = await resolveCtx(c);
+    const gate = checkRunRateLimit(c, ctx);
+    if (!gate.ok) return c.json(gate.body, gate.status, gate.headers);
+    return next();
+  };
+}
+
+export function checkRunRateLimit(
+  c: Context,
+  ctx: SessionContext,
+  slugOverride?: string | null,
+): RunRateLimitGateResult {
+  if (isRateLimitDisabled()) return { ok: true };
+  // Admin bypass (2026-04-21): when FLOOM_AUTH_TOKEN is configured AND
+  // the caller presents the matching bearer, skip rate-limit entirely.
+  // This unblocks ops sweeps, monitoring, and catalog rebuilds from the
+  // server operator without opening the limit up publicly. Returns false
+  // when no token is configured, so OSS mode still enforces the caps.
+  if (hasValidAdminBearer(c)) return { ok: true };
+  const now = Date.now();
+  const windowMs = 3600 * 1000;
+  const ip = extractIp(c);
+
+  // Authed → user bucket (higher cap). Anon → IP bucket.
+  const primaryKey = ctx.is_authenticated ? `user:${ctx.user_id}` : `ip:${ip}`;
+  const primaryCap = ctx.is_authenticated
+    ? defaultUserPerHour()
+    : defaultAnonPerHour();
+  const primaryScope: Scope = ctx.is_authenticated ? 'user' : 'ip';
+  const p = incrementAndCheck(primaryKey, primaryCap, windowMs, now);
+  if (!p.allowed) return buildRateLimitBlock(c, primaryScope, p, primaryCap);
+  const agentLimit = checkAgentTokenLimit(ctx, now);
+  if (agentLimit && !agentLimit.result.allowed) {
+    return buildRateLimitBlock(c, 'agent_token', agentLimit.result, agentLimit.limit);
+  }
+
+  // Per-(IP, app) cap applies in both auth states.
+  const slug = slugOverride ?? c.req.param('slug');
+  if (slug) {
+    const appCap = defaultPerAppPerHour();
+    const r = incrementAndCheck(`app:${ip}:${slug}`, appCap, windowMs, now);
+    if (!r.allowed) return buildRateLimitBlock(c, 'app', r, appCap);
+    // Advertise the *tightest* remaining budget so a well-behaved client
+    // paces itself against whichever bucket will trip first. Primary vs
+    // per-app vs agent token: pick the smaller remaining.
+    const advertised = [
+      { result: p, limit: primaryCap, scope: primaryScope },
+      { result: r, limit: appCap, scope: 'app' as const },
+      ...(agentLimit
+        ? [
+            {
+              result: agentLimit.result,
+              limit: agentLimit.limit,
+              scope: 'agent_token' as const,
+            },
+          ]
+        : []),
+    ].sort((a, b) => a.result.remaining - b.result.remaining)[0];
+    applyLimitHeaders(c, advertised.result, advertised.limit, advertised.scope);
+  } else if (agentLimit && agentLimit.result.remaining < p.remaining) {
+    applyLimitHeaders(c, agentLimit.result, agentLimit.limit, 'agent_token');
+  } else {
+    applyLimitHeaders(c, p, primaryCap, primaryScope);
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Global write limiter for /api/* mutation routes.
+ *
+ * Default budgets (env-configurable):
+ *   - anonymous callers: 30 writes/min per IP
+ *   - authed callers: 60 writes/min per user
+ *
+ * Existing per-route limiters (run surfaces, waitlist, feedback) are skipped
+ * to avoid double-throttling.
+ */
+export function writeRateLimitMiddleware(
+  resolveCtx: (c: Context) => Promise<SessionContext>,
+): MiddlewareHandler {
+  return async (c, next) => {
     if (isRateLimitDisabled()) return next();
-    // Admin bypass (2026-04-21): when FLOOM_AUTH_TOKEN is configured AND
-    // the caller presents the matching bearer, skip rate-limit entirely.
-    // This unblocks ops sweeps, monitoring, and catalog rebuilds from the
-    // server operator without opening the limit up publicly. Returns false
-    // when no token is configured, so OSS mode still enforces the caps.
+    const method = c.req.method.toUpperCase();
+    if (!WRITE_METHODS.has(method)) return next();
+    const pathname = new URL(c.req.url).pathname;
+    if (!pathname.startsWith('/api/')) return next();
+    if (isWriteRateLimitSkippedPath(pathname)) return next();
     if (hasValidAdminBearer(c)) return next();
+
     const now = Date.now();
-    const windowMs = 3600 * 1000;
     const ip = extractIp(c);
     const ctx = await resolveCtx(c);
-
-    // Authed → user bucket (higher cap). Anon → IP bucket.
-    const primaryKey = ctx.is_authenticated ? `user:${ctx.user_id}` : `ip:${ip}`;
-    const primaryCap = ctx.is_authenticated
-      ? defaultUserPerHour()
-      : defaultAnonPerHour();
-    const primaryScope: Scope = ctx.is_authenticated ? 'user' : 'ip';
-    const p = incrementAndCheck(primaryKey, primaryCap, windowMs, now);
-    if (!p.allowed) return rateLimitResponse(c, primaryScope, p, primaryCap);
-
-    // Per-(IP, app) cap applies in both auth states.
-    const slug = c.req.param('slug');
-    if (slug) {
-      const appCap = defaultPerAppPerHour();
-      const r = incrementAndCheck(`app:${ip}:${slug}`, appCap, windowMs, now);
-      if (!r.allowed) return rateLimitResponse(c, 'app', r, appCap);
-      // Advertise the *tightest* remaining budget so a well-behaved client
-      // paces itself against whichever bucket will trip first. Primary vs
-      // per-app: pick the smaller remaining.
-      if (r.remaining < p.remaining) applyLimitHeaders(c, r, appCap, 'app');
-      else applyLimitHeaders(c, p, primaryCap, primaryScope);
+    const scope: Scope = ctx.is_authenticated ? 'user' : 'ip';
+    const limit = ctx.is_authenticated
+      ? defaultWriteUserPerMinute()
+      : defaultWriteAnonPerMinute();
+    const key = ctx.is_authenticated
+      ? `write:user:${ctx.user_id}`
+      : `write:ip:${ip}`;
+    const result = incrementAndCheck(key, limit, 60 * 1000, now);
+    if (!result.allowed) {
+      return writeRateLimitResponse(c, scope, result, limit);
+    }
+    const agentLimit = checkAgentTokenLimit(ctx, now);
+    if (agentLimit && !agentLimit.result.allowed) {
+      return writeRateLimitResponse(c, 'agent_token', agentLimit.result, agentLimit.limit);
+    }
+    if (agentLimit && agentLimit.result.remaining < result.remaining) {
+      applyLimitHeaders(c, agentLimit.result, agentLimit.limit, 'agent_token');
     } else {
-      applyLimitHeaders(c, p, primaryCap, primaryScope);
+      applyLimitHeaders(c, result, limit, scope);
     }
     return next();
   };
@@ -314,6 +477,19 @@ export function checkMcpIngestLimit(
   ip: string,
 ): { allowed: true } | { allowed: false; retryAfterSec: number } {
   if (isRateLimitDisabled()) return { allowed: true };
+  if (ctx.agent_token_id) {
+    const tokenLimit = ctx.agent_token_rate_limit_per_minute || defaultAgentTokenPerMinute();
+    const tokenResult = incrementAndCheck(
+      `agent_token:${ctx.agent_token_id}`,
+      tokenLimit,
+      60 * 1000,
+      Date.now(),
+    );
+    if (!tokenResult.allowed) {
+      recordRateLimitHit('agent_token');
+      return { allowed: false, retryAfterSec: tokenResult.retryAfterSec };
+    }
+  }
   const key = ctx.is_authenticated
     ? `mcp_ingest:user:${ctx.user_id}`
     : `mcp_ingest:ip:${ip}`;

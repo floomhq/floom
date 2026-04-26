@@ -59,12 +59,14 @@ export function Markdown({ content, copyable = true }: MarkdownProps) {
   return (
     <div
       data-renderer="Markdown"
-      className="app-expanded-card markdown-output"
+      className="app-expanded-card markdown-output floom-output-card"
       style={{
         position: 'relative',
         fontSize: 14,
         lineHeight: 1.6,
         color: 'var(--ink)',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
       }}
     >
       {copyable && (

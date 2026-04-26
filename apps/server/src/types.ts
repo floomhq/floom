@@ -10,7 +10,13 @@ export type InputType =
   | 'enum'
   | 'boolean'
   | 'date'
-  | 'file';
+  | 'file'
+  | 'file/csv'
+  | 'file/image'
+  | 'file/pdf'
+  | 'file/audio'
+  | 'array'
+  | 'object';
 
 export type OutputType =
   | 'text'
@@ -92,6 +98,14 @@ export interface NormalizedManifest {
    */
   license?: string;
   /**
+   * ADR-016: outbound network policy for hosted Docker apps. New manifests
+   * declare this explicitly; legacy persisted manifests may omit it and are
+   * handled by the runtime compatibility allowlist.
+   */
+  network?: {
+    allowed_domains: string[];
+  };
+  /**
    * v16 renderer cascade: optional creator-declared hint for which stock
    * library component to mount on the run output. See
    * apps/web/src/components/output/ for the available components and
@@ -105,6 +119,11 @@ export interface NormalizedManifest {
    * Backwards compatible: apps without `render` fall through to auto-pick.
    */
   render?: RenderConfig;
+  /**
+   * ADR-011: optional creator-declared maximum retention window for this
+   * app's completed run rows. Omitted means indefinite retention.
+   */
+  max_run_retention_days?: number;
   /**
    * Optional creator-pinned "primary action" for multi-action apps
    * (audit 2026-04-20, Fix 3). When set to a valid key in `actions`, the
@@ -144,6 +163,25 @@ export interface AuthConfig {
 
 export type AsyncMode = 'poll' | 'webhook' | 'stream';
 
+export type AppVisibilityState =
+  | 'private'
+  | 'link'
+  | 'invited'
+  | 'pending_review'
+  | 'public_live'
+  | 'changes_requested';
+
+export type LegacyAppVisibility = 'public' | 'auth-required';
+
+export type AppVisibility = AppVisibilityState | LegacyAppVisibility;
+
+export type AppInviteState =
+  | 'pending_email'
+  | 'pending_accept'
+  | 'accepted'
+  | 'revoked'
+  | 'declined';
+
 export interface AppRecord {
   id: string;
   slug: string;
@@ -163,13 +201,21 @@ export interface AppRecord {
   auth_config: string | null; // JSON-stringified AuthConfig
   openapi_spec_url: string | null;
   openapi_spec_cached: string | null; // JSON-stringified OpenAPI spec
-  visibility: 'public' | 'auth-required' | 'private';
+  visibility: AppVisibility;
+  link_share_token: string | null;
+  link_share_requires_auth: 0 | 1;
+  review_submitted_at: string | null;
+  review_decided_at: string | null;
+  review_decided_by: string | null;
+  review_comment: string | null;
   // Async job queue fields (v0.3.0). is_async comes back from SQLite as 0/1.
   is_async: 0 | 1;
   webhook_url: string | null;
   timeout_ms: number | null;
   retries: number;
   async_mode: AsyncMode | null;
+  // ADR-011. NULL means runs are retained indefinitely.
+  max_run_retention_days: number | null;
   // Multi-tenant fields (v0.3.1 / W2.1). workspace_id defaults to 'local' in
   // OSS mode. `memory_keys` is a JSON array declared in the app manifest that
   // lists which keys this app is allowed to persist in `app_memory`.
@@ -381,6 +427,28 @@ export interface SessionContext {
   auth_session_id?: string;
   /** User email (cloud mode), surfaced to the UI by /api/session/me. */
   email?: string;
+  /** Agent token principal id when authenticated via Authorization bearer. */
+  agent_token_id?: string;
+  /** Coarse agent-token scope attached to the bearer principal. */
+  agent_token_scope?: AgentTokenScope;
+  /** Per-token request budget applied by the rate-limit layer. */
+  agent_token_rate_limit_per_minute?: number;
+}
+
+export type AgentTokenScope = 'read' | 'read-write' | 'publish-only';
+
+export interface AgentTokenRecord {
+  id: string;
+  prefix: string;
+  hash: string;
+  label: string;
+  scope: AgentTokenScope;
+  workspace_id: string;
+  user_id: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  rate_limit_per_minute: number;
 }
 
 // =====================================================================

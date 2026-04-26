@@ -1,7 +1,7 @@
 // Cookie consent storage. Single source of truth for read/write/subscribe.
-// Used by `CookieBanner` (UI), `lib/sentry.ts` (gate), and `lib/posthog.ts`
-// (gate). Kept tiny and SSR-safe so `initBrowserSentry` / `initPostHog` can
-// be called from `main.tsx` at boot without pulling in React.
+// Used by `CookieBanner` (UI) and `lib/posthog.ts` (gate). Kept tiny and
+// SSR-safe so `initPostHog` can be called from `main.tsx` at boot without
+// pulling in React.
 //
 // Storage layout (kept in sync, both written together in `setConsent`):
 //   - localStorage["floom.cookie-consent"] = "essential" | "all"

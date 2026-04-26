@@ -1,3 +1,5 @@
+import './lib/sentry-init.js';
+
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -8,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { adminRouter } from './routes/admin.js';
+import { accountDeleteRouter } from './routes/account_delete.js';
 import { healthRouter } from './routes/health.js';
 import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
@@ -25,13 +28,17 @@ import { stripeRouter } from './routes/stripe.js';
 import { reviewsRouter } from './routes/reviews.js';
 import { feedbackRouter } from './routes/feedback.js';
 import { meAppsRouter } from './routes/me_apps.js';
+import { agentKeysRouter } from './routes/agent_keys.js';
+import { agentsRouter } from './routes/agents.js';
 import { metricsRouter } from './routes/metrics.js';
 import { ogRouter } from './routes/og.js';
 import { ghStarsRouter } from './routes/gh-stars.js';
 import { skillRouter } from './routes/skill.js';
+import { studioBuildRouter } from './routes/studio-build.js';
 import { db } from './db.js';
 import { SERVER_VERSION } from './lib/server-version.js';
-import { initSentry, captureServerError } from './lib/sentry.js';
+import { captureServerError } from './lib/sentry.js';
+import { enforceStartupChecks } from './lib/startup-checks.js';
 import { sendDiscordAlert, logAlertsBootState } from './lib/alerts.js';
 import { seedFromFile } from './services/seed.js';
 import { seedLaunchDemos } from './services/launch-demos.js';
@@ -39,6 +46,7 @@ import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { startFastApps } from './services/fast-apps-sidecar.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
+import { agentTokenAuthMiddleware } from './lib/agent-tokens.js';
 import {
   getAuth,
   getAuthForRequest,
@@ -48,21 +56,35 @@ import {
 } from './lib/better-auth.js';
 import { sanitizeAuthResponse } from './lib/auth-response.js';
 import { padToFloor, shouldPadAuthTiming } from './lib/auth-response-guard.js';
-import { runRateLimitMiddleware } from './lib/rate-limit.js';
+import { runRateLimitMiddleware, writeRateLimitMiddleware } from './lib/rate-limit.js';
 import {
   applyProgressiveSigninDelayFromContext,
   parseEmailForSigninProgressiveDelay,
   recordSigninEmailProgressiveDelayOutcome,
 } from './lib/signin-progressive-delay.js';
 import { resolveUserContext } from './services/session.js';
+import { getAppAccessDecision, isPublicListingVisibility } from './services/sharing.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
+import { startGithubBuildWorker } from './services/github-deploy.js';
 import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
+import { startRunRetentionSweeper } from './services/run-retention-sweeper.js';
+import { startAuditLogRetentionSweeper } from './services/audit-log.js';
 import { securityHeaders, noIndexPreview, isPreviewEnv } from './middleware/security.js';
 import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
 import { isDeployEnabled } from './services/workspaces.js';
+import {
+  AccountDeleteError,
+  getUserDeletionStateByEmail,
+  initiateAccountSoftDelete,
+  isDeleteExpired,
+  permanentlyDeleteExpiredAccountForEmail,
+  revokeAccountSessions,
+  softDeletedSignInBody,
+  startAccountDeleteSweeper,
+} from './services/account-deletion.js';
 // Side-effect import: instantiates the adapter bundle at module load so
 // misconfigured env vars fail fast at boot (before any request is served).
 // The bundle is exported from `adapters/index.ts`; route modules import
@@ -73,8 +95,8 @@ import './adapters/index.js';
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
-// Optional Sentry wiring. No-op when SENTRY_DSN is unset.
-initSentry();
+enforceStartupChecks();
+
 // Optional Discord alerts. No-op when DISCORD_ALERTS_WEBHOOK_URL is unset.
 // Logs one line at boot so operators can verify wiring via docker logs.
 logAlertsBootState();
@@ -156,6 +178,7 @@ app.use('/api/memory/*', restrictedCors);
 app.use('/api/secrets/*', restrictedCors);
 app.use('/api/stripe/*', restrictedCors);
 app.use('/api/feedback/*', restrictedCors);
+app.use('/api/studio/build/*', restrictedCors);
 // Admin surface is bearer-authed; same CORS policy as other restricted routes
 // so a misconfigured cross-origin page can't call it with credentials.
 app.use('/api/admin/*', restrictedCors);
@@ -168,6 +191,8 @@ app.use('/api/health/*', openCors);
 app.use('/api/gh-stars', openCors);
 app.use('/api/gh-stars/*', openCors);
 app.use('/api/run', openCors);
+app.use('/api/agents', openCors);
+app.use('/api/agents/*', openCors);
 app.use('/api/:slug/run', openCors);
 app.use('/api/:slug/jobs', openCors);
 app.use('/mcp/*', openCors);
@@ -228,30 +253,31 @@ process.on('uncaughtException', (err) => {
 app.use('/api/*', globalAuthMiddleware);
 app.use('/mcp/*', globalAuthMiddleware);
 app.use('/p/*', globalAuthMiddleware);
+app.use('/api/*', agentTokenAuthMiddleware);
+app.use('/mcp/*', agentTokenAuthMiddleware);
+app.use('/p/*', agentTokenAuthMiddleware);
 if (process.env.FLOOM_AUTH_TOKEN) {
   console.log('[auth] FLOOM_AUTH_TOKEN is set — bearer auth required on all /api, /mcp, /p routes');
 }
 
-// Rate limiting for run surfaces. Applied to POST-heavy paths that actually
-// execute an app. Health / hub list / /me/runs / MCP tools/list stay
-// unthrottled so frontend polls and service discovery aren't affected.
+// Rate limiting for run surfaces. Direct run handlers call the shared
+// runGate helper after they know the target slug; queued jobs and HTTP ingest
+// still use middleware because the route path carries their budget identity.
 // Routes covered:
-//   - POST /api/run               (body-keyed slug, legacy)
-//   - POST /api/:slug/run         (slug-keyed, primary for paste-first)
 //   - POST /api/:slug/jobs        (async enqueue)
-//   - POST /mcp/app/:slug         (per-app MCP tool calls)
 //   - POST /api/hub/ingest        (HTTP ingest; MCP ingest_app has its own daily cap)
-// The MCP admin root (/mcp) is rate-limited separately inside the tool
-// handler (ingest_app only, 10/day).
+//   - POST /mcp and /mcp/* body-size guard (run_app rate gates inline)
 const rateLimit = runRateLimitMiddleware(resolveUserContext);
+const writeRateLimit = writeRateLimitMiddleware(resolveUserContext);
 // Body-size guard runs BEFORE the rate-limit check so an attacker can't
 // burn rate-limit budget with oversized bodies (we reject 413 before
 // incrementing the counter). Launch-hardening 2026-04-23 for the 3 hero
-// demo apps; all run surfaces share the same 8 MiB cap.
-app.use('/api/run', runBodyLimit, rateLimit);
-app.use('/api/:slug/run', runBodyLimit, rateLimit);
+// demo apps; all run surfaces share the same 8 MiB cap. /mcp root needs the
+// guard here because MCP transports parse the JSON-RPC body before a tool
+// handler can inspect whether the call is run_app.
+app.use('/mcp', runBodyLimit);
+app.use('/mcp/*', runBodyLimit);
 app.use('/api/:slug/jobs', runBodyLimit, rateLimit);
-app.use('/mcp/app/:slug', runBodyLimit, rateLimit);
 // Security H2 (audit 2026-04-23): /api/hub/ingest was the only
 // unauthenticated-in-OSS write surface missing from the run-rate-limit
 // umbrella. The MCP equivalent (`ingest_app` tool) already has its own
@@ -259,6 +285,10 @@ app.use('/mcp/app/:slug', runBodyLimit, rateLimit);
 // uncapped. Route covers only POST (other hub paths are reads / owner-
 // scoped writes and route through their own auth).
 app.use('/api/hub/ingest', runBodyLimit, rateLimit);
+// Security launch-week #600: global write limiter for all /api mutations.
+// Existing per-route limiters are explicitly skipped inside the middleware
+// to avoid double-throttling (run surfaces, feedback, waitlist).
+app.use('/api/*', writeRateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
@@ -273,11 +303,13 @@ app.route('/api/admin', adminRouter);
 // Prometheus-style metrics. Exempt from the global auth gate above; metrics
 // owns its own METRICS_TOKEN bearer auth. 404 when the env var is unset.
 app.route('/api/metrics', metricsRouter);
+app.route('/api/studio/build', studioBuildRouter);
 app.route('/api/hub', hubRouter);
 app.route('/api/parse', parseRouter);
 app.route('/api/pick', pickRouter);
 app.route('/api/thread', threadRouter);
 app.route('/api/run', runRouter);
+app.route('/api/agents', agentsRouter);
 app.route('/mcp', mcpRouter);
 // Slug-based run endpoint: POST /api/:slug/run
 // Registered after /api/run to avoid prefix collision.
@@ -322,6 +354,8 @@ app.route('/api/stripe', stripeRouter);
 // W4-minimal: per-user run history, reviews, product feedback. /api/me
 // owns the scoped dashboard queries; /api/apps/:slug/reviews powers the
 // /p/:slug review surface; /api/feedback accepts in-app feedback.
+app.route('/api/me/agent-keys', agentKeysRouter);
+app.route('/api/me/delete-account', accountDeleteRouter);
 app.route('/api/me', meRouter);
 // Secrets-policy feature: creator + viewer surface for per-app secret
 // policies and creator-owned secret values. Mounted at /api/me/apps so
@@ -375,6 +409,48 @@ if (isCloudMode()) {
       return c.json({ error: 'auth_failed', code: error }, 400);
     });
 
+    // Issue #767 (waitlist bypass): in waitlist mode (`isDeployEnabled()`
+    // false), block account-creation auth endpoints before Better Auth runs.
+    // Keep GET /auth/* reachable (session checks, callbacks, etc.).
+    app.use('/auth/*', async (c, next) => {
+      const method = c.req.method;
+      const pathname = new URL(c.req.url).pathname;
+      const isSignupPath = /^\/auth\/(?:sign-up|signup)(?:\/|$)/.test(pathname);
+      if (method === 'POST' && isSignupPath && !isDeployEnabled()) {
+        return c.json({ error: 'sign-up disabled — join the waitlist' }, 403);
+      }
+      return next();
+    });
+
+    app.post('/auth/delete-user', async (c) => {
+      const auth = getAuthForRequest(c.req.raw);
+      if (!auth) {
+        return new Response('Auth not configured', { status: 503 });
+      }
+      const session = (await auth.api.getSession({
+        headers: c.req.raw.headers,
+      })) as { user?: { id: string; email: string } } | null;
+      if (!session?.user?.id || !session.user.email) {
+        return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+      }
+      let confirmEmail = session.user.email;
+      try {
+        const body = (await c.req.json()) as { confirm_email?: unknown };
+        if (typeof body.confirm_email === 'string') confirmEmail = body.confirm_email;
+      } catch {
+        confirmEmail = session.user.email;
+      }
+      try {
+        const result = initiateAccountSoftDelete(session.user.id, confirmEmail);
+        return c.json({ success: true, message: 'User deleted', delete_at: result.delete_at });
+      } catch (err) {
+        if (err instanceof AccountDeleteError) {
+          return c.json({ error: err.message, code: err.code }, err.status as 400 | 401 | 404 | 409 | 410 | 422);
+        }
+        throw err;
+      }
+    });
+
     // Hono `app.on(...)` accepts a method list + path. Better Auth's
     // `handler` consumes the raw `Request` and returns a `Response`, which
     // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
@@ -397,12 +473,32 @@ if (isCloudMode()) {
         const method = c.req.method;
         let reqForAuth = c.req.raw;
         let signinEmailForDelay: string | null = null;
+        let pendingDeleteSignin = null as ReturnType<typeof getUserDeletionStateByEmail> | null;
         if (method === 'POST' && pathname === '/auth/sign-in/email') {
           const bodyText = await c.req.raw.clone().text();
           const parsedEmail = parseEmailForSigninProgressiveDelay(bodyText);
           if (parsedEmail) {
             signinEmailForDelay = parsedEmail;
             await applyProgressiveSigninDelayFromContext(c, parsedEmail);
+            const deletionState = getUserDeletionStateByEmail(parsedEmail);
+            if (deletionState?.deleted_at) {
+              if (isDeleteExpired(deletionState)) {
+                const earlyStartedAtMs = Date.now();
+                permanentlyDeleteExpiredAccountForEmail(parsedEmail);
+                const expired = new Response(
+                  JSON.stringify({
+                    error: 'Invalid email or password.',
+                    code: 'invalid_credentials',
+                  }),
+                  { status: 401, headers: { 'content-type': 'application/json' } },
+                );
+                await recordSigninEmailProgressiveDelayOutcome(c, parsedEmail, expired);
+                const padTiming = shouldPadAuthTiming(pathname);
+                if (padTiming) await padToFloor(earlyStartedAtMs);
+                return expired;
+              }
+              pendingDeleteSignin = deletionState;
+            }
             reqForAuth = new Request(c.req.raw.url, {
               method: c.req.raw.method,
               headers: c.req.raw.headers,
@@ -413,7 +509,14 @@ if (isCloudMode()) {
         const padTiming = shouldPadAuthTiming(pathname);
         const startedAtMs = padTiming ? Date.now() : 0;
         const raw = await auth.handler(reqForAuth);
-        const res = await sanitizeAuthResponse(reqForAuth, raw);
+        let res = await sanitizeAuthResponse(reqForAuth, raw);
+        if (pendingDeleteSignin && res.status >= 200 && res.status < 300) {
+          revokeAccountSessions(pendingDeleteSignin.id);
+          res = new Response(JSON.stringify(softDeletedSignInBody(pendingDeleteSignin)), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         if (signinEmailForDelay) {
           await recordSigninEmailProgressiveDelayOutcome(c, signinEmailForDelay, res);
         }
@@ -437,7 +540,7 @@ app.get('/openapi.json', (c) =>
       title: 'Floom self-host API',
       version: SERVER_VERSION,
       description:
-        'Floom lists registered apps at GET /api/hub. Each app is callable over MCP at /mcp/app/{slug} and via HTTP POST /api/{slug}/run; use each app manifest for tool names and parameters. When enabled, POST /mcp exposes admin tools (ingest_app, list_apps, search_apps, get_app) for ingest and discovery without the web UI. Optional routes depend on deployment: per-user memory (/api/memory), encrypted secrets (/api/secrets), OAuth connections (/api/connections), Stripe Connect (/api/stripe), workspaces (/api/workspaces), session (/api/session). Product UI for some features may be deferred; backend routes may still exist. Rate limits apply to run surfaces unless disabled (FLOOM_RATE_LIMIT_DISABLED=true); see docs/SELF_HOST.md#rate-limits.',
+        'Floom lists registered apps at GET /api/hub. Each app is callable over MCP at /mcp/app/{slug} and via HTTP POST /api/{slug}/run; use each app manifest for tool names and parameters. When enabled, POST /mcp exposes admin tools (ingest_app, list_apps, search_apps, get_app) for ingest and discovery without the web UI. Optional routes depend on deployment: per-user memory (/api/memory), encrypted secrets (/api/secrets), OAuth connections (/api/connections), Stripe Connect (/api/stripe), workspaces (/api/workspaces), session (/api/session). Product UI for some features may be deferred; backend routes may still exist. Rate limits apply to run surfaces and /api write endpoints unless disabled (FLOOM_RATE_LIMIT_DISABLED=true); see docs/SELF_HOST.md#rate-limits.',
     },
     paths: {
       '/api/health': {
@@ -1268,8 +1371,8 @@ if (webDist) {
       | undefined;
     const isPubliclyListable =
       row &&
-      row.publish_status === 'published' &&
-      (row.visibility === 'public' || row.visibility === null);
+      isPublicListingVisibility(row.visibility) &&
+      (row.visibility === 'public_live' || row.publish_status === 'published');
     const ogImage = `${publicOrigin}/og/${slug}.svg`;
     // 2026-04-20 (PRR #172): canonical per-slug so indexers don't fold
     // every /p/:slug back to the landing canonical.
@@ -1455,6 +1558,32 @@ if (webDist) {
     // (PRR #172).
     const slugMatch = pathname.match(pSlugPattern);
     if (slugMatch && slugMatch[1]) {
+      const appRow = db
+        .prepare(
+          'SELECT id, slug, author, workspace_id, visibility, link_share_token, link_share_requires_auth FROM apps WHERE slug = ?',
+        )
+        .get(slugMatch[1]) as
+        | {
+            id: string;
+            slug: string;
+            author: string | null;
+            workspace_id: string;
+            visibility: string | null;
+            link_share_token: string | null;
+            link_share_requires_auth: number;
+          }
+        | undefined;
+      if (!appRow) {
+        return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
+      }
+      const ctx = await resolveUserContext(c);
+      const access = getAppAccessDecision(appRow, ctx, url.searchParams.get('key'));
+      if (!access.ok) {
+        if (access.status === 401) {
+          return c.html(rewriteTitle(servedIndexHtml, 'Authentication required · Floom'), 401);
+        }
+        return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
+      }
       return c.html(rewriteHeadForSlug(servedIndexHtml, slugMatch[1]));
     }
     // 2026-04-20 (PRR tail cleanup): explicit /404 path returns 404 status.
@@ -1586,12 +1715,30 @@ async function boot(): Promise<void> {
     startZombieRunSweeper();
   }
 
+  // ADR-011 run retention. Default behavior remains indefinite because the
+  // sweeper only deletes rows for apps with max_run_retention_days set.
+  if (process.env.FLOOM_DISABLE_RETENTION_SWEEPER !== 'true') {
+    startRunRetentionSweeper();
+  }
+
   // Start the triggers scheduler. Polls the `triggers` table every 30s
   // and enqueues jobs for schedule-type triggers whose next_run_at has
   // arrived. Opt-out via FLOOM_DISABLE_TRIGGERS_WORKER=true for tests.
   if (process.env.FLOOM_DISABLE_TRIGGERS_WORKER !== 'true') {
     startTriggersWorker();
   }
+
+  if (process.env.FLOOM_DISABLE_ACCOUNT_DELETE_SWEEPER !== 'true') {
+    startAccountDeleteSweeper();
+  }
+
+  if (process.env.FLOOM_DISABLE_AUDIT_SWEEPER !== 'true') {
+    startAuditLogRetentionSweeper();
+  }
+
+  // ADR-015 GitHub deploys: resume any in-flight public-repo builds after
+  // process restarts. New builds are also enqueued directly by the route.
+  startGithubBuildWorker();
 
   // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its
   // seven deterministic utility apps. Opt-out via FLOOM_FAST_APPS=false.

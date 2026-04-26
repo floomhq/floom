@@ -88,6 +88,7 @@ const USER_WRITE_COLUMNS = new Set<keyof UserWriteInput>([
   'auth_provider',
   'auth_subject',
   'image',
+  'is_admin',
   'composio_user_id',
 ]);
 const JOB_COLUMNS = new Set([
@@ -426,7 +427,8 @@ class PostgresStorageAdapter implements StorageAdapter {
   async getUser(id: string): Promise<UserRecord | undefined> {
     return one(
       (await this.query(
-        `SELECT id, workspace_id, email, name, auth_provider, auth_subject, created_at
+        `SELECT id, workspace_id, email, name, auth_provider, auth_subject, image,
+                is_admin, deleted_at, delete_at, composio_user_id, created_at
            FROM users WHERE id = $1`,
         [id],
       )).map(normalizeUser),
@@ -436,7 +438,8 @@ class PostgresStorageAdapter implements StorageAdapter {
   async getUserByEmail(email: string): Promise<UserRecord | undefined> {
     return one(
       (await this.query(
-        `SELECT id, workspace_id, email, name, auth_provider, auth_subject, created_at
+        `SELECT id, workspace_id, email, name, auth_provider, auth_subject, image,
+                is_admin, deleted_at, delete_at, composio_user_id, created_at
            FROM users WHERE email = $1`,
         [email],
       )).map(normalizeUser),

@@ -10,18 +10,37 @@ import { newRunId } from '../lib/ids.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
-import { checkAppVisibility, hasValidAdminBearer } from '../lib/auth.js';
+import {
+  checkAppVisibility,
+  hasValidAdminBearer,
+  requireAuthenticatedInCloud,
+} from '../lib/auth.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
+import {
+  bulkDeleteRunsForOwner,
+  deleteRunForOwner,
+  RunDeleteForbiddenError,
+  RunDeleteNotFoundError,
+} from '../services/run-retention-sweeper.js';
 import { extractIp } from '../lib/rate-limit.js';
 import {
-  byokRequiredResponse,
+  extractUserApiKey,
+  runByokGate,
+  runGate,
+  type RunGateResult,
+} from '../lib/run-gate.js';
+import {
   decideByok,
   hashUserAgent,
   isByokGated,
-  recordFreeRun,
 } from '../lib/byok-gate.js';
+import {
+  acceptInvite,
+  declineInvite,
+  listPendingInvitesForUser,
+} from '../services/sharing.js';
 import type {
   AppRecord,
   NormalizedManifest,
@@ -29,38 +48,20 @@ import type {
   SessionContext,
 } from '../types.js';
 
-/**
- * BYOK header: callers can pass their own Gemini API key on a per-run basis.
- * When present AND the app is in BYOK_GATED_SLUGS, the server:
- *   1. Does NOT count the run against the 5/day free budget.
- *   2. Injects the key as a per-call secret (GEMINI_API_KEY).
- *   3. Never logs or persists the value (it's merged into mergedSecrets for
- *      this single dispatchRun call only).
- *
- * Header name kept lowercase on read (Hono normalizes) and well-known so
- * the frontend and any curl-user can discover it in the 429 payload docs.
- */
-const USER_API_KEY_HEADER = 'x-user-api-key';
-
-function extractUserApiKey(c: Context): string | null {
-  const raw = c.req.header(USER_API_KEY_HEADER);
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  // Minimum plausible length for a Google AI Studio key (prefix "AIza" +
-  // 35 chars). We don't hard-validate here — the dry-run path inside the
-  // container is the real authority on whether the key works — but a
-  // blank/near-blank header should fall through to free-quota instead of
-  // being treated as "user provided a key".
-  if (trimmed.length < 20) return null;
-  return trimmed;
-}
-
 export const runRouter = new Hono();
 
+function runGateResponse(c: Context, gate: Exclude<RunGateResult, { ok: true }>): Response {
+  return c.json(gate.body, gate.status, gate.headers);
+}
+
 type RunAppAccessRow = {
+  id: string;
   slug: string;
   visibility: string | null;
   author: string | null;
+  workspace_id: string;
+  link_share_token: string | null;
+  link_share_requires_auth: number;
 };
 
 async function loadAuthorizedRunApp(
@@ -68,12 +69,19 @@ async function loadAuthorizedRunApp(
   appId: string,
 ): Promise<{ app: RunAppAccessRow | undefined; blocked: Response | null }> {
   const app = db
-    .prepare('SELECT slug, visibility, author FROM apps WHERE id = ?')
+    .prepare(
+      'SELECT id, slug, visibility, author, workspace_id, link_share_token, link_share_requires_auth FROM apps WHERE id = ?',
+    )
     .get(appId) as RunAppAccessRow | undefined;
   if (!app) return { app: undefined, blocked: null };
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
+    slug: app.slug,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
+    link_share_requires_auth: app.link_share_requires_auth,
     ctx,
   });
   return { app, blocked };
@@ -184,6 +192,10 @@ function formatPublicShareView(
 }
 
 runRouter.post('/', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const bodyGate = runGate(c, ctx, { checkRate: false });
+  if (!bodyGate.ok) return runGateResponse(c, bodyGate);
+
   // 2026-04-20 (P2 #146): malformed JSON used to fall through to
   // `catch(() => ({}))` and silently become an empty body — which, for actions
   // with no required inputs, resulted in a 200 + run_id on junk input.
@@ -201,14 +213,21 @@ runRouter.post('/', async (c) => {
   if (typeof body.app_slug !== 'string') {
     return c.json({ error: '"app_slug" is required' }, 400);
   }
+  const gate = runGate(c, ctx, { slug: body.app_slug, checkBody: false });
+  if (!gate.ok) return runGateResponse(c, gate);
+
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(body.app_slug) as AppRecord | undefined;
   if (!row) return c.json({ error: `App not found: ${body.app_slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
+    slug: row.slug,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;
@@ -247,44 +266,9 @@ runRouter.post('/', async (c) => {
   // Admin bearers bypass (internal ops / monitoring). Everyone else is
   // treated the same for launch — cloud auth'd callers share the same budget
   // as anon. We can split later if abuse materializes.
-  const bypassBecauseAdmin = hasValidAdminBearer(c);
   const userApiKey = extractUserApiKey(c);
-  const perCallSecrets: Record<string, string> = {};
-  if (isByokGated(row.slug) && !bypassBecauseAdmin) {
-    const ip = extractIp(c);
-    // Defense-in-depth against pure-IP bypass (CSO P1-2, 2026-04-23): the
-    // (ip + UA-hash) combo makes two browsers behind the same NAT get
-    // separate budgets, and the subnet-burst detector inside decideByok
-    // tightens the limit to 1 free run for a /24 under attack. Not a
-    // silver bullet; a headless bot rotating both IP AND UA from a proxy
-    // pool can still exhaust, but this raises the cost meaningfully.
-    const uaHash = hashUserAgent(c.req.header('user-agent'));
-    const decision = decideByok(ip, row.slug, userApiKey !== null, undefined, uaHash);
-    if (decision.block) {
-      return c.json(
-        byokRequiredResponse(row.slug, decision.usage, decision.limit),
-        429,
-      );
-    }
-    if (userApiKey) {
-      // BYOK path: inject the caller's key for this run only. perCallSecrets
-      // is transient — dispatchRun merges it into the per-run secrets bag
-      // and never writes it to disk. Do NOT record against the free budget;
-      // the user is paying their own API bill.
-      perCallSecrets.GEMINI_API_KEY = userApiKey;
-    } else {
-      // Free path: count this run against the 24h budget BEFORE dispatch so
-      // a burst of 6 concurrent requests can't all slip through the
-      // usage<5 check.
-      recordFreeRun(ip, row.slug, undefined, uaHash);
-      if (decision.tightened) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[byok-gate] subnet burst tightened limit ip=${ip} slug=${row.slug}`,
-        );
-      }
-    }
-  }
+  const byokGate = runByokGate(c, ctx, row.slug, userApiKey);
+  if (!byokGate.ok) return runGateResponse(c, byokGate);
 
   // W4M.1: scope the run by the current session so /api/me/runs can filter
   // by user_id / device_id. `ctx` was already resolved above for the
@@ -319,7 +303,7 @@ runRouter.post('/', async (c) => {
     runId,
     actionName,
     validated,
-    Object.keys(perCallSecrets).length > 0 ? perCallSecrets : undefined,
+    byokGate.perCallSecrets,
     ctx,
   );
 
@@ -336,9 +320,9 @@ runRouter.post('/', async (c) => {
 //   - Opt-in public share: when the owner hits POST /api/run/:id/share,
 //     `runs.is_public` flips to 1. Anonymous callers then see a redacted
 //     view (outputs only — inputs/logs/upstream_status stripped).
-//   - The app-level auth-required / private visibility gate still runs
-//     on top of the ownership check, so an auth-required app's runs stay
-//     bearer-token-gated even when marked public.
+//   - The app-level link-auth / private visibility gate still runs on top
+//     of the ownership check, so gated app runs stay protected even when
+//     marked public.
 runRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
   const row = getRun(id);
@@ -349,8 +333,7 @@ runRouter.get('/:id', async (c) => {
 
   // Server-admin escape hatch: when FLOOM_AUTH_TOKEN is configured and the
   // caller presents it, they bypass the ownership gate and see the full
-  // payload. This preserves the self-host operator flow (same as the one
-  // on auth-required apps). Without an explicitly-set token this branch
+  // payload. This preserves the self-host operator flow. Without an explicitly-set token this branch
   // is a no-op, so OSS mode without FLOOM_AUTH_TOKEN still enforces
   // per-device ownership.
   if (hasValidAdminBearer(c)) {
@@ -571,14 +554,25 @@ export const slugRunRouter = new Hono<{ Variables: { slug: string } }>();
 
 slugRunRouter.post('/', async (c) => {
   const slug = c.req.param('slug');
+  const ctx = await resolveUserContext(c);
+  const bodyGate = runGate(c, ctx, { slug, checkRate: false });
+  if (!bodyGate.ok) return runGateResponse(c, bodyGate);
+
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
   if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const ctx = await resolveUserContext(c);
+  const gate = runGate(c, ctx, { slug, checkBody: false });
+  if (!gate.ok) return runGateResponse(c, gate);
+
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
+    slug: row.slug,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;
@@ -623,31 +617,9 @@ slugRunRouter.post('/', async (c) => {
   // the slug-based endpoint is the same product surface (e.g. curl users,
   // self-host), so it shares the same 5-free-runs-then-BYOK rule for the
   // 3 hero demo apps.
-  const bypassBecauseAdminSlug = hasValidAdminBearer(c);
   const userApiKeySlug = extractUserApiKey(c);
-  const perCallSecretsSlug: Record<string, string> = {};
-  if (isByokGated(row.slug) && !bypassBecauseAdminSlug) {
-    const ip = extractIp(c);
-    const uaHashSlug = hashUserAgent(c.req.header('user-agent'));
-    const decision = decideByok(ip, row.slug, userApiKeySlug !== null, undefined, uaHashSlug);
-    if (decision.block) {
-      return c.json(
-        byokRequiredResponse(row.slug, decision.usage, decision.limit),
-        429,
-      );
-    }
-    if (userApiKeySlug) {
-      perCallSecretsSlug.GEMINI_API_KEY = userApiKeySlug;
-    } else {
-      recordFreeRun(ip, row.slug, undefined, uaHashSlug);
-      if (decision.tightened) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[byok-gate] subnet burst tightened limit ip=${ip} slug=${row.slug}`,
-        );
-      }
-    }
-  }
+  const byokGate = runByokGate(c, ctx, row.slug, userApiKeySlug);
+  if (!byokGate.ok) return runGateResponse(c, byokGate);
 
   // W4M.1: scope the run by the current session. `ctx` already resolved
   // for the visibility check above.
@@ -676,7 +648,7 @@ slugRunRouter.post('/', async (c) => {
     runId,
     actionName,
     validated,
-    Object.keys(perCallSecretsSlug).length > 0 ? perCallSecretsSlug : undefined,
+    byokGate.perCallSecrets,
     ctx,
   );
 
@@ -761,6 +733,47 @@ slugQuotaRouter.get('/', async (c) => {
 // cloud mode and by (workspace_id, device_id) in OSS mode. Joins `apps`
 // so the UI can render the app name + icon without a second fetch.
 export const meRouter = new Hono();
+
+meRouter.get('/invites', async (c) => {
+  const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+  }
+  const invites = listPendingInvitesForUser(ctx.user_id).map((invite) => ({
+    id: invite.id,
+    app_id: invite.app_id,
+    invited_email: invite.invited_email,
+    state: invite.state,
+    created_at: invite.created_at,
+    app_slug: (invite as unknown as { app_slug?: string }).app_slug,
+    app_name: (invite as unknown as { app_name?: string }).app_name,
+    app_description: (invite as unknown as { app_description?: string }).app_description,
+  }));
+  return c.json({ invites });
+});
+
+meRouter.post('/invites/:invite_id/accept', async (c) => {
+  const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+  }
+  const { invite, changed } = acceptInvite(c.req.param('invite_id') || '', ctx.user_id);
+  if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
+  if (!changed && invite.state !== 'accepted') {
+    return c.json({ error: 'Invite is not acceptable', code: 'invalid_invite_state' }, 409);
+  }
+  return c.json({ ok: true, invite });
+});
+
+meRouter.post('/invites/:invite_id/decline', async (c) => {
+  const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+  }
+  const invite = declineInvite(c.req.param('invite_id') || '', ctx.user_id);
+  if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
+  return c.json({ ok: true, invite });
+});
 
 type StudioAppSummaryRow = {
   id: string;
@@ -1088,6 +1101,52 @@ meRouter.get('/runs', async (c) => {
   });
 });
 
+// DELETE /api/me/runs?app_id=X&before_ts=Y&confirm=delete_runs
+// Bulk-deletes the caller's own run rows for one app before a timestamp.
+meRouter.delete('/runs', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+
+  const appId = c.req.query('app_id') || '';
+  const beforeTs = c.req.query('before_ts') || '';
+  const confirm = c.req.query('confirm') || '';
+  if (confirm !== 'delete_runs') {
+    return c.json(
+      {
+        error: 'Bulk run deletion requires confirm=delete_runs',
+        code: 'confirmation_required',
+      },
+      400,
+    );
+  }
+  if (!appId || !beforeTs) {
+    return c.json(
+      {
+        error: 'app_id and before_ts are required',
+        code: 'invalid_query',
+      },
+      400,
+    );
+  }
+
+  try {
+    const result = bulkDeleteRunsForOwner(ctx, {
+      app_id: appId,
+      before_ts: beforeTs,
+    });
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    return c.json(
+      {
+        error: (err as Error).message || 'bulk_delete_failed',
+        code: 'bulk_delete_failed',
+      },
+      400,
+    );
+  }
+});
+
 // GET /api/me/runs/:id — scoped fetch of a single run. Returns 404 if the
 // run exists but is owned by someone else, so probing run ids can't leak
 // another user's outputs.
@@ -1150,4 +1209,32 @@ meRouter.get('/runs/:id', async (c) => {
     finished_at: row.finished_at,
     logs: row.logs,
   });
+});
+
+// DELETE /api/me/runs/:id — scoped deletion of one owned run. Non-owners get
+// 403 because this is a destructive endpoint and the caller already supplied
+// a concrete id.
+meRouter.delete('/runs/:id', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id');
+  try {
+    const result = deleteRunForOwner(ctx, id);
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    if (err instanceof RunDeleteNotFoundError) {
+      return c.json({ error: 'Run not found', code: 'run_not_found' }, 404);
+    }
+    if (err instanceof RunDeleteForbiddenError) {
+      return c.json({ error: 'Forbidden', code: 'forbidden' }, 403);
+    }
+    return c.json(
+      {
+        error: (err as Error).message || 'delete_failed',
+        code: 'delete_failed',
+      },
+      500,
+    );
+  }
 });

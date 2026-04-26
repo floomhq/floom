@@ -28,9 +28,11 @@ export function StudioHomePage() {
     <StudioLayout
       title="Studio · Floom"
       allowSignedOutShell={signedOutPreview}
+      // v23 PR-H: outer padding is owned by .studio-page (22px 28px 96px).
+      // Layout sets a slim baseline; .studio-page overrides to v23 spec.
       contentStyle={{
         maxWidth: 1240,
-        padding: '24px 28px 96px',
+        padding: '0',
       }}
     >
       <StudioDashboardHome />

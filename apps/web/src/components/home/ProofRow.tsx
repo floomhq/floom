@@ -72,18 +72,6 @@ export function ProofRow({ hubCount, runsToday }: ProofRowProps) {
         <Stat value="MIT" label="open source" />
       </div>
 
-      <style>{`
-        @media (max-width: 640px) {
-          .proof-row {
-            gap: 24px !important;
-          }
-        }
-        @keyframes proof-shimmer {
-          0%   { opacity: 0.35; }
-          50%  { opacity: 0.75; }
-          100% { opacity: 0.35; }
-        }
-      `}</style>
     </section>
   );
 }

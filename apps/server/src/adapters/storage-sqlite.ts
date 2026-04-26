@@ -60,6 +60,7 @@ const USER_WRITE_COLUMNS = new Set<keyof UserWriteInput>([
   'auth_provider',
   'auth_subject',
   'image',
+  'is_admin',
   'composio_user_id',
 ]);
 
@@ -75,7 +76,7 @@ function userInsertKeys(input: UserWriteInput): Array<keyof UserWriteInput> {
 function userInsertValues(
   input: UserWriteInput,
   keys: Array<keyof UserWriteInput>,
-): Array<string | null | undefined> {
+): unknown[] {
   return keys.map((key) => input[key]);
 }
 

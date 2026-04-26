@@ -372,6 +372,7 @@ export function dispatchRun(
       action,
       inputs,
       secrets,
+      manifest,
       image: app.docker_image ?? undefined,
     });
   }
@@ -445,6 +446,7 @@ async function runActionWorker(opts: {
   action: string;
   inputs: Record<string, unknown>;
   secrets: Record<string, string>;
+  manifest: NormalizedManifest;
   image?: string;
 }): Promise<void> {
   const logStream = getOrCreateStream(opts.runId);
@@ -456,6 +458,7 @@ async function runActionWorker(opts: {
       action: opts.action,
       inputs: opts.inputs,
       secrets: opts.secrets,
+      manifest: opts.manifest,
       image: opts.image,
       onOutput: (chunk, stream) => {
         const lines = chunk.split('\n');

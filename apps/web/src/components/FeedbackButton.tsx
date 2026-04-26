@@ -89,51 +89,6 @@ export function FeedbackButton() {
           hover / focus. Keeps a 32px visual size but guarantees a ≥44px
           hit area via an invisible ::before expansion so it stays tappable
           on mobile and accessible via keyboard. */}
-      <style>{`
-        [data-testid="feedback-trigger"] {
-          position: fixed;
-          bottom: 16px;
-          right: 16px;
-          z-index: 900;
-          width: 32px;
-          height: 32px;
-          padding: 0;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          background: transparent;
-          color: var(--muted, #8a8a8a);
-          border: 1px solid var(--line, rgba(0,0,0,0.12));
-          border-radius: 999px;
-          cursor: pointer;
-          font-family: inherit;
-          opacity: 0.6;
-          transition: opacity 120ms ease, color 120ms ease,
-            border-color 120ms ease, background 120ms ease;
-        }
-        [data-testid="feedback-trigger"]::before {
-          content: '';
-          position: absolute;
-          inset: -6px;
-        }
-        [data-testid="feedback-trigger"]:hover,
-        [data-testid="feedback-trigger"]:focus-visible {
-          opacity: 1;
-          color: var(--accent, #1a7f37);
-          border-color: var(--accent, #1a7f37);
-          background: var(--card, rgba(255,255,255,0.85));
-        }
-        [data-testid="feedback-trigger"]:focus-visible {
-          outline: 2px solid var(--accent, #1a7f37);
-          outline-offset: 2px;
-        }
-        @media (max-width: 640px) {
-          [data-testid="feedback-trigger"] {
-            bottom: 12px;
-            right: 12px;
-          }
-        }
-      `}</style>
       <button
         type="button"
         onClick={() => setOpen(true)}

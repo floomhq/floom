@@ -56,6 +56,7 @@ const USER_WRITE_COLUMNS = new Set([
     'auth_provider',
     'auth_subject',
     'image',
+    'is_admin',
     'composio_user_id',
 ]);
 const JOB_COLUMNS = new Set([
@@ -325,11 +326,13 @@ class PostgresStorageAdapter {
         ORDER BY w.created_at ASC`, [user_id])).map(normalizeWorkspaceWithRole);
     }
     async getUser(id) {
-        return one((await this.query(`SELECT id, workspace_id, email, name, auth_provider, auth_subject, created_at
+        return one((await this.query(`SELECT id, workspace_id, email, name, auth_provider, auth_subject, image,
+                is_admin, deleted_at, delete_at, composio_user_id, created_at
            FROM users WHERE id = $1`, [id])).map(normalizeUser));
     }
     async getUserByEmail(email) {
-        return one((await this.query(`SELECT id, workspace_id, email, name, auth_provider, auth_subject, created_at
+        return one((await this.query(`SELECT id, workspace_id, email, name, auth_provider, auth_subject, image,
+                is_admin, deleted_at, delete_at, composio_user_id, created_at
            FROM users WHERE email = $1`, [email])).map(normalizeUser));
     }
     async createUser(input) {

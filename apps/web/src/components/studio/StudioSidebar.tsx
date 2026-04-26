@@ -265,6 +265,18 @@ export function StudioSidebar({
               );
             })
           )}
+          {/* v23 Browse-the-store accent row, foot of Apps section. */}
+          <Link
+            to="/apps"
+            data-testid="studio-sidebar-browse-store"
+            className="rail-browse-store"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <span>Browse the store →</span>
+          </Link>
         </section>
 
         <section style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

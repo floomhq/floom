@@ -144,6 +144,9 @@ CREATE TABLE IF NOT EXISTS users (
   auth_provider TEXT NOT NULL DEFAULT 'local',
   auth_subject TEXT,
   image TEXT,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  delete_at TEXT,
   composio_user_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -82,6 +82,20 @@ floom deploy               # publish
 floom status               # see it listed
 ```
 
+## Network allowlist
+
+Hosted Docker apps declare outbound access in `floom.yaml`:
+
+```yaml
+network:
+  allowed_domains:
+    - api.openai.com
+    - "*.example-api.com"
+```
+
+Use `allowed_domains: []` to block all outbound network. The validator rejects
+`*`, URLs, ports, IP literals, invalid domains, and lists over 20 entries.
+
 ## Agent packages
 
 - **Claude Code**: `skills/claude-code/` — drop into `~/.claude/skills/floom/`, provides `/floom-init`, `/floom-deploy`, `/floom-status`.

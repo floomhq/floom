@@ -183,43 +183,6 @@ export function ArchitectureDiagram() {
         </div>
       </div>
 
-      <style>{`
-        .arch-wrap {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0;
-        }
-        .arch-node {
-          display: inline-flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 4px;
-          padding: 14px 24px;
-          border-radius: 14px;
-          min-width: 260px;
-          max-width: min(440px, 100%);
-          box-sizing: border-box;
-          text-align: center;
-        }
-        @media (max-width: 360px) {
-          .arch-node { min-width: 0; width: 100%; }
-        }
-        .arch-spec {
-          background: var(--bg);
-          border: 1px solid var(--line);
-        }
-        .arch-runtime {
-          background: var(--accent);
-          border: 1px solid var(--accent);
-          padding: 18px 28px;
-          box-shadow: 0 8px 24px rgba(5,150,105,0.18);
-        }
-        @media (max-width: 640px) {
-          .arch-surfaces { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-          .arch-node { min-width: 240px; padding: 12px 16px; }
-        }
-      `}</style>
     </section>
   );
 }

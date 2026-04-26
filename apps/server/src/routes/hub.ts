@@ -24,6 +24,7 @@ import {
   SlugTakenError,
   SpecNotFoundError,
 } from '../services/openapi-ingest.js';
+import { auditLog, getAuditActor } from '../services/audit-log.js';
 import {
   bundleRenderer,
   forgetBundle,
@@ -40,6 +41,7 @@ import {
   setHubCache,
 } from '../lib/hub-cache.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
+import { canonicalVisibility, getAppAccessDecision } from '../services/sharing.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -128,7 +130,10 @@ const IngestBody = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*$/)
     .optional(),
   category: z.string().max(48).optional(),
-  visibility: z.enum(['public', 'private', 'auth-required']).optional(),
+  visibility: z.enum(['public', 'private', 'link', 'auth-required']).optional(),
+  link_share_requires_auth: z.boolean().optional(),
+  auth_required: z.boolean().optional(),
+  max_run_retention_days: z.number().int().min(1).max(3650).optional(),
 });
 
 // SECURITY (issue #378, pentest 2026-04-22): /detect fetches a user-supplied
@@ -329,8 +334,13 @@ hubRouter.post('/ingest', async (c) => {
       slug: parsed.data.slug,
       category: parsed.data.category,
       visibility: parsed.data.visibility,
+      link_share_requires_auth: parsed.data.link_share_requires_auth,
+      auth_required: parsed.data.auth_required,
+      max_run_retention_days: parsed.data.max_run_retention_days,
       workspace_id: ctx.workspace_id,
       author_user_id: ctx.user_id,
+      actor_token_id: ctx.agent_token_id,
+      actor_ip: getAuditActor(c, ctx).ip,
       allowPrivateNetwork: ctx.workspace_id === 'local' && ctx.user_id === 'local',
     });
     // Perf fix (2026-04-20): bust the /api/hub 5s cache so the newly
@@ -597,6 +607,20 @@ hubRouter.delete('/:slug', async (c) => {
     return notOwnerResponse(c);
   }
 
+  auditLog({
+    actor: getAuditActor(c, ctx),
+    action: 'app.deleted',
+    target: { type: 'app', id: app.id },
+    before: {
+      slug: app.slug,
+      visibility: app.visibility,
+      publish_status: app.publish_status,
+      workspace_id: app.workspace_id,
+      author: app.author,
+    },
+    after: null,
+    metadata: { slug },
+  });
   deleteAppRecordById(app.id);
   // Runs are dropped by ON DELETE CASCADE (see db.ts CREATE TABLE runs).
   return c.json({ ok: true, slug });
@@ -619,7 +643,7 @@ hubRouter.delete('/:slug', async (c) => {
 // edits still go through re-ingest so the updated_at bookkeeping stays
 // tight; they can be added here later when the Studio grows inline-edit UI.
 const PatchBody = z.object({
-  visibility: z.enum(['public', 'private', 'auth-required']).optional(),
+  visibility: z.enum(['public', 'private']).optional(),
   // null clears; a string pins; omitted means "don't touch".
   primary_action: z.union([z.string().min(1).max(128), z.null()]).optional(),
 });
@@ -703,6 +727,32 @@ hubRouter.patch('/:slug', async (c) => {
   values.push(app.id);
 
   db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  if (parsed.data.visibility && parsed.data.visibility !== app.visibility) {
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'app.visibility_changed',
+      target: { type: 'app', id: app.id },
+      before: { visibility: app.visibility },
+      after: { visibility: parsed.data.visibility },
+      metadata: { slug },
+    });
+  }
+  if (parsed.data.primary_action !== undefined) {
+    const previousManifest = safeManifest(app.manifest);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'app.updated',
+      target: { type: 'app', id: app.id },
+      before: {
+        primary_action:
+          previousManifest && 'primary_action' in previousManifest
+            ? (previousManifest as NormalizedManifest & { primary_action?: string }).primary_action || null
+            : null,
+      },
+      after: { primary_action: parsed.data.primary_action },
+      metadata: { slug, field: 'primary_action' },
+    });
+  }
   // Perf fix (2026-04-20): bust the /api/hub 5s cache so visibility /
   // primary_action changes land in the public directory immediately.
   invalidateHubCache();
@@ -798,8 +848,11 @@ hubRouter.get('/', (c) => {
                  FROM apps
                  LEFT JOIN users ON apps.author = users.id
                  WHERE apps.status = 'active'
-                   AND (apps.visibility = 'public' OR apps.visibility IS NULL)
-                   AND apps.publish_status = 'published'
+                   AND (
+                     apps.visibility = 'public_live'
+                     OR (apps.visibility = 'public' AND apps.publish_status = 'published')
+                     OR (apps.visibility IS NULL AND apps.publish_status = 'published')
+                   )
                    ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
   const rowsAll = (category
@@ -898,25 +951,13 @@ hubRouter.get('/:slug', async (c) => {
     | (AppRecord & { author_name: string | null; author_email: string | null })
     | undefined;
   if (!row) return c.json({ error: 'App not found' }, 404);
-  // Private app? Only reveal to its owner. Return 404 (not 403) so we
-  // don't leak the slug's existence to strangers.
-  if (row.visibility === 'private') {
-    const ctx = await resolveUserContext(c);
-    if (!row.author || ctx.user_id !== row.author) {
-      return c.json({ error: 'App not found' }, 404);
+  const ctx = await resolveUserContext(c);
+  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  if (!access.ok) {
+    if (access.status === 401) {
+      return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
     }
-  }
-  // Manual publish-review gate (#362): non-published public/auth-required
-  // apps are only reachable by their owner. Strangers get a 404 so we
-  // don't leak that a pending_review slug exists. Private apps already
-  // passed their own owner check above and are exempt from this gate
-  // (publish_status is orthogonal to visibility).
-  if (row.visibility !== 'private' && row.publish_status !== 'published') {
-    const ctx = await resolveUserContext(c);
-    const isOwner = !!row.author && ctx.user_id === row.author;
-    if (!isOwner) {
-      return c.json({ error: 'App not found' }, 404);
-    }
+    return c.json({ error: 'App not found' }, 404);
   }
   const manifest = safeManifest(row.manifest);
   const bundle = getBundleResult(slug);
@@ -949,7 +990,7 @@ hubRouter.get('/:slug', async (c) => {
     // Visibility (public | unlisted | private). Surfaced so the web client
     // can render visibility pills and gate private-only UI (e.g. /me/apps/:slug
     // console) without re-fetching from a separate endpoint.
-    visibility: row.visibility,
+    visibility: canonicalVisibility(row.visibility),
     // Error taxonomy (2026-04-20): expose the upstream host so the
     // /p/:slug runner surface can render "Can't reach {host}" on a
     // network_unreachable failure instead of a generic "its backend"
@@ -964,6 +1005,7 @@ hubRouter.get('/:slug', async (c) => {
     is_async: row.is_async === 1,
     async_mode: row.async_mode,
     timeout_ms: row.timeout_ms,
+    max_run_retention_days: row.max_run_retention_days,
     // W2.2: expose renderer metadata so /p/:slug knows whether to lazy-load
     // /renderer/:slug/bundle.js (creator-supplied) or fall back to the
     // default OutputPanel. Null when no custom renderer is compiled.

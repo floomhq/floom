@@ -208,6 +208,7 @@ export async function seedFromFile(): Promise<{
         category: app.category,
         author: app.author,
         icon: app.icon,
+        visibility: 'public_live',
         publish_status: 'published',
       } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
       appsAdded++;

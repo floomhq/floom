@@ -102,7 +102,7 @@ export function PublishCtaBox() {
         </p>
       </div>
       <div style={STACK_STYLE}>
-        <Link to="/signup" style={BTN_ACCENT}>
+        <Link to="/signup?mode=publish" style={BTN_ACCENT}>
           Publish your app
           <ArrowRight size={16} aria-hidden="true" />
         </Link>

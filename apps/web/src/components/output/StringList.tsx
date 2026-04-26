@@ -5,6 +5,7 @@
 // because the whole reason you ran the app was probably to grab one
 // of these strings.
 import { CopyButton } from './CopyButton';
+import { SectionHeader } from './SectionHeader';
 
 export interface StringListProps {
   items: string[];
@@ -29,30 +30,14 @@ export function StringList({ items, label, maxItems = 20 }: StringListProps) {
   return (
     <div
       data-renderer="StringList"
-      className="app-expanded-card"
+      className="app-expanded-card floom-output-card"
       style={{ position: 'relative' }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          marginBottom: 10,
-          gap: 12,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}
-        >
-          {label ?? `${items.length} items`}
-        </div>
-        <CopyButton value={allText} label="Copy all" />
-      </div>
+      <SectionHeader
+        label={label ?? `${items.length} items`}
+        hint={label && items.length > 1 ? `${items.length} items` : undefined}
+        actions={<CopyButton value={allText} label="Copy all" />}
+      />
 
       {asChips ? (
         <div
@@ -67,17 +52,44 @@ export function StringList({ items, label, maxItems = 20 }: StringListProps) {
           ))}
         </div>
       ) : (
+        // Custom bullet styling: 4px green dot at the start of each
+        // row gives a single accent touch and aligns the prose better
+        // than browser default markers. See feedback_sexy_consumer_bar.
         <ul
           style={{
             margin: 0,
-            paddingLeft: 20,
+            padding: 0,
+            listStyle: 'none',
             fontSize: 14,
-            lineHeight: 1.6,
+            lineHeight: 1.55,
             color: 'var(--ink)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
           }}
         >
           {visible.map((item, i) => (
-            <li key={i} style={{ marginBottom: 4, wordBreak: 'break-word' }}>
+            <li
+              key={i}
+              style={{
+                position: 'relative',
+                paddingLeft: 18,
+                wordBreak: 'break-word',
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  left: 4,
+                  top: 9,
+                  width: 4,
+                  height: 4,
+                  borderRadius: '50%',
+                  background: 'var(--accent, #047857)',
+                  opacity: 0.55,
+                }}
+              />
               {item}
             </li>
           ))}

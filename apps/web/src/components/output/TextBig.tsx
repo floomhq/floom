@@ -15,7 +15,7 @@ export function TextBig({ value, copyable = true }: TextBigProps) {
     // Added 2026-04-18 (audit bug #9) after the previous audit couldn't
     // confirm cascade claims because components applied inline styles
     // without identity.
-    <div data-renderer="TextBig" className="app-expanded-card" style={{ position: 'relative' }}>
+    <div data-renderer="TextBig" className="app-expanded-card floom-output-card" style={{ position: 'relative' }}>
       {copyable && (
         <div style={{ position: 'absolute', top: 12, right: 12 }}>
           <CopyButton value={value} label="Copy" />

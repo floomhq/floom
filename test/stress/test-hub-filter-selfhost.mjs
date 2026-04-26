@@ -65,7 +65,7 @@ console.log('hub-filter: hosted mode (default opts)');
   log('launch demo → visible', isPubliclyListed(demo) === true);
   log('launch demo 2 → visible', isPubliclyListed(demo2) === true);
   log('launch demo 3 → visible', isPubliclyListed(demo3) === true);
-  log('fast-app hidden on hosted', isPubliclyListed(fastApp) === false);
+  log('fast-app visible on hosted (per BROWSE_SLUGS)', isPubliclyListed(fastApp) === true);
   log('ingested app hidden on hosted', isPubliclyListed(ingested) === false);
   log('test fixture hidden on hosted', isPubliclyListed(fixture) === false);
   log('test fixture 2 hidden on hosted', isPubliclyListed(fixture2) === false);
@@ -76,10 +76,10 @@ console.log('hub-filter: hosted mode (default opts)');
     [demo, demo2, demo3, fastApp, ingested, fixture, fixture2],
   );
   log(
-    'hosted publicHubApps: keeps exactly 3 demos',
-    visible.length === 3 &&
+    'hosted publicHubApps: keeps 3 showcase + browse fast-apps (uuid is in BROWSE_SLUGS)',
+    visible.length === 4 &&
       visible.every((a) =>
-        ['competitor-lens', 'ai-readiness-audit', 'pitch-coach'].includes(a.slug),
+        ['competitor-lens', 'ai-readiness-audit', 'pitch-coach', 'uuid'].includes(a.slug),
       ),
     `got ${visible.map((a) => a.slug).join(',')}`,
   );

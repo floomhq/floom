@@ -35,7 +35,7 @@ const MeRunsPage = lazy(() => import('./pages/MeRunsPage').then(m => ({ default:
 const MeSecretsPage = lazy(() => import('./pages/MeSecretsPage').then(m => ({ default: m.MeSecretsPage })));
 const MeRunDetailPage = lazy(() => import('./pages/MeRunDetailPage').then(m => ({ default: m.MeRunDetailPage })));
 const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ default: m.MeSettingsPage })));
-const MeSettingsTokensPage = lazy(() => import('./pages/MeSettingsTokensPage').then(m => ({ default: m.MeSettingsTokensPage })));
+const MeAgentKeysPage = lazy(() => import('./pages/MeAgentKeysPage').then(m => ({ default: m.MeAgentKeysPage })));
 // MeAppPage + MeAppSecretsPage still live on disk for shared component
 // exports (AppHeader, TabBar) used by the Studio pages; the routes that
 // mounted them directly now redirect into /studio/*.
@@ -95,14 +95,12 @@ import { RouteLoading } from './components/RouteLoading';
 import { WaitlistGuard } from './components/WaitlistGuard';
 import { primeSession, refreshSession } from './hooks/useSession';
 import { initPostHog, identifyFromSession, track } from './lib/posthog';
-import { initBrowserSentry } from './lib/sentry';
+import { BrowserSentryErrorBoundary, initBrowserSentry } from './lib/sentry';
 import type { SessionMePayload } from './lib/types';
 import './styles/globals.css';
+import './styles/csp-inline-style-migrations.css';
 
-// Browser Sentry (launch #311). Strict-opt-in — the SDK only boots when
-// the user picked "Accept all" AND VITE_SENTRY_DSN is set. See
-// apps/web/src/lib/sentry.ts for the gating contract; CookieBanner wires
-// the upgrade/downgrade transitions so the choice applies mid-session.
+// Browser Sentry. No-op when VITE_SENTRY_WEB_DSN is unset.
 initBrowserSentry();
 
 // Kick off the /api/session/me fetch as soon as the bundle loads so every
@@ -200,19 +198,20 @@ function RouteChangeTracker() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <IconSprite />
-    <BrowserRouter>
-      <RouteChangeTracker />
-      {/* a11y 2026-04-20: WCAG 2.4.1 skip link. Hidden until keyboard
+    <BrowserSentryErrorBoundary fallback={<RouteLoading variant="full" />}>
+      <IconSprite />
+      <BrowserRouter>
+        <RouteChangeTracker />
+        {/* a11y 2026-04-20: WCAG 2.4.1 skip link. Hidden until keyboard
           focus lands on it (first Tab press from the URL bar). Target
           is the #main landmark set on PageShell's <main>. Styling
           lives in .skip-to-content in globals.css so we can toggle
           the visual offset on :focus without inline pseudo-classes. */}
-      <a href="#main" className="skip-to-content">
-        Skip to main content
-      </a>
-      <Suspense fallback={<RouteLoading variant="full" />}>
-      <Routes>
+        <a href="#main" className="skip-to-content">
+          Skip to main content
+        </a>
+        <Suspense fallback={<RouteLoading variant="full" />}>
+        <Routes>
         {/* Landing v17 (2026-04-22): rebuild to wireframe parity. */}
         <Route path="/" element={<LandingV17Page />} />
         {/* Apps directory. Mounted at both /apps (legacy canonical) and
@@ -268,15 +267,23 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/me/secrets" element={<WaitlistGuard source="me"><MeSecretsPage /></WaitlistGuard>} />
         <Route path="/me/runs/:runId" element={<WaitlistGuard source="me"><MeRunDetailPage /></WaitlistGuard>} />
         <Route path="/me/settings" element={<WaitlistGuard source="me"><MeSettingsPage /></WaitlistGuard>} />
-        {/* /me/api-keys — canonical location for personal API keys
-            (Fede 2026-04-23: "API keys shouldn't sit in studio"). Keys are
-            account-scoped: users need them for both building and running.
-            /me/settings/tokens kept as a redirect so existing links/docs
-            still resolve. The underlying MeSettingsTokensPage is unchanged. */}
-        <Route path="/me/api-keys" element={<WaitlistGuard source="me"><MeSettingsTokensPage /></WaitlistGuard>} />
+        {/* /me/agent-keys — canonical location for "Agent tokens"
+            (vocabulary lock per `keys-decision.md`: "API keys" is banned
+            from user-visible copy on this surface, including the URL).
+            File renamed MeSettingsTokensPage.tsx → MeAgentKeysPage.tsx
+            in PR-G (keys impl). Both old + new routes serve the same
+            page; old URL is deprecated.
+            /me/api-keys redirects → /me/agent-keys.
+            /me/settings/tokens redirects directly → /me/agent-keys (no
+            double-hop) so existing docs/links land in one redirect. */}
+        <Route path="/me/agent-keys" element={<WaitlistGuard source="me"><MeAgentKeysPage /></WaitlistGuard>} />
+        <Route
+          path="/me/api-keys"
+          element={<Navigate to="/me/agent-keys" replace />}
+        />
         <Route
           path="/me/settings/tokens"
-          element={<Navigate to="/me/api-keys" replace />}
+          element={<Navigate to="/me/agent-keys" replace />}
         />
         {/* v16 studio restructure 2026-04-18: creator-context pages moved
             to /studio/*. Legacy /me/apps/:slug (owner context) redirects
@@ -384,8 +391,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/impressum" element={<Navigate to="/legal" replace />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-      </Suspense>
-      <CookieBanner />
-    </BrowserRouter>
+        </Suspense>
+        <CookieBanner />
+      </BrowserRouter>
+    </BrowserSentryErrorBoundary>
   </React.StrictMode>,
 );

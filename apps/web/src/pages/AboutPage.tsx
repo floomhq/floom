@@ -179,11 +179,6 @@ export function AboutPage() {
           />
         </div>
 
-        <style>{`
-          @media (max-width: 720px) {
-            .about-who-cards { grid-template-columns: 1fr !important; }
-          }
-        `}</style>
       </section>
 
       {/* 3. Why headless */}
@@ -460,11 +455,6 @@ function Triad({ label, body }: { label: string; body: string }) {
       <p style={{ fontSize: 15, lineHeight: 1.65, color: 'var(--ink)', margin: 0 }}>
         {body}
       </p>
-      <style>{`
-        @media (max-width: 640px) {
-          .about-triad { grid-template-columns: 1fr !important; gap: 6px !important; }
-        }
-      `}</style>
     </div>
   );
 }
