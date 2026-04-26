@@ -130,6 +130,7 @@ const IngestBody = z.object({
     .optional(),
   category: z.string().max(48).optional(),
   visibility: z.enum(['public', 'private', 'auth-required']).optional(),
+  max_run_retention_days: z.number().int().min(1).max(3650).optional(),
 });
 
 // SECURITY (issue #378, pentest 2026-04-22): /detect fetches a user-supplied
@@ -330,6 +331,7 @@ hubRouter.post('/ingest', async (c) => {
       slug: parsed.data.slug,
       category: parsed.data.category,
       visibility: parsed.data.visibility,
+      max_run_retention_days: parsed.data.max_run_retention_days,
       workspace_id: ctx.workspace_id,
       author_user_id: ctx.user_id,
       allowPrivateNetwork: ctx.workspace_id === 'local' && ctx.user_id === 'local',
@@ -959,6 +961,7 @@ hubRouter.get('/:slug', async (c) => {
     is_async: row.is_async === 1,
     async_mode: row.async_mode,
     timeout_ms: row.timeout_ms,
+    max_run_retention_days: row.max_run_retention_days,
     // W2.2: expose renderer metadata so /p/:slug knows whether to lazy-load
     // /renderer/:slug/bundle.js (creator-supplied) or fall back to the
     // default OutputPanel. Null when no custom renderer is compiled.

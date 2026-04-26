@@ -65,6 +65,7 @@ import { canAccessApp, isPublicListingVisibility } from './services/sharing.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
 import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
+import { startRunRetentionSweeper } from './services/run-retention-sweeper.js';
 import { securityHeaders, noIndexPreview, isPreviewEnv } from './middleware/security.js';
 import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
@@ -1626,6 +1627,12 @@ async function boot(): Promise<void> {
   }
   if (process.env.FLOOM_DISABLE_ZOMBIE_SWEEPER !== 'true') {
     startZombieRunSweeper();
+  }
+
+  // ADR-011 run retention. Default behavior remains indefinite because the
+  // sweeper only deletes rows for apps with max_run_retention_days set.
+  if (process.env.FLOOM_DISABLE_RETENTION_SWEEPER !== 'true') {
+    startRunRetentionSweeper();
   }
 
   // Start the triggers scheduler. Polls the `triggers` table every 30s

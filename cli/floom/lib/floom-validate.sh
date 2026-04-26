@@ -86,5 +86,20 @@ if has_runtime:
         print("floom-validate: actions must be a non-empty mapping", file=sys.stderr)
         sys.exit(1)
 
+retention = m.get("max_run_retention_days")
+if retention is not None:
+    if not isinstance(retention, int) or isinstance(retention, bool):
+        print(
+            "floom-validate: max_run_retention_days must be a positive integer",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if retention < 1 or retention > 3650:
+        print(
+            "floom-validate: max_run_retention_days must be between 1 and 3650",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 print("ok")
 PY

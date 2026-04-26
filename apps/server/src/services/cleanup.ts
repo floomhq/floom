@@ -1,5 +1,6 @@
 import { db, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
+import { deleteRunsForUserAccount } from './run-retention-sweeper.js';
 
 /**
  * Cleanup orphaned Floom data when a user is deleted from Better Auth.
@@ -60,7 +61,10 @@ export function cleanupUserOrphans(userId: string): void {
     // e. Clear orphaned connections (Composio, etc.)
     db.prepare("DELETE FROM connections WHERE owner_id = ? AND owner_kind = 'user'").run(userId);
 
-    // f. Finally, delete user from Floom's mirror table
+    // f. ADR-011: hard account deletion removes the user's run rows.
+    deleteRunsForUserAccount(userId);
+
+    // g. Finally, delete user from Floom's mirror table
     db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
     // 3. Process workspaces where user was a member

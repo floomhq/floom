@@ -404,6 +404,7 @@ function serializeHubApp(
     secrets_needed: manifest?.secrets_needed ?? [],
     featured: row.featured === 1,
     avg_run_ms: row.avg_run_ms,
+    max_run_retention_days: row.max_run_retention_days,
     created_at: row.created_at,
     permalink: `${baseUrl}/p/${row.slug}`,
     mcp_url: `${baseUrl}/mcp/app/${row.slug}`,
@@ -497,6 +498,13 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           .describe(
             'Visibility override. Docker apps default to "private" in cloud mode, "public" in OSS local mode. OpenAPI apps keep existing defaults.',
           ),
+        max_run_retention_days: z
+          .number()
+          .int()
+          .min(1)
+          .max(3650)
+          .optional()
+          .describe('Optional run retention window in days. Omitted means indefinite.'),
       },
     },
     async (args) => {
@@ -626,6 +634,8 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
           description: args.description as string | undefined,
           slug: args.slug as string | undefined,
           category: args.category as string | undefined,
+          max_run_retention_days:
+            args.max_run_retention_days as number | undefined,
           workspace_id: ctx.workspace_id,
           author_user_id: ctx.user_id,
         };

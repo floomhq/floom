@@ -106,6 +106,11 @@ export interface NormalizedManifest {
    */
   render?: RenderConfig;
   /**
+   * ADR-011: optional creator-declared maximum retention window for this
+   * app's completed run rows. Omitted means indefinite retention.
+   */
+  max_run_retention_days?: number;
+  /**
    * Optional creator-pinned "primary action" for multi-action apps
    * (audit 2026-04-20, Fix 3). When set to a valid key in `actions`, the
    * /p/:slug run surface selects that tab by default instead of the
@@ -194,6 +199,8 @@ export interface AppRecord {
   timeout_ms: number | null;
   retries: number;
   async_mode: AsyncMode | null;
+  // ADR-011. NULL means runs are retained indefinitely.
+  max_run_retention_days: number | null;
   // Multi-tenant fields (v0.3.1 / W2.1). workspace_id defaults to 'local' in
   // OSS mode. `memory_keys` is a JSON array declared in the app manifest that
   // lists which keys this app is allowed to persist in `app_memory`.

@@ -130,6 +130,15 @@ export function parseManifest(yamlSource: string): ParseResult {
     }
   }
 
+  const retentionDays = obj['max_run_retention_days'];
+  if (retentionDays !== undefined) {
+    if (typeof retentionDays !== 'number' || !Number.isInteger(retentionDays)) {
+      errors.push('max_run_retention_days must be a positive integer');
+    } else if (retentionDays < 1 || retentionDays > 3650) {
+      errors.push('max_run_retention_days must be between 1 and 3650');
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -159,6 +168,9 @@ export function parseManifest(yamlSource: string): ParseResult {
     manifest.egressAllowlist = (obj['egressAllowlist'] as unknown[]).filter(
       (s): s is string => typeof s === 'string',
     );
+  }
+  if (typeof retentionDays === 'number') {
+    manifest.max_run_retention_days = retentionDays;
   }
 
   return { ok: true, manifest, errors: [] };

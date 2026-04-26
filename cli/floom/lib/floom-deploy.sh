@@ -55,18 +55,23 @@ NAME=$(read_field name)
 DESC=$(read_field description)
 SPEC=$(read_field openapi_spec_url)
 VIS=$(read_field visibility)
+RETENTION_DAYS=$(read_field max_run_retention_days)
 [[ -z "$VIS" ]] && VIS="private"
 
 if [[ -n "$SPEC" ]]; then
   BODY=$(python3 -c "
 import json
-print(json.dumps({
+body = {
     'openapi_url': '$SPEC',
     'slug': '$SLUG',
     'name': '$NAME',
     'description': '$DESC',
     'visibility': '$VIS',
-}))")
+}
+retention = '$RETENTION_DAYS'
+if retention:
+    body['max_run_retention_days'] = int(retention)
+print(json.dumps(body))")
 
   if [[ "$DRY_RUN" == "1" ]]; then
     export FLOOM_DRY_RUN=1

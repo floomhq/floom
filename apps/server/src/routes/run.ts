@@ -10,10 +10,20 @@ import { newRunId } from '../lib/ids.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
-import { checkAppVisibility, hasValidAdminBearer } from '../lib/auth.js';
+import {
+  checkAppVisibility,
+  hasValidAdminBearer,
+  requireAuthenticatedInCloud,
+} from '../lib/auth.js';
 import { isCloudMode } from '../lib/better-auth.js';
 import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
+import {
+  bulkDeleteRunsForOwner,
+  deleteRunForOwner,
+  RunDeleteForbiddenError,
+  RunDeleteNotFoundError,
+} from '../services/run-retention-sweeper.js';
 import { extractIp } from '../lib/rate-limit.js';
 import {
   extractUserApiKey,
@@ -1086,6 +1096,52 @@ meRouter.get('/runs', async (c) => {
   });
 });
 
+// DELETE /api/me/runs?app_id=X&before_ts=Y&confirm=delete_runs
+// Bulk-deletes the caller's own run rows for one app before a timestamp.
+meRouter.delete('/runs', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+
+  const appId = c.req.query('app_id') || '';
+  const beforeTs = c.req.query('before_ts') || '';
+  const confirm = c.req.query('confirm') || '';
+  if (confirm !== 'delete_runs') {
+    return c.json(
+      {
+        error: 'Bulk run deletion requires confirm=delete_runs',
+        code: 'confirmation_required',
+      },
+      400,
+    );
+  }
+  if (!appId || !beforeTs) {
+    return c.json(
+      {
+        error: 'app_id and before_ts are required',
+        code: 'invalid_query',
+      },
+      400,
+    );
+  }
+
+  try {
+    const result = bulkDeleteRunsForOwner(ctx, {
+      app_id: appId,
+      before_ts: beforeTs,
+    });
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    return c.json(
+      {
+        error: (err as Error).message || 'bulk_delete_failed',
+        code: 'bulk_delete_failed',
+      },
+      400,
+    );
+  }
+});
+
 // GET /api/me/runs/:id — scoped fetch of a single run. Returns 404 if the
 // run exists but is owned by someone else, so probing run ids can't leak
 // another user's outputs.
@@ -1148,4 +1204,32 @@ meRouter.get('/runs/:id', async (c) => {
     finished_at: row.finished_at,
     logs: row.logs,
   });
+});
+
+// DELETE /api/me/runs/:id — scoped deletion of one owned run. Non-owners get
+// 403 because this is a destructive endpoint and the caller already supplied
+// a concrete id.
+meRouter.delete('/runs/:id', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id');
+  try {
+    const result = deleteRunForOwner(ctx, id);
+    return c.json({ ok: true, ...result });
+  } catch (err) {
+    if (err instanceof RunDeleteNotFoundError) {
+      return c.json({ error: 'Run not found', code: 'run_not_found' }, 404);
+    }
+    if (err instanceof RunDeleteForbiddenError) {
+      return c.json({ error: 'Forbidden', code: 'forbidden' }, 403);
+    }
+    return c.json(
+      {
+        error: (err as Error).message || 'delete_failed',
+        code: 'delete_failed',
+      },
+      500,
+    );
+  }
 });
