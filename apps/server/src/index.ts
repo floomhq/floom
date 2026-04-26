@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { adminRouter } from './routes/admin.js';
+import { accountDeleteRouter } from './routes/account_delete.js';
 import { healthRouter } from './routes/health.js';
 import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
@@ -71,6 +72,16 @@ import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
 import { isDeployEnabled } from './services/workspaces.js';
+import {
+  AccountDeleteError,
+  getUserDeletionStateByEmail,
+  initiateAccountSoftDelete,
+  isDeleteExpired,
+  permanentlyDeleteExpiredAccountForEmail,
+  revokeAccountSessions,
+  softDeletedSignInBody,
+  startAccountDeleteSweeper,
+} from './services/account-deletion.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -333,6 +344,7 @@ app.route('/api/stripe', stripeRouter);
 // owns the scoped dashboard queries; /api/apps/:slug/reviews powers the
 // /p/:slug review surface; /api/feedback accepts in-app feedback.
 app.route('/api/me/agent-keys', agentKeysRouter);
+app.route('/api/me/delete-account', accountDeleteRouter);
 app.route('/api/me', meRouter);
 // Secrets-policy feature: creator + viewer surface for per-app secret
 // policies and creator-owned secret values. Mounted at /api/me/apps so
@@ -399,6 +411,35 @@ if (isCloudMode()) {
       return next();
     });
 
+    app.post('/auth/delete-user', async (c) => {
+      const auth = getAuthForRequest(c.req.raw);
+      if (!auth) {
+        return new Response('Auth not configured', { status: 503 });
+      }
+      const session = (await auth.api.getSession({
+        headers: c.req.raw.headers,
+      })) as { user?: { id: string; email: string } } | null;
+      if (!session?.user?.id || !session.user.email) {
+        return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+      }
+      let confirmEmail = session.user.email;
+      try {
+        const body = (await c.req.json()) as { confirm_email?: unknown };
+        if (typeof body.confirm_email === 'string') confirmEmail = body.confirm_email;
+      } catch {
+        confirmEmail = session.user.email;
+      }
+      try {
+        const result = initiateAccountSoftDelete(session.user.id, confirmEmail);
+        return c.json({ success: true, message: 'User deleted', delete_at: result.delete_at });
+      } catch (err) {
+        if (err instanceof AccountDeleteError) {
+          return c.json({ error: err.message, code: err.code }, err.status as 400 | 401 | 404 | 409 | 410 | 422);
+        }
+        throw err;
+      }
+    });
+
     // Hono `app.on(...)` accepts a method list + path. Better Auth's
     // `handler` consumes the raw `Request` and returns a `Response`, which
     // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
@@ -421,12 +462,32 @@ if (isCloudMode()) {
         const method = c.req.method;
         let reqForAuth = c.req.raw;
         let signinEmailForDelay: string | null = null;
+        let pendingDeleteSignin = null as ReturnType<typeof getUserDeletionStateByEmail> | null;
         if (method === 'POST' && pathname === '/auth/sign-in/email') {
           const bodyText = await c.req.raw.clone().text();
           const parsedEmail = parseEmailForSigninProgressiveDelay(bodyText);
           if (parsedEmail) {
             signinEmailForDelay = parsedEmail;
             await applyProgressiveSigninDelayFromContext(c, parsedEmail);
+            const deletionState = getUserDeletionStateByEmail(parsedEmail);
+            if (deletionState?.deleted_at) {
+              if (isDeleteExpired(deletionState)) {
+                const earlyStartedAtMs = Date.now();
+                permanentlyDeleteExpiredAccountForEmail(parsedEmail);
+                const expired = new Response(
+                  JSON.stringify({
+                    error: 'Invalid email or password.',
+                    code: 'invalid_credentials',
+                  }),
+                  { status: 401, headers: { 'content-type': 'application/json' } },
+                );
+                await recordSigninEmailProgressiveDelayOutcome(c, parsedEmail, expired);
+                const padTiming = shouldPadAuthTiming(pathname);
+                if (padTiming) await padToFloor(earlyStartedAtMs);
+                return expired;
+              }
+              pendingDeleteSignin = deletionState;
+            }
             reqForAuth = new Request(c.req.raw.url, {
               method: c.req.raw.method,
               headers: c.req.raw.headers,
@@ -437,7 +498,14 @@ if (isCloudMode()) {
         const padTiming = shouldPadAuthTiming(pathname);
         const startedAtMs = padTiming ? Date.now() : 0;
         const raw = await auth.handler(reqForAuth);
-        const res = await sanitizeAuthResponse(reqForAuth, raw);
+        let res = await sanitizeAuthResponse(reqForAuth, raw);
+        if (pendingDeleteSignin && res.status >= 200 && res.status < 300) {
+          revokeAccountSessions(pendingDeleteSignin.id);
+          res = new Response(JSON.stringify(softDeletedSignInBody(pendingDeleteSignin)), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         if (signinEmailForDelay) {
           await recordSigninEmailProgressiveDelayOutcome(c, signinEmailForDelay, res);
         }
@@ -1640,6 +1708,10 @@ async function boot(): Promise<void> {
   // arrived. Opt-out via FLOOM_DISABLE_TRIGGERS_WORKER=true for tests.
   if (process.env.FLOOM_DISABLE_TRIGGERS_WORKER !== 'true') {
     startTriggersWorker();
+  }
+
+  if (process.env.FLOOM_DISABLE_ACCOUNT_DELETE_SWEEPER !== 'true') {
+    startAccountDeleteSweeper();
   }
 
   // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its

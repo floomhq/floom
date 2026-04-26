@@ -28,7 +28,7 @@ import { getMigrations } from 'better-auth/db/migration';
 import { organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import { db } from '../db.js';
-import { cleanupUserOrphans } from '../services/cleanup.js';
+import { initiateAccountSoftDelete } from '../services/account-deletion.js';
 import {
   renderResetPasswordEmail,
   renderVerificationEmail,
@@ -482,22 +482,17 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
       // `password` kwarg on the body verifies the caller owns the credentials.
       deleteUser: {
         enabled: true,
-        // 2026-04-20: Better Auth fires afterDelete after it's already
-        // committed the user row. Wrap the Floom cleanup in try/catch so a
-        // failure here doesn't leave the user in an inconsistent Better
-        // Auth state. We log loudly and keep going; the cleanup is
-        // idempotent, so an operator can re-run it manually if needed.
-        afterDelete: async ({ user }: { user: { id: string } }) => {
-          if (!user?.id) return;
-          try {
-            cleanupUserOrphans(user.id);
-          } catch (err) {
-            console.error(
-              '[auth] cleanupUserOrphans failed for user',
-              user.id,
-              err,
-            );
-          }
+        // ADR-012: the full server shadows /auth/delete-user and routes it
+        // through the account soft-delete service. This hook is a final
+        // guard for direct auth.handler callers; throwing prevents Better
+        // Auth from hard-deleting the credential row after the tombstone is
+        // written.
+        beforeDelete: async (
+          user: { id: string; email?: string | null },
+        ): Promise<void> => {
+          if (!user?.id || !user.email) return;
+          initiateAccountSoftDelete(user.id, user.email);
+          throw new Error('account_soft_delete_intercepted');
         },
       },
     },

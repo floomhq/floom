@@ -27,6 +27,12 @@ import {
   provisionPersonalWorkspace,
 } from './workspaces.js';
 import { linkPendingEmailInvites } from './sharing.js';
+import {
+  getUserDeletionState,
+  isDeleteExpired,
+  permanentDeleteAccount,
+  revokeAccountSessions,
+} from './account-deletion.js';
 
 const COOKIE_NAME = 'floom_device';
 // 10 years in seconds — the cookie is a stable device id, not a session.
@@ -193,6 +199,17 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
     userId,
     isSeededAdminEmail(session.user.email) ? 1 : 0,
   );
+
+  const deletionState = getUserDeletionState(userId);
+  if (deletionState?.deleted_at) {
+    if (isDeleteExpired(deletionState)) {
+      permanentDeleteAccount(userId);
+    } else {
+      revokeAccountSessions(userId);
+    }
+    return ossCtx;
+  }
+
   linkPendingEmailInvites(userId, session.user.email);
 
   // Resolve the active workspace. If the user has none yet (brand-new
