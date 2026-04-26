@@ -63,7 +63,7 @@ import {
   recordSigninEmailProgressiveDelayOutcome,
 } from './lib/signin-progressive-delay.js';
 import { resolveUserContext } from './services/session.js';
-import { canAccessApp, isPublicListingVisibility } from './services/sharing.js';
+import { getAppAccessDecision, isPublicListingVisibility } from './services/sharing.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
 import { startGithubBuildWorker } from './services/github-deploy.js';
@@ -1553,7 +1553,9 @@ if (webDist) {
     const slugMatch = pathname.match(pSlugPattern);
     if (slugMatch && slugMatch[1]) {
       const appRow = db
-        .prepare('SELECT id, slug, author, workspace_id, visibility, link_share_token FROM apps WHERE slug = ?')
+        .prepare(
+          'SELECT id, slug, author, workspace_id, visibility, link_share_token, link_share_requires_auth FROM apps WHERE slug = ?',
+        )
         .get(slugMatch[1]) as
         | {
             id: string;
@@ -1562,13 +1564,18 @@ if (webDist) {
             workspace_id: string;
             visibility: string | null;
             link_share_token: string | null;
+            link_share_requires_auth: number;
           }
         | undefined;
       if (!appRow) {
         return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
       }
       const ctx = await resolveUserContext(c);
-      if (!canAccessApp(appRow, ctx, url.searchParams.get('key'))) {
+      const access = getAppAccessDecision(appRow, ctx, url.searchParams.get('key'));
+      if (!access.ok) {
+        if (access.status === 401) {
+          return c.html(rewriteTitle(servedIndexHtml, 'Authentication required · Floom'), 401);
+        }
         return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
       }
       return c.html(rewriteHeadForSlug(servedIndexHtml, slugMatch[1]));

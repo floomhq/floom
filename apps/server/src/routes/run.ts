@@ -61,6 +61,7 @@ type RunAppAccessRow = {
   author: string | null;
   workspace_id: string;
   link_share_token: string | null;
+  link_share_requires_auth: number;
 };
 
 async function loadAuthorizedRunApp(
@@ -68,7 +69,9 @@ async function loadAuthorizedRunApp(
   appId: string,
 ): Promise<{ app: RunAppAccessRow | undefined; blocked: Response | null }> {
   const app = db
-    .prepare('SELECT id, slug, visibility, author, workspace_id, link_share_token FROM apps WHERE id = ?')
+    .prepare(
+      'SELECT id, slug, visibility, author, workspace_id, link_share_token, link_share_requires_auth FROM apps WHERE id = ?',
+    )
     .get(appId) as RunAppAccessRow | undefined;
   if (!app) return { app: undefined, blocked: null };
   const ctx = await resolveUserContext(c);
@@ -78,6 +81,7 @@ async function loadAuthorizedRunApp(
     author: app.author,
     workspace_id: app.workspace_id,
     link_share_token: app.link_share_token,
+    link_share_requires_auth: app.link_share_requires_auth,
     ctx,
   });
   return { app, blocked };
@@ -223,6 +227,7 @@ runRouter.post('/', async (c) => {
     author: row.author,
     workspace_id: row.workspace_id,
     link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;
@@ -315,9 +320,9 @@ runRouter.post('/', async (c) => {
 //   - Opt-in public share: when the owner hits POST /api/run/:id/share,
 //     `runs.is_public` flips to 1. Anonymous callers then see a redacted
 //     view (outputs only — inputs/logs/upstream_status stripped).
-//   - The app-level auth-required / private visibility gate still runs
-//     on top of the ownership check, so an auth-required app's runs stay
-//     bearer-token-gated even when marked public.
+//   - The app-level link-auth / private visibility gate still runs on top
+//     of the ownership check, so gated app runs stay protected even when
+//     marked public.
 runRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
   const row = getRun(id);
@@ -328,8 +333,7 @@ runRouter.get('/:id', async (c) => {
 
   // Server-admin escape hatch: when FLOOM_AUTH_TOKEN is configured and the
   // caller presents it, they bypass the ownership gate and see the full
-  // payload. This preserves the self-host operator flow (same as the one
-  // on auth-required apps). Without an explicitly-set token this branch
+  // payload. This preserves the self-host operator flow. Without an explicitly-set token this branch
   // is a no-op, so OSS mode without FLOOM_AUTH_TOKEN still enforces
   // per-device ownership.
   if (hasValidAdminBearer(c)) {
@@ -568,6 +572,7 @@ slugRunRouter.post('/', async (c) => {
     author: row.author,
     workspace_id: row.workspace_id,
     link_share_token: row.link_share_token,
+    link_share_requires_auth: row.link_share_requires_auth,
     ctx,
   });
   if (blocked) return blocked;

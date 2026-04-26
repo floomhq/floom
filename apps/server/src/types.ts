@@ -203,6 +203,7 @@ export interface AppRecord {
   openapi_spec_cached: string | null; // JSON-stringified OpenAPI spec
   visibility: AppVisibility;
   link_share_token: string | null;
+  link_share_requires_auth: 0 | 1;
   review_submitted_at: string | null;
   review_decided_at: string | null;
   review_decided_by: string | null;

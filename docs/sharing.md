@@ -17,6 +17,17 @@ Floom apps are owner-only by default. The backend stores the sharing mode in
 Legacy self-host rows with `visibility='public'` continue to behave as public
 when `publish_status='published'`. New app publishes default to `private`.
 
+`link_share_requires_auth` is an optional per-app flag for `link` visibility.
+When it is `0`, anyone with `/p/:slug?key=<token>` can open and run the app.
+When it is `1`, the caller also needs a signed-in Floom session.
+
+The old manifest field `auth_required` is deprecated. Publishing a manifest
+with `auth_required: true` still works for backward compatibility: the backend
+maps it to `visibility='link'`, `link_share_requires_auth=1`, and creates a
+`link_share_token` when one is missing. New manifests use
+`link_share_requires_auth: true`. A manifest that declares both fields is
+rejected.
+
 ## State Machine
 
 Owner transitions:

@@ -73,7 +73,7 @@ export interface RuntimeResult {
  */
 export interface AppListFilter {
   workspace_id?: string;
-  visibility?: 'public' | 'auth-required' | 'private';
+  visibility?: 'public' | 'private' | 'link' | 'invited' | 'pending_review' | 'public_live' | 'changes_requested';
   category?: string;
   featured?: boolean;
   limit?: number;

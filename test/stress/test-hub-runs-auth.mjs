@@ -84,7 +84,14 @@ function seedWorkspace(id, slug, user_id) {
   ).run(user_id, id);
 }
 
-function insertApp({ slug, workspace_id, author, visibility = 'public' }) {
+function insertApp({
+  slug,
+  workspace_id,
+  author,
+  visibility = 'public',
+  link_share_token = null,
+  link_share_requires_auth = 0,
+}) {
   const id = `app_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const manifest = JSON.stringify({
     name: slug,
@@ -96,9 +103,20 @@ function insertApp({ slug, workspace_id, author, visibility = 'public' }) {
   db.prepare(
     `INSERT INTO apps
        (id, slug, name, description, manifest, status, code_path,
-        author, workspace_id, app_type, visibility)
-     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', ?, ?, 'proxied', ?)`,
-  ).run(id, slug, slug, `${slug} app`, manifest, author, workspace_id, visibility);
+        author, workspace_id, app_type, visibility, link_share_token, link_share_requires_auth)
+     VALUES (?, ?, ?, ?, ?, 'active', 'proxied:test', ?, ?, 'proxied', ?, ?, ?)`,
+  ).run(
+    id,
+    slug,
+    slug,
+    `${slug} app`,
+    manifest,
+    author,
+    workspace_id,
+    visibility,
+    link_share_token,
+    link_share_requires_auth,
+  );
   return id;
 }
 
@@ -178,11 +196,14 @@ insertRun({
   outputs: { greeting: 'hi' },
 });
 
+const linkAuthToken = 'LinkAuthToken123456789012';
 const authRequiredAppId = insertApp({
   slug: 'token-gated-app',
   workspace_id: 'ws-alice',
   author: 'user-alice',
-  visibility: 'auth-required',
+  visibility: 'link',
+  link_share_token: linkAuthToken,
+  link_share_requires_auth: 1,
 });
 const authRequiredRunId = insertRun({
   app_id: authRequiredAppId,
@@ -272,23 +293,30 @@ console.log('\n[3] Run stream auth/visibility parity');
 fakeUser = null;
 let snapshot = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}`);
 let stream = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}/stream`);
-log('auth-required snapshot without bearer: 401', snapshot.status === 401, `got ${snapshot.status}`);
-log('auth-required stream without bearer: 401', stream.status === 401, `got ${stream.status}`);
+log('link-auth snapshot without key and anon: 401', snapshot.status === 401, `got ${snapshot.status}`);
+log('link-auth stream without key and anon: 401', stream.status === 401, `got ${stream.status}`);
 log(
-  'auth-required stream without bearer: no leak',
+  'link-auth stream without key and anon: no leak',
   stream.text.indexOf('TOKEN-SECRET-123') === -1,
 );
 
-snapshot = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}`, {
-  authorization: 'Bearer stream-test-token',
-});
-stream = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}/stream`, {
-  authorization: 'Bearer stream-test-token',
-});
-log('auth-required snapshot with bearer: 200', snapshot.status === 200, `got ${snapshot.status}`);
-log('auth-required stream with bearer: 200', stream.status === 200, `got ${stream.status}`);
+snapshot = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}?key=wrong`);
+stream = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}/stream?key=wrong`);
+log('link-auth snapshot with wrong key: 404', snapshot.status === 404, `got ${snapshot.status}`);
+log('link-auth stream with wrong key: 404', stream.status === 404, `got ${stream.status}`);
+
+snapshot = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}?key=${linkAuthToken}`);
+stream = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}/stream?key=${linkAuthToken}`);
+log('link-auth snapshot with key and anon: 401', snapshot.status === 401, `got ${snapshot.status}`);
+log('link-auth stream with key and anon: 401', stream.status === 401, `got ${stream.status}`);
+
+fakeUser = { id: 'user-alice', email: 'alice@example.com', name: 'Alice' };
+snapshot = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}?key=${linkAuthToken}`);
+stream = await fetchRoute(runRouter, 'GET', `/${authRequiredRunId}/stream?key=${linkAuthToken}`);
+log('link-auth snapshot with key and auth: 200', snapshot.status === 200, `got ${snapshot.status}`);
+log('link-auth stream with key and auth: 200', stream.status === 200, `got ${stream.status}`);
 log(
-  'auth-required stream with bearer: emits status payload',
+  'link-auth stream with key and auth: emits status payload',
   stream.text.includes('event: status') && stream.text.includes('TOKEN-SECRET-123'),
   stream.text,
 );
@@ -371,3 +399,4 @@ log(
 console.log(`\n${passed + failed} checks, ${passed} passed, ${failed} failed`);
 rmSync(tmp, { recursive: true, force: true });
 if (failed > 0) process.exit(1);
+process.exit(0);

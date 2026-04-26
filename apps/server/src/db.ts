@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { generateLinkShareToken } from './lib/link-share-token.js';
 
 export const DATA_DIR = process.env.DATA_DIR || './data';
 export const APPS_DIR = join(DATA_DIR, 'apps');
@@ -84,6 +85,9 @@ if (!appCols.includes('visibility')) {
 if (!appCols.includes('link_share_token')) {
   db.exec(`ALTER TABLE apps ADD COLUMN link_share_token TEXT`);
 }
+if (!appCols.includes('link_share_requires_auth')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN link_share_requires_auth INTEGER NOT NULL DEFAULT 0`);
+}
 if (!appCols.includes('review_submitted_at')) {
   db.exec(`ALTER TABLE apps ADD COLUMN review_submitted_at TEXT`);
 }
@@ -96,6 +100,83 @@ if (!appCols.includes('review_decided_by')) {
 if (!appCols.includes('review_comment')) {
   db.exec(`ALTER TABLE apps ADD COLUMN review_comment TEXT`);
 }
+
+export function migrateLegacyAuthRequiredColumn(): void {
+  const columns = (db.prepare(`PRAGMA table_info(apps)`).all() as { name: string }[]).map(
+    (r) => r.name,
+  );
+  const hasAuthRequiredColumn = columns.includes('auth_required');
+  const legacyRows = hasAuthRequiredColumn
+    ? (db
+        .prepare(
+          `SELECT id, slug, visibility, auth_required, link_share_token
+             FROM apps
+            WHERE auth_required = 1
+               OR visibility = 'auth-required'`,
+        )
+        .all() as Array<{
+        id: string;
+        slug: string;
+        visibility: string | null;
+        auth_required: number | null;
+        link_share_token: string | null;
+      }>)
+    : (db
+        .prepare(
+          `SELECT id, slug, visibility, 0 AS auth_required, link_share_token
+             FROM apps
+            WHERE visibility = 'auth-required'`,
+        )
+        .all() as Array<{
+        id: string;
+        slug: string;
+        visibility: string | null;
+        auth_required: number | null;
+        link_share_token: string | null;
+      }>);
+
+  if (legacyRows.length > 0) {
+    const migrate = db.transaction(() => {
+      const updateLegacy = db.prepare(
+        `UPDATE apps
+            SET visibility = ?,
+                link_share_requires_auth = 1,
+                link_share_token = ?,
+                review_comment = CASE
+                  WHEN ? = 1 THEN 'ADR-008 migration flagged legacy public auth_required app for review'
+                  ELSE review_comment
+                END,
+                updated_at = datetime('now')
+          WHERE id = ?`,
+      );
+
+      for (const row of legacyRows) {
+        const legacyColumnEnabled = row.auth_required === 1;
+        const impossiblePublicState =
+          legacyColumnEnabled &&
+          (row.visibility === 'public' || row.visibility === 'public_live');
+        if (impossiblePublicState) {
+          console.warn(
+            `[db] ADR-008 legacy auth_required app ${row.slug} had public visibility; setting private and flagging for review.`,
+          );
+        }
+        updateLegacy.run(
+          impossiblePublicState ? 'private' : 'link',
+          row.link_share_token || generateLinkShareToken(),
+          impossiblePublicState ? 1 : 0,
+          row.id,
+        );
+      }
+    });
+    migrate();
+  }
+
+  if (hasAuthRequiredColumn) {
+    db.exec(`ALTER TABLE apps DROP COLUMN auth_required`);
+  }
+}
+
+migrateLegacyAuthRequiredColumn();
 // Async job queue fields (v0.3.0) — nullable for backward compatibility.
 // When `is_async` is 1, calls go through the job queue (POST /api/:slug/jobs)
 // and MCP tools/call returns immediately with a job-started message.

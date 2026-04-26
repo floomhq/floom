@@ -152,5 +152,18 @@ for i, raw_domain in enumerate(allowed):
         print(f"floom-validate: invalid domain: {raw_domain}", file=sys.stderr)
         sys.exit(1)
 
+if "auth_required" in m and "link_share_requires_auth" in m:
+    print(
+        "floom-validate: auth_required is deprecated; use link_share_requires_auth, not both fields",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+if "auth_required" in m:
+    print(
+        "floom-validate: warning: auth_required is deprecated; use link_share_requires_auth",
+        file=sys.stderr,
+    )
+
 print("ok")
 PY
