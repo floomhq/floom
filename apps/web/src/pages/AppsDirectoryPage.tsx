@@ -11,11 +11,16 @@ import { Search } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppGrid } from '../components/public/AppGrid';
+import {
+  AppShowcaseRow,
+  AppShowcaseRowSkeleton,
+  SHOWCASE_ROW_SLUGS,
+} from '../components/public/AppShowcaseRow';
 import { FeedbackButton } from '../components/FeedbackButton';
 import { PageHead } from '../components/PageHead';
 import { getHub } from '../api/client';
 import type { HubApp } from '../lib/types';
-import { isPubliclyListed } from '../lib/hub-filter';
+import { isPubliclyListed, isShowcase } from '../lib/hub-filter';
 import { useSession } from '../hooks/useSession';
 
 const ALL = 'all';
@@ -275,7 +280,34 @@ export function AppsDirectoryPage() {
     return list;
   }, [sortedApps, activeCategory, trimmedSearch]);
 
+  // Split filtered list into the editorial showcase row (3 launch AI
+  // apps with banner-card hero treatment) and the browse grid below
+  // (utility apps + everything else). v23 wireframe parity: showcase
+  // sits above the grid in its own band, then a section divider, then
+  // the uniform 4-col browse grid.
+  const showcaseApps = useMemo(
+    () => filteredApps.filter((app) => isShowcase(app.slug)),
+    [filteredApps],
+  );
+  const browseApps = useMemo(
+    () => filteredApps.filter((app) => !isShowcase(app.slug)),
+    [filteredApps],
+  );
+
+  // Hide the showcase band when a chip filter / search has explicitly
+  // narrowed the directory and matched nothing in the showcase set —
+  // otherwise the section header reads "Featured" with empty cards
+  // below it. The showcase row stays visible on the canonical /apps
+  // view (no filter) regardless of API truth, so the band always
+  // reserves vertical space on first paint.
+  const isFiltered = activeCategory !== ALL || trimmedSearch.length > 0;
+  const showShowcaseBand = !isFiltered || showcaseApps.length > 0;
+
   const appCount = sortedApps.length;
+  // Total slugs the showcase row will render — used for the H1 ("3 AI
+  // apps. Free to run.") and as a stable count independent of which
+  // showcase apps the API has loaded yet.
+  const showcaseCount = SHOWCASE_ROW_SLUGS.length;
 
   return (
     <div
@@ -299,7 +331,7 @@ export function AppsDirectoryPage() {
             matches the density of the 4-col grid below. */}
         <section
           data-testid="apps-header"
-          style={{ padding: '40px 28px 16px' }}
+          style={{ padding: '64px 28px 24px' }}
         >
           <div style={{ maxWidth: 1180, margin: '0 auto' }}>
             <h1
@@ -307,29 +339,42 @@ export function AppsDirectoryPage() {
               style={{
                 fontFamily: 'var(--font-display)',
                 fontWeight: 800,
-                fontSize: 34,
-                lineHeight: 1.1,
+                fontSize: 48,
+                lineHeight: 1.05,
                 letterSpacing: '-0.025em',
                 color: 'var(--ink)',
-                margin: '0 0 8px',
+                margin: '0 0 12px',
+                maxWidth: 760,
               }}
             >
+              {/* v23 wireframe parity (apps-v23.html line 182):
+                  two-tone H1, "{N} AI apps." in ink + "Free to run." in
+                  brand green. Count stays dynamic (showcaseCount) so a
+                  self-host instance with more apps doesn't lie about
+                  its catalog size. Falls back to "AI apps." (no count)
+                  while loading or error. */}
               {loading || hubError || appCount === 0
-                ? 'AI apps, free to run.'
-                : `${appCount} AI app${appCount === 1 ? '' : 's'}, free to run.`}
+                ? 'AI apps. '
+                : `${showcaseCount} AI app${showcaseCount === 1 ? '' : 's'}. `}
+              <span
+                data-testid="apps-headline-accent"
+                style={{ color: 'var(--accent, #047857)' }}
+              >
+                Free to run.
+              </span>
             </h1>
             <p
               style={{
-                fontSize: 15,
+                fontSize: 16,
                 color: 'var(--muted)',
                 margin: 0,
                 lineHeight: 1.55,
-                maxWidth: 560,
+                maxWidth: 580,
               }}
             >
-              Real AI doing real work. Paste a URL, compare competitors,
-              sharpen a pitch. Each run finishes in under five seconds.
-              Install in Claude, Cursor, ChatGPT, or run from your browser.
+              Real AI doing real work. Compare to competitors, score AI
+              readiness, roast a pitch. Install in Claude, Cursor,
+              ChatGPT, or run from your browser.
             </p>
           </div>
         </section>
@@ -342,9 +387,18 @@ export function AppsDirectoryPage() {
           data-testid="apps-toolbar"
           className="apps-toolbar"
           style={{
+            // v23 wireframe parity (apps-v23.html line 20): toolbar is
+            // sticky under the TopBar (top: 65px = TopBar height) so
+            // chip + search controls stay accessible while scrolling
+            // a long browse grid. z-index 5 sits below TopBar dropdowns
+            // (which use z-index >=10) so menus don't get clipped.
+            position: 'sticky',
+            top: 65,
+            zIndex: 5,
+            background: 'var(--bg)',
             maxWidth: 1180,
             margin: '0 auto',
-            padding: '18px 28px',
+            padding: '16px 28px',
             borderBottom: '1px solid var(--line)',
             display: 'flex',
             alignItems: 'center',
@@ -512,42 +566,61 @@ export function AppsDirectoryPage() {
           </div>
         </div>
 
-        {/* APP LIST · 4-column thumbnail grid (v17 store.html).
-            CLS fix (2026-04-18): reserve vertical space for the list area so
-            the loading-to-rendered transition does not shift subsequent
-            content. 600px fits ~2 grid rows above the fold on desktop; the
-            real grid extends this naturally.
-            Container widened to 1180px (2026-04-23) to host the 4-col grid —
-            the old 760px max-width was calibrated for the single-column
-            stripe variant. */}
-        {/* 32px top gutter so the toolbar border-bottom breathes above
-            the first card row (2026-04-24: separator felt crowded). */}
-        <section ref={resultsRef} style={{ padding: '32px 24px 80px', minHeight: 600 }}>
-          <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-            {loading ? (
+        {/* RESULTS · v23 wireframe parity (apps-v23.html lines 208-382).
+            Two stacked sections:
+              1. SHOWCASE BAND — 3 launch AI apps with banner-card hero
+                 cards (`<AppShowcaseRow>`).
+              2. BROWSE GRID — 4-col uniform grid of utility + remaining
+                 apps (`<AppGrid>`), preceded by an `<h2>Browse all
+                 apps</h2>` divider with dynamic count.
+            CLS fix: keep the outer wrapper's minHeight so loading-to-
+            rendered transition doesn't shift the footer up. */}
+        <section
+          ref={resultsRef}
+          style={{ paddingBottom: 80, minHeight: 600 }}
+        >
+          {loading ? (
+            <>
+              <AppShowcaseRowSkeleton />
               <div
-                className="apps-grid-skeleton"
-                data-testid="apps-list-skeleton"
-                aria-busy="true"
-                aria-label="Loading apps"
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
-                  gap: 16,
+                  maxWidth: 1180,
+                  margin: '0 auto',
+                  padding: '32px 28px 0',
                 }}
               >
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <AppGridSkeleton key={i} />
-                ))}
+                <div
+                  className="apps-grid-skeleton apps-grid-4col"
+                  data-testid="apps-list-skeleton"
+                  aria-busy="true"
+                  aria-label="Loading apps"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: 14,
+                  }}
+                >
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <AppGridSkeleton key={i} />
+                  ))}
+                </div>
               </div>
-            ) : hubError ? (
-              // Audit 2026-04-24: softened tone. Previously "Couldn't load
-              // apps / Check your connection" (blame-y, alarmist). Now:
-              // - reuses the skeleton background so the page doesn't feel
-              //   "broken" — just slow,
-              // - gives the user a non-blaming explanation (the API may be
-              //   waking up on Render cold start),
-              // - keeps the Retry button as a forced refresh.
+            </>
+          ) : hubError ? (
+            // Audit 2026-04-24: softened tone. Previously "Couldn't load
+            // apps / Check your connection" (blame-y, alarmist). Now:
+            // - reuses the skeleton background so the page doesn't feel
+            //   "broken" — just slow,
+            // - gives the user a non-blaming explanation (the API may be
+            //   waking up on Render cold start),
+            // - keeps the Retry button as a forced refresh.
+            <div
+              style={{
+                maxWidth: 1180,
+                margin: '0 auto',
+                padding: '32px 28px 0',
+              }}
+            >
               <div
                 data-testid="apps-hub-error"
                 style={{
@@ -590,7 +663,15 @@ export function AppsDirectoryPage() {
                   Retry
                 </button>
               </div>
-            ) : appCount === 0 ? (
+            </div>
+          ) : appCount === 0 ? (
+            <div
+              style={{
+                maxWidth: 1180,
+                margin: '0 auto',
+                padding: '32px 28px 0',
+              }}
+            >
               <div
                 data-testid="apps-directory-empty"
                 style={{
@@ -623,7 +704,15 @@ export function AppsDirectoryPage() {
                   </p>
                 )}
               </div>
-            ) : filteredApps.length === 0 ? (
+            </div>
+          ) : filteredApps.length === 0 ? (
+            <div
+              style={{
+                maxWidth: 1180,
+                margin: '0 auto',
+                padding: '32px 28px 0',
+              }}
+            >
               <div
                 data-testid="apps-empty"
                 style={{
@@ -657,10 +746,68 @@ export function AppsDirectoryPage() {
                   Clear filters
                 </button>
               </div>
-            ) : (
-              <AppGrid apps={filteredApps} />
-            )}
-          </div>
+            </div>
+          ) : (
+            <>
+              {showShowcaseBand && <AppShowcaseRow apps={showcaseApps} />}
+              {browseApps.length > 0 && (
+                <>
+                  <div
+                    data-testid="apps-browse-header"
+                    style={{
+                      maxWidth: 1180,
+                      margin: '0 auto',
+                      padding: '36px 28px 0',
+                      borderTop: showShowcaseBand
+                        ? '1px solid var(--line)'
+                        : 'none',
+                      display: 'flex',
+                      alignItems: 'flex-end',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <h2
+                        style={{
+                          fontFamily: 'var(--font-display)',
+                          fontWeight: 800,
+                          fontSize: 26,
+                          lineHeight: 1.1,
+                          letterSpacing: '-0.02em',
+                          margin: 0,
+                          color: 'var(--ink)',
+                        }}
+                      >
+                        Browse all apps
+                      </h2>
+                      <p
+                        style={{
+                          fontSize: 13.5,
+                          color: 'var(--muted)',
+                          margin: '6px 0 0',
+                        }}
+                      >
+                        {/* Dynamic count — keeps in sync if the
+                            allowlist or self-host catalog grows. */}
+                        {appCount} live, sorted by trending
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      maxWidth: 1180,
+                      margin: '0 auto',
+                      padding: '24px 28px 0',
+                    }}
+                  >
+                    <AppGrid apps={browseApps} />
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </section>
       </main>
 

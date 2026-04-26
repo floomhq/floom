@@ -22,6 +22,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Star } from 'lucide-react';
 import { AppIcon } from '../AppIcon';
 import { DescriptionMarkdown } from '../DescriptionMarkdown';
+import { BannerCard, type BannerLine } from './BannerCard';
 import type { HubApp } from '../../lib/types';
 
 export interface AppGridProps {
@@ -96,285 +97,117 @@ function formatRuns(n: number): string {
 }
 
 /**
- * Per-slug mini-viz: a small, deliberate shape of what the app
- * returns, sitting inside the 120px thumbnail band. Replaces the prior
- * 3-bar "thumb-lines" mock (#645) which read as a loading skeleton
- * rather than content.
+ * Per-slug banner-card content (Delta 12, v23 wireframe). Each
+ * registered slug renders a small mono "run-state" preview inside the
+ * thumbnail band — a tiny executable taste of what the app returns, NOT
+ * a fake screenshot or generic icon. Federico-locked 2026-04-25:
+ * "show the result of running the app, not the app identity."
  *
- * Option B from the brief: intentional viz per launch app. Unknown
- * apps get the quieter gradient + icon-only band (no bars).
+ * Source of truth = wireframes-floom v23 apps.html lines 304-381 for
+ * the utility apps; lines 215-281 for the 3 launch AI apps (which
+ * normally render in <AppShowcaseRow> but stay registered here in
+ * case the grid renders them under a tag filter).
  *
- * Lead Scorer → 3-row mini leaderboard with score chips.
- * Resume Screener → stacked candidate list with a top-pick bar.
- * Competitor Analyzer → 2-column mini-grid (check / alert glyphs).
+ * Slugs without an entry fall through to the icon-only band.
  *
- * All monochrome, all ~30px tall, all using the warm-dark CARD_NEUTRAL
- * token so the thumbnail band still reads as a single restrained surface.
- *
- * 2026-04-24 polish: dropped the 1px inner border on each viz panel.
- * Together with the outer card border it read as two nested rectangles
- * (Federico screenshot @ 2232). Tinted white background alone is enough
- * to distinguish the viz from the band — the card stays unified.
+ * 2026-04-26 (PR-C): replaced the previous MiniViz slug set
+ * (lead-scorer / resume-screener / competitor-analyzer) — those apps
+ * shipped in the launch demo trio that has been retired. The new
+ * launch trio (competitor-lens, ai-readiness-audit, pitch-coach) gets
+ * editorial banner content; the 7 utility apps (json-format, uuid,
+ * jwt-decode, password, hash, base64, word-count) get pattern-shape
+ * banner content keyed off their actual output.
  */
-function MiniViz({ slug, foreground }: { slug: string; foreground: string }) {
-  // Shared utility: a little horizontal bar, used by several viz shapes.
-  const Bar = ({ width, opacity = 0.25 }: { width: string; opacity?: number }) => (
-    <span
-      style={{
-        display: 'block',
-        height: 3,
-        width,
-        background: foreground,
-        borderRadius: 2,
-        opacity,
-      }}
-    />
-  );
-  // Shared utility: small score pill (mono digits, one accent tint).
-  const ScorePill = ({ text, accent }: { text: string; accent?: boolean }) => (
-    <span
-      style={{
-        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-        fontSize: 9,
-        fontWeight: 700,
-        color: accent ? 'var(--accent, #047857)' : foreground,
-        background: accent ? 'rgba(4,120,87,0.1)' : 'rgba(14,14,12,0.06)',
-        padding: '1px 5px',
-        borderRadius: 3,
-        letterSpacing: '0.02em',
-      }}
-    >
-      {text}
-    </span>
-  );
-
-  if (slug === 'lead-scorer') {
-    return (
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 14,
-          background: 'rgba(255,255,255,0.78)',
-          borderRadius: 5,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          gap: 6,
-          padding: '9px 11px',
-        }}
-      >
-        {[
-          { w: '78%', score: '87', accent: true },
-          { w: '64%', score: '71' },
-          { w: '52%', score: '58' },
-        ].map((row, i) => (
-          <span
-            key={i}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              minWidth: 0,
-            }}
-          >
-            <Bar width={row.w} opacity={i === 0 ? 0.45 : 0.25} />
-            <span style={{ flex: 1 }} />
-            <ScorePill text={row.score} accent={row.accent} />
-          </span>
-        ))}
-      </div>
-    );
-  }
-
-  if (slug === 'resume-screener') {
-    return (
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 14,
-          background: 'rgba(255,255,255,0.78)',
-          borderRadius: 5,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-          padding: '9px 11px',
-        }}
-      >
-        {/* Header: "TOP CANDIDATE" micro-label */}
-        <span
-          style={{
-            fontSize: 8,
-            fontWeight: 700,
-            color: 'rgba(14,14,12,0.45)',
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          }}
-        >
-          Top candidate
-        </span>
-        {/* Top-pick row: accent-tinted track + score pill */}
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span
-            style={{
-              display: 'block',
-              height: 4,
-              flex: 1,
-              background: 'rgba(4,120,87,0.22)',
-              borderRadius: 2,
-              position: 'relative',
-            }}
-          >
-            <span
-              style={{
-                position: 'absolute',
-                inset: 0,
-                width: '92%',
-                background: 'var(--accent, #047857)',
-                borderRadius: 2,
-                opacity: 0.75,
-              }}
-            />
-          </span>
-          <ScorePill text="92" accent />
-        </span>
-        {/* Next two rows: muted */}
-        {[
-          { w: '72%', score: '81' },
-          { w: '55%', score: '64' },
-        ].map((row, i) => (
-          <span
-            key={i}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <Bar width={row.w} />
-            <span style={{ flex: 1 }} />
-            <ScorePill text={row.score} />
-          </span>
-        ))}
-      </div>
-    );
-  }
-
-  if (slug === 'competitor-analyzer') {
-    // 2-col mini-grid: left = strengths (check), right = gaps (alert).
-    // Check = brand-tinted, Alert = muted slate. Two "rows" of comparison.
-    const Row = ({ checks, alerts }: { checks: number; alerts: number }) => (
-      <span
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1px 1fr',
-          columnGap: 8,
-          alignItems: 'center',
-        }}
-      >
-        <span style={{ display: 'flex', gap: 3 }}>
-          {Array.from({ length: checks }).map((_, i) => (
-            <span
-              key={i}
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 2,
-                background: 'var(--accent, #047857)',
-                opacity: 0.75,
-              }}
-            />
-          ))}
-        </span>
-        <span
-          style={{
-            display: 'block',
-            width: 1,
-            height: 12,
-            background: 'rgba(14,14,12,0.12)',
-          }}
-        />
-        <span style={{ display: 'flex', gap: 3 }}>
-          {Array.from({ length: alerts }).map((_, i) => (
-            <span
-              key={i}
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 2,
-                background: 'rgba(107,111,118,0.8)',
-              }}
-            />
-          ))}
-        </span>
-      </span>
-    );
-    return (
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 14,
-          background: 'rgba(255,255,255,0.78)',
-          borderRadius: 5,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 7,
-          padding: '9px 11px',
-          justifyContent: 'center',
-        }}
-      >
-        {/* Column headers */}
-        <span
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            columnGap: 14,
-            fontSize: 8,
-            fontWeight: 700,
-            color: 'rgba(14,14,12,0.45)',
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          }}
-        >
-          <span>Strengths</span>
-          <span>Gaps</span>
-        </span>
-        <Row checks={3} alerts={2} />
-        <Row checks={4} alerts={1} />
-      </div>
-    );
-  }
-
-  // Unknown app: return nothing. The caller renders the icon-only band.
-  return null;
-}
-
-/**
- * Per-slug output-preview snippets — small taste of what the app returns.
- *
- * Added 2026-04-24 after the browser audit flagged cards as "not sexy":
- * plain icon + title + description gave no preview of the actual output.
- * Hardcoded for the 3 launch showcase apps; any app without an entry
- * falls through to a null (no preview row), which keeps unknown apps
- * looking clean rather than fake.
- *
- * When the backend grows an `output_preview` field on HubApp this map
- * becomes the fallback and the API value wins.
- */
-const OUTPUT_PREVIEWS: Record<string, string> = {
-  'lead-scorer': '87/100 · Strong fit',
-  'resume-screener': '92/100 · Top candidate',
-  'competitor-analyzer': '3 strengths, 2 gaps',
+const BANNER_CONTENT: Record<
+  string,
+  { title: string; lines: BannerLine[] }
+> = {
+  // Launch AI trio — used as fallback if these slugs ever render in
+  // the browse grid (e.g. under a filter). Normal path is the
+  // showcase row above.
+  'competitor-lens': {
+    title: 'competitor-lens',
+    lines: [
+      { text: 'stripe vs adyen' },
+      { text: 'fee 1.4% vs 1.6%', dim: true },
+      { text: 'winner: stripe', accent: true },
+    ],
+  },
+  'ai-readiness-audit': {
+    title: 'ai-readiness',
+    lines: [
+      { text: 'floom.dev' },
+      { text: 'score: 8.4/10', dim: true },
+      { text: '3 risks · 3 wins', accent: true },
+    ],
+  },
+  'pitch-coach': {
+    title: 'pitch-coach',
+    lines: [
+      { text: 'harsh truth' },
+      { text: '3 critiques', accent: true },
+      { text: '3 rewrites', dim: true },
+    ],
+  },
+  // Utility apps — banner shapes mirror what each one actually returns.
+  'jwt-decode': {
+    title: 'jwt decode',
+    lines: [
+      { text: 'iss: floom.dev' },
+      { text: 'sub: usr_***' },
+      { text: 'exp: 2027-04-26', dim: true },
+    ],
+  },
+  'json-format': {
+    title: 'format',
+    lines: [
+      { text: '{' },
+      { text: '  "ok": true,' },
+      { text: '  "n": 42' },
+      { text: '}' },
+    ],
+  },
+  password: {
+    title: 'password',
+    lines: [
+      { text: 'k7T#mq2&Lp9' },
+      { text: 'v4*8nW@2Zb1y', dim: true },
+      { text: '9sP!q3&Hr5cF', dim: true },
+    ],
+  },
+  uuid: {
+    title: 'uuid v4',
+    lines: [
+      { text: 'a3f8e1c2-4d9b' },
+      { text: '8c7e-1f3b9d2a', dim: true },
+      { text: 'b1d4-7a2f-9e8c', dim: true },
+    ],
+  },
+  hash: {
+    title: 'sha-256',
+    lines: [
+      { text: 'a3f8e1c2…' },
+      { text: '4d9b8c7e…', dim: true },
+      { text: '1f3b9d2a', dim: true },
+    ],
+  },
+  base64: {
+    title: 'base64',
+    lines: [
+      { text: 'aGVsbG8gd29y' },
+      { text: 'bGQgZnJvbSBm', dim: true },
+      { text: 'bG9vbS5kZXY=', accent: true },
+    ],
+  },
+  'word-count': {
+    title: 'word-count',
+    lines: [
+      { text: 'words: 248' },
+      { text: 'chars: 1,432', dim: true },
+      { text: 'reading: 2 min', accent: true },
+    ],
+  },
 };
-
-/**
- * Slugs that have a dedicated `MiniViz` shape (#645). The 3 launch
- * showcase apps get a tailored mini visualization in the thumbnail
- * band — not a generic loading-skeleton bar stack. Unknown apps fall
- * through to the quieter icon-only band, which is honest: no fake
- * mini-viz for apps we don't have a shape for.
- */
-const MINI_VIZ_SLUGS = new Set(['lead-scorer', 'resume-screener', 'competitor-analyzer']);
 
 export function AppGrid({ apps, variant = 'default' }: AppGridProps) {
   // HERO badge is pure visual noise when EVERY visible card is a hero —
@@ -387,37 +220,32 @@ export function AppGrid({ apps, variant = 'default' }: AppGridProps) {
   const heroCount = apps.reduce((n, a) => n + (a.hero ? 1 : 0), 0);
   const suppressHeroBadge = apps.length > 1 && heroCount === apps.length;
 
-  // Grid layout (2026-04-24, revised for #679): `auto-fill` with a capped
-  // max track width so cards keep a consistent size regardless of how many
-  // match the current filter.
+  // Grid layout (2026-04-26, v23 wireframe parity): `repeat(4, 1fr)`
+  // even-spacing 4-col on desktop, 3-col at 1024px, 2-col at 760px,
+  // 1-col at 480px (apps-v23.html lines 78-80).
   //
-  // Two requirements at once:
-  //   1. At the prod-launch count of 3 apps, cards should fill the ~1180px
-  //      container without a dead ~400px empty column on the right.
-  //   2. When a tag filter narrows to 1 or 2 matches, each card must keep
-  //      its ~380px width — NOT stretch to the full container. (Regression
-  //      #679: "Growth" filter left one full-width card with 1600px thumbnail
-  //      bars and unreadable line length; Federico screenshot 22:33.)
+  // Tradeoff vs the prior `auto-fill, minmax(260px, 380px)` (#679):
+  // a single-card filtered state stretches that card across the full
+  // 1180px container instead of keeping it at 380px. We accept the
+  // regression because (a) the wireframe spec is authoritative and
+  // (b) the showcase row above the grid removes the most common
+  // single-card situation (3 launch apps render up there, not here).
+  // If the stretched-card edge case bites, follow-up: cap each
+  // grid-row item with `max-width: 380px` while keeping the 4-track
+  // structure.
   //
-  // The earlier fix sized the grid to the filtered count
-  // (`repeat(N, minmax(240px, 1fr))`), which collapsed to a single full-width
-  // column when only one card remained. `auto-fill` with a bounded 380px max
-  // keeps column tracks the same width whether the filter returns 1 card or
-  // 10 — empty tracks stay empty, and `justify-content: start` left-aligns
-  // the cards when the set doesn't fill the row. 3 × 380 + 2 × 16 gap ≈ 1172px,
-  // so the 3-up launch layout still sits neatly inside the 1180px container.
-  const gridColumns = 'repeat(auto-fill, minmax(260px, 380px))';
-
+  // Responsive breakpoints land via the `apps-grid-4col` class in
+  // `csp-inline-style-migrations.css`, since this is a CSS-in-JS file
+  // without media-query support.
   return (
     <div
       data-testid="apps-grid"
       style={{
         display: 'grid',
-        gridTemplateColumns: gridColumns,
-        gap: 16,
-        justifyContent: 'start',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 14,
       }}
-      className="app-grid"
+      className="app-grid apps-grid-4col"
     >
       {apps.map((app) => (
         <AppGridCard
@@ -446,23 +274,20 @@ function AppGridCard({
   const hero = !!app.hero && !suppressHeroBadge;
   const thumbnail = app.thumbnail_url ?? null;
   const isFeatured = variant === 'featured';
-  const thumbHeight = isFeatured ? 140 : 120;
-  // 2026-04-25 v17 store.html parity: default card title sized at
-  // 14.5px (matches `.app-card-title` in the wireframe). Featured
-  // variant keeps the 16px hero treatment for landing shelves.
-  const titleSize = isFeatured ? 16 : 14.5;
+  // v23 wireframe (apps-v23.html line 95): browse-grid card title is
+  // 14px / 600. Featured variant (used by landing shelves) keeps the
+  // 16px hero treatment.
+  const titleSize = isFeatured ? 16 : 14;
   // 2026-04-24 polish: hide the "0 stars" meta while the product has no
   // users — it reads as noise ("⭐ 0"). Show only when the count is > 0.
   // The "hot" accent still triggers at >= 100 through `isHot`.
   const showStars = stars > 0;
-  // Per-slug output preview (what the app returns) — small taste below
-  // the description so the card isn't purely name + blurb. Hardcoded
-  // for the 3 launch apps; null for everything else (no fake preview).
-  const outputPreview = OUTPUT_PREVIEWS[app.slug] ?? null;
-  // Per-slug mini-viz (#645): only the 3 launch apps get a tailored
-  // shape in the thumbnail band. Other apps get the quieter icon-only
-  // band so we don't ship fake mini-vizzes for apps we don't know.
-  const hasMiniViz = MINI_VIZ_SLUGS.has(app.slug);
+  // Per-slug banner-card content (PR-C, v23): if the slug has an entry
+  // in BANNER_CONTENT, render a mini run-state preview inside the
+  // thumb. Falls back to the icon-only band for unknown apps. NO fake
+  // banner-card content for apps we don't have a shape for — keeps the
+  // directory honest.
+  const bannerContent = BANNER_CONTENT[app.slug] ?? null;
   // Hide the "{N} runs" label while an app is new and barely used —
   // "0 runs" / "1 runs" reads as negative social proof pre-launch.
   // Above 10 runs, the counter becomes meaningful signal. 7d age
@@ -502,29 +327,26 @@ function AppGridCard({
         el.style.boxShadow = 'none';
       }}
     >
-      {/* THUMBNAIL. v17 store.html parity (2026-04-24 PR A):
-          the wireframe's `.app-card-thumb` is a 120px band with
-          `linear-gradient(135deg, var(--bg), var(--studio))`, a 1px
-          border, AND a faint 3-bar mock that simulates "UI content
-          inside a screenshot" so the thumbnail carries visual signal
-          instead of feeling flat. Previously we rendered a flat pastel
-          block with a centered icon — cards read as thin.
-          When `thumbnail_url` is set we still show the real image; when
-          it's null we render the gradient + thumb-lines + centered icon
-          on top (the icon sits at low opacity so the bars show through).
-          Top-right corner hosts the category chip; HERO (when present)
-          sits on the top-left so they never collide. */}
+      {/* THUMB — v23 wireframe parity (apps-v23.html line 87).
+          16:9 aspect-ratio panel with single neutral surface (NO
+          category tints — Federico-locked 2026-04-26). Centred
+          BannerCard renders a small mono "run-state" preview keyed to
+          the slug; unknown apps fall back to a centred AppIcon. When
+          a real `thumbnail_url` is set we still show the image. */}
       <div
         data-testid={`app-grid-thumb-${app.slug}`}
         style={{
-          height: thumbHeight,
+          aspectRatio: '16 / 9',
           background: thumbnail
             ? 'var(--bg)'
             : `linear-gradient(135deg, var(--bg) 0%, ${CARD_NEUTRAL.bg} 100%)`,
-          boxShadow: thumbnail ? undefined : 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
+          borderBottom: '1px solid var(--line)',
           position: 'relative',
           overflow: 'hidden',
           flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
         {thumbnail ? (
@@ -539,25 +361,18 @@ function AppGridCard({
               display: 'block',
             }}
           />
-        ) : hasMiniViz ? (
-          <>
-            {/* Per-app mini-viz (#645): replaces the prior 3-bar
-                "thumb-lines" skeleton mock, which read as a loading
-                state. Each launch app gets a deliberate shape of what
-                it returns (leaderboard / candidate stack / strengths
-                grid). Unknown apps fall through to the quieter
-                icon-only band below. */}
-            <MiniViz slug={app.slug} foreground={CARD_NEUTRAL.fg} />
-          </>
+        ) : bannerContent ? (
+          <BannerCard
+            title={bannerContent.title}
+            lines={bannerContent.lines}
+            size="sm"
+          />
         ) : (
-          /* Option-A fallback for non-launch apps: clean icon-only band
-             with the subtle gradient already applied on the parent.
-             No bars, no fake UI — just the app identity. Matches the
-             "intentional, not skeleton" directive. */
+          /* Fallback for apps we don't have a banner shape for: clean
+             icon-only band. No fake banner-card content — the
+             directory stays honest. */
           <div
             style={{
-              position: 'absolute',
-              inset: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -567,35 +382,6 @@ function AppGridCard({
           >
             <AppIcon slug={app.slug} size={isFeatured ? 52 : 44} color={CARD_NEUTRAL.fg} />
           </div>
-        )}
-
-        {/* Category chip — top-right inside the pastel band. Moved here
-            from the footer (2026-04-24 polish). Keeps the colored-per-
-            category signal but out of the CTA row. */}
-        {app.category && (
-          <span
-            data-testid={`app-grid-category-${app.slug}`}
-            data-category={app.category}
-            style={{
-              position: 'absolute',
-              top: 10,
-              right: 10,
-              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-              fontSize: 10,
-              color: CARD_NEUTRAL.chipFg,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-              padding: '3px 8px',
-              border: `1px solid ${CARD_NEUTRAL.chipBorder}`,
-              borderRadius: 4,
-              background: CARD_NEUTRAL.chipBg,
-              fontWeight: 600,
-              boxShadow: '0 1px 2px rgba(15,23,42,0.06)',
-              backdropFilter: 'saturate(1.2)',
-            }}
-          >
-            {labelForCategory(app.category)}
-          </span>
         )}
 
         {hero && (
@@ -624,34 +410,15 @@ function AppGridCard({
         )}
       </div>
 
-      {/* TITLE ROW: small app icon + name. Title wraps up to 2 lines —
-          never truncates mid-word. min-height reserves 2 lines so card
-          heights stay aligned across the grid even when some names are
-          single-word. */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '14px 14px 8px' }}>
-        <span
-          aria-hidden="true"
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 9,
-            background: CARD_NEUTRAL.bg,
-            boxShadow: 'inset 0 0 0 1px rgba(15, 23, 42, 0.06)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: CARD_NEUTRAL.fg,
-            flexShrink: 0,
-            marginTop: 1,
-          }}
-        >
-          <AppIcon slug={app.slug} size={18} color={CARD_NEUTRAL.fg} />
-        </span>
+      {/* TITLE ROW — v23 wireframe parity (apps-v23.html line 95):
+          plain name only, 14px / 600. The mini-tile icon next to the
+          name was removed (wireframe doesn't carry it; the banner-card
+          in the thumb is the visual anchor now). 2-line clamp keeps
+          card heights aligned across the grid. */}
+      <div style={{ padding: '14px 16px 6px' }}>
         <h3
           data-testid={`app-grid-title-${app.slug}`}
           style={{
-            flex: 1,
-            minWidth: 0,
             fontSize: titleSize,
             fontWeight: 600,
             lineHeight: 1.25,
@@ -669,27 +436,28 @@ function AppGridCard({
         </h3>
       </div>
 
-      {/* STATS ROW: stands on its own so HERO / title / runs never
-          collide. tabular-nums so counts align; flex-wrap in case a
-          narrow mobile column is tighter than expected.
-          2026-04-24 polish: hide the star glyph + count while the app
-          has 0 stars (reads as noise pre-launch). Reappears naturally
-          when stars > 0. */}
+      {/* STATS ROW — v23 wireframe parity (apps-v23.html line 97):
+          single mono line, nowrap, 10.5px. Stat-line nowrap fix
+          (decision doc PORT #6): the line shouldn't break mid-string.
+          2026-04-24 polish (kept): hide the star glyph + count while
+          the app has 0 stars; hide runs label while runs7d < 10. */}
       <div
         data-testid={`app-grid-stats-${app.slug}`}
         style={{
-          padding: '0 14px',
+          padding: '0 16px',
           display: 'flex',
           alignItems: 'center',
-          flexWrap: 'wrap',
-          rowGap: 2,
-          columnGap: 8,
+          flexWrap: 'nowrap',
+          columnGap: 6,
           fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          fontSize: 11,
+          fontSize: 10.5,
           color: 'var(--muted)',
           lineHeight: 1.3,
           fontVariantNumeric: 'tabular-nums',
-          marginBottom: 8,
+          marginBottom: 6,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
         }}
       >
         {showStars && (
@@ -732,23 +500,23 @@ function AppGridCard({
            badge — an empty stats row beats a meaningless one. */}
       </div>
 
-      {/* DESCRIPTION: 3-line clamp so the first value sentence is
-          readable even when the creator's opening is a generic noun
-          phrase. min-height reserves 3 lines of height for consistent
-          card rhythm across the grid. */}
+      {/* DESCRIPTION — v23 wireframe parity (apps-v23.html line 96):
+          12.5px / muted, 2-line clamp. Reserves 2 lines of height so
+          card heights stay aligned across the grid. */}
       <div
         data-testid={`app-grid-desc-${app.slug}`}
         style={{
-          padding: '0 14px',
-          fontSize: 13,
+          padding: '0 16px',
+          fontSize: 12.5,
           color: 'var(--muted)',
-          lineHeight: 1.5,
+          lineHeight: 1.45,
           overflow: 'hidden',
           display: '-webkit-box',
-          WebkitLineClamp: 3,
+          WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',
-          minHeight: 'calc(13px * 1.5 * 3)',
-          marginBottom: outputPreview ? 10 : 12,
+          minHeight: 'calc(12.5px * 1.45 * 2)',
+          marginBottom: 10,
+          flex: 1,
         }}
       >
         <DescriptionMarkdown
@@ -764,80 +532,50 @@ function AppGridCard({
         />
       </div>
 
-      {/* OUTPUT PREVIEW — small taste of what the app returns (e.g.
-          "87/100 · Strong fit" for Lead Scorer). Only rendered when we
-          have a curated snippet for the slug; keeps unknown apps
-          looking intentional rather than showing a fake placeholder. */}
-      {outputPreview && (
-        <div
-          data-testid={`app-grid-preview-${app.slug}`}
-          style={{
-            margin: '0 14px 12px',
-            padding: '8px 10px',
-            borderRadius: 8,
-            background: CARD_NEUTRAL.bg,
-            boxShadow: 'inset 0 0 0 1px rgba(15,23,42,0.05)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 11.5,
-            color: CARD_NEUTRAL.fg,
-            fontWeight: 600,
-            letterSpacing: '0.01em',
-            minWidth: 0,
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'var(--accent, #047857)',
-              flexShrink: 0,
-            }}
-          />
-          <span
-            style={{
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              minWidth: 0,
-            }}
-          >
-            {outputPreview}
-          </span>
-        </div>
-      )}
-
-      {/* FOOTER: Run → CTA, right-aligned. v17 wireframe gives this row
-          a 1px border-top separator so the card has a clear "action
-          zone" distinct from the description above. Previously the
-          CTA floated without any boundary, which made the card feel
-          thin — Federico's "cards don't look like cards" read narrowed
-          to the top (flat thumbnail) and the bottom (no footer rule).
-          Category pill stayed in the thumbnail band (2026-04-24
-          polish), so this row stays single-purpose. */}
+      {/* FOOTER — v23 wireframe parity (apps-v23.html line 98): category
+          cap (mono uppercase, muted) on the left + accent "Run →" on the
+          right, separated from the description by a 1px border-top.
+          Category moved here from the thumb top-right (2026-04-26
+          PR-C): the thumb now hosts the BannerCard run-state preview
+          and stays visually clean. */}
       <div
         style={{
           marginTop: 'auto',
-          padding: '10px 14px 14px',
+          padding: '10px 16px 14px',
           borderTop: '1px solid var(--line)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'flex-end',
+          justifyContent: 'space-between',
           gap: 8,
-          minHeight: 44,
+          minHeight: 40,
+          fontSize: 11.5,
         }}
       >
+        {app.category ? (
+          <span
+            data-testid={`app-grid-category-${app.slug}`}
+            data-category={app.category}
+            style={{
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontSize: 10,
+              color: 'var(--muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              fontWeight: 500,
+            }}
+          >
+            {labelForCategory(app.category)}
+          </span>
+        ) : (
+          <span aria-hidden="true" />
+        )}
         <span
           className="app-grid-cta"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 4,
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: 600,
             color: 'var(--accent, #047857)',
           }}

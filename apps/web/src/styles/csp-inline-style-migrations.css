@@ -173,16 +173,28 @@
   [data-testid="creator-hero"] .live-apps-header { flex-direction: column !important; align-items: flex-start !important; }
 }
 
+/* Browse-grid responsive breakpoints — v23 wireframe parity (apps-v23.html
+   lines 78-80): 4 -> 3 -> 2 -> 1 columns. Replaces the prior #679 fix
+   (`auto-fill, minmax(240px, 360px)`) with the wireframe spec; the
+   showcase row above the grid is what kept that #679 single-card-stretch
+   pain off the most-likely paths (3 launch apps render up there). */
 @media (max-width: 1024px) {
-  /* Bounded max track so a single filtered card does not stretch
-     to fill the row on tablets (regression #679). */
-  .app-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 360px)) !important; }
+  .apps-grid-4col { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 }
 @media (max-width: 760px) {
-  .app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
+  .apps-grid-4col { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; }
 }
 @media (max-width: 480px) {
-  .app-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+  .apps-grid-4col { grid-template-columns: 1fr !important; gap: 12px !important; }
+}
+
+/* Showcase row responsive breakpoints (apps-v23.html lines 46-47).
+   3 -> 2 -> 1 across the same widths. */
+@media (max-width: 1024px) {
+  .apps-showcase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 640px) {
+  .apps-showcase-grid { grid-template-columns: 1fr !important; }
 }
 /* Keyboard-focus ring on cards (hover is already wired via JS).
    Uses the brand accent so it reads clearly against the card. */

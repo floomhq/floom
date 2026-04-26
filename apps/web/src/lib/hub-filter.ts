@@ -58,11 +58,63 @@ export function isTestFixture(app: HubApp): boolean {
 // resume-screener could run 30s-5min on real inputs. Replaced with
 // bounded <5s apps. The old slugs still live in examples/ and on the
 // DB (as inactive rows), but are off the showcase allowlist.
+//
+// 2026-04-26 v23 expansion (PR-C /apps showcase): the launch storefront
+// now has TWO roles within the public allowlist:
+//   - SHOWCASE_SLUGS — the 3 AI launch apps that render in the
+//     editorial top row (`<AppShowcaseRow>`) with hero treatment.
+//   - BROWSE_SLUGS — the 7 utility apps that render in the browse
+//     grid below. They're zero-key, instant, and act as the long
+//     tail of the directory.
+// Together = 10 apps, which matches the wireframe's "10 live" footer
+// copy. To add an app to the public listing, add its slug to one of
+// these sets — `featured` flag on the DB row is no longer enough.
+//
+// Open question (decision doc F1): the brief mentioned "13 apps", but
+// the wireframe says 10 live and only 7 utility apps exist server-side
+// today (uuid, password, hash, base64, json-format, jwt-decode,
+// word-count). Going with 10 to match the wireframe + the API truth;
+// flagged for Federico to confirm before merge.
 const SHOWCASE_SLUGS = new Set<string>([
   'competitor-lens',
   'ai-readiness-audit',
   'pitch-coach',
 ]);
+
+const BROWSE_SLUGS = new Set<string>([
+  'json-format',
+  'uuid',
+  'jwt-decode',
+  'password',
+  'hash',
+  'base64',
+  'word-count',
+]);
+
+const LAUNCH_LISTED_SLUGS = new Set<string>([
+  ...SHOWCASE_SLUGS,
+  ...BROWSE_SLUGS,
+]);
+
+/**
+ * True for the 3 launch AI apps that get the editorial hero card
+ * treatment (banner-card with run-state preview, larger card, accent
+ * "Run it" CTA). False for the 7 utility apps and everything else.
+ *
+ * Used by `AppsDirectoryPage` to split the filtered list into the
+ * top showcase row vs the browse grid below.
+ */
+export function isShowcase(slug: string): boolean {
+  return SHOWCASE_SLUGS.has(slug);
+}
+
+/**
+ * True for the 7 utility apps that render in the browse grid below the
+ * showcase row.
+ */
+export function isBrowseListed(slug: string): boolean {
+  return BROWSE_SLUGS.has(slug);
+}
 
 export interface HubFilterOptions {
   /**
@@ -82,7 +134,7 @@ export function isPubliclyListed(
 ): boolean {
   if (isTestFixture(app)) return false;
   if (opts.selfHost) return true;
-  return SHOWCASE_SLUGS.has(app.slug);
+  return LAUNCH_LISTED_SLUGS.has(app.slug);
 }
 
 /**
