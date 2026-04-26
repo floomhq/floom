@@ -25,12 +25,14 @@ export function redactAuthTokens(payload: unknown): { payload: unknown; changed:
   const next: Record<string, unknown> = { ...payload };
 
   if ('token' in next) {
-    next.token = null;
+    delete next.token;
     changed = true;
   }
 
   if (isObjectRecord(next.session) && 'token' in next.session) {
-    next.session = { ...next.session, token: null };
+    const session = { ...next.session };
+    delete session.token;
+    next.session = session;
     changed = true;
   }
 
@@ -56,9 +58,13 @@ export async function sanitizeAuthResponse(req: Request, res: Response): Promise
   const { payload, changed } = redactAuthTokens(parsed);
   if (!changed) return res;
 
+  const body = JSON.stringify(payload);
   const headers = new Headers(res.headers);
-  headers.delete('content-length');
-  return new Response(JSON.stringify(payload), {
+  // Recompute rather than delete — some reverse proxies (nginx keep-alive,
+  // undici connection pools) use Content-Length for framing. Deleting it
+  // forces chunked transfer and can cause proxy logs to show wrong sizes.
+  headers.set('content-length', String(Buffer.byteLength(body, 'utf-8')));
+  return new Response(body, {
     status: res.status,
     statusText: res.statusText,
     headers,

@@ -463,7 +463,7 @@ if (isCloudMode()) {
         if (!auth) {
           return new Response('Auth not configured', { status: 503 });
         }
-        const pathname = new URL(c.req.url).pathname;
+        const pathname = new URL(c.req.url).pathname.replace(/\/$/, '');
         const method = c.req.method;
         let reqForAuth = c.req.raw;
         let signinEmailForDelay: string | null = null;
@@ -500,6 +500,7 @@ if (isCloudMode()) {
             });
           }
         }
+        
         const padTiming = shouldPadAuthTiming(pathname);
         const startedAtMs = padTiming ? Date.now() : 0;
         const raw = await auth.handler(reqForAuth);

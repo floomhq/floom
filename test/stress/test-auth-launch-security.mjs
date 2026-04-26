@@ -121,7 +121,7 @@ try {
     }),
   );
   log('sign-up: 200 OK', signup.result.status === 200, signup.result.text);
-  log('sign-up: token redacted from body', signup.result.json?.token === null, signup.result.text);
+  log('sign-up: token redacted from body', signup.result.json?.token === undefined, signup.result.text);
   log(
     'sign-up: no session cookie before verification',
     !signup.result.headers.get('set-cookie'),
@@ -137,7 +137,7 @@ try {
   });
   log('duplicate sign-up: generic 200 response', duplicate.status === 200, duplicate.text);
   log('duplicate sign-up: no duplicate error code leaked', !duplicate.json?.code, duplicate.text);
-  log('duplicate sign-up: token still redacted', duplicate.json?.token === null, duplicate.text);
+  log('duplicate sign-up: token still redacted', duplicate.json?.token === undefined, duplicate.text);
 
   const preVerifySignIn = await captureConsole(() =>
     callAuth('POST', '/auth/sign-in/email', { email: signupEmail, password }),
@@ -173,7 +173,7 @@ try {
   log('get-session: 200 OK', sessionRes.status === 200, sessionRes.text);
   log(
     'get-session: nested session token redacted',
-    sessionRes.json?.session?.token === null,
+    sessionRes.json?.session?.token === undefined,
     sessionRes.text,
   );
   log(
@@ -189,7 +189,7 @@ try {
   log('sign-in after verification: 200 OK', postVerifySignIn.status === 200, postVerifySignIn.text);
   log(
     'sign-in after verification: token redacted from body',
-    postVerifySignIn.json?.token === null,
+    postVerifySignIn.json?.token === undefined,
     postVerifySignIn.text,
   );
   log(

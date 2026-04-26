@@ -33,6 +33,7 @@ import {
   RENDERERS_DIR,
 } from '../services/renderer-bundler.js';
 import { notOwnerResponse, requireAuthenticatedInCloud } from '../lib/auth.js';
+import { isCloudMode } from '../lib/better-auth.js';
 import { filterTestFixtures } from '../lib/hub-filter.js';
 import {
   getHubCache,
@@ -189,9 +190,11 @@ hubRouter.post('/detect', async (c) => {
         404,
       );
     }
+    // Do not forward raw err.message — internal service errors must not reach
+    // the client. SpecNotFoundError (above) is the only pre-approved type.
     return c.json(
       {
-        error: (err as Error).message || 'detect_failed',
+        error: 'detect_failed',
         code: 'detect_failed',
         hint_url: hintUrl,
       },
@@ -341,7 +344,10 @@ hubRouter.post('/ingest', async (c) => {
       author_user_id: ctx.user_id,
       actor_token_id: ctx.agent_token_id,
       actor_ip: getAuditActor(c, ctx).ip,
-      allowPrivateNetwork: ctx.workspace_id === 'local' && ctx.user_id === 'local',
+
+      // Allow localhost specs only in OSS mode. String-matching workspace_id
+      // is fragile — !isCloudMode() is the authoritative mode-level check.
+      allowPrivateNetwork: !isCloudMode(),
     });
     // Perf fix (2026-04-20): bust the /api/hub 5s cache so the newly
     // ingested (or re-ingested) app shows up in the public directory
@@ -362,8 +368,11 @@ hubRouter.post('/ingest', async (c) => {
         409,
       );
     }
+    // Do not forward raw err.message — internal DB errors, file paths, and
+    // service names must not reach the client. Only pre-approved error types
+    // (SlugTakenError above) expose their messages.
     return c.json(
-      { error: (err as Error).message || 'ingest_failed', code: 'ingest_failed' },
+      { error: 'ingest_failed', code: 'ingest_failed' },
       400,
     );
   }

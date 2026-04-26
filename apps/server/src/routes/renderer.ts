@@ -102,6 +102,10 @@ rendererRouter.get('/:slug/bundle.js', (c) => {
       // emit binary bundle bytes). Emit explicitly here; the middleware's
       // `if (!headers.get(...))` guard keeps this dedup-safe.
       'x-content-type-options': 'nosniff',
+      // Explicit CORP rather than relying on the global middleware default
+      // (same-site). same-site (not same-origin) is intentional: the parent
+      // runner and the renderer iframe share the same eTLD+1 (floom.dev).
+      'cross-origin-resource-policy': 'same-site',
       'x-floom-renderer-hash': bundle.sourceHash,
       'x-floom-renderer-shape': bundle.outputShape,
     },

@@ -669,8 +669,10 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
             visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
             link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
             auth_required: args.auth_required as boolean | undefined,
-            allowPrivateNetwork:
-              ctx.workspace_id === 'local' && ctx.user_id === 'local',
+            // Allow localhost specs only in OSS mode. String-matching
+            // workspace_id is fragile — a future misconfiguration could
+            // grant an authenticated Cloud user SSRF bypass.
+            allowPrivateNetwork: !isCloudMode(),
           });
         } else {
           // Inline spec path. Accept any JSON object and let
