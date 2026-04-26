@@ -1,6 +1,6 @@
 # Adapter factory (protocol-v0.2)
 
-Floom's server is built out of five pluggable concerns: **runtime**, **storage**, **auth**, **secrets**, **observability**. The interface contracts for each one live in [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts). For the protocol-level rationale and per-method semantics, read [`spec/adapters.md`](../spec/adapters.md).
+Floom's server is built out of five pluggable concerns: **runtime**, **storage**, **auth**, **secrets**, **observability**. The interface contracts for each one live in [`@floom/adapter-types`](../packages/adapter-types/src/index.ts); [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts) remains as a compatibility re-export for in-repo imports. For the protocol-level rationale and per-method semantics, read [`spec/adapters.md`](../spec/adapters.md).
 
 This doc is about the **factory** that wires them.
 
@@ -65,7 +65,7 @@ That's the whole pattern. The factory picks the impl, the adapter conforms to th
 
 The protocol-level contract for out-of-tree adapters lives in [`spec/adapters.md` "Third-party adapters"](../spec/adapters.md#third-party-adapters). This section is the practical cookbook: what a developer actually does to build and ship one today.
 
-**Status today.** Dynamic-import registration is shipped for package and path specifiers. Publish your adapter as an ESM package or point the relevant `FLOOM_<CONCERN>` env var at a local `.js` file; the stock server imports it during boot and validates its default export.
+**Status today.** Dynamic-import registration is shipped for package and path specifiers, and the adapter contracts are available from `@floom/adapter-types`. Publish your adapter as an ESM package or point the relevant `FLOOM_<CONCERN>` env var at a local `.js` file; the stock server imports it during boot and validates its default export.
 
 ### 1. Package skeleton
 
@@ -103,17 +103,7 @@ Minimum `package.json` fields:
 }
 ```
 
-Note: `@floom/adapter-types` is **planned for v0.5** and does not exist on npm today. Until it's published, vendor the type declarations directly from `apps/server/src/adapters/types.ts` in the `floomhq/floom` repo, or import them via a git dependency:
-
-```json
-{
-  "peerDependencies": {
-    "floom": "github:floomhq/floom#protocol-v0.2"
-  }
-}
-```
-
-Then import as `import type { StorageAdapter } from 'floom/apps/server/src/adapters/types.js'` (path will shift once types are extracted into a dedicated package).
+`@floom/adapter-types` follows the adapter protocol version. For protocol `0.2.0`, use the `^0.2` peer dependency range and import interfaces directly from the package.
 
 ### 2. Implement the adapter
 

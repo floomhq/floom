@@ -6,7 +6,7 @@ This doc formalizes [§10 of protocol.md](./protocol.md) — the five pluggable 
 
 The reference server in this repo pins one concrete implementation for each of runtime, storage, auth, secrets, and observability. This doc publishes the interface contracts for those five concerns so an alternate server (Kubernetes runtime, Postgres storage, Auth0 identity, Vault secrets, OpenTelemetry observability, etc.) can see exactly what to implement.
 
-TypeScript declarations: [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts).
+TypeScript declarations: [`@floom/adapter-types`](../packages/adapter-types/src/index.ts). The server keeps [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts) as a compatibility re-export for in-repo imports.
 
 > **Status.** The five interfaces are *declarations only* today. The reference services (`runner.ts`, `db.ts`, `better-auth.ts`, `user_secrets.ts`, `sentry.ts`) don't implement them explicitly yet — that refactor is deferred for launch-risk reasons. The shapes are stable; a future PR will make the existing services formally conform to these interfaces and expose a single adapter-registration point.
 
@@ -235,7 +235,7 @@ The runner parses the container's stdout for the `__FLOOM_RESULT__` marker (see 
 
 ## Source references
 
-- Interface declarations: [`apps/server/src/adapters/types.ts`](../apps/server/src/adapters/types.ts)
+- Interface declarations: [`packages/adapter-types/src/index.ts`](../packages/adapter-types/src/index.ts)
 - Runtime: [`apps/server/src/services/runner.ts`](../apps/server/src/services/runner.ts), [`services/docker.ts`](../apps/server/src/services/docker.ts), [`services/proxied-runner.ts`](../apps/server/src/services/proxied-runner.ts)
 - Storage: [`apps/server/src/db.ts`](../apps/server/src/db.ts), [`services/jobs.ts`](../apps/server/src/services/jobs.ts)
 - Auth: [`apps/server/src/lib/better-auth.ts`](../apps/server/src/lib/better-auth.ts), [`lib/auth.ts`](../apps/server/src/lib/auth.ts), [`routes/workspaces.ts`](../apps/server/src/routes/workspaces.ts)
@@ -428,4 +428,4 @@ export default {
 };
 ```
 
-The `@floom/adapter-types` package referenced above is **planned for v0.5**; today, adapter authors import interface types directly from the `floomhq/floom` repo (`apps/server/src/adapters/types.ts`) which requires vendoring or a git-dep. Publishing the types as a standalone package is tracked as a prerequisite for the third-party-adapter pattern.
+The `@floom/adapter-types` package referenced above is the standalone type surface for third-party adapters. Its package version matches `FLOOM_PROTOCOL_VERSION` so adapter authors can pin protocol compatibility without depending on the full `floomhq/floom` repo.
