@@ -1,8 +1,8 @@
-import type { ActionSpec, InputSpec, PickResult } from '../../lib/types';
-import { credentialInputNameLooksSensitive } from '../../lib/credential-field';
+import type { ActionSpec, PickResult } from '../../lib/types';
 import { AppIcon } from '../AppIcon';
 import { DescriptionMarkdown } from '../DescriptionMarkdown';
-import { SecretInput } from '../forms/SecretInput';
+
+import { InputField } from './InputField';
 
 interface Props {
   app: PickResult;
@@ -81,6 +81,8 @@ export function AppInputsCard({
             spec={inp}
             value={inputs[inp.name]}
             onChange={(v) => onChange(inp.name, v)}
+            idPrefix="app-card"
+            appSlug={app.slug}
           />
         ))}
 
@@ -111,130 +113,3 @@ export function AppInputsCard({
   );
 }
 
-function InputField({
-  spec,
-  value,
-  onChange,
-}: {
-  spec: InputSpec;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
-  const str = typeof value === 'string' ? value : value == null ? '' : String(value);
-  // Some app manifests literally include " (optional)" in the label; strip it so the
-  // UI doesn't render "Field (optional) (optional)".
-  const cleanLabel = (spec.label ?? '').replace(/\s*\(optional\)\s*$/i, '');
-
-  if (spec.type === 'textarea') {
-    return (
-      <div className="input-group">
-        <label className="input-label" htmlFor={`inp-${spec.name}`}>
-          {cleanLabel}
-          {!spec.required && (
-            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-          )}
-        </label>
-        <textarea
-          id={`inp-${spec.name}`}
-          className="input-field"
-          style={{ height: 80, padding: '10px 12px', resize: 'vertical' as const }}
-          placeholder={spec.placeholder}
-          value={str}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      </div>
-    );
-  }
-
-  if (spec.type === 'enum' && spec.options) {
-    return (
-      <div className="input-group">
-        <label className="input-label" htmlFor={`inp-${spec.name}`}>
-          {cleanLabel}
-        </label>
-        <select
-          id={`inp-${spec.name}`}
-          className="input-field"
-          value={str}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="">(pick one)</option>
-          {spec.options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  }
-
-  if (spec.type === 'number') {
-    return (
-      <div className="input-group">
-        <label className="input-label" htmlFor={`inp-${spec.name}`}>
-          {cleanLabel}
-          {!spec.required && (
-            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-          )}
-        </label>
-        <input
-          id={`inp-${spec.name}`}
-          className="input-field"
-          type="number"
-          placeholder={spec.placeholder}
-          value={str}
-          onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
-        />
-      </div>
-    );
-  }
-
-  if (spec.type === 'boolean') {
-    return (
-      <div className="input-group" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <input
-          id={`inp-${spec.name}`}
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-        />
-        <label className="input-label" htmlFor={`inp-${spec.name}`} style={{ margin: 0 }}>
-          {cleanLabel}
-        </label>
-      </div>
-    );
-  }
-
-  const isSecretish = credentialInputNameLooksSensitive(spec.name);
-  const isUrl = spec.type === 'url';
-
-  return (
-    <div className="input-group">
-      <label className="input-label" htmlFor={`inp-${spec.name}`}>
-        {cleanLabel}
-        {!spec.required && (
-          <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-        )}
-      </label>
-      {isSecretish ? (
-        <SecretInput
-          id={`inp-${spec.name}`}
-          className="input-field"
-          placeholder={spec.placeholder}
-          value={str}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      ) : (
-        <input
-          id={`inp-${spec.name}`}
-          className="input-field"
-          type={isUrl ? 'url' : 'text'}
-          placeholder={spec.placeholder}
-          value={str}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )}
-    </div>
-  );
-}
