@@ -2,7 +2,7 @@
 // (v16 shell) and was the basis for the older AppInputsCard. Extracted so
 // both call sites render identical controls with matching a11y labels.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { InputSpec } from '../../lib/types';
 import { credentialInputNameLooksSensitive } from '../../lib/credential-field';
 import { DEFAULT_MAX_FILE_BYTES } from '../../api/client';
@@ -80,6 +80,8 @@ export function InputField({
     ? { borderColor: '#c44a2b', boxShadow: '0 0 0 3px rgba(196, 74, 43, 0.12)' }
     : undefined;
 
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (spec.type === 'textarea') {
     const isArray = ARRAY_INPUT_NAMES.has(spec.name);
     // UX sweep 2026-04-24: textareas whose name is "urls" (competitor-
@@ -97,31 +99,75 @@ export function InputField({
             <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
           )}
         </label>
-        <textarea
-          id={id}
-          className="input-field"
-          style={{ height: 96, padding: '10px 12px', resize: 'vertical' as const, ...invalidStyle }}
-          placeholder={
-            spec.placeholder ||
-            (isUrlArray
-              ? 'linear.app\nnotion.so (https:// optional)'
-              : isArray
-                ? 'vienna, berlin, paris'
-                : undefined)
-          }
-          value={str}
-          aria-invalid={invalid || undefined}
-          aria-describedby={errorId}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={(e) => {
-            if (!isUrlArray) return;
-            const next = e.target.value
-              .split('\n')
-              .map((line) => maybePrependHttps(line))
-              .join('\n');
-            if (next !== e.target.value) onChange(next);
-          }}
-        />
+        <div style={{ position: 'relative' }}>
+          <textarea
+            id={id}
+            className="input-field"
+            style={{
+              height: 96,
+              padding: '10px 12px',
+              paddingRight: 40, // Space for the expand button
+              resize: 'vertical' as const,
+              ...invalidStyle,
+            }}
+            placeholder={
+              spec.placeholder ||
+              (isUrlArray
+                ? 'linear.app\nnotion.so (https:// optional)'
+                : isArray
+                  ? 'vienna, berlin, paris'
+                  : undefined)
+            }
+            value={str}
+            aria-invalid={invalid || undefined}
+            aria-describedby={errorId}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={(e) => {
+              if (!isUrlArray) return;
+              const next = e.target.value
+                .split('\n')
+                .map((line) => maybePrependHttps(line))
+                .join('\n');
+              if (next !== e.target.value) onChange(next);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            aria-label="Expand editor"
+            title="Expand editor"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              width: 28,
+              height: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'var(--card)',
+              border: '1px solid var(--line)',
+              borderRadius: 6,
+              color: 'var(--muted)',
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+              zIndex: 2,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--ink)';
+              e.currentTarget.style.borderColor = 'var(--accent)';
+              e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.08)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--muted)';
+              e.currentTarget.style.borderColor = 'var(--line)';
+              e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.04)';
+            }}
+          >
+            <ExpandIcon />
+          </button>
+        </div>
         {error && <FieldError id={errorId!} text={error} />}
         {isArray && !error && (
           <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0 0' }}>
@@ -130,9 +176,22 @@ export function InputField({
               : 'Separate multiple values with a comma or a new line.'}
           </p>
         )}
+        {isExpanded && (
+          <TextExpandModal
+            title={cleanLabel}
+            value={str}
+            onSave={(val) => {
+              onChange(val);
+              setIsExpanded(false);
+            }}
+            onClose={() => setIsExpanded(false)}
+            placeholder={spec.placeholder}
+          />
+        )}
       </div>
     );
   }
+
 
   if (spec.type === 'enum' && spec.options) {
     return (
@@ -616,3 +675,170 @@ function FieldError({ id, text }: { id: string; text: string }) {
     </p>
   );
 }
+
+function ExpandIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    </svg>
+  );
+}
+
+function TextExpandModal({
+  title,
+  value,
+  onSave,
+  onClose,
+  placeholder,
+}: {
+  title: string;
+  value: string;
+  onSave: (val: string) => void;
+  onClose: () => void;
+  placeholder?: string;
+}) {
+  const [localValue, setLocalValue] = useState(value);
+
+  // Close on Escape
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  // Prevent body scroll
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow || 'unset';
+    };
+  }, []);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--card)',
+          border: '1px solid var(--line)',
+          borderRadius: 12,
+          padding: 24,
+          maxWidth: 800,
+          width: '100%',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.2)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--ink)' }}>
+            Edit {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--muted)',
+              fontSize: 24,
+              cursor: 'pointer',
+              padding: 0,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <textarea
+          autoFocus
+          value={localValue}
+          onChange={(e) => setLocalValue(e.target.value)}
+          placeholder={placeholder}
+          style={{
+            width: '100%',
+            height: '60vh',
+            padding: 16,
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            background: 'var(--bg)',
+            color: 'var(--ink)',
+            fontSize: 14,
+            lineHeight: 1.6,
+            fontFamily: 'inherit',
+            resize: 'none',
+            outline: 'none',
+          }}
+        />
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-ghost"
+            style={{
+              padding: '8px 16px',
+              fontSize: 14,
+              height: 40,
+              borderRadius: 8,
+              border: '1px solid var(--line)',
+              background: 'transparent',
+              color: 'var(--ink)',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(localValue)}
+            className="btn-primary"
+            style={{
+              padding: '8px 24px',
+              fontSize: 14,
+              height: 40,
+              borderRadius: 8,
+              border: 'none',
+              background: 'var(--ink)',
+              color: 'var(--card)',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Save & Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
