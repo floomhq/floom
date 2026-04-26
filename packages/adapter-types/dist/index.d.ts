@@ -191,21 +191,21 @@ export interface RuntimeAdapter {
     execute(app: AppRecord, manifest: NormalizedManifest, action: string, inputs: Record<string, unknown>, secrets: Record<string, string>, ctx: SessionContext, onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void): Promise<RuntimeResult>;
 }
 export interface StorageAdapter {
-    getApp(slug: string): AppRecord | undefined;
-    getAppById(id: string): AppRecord | undefined;
-    listApps(filter?: AppListFilter): AppRecord[];
-    createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): AppRecord;
-    updateApp(slug: string, patch: Partial<AppRecord>): AppRecord | undefined;
-    deleteApp(slug: string): boolean;
+    getApp(slug: string): Promise<AppRecord | undefined>;
+    getAppById(id: string): Promise<AppRecord | undefined>;
+    listApps(filter?: AppListFilter): Promise<AppRecord[]>;
+    createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): Promise<AppRecord>;
+    updateApp(slug: string, patch: Partial<AppRecord>): Promise<AppRecord | undefined>;
+    deleteApp(slug: string): Promise<boolean>;
     createRun(input: {
         id: string;
         app_id: string;
         thread_id?: string | null;
         action: string;
         inputs: Record<string, unknown> | null;
-    }): RunRecord;
-    getRun(id: string): RunRecord | undefined;
-    listRuns(filter?: RunListFilter): RunRecord[];
+    }): Promise<RunRecord>;
+    getRun(id: string): Promise<RunRecord | undefined>;
+    listRuns(filter?: RunListFilter): Promise<RunRecord[]>;
     updateRun(id: string, patch: {
         status?: RunStatus;
         outputs?: unknown;
@@ -215,24 +215,24 @@ export interface StorageAdapter {
         logs?: string;
         duration_ms?: number | null;
         finished?: boolean;
-    }): void;
+    }): Promise<void>;
     createJob(input: Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'> & {
         status?: JobStatus;
-    }): JobRecord;
-    getJob(id: string): JobRecord | undefined;
-    claimNextJob(): JobRecord | undefined;
-    updateJob(id: string, patch: Partial<JobRecord>): void;
-    getWorkspace(id: string): WorkspaceRecord | undefined;
-    listWorkspacesForUser(user_id: string): Array<WorkspaceRecord & {
+    }): Promise<JobRecord>;
+    getJob(id: string): Promise<JobRecord | undefined>;
+    claimNextJob(): Promise<JobRecord | undefined>;
+    updateJob(id: string, patch: Partial<JobRecord>): Promise<void>;
+    getWorkspace(id: string): Promise<WorkspaceRecord | undefined>;
+    listWorkspacesForUser(user_id: string): Promise<Array<WorkspaceRecord & {
         role: WorkspaceRole;
-    }>;
-    getUser(id: string): UserRecord | undefined;
-    getUserByEmail(email: string): UserRecord | undefined;
-    createUser(input: UserWriteInput): UserRecord;
-    upsertUser(input: UserWriteInput, updateColumns: UserWriteColumn[]): UserRecord;
-    listAdminSecrets(app_id?: string | null): SecretRecord[];
-    upsertAdminSecret(name: string, value: string, app_id?: string | null): void;
-    deleteAdminSecret(name: string, app_id?: string | null): boolean;
+    }>>;
+    getUser(id: string): Promise<UserRecord | undefined>;
+    getUserByEmail(email: string): Promise<UserRecord | undefined>;
+    createUser(input: UserWriteInput): Promise<UserRecord>;
+    upsertUser(input: UserWriteInput, updateColumns: UserWriteColumn[]): Promise<UserRecord>;
+    listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]>;
+    upsertAdminSecret(name: string, value: string, app_id?: string | null): Promise<void>;
+    deleteAdminSecret(name: string, app_id?: string | null): Promise<boolean>;
 }
 export interface UserWriteInput {
     id: string;

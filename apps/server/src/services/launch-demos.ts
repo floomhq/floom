@@ -487,10 +487,12 @@ export async function resolveDemoImageTag(opts: {
 // from a user report. Safe to call when the row is already inactive — the
 // guard below makes it a no-op. Network post is best-effort inside
 // alertLaunchDemoInactive; a webhook outage never blocks seeding.
-function markLaunchDemoInactive(slug: string, detail: string): void {
-  const row = adapters.storage.getApp(slug) as { id: string; status: string } | undefined;
+async function markLaunchDemoInactive(slug: string, detail: string): Promise<void> {
+  const row = (await adapters.storage.getApp(slug)) as
+    | { id: string; status: string }
+    | undefined;
   if (!row || row.status === 'inactive') return;
-  adapters.storage.updateApp(slug, { status: 'inactive' } as unknown as AppPatch);
+  await adapters.storage.updateApp(slug, { status: 'inactive' } as unknown as AppPatch);
   console.warn(`[launch-demos] ${slug}: marking inactive (${detail})`);
   alertLaunchDemoInactive(slug, detail);
 }
@@ -578,11 +580,11 @@ export async function seedLaunchDemos(
     'resume-screener',
   ];
   for (const oldSlug of PREVIOUS_SHOWCASE_SLUGS) {
-    const row = adapters.storage.getApp(oldSlug) as
+    const row = (await adapters.storage.getApp(oldSlug)) as
       | { id: string; status: string }
       | undefined;
     if (row && row.status !== 'inactive') {
-      adapters.storage.updateApp(oldSlug, { status: 'inactive' } as unknown as AppPatch);
+      await adapters.storage.updateApp(oldSlug, { status: 'inactive' } as unknown as AppPatch);
       logger.log(
         `[launch-demos] ${oldSlug}: marked inactive (2026-04-25 roster swap)`,
       );
@@ -592,7 +594,7 @@ export async function seedLaunchDemos(
   for (const demo of DEMOS) {
     const contextPath = resolve(repoRoot, demo.contextDir);
     if (!existsSync(resolve(contextPath, 'Dockerfile'))) {
-      markLaunchDemoInactive(
+      await markLaunchDemoInactive(
         demo.slug,
         `seedLaunchDemos missing Dockerfile at ${contextPath}`,
       );
@@ -605,7 +607,7 @@ export async function seedLaunchDemos(
 
     // Insert the DB row if missing. Existing launch demos are refreshed in
     // place so preview picks up current manifests + image tags after deploy.
-    const row = adapters.storage.getApp(demo.slug) as
+    const row = (await adapters.storage.getApp(demo.slug)) as
       | { id: string; status: string; docker_image: string | null }
       | undefined;
     const resolvedImage = await resolveDemoImageTag({
@@ -617,7 +619,7 @@ export async function seedLaunchDemos(
     });
     if (resolvedImage.kind === 'keep_previous') {
       if (row) {
-        adapters.storage.updateApp(demo.slug, {
+        await adapters.storage.updateApp(demo.slug, {
           status: 'active',
           hero: 1,
           ...launchDemoForcedShape,
@@ -638,7 +640,7 @@ export async function seedLaunchDemos(
     if (resolvedImage.kind === 'missing') {
       failed++;
       if (row) {
-        markLaunchDemoInactive(
+        await markLaunchDemoInactive(
           demo.slug,
           `${resolvedImage.imageTag} unavailable after build/reuse`,
         );
@@ -658,7 +660,7 @@ export async function seedLaunchDemos(
     const codePath = `reused:launch-demo:${demo.slug}:${imageTag.split(':')[1]}`;
     const manifestJson = JSON.stringify(demo.manifest);
     if (row) {
-      adapters.storage.updateApp(demo.slug, {
+      await adapters.storage.updateApp(demo.slug, {
         name: demo.name,
         description: demo.description,
         manifest: manifestJson,
@@ -684,7 +686,7 @@ export async function seedLaunchDemos(
       continue;
     }
     const appId = newAppId();
-    adapters.storage.createApp({
+    await adapters.storage.createApp({
       id: appId,
       slug: demo.slug,
       name: demo.name,

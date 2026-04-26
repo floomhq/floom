@@ -1734,7 +1734,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
       }
 
       if (existing) {
-        adapters.storage.updateApp(appSpec.slug, {
+        await adapters.storage.updateApp(appSpec.slug, {
           name: manifest.name,
           description: appSpec.description || manifest.description,
           manifest: JSON.stringify(manifest),
@@ -1759,7 +1759,7 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         console.log(`[openapi-ingest] updated ${appSpec.slug}`);
       } else {
         const appId = newAppId();
-        adapters.storage.createApp({
+        await adapters.storage.createApp({
           id: appId,
           slug: appSpec.slug,
           name: manifest.name,
@@ -2374,7 +2374,7 @@ export async function ingestAppFromSpec(args: {
     // one place (adapters/storage-sqlite.ts). The wrapper emits
     // `updated_at = datetime('now')` automatically, so behavior is
     // identical to the prior prepared statement.
-    adapters.storage.updateApp(slug, {
+    await adapters.storage.updateApp(slug, {
       name: manifest.name,
       description: description || manifest.description,
       manifest: JSON.stringify(manifest),
@@ -2409,7 +2409,7 @@ export async function ingestAppFromSpec(args: {
   // Routed through adapters.storage.createApp: the wrapper builds the
   // INSERT from the provided keys, so explicit NULLs above translate
   // directly into the SQL that used to be hand-written here.
-  adapters.storage.createApp({
+  await adapters.storage.createApp({
     id: appId,
     slug,
     name: manifest.name,

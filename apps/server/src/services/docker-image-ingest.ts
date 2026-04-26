@@ -456,7 +456,7 @@ export async function ingestAppFromDockerImage(args: {
     // one place (adapters/storage-sqlite.ts). The wrapper emits
     // `updated_at = datetime('now')` automatically, so behavior is
     // identical to the prior prepared statement.
-    adapters.storage.updateApp(slug, {
+    await adapters.storage.updateApp(slug, {
       name,
       description,
       manifest: manifestJson,
@@ -489,7 +489,7 @@ export async function ingestAppFromDockerImage(args: {
     // Routed through adapters.storage.createApp: the wrapper builds the
     // INSERT from the provided keys, so explicit NULLs translate directly
     // into the SQL that used to be hand-written here.
-    adapters.storage.createApp({
+    await adapters.storage.createApp({
       id: appId,
       slug,
       name,

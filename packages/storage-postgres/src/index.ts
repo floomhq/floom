@@ -16,12 +16,8 @@ import type {
   WorkspaceRole,
 } from '@floom/adapter-types';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { Worker } from 'node:worker_threads';
+import { readFileSync } from 'node:fs';
+import pg, { type Pool as PgPool } from 'pg';
 
 export interface PostgresAdapterOptions {
   connectionString: string;
@@ -34,18 +30,10 @@ interface QueryResult {
   rowCount: number;
 }
 
-interface WorkerResponse<T> {
-  ok: boolean;
-  result?: T;
-  error?: {
-    message?: string;
-    code?: string;
-    detail?: string;
-  };
-}
-
-const DEFAULT_CALL_TIMEOUT_MS = 30_000;
 const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000;
+
+const { Pool, types } = pg;
+types.setTypeParser(20, (value: string) => Number(value));
 
 const APP_COLUMNS = new Set([
   'id',
@@ -122,130 +110,30 @@ const JOB_COLUMNS = new Set([
   'finished_at',
 ]);
 
-const require = createRequire(import.meta.url);
-const pgModuleUrl = pathToFileURL(require.resolve('pg')).href;
-
-const workerSource = String.raw`
-import { parentPort, workerData } from 'node:worker_threads';
-import { readFileSync, writeFileSync } from 'node:fs';
-
-const pgModule = await import(workerData.pgModuleUrl);
-const pg = pgModule.default || pgModule;
-const { Pool, types } = pg;
-types.setTypeParser(20, (value) => Number(value));
-
-const pool = new Pool({
-  connectionString: workerData.connectionString,
-  max: workerData.maxPoolSize || 10,
-});
-
-async function handle(operation, payload) {
-  if (operation === 'query') {
-    const result = await pool.query(payload.text, payload.values || []);
-    return { rows: result.rows, rowCount: result.rowCount || 0 };
-  }
-  if (operation === 'executeSql') {
-    await pool.query(payload.sql);
-    return { rows: [], rowCount: 0 };
-  }
-  throw new Error('unknown worker operation: ' + operation);
-}
-
-parentPort.on('message', async (message) => {
-  const signal = new Int32Array(message.signal);
-  let response;
-  try {
-    const request = JSON.parse(readFileSync(message.requestPath, 'utf8'));
-    const result = await handle(request.operation, request.payload);
-    response = { ok: true, result };
-  } catch (error) {
-    response = {
-      ok: false,
-      error: {
-        message: error && error.message ? error.message : String(error),
-        code: error && error.code ? error.code : undefined,
-        detail: error && error.detail ? error.detail : undefined,
-      },
-    };
-  }
-  try {
-    writeFileSync(message.responsePath, JSON.stringify(response));
-  } finally {
-    Atomics.store(signal, 0, 1);
-    Atomics.notify(signal, 0, 1);
-  }
-});
-`;
-
-class PgSyncRunner {
-  private readonly worker: Worker;
-  private readonly callTimeoutMs: number;
-
-  constructor(connectionString: string, callTimeoutMs: number) {
-    this.callTimeoutMs = callTimeoutMs;
-    this.worker = new Worker(workerSource, {
-      eval: true,
-      workerData: { connectionString, pgModuleUrl },
-    });
-    this.worker.unref();
-  }
-
-  call<T>(operation: string, payload: Record<string, unknown>): T {
-    const id = randomUUID();
-    const signal = new SharedArrayBuffer(4);
-    const view = new Int32Array(signal);
-    const requestPath = join(tmpdir(), `floom-pg-${id}.request.json`);
-    const responsePath = join(tmpdir(), `floom-pg-${id}.response.json`);
-    writeFileSync(requestPath, JSON.stringify({ operation, payload }));
-    this.worker.postMessage({ requestPath, responsePath, signal });
-    const wait = Atomics.wait(view, 0, 0, this.callTimeoutMs);
-    try {
-      if (wait === 'timed-out') {
-        throw new Error(`Postgres adapter call timed out after ${this.callTimeoutMs}ms`);
-      }
-      const response = JSON.parse(
-        readFileSync(responsePath, 'utf8'),
-      ) as WorkerResponse<T>;
-      if (!response.ok) {
-        const parts = [
-          response.error?.message || 'Postgres adapter call failed',
-          response.error?.code ? `code=${response.error.code}` : null,
-          response.error?.detail ? `detail=${response.error.detail}` : null,
-        ].filter(Boolean);
-        throw new Error(parts.join(' '));
-      }
-      return response.result as T;
-    } finally {
-      rmSync(requestPath, { force: true });
-      rmSync(responsePath, { force: true });
-    }
-  }
-}
-
 class PostgresStorageAdapter implements StorageAdapter {
-  private readonly runner: PgSyncRunner;
+  private readonly pool: PgPool;
   private readonly connectionString: string;
   private readonly setupSchema: boolean;
-  private schemaReady = false;
+  private schemaReady: Promise<void> | null = null;
 
   constructor(opts: PostgresAdapterOptions) {
     this.connectionString = opts.connectionString;
     this.setupSchema = opts.setupSchema ?? true;
-    this.runner = new PgSyncRunner(
-      opts.connectionString || 'postgres://invalid',
-      opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS,
-    );
+    this.pool = new Pool({
+      connectionString: opts.connectionString || 'postgres://invalid',
+      max: 10,
+    });
   }
 
-  getApp(slug: string): AppRecord | undefined {
-    return one(this.query('SELECT * FROM apps WHERE slug = $1', [slug]).map(normalizeApp));
+  async getApp(slug: string): Promise<AppRecord | undefined> {
+    return one((await this.query('SELECT * FROM apps WHERE slug = $1', [slug])).map(normalizeApp));
   }
 
-  getAppById(id: string): AppRecord | undefined {
-    return one(this.query('SELECT * FROM apps WHERE id = $1', [id]).map(normalizeApp));
+  async getAppById(id: string): Promise<AppRecord | undefined> {
+    return one((await this.query('SELECT * FROM apps WHERE id = $1', [id])).map(normalizeApp));
   }
 
-  listApps(filter: AppListFilter = {}): AppRecord[] {
+  async listApps(filter: AppListFilter = {}): Promise<AppRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.workspace_id) {
@@ -273,10 +161,10 @@ class PostgresStorageAdapter implements StorageAdapter {
         sql += ` OFFSET $${params.length}`;
       }
     }
-    return this.query(sql, params).map(normalizeApp);
+    return (await this.query(sql, params)).map(normalizeApp);
   }
 
-  createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): AppRecord {
+  async createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): Promise<AppRecord> {
     const keys = Object.keys(input).filter((key) => key !== 'created_at' && key !== 'updated_at');
     assertColumns('apps', keys, APP_COLUMNS);
     const values = keys.map((key) =>
@@ -284,13 +172,16 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
     const columns = keys.join(', ');
     const placeholders = keys.map((_, index) => `$${index + 1}`).join(', ');
-    this.execute(`INSERT INTO apps (${columns}) VALUES (${placeholders})`, values);
-    const row = this.getAppById(input.id);
+    await this.execute(`INSERT INTO apps (${columns}) VALUES (${placeholders})`, values);
+    const row = await this.getAppById(input.id);
     if (!row) throw new Error(`createApp: failed to re-read row ${input.id}`);
     return row;
   }
 
-  updateApp(slug: string, patch: Partial<AppRecord>): AppRecord | undefined {
+  async updateApp(
+    slug: string,
+    patch: Partial<AppRecord>,
+  ): Promise<AppRecord | undefined> {
     const keys = Object.keys(patch).filter((key) => key !== 'slug');
     assertColumns('apps', keys, APP_COLUMNS);
     if (keys.length === 0) return this.getApp(slug);
@@ -299,29 +190,29 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
     values.push(slug);
     const set = keys.map((key, index) => `${key} = $${index + 1}`).join(', ');
-    this.execute(
+    await this.execute(
       `UPDATE apps SET ${set}, updated_at = now() WHERE slug = $${values.length}`,
       values,
     );
     return this.getApp(slug);
   }
 
-  deleteApp(slug: string): boolean {
-    const row = one(this.query('SELECT id FROM apps WHERE slug = $1', [slug]));
+  async deleteApp(slug: string): Promise<boolean> {
+    const row = one(await this.query('SELECT id FROM apps WHERE slug = $1', [slug]));
     if (!row || typeof row.id !== 'string') return false;
-    const result = this.execute('DELETE FROM apps WHERE id = $1', [row.id]);
+    const result = await this.execute('DELETE FROM apps WHERE id = $1', [row.id]);
     return result.rowCount > 0;
   }
 
-  createRun(input: {
+  async createRun(input: {
     id: string;
     app_id: string;
     thread_id?: string | null;
     action: string;
     inputs: Record<string, unknown> | null;
-  }): RunRecord {
-    const app = this.getAppById(input.app_id);
-    this.execute(
+  }): Promise<RunRecord> {
+    const app = await this.getAppById(input.app_id);
+    await this.execute(
       `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id)
        VALUES ($1, $2, $3, $4, $5::jsonb, 'pending', $6)`,
       [
@@ -333,16 +224,16 @@ class PostgresStorageAdapter implements StorageAdapter {
         app?.workspace_id ?? 'local',
       ],
     );
-    const row = this.getRun(input.id);
+    const row = await this.getRun(input.id);
     if (!row) throw new Error(`createRun: failed to re-read row ${input.id}`);
     return row;
   }
 
-  getRun(id: string): RunRecord | undefined {
-    return one(this.query('SELECT * FROM runs WHERE id = $1', [id]).map(normalizeRun));
+  async getRun(id: string): Promise<RunRecord | undefined> {
+    return one((await this.query('SELECT * FROM runs WHERE id = $1', [id])).map(normalizeRun));
   }
 
-  listRuns(filter: RunListFilter = {}): RunRecord[] {
+  async listRuns(filter: RunListFilter = {}): Promise<RunRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.app_id) {
@@ -370,10 +261,10 @@ class PostgresStorageAdapter implements StorageAdapter {
         sql += ` OFFSET $${params.length}`;
       }
     }
-    return this.query(sql, params).map(normalizeRun);
+    return (await this.query(sql, params)).map(normalizeRun);
   }
 
-  updateRun(
+  async updateRun(
     id: string,
     patch: {
       status?: RunStatus;
@@ -385,7 +276,7 @@ class PostgresStorageAdapter implements StorageAdapter {
       duration_ms?: number | null;
       finished?: boolean;
     },
-  ): void {
+  ): Promise<void> {
     const cols: string[] = [];
     const values: unknown[] = [];
     if (patch.status !== undefined) {
@@ -421,24 +312,24 @@ class PostgresStorageAdapter implements StorageAdapter {
     }
     if (cols.length === 0) return;
     values.push(id);
-    this.execute(`UPDATE runs SET ${cols.join(', ')} WHERE id = $${values.length}`, values);
+    await this.execute(`UPDATE runs SET ${cols.join(', ')} WHERE id = $${values.length}`, values);
     if (
       patch.finished &&
       patch.status === 'success' &&
       typeof patch.duration_ms === 'number'
     ) {
-      this.refreshAppAvgRunMs(id);
+      await this.refreshAppAvgRunMs(id);
     }
   }
 
-  createJob(
+  async createJob(
     input: Omit<
       JobRecord,
       'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'
     > & { status?: JobStatus },
-  ): JobRecord {
+  ): Promise<JobRecord> {
     const normalized = normalizeCreateJobInput(input);
-    this.execute(
+    await this.execute(
       `INSERT INTO jobs (
          id, slug, app_id, action, status, input_json, output_json, error_json,
          run_id, webhook_url, timeout_ms, max_retries, attempts, per_call_secrets_json
@@ -463,17 +354,17 @@ class PostgresStorageAdapter implements StorageAdapter {
         normalized.per_call_secrets_json,
       ],
     );
-    const row = this.getJob(normalized.id);
+    const row = await this.getJob(normalized.id);
     if (!row) throw new Error(`createJob: failed to re-read row ${normalized.id}`);
     return row;
   }
 
-  getJob(id: string): JobRecord | undefined {
-    return one(this.query('SELECT * FROM jobs WHERE id = $1', [id]).map(normalizeJob));
+  async getJob(id: string): Promise<JobRecord | undefined> {
+    return one((await this.query('SELECT * FROM jobs WHERE id = $1', [id])).map(normalizeJob));
   }
 
-  claimNextJob(): JobRecord | undefined {
-    const rows = this.query(
+  async claimNextJob(): Promise<JobRecord | undefined> {
+    const rows = (await this.query(
       `WITH next AS (
          SELECT id FROM jobs
           WHERE status = 'queued'
@@ -489,11 +380,11 @@ class PostgresStorageAdapter implements StorageAdapter {
         WHERE jobs.id = next.id
         RETURNING jobs.*`,
       [],
-    ).map(normalizeJob);
+    )).map(normalizeJob);
     return one(rows);
   }
 
-  updateJob(id: string, patch: Partial<JobRecord>): void {
+  async updateJob(id: string, patch: Partial<JobRecord>): Promise<void> {
     const keys = Object.keys(patch).filter((key) => key !== 'id');
     assertColumns('jobs', keys, JOB_COLUMNS);
     if (keys.length === 0) return;
@@ -508,62 +399,65 @@ class PostgresStorageAdapter implements StorageAdapter {
         JOB_JSON_COLUMNS.has(key) ? `${key} = $${index + 1}::jsonb` : `${key} = $${index + 1}`,
       )
       .join(', ');
-    this.execute(`UPDATE jobs SET ${set} WHERE id = $${values.length}`, values);
+    await this.execute(`UPDATE jobs SET ${set} WHERE id = $${values.length}`, values);
   }
 
-  getWorkspace(id: string): WorkspaceRecord | undefined {
+  async getWorkspace(id: string): Promise<WorkspaceRecord | undefined> {
     return one(
-      this.query('SELECT id, slug, name, plan, wrapped_dek, created_at FROM workspaces WHERE id = $1', [
+      (await this.query('SELECT id, slug, name, plan, wrapped_dek, created_at FROM workspaces WHERE id = $1', [
         id,
-      ]) as unknown as WorkspaceRecord[],
+      ])).map(normalizeWorkspace),
     );
   }
 
-  listWorkspacesForUser(
+  async listWorkspacesForUser(
     user_id: string,
-  ): Array<WorkspaceRecord & { role: WorkspaceRole }> {
-    return this.query(
+  ): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>> {
+    return (await this.query(
       `SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
          FROM workspaces w
          INNER JOIN workspace_members m ON m.workspace_id = w.id
         WHERE m.user_id = $1
         ORDER BY w.created_at ASC`,
       [user_id],
-    ) as unknown as Array<WorkspaceRecord & { role: WorkspaceRole }>;
+    )).map(normalizeWorkspaceWithRole);
   }
 
-  getUser(id: string): UserRecord | undefined {
+  async getUser(id: string): Promise<UserRecord | undefined> {
     return one(
-      this.query(
+      (await this.query(
         `SELECT id, workspace_id, email, name, auth_provider, auth_subject, created_at
            FROM users WHERE id = $1`,
         [id],
-      ) as unknown as UserRecord[],
+      )).map(normalizeUser),
     );
   }
 
-  getUserByEmail(email: string): UserRecord | undefined {
+  async getUserByEmail(email: string): Promise<UserRecord | undefined> {
     return one(
-      this.query(
+      (await this.query(
         `SELECT id, workspace_id, email, name, auth_provider, auth_subject, created_at
            FROM users WHERE email = $1`,
         [email],
-      ) as unknown as UserRecord[],
+      )).map(normalizeUser),
     );
   }
 
-  createUser(input: UserWriteInput): UserRecord {
+  async createUser(input: UserWriteInput): Promise<UserRecord> {
     const keys = userInsertKeys(input);
     const values = keys.map((key) => input[key]);
     const columns = keys.join(', ');
     const placeholders = keys.map((_, index) => `$${index + 1}`).join(', ');
-    this.execute(`INSERT INTO users (${columns}) VALUES (${placeholders})`, values);
-    const row = this.getUser(input.id);
+    await this.execute(`INSERT INTO users (${columns}) VALUES (${placeholders})`, values);
+    const row = await this.getUser(input.id);
     if (!row) throw new Error(`createUser: failed to re-read row ${input.id}`);
     return row;
   }
 
-  upsertUser(input: UserWriteInput, updateColumns: UserWriteColumn[]): UserRecord {
+  async upsertUser(
+    input: UserWriteInput,
+    updateColumns: UserWriteColumn[],
+  ): Promise<UserRecord> {
     const keys = userInsertKeys(input);
     const keySet = new Set(keys);
     for (const column of updateColumns) {
@@ -583,34 +477,38 @@ class PostgresStorageAdapter implements StorageAdapter {
             .map((column) => `${column} = EXCLUDED.${column}`)
             .join(', ')}`
         : 'DO NOTHING';
-    this.execute(
+    await this.execute(
       `INSERT INTO users (${columns}) VALUES (${placeholders})
        ON CONFLICT (id) ${updates}`,
       values,
     );
-    const row = this.getUser(input.id);
+    const row = await this.getUser(input.id);
     if (!row) throw new Error(`upsertUser: failed to re-read row ${input.id}`);
     return row;
   }
 
-  listAdminSecrets(app_id?: string | null): SecretRecord[] {
+  async listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]> {
     if (app_id === undefined) {
-      return this.query('SELECT * FROM secrets ORDER BY name', []) as unknown as SecretRecord[];
+      return (await this.query('SELECT * FROM secrets ORDER BY name', [])).map(normalizeSecret);
     }
     if (app_id === null) {
-      return this.query(
+      return (await this.query(
         'SELECT * FROM secrets WHERE app_id IS NULL ORDER BY name',
         [],
-      ) as unknown as SecretRecord[];
+      )).map(normalizeSecret);
     }
-    return this.query(
+    return (await this.query(
       'SELECT * FROM secrets WHERE app_id = $1 ORDER BY name',
       [app_id],
-    ) as unknown as SecretRecord[];
+    )).map(normalizeSecret);
   }
 
-  upsertAdminSecret(name: string, value: string, app_id?: string | null): void {
-    this.execute(
+  async upsertAdminSecret(
+    name: string,
+    value: string,
+    app_id?: string | null,
+  ): Promise<void> {
+    await this.execute(
       `INSERT INTO secrets (id, name, value, app_id)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (name, (COALESCE(app_id, '__global__')))
@@ -619,45 +517,55 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
   }
 
-  deleteAdminSecret(name: string, app_id?: string | null): boolean {
+  async deleteAdminSecret(name: string, app_id?: string | null): Promise<boolean> {
     const result =
       app_id === null || app_id === undefined
-        ? this.execute('DELETE FROM secrets WHERE name = $1 AND app_id IS NULL', [name])
-        : this.execute('DELETE FROM secrets WHERE name = $1 AND app_id = $2', [
+        ? await this.execute('DELETE FROM secrets WHERE name = $1 AND app_id IS NULL', [name])
+        : await this.execute('DELETE FROM secrets WHERE name = $1 AND app_id = $2', [
             name,
             app_id,
           ]);
     return result.rowCount > 0;
   }
 
-  private query(sql: string, values: unknown[]): Array<Record<string, unknown>> {
-    return this.execute(sql, values).rows;
+  private async query(
+    sql: string,
+    values: unknown[],
+  ): Promise<Array<Record<string, unknown>>> {
+    return (await this.execute(sql, values)).rows;
   }
 
-  private execute(sql: string, values: unknown[]): QueryResult {
-    this.ensureReady();
-    return this.runner.call<QueryResult>('query', { text: sql, values });
+  private async execute(sql: string, values: unknown[]): Promise<QueryResult> {
+    await this.ensureReady();
+    const result = await this.pool.query(sql, values);
+    return {
+      rows: result.rows as Array<Record<string, unknown>>,
+      rowCount: result.rowCount ?? 0,
+    };
   }
 
-  private ensureReady(): void {
+  private async ensureReady(): Promise<void> {
     if (!this.connectionString) {
       throw new Error(
         'Postgres StorageAdapter requires a connection string via createPostgresAdapter({ connectionString }) or DATABASE_URL',
       );
     }
-    if (this.schemaReady) return;
-    if (this.setupSchema) {
-      const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
-      this.runner.call<QueryResult>('executeSql', { sql: schemaSql });
+    if (!this.schemaReady) {
+      this.schemaReady = this.setupSchema ? this.setupDatabaseSchema() : Promise.resolve();
     }
-    this.schemaReady = true;
+    await this.schemaReady;
   }
 
-  private refreshAppAvgRunMs(runId: string): void {
-    const row = one(this.query('SELECT app_id FROM runs WHERE id = $1', [runId]));
+  private async setupDatabaseSchema(): Promise<void> {
+    const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
+    await this.pool.query(schemaSql);
+  }
+
+  private async refreshAppAvgRunMs(runId: string): Promise<void> {
+    const row = one(await this.query('SELECT app_id FROM runs WHERE id = $1', [runId]));
     if (!row || typeof row.app_id !== 'string') return;
     const avgRow = one(
-      this.query(
+      await this.query(
         `SELECT AVG(duration_ms) AS avg_ms FROM (
            SELECT duration_ms FROM runs
             WHERE app_id = $1 AND status = 'success' AND duration_ms IS NOT NULL
@@ -669,7 +577,7 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
     const avg = avgRow?.avg_ms;
     if (typeof avg === 'number' && Number.isFinite(avg)) {
-      this.execute('UPDATE apps SET avg_run_ms = $1 WHERE id = $2', [
+      await this.execute('UPDATE apps SET avg_run_ms = $1 WHERE id = $2', [
         Math.round(avg),
         row.app_id,
       ]);
@@ -736,12 +644,19 @@ function jsonColumnToString(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+function timestampColumnToString(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
 function normalizeApp(row: Record<string, unknown>): AppRecord {
   return {
     ...row,
     is_async: booleanToTinyInt(row.is_async),
     featured: booleanToTinyInt(row.featured),
     hero: booleanToTinyInt(row.hero),
+    created_at: timestampColumnToString(row.created_at),
+    updated_at: timestampColumnToString(row.updated_at),
   } as AppRecord;
 }
 
@@ -753,6 +668,11 @@ function normalizeRun(row: Record<string, unknown>): RunRecord {
   for (const column of RUN_BOOLEAN_COLUMNS) {
     out[column] = booleanToTinyInt(out[column]);
   }
+  out.started_at = timestampColumnToString(out.started_at);
+  out.finished_at =
+    out.finished_at === null || out.finished_at === undefined
+      ? null
+      : timestampColumnToString(out.finished_at);
   return out as unknown as RunRecord;
 }
 
@@ -761,7 +681,43 @@ function normalizeJob(row: Record<string, unknown>): JobRecord {
   for (const column of JOB_JSON_COLUMNS) {
     out[column] = jsonColumnToString(out[column]);
   }
+  out.created_at = timestampColumnToString(out.created_at);
+  out.started_at =
+    out.started_at === null || out.started_at === undefined
+      ? null
+      : timestampColumnToString(out.started_at);
+  out.finished_at =
+    out.finished_at === null || out.finished_at === undefined
+      ? null
+      : timestampColumnToString(out.finished_at);
   return out as unknown as JobRecord;
+}
+
+function normalizeWorkspace(row: Record<string, unknown>): WorkspaceRecord {
+  return {
+    ...row,
+    created_at: timestampColumnToString(row.created_at),
+  } as WorkspaceRecord;
+}
+
+function normalizeWorkspaceWithRole(
+  row: Record<string, unknown>,
+): WorkspaceRecord & { role: WorkspaceRole } {
+  return normalizeWorkspace(row) as WorkspaceRecord & { role: WorkspaceRole };
+}
+
+function normalizeUser(row: Record<string, unknown>): UserRecord {
+  return {
+    ...row,
+    created_at: timestampColumnToString(row.created_at),
+  } as UserRecord;
+}
+
+function normalizeSecret(row: Record<string, unknown>): SecretRecord {
+  return {
+    ...row,
+    created_at: timestampColumnToString(row.created_at),
+  } as SecretRecord;
 }
 
 function normalizeCreateJobInput(

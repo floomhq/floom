@@ -82,7 +82,7 @@ async function upsertFloomUser(
   updateColumns: UserWriteColumn[],
 ): Promise<void> {
   const { adapters } = await import('../adapters/index.js');
-  adapters.storage.upsertUser(input, updateColumns);
+  await adapters.storage.upsertUser(input, updateColumns);
 }
 
 export function registerAuthUserDeleteListener(cb: UserDeleteListener): void {

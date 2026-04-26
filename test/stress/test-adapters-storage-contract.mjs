@@ -157,20 +157,20 @@ console.log('adapter-storage contract tests');
 
 try {
   await check('apps CRUD round-trip with list/update/delete', async () => {
-    const app = storage.createApp(appInput('app-crud-1', 'app-crud-1'));
+    const app = await storage.createApp(appInput('app-crud-1', 'app-crud-1'));
     assert(app.id === 'app-crud-1', `id=${app.id}`);
-    assert(storage.getApp('app-crud-1')?.id === app.id, 'getApp mismatch');
-    assert(storage.getAppById(app.id)?.slug === app.slug, 'getAppById mismatch');
-    assert(storage.listApps({ workspace_id: DEFAULT_WORKSPACE_ID }).some((row) => row.id === app.id), 'listApps missing app');
-    const updated = storage.updateApp(app.slug, { description: 'Updated description' });
+    assert((await storage.getApp('app-crud-1'))?.id === app.id, 'getApp mismatch');
+    assert((await storage.getAppById(app.id))?.slug === app.slug, 'getAppById mismatch');
+    assert((await storage.listApps({ workspace_id: DEFAULT_WORKSPACE_ID })).some((row) => row.id === app.id), 'listApps missing app');
+    const updated = await storage.updateApp(app.slug, { description: 'Updated description' });
     assert(updated?.description === 'Updated description', 'updateApp did not refresh description');
-    assert(storage.deleteApp(app.slug) === true, 'deleteApp returned false');
-    assert(storage.getApp(app.slug) === undefined, 'deleted app remained readable');
+    assert((await storage.deleteApp(app.slug)) === true, 'deleteApp returned false');
+    assert((await storage.getApp(app.slug)) === undefined, 'deleted app remained readable');
   });
 
   await check('runs CRUD round-trip with read-after-write update', async () => {
-    const app = storage.createApp(appInput('app-runs-1', 'app-runs-1'));
-    const run = storage.createRun({
+    const app = await storage.createApp(appInput('app-runs-1', 'app-runs-1'));
+    const run = await storage.createRun({
       id: 'run-crud-1',
       app_id: app.id,
       thread_id: 'thread-1',
@@ -178,37 +178,37 @@ try {
       inputs: { prompt: 'hello' },
     });
     assert(run.status === 'pending', `status=${run.status}`);
-    assert(storage.getRun(run.id)?.id === run.id, 'getRun mismatch');
-    assert(storage.listRuns({ app_id: app.id }).some((row) => row.id === run.id), 'listRuns missing run');
-    storage.updateRun(run.id, {
+    assert((await storage.getRun(run.id))?.id === run.id, 'getRun mismatch');
+    assert((await storage.listRuns({ app_id: app.id })).some((row) => row.id === run.id), 'listRuns missing run');
+    await storage.updateRun(run.id, {
       status: 'success',
       outputs: { ok: true },
       logs: 'done',
       duration_ms: 12,
       finished: true,
     });
-    const updated = storage.getRun(run.id);
+    const updated = await storage.getRun(run.id);
     assert(updated?.status === 'success', `updated status=${updated?.status}`);
     assert(updated?.outputs === json({ ok: true }), `outputs=${updated?.outputs}`);
-    storage.deleteApp(app.slug);
-    assert(storage.getRun(run.id) === undefined, 'run did not cascade with app delete');
+    await storage.deleteApp(app.slug);
+    assert((await storage.getRun(run.id)) === undefined, 'run did not cascade with app delete');
   });
 
   await check('jobs CRUD round-trip with claim/update', async () => {
-    const app = storage.createApp(appInput('app-jobs-1', 'app-jobs-1'));
-    const job = storage.createJob(createJobInput('job-crud-1', app, { x: 1 }));
+    const app = await storage.createApp(appInput('app-jobs-1', 'app-jobs-1'));
+    const job = await storage.createJob(createJobInput('job-crud-1', app, { x: 1 }));
     assert(job.status === 'queued', `status=${job.status}`);
-    assert(storage.getJob(job.id)?.id === job.id, 'getJob mismatch');
-    const claimed = storage.claimNextJob();
+    assert((await storage.getJob(job.id))?.id === job.id, 'getJob mismatch');
+    const claimed = await storage.claimNextJob();
     assert(claimed?.id === job.id, `claimed=${claimed?.id}`);
-    storage.updateJob(job.id, { output_json: json({ ok: true }), status: 'succeeded' });
-    const updated = storage.getJob(job.id);
+    await storage.updateJob(job.id, { output_json: json({ ok: true }), status: 'succeeded' });
+    const updated = await storage.getJob(job.id);
     assert(updated?.status === 'succeeded', `updated status=${updated?.status}`);
     assert(updated?.output_json === json({ ok: true }), `output_json=${updated?.output_json}`);
   });
 
   await check('users and workspaces round-trip through adapter reads', async () => {
-    const user = storage.createUser({
+    const user = await storage.createUser({
       id: 'user-crud-1',
       workspace_id: DEFAULT_WORKSPACE_ID,
       email: 'user-crud-1@example.com',
@@ -216,12 +216,12 @@ try {
       auth_provider: 'contract',
       auth_subject: 'subject-1',
     });
-    assert(storage.getUser(user.id)?.email === user.email, 'getUser mismatch');
-    assert(storage.getUserByEmail(user.email)?.id === user.id, 'getUserByEmail mismatch');
-    assert(storage.getWorkspace(DEFAULT_WORKSPACE_ID)?.id === DEFAULT_WORKSPACE_ID, 'getWorkspace mismatch');
-    const workspaces = storage.listWorkspacesForUser(DEFAULT_WORKSPACE_ID);
+    assert((await storage.getUser(user.id))?.email === user.email, 'getUser mismatch');
+    assert((await storage.getUserByEmail(user.email))?.id === user.id, 'getUserByEmail mismatch');
+    assert((await storage.getWorkspace(DEFAULT_WORKSPACE_ID))?.id === DEFAULT_WORKSPACE_ID, 'getWorkspace mismatch');
+    const workspaces = await storage.listWorkspacesForUser(DEFAULT_WORKSPACE_ID);
     assert(workspaces.length >= 1 && workspaces.some((row) => row.id === DEFAULT_WORKSPACE_ID), `workspaces=${json(workspaces)}`);
-    const updated = storage.upsertUser(
+    const updated = await storage.upsertUser(
       {
         id: user.id,
         workspace_id: DEFAULT_WORKSPACE_ID,
@@ -236,71 +236,71 @@ try {
   });
 
   await check('admin secrets CRUD round-trip and idempotent delete', async () => {
-    const app = storage.createApp(appInput('app-admin-secrets-1', 'app-admin-secrets-1'));
-    storage.upsertAdminSecret('GLOBAL_TOKEN', 'global-1', null);
-    storage.upsertAdminSecret('APP_TOKEN', 'app-1', app.id);
-    assert(storage.listAdminSecrets(null).some((row) => row.name === 'GLOBAL_TOKEN'), 'global secret missing');
-    assert(storage.listAdminSecrets(app.id).some((row) => row.value === 'app-1'), 'app secret missing');
-    storage.upsertAdminSecret('APP_TOKEN', 'app-2', app.id);
-    assert(storage.listAdminSecrets(app.id).find((row) => row.name === 'APP_TOKEN')?.value === 'app-2', 'app secret did not update');
-    assert(storage.deleteAdminSecret('APP_TOKEN', app.id) === true, 'deleteAdminSecret existing returned false');
-    assert(storage.deleteAdminSecret('APP_TOKEN', app.id) === false, 'deleteAdminSecret missing was not false');
+    const app = await storage.createApp(appInput('app-admin-secrets-1', 'app-admin-secrets-1'));
+    await storage.upsertAdminSecret('GLOBAL_TOKEN', 'global-1', null);
+    await storage.upsertAdminSecret('APP_TOKEN', 'app-1', app.id);
+    assert((await storage.listAdminSecrets(null)).some((row) => row.name === 'GLOBAL_TOKEN'), 'global secret missing');
+    assert((await storage.listAdminSecrets(app.id)).some((row) => row.value === 'app-1'), 'app secret missing');
+    await storage.upsertAdminSecret('APP_TOKEN', 'app-2', app.id);
+    assert((await storage.listAdminSecrets(app.id)).find((row) => row.name === 'APP_TOKEN')?.value === 'app-2', 'app secret did not update');
+    assert((await storage.deleteAdminSecret('APP_TOKEN', app.id)) === true, 'deleteAdminSecret existing returned false');
+    assert((await storage.deleteAdminSecret('APP_TOKEN', app.id)) === false, 'deleteAdminSecret missing was not false');
   });
 
   await check('slug collision is deterministic and never silently overwrites', async () => {
-    const first = storage.createApp(appInput('app-collision-1', 'app-collision'));
+    const first = await storage.createApp(appInput('app-collision-1', 'app-collision'));
     let threw = false;
     try {
-      storage.createApp(appInput('app-collision-2', 'app-collision'));
+      await storage.createApp(appInput('app-collision-2', 'app-collision'));
     } catch (err) {
       threw = /unique|constraint|slug|apps/i.test(err.message || String(err));
     }
-    const after = storage.getApp('app-collision');
+    const after = await storage.getApp('app-collision');
     assert(threw || after?.id === first.id, `threw=${threw}, after=${json(after)}`);
   });
 
   await check('missing-row lookups return undefined', async () => {
-    assert(storage.getApp('missing-app') === undefined, 'getApp missing was not undefined');
-    assert(storage.getAppById('missing-app-id') === undefined, 'getAppById missing was not undefined');
-    assert(storage.getRun('missing-run') === undefined, 'getRun missing was not undefined');
-    assert(storage.getJob('missing-job') === undefined, 'getJob missing was not undefined');
-    assert(storage.getUser('missing-user') === undefined, 'getUser missing was not undefined');
-    assert(storage.getWorkspace('missing-workspace') === undefined, 'getWorkspace missing was not undefined');
+    assert((await storage.getApp('missing-app')) === undefined, 'getApp missing was not undefined');
+    assert((await storage.getAppById('missing-app-id')) === undefined, 'getAppById missing was not undefined');
+    assert((await storage.getRun('missing-run')) === undefined, 'getRun missing was not undefined');
+    assert((await storage.getJob('missing-job')) === undefined, 'getJob missing was not undefined');
+    assert((await storage.getUser('missing-user')) === undefined, 'getUser missing was not undefined');
+    assert((await storage.getWorkspace('missing-workspace')) === undefined, 'getWorkspace missing was not undefined');
   });
 
   await check('updated_at refreshes while created_at remains stable', async () => {
-    const app = storage.createApp(appInput('app-updated-at-1', 'app-updated-at-1'));
+    const app = await storage.createApp(appInput('app-updated-at-1', 'app-updated-at-1'));
     await sleep(1_100);
-    const updated = storage.updateApp(app.slug, { manifest: json({ changed: true }) });
+    const updated = await storage.updateApp(app.slug, { manifest: json({ changed: true }) });
     assert(updated, 'updateApp returned undefined');
     assert(updated.created_at === app.created_at, `created_at changed ${app.created_at} -> ${updated.created_at}`);
     assert(new Date(updated.updated_at).getTime() > new Date(app.updated_at).getTime(), `updated_at ${app.updated_at} -> ${updated.updated_at}`);
   });
 
   await check('deleteApp cascades runs, jobs, and app-scoped admin secrets', async () => {
-    const app = storage.createApp(appInput('app-cascade-1', 'app-cascade-1'));
-    const run = storage.createRun({
+    const app = await storage.createApp(appInput('app-cascade-1', 'app-cascade-1'));
+    const run = await storage.createRun({
       id: 'run-cascade-1',
       app_id: app.id,
       action: 'run',
       inputs: {},
     });
-    const job = storage.createJob(createJobInput('job-cascade-1', app, {}));
-    storage.upsertAdminSecret('CASCADE_TOKEN', 'value', app.id);
-    assert(storage.deleteApp(app.slug) === true, 'deleteApp existing returned false');
-    assert(storage.getRun(run.id) === undefined, 'run survived app delete');
-    assert(storage.getJob(job.id) === undefined, 'job survived app delete');
-    assert(storage.listRuns({ app_id: app.id }).length === 0, 'listRuns returned deleted app runs');
-    assert(storage.listAdminSecrets(app.id).length === 0, 'app-scoped admin secret survived app delete');
+    const job = await storage.createJob(createJobInput('job-cascade-1', app, {}));
+    await storage.upsertAdminSecret('CASCADE_TOKEN', 'value', app.id);
+    assert((await storage.deleteApp(app.slug)) === true, 'deleteApp existing returned false');
+    assert((await storage.getRun(run.id)) === undefined, 'run survived app delete');
+    assert((await storage.getJob(job.id)) === undefined, 'job survived app delete');
+    assert((await storage.listRuns({ app_id: app.id })).length === 0, 'listRuns returned deleted app runs');
+    assert((await storage.listAdminSecrets(app.id)).length === 0, 'app-scoped admin secret survived app delete');
   });
 
   await check('atomic job claim grants one claimant across 50 iterations', async () => {
-    const app = storage.createApp(appInput('app-claim-1', 'app-claim-1'));
+    const app = await storage.createApp(appInput('app-claim-1', 'app-claim-1'));
     for (let i = 0; i < 50; i++) {
-      const job = storage.createJob(createJobInput(`job-claim-${i}`, app, { i }));
+      const job = await storage.createJob(createJobInput(`job-claim-${i}`, app, { i }));
       const [a, b] = await Promise.all([
-        Promise.resolve().then(() => storage.claimNextJob()),
-        Promise.resolve().then(() => storage.claimNextJob()),
+        storage.claimNextJob(),
+        storage.claimNextJob(),
       ]);
       const claimed = [a, b].filter(Boolean);
       assert(claimed.length === 1, `iteration=${i}, claimed=${claimed.length}`);
@@ -309,17 +309,17 @@ try {
   });
 
   await check('tenant filters keep apps and runs scoped by workspace_id', async () => {
-    const appA = storage.createApp(appInput('tenant-app-a', 'tenant-app-a', 'tenant-a'));
-    const appB = storage.createApp(appInput('tenant-app-b', 'tenant-app-b', 'tenant-b'));
-    const runA = storage.createRun({ id: 'tenant-run-a', app_id: appA.id, action: 'run', inputs: {} });
-    const runB = storage.createRun({ id: 'tenant-run-b', app_id: appB.id, action: 'run', inputs: {} });
-    assert(storage.listApps({ workspace_id: 'tenant-a' }).every((row) => row.workspace_id === 'tenant-a'), 'tenant-a listApps leaked');
-    assert(storage.listApps({ workspace_id: 'tenant-b' }).every((row) => row.workspace_id === 'tenant-b'), 'tenant-b listApps leaked');
-    const storedRunA = storage.getRun(runA.id);
-    const storedRunB = storage.getRun(runB.id);
+    const appA = await storage.createApp(appInput('tenant-app-a', 'tenant-app-a', 'tenant-a'));
+    const appB = await storage.createApp(appInput('tenant-app-b', 'tenant-app-b', 'tenant-b'));
+    const runA = await storage.createRun({ id: 'tenant-run-a', app_id: appA.id, action: 'run', inputs: {} });
+    const runB = await storage.createRun({ id: 'tenant-run-b', app_id: appB.id, action: 'run', inputs: {} });
+    assert((await storage.listApps({ workspace_id: 'tenant-a' })).every((row) => row.workspace_id === 'tenant-a'), 'tenant-a listApps leaked');
+    assert((await storage.listApps({ workspace_id: 'tenant-b' })).every((row) => row.workspace_id === 'tenant-b'), 'tenant-b listApps leaked');
+    const storedRunA = await storage.getRun(runA.id);
+    const storedRunB = await storage.getRun(runB.id);
     if (storedRunA?.workspace_id === 'tenant-a' && storedRunB?.workspace_id === 'tenant-b') {
-      assert(storage.listRuns({ workspace_id: 'tenant-a' }).every((row) => row.workspace_id === 'tenant-a'), 'tenant-a listRuns leaked');
-      assert(storage.listRuns({ workspace_id: 'tenant-b' }).every((row) => row.workspace_id === 'tenant-b'), 'tenant-b listRuns leaked');
+      assert((await storage.listRuns({ workspace_id: 'tenant-a' })).every((row) => row.workspace_id === 'tenant-a'), 'tenant-a listRuns leaked');
+      assert((await storage.listRuns({ workspace_id: 'tenant-b' })).every((row) => row.workspace_id === 'tenant-b'), 'tenant-b listRuns leaked');
     }
     skip(
       'unfiltered tenant default',
@@ -328,11 +328,11 @@ try {
   });
 
   await check('transactional read-after-write is visible to another connection', async () => {
-    const app = storage.createApp(appInput('app-raw-1', 'app-raw-1'));
-    const run = storage.createRun({ id: 'run-raw-1', app_id: app.id, action: 'run', inputs: { ok: true } });
+    const app = await storage.createApp(appInput('app-raw-1', 'app-raw-1'));
+    const run = await storage.createRun({ id: 'run-raw-1', app_id: app.id, action: 'run', inputs: { ok: true } });
     const independent = await createIndependentStorageAdapter();
     if (independent) {
-      const row = independent.getRun(run.id);
+      const row = await independent.getRun(run.id);
       assert(row?.id === run.id && row.app_id === app.id && row.action === 'run', `row=${json(row)}`);
     } else {
       const Database = require('../../apps/server/node_modules/better-sqlite3');
@@ -347,8 +347,8 @@ try {
   });
 
   await check('idempotent delete returns false for missing rows', async () => {
-    assert(storage.deleteApp('missing-delete-app') === false, 'deleteApp missing did not return false');
-    assert(storage.deleteAdminSecret('missing-delete-secret', null) === false, 'deleteAdminSecret missing did not return false');
+    assert((await storage.deleteApp('missing-delete-app')) === false, 'deleteApp missing did not return false');
+    assert((await storage.deleteAdminSecret('missing-delete-secret', null)) === false, 'deleteAdminSecret missing did not return false');
   });
 } finally {
   try {

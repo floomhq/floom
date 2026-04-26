@@ -171,7 +171,7 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
   // Idempotent: inserts auth_provider/auth_subject on first sight, then
   // refreshes profile fields on subsequent calls.
   const userId = session.user.id;
-  adapters.storage.upsertUser(
+  await adapters.storage.upsertUser(
     {
       id: userId,
       email: session.user.email,

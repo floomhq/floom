@@ -43,29 +43,29 @@ const [{ createAdapters, __testing }, { FLOOM_PROTOCOL_VERSION }] = await Promis
 function storageModuleSource({ kind = 'storage', protocolVersion = '^0.2' } = {}) {
   return `
 const adapter = {
-  getApp() { return undefined; },
-  getAppById() { return undefined; },
-  listApps() { return []; },
-  createApp(input) { return { ...input, created_at: 'now', updated_at: 'now' }; },
-  updateApp() { return undefined; },
-  deleteApp() { return false; },
-  createRun(input) { return { ...input, status: 'queued', created_at: 'now' }; },
-  getRun() { return undefined; },
-  listRuns() { return []; },
-  updateRun() {},
-  createJob(input) { return { ...input, attempts: 0, status: input.status || 'queued', created_at: 'now', started_at: null, finished_at: null }; },
-  getJob() { return undefined; },
-  claimNextJob() { return undefined; },
-  updateJob() {},
-  getWorkspace() { return undefined; },
-  listWorkspacesForUser() { return []; },
-  getUser() { return undefined; },
-  getUserByEmail() { return undefined; },
-  createUser(input) { return { ...input, created_at: 'now' }; },
-  upsertUser(input) { return { ...input, created_at: 'now' }; },
-  listAdminSecrets() { return []; },
-  upsertAdminSecret() {},
-  deleteAdminSecret() { return false; },
+  async getApp() { return undefined; },
+  async getAppById() { return undefined; },
+  async listApps() { return []; },
+  async createApp(input) { return { ...input, created_at: 'now', updated_at: 'now' }; },
+  async updateApp() { return undefined; },
+  async deleteApp() { return false; },
+  async createRun(input) { return { ...input, status: 'queued', created_at: 'now' }; },
+  async getRun() { return undefined; },
+  async listRuns() { return []; },
+  async updateRun() {},
+  async createJob(input) { return { ...input, attempts: 0, status: input.status || 'queued', created_at: 'now', started_at: null, finished_at: null }; },
+  async getJob() { return undefined; },
+  async claimNextJob() { return undefined; },
+  async updateJob() {},
+  async getWorkspace() { return undefined; },
+  async listWorkspacesForUser() { return []; },
+  async getUser() { return undefined; },
+  async getUserByEmail() { return undefined; },
+  async createUser(input) { return { ...input, created_at: 'now' }; },
+  async upsertUser(input) { return { ...input, created_at: 'now' }; },
+  async listAdminSecrets() { return []; },
+  async upsertAdminSecret() {},
+  async deleteAdminSecret() { return false; },
 };
 
 export default {
@@ -127,7 +127,9 @@ log(
 // ---- 3. method-surface completeness under defaults ----
 const bundle = await createAdapters();
 log('bundle.runtime.execute is fn', typeof bundle.runtime.execute === 'function');
-log('bundle.storage.getApp is fn', typeof bundle.storage.getApp === 'function');
+const storageGetAppResult = bundle.storage.getApp('__factory_missing__');
+log('bundle.storage.getApp returns Promise', storageGetAppResult instanceof Promise);
+await storageGetAppResult;
 log('bundle.auth.getSession is fn', typeof bundle.auth.getSession === 'function');
 log('bundle.secrets.get is fn', typeof bundle.secrets.get === 'function');
 log('bundle.observability.increment is fn', typeof bundle.observability.increment === 'function');

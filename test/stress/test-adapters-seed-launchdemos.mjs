@@ -41,7 +41,7 @@ function log(label, ok, detail) {
 console.log('adapters migration: seed.ts + launch-demos.ts');
 
 // ---- seed.ts path: createApp inserts with publish_status='published' ----
-adapters.storage.createApp({
+await adapters.storage.createApp({
   id: 'app_seed_1',
   slug: 'seed-demo',
   name: 'Seed Demo',
@@ -67,7 +67,7 @@ log(
 db.prepare(
   'UPDATE apps SET stars = 7, featured = 1 WHERE slug = ?',
 ).run('seed-demo');
-adapters.storage.updateApp('seed-demo', {
+await adapters.storage.updateApp('seed-demo', {
   name: 'Seed Demo v2',
   description: 'refreshed',
   manifest: JSON.stringify({ name: 'Seed Demo v2' }),
@@ -92,7 +92,7 @@ log(
 );
 
 // ---- launch-demos.ts path: createApp with hero=1 + publish_status='published' ----
-adapters.storage.createApp({
+await adapters.storage.createApp({
   id: 'app_demo_1',
   slug: 'lead-scorer',
   name: 'Lead Scorer',
@@ -116,7 +116,7 @@ log(
 );
 
 // ---- launch-demos.ts path: updateApp refreshes + still sets hero=1 ----
-adapters.storage.updateApp('lead-scorer', {
+await adapters.storage.updateApp('lead-scorer', {
   name: 'Lead Scorer v2',
   description: 'refreshed',
   manifest: JSON.stringify({ name: 'Lead Scorer v2' }),

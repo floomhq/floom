@@ -155,80 +155,77 @@ export async function seedFromFile(): Promise<{
     `UPDATE apps SET status = 'inactive' WHERE id = ?`,
   );
 
-  const txn = db.transaction(() => {
-    for (const app of seed.apps) {
-      const existing = existsBySlug.get(app.slug) as { id: string } | undefined;
-      const imageOk = !app.docker_image || imageAvailability.get(app.docker_image);
+  for (const app of seed.apps) {
+    const existing = existsBySlug.get(app.slug) as { id: string } | undefined;
+    const imageOk = !app.docker_image || imageAvailability.get(app.docker_image);
 
-      // Image is absent on this host: skip the insert, and if a previous
-      // boot had already inserted the row (e.g. before this guard landed),
-      // mark it inactive so /api/hub (which filters on status='active')
-      // stops surfacing it without losing any existing runs.
-      if (!imageOk) {
-        appsSkipped++;
-        if (existing) {
-          markAppInactive.run(existing.id);
-          console.log(
-            `[seed] ${app.slug}: image "${app.docker_image}" not found locally — marking inactive`,
-          );
-        } else {
-          console.log(
-            `[seed] ${app.slug}: image "${app.docker_image}" not found locally — not inserting`,
-          );
-        }
-        continue;
-      }
-
-      const appId = existing ? existing.id : newAppId();
-      // code_path is unused when docker_image is already set; we store
-      // a placeholder so the NOT NULL constraint is satisfied.
-      const codePath = `reused:${app.marketplace_app_id}`;
-      const manifestJson = JSON.stringify(app.manifest);
+    // Image is absent on this host: skip the insert, and if a previous
+    // boot had already inserted the row (e.g. before this guard landed),
+    // mark it inactive so /api/hub (which filters on status='active')
+    // stops surfacing it without losing any existing runs.
+    if (!imageOk) {
+      appsSkipped++;
       if (existing) {
-        adapters.storage.updateApp(app.slug, {
-          name: app.name,
-          description: app.description,
-          manifest: manifestJson,
-          status: 'active',
-          docker_image: app.docker_image,
-          code_path: codePath,
-          category: app.category,
-          author: app.author,
-          icon: app.icon,
-        } as Partial<AppRecord>);
+        markAppInactive.run(existing.id);
+        console.log(
+          `[seed] ${app.slug}: image "${app.docker_image}" not found locally — marking inactive`,
+        );
       } else {
-        adapters.storage.createApp({
-          id: appId,
-          slug: app.slug,
-          name: app.name,
-          description: app.description,
-          manifest: manifestJson,
-          status: 'active',
-          docker_image: app.docker_image,
-          code_path: codePath,
-          category: app.category,
-          author: app.author,
-          icon: app.icon,
-          publish_status: 'published',
-        } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
-        appsAdded++;
+        console.log(
+          `[seed] ${app.slug}: image "${app.docker_image}" not found locally — not inserting`,
+        );
       }
-
-      // Per-app secrets
-      const perApp = seed.per_app_secrets[app.slug] || {};
-      for (const [name, value] of Object.entries(perApp)) {
-        const result = insertSecret.run(newSecretId(), name, value, appId);
-        if (result.changes > 0) secretsAdded++;
-      }
+      continue;
     }
 
-    // Global secrets
-    for (const [name, value] of Object.entries(seed.global_secrets)) {
-      const result = insertSecret.run(newSecretId(), name, value, null);
+    const appId = existing ? existing.id : newAppId();
+    // code_path is unused when docker_image is already set; we store
+    // a placeholder so the NOT NULL constraint is satisfied.
+    const codePath = `reused:${app.marketplace_app_id}`;
+    const manifestJson = JSON.stringify(app.manifest);
+    if (existing) {
+      await adapters.storage.updateApp(app.slug, {
+        name: app.name,
+        description: app.description,
+        manifest: manifestJson,
+        status: 'active',
+        docker_image: app.docker_image,
+        code_path: codePath,
+        category: app.category,
+        author: app.author,
+        icon: app.icon,
+      } as Partial<AppRecord>);
+    } else {
+      await adapters.storage.createApp({
+        id: appId,
+        slug: app.slug,
+        name: app.name,
+        description: app.description,
+        manifest: manifestJson,
+        status: 'active',
+        docker_image: app.docker_image,
+        code_path: codePath,
+        category: app.category,
+        author: app.author,
+        icon: app.icon,
+        publish_status: 'published',
+      } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
+      appsAdded++;
+    }
+
+    // Per-app secrets
+    const perApp = seed.per_app_secrets[app.slug] || {};
+    for (const [name, value] of Object.entries(perApp)) {
+      const result = insertSecret.run(newSecretId(), name, value, appId);
       if (result.changes > 0) secretsAdded++;
     }
-  });
-  txn();
+  }
+
+  // Global secrets
+  for (const [name, value] of Object.entries(seed.global_secrets)) {
+    const result = insertSecret.run(newSecretId(), name, value, null);
+    if (result.changes > 0) secretsAdded++;
+  }
 
   console.log(
     `[seed] apps added: ${appsAdded}, secrets added: ${secretsAdded}, skipped (image missing): ${appsSkipped}`,

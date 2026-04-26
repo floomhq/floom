@@ -49,7 +49,7 @@ console.log('adapters migration: openapi-ingest + docker-image-ingest');
 // ---------------------------------------------------------------------
 // Site 1: ingestOpenApiApps (operator-declared, publish_status=published)
 // ---------------------------------------------------------------------
-adapters.storage.createApp({
+await adapters.storage.createApp({
   id: 'app_op_1',
   slug: 'operator-proxied',
   name: 'Operator Proxied',
@@ -87,7 +87,7 @@ log('ingestOpenApiApps CREATE: base_url stored',
 log('ingestOpenApiApps CREATE: timeout_ms=30000', op?.timeout_ms === 30000);
 
 // UPDATE path: refresh + preserve publish_status
-adapters.storage.updateApp('operator-proxied', {
+await adapters.storage.updateApp('operator-proxied', {
   name: 'Operator Proxied v2',
   description: 'refreshed',
   manifest: JSON.stringify({ name: 'Operator Proxied v2' }),
@@ -118,7 +118,7 @@ log('ingestOpenApiApps UPDATE: timeout_ms cleared to NULL',
 // ---------------------------------------------------------------------
 // Site 2: ingestAppFromSpec (user-driven, workspace_id + pending_review)
 // ---------------------------------------------------------------------
-adapters.storage.createApp({
+await adapters.storage.createApp({
   id: 'app_user_1',
   slug: 'user-proxied',
   name: 'User Proxied',
@@ -157,7 +157,7 @@ log('ingestAppFromSpec CREATE: visibility=private', usr?.visibility === 'private
 // Flip to published, then UPDATE branch must preserve it
 db.prepare('UPDATE apps SET publish_status = ? WHERE slug = ?')
   .run('published', 'user-proxied');
-adapters.storage.updateApp('user-proxied', {
+await adapters.storage.updateApp('user-proxied', {
   name: 'User Proxied v2',
   description: 'refreshed',
   manifest: JSON.stringify({ name: 'User Proxied v2' }),
@@ -188,7 +188,7 @@ log('ingestAppFromSpec UPDATE: workspace_id preserved',
 // ---------------------------------------------------------------------
 // Site 3: docker-image-ingest (app_type='docker', docker_image set)
 // ---------------------------------------------------------------------
-adapters.storage.createApp({
+await adapters.storage.createApp({
   id: 'app_docker_1',
   slug: 'ig-nano-scout',
   name: 'IG Nano Scout',
@@ -234,7 +234,7 @@ log('docker-image-ingest CREATE: code_path has docker-image: prefix',
 // UPDATE path: swap image tag, preserve publish_status
 db.prepare('UPDATE apps SET publish_status = ? WHERE slug = ?')
   .run('published', 'ig-nano-scout');
-adapters.storage.updateApp('ig-nano-scout', {
+await adapters.storage.updateApp('ig-nano-scout', {
   name: 'IG Nano Scout',
   description: 'refreshed',
   manifest: JSON.stringify({ name: 'IG Nano Scout' }),

@@ -81,19 +81,19 @@ function userInsertValues(
 
 export const sqliteStorageAdapter: StorageAdapter = {
   // ---------- apps ----------
-  getApp(slug: string): AppRecord | undefined {
+  async getApp(slug: string): Promise<AppRecord | undefined> {
     return db
       .prepare('SELECT * FROM apps WHERE slug = ?')
       .get(slug) as AppRecord | undefined;
   },
 
-  getAppById(id: string): AppRecord | undefined {
+  async getAppById(id: string): Promise<AppRecord | undefined> {
     return db
       .prepare('SELECT * FROM apps WHERE id = ?')
       .get(id) as AppRecord | undefined;
   },
 
-  listApps(filter: AppListFilter = {}): AppRecord[] {
+  async listApps(filter: AppListFilter = {}): Promise<AppRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.workspace_id) {
@@ -123,7 +123,7 @@ export const sqliteStorageAdapter: StorageAdapter = {
     return db.prepare(sql).all(...params) as AppRecord[];
   },
 
-  createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): AppRecord {
+  async createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): Promise<AppRecord> {
     // Columns that actually exist on `apps`. We build the INSERT from the
     // keys provided so unknown fields don't trip the schema. All timestamps
     // default to `datetime('now')` in the CREATE TABLE definition.
@@ -132,10 +132,13 @@ export const sqliteStorageAdapter: StorageAdapter = {
     db.prepare(
       `INSERT INTO apps (${keys.join(', ')}) VALUES (${placeholders})`,
     ).run(...keys.map((k) => (input as Record<string, unknown>)[k]));
-    return this.getAppById((input as { id: string }).id) as AppRecord;
+    return (await this.getAppById((input as { id: string }).id)) as AppRecord;
   },
 
-  updateApp(slug: string, patch: Partial<AppRecord>): AppRecord | undefined {
+  async updateApp(
+    slug: string,
+    patch: Partial<AppRecord>,
+  ): Promise<AppRecord | undefined> {
     const keys = Object.keys(patch).filter((k) => k !== 'slug');
     if (keys.length === 0) return this.getApp(slug);
     const set = keys.map((k) => `${k} = ?`).join(', ');
@@ -145,7 +148,7 @@ export const sqliteStorageAdapter: StorageAdapter = {
     return this.getApp(slug);
   },
 
-  deleteApp(slug: string): boolean {
+  async deleteApp(slug: string): Promise<boolean> {
     const row = db
       .prepare('SELECT id FROM apps WHERE slug = ?')
       .get(slug) as { id: string } | undefined;
@@ -159,13 +162,13 @@ export const sqliteStorageAdapter: StorageAdapter = {
   },
 
   // ---------- runs ----------
-  createRun(input: {
+  async createRun(input: {
     id: string;
     app_id: string;
     thread_id?: string | null;
     action: string;
     inputs: Record<string, unknown> | null;
-  }): RunRecord {
+  }): Promise<RunRecord> {
     db.prepare(
       `INSERT INTO runs (id, app_id, thread_id, action, inputs, status)
        VALUES (?, ?, ?, ?, ?, 'pending')`,
@@ -179,11 +182,11 @@ export const sqliteStorageAdapter: StorageAdapter = {
     return db.prepare('SELECT * FROM runs WHERE id = ?').get(input.id) as RunRecord;
   },
 
-  getRun(id: string): RunRecord | undefined {
+  async getRun(id: string): Promise<RunRecord | undefined> {
     return runnerGetRun(id);
   },
 
-  listRuns(filter: RunListFilter = {}): RunRecord[] {
+  async listRuns(filter: RunListFilter = {}): Promise<RunRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.app_id) {
@@ -213,7 +216,7 @@ export const sqliteStorageAdapter: StorageAdapter = {
     return db.prepare(sql).all(...params) as RunRecord[];
   },
 
-  updateRun(
+  async updateRun(
     id: string,
     patch: {
       status?: RunStatus;
@@ -225,33 +228,33 @@ export const sqliteStorageAdapter: StorageAdapter = {
       duration_ms?: number | null;
       finished?: boolean;
     },
-  ): void {
+  ): Promise<void> {
     runnerUpdateRun(id, patch);
   },
 
   // ---------- jobs ----------
-  createJob(
+  async createJob(
     input: Omit<
       JobRecord,
       'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'
     > & { status?: JobStatus },
-  ): JobRecord {
+  ): Promise<JobRecord> {
     // services/jobs.ts createJob takes (jobId, args); re-shape the input.
     const { id, ...rest } = input;
     return jobsCreateJob(id, rest as unknown as Parameters<typeof jobsCreateJob>[1]);
   },
 
-  getJob(id: string): JobRecord | undefined {
+  async getJob(id: string): Promise<JobRecord | undefined> {
     return jobsGetJob(id);
   },
 
-  claimNextJob(): JobRecord | undefined {
+  async claimNextJob(): Promise<JobRecord | undefined> {
     const next = jobsNextQueuedJob();
     if (!next) return undefined;
     return jobsClaimJob(next.id);
   },
 
-  updateJob(id: string, patch: Partial<JobRecord>): void {
+  async updateJob(id: string, patch: Partial<JobRecord>): Promise<void> {
     const keys = Object.keys(patch).filter((k) => k !== 'id');
     if (keys.length === 0) return;
     const set = keys.map((k) => `${k} = ?`).join(', ');
@@ -267,15 +270,15 @@ export const sqliteStorageAdapter: StorageAdapter = {
   },
 
   // ---------- workspaces + users ----------
-  getWorkspace(id: string): WorkspaceRecord | undefined {
+  async getWorkspace(id: string): Promise<WorkspaceRecord | undefined> {
     return db
       .prepare('SELECT * FROM workspaces WHERE id = ?')
       .get(id) as WorkspaceRecord | undefined;
   },
 
-  listWorkspacesForUser(
+  async listWorkspacesForUser(
     user_id: string,
-  ): Array<WorkspaceRecord & { role: WorkspaceRole }> {
+  ): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>> {
     return db
       .prepare(
         `SELECT w.*, m.role as role
@@ -287,28 +290,31 @@ export const sqliteStorageAdapter: StorageAdapter = {
       .all(user_id) as Array<WorkspaceRecord & { role: WorkspaceRole }>;
   },
 
-  getUser(id: string): UserRecord | undefined {
+  async getUser(id: string): Promise<UserRecord | undefined> {
     return db
       .prepare('SELECT * FROM users WHERE id = ?')
       .get(id) as UserRecord | undefined;
   },
 
-  getUserByEmail(email: string): UserRecord | undefined {
+  async getUserByEmail(email: string): Promise<UserRecord | undefined> {
     return db
       .prepare('SELECT * FROM users WHERE email = ?')
       .get(email) as UserRecord | undefined;
   },
 
-  createUser(input: UserWriteInput): UserRecord {
+  async createUser(input: UserWriteInput): Promise<UserRecord> {
     const keys = userInsertKeys(input);
     const placeholders = keys.map(() => '?').join(', ');
     db.prepare(
       `INSERT INTO users (${keys.join(', ')}) VALUES (${placeholders})`,
     ).run(...userInsertValues(input, keys));
-    return this.getUser(input.id) as UserRecord;
+    return (await this.getUser(input.id)) as UserRecord;
   },
 
-  upsertUser(input: UserWriteInput, updateColumns: UserWriteColumn[]): UserRecord {
+  async upsertUser(
+    input: UserWriteInput,
+    updateColumns: UserWriteColumn[],
+  ): Promise<UserRecord> {
     const keys = userInsertKeys(input);
     const keySet = new Set(keys);
     for (const column of updateColumns) {
@@ -328,11 +334,11 @@ export const sqliteStorageAdapter: StorageAdapter = {
        ON CONFLICT (id) DO UPDATE SET
          ${updates}`,
     ).run(...userInsertValues(input, keys));
-    return this.getUser(input.id) as UserRecord;
+    return (await this.getUser(input.id)) as UserRecord;
   },
 
   // ---------- admin secret pointers ----------
-  listAdminSecrets(app_id?: string | null): SecretRecord[] {
+  async listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]> {
     if (app_id === undefined) {
       return db
         .prepare('SELECT * FROM secrets ORDER BY name')
@@ -348,7 +354,11 @@ export const sqliteStorageAdapter: StorageAdapter = {
       .all(app_id) as SecretRecord[];
   },
 
-  upsertAdminSecret(name: string, value: string, app_id?: string | null): void {
+  async upsertAdminSecret(
+    name: string,
+    value: string,
+    app_id?: string | null,
+  ): Promise<void> {
     const scopedApp = app_id ?? null;
     // `secrets` has a uniqueness constraint on (name, COALESCE(app_id,
     // '__global__')), not a composite PK. We INSERT a new row on first
@@ -376,7 +386,10 @@ export const sqliteStorageAdapter: StorageAdapter = {
     ).run(id, name, value, scopedApp);
   },
 
-  deleteAdminSecret(name: string, app_id?: string | null): boolean {
+  async deleteAdminSecret(
+    name: string,
+    app_id?: string | null,
+  ): Promise<boolean> {
     if (app_id === null || app_id === undefined) {
       const res = db
         .prepare('DELETE FROM secrets WHERE name = ? AND app_id IS NULL')
