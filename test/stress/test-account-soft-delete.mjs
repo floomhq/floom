@@ -8,8 +8,10 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const tmp = mkdtempSync(join(tmpdir(), 'floom-account-soft-delete-'));
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 process.env.DATA_DIR = tmp;
 process.env.FLOOM_DISABLE_JOB_WORKER = 'true';
 process.env.FLOOM_DISABLE_TRIGGERS_WORKER = 'true';
@@ -145,6 +147,11 @@ function allocatePort() {
   });
 }
 
+function tail(text, max = 4000) {
+  if (text.length <= max) return text;
+  return text.slice(text.length - max);
+}
+
 async function waitForHttp(url, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -180,15 +187,22 @@ async function runLiveAuthSoftDeleteFlow() {
     FLOOM_DISABLE_JOB_WORKER: 'true',
     FLOOM_DISABLE_TRIGGERS_WORKER: 'true',
     FLOOM_DISABLE_ZOMBIE_SWEEPER: 'true',
+    FLOOM_DISABLE_RETENTION_SWEEPER: 'true',
     FLOOM_DISABLE_ACCOUNT_DELETE_SWEEPER: 'true',
+    FLOOM_DISABLE_AUDIT_SWEEPER: 'true',
+    FLOOM_DISABLE_GITHUB_BUILD_WORKER: 'true',
     FLOOM_FAST_APPS: 'false',
     FLOOM_SEED_LAUNCH_DEMOS: 'false',
     RESEND_API_KEY: '',
   };
-  const proc = spawn(process.execPath, [join(process.cwd(), 'apps/server/dist/index.js')], {
+  const proc = spawn(process.execPath, [join(repoRoot, 'apps/server/dist/index.js')], {
+    cwd: repoRoot,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const procExit = new Promise((resolve) =>
+    proc.once('exit', (code, signal) => resolve({ code, signal })),
+  );
   let output = '';
   proc.stdout.on('data', (chunk) => {
     output += chunk.toString();
@@ -219,7 +233,15 @@ async function runLiveAuthSoftDeleteFlow() {
   }
 
   try {
-    await waitForHttp(`http://127.0.0.1:${port}/api/health`);
+    await Promise.race([
+      waitForHttp(`http://127.0.0.1:${port}/api/health`, 45000),
+      procExit.then(({ code, signal }) => {
+        throw new Error(
+          `Live auth server exited before /api/health (code=${code}, signal=${signal}).\n` +
+            tail(output),
+        );
+      }),
+    ]);
     const email = 'live-soft-delete@example.com';
     const password = 'hunter2-hunter2';
     const signup = await jsonFetch('/auth/sign-up/email', {
@@ -251,8 +273,8 @@ async function runLiveAuthSoftDeleteFlow() {
       signin.text,
     );
   } finally {
-    proc.kill('SIGTERM');
-    await new Promise((resolve) => proc.once('exit', resolve));
+    if (proc.exitCode === null) proc.kill('SIGTERM');
+    await procExit;
     rmSync(liveTmp, { recursive: true, force: true });
   }
 }
