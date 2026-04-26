@@ -1,21 +1,49 @@
 // W4-minimal: combined /login + /signup page.
 //
-// Two modes switched by a tab at the top: "Sign in" and "Create account".
-// Supports email+password AND Google/GitHub OAuth. Social buttons render
-// only when the server reports the provider is configured (see
-// /api/session/me -> auth_providers.{google,github}). A provider is
-// "configured" iff both its OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET env
-// vars are set on the server (apps/server/src/lib/better-auth.ts reads
-// them lazily; workspaces.ts `me()` echoes the flags). This lets ops flip
-// OAuth on/off per environment without a rebuild.
+// v23 PR-F (decision doc /tmp/wireframe-react/auth-decision.md):
+//   - Single centred card via <AuthCard>; right-column "value pitch"
+//     and the legacy `Sign in / Sign up` top tabs are gone (B5/B6/C2).
+//   - Heading + subhead + footer link + primary CTA label switch on
+//     `mode` so /login and /signup feel like distinct pages even
+//     though they share this component (B1/B2/B11/C1/C3, B7/C11).
+//   - /signup gets a 2-button intent toggle (`run` vs `publish`). The
+//     `?mode=publish` URL param pre-selects publish (B3/B4). After
+//     auth, intent steers `nextPath`: `publish` → /studio/build,
+//     `run` → /me.
+//   - OAuth tiles get the v23 padding (13/16) + left alignment, plus a
+//     mono-uppercase "or" divider before the password form (A15/A16).
+//   - Login submit gets a `<kbd>⌘ ↵</kbd>` (or `Ctrl ↵`) hint inside
+//     the button, OS-detected (C7).
+//   - Saved-draft pill: ABOVE OAuth on mobile, BELOW submit on desktop
+//     (C9/C10). Slug + relative time read from localStorage if
+//     present; else falls back to a generic line.
+//   - Display-name field on signup is dropped (B9 default — matches
+//     wireframe; better-auth captures display name later).
 //
-// In OSS mode Better Auth is not mounted, so the /auth/* POSTs will 404.
-// We detect that via /api/session/me (cloud_mode: false) and render a
-// banner letting the user know they can use the local account.
+// Auth mechanics (unchanged):
+//   - Two modes switched by `mode` derived from the route (and the
+//     legacy `?mode=signup` alias).
+//   - Supports email+password AND Google/GitHub OAuth. Social buttons
+//     render only when the server reports the provider is configured
+//     (see /api/session/me -> auth_providers.{google,github}).
+//   - In OSS mode Better Auth is not mounted, so the /auth/* POSTs
+//     would 404. We detect that via /api/session/me (cloud_mode: false)
+//     and render a banner letting the user know they can use the
+//     local account.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import {
+  AuthCard,
+  AuthOrDivider,
+  authH1Style,
+  authSubStyle,
+  authLabelStyle,
+  authInputStyle,
+  authPrimaryButtonStyle,
+  authOAuthButtonStyle,
+} from '../components/auth/AuthCard';
 import { useSession, refreshSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import {
@@ -24,29 +52,78 @@ import {
   type AuthErrorAction,
 } from '../lib/authErrors';
 import { track, identifyFromSession } from '../lib/posthog';
-import { readDeployEnabled } from '../lib/flags';
 
 type Mode = 'signin' | 'signup';
+type Intent = 'run' | 'publish';
 
 const PENDING_KEY = 'floom:pending-publish';
+
+interface PendingDraft {
+  slug?: string;
+  startedAt?: number;
+}
+
+/** Read the saved-draft payload from localStorage, tolerating legacy
+ *  shapes. The payload was historically a plain string flag; v23 may
+ *  carry `{ slug, startedAt }`. We never fabricate fields — if the
+ *  payload is just a flag, slug + startedAt are undefined. */
+function readPendingDraft(): PendingDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw) as PendingDraft;
+      return {
+        slug: typeof parsed.slug === 'string' ? parsed.slug : undefined,
+        startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
+      };
+    }
+    return {};
+  } catch {
+    return null;
+  }
+}
+
+function relativeTime(ms: number | undefined): string | null {
+  if (!ms || !Number.isFinite(ms)) return null;
+  const diff = Date.now() - ms;
+  if (diff < 0) return null;
+  const minutes = Math.round(diff / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function isMacPlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const platform = (navigator.platform || '').toLowerCase();
+  if (platform.includes('mac')) return true;
+  // Fallback for browsers reporting `userAgent` only.
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
 
 export function LoginPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data, isAuthenticated } = useSession();
-  const deployEnabled = useMemo(() => readDeployEnabled(), []);
   const routeMode = getModeFromLocation(location.pathname, searchParams);
+  const initialIntent = getIntentFromLocation(searchParams);
   const [mode, setMode] = useState<Mode>(routeMode);
+  const [intent, setIntent] = useState<Intent>(initialIntent);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [state, setState] = useState<'idle' | 'submitting' | 'error'>('idle');
   const [errorCopy, setErrorCopy] = useState<AuthErrorCopy | null>(null);
   const [noticeCopy, setNoticeCopy] = useState<AuthErrorCopy | null>(null);
   const oauthErrorParam = searchParams.get('error');
 
-  const [hasSavedDraft, setHasSavedDraft] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<PendingDraft | null>(null);
+  const isMac = useMemo(() => isMacPlatform(), []);
 
   useEffect(() => {
     if (oauthErrorParam) {
@@ -62,12 +139,21 @@ export function LoginPage() {
       }
     }
   }, [oauthErrorParam]);
+
   const rawNext = searchParams.get('next');
   const safeNext =
     rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
       ? rawNext
       : null;
-  const nextPath = safeNext || (mode === 'signup' ? '/studio/build' : '/me');
+  // v23: post-auth route follows intent on /signup. Sign-in defaults
+  // to /me unless `next` overrides.
+  const nextPath =
+    safeNext ||
+    (mode === 'signup'
+      ? intent === 'publish'
+        ? '/studio/build'
+        : '/me'
+      : '/me');
 
   // If the user is already logged in (cloud mode) redirect away.
   useEffect(() => {
@@ -81,14 +167,17 @@ export function LoginPage() {
   }, [routeMode]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const savedDraft = window.localStorage.getItem(PENDING_KEY);
-      setHasSavedDraft(Boolean(savedDraft) && nextPath.startsWith('/studio/build'));
-    } catch {
-      setHasSavedDraft(false);
-    }
-  }, [nextPath]);
+    setIntent(initialIntent);
+  }, [initialIntent]);
+
+  useEffect(() => {
+    setPendingDraft(readPendingDraft());
+  }, []);
+
+  // Saved-draft pill renders only on /login when there's a pending
+  // publish draft. On signup we show the mode toggle instead.
+  const savedDraftRelTime = relativeTime(pendingDraft?.startedAt);
+  const showSavedDraft = mode === 'signin' && pendingDraft !== null;
 
   // OAuth social sign-in (Google/GitHub). Buttons render only when the
   // server reports the provider is configured. `signInWithSocial` POSTs
@@ -123,7 +212,8 @@ export function LoginPage() {
         navigate(nextPath, { replace: true });
         return;
       } else {
-        await api.signUpWithPassword(email, password, name || undefined, nextPath);
+        // v23 B9: dropped display-name field. better-auth captures it later.
+        await api.signUpWithPassword(email, password, undefined, nextPath);
         session = await refreshSession();
         if (session && !session.user.is_local) {
           identifyFromSession(session);
@@ -131,6 +221,9 @@ export function LoginPage() {
           navigate(nextPath, { replace: true });
           return;
         }
+        // Verification email flow: surface a notice and route to /login
+        // so the user knows where to land after clicking the email.
+        navigate('/login', { replace: true });
         setMode('signin');
         setPassword('');
         setState('idle');
@@ -151,23 +244,24 @@ export function LoginPage() {
   }
 
   // Wire error-recovery CTAs (e.g. "Sign in instead" after a duplicate
-  // signup attempt) to real UI behavior. Keeps the email the user already
-  // typed so they don't re-enter it on the other tab.
+  // signup attempt) to real UI behavior. We use route navigation so
+  // the URL stays the source of truth (/login vs /signup); React state
+  // syncs via the `routeMode` effect above.
   async function handleErrorAction(action: AuthErrorAction) {
     if (action.kind === 'switch-to-signin') {
-      setMode('signin');
       setErrorCopy(null);
       setNoticeCopy(null);
       setPassword('');
       setState('idle');
+      navigate('/login', { replace: true });
       return;
     }
     if (action.kind === 'switch-to-signup') {
-      setMode('signup');
       setErrorCopy(null);
       setNoticeCopy(null);
       setPassword('');
       setState('idle');
+      navigate('/signup', { replace: true });
       return;
     }
     if (action.kind === 'resend-verification') {
@@ -197,113 +291,68 @@ export function LoginPage() {
   );
   const showPasswordForm = !hasOAuthProvider;
 
+  const cardWidth = mode === 'signup' ? 480 : 440;
+
+  const heading =
+    mode === 'signup' ? 'Create your account.' : 'Welcome back.';
+  const subhead =
+    mode === 'signup'
+      ? '30 seconds. Free for launch.'
+      : 'Sign in to publish apps, view runs, manage secrets.';
+  const submitLabel =
+    mode === 'signup' ? 'Create account' : 'Sign in';
+  const footer =
+    mode === 'signup' ? (
+      <>
+        Already have an account?{' '}
+        <Link
+          to="/login"
+          data-testid="auth-footer-link"
+          style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
+        >
+          Sign in &rarr;
+        </Link>
+      </>
+    ) : (
+      <>
+        New here?{' '}
+        <Link
+          to="/signup"
+          data-testid="auth-footer-link"
+          style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
+        >
+          Create an account &rarr;
+        </Link>
+      </>
+    );
+
   return (
     <PageShell title={mode === 'signin' ? 'Sign in · Floom' : 'Sign up · Floom'}>
-      <div
-        className="login-grid"
-        style={{
-          display: 'grid',
-          gap: 48,
-          gridTemplateColumns: '440px 1fr',
-          maxWidth: 960,
-          margin: '40px auto',
-          alignItems: 'start',
-        }}
+      <AuthCard
+        maxWidth={cardWidth}
+        dataTestId={mode === 'signin' ? 'login-page' : 'signup-page'}
       >
-      <div
-        className="login-left"
-        style={{
-          width: '100%',
-          maxWidth: 440,
-        }}
-        data-testid={mode === 'signin' ? 'login-page' : 'signup-page'}
-      >
-        {/* 2026-04-20 (round 2): dropped the page-level hero logo. The
-            TopBar above this column already renders the floom mark, so
-            rendering another 56px glow mark here stacked two logos on
-            top of each other and looked redundant. The right-column
-            value-pitch block (below) keeps its small brand mark since
-            it's a separate visual unit. */}
-        {/* v17 parity 2026-04-24: display-font hero (Inter 800 tight-tracked
-            per wireframe.css --font-display decision — the wireframes.floom.dev
-            site still renders DM Serif Display but that font was dropped in
-            the 2026-04-24 audit). Copy follows wireframes/v17/login.html:
-            "Sign in to Floom" + "One account. Run apps, ship apps, all in
-            one place." — same message on signup tab, the wireframe notes
-            call out this is intentionally one combined page.
-            #545 regression fix 2026-04-23: bumped weight 700 → 800 and
-            letter-spacing -0.02em → -0.025em to match the display-font
-            spec. Previous values rendered as plain Inter 700 once the
-            display token was applied. */}
-        <h1
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 28,
-            fontWeight: 800,
-            letterSpacing: '-0.025em',
-            lineHeight: 1.15,
-            margin: '0 0 8px',
-            color: 'var(--ink)',
-            textAlign: 'center',
-          }}
-        >
-          Sign in to Floom
-        </h1>
-        <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
-          One account. Run apps, ship apps, all in one place.
-        </p>
+        <h1 style={authH1Style}>{heading}</h1>
+        <p style={authSubStyle}>{subhead}</p>
 
-        {hasSavedDraft && (
-          <div
-            data-testid="auth-resume-banner"
-            style={{
-              background: '#ecfdf5',
-              border: '1px solid #b7ebd3',
-              color: '#0f5132',
-              borderRadius: 10,
-              padding: '12px 14px',
-              fontSize: 13,
-              marginBottom: 16,
-              lineHeight: 1.5,
-            }}
-          >
-            Your app draft is saved. {mode === 'signin' ? 'Sign in' : 'Sign up'} to pick up where you left off.
-          </div>
+        {/* Mobile-first saved-draft pill: ABOVE OAuth on /login mobile.
+            We render once and use CSS to position it correctly on each
+            breakpoint (mobile order:above, desktop order:below). */}
+        {showSavedDraft && (
+          <SavedDraftPill
+            slug={pendingDraft?.slug}
+            relativeTime={savedDraftRelTime}
+            position="mobile"
+          />
         )}
 
-        {/* Tabs */}
-        <div
-          role="tablist"
-          style={{
-            display: 'flex',
-            background: 'var(--bg)',
-            border: '1px solid var(--line)',
-            borderRadius: 10,
-            padding: 4,
-            marginBottom: 24,
-          }}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'signin'}
-            onClick={() => setMode('signin')}
-            data-testid="tab-signin"
-            style={tabStyle(mode === 'signin')}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'signup'}
-            onClick={() => setMode('signup')}
-            data-testid="tab-signup"
-            style={tabStyle(mode === 'signup')}
-          >
-            Sign up
-          </button>
-        </div>
+        {/* /signup-only: dual-mode toggle (run vs publish). Reads
+            `?mode=publish` from URL on mount; updates `intent` state
+            and rewrites `nextPath` so post-auth lands on /studio/build
+            for publishers, /me for runners. */}
+        {mode === 'signup' && (
+          <SignupModeToggle intent={intent} onChange={setIntent} />
+        )}
 
         {noticeCopy && (
           <div
@@ -370,89 +419,45 @@ export function LoginPage() {
             is configured on this server — dead buttons are a trust-killer.
             Check: data.auth_providers.{google,github}. */}
         {hasOAuthProvider && (
-          <>
-            <div
-              data-testid="oauth-buttons"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                marginBottom: 16,
-              }}
-            >
-              {data?.auth_providers?.google && (
-                <button
-                  type="button"
-                  onClick={() => signInWithProvider('google')}
-                  data-testid="oauth-google"
-                  style={oauthButtonStyle}
-                >
-                  <GoogleIcon />
-                  <span>Continue with Google</span>
-                </button>
-              )}
-              {data?.auth_providers?.github && (
-                <button
-                  type="button"
-                  onClick={() => signInWithProvider('github')}
-                  data-testid="oauth-github"
-                  style={oauthButtonStyle}
-                >
-                  <GitHubIcon />
-                  <span>Continue with GitHub</span>
-                </button>
-              )}
-            </div>
-          </>
-        )}
-
-        {hasOAuthProvider && (
-          <>
-            <p
-              style={{
-                fontSize: 13,
-                color: 'var(--muted)',
-                lineHeight: 1.55,
-                margin: '0 0 12px',
-              }}
-            >
-              On signup, you can save your own GEMINI_API_KEY or OPENAI_API_KEY once, every app on Floom can use it. Your keys stay encrypted, never logged.
-            </p>
-            <p
-              style={{
-                fontSize: 12,
-                color: 'var(--muted)',
-                lineHeight: 1.5,
-                margin: 0,
-              }}
-            >
-              By continuing, you agree to our <Link to="/terms" style={{ color: 'var(--ink)' }}>Terms</Link> and <Link to="/privacy" style={{ color: 'var(--ink)' }}>Privacy Policy</Link>.
-            </p>
-            <p
-              style={{
-                fontSize: 12,
-                color: 'var(--muted)',
-                lineHeight: 1.5,
-                margin: '4px 0 16px',
-              }}
-            >
-              No password. No tracking pixels.
-            </p>
-          </>
-        )}
-
-        {!hasOAuthProvider && (
-          <p
+          <div
+            data-testid="oauth-buttons"
             style={{
-              fontSize: 12,
-              color: 'var(--muted)',
-              lineHeight: 1.5,
-              margin: '0 0 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              marginBottom: 18,
             }}
           >
-            By continuing, you agree to our <Link to="/terms" style={{ color: 'var(--ink)' }}>Terms</Link> and <Link to="/privacy" style={{ color: 'var(--ink)' }}>Privacy Policy</Link>.
-          </p>
+            {data?.auth_providers?.google && (
+              <button
+                type="button"
+                onClick={() => signInWithProvider('google')}
+                data-testid="oauth-google"
+                style={authOAuthButtonStyle}
+              >
+                <GoogleIcon />
+                <span>Continue with Google</span>
+              </button>
+            )}
+            {data?.auth_providers?.github && (
+              <button
+                type="button"
+                onClick={() => signInWithProvider('github')}
+                data-testid="oauth-github"
+                style={authOAuthButtonStyle}
+              >
+                <GitHubIcon />
+                <span>Continue with GitHub</span>
+              </button>
+            )}
+          </div>
         )}
+
+        {/* OR divider — render only when both OAuth tiles AND the
+            password form are visible (decision doc Risk #7). In OSS
+            mode OAuth is hidden, so a lone "or" between nothing and
+            the form would be visual noise. */}
+        {hasOAuthProvider && showPasswordForm && <AuthOrDivider />}
 
         {state === 'error' && errorCopy && (
           <div
@@ -495,22 +500,7 @@ export function LoginPage() {
 
         {showPasswordForm && (
           <form onSubmit={handlePasswordSubmit}>
-            {mode === 'signup' && (
-              <>
-                <label htmlFor="login-name" style={labelStyle}>Display name</label>
-                <input
-                  id="login-name"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Ada Lovelace"
-                  data-testid="input-name"
-                  style={inputStyle}
-                  autoComplete="name"
-                />
-              </>
-            )}
-            <label htmlFor="login-email" style={labelStyle}>Email</label>
+            <label htmlFor="login-email" style={authLabelStyle}>Email</label>
             <input
               id="login-email"
               type="email"
@@ -519,10 +509,10 @@ export function LoginPage() {
               required
               placeholder="you@example.com"
               data-testid="input-email"
-              style={inputStyle}
+              style={authInputStyle}
               autoComplete="email"
             />
-            <label htmlFor="login-password" style={labelStyle}>Password</label>
+            <label htmlFor="login-password" style={authLabelStyle}>Password</label>
             <input
               id="login-password"
               type="password"
@@ -532,7 +522,7 @@ export function LoginPage() {
               minLength={8}
               placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
               data-testid="input-password"
-              style={inputStyle}
+              style={authInputStyle}
               autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
             />
 
@@ -557,18 +547,72 @@ export function LoginPage() {
               disabled={state === 'submitting'}
               data-testid="submit-password"
               style={{
-                ...primaryButtonStyle,
+                ...authPrimaryButtonStyle,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
                 opacity: state === 'submitting' ? 0.7 : 1,
                 cursor: state === 'submitting' ? 'not-allowed' : 'pointer',
               }}
             >
-              {state === 'submitting'
-                ? 'Working...'
-                : mode === 'signin'
-                ? 'Sign in'
-                : 'Sign up'}
+              <span>
+                {state === 'submitting' ? 'Working...' : submitLabel}
+              </span>
+              {/* Login-only: ⌘ ↵ keyboard hint. macOS shows ⌘, others
+                  show Ctrl. Hidden during submitting to avoid layout
+                  shift on the spinner copy. */}
+              {mode === 'signin' && state !== 'submitting' && (
+                <KbdHint mac={isMac} />
+              )}
             </button>
           </form>
+        )}
+
+        {/* Saved-draft pill — DESKTOP position (below submit). The
+            mobile copy is already rendered above, so we only paint
+            this on viewports where mobile pill is hidden via CSS. */}
+        {showSavedDraft && (
+          <SavedDraftPill
+            slug={pendingDraft?.slug}
+            relativeTime={savedDraftRelTime}
+            position="desktop"
+          />
+        )}
+
+        {/* Signup-only: legal terms line. The wireframe prescribes a
+            single sentence; we drop the older GEMINI_API_KEY paragraph
+            and the "No password" reassurance line per B8 (those were
+            sales copy, not auth-flow info). */}
+        {mode === 'signup' && (
+          <p
+            style={{
+              fontSize: 11.5,
+              color: 'var(--muted)',
+              lineHeight: 1.5,
+              margin: '14px 0 0',
+              textAlign: 'center',
+            }}
+          >
+            By signing up you agree to our{' '}
+            <Link to="/terms" style={{ color: 'var(--ink)' }}>Terms</Link> and{' '}
+            <Link to="/privacy" style={{ color: 'var(--ink)' }}>Privacy</Link>.
+          </p>
+        )}
+        {mode === 'signin' && !hasOAuthProvider && (
+          <p
+            style={{
+              fontSize: 11.5,
+              color: 'var(--muted)',
+              lineHeight: 1.5,
+              margin: '14px 0 0',
+              textAlign: 'center',
+            }}
+          >
+            By continuing, you agree to our{' '}
+            <Link to="/terms" style={{ color: 'var(--ink)' }}>Terms</Link> and{' '}
+            <Link to="/privacy" style={{ color: 'var(--ink)' }}>Privacy</Link>.
+          </p>
         )}
 
         <p
@@ -578,176 +622,168 @@ export function LoginPage() {
             fontSize: 13,
             color: 'var(--muted)',
           }}
+          data-testid="auth-footer"
         >
-          {mode === 'signin' ? "Don't have an account? " : 'Already have one? '}
-          <button
-            type="button"
-            onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--accent)',
-              fontWeight: 600,
-              cursor: 'pointer',
-              padding: 0,
-              font: 'inherit',
-            }}
-          >
-            {mode === 'signin' ? 'Sign up' : 'Sign in'}
-          </button>
+          {footer}
         </p>
-        <p
-          style={{
-            textAlign: 'center',
-            margin: '10px 0 0',
-            fontSize: 12,
-            color: 'var(--muted)',
-          }}
-        >
-          New to Floom? You are in the right place, the same page signs you up. ·{' '}
-          <Link to="/" style={{ color: 'var(--ink)' }}>Back to home</Link>
-        </p>
-      </div>
-
-      {/* Right column: value pitch. Hidden on mobile via CSS (<1024px).
-          Kept intentionally quiet: one headline + one supporting line.
-          The three-bullet + closing-line version read as filler on an
-          auth page, so we dropped it (2026-04-20).
-          2026-04-21: dropped the standalone brand mark from this panel.
-          The TopBar already renders the floom logo in the chrome, so
-          showing another one here read as double-branding. Stripe /
-          Linear / Notion put one mark in the chrome and zero in the
-          side panel. */}
-      <aside
-        className="login-right"
-        data-testid="login-value-pitch"
-        style={{
-          padding: '8px 0 0',
-        }}
-      >
-        <h2
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            lineHeight: 1.3,
-            margin: '0 0 12px',
-            color: 'var(--ink)',
-          }}
-        >
-          {deployEnabled ? 'Ship AI apps fast.' : 'Run AI apps from one account.'}
-        </h2>
-        <p
-          style={{
-            fontSize: 14,
-            color: 'var(--muted)',
-            lineHeight: 1.6,
-            margin: 0,
-          }}
-        >
-          {deployEnabled ? (
-            <>Paste a GitHub link. Get a runnable app in 30 seconds.</>
-          ) : (
-            <>
-              Try catalog apps, MCP, and your dashboard on floom.dev. Publishing to
-              our cloud is waitlist-only; self-host stays unrestricted.
-            </>
-          )}
-        </p>
-      </aside>
-      </div>
+      </AuthCard>
     </PageShell>
   );
 }
 
 function getModeFromLocation(pathname: string, searchParams: URLSearchParams): Mode {
-  if (searchParams.get('mode') === 'signup') return 'signup';
   if (pathname === '/signup') return 'signup';
+  // Legacy alias: ?mode=signup on /login still flips into signup mode.
+  if (searchParams.get('mode') === 'signup') return 'signup';
   return 'signin';
 }
 
-const tabStyle = (active: boolean): React.CSSProperties => ({
+function getIntentFromLocation(searchParams: URLSearchParams): Intent {
+  return searchParams.get('mode') === 'publish' ? 'publish' : 'run';
+}
+
+interface SignupModeToggleProps {
+  intent: Intent;
+  onChange: (intent: Intent) => void;
+}
+
+function SignupModeToggle({ intent, onChange }: SignupModeToggleProps) {
+  return (
+    <div
+      role="tablist"
+      aria-label="What do you want to do?"
+      data-testid="signup-mode-toggle"
+      style={{
+        display: 'flex',
+        gap: 0,
+        padding: 4,
+        background: 'var(--bg)',
+        border: '1px solid var(--line)',
+        borderRadius: 10,
+        marginBottom: 24,
+      }}
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={intent === 'run'}
+        onClick={() => onChange('run')}
+        data-testid="signup-mode-run"
+        style={modeToggleButtonStyle(intent === 'run')}
+      >
+        I want to run apps
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={intent === 'publish'}
+        onClick={() => onChange('publish')}
+        data-testid="signup-mode-publish"
+        style={modeToggleButtonStyle(intent === 'publish')}
+      >
+        I want to publish apps
+      </button>
+    </div>
+  );
+}
+
+const modeToggleButtonStyle = (active: boolean): React.CSSProperties => ({
   flex: 1,
   padding: '8px 12px',
+  border: 0,
   background: active ? 'var(--card)' : 'transparent',
-  border: 'none',
-  borderRadius: 6,
+  fontFamily: 'inherit',
   fontSize: 13,
   fontWeight: active ? 600 : 500,
   color: active ? 'var(--ink)' : 'var(--muted)',
+  borderRadius: 7,
   cursor: 'pointer',
-  fontFamily: 'inherit',
-  boxShadow: active ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
+  boxShadow: active ? '0 1px 2px rgba(14,14,12,0.06)' : 'none',
+  transition: 'all 0.15s ease',
 });
 
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 12,
-  fontWeight: 600,
-  color: 'var(--muted)',
-  marginBottom: 6,
-  marginTop: 12,
-};
+interface SavedDraftPillProps {
+  slug?: string;
+  relativeTime: string | null;
+  /** Two render targets so the same pill can sit ABOVE OAuth on
+   *  mobile and BELOW submit on desktop. We swap visibility via inline
+   *  media-query style (data-position attr + CSS in index.css would
+   *  also work, but inline keeps this self-contained). */
+  position: 'mobile' | 'desktop';
+}
 
-// #563 2026-04-23: font-size is 16px, not 14px. iOS Safari auto-zooms
-// into any input whose computed font-size is < 16px on focus, which
-// jolts the viewport on mobile sign-in. 16px is the documented fix
-// (WebKit zoom trigger is < 16px) and matches what Stripe / Linear /
-// Vercel ship on their auth surfaces. Applied at all breakpoints —
-// there's no visual downside on desktop.
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 12px',
-  border: '1px solid var(--line)',
-  borderRadius: 8,
-  background: 'var(--card)',
-  fontSize: 16,
-  color: 'var(--ink)',
-  fontFamily: 'inherit',
-  marginBottom: 8,
-  boxSizing: 'border-box',
-};
+function SavedDraftPill({ slug, relativeTime, position }: SavedDraftPillProps) {
+  // Build copy from whatever the localStorage payload carries. Never
+  // fabricate slug or time — fall back to a generic line if missing.
+  const detailParts: string[] = [];
+  if (slug) detailParts.push(`"${slug}"`);
+  if (relativeTime) detailParts.push(`you started ${relativeTime}`);
+  const detail = detailParts.length
+    ? `Sign in to publish ${detailParts.join(' ')}.`
+    : 'Sign in to pick up where you left off.';
 
-// Goosebumps pass 2026-04-20: auth primary CTAs (Sign in / Create account)
-// are brand green, matching the nav "Publish an app" + hero "Publish your
-// app" submit button. One primary action per view, same color system.
-const primaryButtonStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '12px 16px',
-  background: 'var(--accent)',
-  color: '#fff',
-  border: '1px solid var(--accent)',
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 600,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  marginTop: 12,
-  boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
-};
+  return (
+    <div
+      data-testid="auth-saved-draft"
+      data-position={position}
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 10,
+        padding: '14px 16px',
+        background: 'var(--accent-soft)',
+        border: '1px solid var(--accent-border)',
+        borderRadius: 12,
+        fontSize: 12.5,
+        color: 'var(--ink)',
+        lineHeight: 1.55,
+        marginTop: position === 'desktop' ? 18 : 0,
+        marginBottom: position === 'mobile' ? 18 : 0,
+      }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width={18}
+        height={18}
+        stroke="currentColor"
+        fill="none"
+        strokeWidth={1.75}
+        style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }}
+        aria-hidden="true"
+      >
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+      <span>
+        <strong style={{ fontWeight: 600 }}>Your draft is saved.</strong> {detail}
+      </span>
+    </div>
+  );
+}
 
-// Full-width, outlined, white-bg button matching the login-page surface.
-// Neutral styling so GitHub and Google sit side-by-side without one looking
-// more prominent than the other. Brand-specific color would push a
-// provider preference, which we don't want to signal.
-const oauthButtonStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 10,
-  width: '100%',
-  padding: '11px 16px',
-  background: 'var(--card)',
-  color: 'var(--ink)',
-  border: '1px solid var(--line)',
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 600,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-};
+function KbdHint({ mac }: { mac: boolean }) {
+  return (
+    <span
+      data-testid="kbd-hint"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        padding: '2px 6px',
+        background: 'rgba(255,255,255,0.16)',
+        border: '1px solid rgba(255,255,255,0.22)',
+        borderRadius: 5,
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: 600,
+        fontFamily: 'var(--font-mono, "JetBrains Mono", monospace)',
+        lineHeight: 1,
+      }}
+      aria-hidden="true"
+    >
+      {mac ? '⌘ ↵' : 'Ctrl ↵'}
+    </span>
+  );
+}
 
 // Real brand logos (SimpleIcons-licensed SVG paths). No text-in-circles
 // monograms — those read as AI-slop on an auth page.

@@ -1405,14 +1405,26 @@ body:has(.topbar-mobile-menu) {
   border-radius: 0;
 }
 
-/* /login value-pitch: 2-column on desktop, stack on mobile. */
-@media (max-width: 1023px) {
-  .login-grid {
-    grid-template-columns: 1fr !important;
-    max-width: 440px !important;
-  }
-  .login-right {
+/* v23 PR-F: shared auth-card chrome for /login, /signup,
+   /forgot-password, /reset-password. The 2-column .login-grid /
+   .login-right block is gone in v23 (a single centred card replaces it). */
+
+/* Saved-draft pill renders twice — once with [data-position="mobile"]
+   (hidden ≥720px) and once with [data-position="desktop"] (hidden
+   <720px). 720px is below the iPad portrait threshold (768px) so a
+   tablet still gets the desktop layout. */
+[data-testid="auth-saved-draft"][data-position="desktop"] {
+  display: flex;
+}
+[data-testid="auth-saved-draft"][data-position="mobile"] {
+  display: none;
+}
+@media (max-width: 720px) {
+  [data-testid="auth-saved-draft"][data-position="desktop"] {
     display: none;
+  }
+  [data-testid="auth-saved-draft"][data-position="mobile"] {
+    display: flex;
   }
 }
 

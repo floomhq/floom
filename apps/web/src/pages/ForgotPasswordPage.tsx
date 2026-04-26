@@ -9,103 +9,205 @@
 //   3. We always show the same "check your email" state regardless of
 //      whether the email actually exists on record — Better Auth returns
 //      200 either way for anti-enumeration, and we match that guarantee
-//      in the UI so an attacker can't tell a real address from a typo.
+//      in the UI.
+//
+// v23 PR-F (decision doc /tmp/wireframe-react/auth-decision.md):
+//   - Wraps the form in <AuthCard> (shared chrome with /login, /signup,
+//     /reset-password) — D-section + A-section.
+//   - Heading: `Reset your password.` (request) / `Check your inbox.`
+//     (sent), per D1/D3.
+//   - Sent-state subhead: echoes the entered email but does NOT claim
+//     the email exists in our DB (Flag #2 default) — anti-enumeration
+//     preserved while matching wireframe parity.
+//   - Sent confirmation pill: green-soft bg + check icon + "Sent." +
+//     30s resend countdown link (D5).
+//   - Footer link: `Sign in →` with arrow per D7.
+//   - Primary CTA stays emerald (D6: brief overrides wireframe's
+//     btn-ink).
 //
 // The `redirectTo` param is the frontend URL Better Auth sends users to
 // after validating the token on the GET callback; it appends the token
 // as `?token=<token>` when it redirects.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
+import {
+  AuthCard,
+  authH1Style,
+  authSubStyle,
+  authLabelStyle,
+  authInputStyle,
+  authPrimaryButtonStyle,
+} from '../components/auth/AuthCard';
 import * as api from '../api/client';
+
+const RESEND_COOLDOWN_SECONDS = 30;
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
+  const [submittedEmail, setSubmittedEmail] = useState('');
   const [state, setState] = useState<'idle' | 'submitting' | 'sent' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+  const [resendError, setResendError] = useState('');
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email.trim()) return;
-    setState('submitting');
+  // Tick the resend cooldown once a second. Stops at 0 so the user can
+  // tap "resend" again. Clears on unmount or when the user lands back
+  // in the request state (state !== 'sent' resets the counter).
+  useEffect(() => {
+    if (state !== 'sent' || resendIn <= 0) return;
+    const id = window.setInterval(() => {
+      setResendIn((n) => Math.max(0, n - 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [state, resendIn]);
+
+  async function sendReset(target: string): Promise<boolean> {
     setErrorMsg('');
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       await api.requestPasswordReset({
-        email: email.trim(),
+        email: target,
         redirectTo: `${origin}/reset-password`,
       });
-      setState('sent');
+      return true;
     } catch (err) {
       // Better Auth returns 200 for enumeration safety even when the
       // email doesn't exist, so a non-200 here is a real infrastructure
       // error. Show the server message if we have one, else a generic.
-      setState('error');
       const e = err as { message?: string };
       setErrorMsg(e.message || 'Something went wrong. Try again in a moment.');
+      return false;
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const target = email.trim();
+    if (!target) return;
+    setState('submitting');
+    const ok = await sendReset(target);
+    if (ok) {
+      setSubmittedEmail(target);
+      setResendIn(RESEND_COOLDOWN_SECONDS);
+      setState('sent');
+    } else {
+      setState('error');
+    }
+  }
+
+  async function handleResend() {
+    if (resendIn > 0 || !submittedEmail) return;
+    setResendError('');
+    const ok = await sendReset(submittedEmail);
+    if (ok) {
+      setResendIn(RESEND_COOLDOWN_SECONDS);
+    } else {
+      // Surface the error inline without leaving the sent state — the
+      // user already saw their email confirmed, so we don't want to
+      // visually regress to the request form on a transient infra error.
+      setResendError(errorMsg || 'Could not resend. Try again in a moment.');
+    }
+  }
+
+  const isSent = state === 'sent';
+
   return (
     <PageShell title="Reset your password · Floom" noIndex>
-      <div
-        style={{
-          maxWidth: 440,
-          margin: '40px auto',
-          padding: '0 16px',
-        }}
-        data-testid="forgot-password-page"
-      >
-        <h1
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 28,
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            lineHeight: 1.15,
-            margin: '0 0 8px',
-            color: 'var(--ink)',
-            textAlign: 'center',
-          }}
-        >
-          Reset your password
+      <AuthCard dataTestId="forgot-password-page">
+        <h1 style={authH1Style}>
+          {isSent ? 'Check your inbox.' : 'Reset your password.'}
         </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: 'var(--muted)',
-            margin: '0 0 24px',
-            textAlign: 'center',
-            lineHeight: 1.55,
-          }}
-        >
-          {state === 'sent'
-            ? "We sent you a link if the email matches a Floom account."
-            : 'Enter your email and we\u2019ll send you a link to pick a new password.'}
+        <p style={authSubStyle}>
+          {isSent ? (
+            <>
+              We sent a reset link to{' '}
+              <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>
+                {submittedEmail}
+              </strong>
+              . Click it within 15 minutes to set a new password.
+            </>
+          ) : (
+            "Enter the email on your account. We'll send a reset link valid for 15 minutes."
+          )}
         </p>
 
-        {state === 'sent' ? (
-          <div
-            data-testid="forgot-password-sent"
-            style={{
-              background: '#ecfdf5',
-              border: '1px solid #b7ebd3',
-              color: '#0f5132',
-              borderRadius: 10,
-              padding: '16px 16px',
-              fontSize: 14,
-              lineHeight: 1.55,
-              marginBottom: 16,
-            }}
-          >
-            <strong style={{ display: 'block', marginBottom: 4 }}>Check your email.</strong>
-            The reset link expires in 1 hour. Didn&rsquo;t get anything? Check spam, or try
-            again with a different address.
-          </div>
+        {isSent ? (
+          <>
+            <div
+              data-testid="forgot-password-sent-pill"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '14px 16px',
+                background: 'var(--accent-soft)',
+                border: '1px solid var(--accent-border)',
+                borderRadius: 12,
+                fontSize: 12.5,
+                color: 'var(--ink)',
+                lineHeight: 1.55,
+                marginTop: 4,
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width={18}
+                height={18}
+                stroke="currentColor"
+                fill="none"
+                strokeWidth={1.75}
+                style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 2 }}
+                aria-hidden="true"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <div>
+                <strong style={{ fontWeight: 600 }}>Sent.</strong> Didn&rsquo;t arrive? Check spam, or{' '}
+                <button
+                  type="button"
+                  onClick={() => void handleResend()}
+                  disabled={resendIn > 0}
+                  data-testid="forgot-password-resend"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    color: resendIn > 0 ? 'var(--muted)' : 'var(--accent)',
+                    fontWeight: 600,
+                    fontSize: 'inherit',
+                    fontFamily: 'inherit',
+                    textDecoration: 'underline',
+                    cursor: resendIn > 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {resendIn > 0 ? `resend in ${resendIn}s` : 'resend now'}
+                </button>
+                .
+              </div>
+            </div>
+            {resendError && (
+              <div
+                data-testid="forgot-password-resend-error"
+                style={{
+                  margin: '12px 0 0',
+                  padding: '10px 12px',
+                  background: '#fff8e6',
+                  border: '1px solid #f4e0a5',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  color: '#8a5a00',
+                  lineHeight: 1.5,
+                }}
+              >
+                {resendError}
+              </div>
+            )}
+          </>
         ) : (
           <form onSubmit={handleSubmit} data-testid="forgot-password-form">
-            <label htmlFor="forgot-email" style={labelStyle}>
+            <label htmlFor="forgot-email" style={authLabelStyle}>
               Email
             </label>
             <input
@@ -118,7 +220,7 @@ export function ForgotPasswordPage() {
               autoComplete="email"
               placeholder="you@example.com"
               data-testid="forgot-password-email"
-              style={inputStyle}
+              style={authInputStyle}
             />
             {state === 'error' && (
               <div
@@ -142,7 +244,7 @@ export function ForgotPasswordPage() {
               disabled={state === 'submitting'}
               data-testid="forgot-password-submit"
               style={{
-                ...primaryButtonStyle,
+                ...authPrimaryButtonStyle,
                 opacity: state === 'submitting' ? 0.7 : 1,
                 cursor: state === 'submitting' ? 'not-allowed' : 'pointer',
               }}
@@ -163,49 +265,13 @@ export function ForgotPasswordPage() {
           Remembered it?{' '}
           <Link
             to="/login"
+            data-testid="forgot-password-signin-link"
             style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}
           >
-            Back to sign in
+            Sign in &rarr;
           </Link>
         </p>
-      </div>
+      </AuthCard>
     </PageShell>
   );
 }
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 12,
-  fontWeight: 600,
-  color: 'var(--muted)',
-  marginBottom: 6,
-  marginTop: 12,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 12px',
-  border: '1px solid var(--line)',
-  borderRadius: 8,
-  background: 'var(--card)',
-  fontSize: 14,
-  color: 'var(--ink)',
-  fontFamily: 'inherit',
-  marginBottom: 8,
-  boxSizing: 'border-box',
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '12px 16px',
-  background: 'var(--accent)',
-  color: '#fff',
-  border: '1px solid var(--accent)',
-  borderRadius: 8,
-  fontSize: 14,
-  fontWeight: 600,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  marginTop: 12,
-  boxShadow: '0 4px 14px rgba(5,150,105,0.28), inset 0 1px 0 rgba(255,255,255,0.18)',
-};
