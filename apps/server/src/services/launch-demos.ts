@@ -86,8 +86,9 @@ interface LaunchDemo {
 // previous 3 (lead-scorer, competitor-analyzer, resume-screener) can run
 // 30s-5min on real inputs, which times out in the demo UX. Replacement
 // roster below is bounded to <5s per run. Old 3 stay under examples/
-// and return to the showcase when the job queue (Phase 2 protocol)
-// ships — see project memory.
+// and remain directly runnable by slug for docs, agents, and launch
+// verification; the hosted public storefront is curated separately by the
+// web allowlist.
 export const DEMOS: LaunchDemo[] = [
   {
     slug: 'competitor-lens',
@@ -593,27 +594,30 @@ export async function seedLaunchDemos(
   let keptPrevious = 0;
   let markedInactive = 0;
 
-  // 2026-04-25 roster swap (Federico P0): the previous showcase slugs can
-  // exceed the demo budget on real inputs. Mark any leftover rows inactive
-  // so they stop appearing in the hub listing even if their docker images
-  // linger. The examples/ directory keeps the source for the v1.1 re-launch
-  // when the job queue ships.
-  const PREVIOUS_SHOWCASE_SLUGS = [
+  // 2026-04-25 roster swap (Federico P0): the public storefront moved to
+  // bounded <5s demos, but the previous launch slugs are still documented
+  // and used by agent/readiness flows. Keep existing rows runnable when
+  // they already point at a Docker image. The web SHOWCASE_SLUGS allowlist
+  // controls public listing, so this does not re-add them to the hosted grid.
+  const LEGACY_DIRECT_RUN_SLUGS = [
     'lead-scorer',
     'competitor-analyzer',
     'resume-screener',
   ];
-  const markPreviousInactive = db.prepare(
+  const markLegacyRunnable = db.prepare(
     `UPDATE apps
-       SET status = 'inactive',
+       SET status = 'active',
            updated_at = datetime('now')
-     WHERE slug = ? AND status != 'inactive'`,
+     WHERE slug = ?
+       AND docker_image IS NOT NULL
+       AND docker_image != ''
+       AND status != 'active'`,
   );
-  for (const oldSlug of PREVIOUS_SHOWCASE_SLUGS) {
-    const info = markPreviousInactive.run(oldSlug) as { changes: number };
+  for (const legacySlug of LEGACY_DIRECT_RUN_SLUGS) {
+    const info = markLegacyRunnable.run(legacySlug) as { changes: number };
     if (info.changes > 0) {
       logger.log(
-        `[launch-demos] ${oldSlug}: marked inactive (2026-04-25 roster swap)`,
+        `[launch-demos] ${legacySlug}: restored direct-run active status`,
       );
     }
   }

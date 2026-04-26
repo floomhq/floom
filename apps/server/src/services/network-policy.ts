@@ -1,5 +1,6 @@
 import type Docker from 'dockerode';
 import { lookup } from 'node:dns/promises';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -225,6 +226,7 @@ async function startAllowlistProxy(
   runId: string,
   listenHost: string,
   allowedDomains: string[],
+  advertisedHost = listenHost,
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const sockets = new Set<net.Socket>();
   const server = http.createServer(async (req, res) => {
@@ -330,7 +332,7 @@ async function startAllowlistProxy(
   server.unref();
 
   return {
-    url: `http://${listenHost}:${address.port}`,
+    url: `http://${advertisedHost}:${address.port}`,
     close: () =>
       new Promise((resolve, reject) => {
         for (const socket of sockets) socket.destroy();
@@ -345,6 +347,66 @@ async function startAllowlistProxy(
         });
       }),
   };
+}
+
+function isAddressUnavailable(err: unknown): boolean {
+  return (
+    (err as { code?: unknown })?.code === 'EADDRNOTAVAIL' ||
+    /EADDRNOTAVAIL|address not available/i.test((err as Error)?.message || '')
+  );
+}
+
+async function resolveSelfContainerId(docker: Docker): Promise<string | null> {
+  const candidates = [
+    process.env.FLOOM_DOCKER_PROXY_CONTAINER_ID,
+    process.env.HOSTNAME,
+    (() => {
+      try {
+        return readFileSync('/etc/hostname', 'utf8').trim();
+      } catch {
+        return null;
+      }
+    })(),
+  ]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .map((v) => v.trim());
+
+  for (const candidate of Array.from(new Set(candidates))) {
+    try {
+      const info = await docker.getContainer(candidate).inspect();
+      return info.Id || candidate;
+    } catch {
+      // Not a container id on this Docker daemon.
+    }
+  }
+  return null;
+}
+
+async function connectSelfContainerToNetwork(
+  docker: Docker,
+  network: Docker.Network,
+  networkName: string,
+): Promise<{ containerId: string; ipAddress: string } | null> {
+  const containerId = await resolveSelfContainerId(docker);
+  if (!containerId) return null;
+
+  try {
+    await network.connect({ Container: containerId });
+  } catch (err) {
+    const message = (err as Error).message || '';
+    if (!/already exists|is already attached|endpoint .* exists/i.test(message)) {
+      throw err;
+    }
+  }
+
+  const info = await docker.getContainer(containerId).inspect();
+  const networks = info.NetworkSettings?.Networks || {};
+  const attached = networks[networkName];
+  const ipAddress = attached?.IPAddress;
+  if (!ipAddress) {
+    throw new Error(`Floom container joined ${networkName} without an IPv4 address`);
+  }
+  return { containerId, ipAddress };
 }
 
 export async function prepareDockerNetworkPolicy(
@@ -364,6 +426,7 @@ export async function prepareDockerNetworkPolicy(
   const networkName = `floom-run-net-${runId.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 48)}`;
   let network: Docker.Network | null = null;
   let proxy: { url: string; close: () => Promise<void> } | null = null;
+  let proxyContainerId: string | null = null;
   try {
     network = await docker.createNetwork({
       Name: networkName,
@@ -376,7 +439,20 @@ export async function prepareDockerNetworkPolicy(
     if (!gateway) {
       throw new Error(`Docker network ${networkName} did not expose a gateway`);
     }
-    proxy = await startAllowlistProxy(runId, gateway, allowedDomains);
+    try {
+      proxy = await startAllowlistProxy(runId, gateway, allowedDomains);
+    } catch (err) {
+      if (!isAddressUnavailable(err)) throw err;
+      const attached = await connectSelfContainerToNetwork(docker, network, networkName);
+      if (!attached) throw err;
+      proxyContainerId = attached.containerId;
+      proxy = await startAllowlistProxy(
+        runId,
+        '0.0.0.0',
+        allowedDomains,
+        attached.ipAddress,
+      );
+    }
     const proxyUrl = proxy.url;
     return {
       networkMode: networkName,
@@ -400,6 +476,13 @@ export async function prepareDockerNetworkPolicy(
           }
         }
         if (network) {
+          if (proxyContainerId) {
+            try {
+              await network.disconnect({ Container: proxyContainerId, Force: true });
+            } catch (err) {
+              errors.push((err as Error).message);
+            }
+          }
           try {
             await network.remove();
           } catch (err) {
