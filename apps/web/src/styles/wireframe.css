@@ -21,6 +21,18 @@
   --terminal-ink: #f1efe9;
   --success: #1a7f37;
   --warning: #c2791c;
+  /* v23 token additions for /me apps-led IA + banner pattern.
+     Scoped to be safe: existing components don't use these tokens, so
+     adding them here is additive. Sourced from wireframes.floom.dev
+     v23 _v23.css (Federico-locked 2026-04-26). */
+  --studio: #f5f4f0;
+  --line-hover: #c4c1b8;
+  --line-soft: #f1efe9;
+  --danger: #c44a2b;
+  --danger-soft: #fdf1ec;
+  --danger-border: #f0d5c9;
+  --shadow-2: 0 1px 2px rgba(22, 21, 18, 0.04), 0 1px 3px rgba(22, 21, 18, 0.03);
+  --shadow-3: 0 1px 3px rgba(22, 21, 18, 0.04), 0 4px 20px rgba(22, 21, 18, 0.05);
   /* Radius tokens */
   --radius-pill: 8px;
   --radius-chip: 6px;
@@ -1728,6 +1740,447 @@ input { font-family: inherit; }
   .showcase-header {
     flex-direction: column;
     align-items: stretch !important;
+  }
+}
+
+/* =========================================================
+   /me v23 — apps-led IA, banner pattern, compact run rows.
+   Scoped under `.me-page` so the new selectors (.run-row, .ic, etc.)
+   don't collide with other parts of the app. Tokens used: --card,
+   --line, --line-hover, --line-soft, --bg, --ink, --muted, --accent,
+   --accent-soft, --accent-border, --accent-hover, --danger,
+   --danger-soft, --danger-border, --shadow-2, --shadow-3.
+   Federico-locked 2026-04-26: NO category tints on banners (single
+   neutral palette). Run-row icons DO carry cat-* tints per app slug.
+   ========================================================= */
+
+/* Primary nav strip — Section 1 of /me (Apps · Runs · BYOK keys ·
+   Agent tokens · Settings + Browse the store CTA). */
+.me-page .me-primary-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 28px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-2);
+  align-items: center;
+}
+.me-page .me-primary-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.me-page .me-primary-nav a:hover {
+  background: var(--bg);
+  border-color: var(--line);
+}
+.me-page .me-primary-nav a .ct {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-left: 2px;
+}
+.me-page .me-primary-nav .browse-store {
+  margin-left: auto;
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+.me-page .me-primary-nav .browse-store:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Your apps section — Section 2. */
+.me-page .your-apps-section { margin-bottom: 32px; }
+.me-page .your-apps-section h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.015em;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.me-page .your-apps-section .lede {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 18px;
+}
+.me-page .your-apps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.me-page .your-apps-grid .ya-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  text-decoration: none;
+  color: inherit;
+}
+.me-page .your-apps-grid .ya-card:hover {
+  border-color: var(--line-hover);
+  box-shadow: var(--shadow-3);
+}
+.me-page .your-apps-grid .ya-card .ya-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.me-page .your-apps-grid .ya-card .ya-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ink);
+}
+.me-page .your-apps-grid .ya-card .ya-name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+}
+.me-page .your-apps-grid .ya-card .ya-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.me-page .your-apps-grid .ya-card .ya-cta {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+  align-self: flex-start;
+  margin-top: auto;
+}
+.me-page .your-apps-grid .ya-card .ya-cta:hover { color: var(--accent-hover); }
+.me-page .your-apps-foot {
+  margin-top: 14px;
+  display: flex;
+  gap: 14px;
+  font-size: 13px;
+}
+.me-page .your-apps-foot a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.me-page .your-apps-foot a:hover { color: var(--accent-hover); }
+
+/* App banner — neutral palette ONLY (Federico-locked). The .banner-*
+   classes (banner-research, banner-writing, banner-content,
+   banner-travel) are accepted on the markup for parity with the
+   wireframe + apps-cards roadmap, but they all resolve to the same
+   neutral gradient. NO tints. */
+.me-page .app-banner {
+  position: relative;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, var(--studio) 0%, var(--card) 100%);
+  overflow: hidden;
+}
+.me-page .app-banner .banner-card {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-width: 160px;
+  max-width: 80%;
+  box-shadow: var(--shadow-2);
+  text-align: left;
+  white-space: pre;
+  overflow: hidden;
+}
+.me-page .app-banner .banner-card .banner-title {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.me-page .app-banner .banner-card .banner-line {
+  display: block;
+  font-size: 10.5px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.me-page .app-banner .banner-card .banner-line.dim { color: var(--muted); }
+.me-page .app-banner .banner-card .banner-line.accent {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Running now + scheduled — Section 3. */
+.me-page .running-section { margin-bottom: 32px; }
+.me-page .running-section h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.015em;
+  margin: 0 0 14px;
+  color: var(--ink);
+}
+.me-page .running-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.me-page .running-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.me-page .running-row:last-child { border-bottom: 0; }
+.me-page .running-row .ic {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  flex-shrink: 0;
+}
+.me-page .running-row .ic.scheduled {
+  background: var(--muted);
+  box-shadow: 0 0 0 4px var(--bg);
+}
+.me-page .running-row .body { min-width: 0; }
+.me-page .running-row .body .nm {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.me-page .running-row .body .meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.me-page .running-row .act {
+  font-size: 12.5px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.me-page .running-foot {
+  padding: 11px 18px;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.me-page .running-foot a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* Recent runs compact — Section 4. */
+.me-page .recent-runs-compact { margin-bottom: 32px; }
+.me-page .runs-compact-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.me-page .runs-compact-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 18px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.me-page .runs-compact-card > header a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.me-page .run-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 18px;
+  border-top: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.12s;
+}
+.me-page .run-row:first-of-type { border-top: 0; }
+.me-page .run-row:hover { background: var(--bg); }
+.me-page .run-row .ic {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+/* Run-row category tints — applied per app slug in the React layer.
+   These DO carry colour because the run row icon is the app's identity
+   marker in a long list. The /me banner pattern stays neutral; only
+   the run-row icon bubble carries category. */
+.me-page .run-row .ic.cat-research {
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  border-color: #a7f3d0;
+}
+.me-page .run-row .ic.cat-writing {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border-color: #fde68a;
+}
+.me-page .run-row .ic.cat-content {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border-color: #fde68a;
+}
+.me-page .run-row .ic.cat-travel {
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  border-color: #bfdbfe;
+}
+.me-page .run-row .body { min-width: 0; }
+.me-page .run-row .body .nm {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.me-page .run-row .body .meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  display: flex;
+  gap: 8px;
+}
+.me-page .run-row .dur {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-weight: 600;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.me-page .run-row .dur.fail {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Agent-tokens demoted CTA — Section 5. */
+.me-page .muted-section {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.me-page .muted-section h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.me-page .muted-section p {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.55;
+}
+.me-page .muted-section a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.me-page .muted-section a:hover { color: var(--accent-hover); }
+
+/* Greeting — apps-led IA puts a clamp() heading at the top of /me. */
+.me-page .me-greet { margin-bottom: 24px; }
+.me-page .me-greet h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(32px, 3.6vw, 40px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.me-page .me-greet p {
+  font-size: 13.5px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Mobile (<= 720px) tweaks for /me. */
+@media (max-width: 720px) {
+  .me-page .me-greet h1 { font-size: 30px; }
+  .me-page .your-apps-grid { grid-template-columns: 1fr; }
+  .me-page .me-primary-nav { padding: 8px; gap: 6px; }
+  .me-page .me-primary-nav a {
+    padding: 7px 10px;
+    font-size: 11.5px;
   }
 }
 

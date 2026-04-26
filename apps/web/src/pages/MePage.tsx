@@ -1,228 +1,92 @@
+// /me — v23 apps-led 5-section IA. Federico-locked 2026-04-26.
+//
+// Section order (top → bottom):
+//   1. Greeting + stats subtitle
+//   2. Primary nav strip (Apps · Runs · BYOK keys · Agent tokens · Settings + Browse the store)
+//   3. Your apps grid (with banner pattern, neutral palette only)
+//   4. Running now + scheduled (rendered only when there's data)
+//   5. Recent runs compact (5 rows, category-tinted icons per app)
+//   6. Agent tokens demoted CTA (.muted-section)
+//
+// Vocabulary (Federico-locked): "BYOK keys" + "Agent tokens" — never
+// "API keys". The legacy footer row of API keys · Profile · Sign out
+// has been removed; those links live in the primary nav strip + the
+// avatar dropdown (TopBar.tsx, already on main).
+//
+// Banner palette: NEUTRAL ONLY. The .banner-research / .banner-content /
+// .banner-writing / .banner-travel class names appear on the markup for
+// parity with the wireframe + the apps-cards roadmap, but every banner
+// resolves to the same neutral gradient (var(--studio) → var(--card)).
+// Run-row icons DO carry per-app cat-* tints — that's the identity
+// marker in a long list and it's allowed.
+
 import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppIcon } from '../components/AppIcon';
 import { MeLayout } from '../components/me/MeLayout';
-import { ToolTile } from '../components/me/ToolTile';
-import { buildRerunHref, runPreviewText } from '../components/me/runPreview';
-import { useMeCompactLayout } from '../components/me/useMeCompactLayout';
+import { runPreviewText } from '../components/me/runPreview';
 import { Tour } from '../components/onboarding/Tour';
 import { hasOnboarded } from '../lib/onboarding';
 import { useSession, clearSession, refreshSession } from '../hooks/useSession';
+import { useMyApps } from '../hooks/useMyApps';
 import * as api from '../api/client';
-import { formatTime } from '../lib/time';
 import type { MeRunSummary } from '../lib/types';
 
 const FETCH_LIMIT = 200;
-const APP_PREVIEW_LIMIT = 6;
+const APP_PREVIEW_LIMIT = 5;
 const RECENT_RUNS_PREVIEW = 5;
 
+/**
+ * App-slug → category mapping for run-row tints (per the v23 wireframe
+ * + the launch-day brief). The /me banner pattern stays neutral; only
+ * the run-row icon bubble carries category. Unknown slugs render with
+ * no tint (default neutral icon).
+ */
+const APP_CATEGORY: Record<string, 'research' | 'writing' | 'content' | 'travel'> = {
+  'competitor-lens': 'research',
+  'ai-readiness-audit': 'research',
+  'pitch-coach': 'writing',
+  opendraft: 'content',
+  flyfast: 'travel',
+};
+
+/**
+ * Banner content per app slug — matches v23 wireframe + the /apps PR
+ * roster (competitor-lens, ai-readiness-audit, pitch-coach). The
+ * banner is the run-result preview shape, not a runtime metric.
+ * Unknown slugs fall back to a generic banner with the slug + a
+ * single line derived from the latest run preview.
+ */
+type BannerLine = { text: string; tone?: 'dim' | 'accent' };
+const BANNER_CONTENT: Record<string, { title: string; lines: BannerLine[] }> = {
+  'competitor-lens': {
+    title: 'competitor-lens',
+    lines: [
+      { text: 'stripe vs adyen' },
+      { text: 'fee 1.4% vs 1.6%', tone: 'dim' },
+      { text: 'winner: stripe', tone: 'accent' },
+    ],
+  },
+  'ai-readiness-audit': {
+    title: 'ai-readiness',
+    lines: [
+      { text: 'floom.dev' },
+      { text: 'score: 8.4/10', tone: 'dim' },
+      { text: '3 risks · 3 wins', tone: 'accent' },
+    ],
+  },
+  'pitch-coach': {
+    title: 'pitch-coach',
+    lines: [
+      { text: 'harsh truth' },
+      { text: '3 critiques', tone: 'dim' },
+      { text: '3 rewrites', tone: 'accent' },
+    ],
+  },
+};
+
 const s: Record<string, CSSProperties> = {
-  section: {
-    marginBottom: 30,
-  },
-  sectionHeader: {
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 14,
-    flexWrap: 'wrap',
-  },
-  sectionH2: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 22,
-    fontWeight: 800,
-    letterSpacing: '-0.03em',
-    lineHeight: 1.15,
-    margin: 0,
-    color: 'var(--ink)',
-  },
-  sectionCopy: {
-    margin: '4px 0 0',
-    fontSize: 14,
-    lineHeight: 1.55,
-    color: 'var(--muted)',
-  },
-  headerLink: {
-    fontSize: 13.5,
-    fontWeight: 700,
-    color: 'var(--accent)',
-    textDecoration: 'none',
-  },
-  card: {
-    border: '1px solid var(--line)',
-    borderRadius: 20,
-    background: 'var(--card)',
-    boxShadow: '0 1px 0 rgba(17, 24, 39, 0.02)',
-  },
-  appsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-    gap: 14,
-  },
-  tableWrap: {
-    overflow: 'hidden',
-  },
-  tableHeader: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 0.95fr) minmax(0, 1.35fr) auto',
-    gap: 12,
-    padding: '12px 52px 12px 18px',
-    borderBottom: '1px solid var(--line)',
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase' as const,
-    color: 'var(--muted)',
-    background: 'rgba(250, 248, 243, 0.82)',
-  },
-  runRowWrap: {
-    position: 'relative',
-    borderBottom: '1px solid var(--line)',
-  },
-  runRow: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 0.95fr) minmax(0, 1.35fr) auto',
-    gap: 12,
-    alignItems: 'center',
-    padding: '15px 52px 15px 18px',
-    textDecoration: 'none',
-    color: 'var(--ink)',
-  },
-  runRerun: {
-    position: 'absolute',
-    top: '50%',
-    right: 14,
-    transform: 'translateY(-50%)',
-    width: 30,
-    height: 30,
-    borderRadius: 999,
-    border: '1px solid var(--line)',
-    background: 'rgba(255,255,255,0.92)',
-    color: 'var(--muted)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    textDecoration: 'none',
-    cursor: 'pointer',
-    transition: 'opacity .12s, color .12s, border-color .12s',
-  },
-  runRerunCompact: {
-    position: 'static',
-    transform: 'none',
-    flexShrink: 0,
-  },
-  appCell: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    minWidth: 0,
-  },
-  appIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    background: 'rgba(250, 248, 243, 0.92)',
-    border: '1px solid var(--line)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  appName: {
-    fontSize: 14,
-    fontWeight: 700,
-    lineHeight: 1.3,
-    whiteSpace: 'nowrap' as const,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  },
-  previewText: {
-    fontSize: 13.5,
-    lineHeight: 1.55,
-    color: 'var(--muted)',
-    minWidth: 0,
-    overflow: 'hidden',
-    display: '-webkit-box',
-    WebkitBoxOrient: 'vertical',
-    WebkitLineClamp: 2,
-  },
-  whenText: {
-    fontSize: 12.5,
-    lineHeight: 1.4,
-    color: 'var(--muted)',
-    fontVariantNumeric: 'tabular-nums',
-    textAlign: 'right' as const,
-    whiteSpace: 'nowrap' as const,
-  },
-  emptyCard: {
-    ...{
-      border: '1px solid var(--line)',
-      borderRadius: 24,
-      background:
-        'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,248,243,0.94) 100%)',
-      boxShadow: '0 1px 0 rgba(17, 24, 39, 0.02)',
-    },
-    padding: '40px 28px',
-    textAlign: 'center' as const,
-  },
-  emptyTitle: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 24,
-    fontWeight: 800,
-    letterSpacing: '-0.04em',
-    lineHeight: 1.1,
-    color: 'var(--ink)',
-    margin: '0 0 10px',
-  },
-  emptyBody: {
-    margin: '0 auto 22px',
-    maxWidth: 420,
-    fontSize: 15,
-    lineHeight: 1.65,
-    color: 'var(--muted)',
-  },
-  primaryButton: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '11px 18px',
-    borderRadius: 999,
-    background: 'var(--ink)',
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 700,
-    textDecoration: 'none',
-  },
-  settingsRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    paddingTop: 20,
-    borderTop: '1px solid var(--line)',
-    flexWrap: 'wrap',
-  },
-  settingsLink: {
-    fontSize: 13.5,
-    fontWeight: 600,
-    color: 'var(--muted)',
-    textDecoration: 'none',
-  },
-  settingsSeparator: {
-    fontSize: 13.5,
-    color: 'var(--muted)',
-  },
-  settingsButton: {
-    padding: 0,
-    border: 'none',
-    background: 'none',
-    fontSize: 13.5,
-    fontWeight: 600,
-    color: 'var(--muted)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  },
   notice: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -263,11 +127,11 @@ export function MePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: sessionData, loading: sessionLoading, error: sessionError } = useSession();
+  const { apps: myApps } = useMyApps();
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [runsError, setRunsError] = useState<string | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const compactLayout = useMeCompactLayout();
 
   const sessionPending = sessionLoading || (sessionData === null && !sessionError);
   const signedOutPreview = !!sessionData && sessionData.cloud_mode && sessionData.user.is_local;
@@ -312,6 +176,11 @@ export function MePage() {
     }
   }, [forceTour, runs, sessionPending, canLoadPersonalData]);
 
+  /**
+   * Aggregated info per app slug from the user's run history.
+   * Drives the Your-apps grid: name, last-run timestamp, total run
+   * count, and the prefill ID for the Run-again link.
+   */
   const previewApps = useMemo(() => {
     if (runs === null) return null;
     const seen = new Map<
@@ -322,27 +191,57 @@ export function MePage() {
         lastUsedAt: string | null;
         lastRunId: string;
         lastRunAction: string;
+        runCount: number;
       }
     >();
     for (const run of runs) {
       if (!run.app_slug) continue;
-      if (seen.has(run.app_slug)) continue;
+      const existing = seen.get(run.app_slug);
+      if (existing) {
+        existing.runCount += 1;
+        continue;
+      }
       seen.set(run.app_slug, {
         slug: run.app_slug,
         name: run.app_name || run.app_slug,
         lastUsedAt: run.started_at,
         lastRunId: run.id,
         lastRunAction: run.action,
+        runCount: 1,
       });
-      if (seen.size >= APP_PREVIEW_LIMIT) break;
     }
-    return Array.from(seen.values());
+    return Array.from(seen.values()).slice(0, APP_PREVIEW_LIMIT);
   }, [runs]);
 
   const recentRuns = useMemo(
     () => (runs ? runs.slice(0, RECENT_RUNS_PREVIEW) : []),
     [runs],
   );
+
+  /** Currently-running runs surfaced from the same /api/me/runs payload.
+   * Backend doesn't yet expose a separate "scheduled" / "triggers"
+   * collection, so the section renders only when there's a live
+   * `running` or `pending` row. Empty → section is invisible
+   * (Federico-locked Flag #2 default: option A). */
+  const runningRuns = useMemo(() => {
+    if (runs === null) return [];
+    return runs.filter((r) => r.status === 'running' || r.status === 'pending');
+  }, [runs]);
+
+  /** Greeting subtitle counts. We bind real values where the API
+   * supports it: apps installed comes from useMyApps (creator-side
+   * installs) OR previewApps.length (consumer-side: apps the user
+   * has actually run); pick whichever is larger so the count is
+   * never wrong-direction. Total runs comes from runs.length (capped
+   * at FETCH_LIMIT). Running-now is runningRuns.length. */
+  const stats = useMemo(() => {
+    const installedFromApps = myApps?.length ?? 0;
+    const installedFromRuns = previewApps?.length ?? 0;
+    const apps = Math.max(installedFromApps, installedFromRuns);
+    const totalRuns = runs?.length ?? 0;
+    const running = runningRuns.length;
+    return { apps, totalRuns, running };
+  }, [myApps, previewApps, runs, runningRuns]);
 
   function dismissNotice() {
     const next = new URLSearchParams(searchParams);
@@ -378,128 +277,185 @@ export function MePage() {
     await refreshSession();
     navigate('/', { replace: true });
   }
+  // Sign-out callback retained for the Tour component (which can also
+  // surface a "Sign out" affordance during onboarding). The legacy
+  // footer-row trigger is removed from the page itself.
+  void handleSignOut;
+
+  const greetingName = greetingFirstName(sessionData?.user);
+  const greetingHeading = greetingName ? `Hi, ${greetingName}.` : 'Hi, there.';
+  const subtitleText = formatStatsSubtitle(stats);
 
   return (
     <MeLayout
-      title="Me · Floom"
+      title="My account · Floom"
       allowSignedOutShell={signedOutPreview}
-      headerVariant="inline"
+      headerVariant="none"
     >
-      <div data-testid="me-page">
-        {showWelcome && <WelcomeBanner onDismiss={dismissWelcome} />}
+      <div className="me-page" data-testid="me-page">
+        <div className="me-greet" data-testid="me-greet">
+          <h1 data-testid="me-greeting-name">{greetingHeading}</h1>
+          <p data-testid="me-greeting-subtitle">{subtitleText}</p>
+        </div>
+
+        {showWelcome && !subtitleText && <WelcomeBanner onDismiss={dismissWelcome} />}
         {showNotice && <AppNotFound slug={noticeSlug} onDismiss={dismissNotice} />}
 
         {runsError ? (
           <ErrorPanel message={runsError} />
         ) : (
-          <>
-            <section data-testid="me-apps-preview" aria-label="Your apps preview" style={s.section}>
-              <header style={s.sectionHeader}>
-                <div>
-                  <h2 style={s.sectionH2}>Your apps</h2>
-                  <p style={s.sectionCopy}>
-                    Re-run the apps you already know, without digging through the store.
-                  </p>
-                </div>
-                <Link to="/me/apps" data-testid="me-apps-see-all" style={s.headerLink}>
-                  See all →
-                </Link>
-              </header>
+          <main>
+            {/* 1 — Primary nav strip */}
+            <nav
+              className="me-primary-nav"
+              data-testid="me-primary-nav"
+              aria-label="My account primary nav"
+            >
+              <Link to="/me/apps" data-testid="me-nav-apps">
+                Apps <span className="ct">{stats.apps}</span>
+              </Link>
+              <Link to="/me/runs" data-testid="me-nav-runs">
+                Runs <span className="ct">{stats.totalRuns}</span>
+              </Link>
+              <Link to="/me/secrets" data-testid="me-nav-byok">
+                BYOK keys
+              </Link>
+              <Link to="/me/agent-keys" data-testid="me-nav-agent-tokens">
+                Agent tokens
+              </Link>
+              <Link to="/me/settings" data-testid="me-nav-settings">
+                Settings
+              </Link>
+              <Link to="/apps" className="browse-store" data-testid="me-nav-browse-store">
+                Browse the store →
+              </Link>
+            </nav>
+
+            {/* 2 — Your apps */}
+            <section
+              className="your-apps-section"
+              data-testid="me-apps-preview"
+              data-section="your-apps"
+              aria-label="Your apps"
+              id="your-apps"
+            >
+              <h2>Your apps</h2>
+              <p className="lede">
+                {previewApps && previewApps.length > 0
+                  ? `${previewApps.length} installed. Pinned to /me, available in Claude.`
+                  : 'Pinned to /me, available in Claude.'}
+              </p>
 
               {previewApps === null ? (
-                <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
+                <div
+                  data-testid="me-apps-preview-loading"
+                  style={{
+                    padding: 18,
+                    color: 'var(--muted)',
+                    fontSize: 13.5,
+                    border: '1px solid var(--line)',
+                    borderRadius: 14,
+                    background: 'var(--card)',
+                  }}
+                >
                   Loading your apps…
                 </div>
               ) : previewApps.length === 0 ? (
                 <HomeEmptyState signedOutPreview={signedOutPreview} testId="me-apps-preview-empty" />
               ) : (
-                <div
-                  data-testid="me-apps-preview-grid"
-                  style={{
-                    ...s.appsGrid,
-                    gridTemplateColumns: compactLayout
-                      ? 'minmax(0, 1fr)'
-                      : (s.appsGrid.gridTemplateColumns as string),
-                  }}
-                >
-                  {previewApps.map((app) => (
-                    <ToolTile
-                      key={app.slug}
-                      slug={app.slug}
-                      name={app.name}
-                      lastUsedAt={app.lastUsedAt}
-                      lastRunId={app.lastRunId}
-                      lastRunAction={app.lastRunAction}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {(runs === null || recentRuns.length > 0) && (
-              <section id="recent-runs" data-testid="me-runs-preview" aria-label="Recent runs">
-                <header style={s.sectionHeader}>
-                  <div>
-                    <h2 style={s.sectionH2}>Recent runs</h2>
-                    <p style={s.sectionCopy}>
-                      The last few things you ran across every app.
-                    </p>
-                  </div>
-                  <Link to="/me/runs" data-testid="me-runs-see-all" style={s.headerLink}>
-                    See all →
-                  </Link>
-                </header>
-
-                {runs === null ? (
-                  <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
-                    Loading runs…
-                  </div>
-                ) : (
-                  <div data-testid="me-runs-preview-list" style={{ ...s.card, ...s.tableWrap }}>
-                    {!compactLayout ? (
-                      <div style={s.tableHeader}>
-                        <span>App</span>
-                        <span>Output preview</span>
-                        <span style={{ textAlign: 'right' }}>When</span>
-                      </div>
-                    ) : null}
-                    {recentRuns.map((run, index) => (
-                      <HomeRunRow
-                        key={run.id}
-                        run={run}
-                        isLast={index === recentRuns.length - 1}
-                        compact={compactLayout}
+                <>
+                  <div className="your-apps-grid" data-testid="me-apps-preview-grid">
+                    {previewApps.map((app) => (
+                      <AppCard
+                        key={app.slug}
+                        slug={app.slug}
+                        name={app.name}
+                        lastUsedAt={app.lastUsedAt}
+                        runCount={app.runCount}
+                        latestRun={
+                          recentRuns.find((r) => r.app_slug === app.slug) ?? null
+                        }
                       />
                     ))}
                   </div>
-                )}
+                  <div className="your-apps-foot" data-testid="me-apps-foot">
+                    <Link to="/me/apps">Show all {stats.apps} →</Link>
+                    <Link to="/apps">Browse the store →</Link>
+                  </div>
+                </>
+              )}
+            </section>
+
+            {/* 3 — Running now + scheduled (conditional render) */}
+            {runningRuns.length > 0 && (
+              <section
+                className="running-section"
+                data-testid="me-running-section"
+                aria-label="Running now and scheduled"
+                id="whats-running"
+              >
+                <h2>Running now + scheduled</h2>
+                <div className="running-card" data-testid="me-running-card">
+                  {runningRuns.slice(0, 5).map((run) => (
+                    <RunningRow key={run.id} run={run} />
+                  ))}
+                </div>
               </section>
             )}
 
-            <div style={s.settingsRow}>
-              <Link to="/me/secrets" style={s.settingsLink}>
-                API keys
-              </Link>
-              <span aria-hidden style={s.settingsSeparator}>
-                ·
-              </span>
-              <Link to="/me/settings" style={s.settingsLink}>
-                Profile
-              </Link>
-              <span aria-hidden style={s.settingsSeparator}>
-                ·
-              </span>
-              <button
-                type="button"
-                onClick={handleSignOut}
-                data-testid="me-sign-out"
-                disabled={signingOut}
-                style={s.settingsButton}
+            {/* 4 — Recent runs compact */}
+            {(runs === null || recentRuns.length > 0) && (
+              <section
+                className="recent-runs-compact"
+                id="recent-runs-compact"
+                data-testid="me-runs-preview"
+                aria-label="Recent runs"
               >
-                {signingOut ? 'Signing out…' : 'Sign out'}
-              </button>
-            </div>
-          </>
+                <div className="runs-compact-card" data-testid="me-runs-preview-list">
+                  <header>
+                    <span>
+                      Recent runs · last {Math.min(RECENT_RUNS_PREVIEW, recentRuns.length || RECENT_RUNS_PREVIEW)}
+                    </span>
+                    <Link to="/me/runs" data-testid="me-runs-see-all">
+                      See all{stats.totalRuns ? ` ${stats.totalRuns}` : ''} →
+                    </Link>
+                  </header>
+                  {runs === null ? (
+                    <div
+                      style={{
+                        padding: 18,
+                        color: 'var(--muted)',
+                        fontSize: 13.5,
+                      }}
+                    >
+                      Loading runs…
+                    </div>
+                  ) : (
+                    recentRuns.map((run) => <RunRow key={run.id} run={run} />)
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* 5 — Agent tokens demoted CTA */}
+            <section
+              className="muted-section"
+              id="agent-tokens-cta"
+              data-testid="me-agent-tokens-cta"
+              aria-label="Agent tokens"
+            >
+              <div>
+                <h3>Use Floom from Claude, Cursor, or your CLI</h3>
+                <p>
+                  One token works across MCP, REST, CLI. Scope it to read, run, publish, or
+                  update secrets.
+                </p>
+              </div>
+              <Link to="/me/agent-keys" data-testid="me-agent-tokens-link">
+                Manage agent tokens →
+              </Link>
+            </section>
+          </main>
         )}
       </div>
 
@@ -508,131 +464,230 @@ export function MePage() {
   );
 }
 
-function HomeRunRow({
-  run,
-  isLast,
-  compact,
+/**
+ * Your-apps card — v23 banner pattern. Neutral palette only (Federico-
+ * locked). The .banner-{research,writing,content,travel} class is set
+ * on the markup for wireframe parity but every variant resolves to the
+ * same neutral gradient via wireframe.css.
+ */
+function AppCard({
+  slug,
+  name,
+  lastUsedAt,
+  runCount,
+  latestRun,
 }: {
-  run: MeRunSummary;
-  isLast: boolean;
-  compact: boolean;
+  slug: string;
+  name: string;
+  lastUsedAt: string | null;
+  runCount: number;
+  latestRun: MeRunSummary | null;
 }) {
-  const appName = run.app_name || run.app_slug || 'App';
-  const href = `/r/${encodeURIComponent(run.id)}`;
-  const rerunHref = run.app_slug
-    ? buildRerunHref(run.app_slug, run.id, run.action)
-    : null;
+  const category = APP_CATEGORY[slug] ?? null;
+  const bannerVariant = category ? `banner-${category}` : 'banner-research';
+  const lastRel = lastUsedAt ? formatRelative(lastUsedAt) : null;
+  const meta = lastRel
+    ? `last run ${lastRel} · ${runCount} run${runCount === 1 ? '' : 's'}`
+    : `${runCount} run${runCount === 1 ? '' : 's'}`;
 
   return (
-    <div
-      style={{
-        ...s.runRowWrap,
-        borderBottom: isLast ? 'none' : s.runRowWrap.borderBottom,
-        display: compact ? 'flex' : 'block',
-        alignItems: compact ? 'center' : undefined,
-        gap: compact ? 12 : undefined,
-        padding: compact ? '15px 18px' : undefined,
-      }}
-      onMouseEnter={(e) => {
-        const btn = e.currentTarget.querySelector<HTMLAnchorElement>(
-          '[data-rerun-btn]',
-        );
-        if (btn) btn.style.opacity = '1';
-      }}
-      onMouseLeave={(e) => {
-        const btn = e.currentTarget.querySelector<HTMLAnchorElement>(
-          '[data-rerun-btn]',
-        );
-        if (btn && !compact) btn.style.opacity = '0';
-      }}
+    <Link
+      to={`/p/${slug}`}
+      className="ya-card"
+      data-testid={`me-app-card-${slug}`}
     >
-      <Link
-        to={href}
-        data-testid={`me-run-row-${run.id}`}
-        style={{
-          ...s.runRow,
-          gridTemplateColumns: compact
-            ? 'minmax(0, 1fr)'
-            : (s.runRow.gridTemplateColumns as string),
-          padding: compact ? 0 : s.runRow.padding,
-          flex: compact ? 1 : undefined,
-          minWidth: compact ? 0 : undefined,
-        }}
-      >
-        <div style={s.appCell}>
-          {run.app_slug ? (
-            <span aria-hidden style={s.appIconWrap}>
-              <AppIcon slug={run.app_slug} size={16} />
-            </span>
-          ) : null}
-          <span style={s.appName}>{appName}</span>
-        </div>
-        <span style={s.previewText}>{runPreviewText(run)}</span>
-        <span
-          style={{
-            ...s.whenText,
-            textAlign: compact ? 'left' : s.whenText.textAlign,
-            whiteSpace: compact ? 'normal' : s.whenText.whiteSpace,
-          }}
-        >
-          {formatTime(run.started_at)}
+      <div className="ya-head">
+        <span aria-hidden className="ya-icon">
+          <AppIcon slug={slug} size={18} />
         </span>
-      </Link>
-      {rerunHref ? (
-        <Link
-          to={rerunHref}
-          data-rerun-btn
-          data-testid={`me-run-rerun-${run.id}`}
-          aria-label={`Re-run ${appName}`}
-          title={`Re-run ${appName}`}
-          style={{
-            ...s.runRerun,
-            ...(compact ? s.runRerunCompact : {}),
-            opacity: compact ? 1 : 0,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'var(--accent)';
-            e.currentTarget.style.borderColor = 'var(--accent)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'var(--muted)';
-            e.currentTarget.style.borderColor = 'var(--line)';
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.opacity = '1';
-            e.currentTarget.style.color = 'var(--accent)';
-            e.currentTarget.style.borderColor = 'var(--accent)';
-          }}
-          onBlur={(e) => {
-            if (!compact) e.currentTarget.style.opacity = '0';
-            e.currentTarget.style.color = 'var(--muted)';
-            e.currentTarget.style.borderColor = 'var(--line)';
-          }}
+        <div>
+          <div className="ya-name">{name}</div>
+          <div className="ya-meta">{meta}</div>
+        </div>
+      </div>
+      <div
+        className={`app-banner ${bannerVariant}`}
+        data-testid={`me-app-banner-${slug}`}
+      >
+        <BannerCard slug={slug} latestRun={latestRun} />
+      </div>
+      <span className="ya-cta">Run again →</span>
+    </Link>
+  );
+}
+
+function BannerCard({
+  slug,
+  latestRun,
+}: {
+  slug: string;
+  latestRun: MeRunSummary | null;
+}) {
+  const content = BANNER_CONTENT[slug] ?? {
+    title: slug,
+    lines: latestRun
+      ? [
+          {
+            text: truncateBanner(runPreviewText(latestRun)),
+            tone: 'dim' as const,
+          },
+        ]
+      : [{ text: `${slug}`, tone: 'dim' as const }],
+  };
+  return (
+    <div className="banner-card">
+      <span className="banner-title">{content.title}</span>
+      {content.lines.map((line, idx) => (
+        <span
+          key={idx}
+          className={`banner-line${line.tone ? ` ${line.tone}` : ''}`}
         >
-          <RerunIcon />
-        </Link>
-      ) : null}
+          {line.text}
+        </span>
+      ))}
     </div>
   );
 }
 
-function RerunIcon() {
+function truncateBanner(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= 32) return clean;
+  return `${clean.slice(0, 31).trimEnd()}…`;
+}
+
+/**
+ * Recent-runs row — compact pattern with category-tinted icon, rich
+ * .nm line built from the same runPreviewText helper as the legacy
+ * row, meta row, and a duration pill.
+ */
+function RunRow({ run }: { run: MeRunSummary }) {
+  const appSlug = run.app_slug || '';
+  const appName = run.app_name || run.app_slug || 'App';
+  const category = appSlug ? APP_CATEGORY[appSlug] : undefined;
+  const href = `/r/${encodeURIComponent(run.id)}`;
+
+  const isFail = run.status === 'error' || run.status === 'timeout';
+  const dur = formatDuration(run.duration_ms);
+  const rel = formatRelative(run.started_at);
+  const preview = runPreviewText(run);
+  const nm = appSlug
+    ? `${appSlug} · ${preview}`
+    : preview;
+
   return (
-    <svg
-      aria-hidden="true"
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+    <Link
+      to={href}
+      className="run-row"
+      data-testid={`me-run-row-${run.id}`}
     >
-      <polyline points="1.5 3 1.5 7.5 6 7.5" />
-      <path d="M3.2 11A6 6 0 1 0 4.6 4.4L1.5 7.5" />
-    </svg>
+      <div className={`ic${category ? ` cat-${category}` : ''}`}>
+        {appSlug ? <AppIcon slug={appSlug} size={16} /> : null}
+      </div>
+      <div className="body">
+        <div className="nm" title={nm}>{nm}</div>
+        <div className="meta">
+          <span>{rel}</span>
+          {appName && appName !== appSlug ? (
+            <>
+              <span aria-hidden>·</span>
+              <span>{appName}</span>
+            </>
+          ) : null}
+        </div>
+      </div>
+      <span className={`dur${isFail ? ' fail' : ''}`}>{isFail ? 'fail' : dur}</span>
+    </Link>
   );
+}
+
+function RunningRow({ run }: { run: MeRunSummary }) {
+  const appName = run.app_name || run.app_slug || 'App';
+  const rel = formatRelative(run.started_at);
+  const isPending = run.status === 'pending';
+  return (
+    <div
+      className="running-row"
+      data-testid={`me-running-row-${run.id}`}
+    >
+      <span aria-hidden className={`ic${isPending ? ' scheduled' : ''}`} />
+      <div className="body">
+        <div className="nm">
+          {appName} · {isPending ? 'queued' : 'running'}
+        </div>
+        <div className="meta">
+          <span>started {rel}</span>
+        </div>
+      </div>
+      <Link
+        to={`/r/${encodeURIComponent(run.id)}`}
+        className="act"
+        aria-label={`View run ${run.id}`}
+      >
+        View
+      </Link>
+    </div>
+  );
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null || ms === undefined || Number.isNaN(ms)) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const sec = ms / 1000;
+  if (sec < 10) return `${sec.toFixed(2)}s`;
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = Math.round(sec - min * 60);
+  return `${min}m ${remSec}s`;
+}
+
+/** Compact relative time used in run-row meta + Your-apps card meta.
+ * Returns "2m" / "14m" / "2h" / "1d" — no "ago" suffix because the
+ * surrounding markup ("last run X ago", "started X") supplies it. */
+function formatRelative(iso: string | null): string {
+  if (!iso) return 'unknown';
+  try {
+    const d = new Date(iso);
+    const t = d.getTime();
+    if (Number.isNaN(t)) return iso;
+    const now = Date.now();
+    const diff = Math.max(0, now - t);
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.floor(hr / 24);
+    if (day < 7) return `${day}d ago`;
+    return d.toLocaleDateString();
+  } catch {
+    return iso;
+  }
+}
+
+function greetingFirstName(
+  user: { email: string | null; name: string | null } | undefined | null,
+): string {
+  if (!user) return '';
+  const nameRaw = (user.name ?? '').trim();
+  if (nameRaw) {
+    const first = nameRaw.split(/\s+/)[0] || '';
+    if (first) return first;
+  }
+  const email = (user.email ?? '').trim();
+  const local = email.includes('@') ? email.split('@')[0] : email;
+  if (!local) return '';
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+function formatStatsSubtitle(stats: { apps: number; totalRuns: number; running: number }): string {
+  const parts: string[] = [];
+  parts.push(`${stats.apps} app${stats.apps === 1 ? '' : 's'} installed`);
+  parts.push(`${stats.totalRuns} run${stats.totalRuns === 1 ? '' : 's'}`);
+  if (stats.running > 0) {
+    parts.push(`${stats.running} running now`);
+  }
+  return parts.join(' · ');
 }
 
 function WelcomeBanner({ onDismiss }: { onDismiss: () => void }) {
@@ -723,14 +778,58 @@ function HomeEmptyState({
   testId?: string;
 }) {
   return (
-    <section data-testid={testId} style={s.emptyCard}>
-      <h2 style={s.emptyTitle}>Nothing here yet.</h2>
-      <p style={s.emptyBody}>
+    <section
+      data-testid={testId}
+      style={{
+        border: '1px solid var(--line)',
+        borderRadius: 14,
+        background: 'var(--card)',
+        padding: '40px 28px',
+        textAlign: 'center',
+      }}
+    >
+      <h2
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 22,
+          fontWeight: 800,
+          letterSpacing: '-0.025em',
+          lineHeight: 1.1,
+          color: 'var(--ink)',
+          margin: '0 0 10px',
+        }}
+      >
+        Nothing here yet.
+      </h2>
+      <p
+        style={{
+          margin: '0 auto 22px',
+          maxWidth: 420,
+          fontSize: 14.5,
+          lineHeight: 1.6,
+          color: 'var(--muted)',
+        }}
+      >
         {signedOutPreview
           ? 'Try one from the public directory and your recent activity will show up here after you sign in.'
           : 'Try one from the public directory.'}
       </p>
-      <Link to="/apps" data-testid="me-empty-browse" style={s.primaryButton}>
+      <Link
+        to="/apps"
+        data-testid="me-empty-browse"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '11px 18px',
+          borderRadius: 999,
+          background: 'var(--ink)',
+          color: '#fff',
+          fontSize: 14,
+          fontWeight: 700,
+          textDecoration: 'none',
+        }}
+      >
         Browse apps →
       </Link>
     </section>
