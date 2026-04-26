@@ -18,9 +18,12 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createRequire } from 'node:module';
 
 // Bypass env var so the ingest actually writes all operations we can inspect.
 process.env.FLOOM_MAX_ACTIONS_PER_APP = '0';
+
+const requireFromServer = createRequire(new URL('../../apps/server/package.json', import.meta.url));
 
 const {
   dereferenceSpec,
@@ -80,7 +83,7 @@ async function fetchSpec(slug, url) {
   try {
     spec = JSON.parse(text);
   } catch {
-    const yaml = await import('yaml');
+    const yaml = requireFromServer('yaml');
     spec = yaml.parse(text);
   }
   mkdirSync(CACHE_DIR, { recursive: true });

@@ -38,5 +38,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y age sqlite3 zstd
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
