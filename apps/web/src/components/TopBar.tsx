@@ -170,10 +170,13 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   // we're on preview (deploy_enabled=true).
   const deployEnabled = deployEnabledFlag === true;
   const waitlistMode = deployEnabledFlag === false;
-  const studioNavLabel =
-    isAuthenticated && myApps && myApps.length > 0
-      ? `Studio (${myApps.length})`
-      : 'Studio';
+  // Bug fix 2026-04-26: count badges belong ONLY in the avatar dropdown
+  // (where "Apps · 5" is by design), NEVER on top-level centre-nav items.
+  // The earlier `Studio (3)` label rendered visually adjacent to "My
+  // account" and looked like a stray "(c) 6" glyph attached to the wrong
+  // link. Federico-locked: centre nav stays clean ink labels; counts
+  // surface inside the dropdown menu only.
+  const studioNavLabel = 'Studio';
   // Auth-branched chrome: only flip to the work-focused layout when the
   // session is authenticated AND we know we're on a deploy-enabled
   // environment. Both must be true. While the deploy flag is loading

@@ -1,39 +1,94 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { useSession } from '../hooks/useSession';
+import { useAgentTokens } from '../hooks/useAgentTokens';
 
 // v23 "Copy for Claude" affordance. Globally visible button + 3-row popover.
 //
 // Federico-locked decisions (2026-04-26):
 //   • One neutral palette — no category tints. var(--card) bg, var(--line)
 //     border, monospace text. Result content carries meaning, not colour.
-//   • Row 1 — MCP server config: { "mcpServers": { "floom": { "url":
-//     "https://floom.dev/mcp" } } }   <- verified path. Earlier wireframes
-//     said /mcp/sse; that was wrong, do NOT use it.
+//   • Row 1 — MCP server config. Pretty-printed JSON (multi-line) so it
+//     fits the popover width without truncation. Authed users get the
+//     `headers.Authorization: Bearer <your_floom_agent_token>` form so
+//     copy-paste actually works against Floom's MCP endpoint; anon users
+//     get the URL-only form. Verified path is /mcp (NOT /mcp/sse — that
+//     was an earlier wireframe error).
 //   • Row 2 — CLI install: curl -fsSL https://floom.dev/install.sh | bash
-//   • Row 3 — context-aware. Hidden on routes where it adds nothing:
+//   • Row 3 — context-aware AND token-aware:
 //       /p/:slug          → run THIS app via the CLI
 //       /me, /me/*        → generic "use Floom from your agent" snippet
 //       /studio/:slug     → deploy-via-CLI snippet for THIS creator's app
 //       Other routes      → row 3 hidden (only Row 1 + Row 2)
+//     For authed users with ≥1 agent token: snippet shows real working
+//     command + a clickable note pointing at /me/agent-keys.
+//     For authed users with 0 tokens: snippet replaced by a CTA pointing
+//     at /me/agent-keys with helper text above.
+//     For anon users: row 3 hides entirely (no auth context to bind).
 //
 // Behaviour: click toggles, click-outside closes, Esc closes. Per-row
 // "Copy" buttons flash green for 1.5s after clipboard write succeeds.
 
-type ContextSnippet = {
+type AuthedSnippet = {
+  kind: 'snippet';
   label: string;
   snippet: string;
 };
 
-const MCP_CONFIG_SNIPPET = `{ "mcpServers": { "floom": { "url": "https://floom.dev/mcp" } } }`;
+type AuthedCta = {
+  kind: 'cta';
+  label: string;
+  helper: string;
+  ctaText: string;
+  ctaHref: string;
+};
+
+type ContextRow = AuthedSnippet | AuthedCta;
+
+const AGENT_KEYS_PATH = '/me/agent-keys';
+const FLOOM_TOKEN_PLACEHOLDER = '<your_floom_agent_token>';
+
+const MCP_CONFIG_ANON = JSON.stringify(
+  {
+    mcpServers: {
+      floom: {
+        url: 'https://floom.dev/mcp',
+      },
+    },
+  },
+  null,
+  2,
+);
+
+const MCP_CONFIG_AUTHED = JSON.stringify(
+  {
+    mcpServers: {
+      floom: {
+        url: 'https://floom.dev/mcp',
+        headers: {
+          Authorization: `Bearer ${FLOOM_TOKEN_PLACEHOLDER}`,
+        },
+      },
+    },
+  },
+  null,
+  2,
+);
+
 const CLI_INSTALL_SNIPPET = `curl -fsSL https://floom.dev/install.sh | bash`;
 
-function buildContextSnippet(pathname: string): ContextSnippet | null {
-  // /p/:slug — run THIS app
+function buildContextRow(
+  pathname: string,
+  authedAndHasTokens: boolean | null,
+): ContextRow | null {
+  // /p/:slug — run THIS app. Same snippet for anon + authed; CLI prompts
+  // for `floom auth login` if no creds yet.
   const pMatch = pathname.match(/^\/p\/([^/]+)/);
   if (pMatch) {
     const slug = pMatch[1];
     return {
+      kind: 'snippet',
       label: `For this app (${slug})`,
       snippet: `floom run ${slug}`,
     };
@@ -44,15 +99,33 @@ function buildContextSnippet(pathname: string): ContextSnippet | null {
   if (studioMatch && studioMatch[1] !== 'build') {
     const slug = studioMatch[1];
     return {
+      kind: 'snippet',
       label: `For this app (${slug})`,
       snippet: `floom deploy ${slug}`,
     };
   }
-  // /me + sub-pages — generic agent snippet
+  // /me + sub-pages — token-aware. Anon users skip row 3 entirely (no
+  // auth context). Authed users with tokens get a real command + helper
+  // note. Authed users with 0 tokens get a CTA to mint one.
   if (pathname === '/me' || pathname.startsWith('/me/')) {
+    if (authedAndHasTokens === null) {
+      // Not authed — hide row 3.
+      return null;
+    }
+    if (authedAndHasTokens) {
+      return {
+        kind: 'snippet',
+        label: 'For this page (your account)',
+        snippet: `floom auth login --token ${FLOOM_TOKEN_PLACEHOLDER}\nfloom apps list`,
+      };
+    }
     return {
+      kind: 'cta',
       label: 'For this page (your account)',
-      snippet: `floom auth login\nfloom apps list`,
+      helper:
+        'Floom apps need an agent token to call from Claude or Cursor.',
+      ctaText: 'Mint an agent token first →',
+      ctaHref: AGENT_KEYS_PATH,
     };
   }
   // Elsewhere: hide row 3
@@ -100,10 +173,57 @@ const snippetStyle: CSSProperties = {
   border: '1px solid var(--line)',
   borderRadius: 6,
   padding: '8px 10px',
+  // Pretty-printed JSON spans multiple lines so the snippet fits the
+  // 380px popover width without truncation. Keep overflowX:auto as a
+  // belt-and-braces fallback for unusually long lines (e.g. tokens
+  // glued back into a single line if a future snippet rebuilds inline).
   overflowX: 'auto',
   whiteSpace: 'pre',
   lineHeight: 1.45,
   margin: 0,
+};
+
+// Helper note above an MCP/agent-token snippet. Plain prose, slightly
+// muted, smaller than the body so it reads as guidance not as a
+// snippet body.
+const helperNoteStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: 'var(--muted)',
+  lineHeight: 1.45,
+  margin: 0,
+};
+
+const inlineCodeStyle: CSSProperties = {
+  fontFamily:
+    '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: 11,
+  background: 'var(--bg)',
+  border: '1px solid var(--line)',
+  borderRadius: 4,
+  padding: '0 4px',
+  color: 'var(--ink)',
+};
+
+const inlineLinkStyle: CSSProperties = {
+  color: 'var(--accent)',
+  textDecoration: 'underline',
+  fontWeight: 500,
+};
+
+// Mint-token CTA: row 3 replaces the snippet pre with a clear text link
+// to /me/agent-keys for authed users with 0 tokens.
+const ctaLinkStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  alignSelf: 'flex-start',
+  padding: '6px 10px',
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--accent)',
+  background: 'var(--accent-soft)',
+  border: '1px solid var(--accent-border)',
+  textDecoration: 'none',
 };
 
 interface Props {
@@ -122,9 +242,35 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
 
+  // Auth-aware: anon users get the URL-only MCP snippet (no token yet to
+  // bind) and skip row 3 on /me*. Authed users get the Authorization-
+  // header form so copy-paste works, and row 3 branches on whether they
+  // already have an agent token minted.
+  const { isAuthenticated } = useSession();
+  // Only fire /auth/api-key/list for authed users. Anon visitors would
+  // get a 401 from the endpoint and we don't need the data — row 3 hides
+  // entirely on /me* for them anyway.
+  const { tokens, loading: tokensLoading } = useAgentTokens({
+    enabled: isAuthenticated,
+  });
+  // Resolved auth-and-token signal for contextRow:
+  //   null  → not authed (anon) → row 3 hides on /me*
+  //   true  → authed with ≥1 token → row 3 shows real snippet + helper
+  //   false → authed with 0 tokens → row 3 shows mint-token CTA
+  // While the token list is loading we treat it as null to avoid a flash
+  // of the CTA before the cache hydrates. Settled state then renders
+  // correctly without a re-mount.
+  const authedAndHasTokens: boolean | null = !isAuthenticated
+    ? null
+    : tokens === null || tokensLoading
+    ? null
+    : tokens.length > 0;
+
+  const mcpConfigSnippet = isAuthenticated ? MCP_CONFIG_AUTHED : MCP_CONFIG_ANON;
+
   const contextRow = useMemo(
-    () => buildContextSnippet(location.pathname),
-    [location.pathname],
+    () => buildContextRow(location.pathname, authedAndHasTokens),
+    [location.pathname, authedAndHasTokens],
   );
 
   // Click outside to close
@@ -298,6 +444,8 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
           >
             <PopoverContents
               contextRow={contextRow}
+              mcpConfigSnippet={mcpConfigSnippet}
+              isAuthenticated={isAuthenticated}
               CopyButton={CopyButton}
             />
           </div>
@@ -337,7 +485,12 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
           data-testid="mcp-popover"
           style={popoverStyle}
         >
-          <PopoverContents contextRow={contextRow} CopyButton={CopyButton} />
+          <PopoverContents
+            contextRow={contextRow}
+            mcpConfigSnippet={mcpConfigSnippet}
+            isAuthenticated={isAuthenticated}
+            CopyButton={CopyButton}
+          />
         </div>
       )}
     </div>
@@ -346,9 +499,13 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
 
 function PopoverContents({
   contextRow,
+  mcpConfigSnippet,
+  isAuthenticated,
   CopyButton,
 }: {
-  contextRow: ContextSnippet | null;
+  contextRow: ContextRow | null;
+  mcpConfigSnippet: string;
+  isAuthenticated: boolean;
   CopyButton: (props: { rowKey: string; text: string }) => JSX.Element;
 }) {
   return (
@@ -356,9 +513,26 @@ function PopoverContents({
       <div style={rowStyle} data-testid="mcp-row-mcp">
         <div style={rowLabelStyle}>
           <span>MCP server config</span>
-          <CopyButton rowKey="mcp" text={MCP_CONFIG_SNIPPET} />
+          <CopyButton rowKey="mcp" text={mcpConfigSnippet} />
         </div>
-        <pre style={snippetStyle}>{MCP_CONFIG_SNIPPET}</pre>
+        {/* Authed users get the Authorization-header form. Show a one-
+            liner above the JSON pointing at /me/agent-keys so the
+            placeholder isn't a dead-end. */}
+        {isAuthenticated && (
+          <div style={helperNoteStyle} data-testid="mcp-row-mcp-note">
+            Replace <code style={inlineCodeStyle}>{FLOOM_TOKEN_PLACEHOLDER}</code>{' '}
+            with one from{' '}
+            <Link
+              to={AGENT_KEYS_PATH}
+              style={inlineLinkStyle}
+              data-testid="mcp-row-mcp-token-link"
+            >
+              {AGENT_KEYS_PATH}
+            </Link>
+            .
+          </div>
+        )}
+        <pre style={snippetStyle}>{mcpConfigSnippet}</pre>
       </div>
       <div
         aria-hidden="true"
@@ -386,11 +560,53 @@ function PopoverContents({
             }}
           />
           <div style={rowStyle} data-testid="mcp-row-context">
-            <div style={rowLabelStyle}>
-              <span>{contextRow.label}</span>
-              <CopyButton rowKey="context" text={contextRow.snippet} />
-            </div>
-            <pre style={snippetStyle}>{contextRow.snippet}</pre>
+            {contextRow.kind === 'snippet' ? (
+              <>
+                <div style={rowLabelStyle}>
+                  <span>{contextRow.label}</span>
+                  <CopyButton rowKey="context" text={contextRow.snippet} />
+                </div>
+                {/* Token-aware helper: only on /me* snippets. Other
+                    contexts (/p/:slug, /studio/:slug) skip the note —
+                    their snippets don't bind to a token. */}
+                {contextRow.snippet.includes(FLOOM_TOKEN_PLACEHOLDER) && (
+                  <div
+                    style={helperNoteStyle}
+                    data-testid="mcp-row-context-note"
+                  >
+                    Use your agent token from{' '}
+                    <Link
+                      to={AGENT_KEYS_PATH}
+                      style={inlineLinkStyle}
+                      data-testid="mcp-row-context-token-link"
+                    >
+                      {AGENT_KEYS_PATH}
+                    </Link>
+                    .
+                  </div>
+                )}
+                <pre style={snippetStyle}>{contextRow.snippet}</pre>
+              </>
+            ) : (
+              <>
+                <div style={rowLabelStyle}>
+                  <span>{contextRow.label}</span>
+                </div>
+                <div
+                  style={helperNoteStyle}
+                  data-testid="mcp-row-context-helper"
+                >
+                  {contextRow.helper}
+                </div>
+                <Link
+                  to={contextRow.ctaHref}
+                  style={ctaLinkStyle}
+                  data-testid="mcp-row-context-cta"
+                >
+                  {contextRow.ctaText}
+                </Link>
+              </>
+            )}
           </div>
         </>
       )}
