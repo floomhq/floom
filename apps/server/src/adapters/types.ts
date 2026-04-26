@@ -6,6 +6,8 @@ export type {
   AppVisibilityState,
   AsyncMode,
   AuthAdapter,
+  AuthMagicLinkSentResult,
+  AuthSessionResult,
   AuthConfig,
   AuthType,
   ErrorType,

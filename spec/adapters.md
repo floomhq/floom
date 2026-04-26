@@ -136,8 +136,9 @@ The reference impl is `apps/server/src/lib/better-auth.ts`, which wraps Better A
 ```ts
 interface AuthAdapter {
   getSession(request: Request): Promise<SessionContext | null>;
-  signIn(input: { email; password }): Promise<{ session, set_cookie?, token? }>;
-  signUp(input: { email; password; name? }): Promise<{ session, set_cookie?, token? }>;
+  signIn(input: { email; password? }): Promise<{ session, set_cookie?, token? } | { status: 'magic-link-sent', email }>;
+  signUp(input: { email; password?; name? }): Promise<{ session, set_cookie?, token? } | { status: 'magic-link-sent', email }>;
+  verifyMagicLink?(token: string): Promise<{ session, set_cookie?, token?, user_id?, session_token? } | null>;
   signOut(session: SessionContext): Promise<void>;
   onUserDelete(cb: (user_id: string) => void | Promise<void>): void;
 }
@@ -147,6 +148,7 @@ interface AuthAdapter {
 
 - `getSession` returns `null` (not a fake SessionContext) for unauthenticated requests in cloud mode so the middleware can return 401. In OSS mode it MAY always return the local context.
 - A successful sign-in MUST emit a cookie or token that `getSession` can later resolve. The adapter owns the cookie name / header format; callers never inspect it directly.
+- Some adapters are not password-based. A magic-link adapter MAY return `{ status: 'magic-link-sent', email }` from `signIn` / `signUp`, then expose `verifyMagicLink(token)` as the completion step that emits the resolvable cookie or token.
 - `onUserDelete` runs AFTER the account row is gone, not before — callers use it to cascade-delete per-user rows (`app_memory`, `user_secrets`, `connections`).
 
 ### What Floom actually needs
@@ -157,7 +159,11 @@ Only three things:
 2. Sign in / up / out.
 3. An account-deletion hook.
 
-The adapter does NOT need to expose MFA, magic link, passkeys, OAuth provider enumeration, session rotation policies, or rate limits. Those are adapter-internal details. An Auth0 / Clerk / Supabase Auth / custom JWT adapter all fit.
+The adapter does NOT need to expose MFA, passkeys, OAuth provider enumeration, session rotation policies, or rate limits. Those are adapter-internal details. Passwordless adapters fit as long as Floom gets the same session context after the adapter-specific completion step.
+
+### Extensions
+
+- `verifyMagicLink(token)` is optional and only required for magic-link-style adapters. It validates the one-time token, consumes it, marks the storage-backed user as verified when the backend supports that state, and returns a normal session result with a JWT/cookie that `getSession` can resolve.
 
 ---
 
@@ -288,7 +294,7 @@ Reference suite: `test/stress/test-adapters-storage-contract.mjs`. Related cover
 A conformant `AuthAdapter` MUST pass:
 
 - **null on unauthenticated**: `getSession(new Request(url))` with no cookie / no Authorization header returns `null`. In OSS-single-user mode the adapter MAY return the synthetic local context instead; the suite detects mode via an env flag and skips this assertion under `FLOOM_DEPLOYMENT_MODE=oss`.
-- **sign-in then resolve**: `signIn({ email, password })` returns a session + cookie/token; a follow-up request carrying that cookie/token to `getSession` returns a `SessionContext` with the same `user_id`.
+- **sign-in then resolve**: password adapters return a session + cookie/token from `signIn({ email, password })`; magic-link adapters return a sent-status and complete through `verifyMagicLink(token)`. In both modes, a follow-up request carrying the emitted cookie/token to `getSession` returns a `SessionContext` with the same `user_id`.
 - **sign-up creates a user**: `signUp({ email, password })` creates a row reachable via `storage.getUserByEmail(email)`.
 - **sign-out invalidates**: after `signOut(session)`, a request carrying the old cookie/token resolves to `null` via `getSession`.
 - **`onUserDelete` fires after deletion**: registered callbacks are invoked after the account row is gone, not before. The suite asserts ordering by attempting `storage.getUser(user_id)` inside the callback and expecting `undefined`.

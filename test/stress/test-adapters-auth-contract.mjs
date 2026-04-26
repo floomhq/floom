@@ -27,6 +27,16 @@ process.env.BETTER_AUTH_SECRET =
 process.env.BETTER_AUTH_URL = 'http://localhost:3051';
 delete process.env.RESEND_API_KEY;
 
+const selectedAuthAdapter = process.env.FLOOM_CONFORMANCE_ADAPTER || '';
+const authMode =
+  process.env.FLOOM_AUTH_MODE ||
+  (selectedAuthAdapter.includes('auth-magic-link') ? 'magic-link' : 'password');
+process.env.FLOOM_AUTH_MODE = authMode;
+if (authMode === 'magic-link') {
+  process.env.FLOOM_AUTH_MAGIC_LINK_SEND = 'false';
+  process.env.FLOOM_AUTH_MAGIC_LINK_EXPOSE_TOKEN = 'true';
+}
+
 // Strip selection env vars for direct runs so the factory returns the
 // reference impls. The conformance runner sets FLOOM_CONFORMANCE_CONCERN to
 // preserve the selected concern under test.
@@ -54,6 +64,7 @@ betterAuth._resetAuthForTests();
 await betterAuth.runAuthMigrations();
 
 let passed = 0;
+let skipped = 0;
 let failed = 0;
 
 function ok(label) {
@@ -64,6 +75,19 @@ function ok(label) {
 function fail(label, reason) {
   failed++;
   console.log(`  FAIL  ${label}: ${reason}`);
+}
+
+function skip(label, reason) {
+  skipped++;
+  console.log(`  skip  ${label}: ${reason}`);
+}
+
+function isSessionResult(result) {
+  return !!(result && result.session && typeof result.session.user_id === 'string');
+}
+
+function isMagicLinkSent(result) {
+  return result?.status === 'magic-link-sent' && typeof result.email === 'string';
 }
 
 function rowCount(sql, ...params) {
@@ -106,19 +130,30 @@ try {
         password: 'hunter2-hunter2',
         name: 'Contract Signup',
       });
-      const userRows = rowCount(
-        `SELECT COUNT(*) AS n FROM "user" WHERE "email" = ?`,
-        email,
-      );
-      const hasSession =
-        !!(result && result.session && typeof result.session.user_id === 'string');
-      if (userRows >= 1 && hasSession) {
-        ok(label);
+      if (authMode === 'magic-link') {
+        const user = await adapters.storage.getUserByEmail(email);
+        if (user?.email === email && isMagicLinkSent(result)) {
+          ok(label);
+        } else {
+          fail(
+            label,
+            `storage_user=${JSON.stringify(user)}, status=${result?.status}`,
+          );
+        }
       } else {
-        fail(
-          label,
-          `user_rows=${userRows}, hasSession=${hasSession}`,
+        const userRows = rowCount(
+          `SELECT COUNT(*) AS n FROM "user" WHERE "email" = ?`,
+          email,
         );
+        const hasSession = isSessionResult(result);
+        if (userRows >= 1 && hasSession) {
+          ok(label);
+        } else {
+          fail(
+            label,
+            `user_rows=${userRows}, hasSession=${hasSession}`,
+          );
+        }
       }
     } catch (err) {
       fail(
@@ -155,16 +190,40 @@ try {
         // ignore — signIn is what we're checking here
       }
       const result = await adapters.auth.signIn({ email, password });
-      const hasSession =
-        !!(result && result.session && typeof result.session.user_id === 'string');
-      const hasToken = !!(result && (result.set_cookie || result.token));
-      if (hasSession && hasToken && result.session.is_authenticated === true) {
-        ok(label);
+      if (authMode === 'magic-link') {
+        const verified = await adapters.auth.verifyMagicLink?.(result?.debug_token || '');
+        const hasSentStatus = isMagicLinkSent(result);
+        const hasVerifiedSession = isSessionResult(verified);
+        const resolved = verified?.token
+          ? await adapters.auth.getSession(new Request('http://localhost:3051/api/anything', {
+              headers: new Headers({
+                authorization: `Bearer ${verified.token}`,
+              }),
+            }))
+          : null;
+        if (
+          hasSentStatus &&
+          hasVerifiedSession &&
+          resolved?.user_id === verified.session.user_id
+        ) {
+          ok(label);
+        } else {
+          fail(
+            label,
+            `hasSentStatus=${hasSentStatus}, hasVerifiedSession=${hasVerifiedSession}, resolved=${JSON.stringify(resolved)}`,
+          );
+        }
       } else {
-        fail(
-          label,
-          `hasSession=${hasSession}, hasToken=${hasToken}, is_authenticated=${result?.session?.is_authenticated}`,
-        );
+        const hasSession = isSessionResult(result);
+        const hasToken = !!(result && (result.set_cookie || result.token));
+        if (hasSession && hasToken && result.session.is_authenticated === true) {
+          ok(label);
+        } else {
+          fail(
+            label,
+            `hasSession=${hasSession}, hasToken=${hasToken}, is_authenticated=${result?.session?.is_authenticated}`,
+          );
+        }
       }
     } catch (err) {
       fail(
@@ -189,13 +248,24 @@ try {
     try {
       await adapters.auth.signUp({ email, password, name: 'Contract Signout' });
       const signedIn = await adapters.auth.signIn({ email, password });
-      const cookie = firstCookieFromSetCookie(signedIn.set_cookie);
-      await adapters.auth.signOut(signedIn.session);
+      const verified =
+        authMode === 'magic-link'
+          ? await adapters.auth.verifyMagicLink?.(signedIn?.debug_token || '')
+          : signedIn;
+      const cookie = firstCookieFromSetCookie(verified?.set_cookie);
+      await adapters.auth.signOut(verified.session);
+      const headers =
+        authMode === 'magic-link'
+          ? new Headers({
+              authorization: `Bearer ${verified.token}`,
+              host: 'localhost:3051',
+            })
+          : new Headers({
+              cookie,
+              host: 'localhost:3051',
+            });
       const after = await adapters.auth.getSession(new Request('http://localhost:3051/api/anything', {
-        headers: new Headers({
-          cookie,
-          host: 'localhost:3051',
-        }),
+        headers,
       }));
       if (after === null) {
         ok(label);
@@ -226,6 +296,12 @@ try {
     const label = 'onUserDelete fires listeners';
     const invocations = [];
     try {
+      if (authMode === 'magic-link') {
+        skip(
+          label,
+          'magic-link stores users through StorageAdapter, whose protocol 0.2 surface has no deleteUser event',
+        );
+      } else {
       adapters.auth.onUserDelete((user_id) => {
         invocations.push(user_id);
       });
@@ -253,6 +329,7 @@ try {
           label,
           `invocations=${JSON.stringify(invocations)}, expected=${signedUp.session.user_id}`,
         );
+      }
       }
     } catch (err) {
       fail(
@@ -300,6 +377,6 @@ try {
 }
 
 console.log(
-  `\n${passed} passing, ${failed} failing`,
+  `\n${passed} passing, ${skipped} skipped, ${failed} failing`,
 );
 process.exit(failed === 0 ? 0 : 1);

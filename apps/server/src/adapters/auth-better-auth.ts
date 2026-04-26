@@ -115,9 +115,16 @@ function sessionContextFromEmailResult(result: AuthEmailResult): SessionContext 
   };
 }
 
+function requirePassword(password: string | undefined, method: string): string {
+  if (!password) {
+    throw new Error(`AuthAdapter.${method} requires a password for better-auth.`);
+  }
+  return password;
+}
+
 async function signInWithBetterAuth(input: {
   email: string;
-  password: string;
+  password?: string;
 }): Promise<{
   session: SessionContext;
   set_cookie?: string;
@@ -135,11 +142,12 @@ async function signInWithBetterAuth(input: {
       },
     };
   }
+  const password = requirePassword(input.password, 'signIn');
   const { response, headers } = unwrapAuthResult<AuthEmailResult>(
     (await auth.api.signInEmail({
       body: {
         email: input.email,
-        password: input.password,
+        password,
         rememberMe: true,
       },
       headers: authCallHeaders(),
@@ -218,6 +226,7 @@ export const betterAuthAdapter: AuthAdapter = {
         },
       };
     }
+    const password = requirePassword(input.password, 'signUp');
     const normalizedEmail = input.email.toLowerCase();
     const existingUser = db
       .prepare(`SELECT "id" FROM "user" WHERE "email" = ?`)
@@ -228,7 +237,7 @@ export const betterAuthAdapter: AuthAdapter = {
     await auth.api.signUpEmail({
       body: {
         email: input.email,
-        password: input.password,
+        password,
         name: input.name || input.email,
         rememberMe: true,
       },

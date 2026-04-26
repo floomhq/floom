@@ -55,7 +55,7 @@ That's the whole pattern. The factory picks the impl, the adapter conforms to th
 ## What is NOT in this PR
 
 - **Call-site migration.** Routes and services in `routes/*` and `services/*` still import `db`, `runner`, `userSecrets` directly. The adapter bundle exists and is callable, but the 50+ existing call sites are not refactored yet. That is deliberately scoped to a follow-on PR so this one can land fast.
-- **New concrete adapters.** Only the reference impls (`docker`, `proxy`, `sqlite`, `better-auth`, `local`, `console`) are registered. A Postgres `StorageAdapter` is the natural next target.
+- **New concrete adapters.** The reference impls (`docker`, `proxy`, `sqlite`, `better-auth`, `local`, `console`) remain the only in-tree registry values. First-party package adapters such as Postgres storage and magic-link auth are loaded through the same dynamic import path used by third-party adapters.
 
 ## Proof-of-pattern call site
 
@@ -147,6 +147,11 @@ pnpm test:conformance --concern runtime --adapter ./local-adapters/runtime-k8s.j
 ```
 
 The runner prints the suite output and exits non-zero when any assertion fails.
+
+## Known adapters
+
+- `@floomhq/storage-postgres`: first-party Postgres `StorageAdapter` package for protocol 0.2.
+- `@floomhq/auth-magic-link`: first-party Resend-backed magic-link `AuthAdapter` package for protocol 0.2. It stores users, one-time magic-link tokens, and JWT revocations through the configured `StorageAdapter`, so auth and storage remain separate concerns.
 
 ### 4. Wire it into a local Floom server
 

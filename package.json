@@ -13,6 +13,7 @@
     "lint": "turbo lint"
   },
   "devDependencies": {
+    "@floomhq/auth-magic-link": "workspace:*",
     "@floomhq/storage-postgres": "workspace:*",
     "react": "18.3.1",
     "react-dom": "18.3.1",

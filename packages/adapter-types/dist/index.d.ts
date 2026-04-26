@@ -273,23 +273,27 @@ export interface AuthAdapter {
     getSession(request: Request): Promise<SessionContext | null>;
     signIn(input: {
         email: string;
-        password: string;
-    }): Promise<{
-        session: SessionContext;
-        set_cookie?: string;
-        token?: string;
-    }>;
+        password?: string;
+    }): Promise<AuthSessionResult | AuthMagicLinkSentResult>;
     signUp(input: {
         email: string;
-        password: string;
+        password?: string;
         name?: string;
-    }): Promise<{
-        session: SessionContext;
-        set_cookie?: string;
-        token?: string;
-    }>;
+    }): Promise<AuthSessionResult | AuthMagicLinkSentResult>;
+    verifyMagicLink?(token: string): Promise<AuthSessionResult | null>;
     signOut(session: SessionContext): Promise<void>;
     onUserDelete(cb: (user_id: string) => void | Promise<void>): void;
+}
+export interface AuthSessionResult {
+    session: SessionContext;
+    set_cookie?: string;
+    token?: string;
+    user_id?: string;
+    session_token?: string;
+}
+export interface AuthMagicLinkSentResult {
+    status: 'magic-link-sent';
+    email: string;
 }
 export interface SecretsAdapter {
     get(ctx: SessionContext, key: string): string | null;
