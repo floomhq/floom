@@ -29,6 +29,8 @@ Zero behavior change under the default configuration. Every env var defaults to 
 | `FLOOM_SECRETS`          | `local`        | `local`           | `adapters/secrets-local.ts`                |
 | `FLOOM_OBSERVABILITY`    | `console`      | `console`         | `adapters/observability-console.ts`        |
 
+Known first-party optional adapters include `@floomhq/storage-postgres` for Postgres-backed storage and `@floomhq/observability-otel` for OpenTelemetry metrics and error events. The OpenTelemetry adapter stays out of `@floom/server` dependencies; install it only on deployments that export to an OTLP collector.
+
 Values starting with `@` or containing `/` are treated as third-party module specifiers and loaded with dynamic `import()` at boot:
 
 ```bash
