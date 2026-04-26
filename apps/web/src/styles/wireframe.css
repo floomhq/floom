@@ -2508,12 +2508,176 @@ input { font-family: inherit; }
   position: relative;
   background: linear-gradient(135deg, var(--bg) 0%, var(--studio) 100%);
   border-bottom: 1px solid var(--line);
+}
+/* ── /me/apps (v23 PR-J — installed apps) ───────────────────
+   Editorial staggered grid with hero card + compact tiles. All
+   styles scoped to `.me-apps-page` so they don't bleed into other
+   /me sub-routes. Federico-locked: NO category tints on banners —
+   single neutral surface across every card. */
+.me-apps-page .ma-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.me-apps-page .ma-head h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 38px;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  margin: 0 0 6px;
+  color: var(--ink);
+}
+.me-apps-page .ma-head .lede {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.55;
+}
+.me-apps-page .ma-head .browse-store {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.me-apps-page .ma-head .browse-store:hover {
+  border-color: var(--line-hover);
+  background: var(--bg);
+}
+
+/* Filter strip — local-only category filter. Backend tags are deferred. */
+.me-apps-page .ma-filter {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.me-apps-page .ma-filter .ma-filter-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+}
+.me-apps-page .ma-filter .ma-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.me-apps-page .ma-filter .ma-folders {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  opacity: 0.75;
+}
+
+/* Tag chip — used in the filter strip (button) and on cards (read-only). */
+.me-apps-page .tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: default;
+}
+.me-apps-page .ma-filter .tag-chip {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 4px 11px;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.me-apps-page .ma-filter .tag-chip:hover {
+  border-color: var(--line-hover);
+  color: var(--ink);
+}
+.me-apps-page .ma-filter .tag-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Staggered grid: first card spans 2 cols, rest are 1 col. */
+.me-apps-page .ma-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.me-apps-page .ma-grid > .ma-card-hero {
+  grid-column: span 2;
+  grid-row: span 1;
+}
+@media (max-width: 900px) {
+  .me-apps-page .ma-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .me-apps-page .ma-grid > .ma-card-hero {
+    grid-column: span 2;
+  }
+}
+
+/* Card chrome. */
+.me-apps-page .ma-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.me-apps-page .ma-card:hover {
+  border-color: var(--line-hover);
+  box-shadow: var(--shadow-3);
+}
+.me-apps-page .ma-card .ma-card-link {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+  flex: 1;
+}
+
+/* Banner thumb — single neutral surface, NO category tints. */
+.me-apps-page .ma-card .thumb.app-banner {
+  position: relative;
+  height: 140px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, var(--studio) 0%, var(--card) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
 }
 .studio-page .apps-grid .app .thumb .cat-badge {
+}
+.me-apps-page .ma-card-hero .thumb.app-banner {
+  height: 240px;
+}
+.me-apps-page .ma-card .thumb-cap {
   position: absolute;
   top: 10px;
   left: 10px;
@@ -2522,6 +2686,7 @@ input { font-family: inherit; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-weight: 600;
+  color: var(--muted);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -2591,6 +2756,27 @@ input { font-family: inherit; }
   border-radius: 7px;
   background: var(--bg);
   border: 1px solid var(--line);
+}
+
+/* Card body. */
+.me-apps-page .ma-card .body {
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+.me-apps-page .ma-card .body .head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.me-apps-page .ma-card .body .app-ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3129,6 +3315,52 @@ input { font-family: inherit; }
 
 /* Status pill — saturated, matches v23 .status */
 .studio-page .status-pill {
+  color: var(--ink);
+}
+.me-apps-page .ma-card-hero .body .app-ic {
+  width: 38px;
+  height: 38px;
+}
+.me-apps-page .ma-card .body .meta {
+  flex: 1;
+  min-width: 0;
+}
+.me-apps-page .ma-card .body .nm {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.25;
+}
+.me-apps-page .ma-card-hero .body .nm {
+  font-size: 16px;
+}
+.me-apps-page .ma-card .body .stats {
+  margin-top: 2px;
+}
+.me-apps-page .ma-card .body .run-count-inline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.me-apps-page .ma-card .body .desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+.me-apps-page .ma-card .body .ma-spark {
+  height: 24px;
+  display: flex;
+  align-items: flex-end;
+}
+.me-apps-page .ma-card .body .tag-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Installed pill (hero card only). */
+.me-apps-page .ma-card .pill.pill-accent.installed-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -4383,6 +4615,222 @@ input { font-family: inherit; }
   .repo-bar { flex-wrap: wrap; }
   .lock-head, .conflict-card .head { flex-direction: column; }
   .install-cta .row { flex-wrap: wrap; }
+}
+
+/* Orphan from rebase union merge — duplicated installed-pill rules. Wrap in stub selector. */
+.me-apps-page .ma-card .pill.pill-accent.installed-pill-clone {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.me-apps-page .ma-card .pill.pill-accent.installed-pill .dot.dot-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Card foot row — last-run pill on the left, CTA on the right. */
+.me-apps-page .ma-card .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.me-apps-page .ma-card .foot .mono-tag.last-run {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.me-apps-page .ma-card .foot .btn.btn-accent.btn-sm {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.me-apps-page .ma-card .foot .btn.btn-accent.btn-sm:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.me-apps-page .ma-card .foot .open-link {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.me-apps-page .ma-card .foot .open-link:hover { color: var(--accent-hover); }
+
+/* Empty state. */
+.me-apps-page .ma-empty {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--card) 0%, var(--studio) 100%);
+  padding: 36px 24px;
+  text-align: center;
+}
+.me-apps-page .ma-empty h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+.me-apps-page .ma-empty p {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0 auto 18px;
+  max-width: 380px;
+  line-height: 1.55;
+}
+.me-apps-page .ma-empty .btn.btn-accent.btn-sm {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  text-decoration: none;
+}
+.me-apps-page .ma-empty .btn.btn-accent.btn-sm:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Mobile compact list (≤560px). Replaces the staggered grid with
+   single-column rows that match the v23 .m-list-item pattern. */
+.me-apps-page .ma-mobile-h1 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.me-apps-page .ma-mobile-meta {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.me-apps-page .m-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 0;
+  overflow: hidden;
+}
+.me-apps-page .m-card .m-list {
+  display: flex;
+  flex-direction: column;
+}
+.me-apps-page .m-list-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+}
+.me-apps-page .m-list-item:last-child { border-bottom: 0; }
+.me-apps-page .m-list-item .ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.me-apps-page .m-list-item .body { min-width: 0; }
+.me-apps-page .m-list-item .nm {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.me-apps-page .m-list-item .sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.me-apps-page .m-list-item .tag-chips {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.me-apps-page .m-list-item .tag-chips .tag-chip {
+  font-size: 10px;
+  padding: 2px 7px;
+}
+.me-apps-page .m-list-item .ma-spark {
+  width: 56px;
+  height: 22px;
+  display: flex;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+/* Mobile filter strip — overflow-x scroll, full bleed. */
+.me-apps-page .m-filter {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin: 0 -16px 14px;
+  padding: 0 16px;
+  scrollbar-width: none;
+}
+.me-apps-page .m-filter::-webkit-scrollbar { display: none; }
+.me-apps-page .m-filter .tag-chip {
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 4px 11px;
+  flex-shrink: 0;
+}
+.me-apps-page .m-filter .tag-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Loading skeleton card (kept for parity — same chrome as a real card). */
+.me-apps-page .ma-loading {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 18px;
+  color: var(--muted);
+  font-size: 13.5px;
 }
 
 /* ── Reduced motion ──────────────────────────────────────── */
