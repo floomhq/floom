@@ -12,9 +12,10 @@
 //    runtime shape only.
 //  - other nested objects/arrays collapse to a one-line JSON preview
 //    and expose a "Show raw" disclosure via JsonRaw elsewhere.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CopyButton } from './CopyButton';
 import { SectionHeader } from './SectionHeader';
+import { ExpandIcon } from '../Icons';
 
 export interface RowTableProps {
   rows: Array<Record<string, unknown>>;
@@ -180,16 +181,77 @@ function renderCell(value: unknown): JSX.Element | string {
   return formatScalar(value);
 }
 
+function BaseTable({ columns, rows }: { columns: string[]; rows: Array<Record<string, unknown>> }) {
+  return (
+    <table
+      style={{
+        width: '100%',
+        borderCollapse: 'collapse',
+        fontSize: 13,
+        lineHeight: 1.5,
+      }}
+    >
+      <thead>
+        <tr>
+          {columns.map((col) => (
+            <th
+              key={col}
+              style={{
+                position: 'sticky',
+                top: 0,
+                background: 'var(--card)',
+                borderBottom: '1px solid var(--line)',
+                textAlign: 'left',
+                padding: '10px 12px',
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                color: 'var(--muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                fontWeight: 600,
+                zIndex: 1,
+              }}
+            >
+              {humanizeKey(col)}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr
+            key={i}
+            style={{
+              borderTop: i === 0 ? 'none' : '1px solid var(--line)',
+            }}
+          >
+            {columns.map((col) => (
+              <td
+                key={col}
+                style={{
+                  padding: '8px 12px',
+                  color: 'var(--ink)',
+                  wordBreak: 'break-word',
+                  verticalAlign: 'top',
+                }}
+              >
+                {renderCell(row[col])}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runId }: RowTableProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const visible = rows.slice(0, maxRows);
   const extra = rows.length - visible.length;
   const columns = deriveColumns(visible, maxCols);
   const copyValue = JSON.stringify(rows, null, 2);
 
-  // Issue #282: biz users want "a scored version of their spreadsheet",
-  // not a JSON blob. Generate the CSV from ALL rows (not just the
-  // visible slice), so the file is complete even when the table truncates
-  // at maxRows. Client-side Blob + anchor download, no new dependency.
   const downloadCsv = () => {
     const csv = rowsToCsv(rows, columns);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -200,15 +262,45 @@ export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runI
     const a = document.createElement('a');
     a.href = url;
     a.download = fileName;
-    // Firefox needs the anchor in the DOM for the click to trigger.
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // Release the object URL on the next tick so the download has time
-    // to kick off. Not strictly necessary but avoids a mem leak on long
-    // sessions where the user downloads many runs.
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+
+  const actionButtons = (
+    <>
+      <button
+        type="button"
+        className="output-copy-btn"
+        onClick={() => setIsExpanded(true)}
+        title="Expand to full screen"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 8px',
+        }}
+      >
+        <ExpandIcon size={12} />
+        Expand
+      </button>
+      <button
+        type="button"
+        data-testid="row-table-download-csv"
+        className="output-copy-btn"
+        onClick={downloadCsv}
+        disabled={rows.length === 0}
+        style={{
+          cursor: rows.length === 0 ? 'not-allowed' : 'pointer',
+          opacity: rows.length === 0 ? 0.5 : 1,
+        }}
+      >
+        Download CSV
+      </button>
+      <CopyButton value={copyValue} label="Copy JSON" />
+    </>
+  );
 
   return (
     <div
@@ -220,84 +312,10 @@ export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runI
         label={label ?? 'Rows'}
         hint={label ? `${rows.length} rows` : undefined}
         bordered
-        actions={
-          <>
-            <button
-              type="button"
-              data-testid="row-table-download-csv"
-              className="output-copy-btn"
-              onClick={downloadCsv}
-              disabled={rows.length === 0}
-              style={{
-                cursor: rows.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: rows.length === 0 ? 0.5 : 1,
-              }}
-            >
-              Download CSV
-            </button>
-            <CopyButton value={copyValue} label="Copy JSON" />
-          </>
-        }
+        actions={actionButtons}
       />
       <div style={{ maxHeight: 480, overflow: 'auto' }}>
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          <thead>
-            <tr>
-              {columns.map((col) => (
-                <th
-                  key={col}
-                  style={{
-                    position: 'sticky',
-                    top: 0,
-                    background: 'var(--card)',
-                    borderBottom: '1px solid var(--line)',
-                    textAlign: 'left',
-                    padding: '10px 12px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    fontSize: 11,
-                    color: 'var(--muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    fontWeight: 600,
-                  }}
-                >
-                  {humanizeKey(col)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((row, i) => (
-              <tr
-                key={i}
-                style={{
-                  borderTop: i === 0 ? 'none' : '1px solid var(--line)',
-                }}
-              >
-                {columns.map((col) => (
-                  <td
-                    key={col}
-                    style={{
-                      padding: '8px 12px',
-                      color: 'var(--ink)',
-                      wordBreak: 'break-word',
-                      verticalAlign: 'top',
-                    }}
-                  >
-                    {renderCell(row[col])}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <BaseTable columns={columns} rows={visible} />
       </div>
       {extra > 0 && (
         <div
@@ -312,6 +330,125 @@ export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runI
           + {extra} more
         </div>
       )}
+
+      {isExpanded && (
+        <TableExpandModal
+          label={label ?? 'Rows'}
+          rows={rows}
+          columns={deriveColumns(rows, 20)} // Show up to 20 columns in expanded view
+          onClose={() => setIsExpanded(false)}
+          downloadCsv={downloadCsv}
+          copyValue={copyValue}
+        />
+      )}
+    </div>
+  );
+}
+
+function TableExpandModal({
+  label,
+  rows,
+  columns,
+  onClose,
+  downloadCsv,
+  copyValue,
+}: {
+  label: string;
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+  onClose: () => void;
+  downloadCsv: () => void;
+  copyValue: string;
+}) {
+  // Close on Escape
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  // Prevent body scroll
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow || 'unset';
+    };
+  }, []);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px 16px',
+        backdropFilter: 'blur(2px)',
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--card)',
+          border: '1px solid var(--line)',
+          borderRadius: 16,
+          width: '95vw',
+          maxWidth: 1400,
+          maxHeight: '90vh',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <SectionHeader
+          label={label}
+          hint={`${rows.length} rows`}
+          bordered
+          actions={
+            <>
+              <button
+                type="button"
+                className="output-copy-btn"
+                onClick={downloadCsv}
+                disabled={rows.length === 0}
+              >
+                Download CSV
+              </button>
+              <CopyButton value={copyValue} label="Copy JSON" />
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--muted)',
+                  fontSize: 24,
+                  cursor: 'pointer',
+                  padding: '0 4px',
+                  lineHeight: 1,
+                  marginLeft: 4,
+                }}
+              >
+                ×
+              </button>
+            </>
+          }
+        />
+        <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg)' }}>
+          <BaseTable columns={columns} rows={rows} />
+        </div>
+      </div>
     </div>
   );
 }
