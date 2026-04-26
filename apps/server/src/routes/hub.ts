@@ -40,6 +40,7 @@ import {
   setHubCache,
 } from '../lib/hub-cache.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
+import { canAccessApp, canonicalVisibility } from '../services/sharing.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -798,8 +799,11 @@ hubRouter.get('/', (c) => {
                  FROM apps
                  LEFT JOIN users ON apps.author = users.id
                  WHERE apps.status = 'active'
-                   AND (apps.visibility = 'public' OR apps.visibility IS NULL)
-                   AND apps.publish_status = 'published'
+                   AND (
+                     apps.visibility = 'public_live'
+                     OR (apps.visibility = 'public' AND apps.publish_status = 'published')
+                     OR (apps.visibility IS NULL AND apps.publish_status = 'published')
+                   )
                    ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
   const rowsAll = (category
@@ -898,25 +902,16 @@ hubRouter.get('/:slug', async (c) => {
     | (AppRecord & { author_name: string | null; author_email: string | null })
     | undefined;
   if (!row) return c.json({ error: 'App not found' }, 404);
-  // Private app? Only reveal to its owner. Return 404 (not 403) so we
-  // don't leak the slug's existence to strangers.
-  if (row.visibility === 'private') {
-    const ctx = await resolveUserContext(c);
-    if (!row.author || ctx.user_id !== row.author) {
-      return c.json({ error: 'App not found' }, 404);
-    }
+  const ctx = await resolveUserContext(c);
+  if (
+    !canAccessApp(row, ctx, c.req.query('key') || null) &&
+    !(row.visibility === 'auth-required')
+  ) {
+    return c.json({ error: 'App not found' }, 404);
   }
-  // Manual publish-review gate (#362): non-published public/auth-required
-  // apps are only reachable by their owner. Strangers get a 404 so we
-  // don't leak that a pending_review slug exists. Private apps already
-  // passed their own owner check above and are exempt from this gate
-  // (publish_status is orthogonal to visibility).
-  if (row.visibility !== 'private' && row.publish_status !== 'published') {
-    const ctx = await resolveUserContext(c);
+  if (row.visibility === 'auth-required' && row.publish_status !== 'published') {
     const isOwner = !!row.author && ctx.user_id === row.author;
-    if (!isOwner) {
-      return c.json({ error: 'App not found' }, 404);
-    }
+    if (!isOwner) return c.json({ error: 'App not found' }, 404);
   }
   const manifest = safeManifest(row.manifest);
   const bundle = getBundleResult(slug);
@@ -949,7 +944,7 @@ hubRouter.get('/:slug', async (c) => {
     // Visibility (public | unlisted | private). Surfaced so the web client
     // can render visibility pills and gate private-only UI (e.g. /me/apps/:slug
     // console) without re-fetching from a separate endpoint.
-    visibility: row.visibility,
+    visibility: canonicalVisibility(row.visibility),
     // Error taxonomy (2026-04-20): expose the upstream host so the
     // /p/:slug runner surface can render "Can't reach {host}" on a
     // network_unreachable failure instead of a generic "its backend"

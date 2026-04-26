@@ -427,7 +427,7 @@ export async function ingestAppFromDockerImage(args: {
     throw new SlugTakenError(slug, deriveSlugSuggestions(slug));
   }
 
-  // Visibility: default to private for cloud workspaces, public for OSS 'local'.
+  // Visibility: new published apps default to owner-only.
   let visibility: 'public' | 'private' | 'auth-required';
   if (args.visibility !== undefined) {
     visibility = args.visibility;
@@ -435,7 +435,7 @@ export async function ingestAppFromDockerImage(args: {
     visibility =
       (existing.visibility as 'public' | 'private' | 'auth-required') || 'private';
   } else {
-    visibility = args.workspace_id === 'local' ? 'public' : 'private';
+    visibility = 'private';
   }
 
   const description =

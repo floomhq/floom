@@ -74,9 +74,26 @@ if (!appCols.includes('openapi_spec_cached')) {
 if (!appCols.includes('auth_config')) {
   db.exec(`ALTER TABLE apps ADD COLUMN auth_config TEXT`);
 }
-// Per-app visibility: 'public' (default) or 'auth-required'.
+// Per-app visibility. New rows default to owner-only; legacy `public` and
+// `auth-required` rows are still understood by the runtime for migrations and
+// older self-host fixtures.
 if (!appCols.includes('visibility')) {
-  db.exec(`ALTER TABLE apps ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'`);
+  db.exec(`ALTER TABLE apps ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'`);
+}
+if (!appCols.includes('link_share_token')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN link_share_token TEXT`);
+}
+if (!appCols.includes('review_submitted_at')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_submitted_at TEXT`);
+}
+if (!appCols.includes('review_decided_at')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_decided_at TEXT`);
+}
+if (!appCols.includes('review_decided_by')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_decided_by TEXT REFERENCES users(id)`);
+}
+if (!appCols.includes('review_comment')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN review_comment TEXT`);
 }
 // Async job queue fields (v0.3.0) — nullable for backward compatibility.
 // When `is_async` is 1, calls go through the job queue (POST /api/:slug/jobs)
@@ -139,6 +156,40 @@ if (!appCols.includes('publish_status')) {
   db.exec(`UPDATE apps SET publish_status = 'published'`);
 }
 db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_publish_status ON apps(publish_status)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_visibility ON apps(visibility)`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_invites (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    invited_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    invited_email TEXT,
+    state TEXT NOT NULL CHECK (state IN ('pending_email', 'pending_accept', 'accepted', 'revoked', 'declined')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    accepted_at TEXT,
+    revoked_at TEXT,
+    invited_by_user_id TEXT NOT NULL REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_invites_app_user
+    ON app_invites(app_id, invited_user_id);
+  CREATE INDEX IF NOT EXISTS idx_app_invites_email
+    ON app_invites(invited_email);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_visibility_audit (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    actor_user_id TEXT NOT NULL REFERENCES users(id),
+    reason TEXT NOT NULL,
+    metadata TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_visibility_audit_app_created
+    ON app_visibility_audit(app_id, created_at DESC);
+`);
 
 // Store-catalog wireframe parity (2026-04-23). v17 `store.html` shows
 // each card with a 120px thumbnail, a star count, a runs-7d count, and
@@ -353,6 +404,37 @@ const userCols2 = (db.prepare(`PRAGMA table_info(users)`).all() as {
 if (!userCols2.includes('image')) {
   db.exec(`ALTER TABLE users ADD COLUMN image TEXT`);
 }
+if (!userCols2.includes('is_admin')) {
+  db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0`);
+}
+
+function normalizeAdminEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function isSeededAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalized = normalizeAdminEmail(email);
+  if (!normalized) return false;
+  return (process.env.FLOOM_ADMIN_EMAILS || '')
+    .split(',')
+    .map(normalizeAdminEmail)
+    .filter(Boolean)
+    .includes(normalized);
+}
+
+export function seedAdminUsersFromEnv(): void {
+  const emails = (process.env.FLOOM_ADMIN_EMAILS || '')
+    .split(',')
+    .map(normalizeAdminEmail)
+    .filter(Boolean);
+  if (emails.length === 0) return;
+  for (const email of emails) {
+    db.prepare(`UPDATE users SET is_admin = 1 WHERE LOWER(email) = ?`).run(email);
+  }
+}
+
+seedAdminUsersFromEnv();
 
 // ---------- workspace_members (user <-> workspace <-> role) ----------
 db.exec(`

@@ -18,6 +18,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import type { SessionContext } from '../types.js';
 import { getPresentedAgentToken } from './agent-tokens.js';
 import { isCloudMode } from './better-auth.js';
+import { canAccessApp } from '../services/sharing.js';
 
 // Actionable hints embedded in every 401/403 auth response. Single source
 // of truth so the ax-eval baseline fix (#536) can't drift across routes.
@@ -116,7 +117,15 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   return next();
 };
 
-export type AppVisibility = 'public' | 'auth-required' | 'private';
+export type AppVisibility =
+  | 'public'
+  | 'auth-required'
+  | 'private'
+  | 'link'
+  | 'invited'
+  | 'pending_review'
+  | 'public_live'
+  | 'changes_requested';
 
 /**
  * Per-app auth check. Call at the top of a route handler where `app` has
@@ -129,10 +138,37 @@ export type AppVisibility = 'public' | 'auth-required' | 'private';
 export function checkAppVisibility(
   c: Context,
   visibility: AppVisibility | string | null | undefined,
-  owner?: { author?: string | null; ctx?: SessionContext | null },
+  owner?: {
+    app_id?: string | null;
+    author?: string | null;
+    workspace_id?: string | null;
+    link_share_token?: string | null;
+    ctx?: SessionContext | null;
+  },
 ): Response | null {
   const v = (visibility || 'public') as AppVisibility;
-  if (v === 'public') return null;
+  if (v === 'public' || v === 'public_live') return null;
+
+  if (v === 'link' || v === 'invited' || v === 'pending_review' || v === 'changes_requested') {
+    const ctx = owner?.ctx ?? null;
+    const appId = owner?.app_id ?? null;
+    if (!ctx || !appId) {
+      return c.json({ error: 'App not found', code: 'not_found' }, 404);
+    }
+    const ok = canAccessApp(
+      {
+        id: appId,
+        author: owner?.author ?? null,
+        workspace_id: owner?.workspace_id ?? 'local',
+        visibility: v,
+        link_share_token: owner?.link_share_token ?? null,
+      },
+      ctx,
+      c.req.query('key') || null,
+    );
+    if (!ok) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+    return null;
+  }
 
   if (v === 'private') {
     const author = owner?.author ?? null;

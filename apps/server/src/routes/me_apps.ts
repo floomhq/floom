@@ -39,8 +39,21 @@ import { resolveUserContext } from '../services/session.js';
 import * as creatorSecrets from '../services/app_creator_secrets.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
 import { checkAppVisibility, requireAuthenticatedInCloud } from '../lib/auth.js';
+import { sendEmail, renderAppInviteEmail } from '../lib/email.js';
+import { invalidateHubCache } from '../lib/hub-cache.js';
+import {
+  canonicalVisibility,
+  findUserByEmail,
+  findUserByUsername,
+  isAppOwner,
+  listInvites,
+  transitionVisibility,
+  upsertInvite,
+  revokeInvite,
+} from '../services/sharing.js';
 import type {
   AppRecord,
+  AppVisibilityState,
   NormalizedManifest,
   SecretPolicy,
   SecretPolicyEntry,
@@ -77,6 +90,257 @@ function isOwner(
   return false;
 }
 
+function serializeInvite(invite: ReturnType<typeof listInvites>[number]) {
+  return {
+    id: invite.id,
+    invited_user_id: invite.invited_user_id,
+    invited_email: invite.invited_email,
+    state: invite.state,
+    created_at: invite.created_at,
+    accepted_at: invite.accepted_at,
+    revoked_at: invite.revoked_at,
+    invited_by_user_id: invite.invited_by_user_id,
+    invited_user_name: invite.invited_user_name ?? null,
+    invited_user_email: invite.invited_user_email ?? null,
+  };
+}
+
+function publicUrl(): string {
+  return (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3051}`).replace(/\/+$/, '');
+}
+
+const SharingPatchBody = z.object({
+  state: z.enum(['private', 'link', 'invited']),
+  comment: z.string().max(5000).optional(),
+  link_token_rotate: z.boolean().optional(),
+});
+
+meAppsRouter.get('/:slug/sharing', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+
+  return c.json({
+    slug: app.slug,
+    visibility: canonicalVisibility(app.visibility),
+    link_share_token: canonicalVisibility(app.visibility) === 'link' ? app.link_share_token : null,
+    invites: listInvites(app.id).map(serializeInvite),
+    review: {
+      submitted_at: app.review_submitted_at,
+      decided_at: app.review_decided_at,
+      decided_by: app.review_decided_by,
+      comment: app.review_comment,
+    },
+  });
+});
+
+meAppsRouter.patch('/:slug/sharing', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = SharingPatchBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() }, 400);
+  }
+
+  const to = parsed.data.state as AppVisibilityState;
+  const current = canonicalVisibility(app.visibility);
+  if (current === to && !(to === 'link' && parsed.data.link_token_rotate)) {
+    return c.json({ ok: true, slug: app.slug, visibility: current, link_share_token: app.link_share_token });
+  }
+
+  let nextApp: AppRecord;
+  try {
+    nextApp = transitionVisibility(app, to, {
+      actorUserId: ctx.user_id,
+      reason:
+        to === 'private'
+          ? current === 'public_live'
+            ? 'owner_unlist'
+            : 'owner_set_private'
+          : to === 'link'
+            ? 'owner_enable_link'
+            : 'owner_set_invited',
+      rotateLinkToken: parsed.data.link_token_rotate,
+      metadata: parsed.data.comment ? { comment: parsed.data.comment } : undefined,
+    });
+  } catch {
+    return c.json({ error: 'Illegal visibility transition', code: 'illegal_transition' }, 409);
+  }
+  invalidateHubCache();
+  return c.json({
+    ok: true,
+    slug: nextApp.slug,
+    visibility: canonicalVisibility(nextApp.visibility),
+    link_share_token: canonicalVisibility(nextApp.visibility) === 'link' ? nextApp.link_share_token : null,
+  });
+});
+
+const InviteBody = z
+  .object({
+    username: z.string().min(1).max(120).optional(),
+    email: z.string().email().optional(),
+  })
+  .refine((body) => Boolean(body.username) !== Boolean(body.email), {
+    message: 'Provide exactly one of username or email',
+  });
+
+meAppsRouter.get('/:slug/sharing/user-search', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+
+  const q = (c.req.query('q') || '').trim().toLowerCase();
+  if (q.length < 2) return c.json({ users: [] });
+  const users = db
+    .prepare(
+      `SELECT id, email, name
+         FROM users
+        WHERE LOWER(COALESCE(name, '')) LIKE ?
+           OR LOWER(COALESCE(email, '')) LIKE ?
+        ORDER BY name, email
+        LIMIT 10`,
+    )
+    .all(`%${q}%`, `%${q}%`) as Array<{ id: string; email: string | null; name: string | null }>;
+  return c.json({ users });
+});
+
+meAppsRouter.post('/:slug/sharing/invite', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = InviteBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() }, 400);
+  }
+
+  let invite;
+  if (parsed.data.username) {
+    const user = findUserByUsername(parsed.data.username);
+    if (!user) return c.json({ error: 'User not found', code: 'user_not_found' }, 404);
+    invite = upsertInvite({
+      appId: app.id,
+      invitedByUserId: ctx.user_id,
+      invitedUserId: user.id,
+      invitedEmail: user.email,
+      state: 'pending_accept',
+    });
+  } else {
+    const email = parsed.data.email!.trim().toLowerCase();
+    const user = findUserByEmail(email);
+    invite = upsertInvite({
+      appId: app.id,
+      invitedByUserId: ctx.user_id,
+      invitedUserId: user?.id || null,
+      invitedEmail: email,
+      state: user ? 'pending_accept' : 'pending_email',
+    });
+    if (!user) {
+      const inviter = db.prepare(`SELECT name, email FROM users WHERE id = ?`).get(ctx.user_id) as
+        | { name: string | null; email: string | null }
+        | undefined;
+      const rendered = renderAppInviteEmail({
+        appName: app.name,
+        inviterName: inviter?.name || inviter?.email || null,
+        acceptUrl: `${publicUrl()}/login?invite_id=${encodeURIComponent(invite.id)}`,
+      });
+      await sendEmail({ to: email, ...rendered });
+    }
+  }
+
+  if (canonicalVisibility(app.visibility) === 'private') {
+    try {
+      transitionVisibility(app, 'invited', {
+        actorUserId: ctx.user_id,
+        reason: 'owner_set_invited',
+        metadata: { invite_id: invite.id },
+      });
+      invalidateHubCache();
+    } catch {
+      // Existing review/public states keep their current visibility; the invite
+      // remains available if the owner later switches to invited.
+    }
+  }
+
+  return c.json({ ok: true, invite: serializeInvite(invite) }, 201);
+});
+
+meAppsRouter.post('/:slug/sharing/invite/:invite_id/revoke', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  const invite = revokeInvite(c.req.param('invite_id') || '', app.id);
+  if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
+  return c.json({ ok: true, invite: serializeInvite(invite) });
+});
+
+meAppsRouter.post('/:slug/sharing/submit-review', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  try {
+    const next = transitionVisibility(app, 'pending_review', {
+      actorUserId: ctx.user_id,
+      reason: canonicalVisibility(app.visibility) === 'changes_requested' ? 'owner_resubmit_review' : 'owner_submit_review',
+    });
+    invalidateHubCache();
+    return c.json({ ok: true, slug: next.slug, visibility: canonicalVisibility(next.visibility) });
+  } catch {
+    return c.json({ error: 'Illegal visibility transition', code: 'illegal_transition' }, 409);
+  }
+});
+
+meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  try {
+    const next = transitionVisibility(app, 'private', {
+      actorUserId: ctx.user_id,
+      reason: 'owner_withdraw_review',
+    });
+    invalidateHubCache();
+    return c.json({ ok: true, slug: next.slug, visibility: canonicalVisibility(next.visibility) });
+  } catch {
+    return c.json({ error: 'Illegal visibility transition', code: 'illegal_transition' }, 409);
+  }
+});
+
 /**
  * GET /api/me/apps/:slug/secret-policies
  *
@@ -96,7 +360,10 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   const app = loadApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
     ctx,
   });
   if (blocked) return blocked;

@@ -526,3 +526,52 @@ export function renderWaitlistConfirmationEmail(
     text,
   };
 }
+
+export interface AppInviteTemplateInput {
+  appName: string;
+  inviterName?: string | null;
+  acceptUrl: string;
+}
+
+export function renderAppInviteEmail(input: AppInviteTemplateInput): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const subject = `You're invited to ${input.appName} on Floom`;
+  const inviter = input.inviterName || 'A Floom user';
+  const safeAppName = escapeHtml(input.appName);
+  const safeInviter = escapeHtml(inviter);
+
+  const body = [
+    bodyParagraph(`${safeInviter} invited you to run <strong>${safeAppName}</strong> on Floom.`),
+    bodyParagraph(
+      'Create or sign in to your account, then accept the invite to get access.',
+    ),
+    ctaButton(input.acceptUrl, 'Open invite'),
+    fallbackLink(input.acceptUrl),
+    mutedParagraph('If you were not expecting this invite, you can ignore this email.'),
+  ].join('\n');
+
+  const text = [
+    `${inviter} invited you to run ${input.appName} on Floom.`,
+    '',
+    'Create or sign in to your account, then accept the invite to get access:',
+    input.acceptUrl,
+    '',
+    'If you were not expecting this invite, you can ignore this email.',
+    '',
+    'Floom, Inc. · Wilmington, DE',
+    'hello@floom.dev',
+  ].join('\n');
+
+  return {
+    subject,
+    html: baseLayout({
+      heading: 'You have a Floom invite',
+      body,
+      preheader: `${inviter} invited you to run ${input.appName}.`,
+    }),
+    text,
+  };
+}

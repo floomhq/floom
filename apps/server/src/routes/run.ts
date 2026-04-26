@@ -22,6 +22,11 @@ import {
   isByokGated,
   recordFreeRun,
 } from '../lib/byok-gate.js';
+import {
+  acceptInvite,
+  declineInvite,
+  listPendingInvitesForUser,
+} from '../services/sharing.js';
 import type {
   AppRecord,
   NormalizedManifest,
@@ -58,9 +63,12 @@ function extractUserApiKey(c: Context): string | null {
 export const runRouter = new Hono();
 
 type RunAppAccessRow = {
+  id: string;
   slug: string;
   visibility: string | null;
   author: string | null;
+  workspace_id: string;
+  link_share_token: string | null;
 };
 
 async function loadAuthorizedRunApp(
@@ -68,12 +76,15 @@ async function loadAuthorizedRunApp(
   appId: string,
 ): Promise<{ app: RunAppAccessRow | undefined; blocked: Response | null }> {
   const app = db
-    .prepare('SELECT slug, visibility, author FROM apps WHERE id = ?')
+    .prepare('SELECT id, slug, visibility, author, workspace_id, link_share_token FROM apps WHERE id = ?')
     .get(appId) as RunAppAccessRow | undefined;
   if (!app) return { app: undefined, blocked: null };
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
     ctx,
   });
   return { app, blocked };
@@ -208,7 +219,10 @@ runRouter.post('/', async (c) => {
   }
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
     ctx,
   });
   if (blocked) return blocked;
@@ -578,7 +592,10 @@ slugRunRouter.post('/', async (c) => {
   }
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
     ctx,
   });
   if (blocked) return blocked;
@@ -761,6 +778,47 @@ slugQuotaRouter.get('/', async (c) => {
 // cloud mode and by (workspace_id, device_id) in OSS mode. Joins `apps`
 // so the UI can render the app name + icon without a second fetch.
 export const meRouter = new Hono();
+
+meRouter.get('/invites', async (c) => {
+  const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+  }
+  const invites = listPendingInvitesForUser(ctx.user_id).map((invite) => ({
+    id: invite.id,
+    app_id: invite.app_id,
+    invited_email: invite.invited_email,
+    state: invite.state,
+    created_at: invite.created_at,
+    app_slug: (invite as unknown as { app_slug?: string }).app_slug,
+    app_name: (invite as unknown as { app_name?: string }).app_name,
+    app_description: (invite as unknown as { app_description?: string }).app_description,
+  }));
+  return c.json({ invites });
+});
+
+meRouter.post('/invites/:invite_id/accept', async (c) => {
+  const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+  }
+  const { invite, changed } = acceptInvite(c.req.param('invite_id') || '', ctx.user_id);
+  if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
+  if (!changed && invite.state !== 'accepted') {
+    return c.json({ error: 'Invite is not acceptable', code: 'invalid_invite_state' }, 409);
+  }
+  return c.json({ ok: true, invite });
+});
+
+meRouter.post('/invites/:invite_id/decline', async (c) => {
+  const ctx = await resolveUserContext(c);
+  if (isCloudMode() && !ctx.is_authenticated) {
+    return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+  }
+  const invite = declineInvite(c.req.param('invite_id') || '', ctx.user_id);
+  if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
+  return c.json({ ok: true, invite });
+});
 
 type StudioAppSummaryRow = {
   id: string;

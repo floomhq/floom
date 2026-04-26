@@ -189,7 +189,7 @@ skillRouter.get('/p/:slug/skill.md', (c) => {
       `SELECT * FROM apps
         WHERE slug = ?
           AND status = 'active'
-          AND visibility = 'public'
+          AND visibility IN ('public_live', 'public')
         LIMIT 1`,
     )
     .get(slug) as AppRecord | undefined;

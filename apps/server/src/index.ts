@@ -57,6 +57,7 @@ import {
   recordSigninEmailProgressiveDelayOutcome,
 } from './lib/signin-progressive-delay.js';
 import { resolveUserContext } from './services/session.js';
+import { canAccessApp, isPublicListingVisibility } from './services/sharing.js';
 import { startJobWorker } from './services/worker.js';
 import { startTriggersWorker } from './services/triggers-worker.js';
 import { sweepZombieRuns, startZombieRunSweeper } from './services/runner.js';
@@ -1286,8 +1287,8 @@ if (webDist) {
       | undefined;
     const isPubliclyListable =
       row &&
-      row.publish_status === 'published' &&
-      (row.visibility === 'public' || row.visibility === null);
+      isPublicListingVisibility(row.visibility) &&
+      (row.visibility === 'public_live' || row.publish_status === 'published');
     const ogImage = `${publicOrigin}/og/${slug}.svg`;
     // 2026-04-20 (PRR #172): canonical per-slug so indexers don't fold
     // every /p/:slug back to the landing canonical.
@@ -1473,6 +1474,24 @@ if (webDist) {
     // (PRR #172).
     const slugMatch = pathname.match(pSlugPattern);
     if (slugMatch && slugMatch[1]) {
+      const appRow = db
+        .prepare('SELECT id, author, workspace_id, visibility, link_share_token FROM apps WHERE slug = ?')
+        .get(slugMatch[1]) as
+        | {
+            id: string;
+            author: string | null;
+            workspace_id: string;
+            visibility: string | null;
+            link_share_token: string | null;
+          }
+        | undefined;
+      if (!appRow) {
+        return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
+      }
+      const ctx = await resolveUserContext(c);
+      if (!canAccessApp(appRow, ctx, url.searchParams.get('key'))) {
+        return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
+      }
       return c.html(rewriteHeadForSlug(servedIndexHtml, slugMatch[1]));
     }
     // 2026-04-20 (PRR tail cleanup): explicit /404 path returns 404 status.

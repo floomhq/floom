@@ -2312,7 +2312,7 @@ export async function ingestAppFromSpec(args: {
   category?: string;
   workspace_id: string;
   author_user_id: string;
-  /** When omitted, new cloud apps default to `private`; OSS/local defaults to `public`. */
+  /** When omitted, new apps default to `private`. */
   visibility?: 'public' | 'private' | 'auth-required';
 }): Promise<{ slug: string; name: string; created: boolean }> {
   const openapi_url = args.openapi_url || '';
@@ -2343,7 +2343,7 @@ export async function ingestAppFromSpec(args: {
     visibility =
       (existing.visibility as 'public' | 'private' | 'auth-required') || 'public';
   } else {
-    visibility = args.workspace_id === 'local' ? 'public' : 'private';
+    visibility = 'private';
   }
 
   const appSpec: OpenApiAppSpec = {

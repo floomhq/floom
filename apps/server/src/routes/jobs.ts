@@ -42,7 +42,10 @@ jobsRouter.post('/', async (c) => {
   }
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
     ctx,
   });
   if (blocked) return blocked;
@@ -148,7 +151,10 @@ jobsRouter.get('/:job_id', async (c) => {
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
     ctx,
   });
   if (blocked) return blocked;
@@ -169,7 +175,10 @@ jobsRouter.post('/:job_id/cancel', async (c) => {
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, app.visibility || 'public', {
+    app_id: app.id,
     author: app.author,
+    workspace_id: app.workspace_id,
+    link_share_token: app.link_share_token,
     ctx,
   });
   if (blocked) return blocked;

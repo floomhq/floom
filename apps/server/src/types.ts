@@ -144,6 +144,25 @@ export interface AuthConfig {
 
 export type AsyncMode = 'poll' | 'webhook' | 'stream';
 
+export type AppVisibilityState =
+  | 'private'
+  | 'link'
+  | 'invited'
+  | 'pending_review'
+  | 'public_live'
+  | 'changes_requested';
+
+export type LegacyAppVisibility = 'public' | 'auth-required';
+
+export type AppVisibility = AppVisibilityState | LegacyAppVisibility;
+
+export type AppInviteState =
+  | 'pending_email'
+  | 'pending_accept'
+  | 'accepted'
+  | 'revoked'
+  | 'declined';
+
 export interface AppRecord {
   id: string;
   slug: string;
@@ -163,7 +182,12 @@ export interface AppRecord {
   auth_config: string | null; // JSON-stringified AuthConfig
   openapi_spec_url: string | null;
   openapi_spec_cached: string | null; // JSON-stringified OpenAPI spec
-  visibility: 'public' | 'auth-required' | 'private';
+  visibility: AppVisibility;
+  link_share_token: string | null;
+  review_submitted_at: string | null;
+  review_decided_at: string | null;
+  review_decided_by: string | null;
+  review_comment: string | null;
   // Async job queue fields (v0.3.0). is_async comes back from SQLite as 0/1.
   is_async: 0 | 1;
   webhook_url: string | null;

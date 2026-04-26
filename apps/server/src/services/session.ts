@@ -18,7 +18,7 @@
 //      request after login.
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'hono';
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID, isSeededAdminEmail } from '../db.js';
 import { getAuth, isCloudMode } from '../lib/better-auth.js';
 import { agentContextToSessionContext, getAgentTokenContext } from '../lib/agent-tokens.js';
 import type { RekeyResult, SessionContext } from '../types.js';
@@ -26,6 +26,7 @@ import {
   getActiveWorkspaceId,
   provisionPersonalWorkspace,
 } from './workspaces.js';
+import { linkPendingEmailInvites } from './sharing.js';
 
 const COOKIE_NAME = 'floom_device';
 // 10 years in seconds — the cookie is a stable device id, not a session.
@@ -177,19 +178,22 @@ export async function resolveUserContext(c: Context): Promise<SessionContext> {
   // columns coherent on subsequent calls.
   const userId = session.user.id;
   db.prepare(
-    `INSERT INTO users (id, email, name, image, auth_provider, auth_subject)
-     VALUES (?, ?, ?, ?, 'better-auth', ?)
+    `INSERT INTO users (id, email, name, image, auth_provider, auth_subject, is_admin)
+     VALUES (?, ?, ?, ?, 'better-auth', ?, ?)
      ON CONFLICT (id) DO UPDATE SET
        email = excluded.email,
        name = excluded.name,
-       image = excluded.image`,
+       image = excluded.image,
+       is_admin = CASE WHEN excluded.is_admin = 1 THEN 1 ELSE users.is_admin END`,
   ).run(
     userId,
     session.user.email,
     session.user.name || null,
     session.user.image || null,
     userId,
+    isSeededAdminEmail(session.user.email) ? 1 : 0,
   );
+  linkPendingEmailInvites(userId, session.user.email);
 
   // Resolve the active workspace. If the user has none yet (brand-new
   // account, no invite accepted, no manual create), bootstrap a default

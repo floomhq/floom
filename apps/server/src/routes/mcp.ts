@@ -828,16 +828,17 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
     },
     async ({ category, keyword, limit }) => {
       const lim = typeof limit === 'number' ? limit : 50;
-      // MCP list_apps is a public admin surface — only expose public apps.
-      // Private apps are owner-only and never show up in gallery-wide listings.
+      // MCP list_apps exposes public apps plus the caller's own apps. This
+      // keeps freshly-ingested private apps discoverable to the creator without
+      // leaking another user's private slug.
       let sql =
         "SELECT * FROM apps WHERE status = 'active'" +
-        " AND (visibility = 'public' OR visibility IS NULL)" +
+        " AND (visibility = 'public_live' OR visibility = 'public' OR visibility IS NULL OR author = ?)" +
         (category ? ' AND category = ?' : '') +
         ' ORDER BY featured DESC, name ASC';
       const rows = (category
-        ? db.prepare(sql).all(category)
-        : db.prepare(sql).all()) as AppRecord[];
+        ? db.prepare(sql).all(ctx.user_id, category)
+        : db.prepare(sql).all(ctx.user_id)) as AppRecord[];
       // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
       // listings so Claude Desktop + Cursor clients don't surface them in
       // discovery. Same regex as server /api/hub. Fixtures are still
@@ -1052,7 +1053,10 @@ mcpRouter.all('/app/:slug', async (c) => {
   }
   const ctx = await resolveUserContext(c);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
+    app_id: row.id,
     author: row.author,
+    workspace_id: row.workspace_id,
+    link_share_token: row.link_share_token,
     ctx,
   });
   if (blocked) return blocked;
