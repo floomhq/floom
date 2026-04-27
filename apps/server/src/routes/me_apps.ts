@@ -20,8 +20,7 @@
 //   DELETE /api/me/apps/:slug/creator-secrets/:key
 //     Creator-only. Upsert / delete the creator-owned plaintext value
 //     for a key whose policy is 'creator_override'. Plaintext is
-//     AES-256-GCM encrypted under the creator's workspace DEK via the
-//     same envelope scheme that user_secrets uses.
+//     encrypted by the configured secrets adapter.
 //
 //   DELETE /api/me/apps/:slug
 //     Creator-only. Removes the app row (hard-delete; cascades per db.ts).
@@ -37,7 +36,6 @@ import { adapters } from '../adapters/index.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
-import { SecretDecryptError } from '../services/user_secrets.js';
 import { checkAppVisibility, requireAuthenticatedInCloud } from '../lib/auth.js';
 import { sendEmail, renderAppInviteEmail } from '../lib/email.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
@@ -93,6 +91,10 @@ function creatorSecretWorkspace(
   ctx: { workspace_id: string },
 ): { workspace_id: string } {
   return { workspace_id: app.workspace_id || ctx.workspace_id };
+}
+
+function isSecretDecryptError(err: unknown): err is Error {
+  return err instanceof Error && err.name === 'SecretDecryptError';
 }
 
 async function creatorHasValue(
@@ -365,7 +367,7 @@ meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
  * Returns `{ policies: SecretPolicyEntry[] }`. One entry per key in
  * `manifest.secrets_needed`, with default `policy='user_vault'` filled
  * in for keys that have no explicit row. `creator_has_value` is
- * populated from app_creator_secrets (presence only; no plaintext).
+ * populated through the secrets adapter (presence only; no plaintext).
  * Creator-only: non-owners must not learn which keys are overridden or
  * already configured on the creator's account.
  */
@@ -607,7 +609,7 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
     });
     return c.json({ ok: true, key });
   } catch (err) {
-    if (err instanceof SecretDecryptError) {
+    if (isSecretDecryptError(err)) {
       return c.json(
         { error: err.message, code: 'secret_encrypt_failed' },
         500,

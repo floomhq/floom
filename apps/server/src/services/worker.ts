@@ -219,7 +219,7 @@ async function deliverCompletion(jobId: string): Promise<void> {
   }
   const duration =
     job.started_at && job.finished_at
-      ? new Date(job.finished_at + 'Z').getTime() - new Date(job.started_at + 'Z').getTime()
+      ? parseStorageTimestampMs(job.finished_at) - parseStorageTimestampMs(job.started_at)
       : null;
 
   // Trigger context (unified triggers). When a job was enqueued by a
@@ -254,6 +254,14 @@ async function deliverCompletion(jobId: string): Promise<void> {
       `[worker] webhook threw job=${job.id} url=${job.webhook_url} error=${(err as Error).message}`,
     );
   }
+}
+
+function parseStorageTimestampMs(value: string): number {
+  const trimmed = value.trim();
+  if (/[zZ]$|[+-]\d{2}(?::?\d{2})?$/.test(trimmed)) {
+    return Date.parse(trimmed);
+  }
+  return Date.parse(trimmed.replace(' ', 'T') + 'Z');
 }
 
 function safeJsonParse(raw: string): unknown {
