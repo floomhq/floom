@@ -1,16 +1,7 @@
-// MVP stub: /studio/:slug/analytics — replaced with ComingSoon for launch.
+// MVP stub: /studio/:slug/analytics → redirect for launch.
 
-import { useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
-import { StudioAppTabs } from './StudioAppPage';
-import { ComingSoon } from '../components/ComingSoon';
+import { Navigate } from 'react-router-dom';
 
 export function StudioAppAnalyticsPage() {
-  const { slug = '' } = useParams<{ slug: string }>();
-  return (
-    <StudioLayout title="Analytics · Studio · Floom" activeAppSlug={slug} activeSubsection="analytics">
-      <StudioAppTabs slug={slug} active="analytics" />
-      <ComingSoon feature="App analytics" />
-    </StudioLayout>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
