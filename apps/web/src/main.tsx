@@ -12,8 +12,6 @@ import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from '
 // tree in a follow-up). Both are eager so the LCP path doesn't wait on
 // a dynamic import round-trip.
 import { LandingV17Page } from './pages/LandingV17Page';
-// M5: launch-mvp slim landing
-import { LandingMVPPage } from './pages/LandingMVPPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 const AppsDirectoryPage = lazy(() => import('./pages/AppsDirectoryPage').then(m => ({ default: m.AppsDirectoryPage })));
 const AppPermalinkPage = lazy(() => import('./pages/AppPermalinkPage').then(m => ({ default: m.AppPermalinkPage })));
@@ -258,9 +256,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </a>
         <Suspense fallback={<RouteLoading variant="full" />}>
         <Routes>
-        {/* M5: slim MVP landing for launch-mvp */}
-        <Route path="/" element={<LandingMVPPage />} />
-        <Route path="/marketing" element={<LandingV17Page />} />
+        {/* Landing v17 (2026-04-22): rebuild to wireframe parity. */}
+        <Route path="/" element={<LandingV17Page />} />
         {/* Apps directory. Mounted at both /apps (legacy canonical) and
             /store (matches the "Store" pill label Federico sees on screen).
             Nav-polish 2026-04-20: URL no longer drifts from the label. */}
