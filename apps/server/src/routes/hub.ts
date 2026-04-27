@@ -138,16 +138,18 @@ const IngestBody = z.object({
 
 // SECURITY (issue #378, pentest 2026-04-22): /detect fetches a user-supplied
 // URL server-side, which is a classic SSRF primitive. Two hardenings:
-//   1. Auth gate (Cloud mode): anon callers get a 401, so the capability to
-//      "make our server fetch a URL" is not exposed to the public internet.
-//      OSS self-host keeps the legacy behavior (no auth configured = no-op).
+//   1. ~~Auth gate (Cloud mode)~~ — REMOVED 2026-04-27 (V4 fix): the auth
+//      gate blocked anonymous detect of public OpenAPI URLs (e.g. petstore),
+//      breaking the core "paste URL → instant preview" flow for new creators.
+//      The remaining SSRF defence (hardening #2 below) is sufficient:
 //   2. Private-network / loopback / link-local blocks + response size cap +
 //      timeout live in `fetchSpec` (services/openapi-ingest.ts), so every
-//      caller of fetchSpec benefits, not just /detect.
+//      caller of fetchSpec benefits, not just /detect. The SSRF_BLOCK_LIST_V4
+//      and SSRF_BLOCK_LIST_V6 net-filter all private/loopback/RFC1918/LLA
+//      addresses at the TCP-connect level; public URLs are unaffected.
+//   Auth is still required on POST /api/hub/ingest (the publish step) and
+//   POST /api/studio/build/from-github. Preview ≠ publish.
 hubRouter.post('/detect', async (c) => {
-  const ctx = await resolveUserContext(c);
-  const gate = requireAuthenticatedInCloud(c, ctx);
-  if (gate) return gate;
   let body: unknown;
   try {
     body = await c.req.json();
@@ -274,9 +276,10 @@ const InlineDetectBody = z.object({
 });
 
 hubRouter.post('/detect/inline', async (c) => {
-  const ctx = await resolveUserContext(c);
-  const gate = requireAuthenticatedInCloud(c, ctx);
-  if (gate) return gate;
+  // Auth gate removed 2026-04-27 (V4 fix, mirrors /detect): inline specs
+  // carry no SSRF risk (no outbound fetch) and the paste-spec path must
+  // work for anonymous creators just like the URL-based path.
+  // Auth is still required on POST /api/hub/ingest (the publish step).
   let body: unknown;
   try {
     body = await c.req.json();
