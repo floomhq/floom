@@ -36,9 +36,8 @@ import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adapters } from '../adapters/index.js';
-import { db } from '../db.js';
 import { alertLaunchDemoInactive } from '../lib/alerts.js';
-import { newAppId, newSecretId } from '../lib/ids.js';
+import { newAppId } from '../lib/ids.js';
 import type { NormalizedManifest } from '../types.js';
 
 export const LAUNCH_DEMO_BUILD_TIMEOUT = Number(
@@ -406,19 +405,14 @@ function demoSecretKeys(): string[] {
  * because the global row already exists, and is a pure no-op if the env var
  * is unset.
  */
-function seedLaunchDemoSecretsFromEnv(logger: SeedLogger = console): void {
-  const selectGlobal = db.prepare(
-    "SELECT id FROM secrets WHERE name = ? AND app_id IS NULL",
-  );
-  const insertGlobal = db.prepare(
-    'INSERT INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, NULL)',
-  );
+async function seedLaunchDemoSecretsFromEnv(
+  logger: SeedLogger = console,
+): Promise<void> {
   for (const key of demoSecretKeys()) {
     const envVal = process.env[key];
     if (!envVal || envVal.length < 20) continue;
-    const existing = selectGlobal.get(key) as { id: string } | undefined;
-    if (existing) continue;
-    insertGlobal.run(newSecretId(), key, envVal);
+    if ((await adapters.secrets.getAdminSecret(null, key)) !== null) continue;
+    await adapters.secrets.setAdminSecret(null, key, envVal);
     logger.log(`[launch-demos] seeded global ${key} from env`);
   }
 }
@@ -519,7 +513,7 @@ export async function seedLaunchDemos(
   // docker is unreachable on this host (dev mode without Docker), because the
   // secret is a DB-only operation and a later host with docker reachable will
   // reuse the same DB.
-  seedLaunchDemoSecretsFromEnv(logger);
+  await seedLaunchDemoSecretsFromEnv(logger);
 
   const repoRoot = options.repoRoot ?? findRepoRoot();
   if (!repoRoot) {

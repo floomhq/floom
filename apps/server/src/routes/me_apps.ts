@@ -37,8 +37,8 @@ import { adapters } from '../adapters/index.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
-// TODO(adapters): migrate these legacy sync creator-secret routes to
-// SecretsAdapter once policy and creator-value mutation are in the contract.
+// Creator value mutation remains in the legacy service until that plaintext
+// write surface is part of SecretsAdapter.
 import * as creatorSecrets from '../services/app_creator_secrets.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
 import { checkAppVisibility, requireAuthenticatedInCloud } from '../lib/auth.js';
@@ -380,7 +380,14 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   const neededKeys = manifest?.secrets_needed ?? [];
 
   const explicit = new Map<string, SecretPolicyEntry>(
-    creatorSecrets.listPolicies(app.id).map((p) => [p.key, p]),
+    (await adapters.secrets.listCreatorPolicies(app.id)).map((p) => [
+      p.key,
+      {
+        key: p.key,
+        policy: p.policy,
+        creator_has_value: creatorSecrets.hasCreatorValue(app.id, p.key),
+      },
+    ]),
   );
 
   const policies: SecretPolicyEntry[] = neededKeys.map((key) => {
@@ -455,8 +462,13 @@ meAppsRouter.put('/:slug/secret-policies/:key', async (c) => {
   }
 
   try {
-    const previousPolicy = creatorSecrets.getPolicy(app.id, key);
-    creatorSecrets.setPolicy(app.id, key, parsed.data.policy as SecretPolicy);
+    const previousPolicy =
+      (await adapters.secrets.getCreatorPolicy(app.id, key)) ?? 'user_vault';
+    await adapters.secrets.setCreatorPolicy(
+      app.id,
+      key,
+      parsed.data.policy as SecretPolicy,
+    );
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.policy_updated',
@@ -521,7 +533,8 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
     );
   }
 
-  const policy = creatorSecrets.getPolicy(app.id, key);
+  const policy =
+    (await adapters.secrets.getCreatorPolicy(app.id, key)) ?? 'user_vault';
   if (policy !== 'creator_override') {
     return c.json(
       {

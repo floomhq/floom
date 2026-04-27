@@ -279,11 +279,14 @@ function createPerAppMcpServer(
         // missing_secrets error so the MCP client can prompt the user.
         if (actionSecretsNeeded.length > 0) {
           const available = new Set<string>();
-          const rows = [
-            ...(await adapters.storage.listAdminSecrets(null)),
-            ...(await adapters.storage.listAdminSecrets(fresh.id)),
-          ].filter((row) => row.value !== '');
-          for (const r of rows) available.add(r.name);
+          for (const r of await adapters.secrets.listAdminSecrets(null)) {
+            const value = await adapters.secrets.getAdminSecret(null, r.key);
+            if (value !== null && value !== '') available.add(r.key);
+          }
+          for (const r of await adapters.secrets.listAdminSecrets(fresh.id)) {
+            const value = await adapters.secrets.getAdminSecret(fresh.id, r.key);
+            if (value !== null && value !== '') available.add(r.key);
+          }
           // Per-call secrets
           for (const k of Object.keys(perCallSecrets || {})) available.add(k);
 

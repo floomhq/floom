@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, } from 'node:crypto';
+const OPERATOR_SECRET_WORKSPACE_ID = 'operator';
 class GcpKmsDekWrapper {
     keyName;
     projectId;
@@ -75,6 +76,61 @@ export function createGcpKmsSecretsAdapter(opts) {
             })
                 .filter((row) => row !== null)
                 .sort((a, b) => a.key.localeCompare(b.key));
+        },
+        async setAdminSecret(app_id, key, plaintext) {
+            await storage.setEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, adminSecretStorageKey(app_id, key), await encryptSecret(kms, plaintext));
+        },
+        async getAdminSecret(app_id, key) {
+            const row = await storage.getEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, adminSecretStorageKey(app_id, key));
+            return row ? await decryptSecretRow(kms, row) : null;
+        },
+        async listAdminSecrets(app_id) {
+            const rows = await storage.listEncryptedSecrets({
+                workspace_id: OPERATOR_SECRET_WORKSPACE_ID,
+            });
+            return rows
+                .map((row) => {
+                const key = adminSecretKeyFromStorageKey(app_id, row.key);
+                return key ? { key, updated_at: row.updated_at } : null;
+            })
+                .filter((row) => row !== null)
+                .sort((a, b) => a.key.localeCompare(b.key));
+        },
+        async deleteAdminSecret(app_id, key) {
+            return storage.deleteEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, adminSecretStorageKey(app_id, key));
+        },
+        async setCreatorPolicy(app_id, key, policy) {
+            if (policy !== 'user_vault' && policy !== 'creator_override') {
+                throw new Error(`Invalid policy: ${policy}`);
+            }
+            await storage.setEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, creatorPolicyStorageKey(app_id, key), await encryptSecret(kms, policy));
+        },
+        async getCreatorPolicy(app_id, key) {
+            const row = await storage.getEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, creatorPolicyStorageKey(app_id, key));
+            if (!row)
+                return null;
+            return normalizePolicy(await decryptSecretRow(kms, row));
+        },
+        async listCreatorPolicies(app_id) {
+            const rows = await storage.listEncryptedSecrets({
+                workspace_id: OPERATOR_SECRET_WORKSPACE_ID,
+            });
+            const out = [];
+            for (const row of rows) {
+                const key = creatorPolicyKeyFromStorageKey(app_id, row.key);
+                if (!key)
+                    continue;
+                const encrypted = await storage.getEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, row.key);
+                if (!encrypted)
+                    continue;
+                const policy = normalizePolicy(await decryptSecretRow(kms, encrypted));
+                if (policy)
+                    out.push({ key, policy });
+            }
+            return out.sort((a, b) => a.key.localeCompare(b.key));
+        },
+        async deleteCreatorPolicy(app_id, key) {
+            return storage.deleteEncryptedSecret({ workspace_id: OPERATOR_SECRET_WORKSPACE_ID }, creatorPolicyStorageKey(app_id, key));
         },
         async loadUserVaultForRun(ctx, keys) {
             const rows = await loadEncryptedRows(storage, ctx.workspace_id, keys.map((key) => userSecretStorageKey(ctx.user_id, key)));
@@ -157,11 +213,34 @@ function userSecretStorageKey(user_id, key) {
 function creatorSecretStorageKey(app_id, key) {
     return `creator:${encodeComponent(app_id)}:${encodeComponent(key)}`;
 }
+function adminSecretStorageKey(app_id, key) {
+    return `admin:${encodeComponent(app_id ?? '__global__')}:${encodeComponent(key)}`;
+}
+function creatorPolicyStorageKey(app_id, key) {
+    return `creator-policy:${encodeComponent(app_id)}:${encodeComponent(key)}`;
+}
 function userSecretKeyFromStorageKey(user_id, storageKey) {
     const prefix = `user:${encodeComponent(user_id)}:`;
     if (!storageKey.startsWith(prefix))
         return null;
     return decodeComponent(storageKey.slice(prefix.length));
+}
+function adminSecretKeyFromStorageKey(app_id, storageKey) {
+    const prefix = `admin:${encodeComponent(app_id ?? '__global__')}:`;
+    if (!storageKey.startsWith(prefix))
+        return null;
+    return decodeComponent(storageKey.slice(prefix.length));
+}
+function creatorPolicyKeyFromStorageKey(app_id, storageKey) {
+    const prefix = `creator-policy:${encodeComponent(app_id)}:`;
+    if (!storageKey.startsWith(prefix))
+        return null;
+    return decodeComponent(storageKey.slice(prefix.length));
+}
+function normalizePolicy(value) {
+    if (value === 'user_vault' || value === 'creator_override')
+        return value;
+    return null;
 }
 function decodedSecretKey(storageKey) {
     const parts = storageKey.split(':');

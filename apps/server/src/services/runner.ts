@@ -4,7 +4,6 @@ import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
 import { noteAppUnavailable } from '../lib/alerts.js';
-import * as creatorSecrets from './app_creator_secrets.js';
 import type { SecretPolicy } from '../types.js';
 import type {
   AppRecord,
@@ -271,17 +270,18 @@ export async function dispatchRun(
   perCallSecrets?: Record<string, string>,
   ctx?: SessionContext,
 ): Promise<void> {
-  // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
-  const globalRows = db
-    .prepare('SELECT name, value FROM secrets WHERE app_id IS NULL')
-    .all() as { name: string; value: string }[];
-  const appRows = db
-    .prepare('SELECT name, value FROM secrets WHERE app_id = ?')
-    .all(app.id) as { name: string; value: string }[];
+  const secretsAdapter = (await import('../adapters/index.js')).adapters.secrets;
 
+  // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
   const mergedSecrets: Record<string, string> = {};
-  for (const row of globalRows) mergedSecrets[row.name] = row.value;
-  for (const row of appRows) mergedSecrets[row.name] = row.value;
+  for (const row of await secretsAdapter.listAdminSecrets(null)) {
+    const value = await secretsAdapter.getAdminSecret(null, row.key);
+    if (value !== null) mergedSecrets[row.key] = value;
+  }
+  for (const row of await secretsAdapter.listAdminSecrets(app.id)) {
+    const value = await secretsAdapter.getAdminSecret(app.id, row.key);
+    if (value !== null) mergedSecrets[row.key] = value;
+  }
 
   // Per-secret policy split (secrets-policy feature).
   //
@@ -296,13 +296,11 @@ export async function dispatchRun(
   const runtimeCtx = ctx || defaultContext();
   const needs = manifest.secrets_needed || [];
   if (needs.length > 0) {
-    const secretsAdapter = (await import('../adapters/index.js')).adapters.secrets;
     const policies = new Map<string, SecretPolicy>(
-      // TODO(adapters): migrate policy reads to SecretsAdapter once that
-      // surface includes creator policy metadata.
-      creatorSecrets
-        .listPolicies(app.id)
-        .map((p) => [p.key, p.policy as SecretPolicy]),
+      (await secretsAdapter.listCreatorPolicies(app.id)).map((p) => [
+        p.key,
+        p.policy as SecretPolicy,
+      ]),
     );
     const userVaultKeys = needs.filter(
       (k) => (policies.get(k) ?? 'user_vault') === 'user_vault',

@@ -264,6 +264,18 @@ export interface SecretRecord {
   created_at: string;
 }
 
+export type SecretPolicy = 'user_vault' | 'creator_override';
+
+export interface AdminSecretMetadata {
+  key: string;
+  updated_at: string;
+}
+
+export interface CreatorPolicyMetadata {
+  key: string;
+  policy: SecretPolicy;
+}
+
 export interface EncryptedSecretRecord {
   workspace_id: string;
   key: string;
@@ -879,6 +891,14 @@ export interface SecretsAdapter extends AdapterLifecycle {
   set(ctx: SessionContext, key: string, plaintext: string): Promise<void>;
   delete(ctx: SessionContext, key: string): Promise<boolean>;
   list(ctx: SessionContext): Promise<Array<{ key: string; updated_at: string }>>;
+  setAdminSecret(app_id: string | null, key: string, plaintext: string): Promise<void>;
+  getAdminSecret(app_id: string | null, key: string): Promise<string | null>;
+  listAdminSecrets(app_id: string | null): Promise<AdminSecretMetadata[]>;
+  deleteAdminSecret(app_id: string | null, key: string): Promise<boolean>;
+  setCreatorPolicy(app_id: string, key: string, policy: SecretPolicy): Promise<void>;
+  getCreatorPolicy(app_id: string, key: string): Promise<SecretPolicy | null>;
+  listCreatorPolicies(app_id: string): Promise<CreatorPolicyMetadata[]>;
+  deleteCreatorPolicy(app_id: string, key: string): Promise<boolean>;
   loadUserVaultForRun(
     ctx: SessionContext,
     keys: string[],

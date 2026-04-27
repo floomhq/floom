@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import Docker from 'dockerode';
 import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
-import { newAppId, newSecretId } from '../lib/ids.js';
+import { newAppId } from '../lib/ids.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 /**
@@ -147,9 +147,6 @@ export async function seedFromFile(): Promise<{
   // seed-owned columns refreshed, new rows are inserted with
   // publish_status='published'; non-seed columns (stars / featured /
   // hero / publish_status) are left untouched on the update path.
-  const insertSecret = db.prepare(
-    `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
-  );
   const existsBySlug = db.prepare('SELECT id FROM apps WHERE slug = ?');
   const markAppInactive = db.prepare(
     `UPDATE apps SET status = 'inactive' WHERE id = ?`,
@@ -217,15 +214,21 @@ export async function seedFromFile(): Promise<{
     // Per-app secrets
     const perApp = seed.per_app_secrets[app.slug] || {};
     for (const [name, value] of Object.entries(perApp)) {
-      const result = insertSecret.run(newSecretId(), name, value, appId);
-      if (result.changes > 0) secretsAdded++;
+      if ((await adapters.secrets.getAdminSecret(appId, name)) !== null) {
+        continue;
+      }
+      await adapters.secrets.setAdminSecret(appId, name, value);
+      secretsAdded++;
     }
   }
 
   // Global secrets
   for (const [name, value] of Object.entries(seed.global_secrets)) {
-    const result = insertSecret.run(newSecretId(), name, value, null);
-    if (result.changes > 0) secretsAdded++;
+    if ((await adapters.secrets.getAdminSecret(null, name)) !== null) {
+      continue;
+    }
+    await adapters.secrets.setAdminSecret(null, name, value);
+    secretsAdded++;
   }
 
   console.log(

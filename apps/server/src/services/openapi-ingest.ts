@@ -18,7 +18,7 @@ import { parseRendererManifest } from '../lib/renderer-manifest.js';
 import type { RendererManifest } from '@floom/renderer/contract';
 import { db } from '../db.js';
 import { adapters } from '../adapters/index.js';
-import { newAppId, newSecretId } from '../lib/ids.js';
+import { newAppId } from '../lib/ids.js';
 import { auditLog } from './audit-log.js';
 import { generateLinkShareToken } from '../lib/link-share-token.js';
 import { bundleRendererFromManifest } from './renderer-bundler.js';
@@ -1705,10 +1705,6 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
   // INSERT from the provided keys and updateApp adds `updated_at =
   // datetime('now')` automatically, so behavior is identical to the prior
   // prepared statements.
-  const insertSecret = db.prepare(
-    `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
-  );
-
   let apps_ingested = 0;
   let apps_failed = 0;
   const errors: Array<{ slug: string; error: string }> = [];
@@ -1856,7 +1852,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         });
         // Insert placeholder secrets if not already present (so the UI shows them)
         for (const name of secretNames) {
-          insertSecret.run(newSecretId(), name, '', existing.id);
+          if ((await adapters.secrets.getAdminSecret(existing.id, name)) === null) {
+            await adapters.secrets.setAdminSecret(existing.id, name, '');
+          }
         }
         console.log(`[openapi-ingest] updated ${appSpec.slug}`);
       } else {
@@ -1892,7 +1890,9 @@ export async function ingestOpenApiApps(configPath: string): Promise<IngestResul
         } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
         // Insert placeholder secrets
         for (const name of secretNames) {
-          insertSecret.run(newSecretId(), name, '', appId);
+          if ((await adapters.secrets.getAdminSecret(appId, name)) === null) {
+            await adapters.secrets.setAdminSecret(appId, name, '');
+          }
         }
         console.log(`[openapi-ingest] inserted ${appSpec.slug}`);
       }

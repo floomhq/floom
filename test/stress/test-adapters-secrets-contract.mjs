@@ -148,11 +148,36 @@ try {
     assert(loaded.KEY_A === 'value-a', `KEY_A=${loaded.KEY_A}`);
   });
 
+  await check('admin global secret CRUD round-trip', async () => {
+    await secrets.setAdminSecret(null, 'ADMIN_GLOBAL', 'admin-global-value');
+    assert(await secrets.getAdminSecret(null, 'ADMIN_GLOBAL') === 'admin-global-value', 'global admin plaintext mismatch');
+    assert(await secrets.deleteAdminSecret(null, 'ADMIN_GLOBAL') === true, 'delete existing global admin secret returned false');
+    assert(await secrets.getAdminSecret(null, 'ADMIN_GLOBAL') === null, 'deleted global admin secret remained readable');
+  });
+
+  await check('admin app secret list masks plaintext', async () => {
+    await secrets.setAdminSecret('secrets-contract-app', 'ADMIN_APP', 'admin-app-value');
+    const list = await secrets.listAdminSecrets('secrets-contract-app');
+    const row = list.find((item) => item.key === 'ADMIN_APP');
+    assert(row, `list=${JSON.stringify(list)}`);
+    assert(typeof row.updated_at === 'string' && row.updated_at.length > 0, 'updated_at missing');
+    assert(!('value' in row), 'admin list exposed value');
+    assert(!('ciphertext' in row), 'admin list exposed ciphertext');
+    assert(!JSON.stringify(row).includes('admin-app-value'), 'admin list leaked plaintext');
+  });
+
+  await check('admin global and app namespaces are isolated', async () => {
+    await secrets.setAdminSecret(null, 'ADMIN_SHARED', 'admin-global-shared');
+    await secrets.setAdminSecret('secrets-contract-app', 'ADMIN_SHARED', 'admin-app-shared');
+    assert(await secrets.getAdminSecret(null, 'ADMIN_SHARED') === 'admin-global-shared', 'global admin value mismatch');
+    assert(await secrets.getAdminSecret('secrets-contract-app', 'ADMIN_SHARED') === 'admin-app-shared', 'app admin value mismatch');
+  });
+
   await check('creator-override namespace is isolated from user vault', async () => {
     await secrets.set(ctx, 'USER_ONLY', 'user-only-value');
     await secrets.set(ctx, 'NO_FALLBACK', 'user-fallback-must-not-load');
-    creatorSecrets.setPolicy('secrets-contract-app', 'CREATOR_ONLY', 'creator_override');
-    creatorSecrets.setPolicy('secrets-contract-app', 'NO_FALLBACK', 'creator_override');
+    await secrets.setCreatorPolicy('secrets-contract-app', 'CREATOR_ONLY', 'creator_override');
+    await secrets.setCreatorPolicy('secrets-contract-app', 'NO_FALLBACK', 'creator_override');
     if (setCreatorOverrideForTests) {
       await setCreatorOverrideForTests(
         'secrets-contract-app',
@@ -179,6 +204,38 @@ try {
     const userLoaded = await secrets.loadUserVaultForRun(ctx, ['CREATOR_ONLY', 'USER_ONLY']);
     assert(userLoaded.USER_ONLY === 'user-only-value', `userLoaded=${JSON.stringify(userLoaded)}`);
     assert(!('CREATOR_ONLY' in userLoaded), 'user loader returned creator-only key');
+  });
+
+  await check('creator policy CRUD round-trip', async () => {
+    await secrets.setCreatorPolicy('secrets-contract-app', 'POLICY_KEY', 'creator_override');
+    assert(await secrets.getCreatorPolicy('secrets-contract-app', 'POLICY_KEY') === 'creator_override', 'creator policy mismatch');
+    await secrets.setCreatorPolicy('secrets-contract-app', 'POLICY_KEY', 'user_vault');
+    assert(await secrets.getCreatorPolicy('secrets-contract-app', 'POLICY_KEY') === 'user_vault', 'creator policy update mismatch');
+  });
+
+  await check('creator policy list returns explicit policies only', async () => {
+    await secrets.setCreatorPolicy('secrets-contract-app', 'POLICY_LIST_A', 'creator_override');
+    await secrets.setCreatorPolicy('secrets-contract-app', 'POLICY_LIST_B', 'user_vault');
+    const list = await secrets.listCreatorPolicies('secrets-contract-app');
+    const map = new Map(list.map((row) => [row.key, row.policy]));
+    assert(map.get('POLICY_LIST_A') === 'creator_override', `list=${JSON.stringify(list)}`);
+    assert(map.get('POLICY_LIST_B') === 'user_vault', `list=${JSON.stringify(list)}`);
+    assert(!map.has('MISSING_POLICY'), 'list returned implicit default policy');
+  });
+
+  await check('creator policy delete is idempotent', async () => {
+    await secrets.setCreatorPolicy('secrets-contract-app', 'POLICY_DELETE', 'creator_override');
+    assert(await secrets.deleteCreatorPolicy('secrets-contract-app', 'POLICY_DELETE') === true, 'delete existing policy returned false');
+    assert(await secrets.getCreatorPolicy('secrets-contract-app', 'POLICY_DELETE') === null, 'deleted policy remained readable');
+    assert(await secrets.deleteCreatorPolicy('secrets-contract-app', 'POLICY_DELETE') === false, 'delete missing policy returned true');
+  });
+
+  await check('creator policy namespace is isolated by app_id', async () => {
+    createApp('secrets-contract-app-b');
+    await secrets.setCreatorPolicy('secrets-contract-app', 'POLICY_ISOLATED', 'creator_override');
+    await secrets.setCreatorPolicy('secrets-contract-app-b', 'POLICY_ISOLATED', 'user_vault');
+    assert(await secrets.getCreatorPolicy('secrets-contract-app', 'POLICY_ISOLATED') === 'creator_override', 'app A policy mismatch');
+    assert(await secrets.getCreatorPolicy('secrets-contract-app-b', 'POLICY_ISOLATED') === 'user_vault', 'app B policy mismatch');
   });
 
   await check('tenant isolation keeps same key separate by workspace_id', async () => {
@@ -219,6 +276,22 @@ try {
     assert(/^[0-9a-f]+$/i.test(row.ciphertext), 'ciphertext is not hex-like');
     assert(/^[0-9a-f]{24}$/i.test(row.nonce), 'nonce shape mismatch');
     assert(/^[0-9a-f]{32}$/i.test(row.auth_tag), 'auth_tag shape mismatch');
+  });
+
+  await check('gcp-kms admin secret ciphertext opacity', async () => {
+    if (!selectedSecretsAdapter.includes('gcp-kms')) return;
+    const canary = 'ADMIN_CANARY_SECRET_aaa';
+    await secrets.setAdminSecret('secrets-contract-app', 'ADMIN_CANARY_KEY', canary);
+    const storageKey = `admin:${Buffer.from('secrets-contract-app', 'utf8').toString('base64url')}:${Buffer.from('ADMIN_CANARY_KEY', 'utf8').toString('base64url')}`;
+    const row = db
+      .prepare(
+        `SELECT ciphertext, nonce, auth_tag, encrypted_dek FROM encrypted_secrets
+         WHERE workspace_id = ? AND key = ?`,
+      )
+      .get('operator', storageKey);
+    assert(row, 'encrypted admin secret row missing');
+    assert(!JSON.stringify(row).includes(canary), `admin backing row leaked plaintext: ${JSON.stringify(row)}`);
+    assert(typeof row.encrypted_dek === 'string' && row.encrypted_dek.length > 0, 'encrypted_dek missing');
   });
 } finally {
   try {
