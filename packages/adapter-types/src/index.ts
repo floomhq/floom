@@ -350,6 +350,13 @@ export interface RuntimeResult {
   logs: string;
 }
 
+export interface RuntimeExecutionContext {
+  runId?: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  signal?: AbortSignal;
+}
+
 export interface AppListFilter {
   workspace_id?: string;
   visibility?: AppVisibility;
@@ -381,6 +388,7 @@ export interface RuntimeAdapter {
     secrets: Record<string, string>,
     ctx: SessionContext,
     onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+    runContext?: RuntimeExecutionContext,
   ): Promise<RuntimeResult>;
 }
 

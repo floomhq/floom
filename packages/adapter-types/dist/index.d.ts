@@ -255,6 +255,12 @@ export interface RuntimeResult {
     duration_ms: number;
     logs: string;
 }
+export interface RuntimeExecutionContext {
+    runId?: string;
+    timeoutMs?: number;
+    maxOutputBytes?: number;
+    signal?: AbortSignal;
+}
 export interface AppListFilter {
     workspace_id?: string;
     visibility?: AppVisibility;
@@ -272,7 +278,7 @@ export interface RunListFilter {
     offset?: number;
 }
 export interface RuntimeAdapter {
-    execute(app: AppRecord, manifest: NormalizedManifest, action: string, inputs: Record<string, unknown>, secrets: Record<string, string>, ctx: SessionContext, onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void): Promise<RuntimeResult>;
+    execute(app: AppRecord, manifest: NormalizedManifest, action: string, inputs: Record<string, unknown>, secrets: Record<string, string>, ctx: SessionContext, onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void, runContext?: RuntimeExecutionContext): Promise<RuntimeResult>;
 }
 export interface StorageAdapter {
     getApp(slug: string): Promise<AppRecord | undefined>;

@@ -1,20 +1,8 @@
-// HTTP proxy runtime adapter wrapper.
-//
-// Thin shim around `services/proxied-runner.ts runProxied` so that the
-// existing HTTP-proxy runtime satisfies the `RuntimeAdapter` interface
-// declared in `adapters/types.ts`. Behavior is unchanged from the live
-// dispatch path in `services/runner.ts runProxiedWorker`.
-//
-// Selected by the factory when `FLOOM_RUNTIME=proxy`. This knob is
-// deliberately coarse — the reference server still picks runtime per-app
-// at dispatch time based on `app.app_type` ('docker' | 'proxied'). The
-// env-var choice here is about "which adapter is wired at the factory
-// level", not "which runtime every app runs under". Once the main
-// dispatch path migrates to `adapters.runtime.execute`, this adapter
-// becomes the explicit implementation for proxy apps.
+// HTTP proxy runtime adapter. `FLOOM_RUNTIME=proxy` selects this implementation
+// for deployments where every app execution is forwarded to an HTTP endpoint.
 
 import type { AppRecord, NormalizedManifest, SessionContext } from '../types.js';
-import type { RuntimeAdapter, RuntimeResult } from './types.js';
+import type { RuntimeAdapter, RuntimeExecutionContext, RuntimeResult } from './types.js';
 import { runProxied } from '../services/proxied-runner.js';
 
 function redactSecrets(value: unknown, secrets: Record<string, string>): unknown {
@@ -49,7 +37,8 @@ export const proxyRuntimeAdapter: RuntimeAdapter = {
     inputs: Record<string, unknown>,
     secrets: Record<string, string>,
     _ctx: SessionContext,
-    _onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+    onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+    runContext?: RuntimeExecutionContext,
   ): Promise<RuntimeResult> {
     const result = await runProxied({
       app,
@@ -57,15 +46,19 @@ export const proxyRuntimeAdapter: RuntimeAdapter = {
       action,
       inputs,
       secrets,
+      timeoutMs: runContext?.timeoutMs,
     });
+    const safeLogs = redactSecrets(result.logs, secrets) as string;
+    if (onOutput && safeLogs) onOutput(safeLogs, 'stdout');
     return {
-      status: result.status,
+      status:
+        result.error_type === 'timeout' && runContext?.timeoutMs ? 'timeout' : result.status,
       outputs: redactSecrets(result.outputs, secrets),
       error: redactSecrets(result.error, secrets) as string | undefined,
       error_type: result.error_type,
       upstream_status: result.upstream_status,
       duration_ms: result.duration_ms,
-      logs: redactSecrets(result.logs, secrets) as string,
+      logs: safeLogs,
     };
   },
 };

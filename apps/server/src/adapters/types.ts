@@ -30,6 +30,7 @@ export type {
   RunStatus,
   RunTurnRecord,
   RuntimeAdapter,
+  RuntimeExecutionContext,
   RuntimeResult,
   CreatorSecretCiphertextRow,
   CreatorSecretCiphertextWriteInput,

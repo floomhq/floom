@@ -18,9 +18,10 @@ TypeScript declarations: [`@floom/adapter-types`](../packages/adapter-types/src/
 
 **Purpose.** Executes one action of a Floom app and returns a normalized result.
 
-The reference server ships two impls that are selected by `app.app_type`:
-1. **Docker runtime** (`services/docker.ts` + `services/runner.ts`) — spawns a container per run, injects secrets as env vars, streams stdout/stderr, enforces a timeout + memory cap, and parses the `__FLOOM_RESULT__` marker line from stdout.
-2. **Proxy runtime** (`services/proxied-runner.ts`) — forwards an HTTP request to an upstream API (for apps registered via OpenAPI spec URL), injects declared secrets into the auth header / cookie / query param, and classifies HTTP statuses into the `ErrorType` taxonomy.
+The reference server ships two runtime adapters selected by `FLOOM_RUNTIME`.
+The default Docker adapter owns `app.app_type` dispatch internally:
+1. **Docker app strategy** (`services/docker.ts`) — spawns a container per run, injects secrets as env vars, streams stdout/stderr, enforces a timeout + memory cap, and parses the `__FLOOM_RESULT__` marker line from stdout.
+2. **Proxy app strategy** (`services/proxied-runner.ts`) — forwards an HTTP request to an upstream API (for apps registered via OpenAPI spec URL), injects declared secrets into the auth header / cookie / query param, and classifies HTTP statuses into the `ErrorType` taxonomy.
 
 ### Signature
 
@@ -34,7 +35,15 @@ interface RuntimeAdapter {
     secrets: Record<string, string>,
     ctx: SessionContext,
     onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+    runContext?: RuntimeExecutionContext,
   ): Promise<RuntimeResult>;
+}
+
+interface RuntimeExecutionContext {
+  runId?: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+  signal?: AbortSignal;
 }
 
 interface RuntimeResult {
@@ -50,7 +59,7 @@ interface RuntimeResult {
 
 ### Invariants
 
-- **Timeout enforcement.** The adapter MUST kill the run after `app.timeout_ms` (default 300s, see `docker.ts` `RUNNER_TIMEOUT`) and return `{ status: 'timeout', error_type: 'timeout' }`. The job worker relies on this upper bound to make progress — an adapter that silently runs longer will starve the queue.
+- **Timeout enforcement.** The adapter MUST kill the run after `runContext.timeoutMs` when supplied, otherwise its configured default (300s for the Docker runtime, see `docker.ts` `RUNNER_TIMEOUT`), and return `{ status: 'timeout', error_type: 'timeout' }`. The job worker relies on this upper bound to make progress — an adapter that silently runs longer will starve the queue.
 - **Secret injection.** Values in `secrets` are injected into the execution environment (env vars for containers, auth headers for proxy). Secrets MUST NOT appear in `logs` or `outputs`.
 - **Output shape.** `outputs` is the app's successful return payload, verbatim. Errors go to `error` / `error_type`, not to `outputs`.
 - **Log capture.** stdout + stderr (or request/response trace) is captured to `logs` for display on `/p/:slug` and `GET /api/run/:id`.
@@ -62,9 +71,9 @@ Long-running apps (`is_async = 1`) are invoked via `POST /api/:slug/jobs`, which
 
 ### How to write one
 
-Pick your execution substrate (Firecracker, K8s Job, Cloud Run, WASM), implement `execute`, map your native error shape onto the `ErrorType` taxonomy, and pass the resulting `RuntimeResult` back. Start by implementing the docker path only; `app_type: 'proxied'` can reuse the reference proxy runner unchanged.
+Pick your execution substrate (Firecracker, K8s Job, Cloud Run, WASM), implement `execute`, map your native error shape onto the `ErrorType` taxonomy, and pass the resulting `RuntimeResult` back. The selected runtime adapter owns every supported `app_type` for that deployment; `app_type: 'proxied'` can reuse the reference proxy runner unchanged.
 
-**Worked example.** The default Floom server implements `RuntimeAdapter` using `dockerode`. See `apps/server/src/services/runner.ts` (`dispatchRun` + `runActionWorker`) for the dispatch path; the actual container spawn lives in `apps/server/src/services/docker.ts` (`runAppContainer`).
+**Worked example.** The default Floom server implements `RuntimeAdapter` using `dockerode`. See `apps/server/src/services/runner.ts` (`dispatchRun`) for the dispatch path; the actual container spawn lives in `apps/server/src/services/docker.ts` (`runAppContainer`).
 
 ---
 
@@ -265,10 +274,10 @@ Forward the four methods to your backend of choice. OpenTelemetry is the recomme
 
 Floom's Docker runtime is implemented in two files:
 
-- `apps/server/src/services/runner.ts` — the dispatch path. `dispatchRun(app, manifest, runId, action, inputs, perCallSecrets?, ctx?)` resolves secret precedence (global → per-app → user vault / creator override → per-call `_auth`), writes the initial `runs` row, and forks to `runActionWorker` (docker) or `runProxiedWorker` (proxy) by `app.app_type`.
+- `apps/server/src/services/runner.ts` — the dispatch path. `dispatchRun(app, manifest, runId, action, inputs, perCallSecrets?, ctx?)` resolves secret precedence (global → per-app → user vault / creator override → per-call `_auth`), writes the initial `runs` row, and invokes `adapters.runtime.execute`.
 - `apps/server/src/services/docker.ts` — the container spawn. `runAppContainer({ appId, runId, action, inputs, secrets, image, onOutput })` builds a Dockerfile (Python or Node) if the image isn't cached, spawns the container with the provided secrets as env, streams stdout + stderr to `onOutput`, enforces `RUNNER_TIMEOUT`, and returns `{ stdout, stderr, exitCode, timedOut, oomKilled, durationMs }`.
 
-The runner parses the container's stdout for the `__FLOOM_RESULT__` marker (see `parseEntrypointOutput`), classifies the result into the 10-class `ErrorType` taxonomy, and writes the final row via `updateRun`. That's the whole contract — an alternate runtime adapter would replace `runAppContainer` with its own spawn path and return a structurally-identical result.
+The default runtime adapter parses the container's stdout for the `__FLOOM_RESULT__` marker (see `parseEntrypointOutput`), classifies the result into the `ErrorType` taxonomy, and returns a normalized `RuntimeResult`. The runner writes that result via `updateRun`. An alternate runtime adapter can replace `runAppContainer` with its own spawn path and return the same normalized shape.
 
 ---
 
@@ -294,7 +303,7 @@ Language below follows RFC 2119: **MUST**, **SHOULD**, **MAY**.
 A conformant `RuntimeAdapter` MUST pass:
 
 - **success path**: given a no-op action that writes `__FLOOM_RESULT__ {"ok":true}` to stdout, `execute` resolves with `status: 'success'`, `outputs: { ok: true }`, `duration_ms >= 0`, no `error`, no `error_type`.
-- **timeout enforcement**: given `app.timeout_ms = 500` and an action that sleeps for 5s, `execute` resolves within 2s with `status: 'timeout'`, `error_type: 'timeout'`. The adapter MUST NOT leave an orphan process or container.
+- **timeout enforcement**: given `runContext.timeoutMs = 500` and an action that sleeps for 5s, `execute` resolves within 2s with `status: 'timeout'`, `error_type: 'timeout'`. The adapter MUST NOT leave an orphan process or container.
 - **error classification**: given an action that exits non-zero with a recognizable upstream error, the returned `error_type` is one of the 10 `ErrorType` enum values; an unclassified failure MUST map to `error_type: 'unknown_error'`, not omitted.
 - **secret non-leakage**: given `secrets: { API_KEY: 'sk-abc123' }` and an action that echoes its environment to stdout, the returned `logs` and `outputs` MUST NOT contain the string `sk-abc123`. (The adapter is allowed to redact; it is not allowed to pass through.)
 - **concurrent isolation**: two parallel `execute` calls for the same app with different inputs MUST each return their own `outputs` with no cross-contamination.

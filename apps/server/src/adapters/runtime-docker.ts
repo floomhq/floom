@@ -1,21 +1,11 @@
-// Docker runtime adapter wrapper.
-//
-// Thin shim that lets the existing `services/docker.ts runAppContainer`
-// function satisfy the `RuntimeAdapter` interface declared in
-// `adapters/types.ts`. Behavior is unchanged: a call to
-// `dockerRuntimeAdapter.execute(...)` is functionally equivalent to the
-// call path inside `services/runner.ts runActionWorker` (minus the
-// DB-write side effects, which stay in the runner).
-//
-// This wrapper exists so the adapter factory (adapters/factory.ts) has
-// something concrete to hand back for the default `FLOOM_RUNTIME=docker`
-// configuration. The live run-dispatch path still goes through
-// `dispatchRun` in services/runner.ts; migrating that call site to use
-// `adapters.runtime.execute` is follow-on work.
+// Default runtime adapter. `FLOOM_RUNTIME=docker` selects this implementation;
+// it owns app_type dispatch so the runner only talks to the RuntimeAdapter
+// surface.
 
 import type { AppRecord, NormalizedManifest, SessionContext } from '../types.js';
-import type { RuntimeAdapter, RuntimeResult } from './types.js';
+import type { RuntimeAdapter, RuntimeExecutionContext, RuntimeResult } from './types.js';
 import { runAppContainer } from '../services/docker.js';
+import { runProxied } from '../services/proxied-runner.js';
 import { parseEntrypointOutput, extractUserLogs, detectSilentError } from '../services/runner.js';
 
 function redactSecrets(value: unknown, secrets: Record<string, string>): unknown {
@@ -51,23 +41,59 @@ export const dockerRuntimeAdapter: RuntimeAdapter = {
     secrets: Record<string, string>,
     _ctx: SessionContext,
     onOutput?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+    runContext?: RuntimeExecutionContext,
   ): Promise<RuntimeResult> {
+    if (app.app_type === 'proxied') {
+      const result = await runProxied({
+        app,
+        manifest,
+        action,
+        inputs,
+        secrets,
+        timeoutMs: runContext?.timeoutMs,
+      });
+      const safeLogs = redactSecrets(result.logs, secrets) as string;
+      if (onOutput && safeLogs) onOutput(safeLogs, 'stdout');
+      return {
+        status:
+          result.error_type === 'timeout' && runContext?.timeoutMs ? 'timeout' : result.status,
+        outputs: redactSecrets(result.outputs, secrets),
+        error: redactSecrets(result.error, secrets) as string | undefined,
+        error_type: result.error_type,
+        upstream_status: result.upstream_status,
+        duration_ms: result.duration_ms,
+        logs: safeLogs,
+      };
+    }
+
+    if (app.app_type !== 'docker') {
+      return {
+        status: 'error',
+        outputs: null,
+        error: `Unsupported app_type for docker runtime: ${app.app_type}`,
+        error_type: 'floom_internal_error',
+        duration_ms: 0,
+        logs: '',
+      };
+    }
+
     // runAppContainer requires a runId. The live runner creates the run row
-    // first and passes its id; here we synthesise a transient id because the
-    // adapter contract doesn't carry one. The container name it ends up in is
-    // still unique per call. The run id is only used for the container name
-    // and the file-input staging dir, so a transient value is safe.
-    const transientRunId = `adhoc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // first and passes its id. Contract tests and direct adapter callers get a
+    // transient id that is still unique enough for container names and input
+    // staging dirs.
+    const runId =
+      runContext?.runId || `adhoc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const image = app.docker_image ?? undefined;
 
     const result = await runAppContainer({
       appId: app.id,
-      runId: transientRunId,
+      runId,
       action,
       inputs,
       secrets,
       manifest,
       image,
+      timeoutMs: runContext?.timeoutMs,
       onOutput,
     });
 

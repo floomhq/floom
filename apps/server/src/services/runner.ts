@@ -1,8 +1,6 @@
 // Trimmed port of the marketplace runner. Loads secrets, dispatches a
 // container run, streams output to the log bus, and updates the run record.
 import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
-import { runAppContainer } from './docker.js';
-import { runProxied } from './proxied-runner.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
 import { noteAppUnavailable } from '../lib/alerts.js';
@@ -372,218 +370,77 @@ export async function dispatchRun(
 
   updateRun(runId, { status: 'running' });
 
-  if (app.app_type === 'proxied') {
-    void runProxiedWorker({ app, manifest, runId, action, inputs, secrets });
-  } else {
-    void runActionWorker({
-      slug: app.slug,
-      appId: app.id,
-      runId,
-      action,
-      inputs,
-      secrets,
-      manifest,
-      image: app.docker_image ?? undefined,
-    });
-  }
+  void runRuntimeWorker({ app, manifest, runId, action, inputs, secrets, ctx: runtimeCtx });
 }
 
-async function runProxiedWorker(opts: {
+async function runRuntimeWorker(opts: {
   app: AppRecord;
   manifest: NormalizedManifest;
   runId: string;
   action: string;
   inputs: Record<string, unknown>;
   secrets: Record<string, string>;
+  ctx: SessionContext;
 }): Promise<void> {
   const logStream = getOrCreateStream(opts.runId);
   try {
-    const result = await runProxied({
-      app: opts.app,
-      manifest: opts.manifest,
-      action: opts.action,
-      inputs: opts.inputs,
-      secrets: opts.secrets,
-    });
-    for (const line of result.logs.split('\n')) {
-      if (line) logStream.append(line, 'stdout');
-    }
-    // Error taxonomy (2026-04-20): proxied-runner classifies the
-    // failure at source (auth_error / user_input_error / upstream_outage
-    // / network_unreachable / timeout / missing_secret). We persist its
-    // verdict verbatim so the client can render the matching headline
-    // without re-parsing the raw error string. Fall back to
-    // runtime_error only when the runner couldn't pick a class.
-    updateRun(opts.runId, {
-      status: result.status,
-      outputs: result.outputs,
-      error: result.error || null,
-      error_type:
-        result.status === 'error'
-          ? ((result.error_type as ErrorType | undefined) ?? 'runtime_error')
-          : null,
-      upstream_status: result.upstream_status ?? null,
-      logs: result.logs,
-      duration_ms: result.duration_ms,
-      finished: true,
-    });
-    if (result.status === 'error' && result.error_type === 'app_unavailable') {
-      noteAppUnavailable(opts.app.slug, result.error || 'app_unavailable');
-    }
-  } catch (err) {
-    // An exception here (as opposed to a returned error result) means
-    // runProxied itself crashed — that's a Floom-side bug, not an
-    // upstream issue. Classify as floom_internal_error so the runner
-    // surface shows the "Something broke inside Floom" headline with
-    // a "Report this" link, not the misleading "Can't reach this app".
-    const e = err as Error;
-    updateRun(opts.runId, {
-      status: 'error',
-      error: e.message || 'Proxied runner crashed',
-      error_type: 'floom_internal_error',
-      logs: e.stack || '',
-      finished: true,
-    });
-  } finally {
-    logStream.finish();
-  }
-}
-
-async function runActionWorker(opts: {
-  slug: string;
-  appId: string;
-  runId: string;
-  action: string;
-  inputs: Record<string, unknown>;
-  secrets: Record<string, string>;
-  manifest: NormalizedManifest;
-  image?: string;
-}): Promise<void> {
-  const logStream = getOrCreateStream(opts.runId);
-
-  try {
-    const result = await runAppContainer({
-      appId: opts.appId,
-      runId: opts.runId,
-      action: opts.action,
-      inputs: opts.inputs,
-      secrets: opts.secrets,
-      manifest: opts.manifest,
-      image: opts.image,
-      onOutput: (chunk, stream) => {
+    const { adapters } = await import('../adapters/index.js');
+    const result = await adapters.runtime.execute(
+      opts.app,
+      opts.manifest,
+      opts.action,
+      opts.inputs,
+      opts.secrets,
+      opts.ctx,
+      (chunk, stream) => {
         const lines = chunk.split('\n');
         for (const line of lines) {
           if (line) logStream.append(line, stream);
         }
       },
-    });
+      { runId: opts.runId },
+    );
 
-    const parsed = parseEntrypointOutput(result.stdout);
-    const userLogs =
-      extractUserLogs(result.stdout) + (result.stderr ? '\n' + result.stderr : '');
-
-    if (result.timedOut) {
-      updateRun(opts.runId, {
-        status: 'timeout',
-        error: 'Run timed out',
-        error_type: 'timeout',
-        logs: userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      return;
-    }
-
-    if (result.oomKilled) {
-      updateRun(opts.runId, {
-        status: 'error',
-        error: 'Container ran out of memory. Increase RUNNER_MEMORY.',
-        error_type: 'oom',
-        logs: userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      return;
-    }
-
-    if (parsed && parsed.ok === true) {
-      // Some docker apps return `{ ok: true, outputs: { error: "..." } }` when
-      // an internal step failed (e.g. git clone with no auth, or a downstream
-      // generator returned a non-2xx). Treat those as runtime errors so the UI
-      // and `/api/run/<id>` surface a real failure instead of a silent
-      // "success" with an error buried in the outputs. Also covers openblog's
-      // batch shape where every article failed.
-      const silentErr = detectSilentError(parsed.outputs);
-      if (silentErr) {
-        updateRun(opts.runId, {
-          status: 'error',
-          outputs: parsed.outputs ?? null,
-          error: silentErr,
-          error_type: 'runtime_error',
-          logs: userLogs,
-          duration_ms: result.durationMs,
-          finished: true,
-        });
-        return;
-      }
-      updateRun(opts.runId, {
-        status: 'success',
-        outputs: parsed.outputs ?? null,
-        logs: userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      return;
-    }
-
-    if (parsed && parsed.ok === false) {
-      updateRun(opts.runId, {
-        status: 'error',
-        error: parsed.error || 'Unknown error',
-        error_type: parsed.error_type || 'runtime_error',
-        logs: (parsed.logs ? parsed.logs + '\n' : '') + userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      if (parsed.error_type === 'app_unavailable') {
-        noteAppUnavailable(opts.slug, parsed.error || 'app_unavailable');
-      }
-      return;
-    }
-
-    updateRun(opts.runId, {
-      status: 'error',
-      error:
-        result.exitCode === 0
-          ? 'Container exited cleanly but emitted no result'
-          : `Container exited with code ${result.exitCode}`,
-      error_type: 'floom_internal_error',
-      logs: result.stdout + '\n' + result.stderr,
-      duration_ms: result.durationMs,
+    const patch: UpdateRunArgs = {
+      status: result.status,
+      error: result.status === 'error' || result.status === 'timeout' ? result.error || null : null,
+      error_type:
+        result.status === 'error' || result.status === 'timeout'
+          ? ((result.error_type as ErrorType | undefined) ?? 'runtime_error')
+          : null,
+      logs: result.logs,
+      duration_ms: result.duration_ms,
       finished: true,
-    });
+    };
+    if (
+      result.status === 'success' ||
+      opts.app.app_type === 'proxied' ||
+      result.outputs !== null
+    ) {
+      patch.outputs = result.outputs ?? null;
+    }
+    if (opts.app.app_type === 'proxied' || result.upstream_status !== undefined) {
+      patch.upstream_status = result.upstream_status ?? null;
+    }
+
+    updateRun(opts.runId, patch);
+    if (result.status === 'error' && result.error_type === 'app_unavailable') {
+      noteAppUnavailable(opts.app.slug, result.error || 'app_unavailable');
+    }
   } catch (err) {
-    // The runner itself crashed — not an upstream problem, not the
-    // user's input. Classify as floom_internal_error so the UI doesn't
-    // tell the caller to "try again in a minute" when the fix is on
-    // our side.
-    //
-    // Exception (2026-04-20): docker.ts tags "no such image" failures
-    // with `floom_error_class === 'app_unavailable'`. Those are creator
-    // misconfig, not a Floom bug — surface as the dedicated class so
-    // the UI can render "This app isn't available" instead of the
-    // misleading "Something broke inside Floom" card.
+    // The selected runtime adapter crashed. That is a Floom-side runtime
+    // integration failure unless the lower layer tagged it as an unavailable app.
     const e = err as Error & { floom_error_class?: string };
     const klass = e.floom_error_class;
     updateRun(opts.runId, {
       status: 'error',
-      error: e.message || 'Runner crashed',
+      error: e.message || 'Runtime adapter crashed',
       error_type: klass === 'app_unavailable' ? 'app_unavailable' : 'floom_internal_error',
       logs: e.stack || '',
       finished: true,
     });
     if (klass === 'app_unavailable') {
-      noteAppUnavailable(opts.slug, e.message || 'Runner crashed');
+      noteAppUnavailable(opts.app.slug, e.message || 'Runtime adapter crashed');
     }
   } finally {
     logStream.finish();
@@ -597,7 +454,7 @@ export function getRun(runId: string): RunRecord | undefined {
 /**
  * Zombie-run sweeper (#349).
  *
- * Every run is dispatched fire-and-forget (`void runActionWorker(...)`) from
+ * Every run is dispatched fire-and-forget (`void runRuntimeWorker(...)`) from
  * {@link dispatchRun}. If the server process crashes, is OOM-killed, or is
  * redeployed mid-run, the inner `updateRun({..., finished: true})` call
  * never lands and the row stays `status='running'` forever. The /p/:slug
