@@ -127,6 +127,41 @@ export function pickApps(prompt: string, limit = 3): Promise<{ apps: PickResult[
   });
 }
 
+// Studio Analytics (GH #882)
+export interface AppAnalytics {
+  slug: string;
+  total_runs: number;
+  runs_7d: number;
+  success_rate: number | null;
+  last_run_at: string | null;
+  avg_duration_ms: number | null;
+  runs_by_day: Array<{ date: string; count: number }>;
+}
+
+export function getAppAnalytics(slug: string): Promise<AppAnalytics> {
+  return request<AppAnalytics>(`/api/hub/${slug}/analytics`);
+}
+
+// Studio Feedback (GH #881)
+export interface AppFeedbackItem {
+  id: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  author_display: string;
+  created_at: string;
+}
+
+export interface AppFeedbackResponse {
+  slug: string;
+  summary: { count: number; avg: number };
+  feedback: AppFeedbackItem[];
+}
+
+export function getAppFeedback(slug: string): Promise<AppFeedbackResponse> {
+  return request<AppFeedbackResponse>(`/api/hub/${slug}/feedback`);
+}
+
 export function parsePrompt(
   prompt: string,
   appSlug: string,
