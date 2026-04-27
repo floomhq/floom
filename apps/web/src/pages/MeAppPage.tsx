@@ -1,30 +1,13 @@
-// MVP stub: /me/apps/:slug — replaced with ComingSoon for launch.
+// MVP stub: /me/apps/:slug → redirect for launch.
 // AppHeader, TabBar exports below are preserved as other pages depend on them.
 
-import { Link } from 'react-router-dom';
-import { PageShell } from '../components/PageShell';
-import { MeRail } from '../components/me/MeRail';
+import { Link, Navigate } from 'react-router-dom';
 import { AppIcon } from '../components/AppIcon';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
-import { ComingSoon } from '../components/ComingSoon';
 import type { AppDetail } from '../lib/types';
 
 export function MeAppPage() {
-  return (
-    <PageShell
-      requireAuth="cloud"
-      title="App · Floom"
-      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
-      noIndex
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 'calc(100vh - 56px)' }}>
-        <MeRail />
-        <main style={{ flex: 1, minWidth: 0 }}>
-          <ComingSoon feature="App detail" />
-        </main>
-      </div>
-    </PageShell>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 // ---------- Shared header + tabs ----------
