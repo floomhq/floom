@@ -67,7 +67,8 @@ export function LoginPage() {
     rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
       ? rawNext
       : null;
-  const nextPath = safeNext || '/me/agent-keys';
+  // launch-mvp: redirect to slim one-box home after login
+  const nextPath = safeNext || '/home';
 
   // If the user is already logged in (cloud mode) redirect away.
   useEffect(() => {
