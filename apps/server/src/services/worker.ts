@@ -7,23 +7,21 @@
 // (or the job's timeout_ms to elapse), updates the job, fires the webhook,
 // and retries on failure if `max_retries` allows.
 //
-// One worker per server process. Multiple replicas are safe because claimJob
-// uses an atomic UPDATE...WHERE status='queued'.
-import { db } from '../db.js';
+// One worker per server process. Multiple replicas are safe because the
+// storage adapter claim path is atomic.
+import { adapters } from '../adapters/index.js';
 import { newRunId } from '../lib/ids.js';
 import {
-  claimJob,
   completeJob,
   failJob,
   getJob,
-  nextQueuedJob,
   requeueJob,
 } from './jobs.js';
-import { dispatchRun, getRun } from './runner.js';
+import { dispatchRun } from './runner.js';
+import { buildContext } from './session.js';
 import { deliverWebhook, type WebhookPayload } from './webhook.js';
 import { getJobTriggerContext } from './triggers-worker.js';
 import type {
-  AppRecord,
   JobRecord,
   NormalizedManifest,
   RunRecord,
@@ -74,16 +72,12 @@ export function stopJobWorker(): void {
  * deterministically without waiting for the setTimeout loop.
  */
 export async function processOneJob(): Promise<JobRecord | null> {
-  const candidate = nextQueuedJob();
-  if (!candidate) return null;
-  const claimed = claimJob(candidate.id);
-  if (!claimed) return null; // another worker won
+  const claimed = await adapters.storage.claimNextJob();
+  if (!claimed) return null;
 
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(claimed.app_id) as AppRecord | undefined;
+  const app = await adapters.storage.getAppById(claimed.app_id);
   if (!app) {
-    failJob(claimed.id, { message: `App ${claimed.app_id} not found` }, null);
+    await failJob(claimed.id, { message: `App ${claimed.app_id} not found` }, null);
     await deliverCompletion(claimed.id);
     return claimed;
   }
@@ -92,7 +86,7 @@ export async function processOneJob(): Promise<JobRecord | null> {
   try {
     manifest = JSON.parse(app.manifest) as NormalizedManifest;
   } catch (err) {
-    failJob(
+    await failJob(
       claimed.id,
       { message: `Manifest corrupted: ${(err as Error).message}` },
       null,
@@ -108,33 +102,45 @@ export async function processOneJob(): Promise<JobRecord | null> {
   const perCallSecrets = claimed.per_call_secrets_json
     ? (JSON.parse(claimed.per_call_secrets_json) as Record<string, string>)
     : undefined;
+  const ctx = contextFromJob(claimed);
 
   const runId = newRunId();
-  db.prepare(
-    `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
-  ).run(runId, app.id, claimed.action, JSON.stringify(inputs));
+  const runInput: Parameters<typeof adapters.storage.createRun>[0] = {
+    id: runId,
+    app_id: app.id,
+    action: claimed.action,
+    inputs,
+  };
+  if (ctx) {
+    runInput.workspace_id = ctx.workspace_id;
+    runInput.user_id = ctx.user_id;
+    runInput.device_id = ctx.device_id;
+  }
+  await adapters.storage.createRun(runInput);
 
-  dispatchRun(app, manifest, runId, claimed.action, inputs, perCallSecrets);
+  await dispatchRun(app, manifest, runId, claimed.action, inputs, perCallSecrets, ctx);
 
   const run = await waitForRunOrTimeout(runId, claimed.timeout_ms);
 
   if (!run) {
     // Timed out. Mark the run as timeout if we can, mark the job failed.
-    db.prepare(
-      `UPDATE runs SET status='timeout', error='Job timeout exceeded',
-        error_type='timeout', finished_at=datetime('now') WHERE id = ?`,
-    ).run(runId);
+    await adapters.storage.updateRun(runId, {
+      status: 'timeout',
+      error: 'Job timeout exceeded',
+      error_type: 'timeout',
+      finished: true,
+    });
     await handleFailure(claimed.id, {
       message: `Job exceeded timeout_ms=${claimed.timeout_ms}`,
       type: 'timeout',
     }, runId);
-    return getJob(claimed.id) || claimed;
+    return (await getJob(claimed.id)) || claimed;
   }
 
   if (run.status === 'success') {
-    completeJob(claimed.id, run.outputs ? safeJsonParse(run.outputs) : null, runId);
+    await completeJob(claimed.id, run.outputs ? safeJsonParse(run.outputs) : null, runId);
     await deliverCompletion(claimed.id);
-    return getJob(claimed.id) || claimed;
+    return (await getJob(claimed.id)) || claimed;
   }
 
   // Error / timeout path
@@ -146,7 +152,22 @@ export async function processOneJob(): Promise<JobRecord | null> {
     },
     runId,
   );
-  return getJob(claimed.id) || claimed;
+  return (await getJob(claimed.id)) || claimed;
+}
+
+function contextFromJob(job: JobRecord) {
+  if (!job.workspace_id || !job.user_id) {
+    console.warn(
+      `[worker] job=${job.id} missing persisted session context; using legacy dispatch context`,
+    );
+    return undefined;
+  }
+  return buildContext(
+    job.workspace_id,
+    job.user_id,
+    job.device_id || job.user_id,
+    !(job.workspace_id === 'local' && job.user_id === 'local'),
+  );
 }
 
 async function handleFailure(
@@ -154,14 +175,14 @@ async function handleFailure(
   error: { message: string; type?: string; details?: unknown },
   runId: string | null,
 ): Promise<void> {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) return;
   if (job.attempts <= job.max_retries) {
     // Retries remain — re-queue silently. No webhook yet.
-    requeueJob(jobId);
+    await requeueJob(jobId);
     return;
   }
-  failJob(jobId, error, runId);
+  await failJob(jobId, error, runId);
   await deliverCompletion(jobId);
 }
 
@@ -171,7 +192,7 @@ async function waitForRunOrTimeout(
 ): Promise<RunRecord | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const row = getRun(runId);
+    const row = await adapters.storage.getRun(runId);
     if (row && ['success', 'error', 'timeout'].includes(row.status)) return row;
     await new Promise((r) => setTimeout(r, RUN_POLL_INTERVAL_MS));
   }
@@ -179,7 +200,7 @@ async function waitForRunOrTimeout(
 }
 
 async function deliverCompletion(jobId: string): Promise<void> {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) return;
   if (!job.webhook_url) return;
 
@@ -198,7 +219,7 @@ async function deliverCompletion(jobId: string): Promise<void> {
   }
   const duration =
     job.started_at && job.finished_at
-      ? new Date(job.finished_at + 'Z').getTime() - new Date(job.started_at + 'Z').getTime()
+      ? parseStorageTimestampMs(job.finished_at) - parseStorageTimestampMs(job.started_at)
       : null;
 
   // Trigger context (unified triggers). When a job was enqueued by a
@@ -233,6 +254,14 @@ async function deliverCompletion(jobId: string): Promise<void> {
       `[worker] webhook threw job=${job.id} url=${job.webhook_url} error=${(err as Error).message}`,
     );
   }
+}
+
+function parseStorageTimestampMs(value: string): number {
+  const trimmed = value.trim();
+  if (/[zZ]$|[+-]\d{2}(?::?\d{2})?$/.test(trimmed)) {
+    return Date.parse(trimmed);
+  }
+  return Date.parse(trimmed.replace(' ', 'T') + 'Z');
 }
 
 function safeJsonParse(raw: string): unknown {

@@ -1,7 +1,7 @@
-import { db } from '../db.js';
 import { newAppInviteId, newVisibilityAuditId } from '../lib/ids.js';
 import { auditLog } from './audit-log.js';
 import { generateLinkShareToken } from '../lib/link-share-token.js';
+import type { StorageAdapter } from '../adapters/types.js';
 import type {
   AppInviteState,
   AppRecord,
@@ -9,6 +9,10 @@ import type {
   AppVisibilityState,
   SessionContext,
 } from '../types.js';
+
+async function storage(): Promise<StorageAdapter> {
+  return (await import('../adapters/index.js')).adapters.storage;
+}
 
 export const VISIBILITY_STATES = [
   'private',
@@ -92,11 +96,9 @@ export function isPubliclyRunnableVisibility(value: string | null | undefined): 
   return value === 'public_live' || value === 'public';
 }
 
-export function verifyLinkToken(slug: string, providedKey: string | null | undefined): boolean {
+export async function verifyLinkToken(slug: string, providedKey: string | null | undefined): Promise<boolean> {
   if (!providedKey) return false;
-  const row = db
-    .prepare(`SELECT link_share_token FROM apps WHERE slug = ?`)
-    .get(slug) as { link_share_token: string | null } | undefined;
+  const row = await (await storage()).getLinkShareByAppSlug(slug);
   return Boolean(row?.link_share_token && row.link_share_token === providedKey);
 }
 
@@ -113,22 +115,12 @@ function readOwnerMatches(app: Pick<AppRecord, 'author'>, ctx: SessionContext): 
   return Boolean(app.author && app.author === ctx.user_id);
 }
 
-export function userHasAcceptedInvite(appId: string, userId: string | null | undefined): boolean {
-  if (!userId) return false;
-  const row = db
-    .prepare(
-      `SELECT 1 AS ok
-         FROM app_invites
-        WHERE app_id = ?
-          AND invited_user_id = ?
-          AND state = 'accepted'
-        LIMIT 1`,
-    )
-    .get(appId, userId) as { ok: number } | undefined;
-  return Boolean(row);
+export function userHasAcceptedInvite(appId: string, userId: string | null | undefined): Promise<boolean> {
+  if (!userId) return Promise.resolve(false);
+  return storage().then((s) => s.userHasAcceptedAppInvite(appId, userId));
 }
 
-export function canAccessApp(
+export async function canAccessApp(
   app: Pick<AppRecord, 'id' | 'author' | 'workspace_id' | 'link_share_token'> & {
     slug?: string | null;
     visibility: AppVisibility | string | null | undefined;
@@ -136,7 +128,7 @@ export function canAccessApp(
   },
   ctx: SessionContext,
   linkToken?: string | null,
-): boolean {
+): Promise<boolean> {
   const visibility = canonicalVisibility(app.visibility);
   if (visibility === 'public_live') return true;
   if (visibility === 'private' || visibility === 'pending_review' || visibility === 'changes_requested') {
@@ -144,21 +136,21 @@ export function canAccessApp(
   }
   if (visibility === 'link') {
     const validToken = app.slug
-      ? verifyLinkToken(app.slug, linkToken)
+      ? await verifyLinkToken(app.slug, linkToken)
       : Boolean(app.link_share_token && linkToken && app.link_share_token === linkToken);
     if (!validToken) return false;
     if (app.link_share_requires_auth) return ctx.is_authenticated;
     return true;
   }
   if (visibility === 'invited') {
-    return readOwnerMatches(app, ctx) || userHasAcceptedInvite(app.id, ctx.user_id);
+    return readOwnerMatches(app, ctx) || await userHasAcceptedInvite(app.id, ctx.user_id);
   }
   return false;
 }
 
 export type AppAccessDecision = { ok: true } | { ok: false; status: 401 | 404 };
 
-export function getAppAccessDecision(
+export async function getAppAccessDecision(
   app: Pick<AppRecord, 'id' | 'author' | 'workspace_id' | 'link_share_token'> & {
     slug?: string | null;
     visibility: AppVisibility | string | null | undefined;
@@ -166,14 +158,14 @@ export function getAppAccessDecision(
   },
   ctx: SessionContext,
   linkToken?: string | null,
-): AppAccessDecision {
+): Promise<AppAccessDecision> {
   const visibility = canonicalVisibility(app.visibility);
   if (visibility !== 'link') {
-    return canAccessApp(app, ctx, linkToken) ? { ok: true } : { ok: false, status: 404 };
+    return (await canAccessApp(app, ctx, linkToken)) ? { ok: true } : { ok: false, status: 404 };
   }
 
   const validToken = app.slug
-    ? verifyLinkToken(app.slug, linkToken)
+    ? await verifyLinkToken(app.slug, linkToken)
     : Boolean(app.link_share_token && linkToken && app.link_share_token === linkToken);
   if (validToken && (!app.link_share_requires_auth || ctx.is_authenticated)) {
     return { ok: true };
@@ -211,7 +203,7 @@ export function assertLegalTransition(
   throw new Error('illegal_transition');
 }
 
-function auditTransition(
+async function auditTransition(
   appId: string,
   fromState: string | null,
   toState: string,
@@ -222,20 +214,16 @@ function auditTransition(
   beforeState: Record<string, unknown>,
   afterState: Record<string, unknown>,
   metadata?: Record<string, unknown>,
-): void {
-  db.prepare(
-    `INSERT INTO app_visibility_audit
-       (id, app_id, from_state, to_state, actor_user_id, reason, metadata)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    newVisibilityAuditId(),
-    appId,
-    fromState,
-    toState,
-    actorUserId,
+): Promise<void> {
+  await (await storage()).createVisibilityAudit({
+    id: newVisibilityAuditId(),
+    app_id: appId,
+    from_state: fromState,
+    to_state: toState,
+    actor_user_id: actorUserId,
     reason,
-    metadata ? JSON.stringify(metadata) : null,
-  );
+    metadata: metadata ? JSON.stringify(metadata) : null,
+  });
   auditLog({
     actor: { userId: actorUserId, tokenId: actorTokenId || null, ip: actorIp || null },
     action:
@@ -256,11 +244,11 @@ function auditTransition(
   });
 }
 
-export function transitionVisibility(
+export async function transitionVisibility(
   app: AppRecord,
   to: AppVisibilityState,
   options: TransitionOptions,
-): AppRecord {
+): Promise<AppRecord> {
   const from = canonicalVisibility(app.visibility);
   assertLegalTransition(from, to, options.reason);
 
@@ -272,34 +260,33 @@ export function transitionVisibility(
         : app.link_share_token;
   }
 
-  const reviewSubmittedAt = to === 'pending_review' ? "datetime('now')" : 'review_submitted_at';
-  const reviewDecidedAt =
-    to === 'public_live' || to === 'changes_requested' ? "datetime('now')" : 'review_decided_at';
-  const reviewDecidedBy =
-    to === 'public_live' || to === 'changes_requested' ? '?' : 'review_decided_by';
-  const reviewComment = to === 'changes_requested' ? '?' : to === 'pending_review' ? 'NULL' : 'review_comment';
   const publishStatus = to === 'public_live' ? 'published' : to === 'pending_review' ? 'pending_review' : app.publish_status;
 
-  const values: unknown[] = [to, linkToken, publishStatus];
-  if (to === 'public_live' || to === 'changes_requested') values.push(options.actorUserId);
-  if (to === 'changes_requested') values.push(options.comment || '');
-  values.push(app.id);
+  const apply = async () => {
+    const patch: Parameters<StorageAdapter['updateAppSharing']>[1] = {
+      visibility: to,
+      link_share_token: linkToken,
+      publish_status: publishStatus,
+      review_submitted_at: to === 'pending_review' ? new Date().toISOString() : app.review_submitted_at,
+      review_decided_at:
+        to === 'public_live' || to === 'changes_requested'
+          ? new Date().toISOString()
+          : app.review_decided_at,
+      review_decided_by:
+        to === 'public_live' || to === 'changes_requested'
+          ? options.actorUserId
+          : app.review_decided_by,
+      review_comment:
+        to === 'changes_requested'
+          ? options.comment || ''
+          : to === 'pending_review'
+            ? null
+            : app.review_comment,
+    };
+    const updated = await (await storage()).updateAppSharing(app.id, patch);
+    if (!updated) throw new Error(`app not found: ${app.id}`);
 
-  const apply = db.transaction(() => {
-    db.prepare(
-      `UPDATE apps
-          SET visibility = ?,
-              link_share_token = ?,
-              publish_status = ?,
-              review_submitted_at = ${reviewSubmittedAt},
-              review_decided_at = ${reviewDecidedAt},
-              review_decided_by = ${reviewDecidedBy},
-              review_comment = ${reviewComment},
-              updated_at = datetime('now')
-        WHERE id = ?`,
-    ).run(...values);
-
-    auditTransition(
+    await auditTransition(
       app.id,
       from,
       to,
@@ -315,182 +302,69 @@ export function transitionVisibility(
       },
     );
 
-    return db.prepare(`SELECT * FROM apps WHERE id = ?`).get(app.id) as AppRecord;
-  });
+    return updated;
+  };
 
   return apply();
 }
 
-export function listInvites(appId: string): AppInviteRow[] {
-  return db
-    .prepare(
-      `SELECT app_invites.*,
-              users.name AS invited_user_name,
-              users.email AS invited_user_email
-         FROM app_invites
-         LEFT JOIN users ON users.id = app_invites.invited_user_id
-        WHERE app_invites.app_id = ?
-        ORDER BY app_invites.created_at DESC`,
-    )
-    .all(appId) as AppInviteRow[];
+export async function listInvites(appId: string): Promise<AppInviteRow[]> {
+  return (await storage()).listAppInvites(appId) as Promise<AppInviteRow[]>;
 }
 
-export function findUserByUsername(username: string): { id: string; email: string | null; name: string | null } | null {
+export async function findUserByUsername(username: string): Promise<{ id: string; email: string | null; name: string | null } | null> {
   const normalized = username.trim().replace(/^@/, '').toLowerCase();
   if (!normalized) return null;
-  const row = db
-    .prepare(
-      `SELECT id, email, name
-         FROM users
-        WHERE LOWER(name) = ?
-           OR LOWER(email) = ?
-           OR LOWER(substr(email, 1, instr(email, '@') - 1)) = ?
-        LIMIT 1`,
-    )
-    .get(normalized, normalized, normalized) as { id: string; email: string | null; name: string | null } | undefined;
+  const row = await (await storage()).findUserByUsername(normalized);
   return row || null;
 }
 
-export function findUserByEmail(email: string): { id: string; email: string | null; name: string | null } | null {
+export async function findUserByEmail(email: string): Promise<{ id: string; email: string | null; name: string | null } | null> {
   const normalized = email.trim().toLowerCase();
   if (!normalized) return null;
-  const row = db
-    .prepare(`SELECT id, email, name FROM users WHERE LOWER(email) = ? LIMIT 1`)
-    .get(normalized) as { id: string; email: string | null; name: string | null } | undefined;
+  const row = await (await storage()).getUserByEmail(normalized);
   return row || null;
 }
 
-export function upsertInvite(params: {
+export async function upsertInvite(params: {
   appId: string;
   invitedByUserId: string;
   invitedUserId?: string | null;
   invitedEmail?: string | null;
   state: AppInviteState;
-}): AppInviteRow {
-  const existing = db
-    .prepare(
-      `SELECT * FROM app_invites
-        WHERE app_id = ?
-          AND (
-            (? IS NOT NULL AND invited_user_id = ?)
-            OR (? IS NOT NULL AND LOWER(invited_email) = LOWER(?))
-          )
-        ORDER BY created_at DESC
-        LIMIT 1`,
-    )
-    .get(
-      params.appId,
-      params.invitedUserId || null,
-      params.invitedUserId || null,
-      params.invitedEmail || null,
-      params.invitedEmail || null,
-    ) as AppInviteRow | undefined;
-
-  if (existing && !['revoked', 'declined'].includes(existing.state)) {
-    return existing;
-  }
-
+}): Promise<AppInviteRow> {
   const id = newAppInviteId();
-  db.prepare(
-    `INSERT INTO app_invites
-       (id, app_id, invited_user_id, invited_email, state, invited_by_user_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
+  return (await storage()).upsertAppInvite({
     id,
-    params.appId,
-    params.invitedUserId || null,
-    params.invitedEmail || null,
-    params.state,
-    params.invitedByUserId,
-  );
-  return db.prepare(`SELECT * FROM app_invites WHERE id = ?`).get(id) as AppInviteRow;
+    app_id: params.appId,
+    invited_user_id: params.invitedUserId || null,
+    invited_email: params.invitedEmail || null,
+    state: params.state,
+    invited_by_user_id: params.invitedByUserId,
+  }) as Promise<AppInviteRow>;
 }
 
-export function revokeInvite(inviteId: string, appId: string): AppInviteRow | null {
-  const invite = db
-    .prepare(`SELECT * FROM app_invites WHERE id = ? AND app_id = ?`)
-    .get(inviteId, appId) as AppInviteRow | undefined;
-  if (!invite) return null;
-  if (invite.state === 'revoked') return invite;
-  db.prepare(
-    `UPDATE app_invites
-        SET state = 'revoked',
-            revoked_at = datetime('now')
-      WHERE id = ?`,
-  ).run(invite.id);
-  return db.prepare(`SELECT * FROM app_invites WHERE id = ?`).get(invite.id) as AppInviteRow;
+export async function revokeInvite(inviteId: string, appId: string): Promise<AppInviteRow | null> {
+  return (await (await storage()).revokeAppInvite(inviteId, appId) as AppInviteRow | undefined) || null;
 }
 
-export function acceptInvite(inviteId: string, userId: string): { invite: AppInviteRow | null; changed: boolean } {
-  const invite = db
-    .prepare(`SELECT * FROM app_invites WHERE id = ?`)
-    .get(inviteId) as AppInviteRow | undefined;
-  if (!invite || invite.invited_user_id !== userId) return { invite: null, changed: false };
-  if (invite.state === 'accepted') return { invite, changed: false };
-  if (invite.state !== 'pending_accept') return { invite, changed: false };
-  db.prepare(
-    `UPDATE app_invites
-        SET state = 'accepted',
-            accepted_at = datetime('now')
-      WHERE id = ?`,
-  ).run(invite.id);
-  return {
-    invite: db.prepare(`SELECT * FROM app_invites WHERE id = ?`).get(invite.id) as AppInviteRow,
-    changed: true,
-  };
+export async function acceptInvite(inviteId: string, userId: string): Promise<{ invite: AppInviteRow | null; changed: boolean }> {
+  const result = await (await storage()).acceptAppInvite(inviteId, userId);
+  return { invite: (result.invite as AppInviteRow | undefined) || null, changed: result.changed };
 }
 
-export function declineInvite(inviteId: string, userId: string): AppInviteRow | null {
-  const invite = db
-    .prepare(`SELECT * FROM app_invites WHERE id = ?`)
-    .get(inviteId) as AppInviteRow | undefined;
-  if (!invite || invite.invited_user_id !== userId) return null;
-  if (invite.state === 'accepted' || invite.state === 'pending_accept') {
-    db.prepare(`UPDATE app_invites SET state = 'declined' WHERE id = ?`).run(invite.id);
-  }
-  return db.prepare(`SELECT * FROM app_invites WHERE id = ?`).get(invite.id) as AppInviteRow;
+export async function declineInvite(inviteId: string, userId: string): Promise<AppInviteRow | null> {
+  return (await (await storage()).declineAppInvite(inviteId, userId) as AppInviteRow | undefined) || null;
 }
 
-export function linkPendingEmailInvites(userId: string, email: string): number {
-  const result = db
-    .prepare(
-      `UPDATE app_invites
-          SET invited_user_id = ?,
-              state = 'pending_accept'
-        WHERE state = 'pending_email'
-          AND LOWER(invited_email) = LOWER(?)`,
-    )
-    .run(userId, email);
-  return result.changes;
+export async function linkPendingEmailInvites(userId: string, email: string): Promise<number> {
+  return (await storage()).linkPendingEmailAppInvites(userId, email);
 }
 
-export function listPendingInvitesForUser(userId: string): AppInviteRow[] {
-  return db
-    .prepare(
-      `SELECT app_invites.*,
-              apps.slug AS app_slug,
-              apps.name AS app_name,
-              apps.description AS app_description
-         FROM app_invites
-         JOIN apps ON apps.id = app_invites.app_id
-        WHERE app_invites.invited_user_id = ?
-          AND app_invites.state = 'pending_accept'
-        ORDER BY app_invites.created_at DESC`,
-    )
-    .all(userId) as AppInviteRow[];
+export async function listPendingInvitesForUser(userId: string): Promise<AppInviteRow[]> {
+  return (await storage()).listPendingAppInvitesForUser(userId) as Promise<AppInviteRow[]>;
 }
 
-export function listAuditRows(appId?: string | null): VisibilityAuditRow[] {
-  if (appId) {
-    return db
-      .prepare(
-        `SELECT * FROM app_visibility_audit
-          WHERE app_id = ?
-          ORDER BY created_at DESC`,
-      )
-      .all(appId) as VisibilityAuditRow[];
-  }
-  return db
-    .prepare(`SELECT * FROM app_visibility_audit ORDER BY created_at DESC LIMIT 200`)
-    .all() as VisibilityAuditRow[];
+export async function listAuditRows(appId?: string | null): Promise<VisibilityAuditRow[]> {
+  return (await storage()).listVisibilityAudit(appId) as Promise<VisibilityAuditRow[]>;
 }

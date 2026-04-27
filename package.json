@@ -8,10 +8,15 @@
     "dev": "turbo dev",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:conformance": "node packages/conformance-runner/bin/run.mjs",
     "test:hub-smoke": "pnpm --filter @floom/hub-smoke test:fast",
     "lint": "turbo lint"
   },
   "devDependencies": {
+    "@floomhq/auth-magic-link": "workspace:*",
+    "@floomhq/observability-otel": "workspace:*",
+    "@floomhq/storage-postgres": "workspace:*",
+    "@floomhq/secrets-gcp-kms": "workspace:*",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "tsx": "4.21.0",

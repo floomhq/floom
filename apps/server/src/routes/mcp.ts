@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { newRunId, newJobId } from '../lib/ids.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { dispatchRun, getRun } from '../services/runner.js';
@@ -117,12 +117,12 @@ async function waitForRun(runId: string): Promise<RunRecord> {
   const POLL_INTERVAL_MS = 2000;
   const deadline = Date.now() + MAX_WAIT_MS;
   while (Date.now() < deadline) {
-    const row = getRun(runId);
+    const row = await getRun(runId);
     if (!row) throw new Error(`Run ${runId} not found`);
     if (['success', 'error', 'timeout'].includes(row.status)) return row;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-  const row = getRun(runId);
+  const row = await getRun(runId);
   if (!row) throw new Error(`Run ${runId} not found`);
   return row;
 }
@@ -215,9 +215,7 @@ function createPerAppMcpServer(
       },
       async (rawInputs) => {
         recordMcpToolCall(toolName);
-        const fresh = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as
-          | AppRecord
-          | undefined;
+        const fresh = await adapters.storage.getAppById(app.id);
         if (!fresh) {
           return {
             isError: true,
@@ -280,13 +278,14 @@ function createPerAppMcpServer(
         // missing_secrets error so the MCP client can prompt the user.
         if (actionSecretsNeeded.length > 0) {
           const available = new Set<string>();
-          // Server-side persisted secrets
-          const rows = db
-            .prepare(
-              "SELECT name FROM secrets WHERE (app_id IS NULL OR app_id = ?) AND value != ''",
-            )
-            .all(fresh.id) as { name: string }[];
-          for (const r of rows) available.add(r.name);
+          for (const r of await adapters.secrets.listAdminSecrets(null)) {
+            const value = await adapters.secrets.getAdminSecret(null, r.key);
+            if (value !== null && value !== '') available.add(r.key);
+          }
+          for (const r of await adapters.secrets.listAdminSecrets(fresh.id)) {
+            const value = await adapters.secrets.getAdminSecret(fresh.id, r.key);
+            if (value !== null && value !== '') available.add(r.key);
+          }
           // Per-call secrets
           for (const k of Object.keys(perCallSecrets || {})) available.add(k);
 
@@ -313,11 +312,14 @@ function createPerAppMcpServer(
         // /api/:slug/jobs/:id or receives a webhook on completion.
         if (fresh.is_async) {
           const jobId = newJobId();
-          createJob(jobId, {
+          await createJob(jobId, {
             app: fresh,
             action: actionName,
             inputs: validated,
             perCallSecrets,
+            workspace_id: ctx?.workspace_id ?? null,
+            user_id: ctx?.user_id ?? null,
+            device_id: ctx?.device_id ?? null,
           });
           const publicUrl =
             process.env.PUBLIC_URL ||
@@ -342,16 +344,19 @@ function createPerAppMcpServer(
           };
         }
 
-        db.prepare(
-          `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
-        ).run(runId, fresh.id, actionName, JSON.stringify(validated));
+        await adapters.storage.createRun({
+          id: runId,
+          app_id: fresh.id,
+          action: actionName,
+          inputs: validated,
+        });
         // Parity with POST /api/run + POST /api/:slug/run: pass the
         // resolved SessionContext so dispatchRun can merge the caller's
         // user-vault secrets. Without this every authed MCP consumer
         // falls back to defaultContext() (the synthetic 'local' user)
         // and loses access to their own vault. See
         // docs/product-audit/deep/pd-05-three-surface-parity.md.
-        dispatchRun(
+        await dispatchRun(
           fresh,
           freshManifest,
           runId,
@@ -883,14 +888,22 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       // MCP list_apps exposes public apps plus the caller's own apps. This
       // keeps freshly-ingested private apps discoverable to the creator without
       // leaking another user's private slug.
-      let sql =
-        "SELECT * FROM apps WHERE status = 'active'" +
-        " AND (visibility = 'public_live' OR visibility = 'public' OR visibility IS NULL OR author = ?)" +
-        (category ? ' AND category = ?' : '') +
-        ' ORDER BY featured DESC, name ASC';
-      const rows = (category
-        ? db.prepare(sql).all(ctx.user_id, category)
-        : db.prepare(sql).all(ctx.user_id)) as AppRecord[];
+      const rows = (await adapters.storage.listApps())
+        .filter((app) => {
+          if (app.status !== 'active') return false;
+          if (category && app.category !== category) return false;
+          return (
+            app.visibility === 'public_live' ||
+            app.visibility === 'public' ||
+            app.visibility === null ||
+            app.author === ctx.user_id
+          );
+        })
+        .sort(
+          (a, b) =>
+            Number(b.featured) - Number(a.featured) ||
+            a.name.localeCompare(b.name),
+        );
       // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
       // listings so Claude Desktop + Cursor clients don't surface them in
       // discovery. Same regex as server /api/hub. Fixtures are still
@@ -982,9 +995,7 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       },
     },
     async ({ slug }) => {
-      const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-        | AppRecord
-        | undefined;
+      const row = await adapters.storage.getApp(slug);
       if (!row) {
         return {
           isError: true,
@@ -1101,7 +1112,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ category, q, limit, cursor }) => {
       recordMcpToolCall('discover_apps');
       try {
-        return mcpJson(discoverApps(c, ctx, { category, q, limit, cursor }));
+        return mcpJson(await discoverApps(c, ctx, { category, q, limit, cursor }));
       } catch (err) {
         return mcpError(err);
       }
@@ -1121,7 +1132,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ slug }) => {
       recordMcpToolCall('get_app_skill');
       try {
-        return mcpJson(getAppSkill(c, ctx, slug));
+        return mcpJson(await getAppSkill(c, ctx, slug));
       } catch (err) {
         return mcpError(err);
       }
@@ -1169,7 +1180,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ run_id }) => {
       recordMcpToolCall('get_run');
       try {
-        return mcpJson(getAgentRun(ctx, run_id));
+        return mcpJson(await getAgentRun(ctx, run_id));
       } catch (err) {
         return mcpError(err);
       }
@@ -1192,7 +1203,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ slug, limit, cursor, since_ts }) => {
       recordMcpToolCall('list_my_runs');
       try {
-        return mcpJson(listMyRuns(ctx, { slug, limit, cursor, since_ts }));
+        return mcpJson(await listMyRuns(ctx, { slug, limit, cursor, since_ts }));
       } catch (err) {
         return mcpError(err);
       }
@@ -1234,7 +1245,7 @@ mcpRouter.all('/search', async (c) => {
 // /mcp/app/:slug — per-app MCP
 mcpRouter.all('/app/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const row = await adapters.storage.getApp(slug);
   if (!row) {
     // Wrap unknown-app errors in a JSON-RPC envelope so MCP clients see a
     // protocol-level error, not a bare HTTP 404. Return 200 per JSON-RPC
@@ -1249,7 +1260,7 @@ mcpRouter.all('/app/:slug', async (c) => {
     );
   }
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,
     author: row.author,

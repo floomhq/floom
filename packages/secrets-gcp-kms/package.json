@@ -1,0 +1,41 @@
+{
+  "name": "@floomhq/secrets-gcp-kms",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "GCP KMS envelope-encrypted SecretsAdapter implementation for Floom protocol 0.2.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx test/gcp-kms-secrets.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/floomhq/floom.git",
+    "directory": "packages/secrets-gcp-kms"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@google-cloud/kms": "^5.4.0"
+  },
+  "peerDependencies": {
+    "@floom/adapter-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@floom/adapter-types": "workspace:*",
+    "@types/node": "20.17.9",
+    "tsx": "4.21.0",
+    "typescript": "5.6.3"
+  }
+}

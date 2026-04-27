@@ -1,0 +1,41 @@
+{
+  "name": "@floomhq/auth-magic-link",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Resend magic-link AuthAdapter implementation for Floom protocol 0.2.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/floomhq/floom.git",
+    "directory": "packages/auth-magic-link"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "resend": "6.12.0"
+  },
+  "peerDependencies": {
+    "@floom/adapter-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@floom/adapter-types": "workspace:*",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "20.17.9",
+    "typescript": "5.6.3"
+  }
+}

@@ -73,7 +73,7 @@ db.prepare(
 console.log('triggers: schedule tests');
 
 // 1. Create a schedule trigger and assert next_run_at is in the future.
-const t1 = triggers.createTrigger({
+const t1 = await triggers.createTrigger({
   app_id: appId,
   user_id: DEFAULT_USER_ID,
   workspace_id: DEFAULT_WORKSPACE_ID,
@@ -107,13 +107,13 @@ db.prepare('UPDATE triggers SET next_run_at = ? WHERE id = ?').run(
   Date.now() - 1_000,
   t1.id,
 );
-const firedCount = worker.tickOnce();
+const firedCount = await worker.tickOnce();
 log(
   'tickOnce: fires when next_run_at <= now',
   firedCount === 1,
   `fired=${firedCount}`,
 );
-const t1After = triggers.getTrigger(t1.id);
+const t1After = await triggers.getTrigger(t1.id);
 log(
   'tickOnce: next_run_at advanced',
   t1After.next_run_at > Date.now(),
@@ -135,12 +135,12 @@ log(
 
 // 3. Disable the trigger, force next_run_at into the past again, tick.
 //    Nothing should fire.
-triggers.updateTrigger(t1.id, { enabled: false });
+await triggers.updateTrigger(t1.id, { enabled: false });
 db.prepare('UPDATE triggers SET next_run_at = ? WHERE id = ?').run(
   Date.now() - 1_000,
   t1.id,
 );
-const firedCount2 = worker.tickOnce();
+const firedCount2 = await worker.tickOnce();
 log(
   'tickOnce: disabled trigger does NOT fire',
   firedCount2 === 0,
@@ -156,13 +156,13 @@ log(
 );
 
 // Re-enable for next checks.
-triggers.updateTrigger(t1.id, { enabled: true });
+await triggers.updateTrigger(t1.id, { enabled: true });
 
 // 4. Update cron via PATCH and assert next_run_at recomputed.
-const before = triggers.getTrigger(t1.id).next_run_at;
+const before = (await triggers.getTrigger(t1.id)).next_run_at;
 await new Promise((r) => setTimeout(r, 50));
-triggers.updateTrigger(t1.id, { cron_expression: '0 0 1 1 *' }); // once a year
-const after = triggers.getTrigger(t1.id).next_run_at;
+await triggers.updateTrigger(t1.id, { cron_expression: '0 0 1 1 *' }); // once a year
+const after = (await triggers.getTrigger(t1.id)).next_run_at;
 log(
   'updateTrigger: cron_expression change recomputes next_run_at',
   after !== before,
@@ -184,7 +184,7 @@ db.prepare(
   DEFAULT_WORKSPACE_ID,
   DEFAULT_USER_ID,
 );
-const tDrift = triggers.createTrigger({
+const tDrift = await triggers.createTrigger({
   app_id: catchUpAppId,
   user_id: DEFAULT_USER_ID,
   workspace_id: DEFAULT_WORKSPACE_ID,
@@ -203,7 +203,7 @@ db.prepare('UPDATE triggers SET next_run_at = ? WHERE id = ?').run(
 const jobsBeforeDrift = db
   .prepare('SELECT COUNT(*) as n FROM jobs WHERE app_id = ?')
   .get(catchUpAppId).n;
-worker.tickOnce();
+await worker.tickOnce();
 const jobsAfterDrift = db
   .prepare('SELECT COUNT(*) as n FROM jobs WHERE app_id = ?')
   .get(catchUpAppId).n;
@@ -212,7 +212,7 @@ log(
   jobsAfterDrift === jobsBeforeDrift,
   `before=${jobsBeforeDrift} after=${jobsAfterDrift}`,
 );
-const tDriftAfter = triggers.getTrigger(tDrift.id);
+const tDriftAfter = await triggers.getTrigger(tDrift.id);
 log(
   'catch-up: next_run_at reset to the future',
   tDriftAfter.next_run_at > Date.now(),
@@ -253,7 +253,7 @@ db.prepare(
   DEFAULT_WORKSPACE_ID,
   cascadeUserId,
 );
-const cascadeTrig = triggers.createTrigger({
+const cascadeTrig = await triggers.createTrigger({
   app_id: cascadeAppId,
   user_id: cascadeUserId,
   workspace_id: DEFAULT_WORKSPACE_ID,

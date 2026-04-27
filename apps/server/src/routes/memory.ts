@@ -17,9 +17,8 @@ import { z } from 'zod';
 import { resolveUserContext } from '../services/session.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import * as appMemory from '../services/app_memory.js';
-import * as userSecrets from '../services/user_secrets.js';
+import { adapters } from '../adapters/index.js';
 import { MemoryKeyNotAllowedError } from '../services/app_memory.js';
-import { SecretDecryptError } from '../services/user_secrets.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
 
 export const memoryRouter = new Hono();
@@ -37,7 +36,7 @@ memoryRouter.get('/:app_slug', async (c) => {
   const ctx = await resolveUserContext(c);
   const slug = c.req.param('app_slug') || '';
   try {
-    const entries = appMemory.list(ctx, slug);
+    const entries = await appMemory.list(ctx, slug);
     return c.json({ entries });
   } catch (err) {
     return c.json(
@@ -73,7 +72,7 @@ memoryRouter.post('/:app_slug', async (c) => {
     );
   }
   try {
-    appMemory.set(ctx, slug, parsed.data.key, parsed.data.value);
+    await appMemory.set(ctx, slug, parsed.data.key, parsed.data.value);
     return c.json({ ok: true, key: parsed.data.key });
   } catch (err) {
     if (err instanceof MemoryKeyNotAllowedError) {
@@ -103,7 +102,7 @@ memoryRouter.delete('/:app_slug/:key', async (c) => {
   const slug = c.req.param('app_slug') || '';
   const key = c.req.param('key') || '';
   try {
-    const removed = appMemory.del(ctx, slug, key);
+    const removed = await appMemory.del(ctx, slug, key);
     return c.json({ ok: true, removed });
   } catch (err) {
     return c.json(
@@ -135,7 +134,7 @@ secretsRouter.get('/', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   try {
-    const entries = userSecrets.listMasked(ctx);
+    const entries = await adapters.secrets.list(ctx);
     return c.json({ entries });
   } catch (err) {
     return c.json(
@@ -171,10 +170,9 @@ secretsRouter.post('/', async (c) => {
     );
   }
   try {
-    const existed = userSecrets
-      .listMasked(ctx)
+    const existed = (await adapters.secrets.list(ctx))
       .some((entry) => entry.key === parsed.data.key);
-    userSecrets.set(ctx, parsed.data.key, parsed.data.value);
+    await adapters.secrets.set(ctx, parsed.data.key, parsed.data.value);
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.updated',
@@ -189,9 +187,9 @@ secretsRouter.post('/', async (c) => {
     });
     return c.json({ ok: true, key: parsed.data.key });
   } catch (err) {
-    if (err instanceof SecretDecryptError) {
+    if ((err as Error).name === 'SecretDecryptError') {
       return c.json(
-        { error: err.message, code: 'secret_encrypt_failed' },
+        { error: (err as Error).message, code: 'secret_encrypt_failed' },
         500,
       );
     }
@@ -211,10 +209,9 @@ secretsRouter.delete('/:key', async (c) => {
   if (gate) return gate;
   const key = c.req.param('key') || '';
   try {
-    const existed = userSecrets
-      .listMasked(ctx)
+    const existed = (await adapters.secrets.list(ctx))
       .some((entry) => entry.key === key);
-    const removed = userSecrets.del(ctx, key);
+    const removed = await adapters.secrets.delete(ctx, key);
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.deleted',

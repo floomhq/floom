@@ -13,7 +13,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { resolveUserContext } from '../services/session.js';
 import type { AppReviewRecord } from '../types.js';
 
@@ -46,36 +46,24 @@ reviewsRouter.get('/:slug/reviews', async (c) => {
   const slug = c.req.param('slug') || '';
   const limit = Math.max(1, Math.min(50, Number(c.req.query('limit') || 20)));
 
-  // Summary: count + average rating across ALL workspaces. Reviews are
-  // per-app, not per-workspace, so a single app's review list is global.
-  const summary = db
-    .prepare(
-      `SELECT COUNT(*) AS count, COALESCE(AVG(rating), 0) AS avg
-         FROM app_reviews
-        WHERE app_slug = ?`,
-    )
-    .get(slug) as { count: number; avg: number };
-
-  // Recent reviews with a joined display name from users.
-  const rows = db
-    .prepare(
-      `SELECT app_reviews.*, users.name AS author_name, users.email AS author_email
-         FROM app_reviews
-         LEFT JOIN users ON users.id = app_reviews.user_id
-        WHERE app_reviews.app_slug = ?
-        ORDER BY app_reviews.created_at DESC
-        LIMIT ?`,
-    )
-    .all(slug, limit) as Array<AppReviewRecord & { author_name: string | null; author_email: string | null }>;
+  const allReviews = await adapters.storage.listAppReviews({ app_slug: slug });
+  const rows = allReviews.slice(0, limit);
+  const authorNames = new Map<string, string | null>();
+  await Promise.all(
+    rows.map(async (row) => {
+      const user = await adapters.storage.getUser(row.user_id);
+      authorNames.set(row.id, user?.name || (user?.email ? user.email.split('@')[0] : null));
+    }),
+  );
+  const ratingTotal = allReviews.reduce((sum, row) => sum + Number(row.rating || 0), 0);
+  const avg = allReviews.length > 0 ? ratingTotal / allReviews.length : 0;
 
   return c.json({
     summary: {
-      count: summary.count || 0,
-      avg: Math.round(Number(summary.avg || 0) * 10) / 10,
+      count: allReviews.length,
+      avg: Math.round(avg * 10) / 10,
     },
-    reviews: rows.map((r) =>
-      serialize(r, r.author_name || (r.author_email ? r.author_email.split('@')[0] : null)),
-    ),
+    reviews: rows.map((r) => serialize(r, authorNames.get(r.id) || null)),
   });
 });
 
@@ -91,9 +79,7 @@ reviewsRouter.post('/:slug/reviews', async (c) => {
   const slug = c.req.param('slug') || '';
 
   // Confirm the app exists so we don't accumulate orphan reviews.
-  const app = db
-    .prepare('SELECT id FROM apps WHERE slug = ?')
-    .get(slug) as { id: string } | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) {
     return c.json({ error: 'App not found', code: 'app_not_found' }, 404);
   }
@@ -114,41 +100,41 @@ reviewsRouter.post('/:slug/reviews', async (c) => {
   const { rating, title, body: reviewBody } = parsed.data;
 
   const now = new Date().toISOString();
-  const existing = db
-    .prepare(
-      `SELECT id FROM app_reviews
-        WHERE workspace_id = ? AND app_slug = ? AND user_id = ?`,
-    )
-    .get(ctx.workspace_id, slug, ctx.user_id) as { id: string } | undefined;
+  const existing = (
+    await adapters.storage.listAppReviews({
+      workspace_id: ctx.workspace_id,
+      app_slug: slug,
+      user_id: ctx.user_id,
+      limit: 1,
+    })
+  )[0];
 
   let id: string;
+  let row: AppReviewRecord | undefined;
   if (existing) {
     id = existing.id;
-    db.prepare(
-      `UPDATE app_reviews
-          SET rating = ?, title = ?, body = ?, updated_at = ?
-        WHERE id = ?`,
-    ).run(rating, title ?? null, reviewBody ?? null, now, id);
+    row = await adapters.storage.updateAppReview(id, {
+      rating,
+      title: title ?? null,
+      body: reviewBody ?? null,
+      updated_at: now,
+    });
   } else {
     id = `rev_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
-    db.prepare(
-      `INSERT INTO app_reviews
-        (id, workspace_id, app_slug, user_id, rating, title, body, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
+    row = await adapters.storage.createAppReview({
       id,
-      ctx.workspace_id,
-      slug,
-      ctx.user_id,
+      workspace_id: ctx.workspace_id,
+      app_slug: slug,
+      user_id: ctx.user_id,
       rating,
-      title ?? null,
-      reviewBody ?? null,
-      now,
-      now,
-    );
+      title: title ?? null,
+      body: reviewBody ?? null,
+      created_at: now,
+      updated_at: now,
+    });
   }
 
-  const row = db.prepare('SELECT * FROM app_reviews WHERE id = ?').get(id) as AppReviewRecord;
+  if (!row) return c.json({ error: 'Review not found', code: 'review_not_found' }, 404);
   return c.json({ review: serialize(row, ctx.email?.split('@')[0] || null) }, existing ? 200 : 201);
 });
 
@@ -171,9 +157,7 @@ const InviteBody = z.object({
 
 reviewsRouter.post('/:slug/invite', async (c) => {
   const slug = c.req.param('slug') || '';
-  const app = db
-    .prepare('SELECT id FROM apps WHERE slug = ?')
-    .get(slug) as { id: string } | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) {
     return c.json({ error: 'App not found', code: 'app_not_found' }, 404);
   }
@@ -192,4 +176,3 @@ reviewsRouter.post('/:slug/invite', async (c) => {
   }
   return c.json({ ok: true, invite_id: `stub-${Date.now()}` }, 201);
 });
-

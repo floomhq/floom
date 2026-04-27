@@ -49,20 +49,11 @@ import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
 import { agentTokenAuthMiddleware } from './lib/agent-tokens.js';
 import {
-  getAuth,
-  getAuthForRequest,
   isCloudMode,
   purgeUnverifiedAuthSessions,
   runAuthMigrations,
 } from './lib/better-auth.js';
-import { sanitizeAuthResponse } from './lib/auth-response.js';
-import { padToFloor, shouldPadAuthTiming } from './lib/auth-response-guard.js';
 import { runRateLimitMiddleware, writeRateLimitMiddleware } from './lib/rate-limit.js';
-import {
-  applyProgressiveSigninDelayFromContext,
-  parseEmailForSigninProgressiveDelay,
-  recordSigninEmailProgressiveDelayOutcome,
-} from './lib/signin-progressive-delay.js';
 import { resolveUserContext } from './services/session.js';
 import { getAppAccessDecision, isPublicListingVisibility } from './services/sharing.js';
 import { startJobWorker } from './services/worker.js';
@@ -76,19 +67,20 @@ import { runBodyLimit } from './middleware/body-size.js';
 import { meTriggersRouter, hubTriggersRouter } from './routes/triggers.js';
 import { webhookRouter } from './routes/webhook.js';
 import { isDeployEnabled } from './services/workspaces.js';
-import {
-  AccountDeleteError,
-  getUserDeletionStateByEmail,
-  initiateAccountSoftDelete,
-  isDeleteExpired,
-  permanentlyDeleteExpiredAccountForEmail,
-  revokeAccountSessions,
-  softDeletedSignInBody,
-  startAccountDeleteSweeper,
-} from './services/account-deletion.js';
+import { startAccountDeleteSweeper } from './services/account-deletion.js';
+// Instantiates the adapter bundle at module load so
+// misconfigured env vars fail fast at boot (before any request is served).
+// The bundle is exported from `adapters/index.ts`; route modules import
+// `adapters` from there rather than `src/index.ts` to avoid an import
+// cycle with this bootstrap file. See docs/adapters.md.
+import { adapters } from './adapters/index.js';
 
 const PORT = Number(process.env.PORT || 3051);
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+
+function usesBetterAuthAdapter(): boolean {
+  return (process.env.FLOOM_AUTH || 'better-auth') === 'better-auth';
+}
 
 enforceStartupChecks();
 
@@ -98,6 +90,48 @@ logAlertsBootState();
 
 const app = new Hono();
 app.use('*', logger());
+
+let server: ReturnType<typeof serve> | null = null;
+let shutdownStarted = false;
+
+async function closeAdapters(): Promise<boolean> {
+  const results = await Promise.allSettled(
+    Object.values(adapters).map((adapter) => adapter.close?.()),
+  );
+  let ok = true;
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      ok = false;
+      console.error('[server] adapter close failed:', result.reason);
+    }
+  }
+  return ok;
+}
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  console.log(`[server] ${signal} received, shutting down`);
+  await new Promise<void>((resolve) => {
+    if (!server) {
+      resolve();
+      return;
+    }
+    server.close((err?: Error) => {
+      if (err) console.error('[server] HTTP server close failed:', err);
+      resolve();
+    });
+  });
+  const adaptersClosed = await closeAdapters();
+  process.exit(adaptersClosed ? 0 : 1);
+}
+
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
 
 // CORS (2026-04-20 security audit P2): split policy.
 //
@@ -373,155 +407,13 @@ app.route('/api/feedback', feedbackRouter);
 // Mounted before static+SPA handling so these routes never hit index.html.
 app.route('/', skillRouter);
 
-// W3.1: when FLOOM_CLOUD_MODE=true, mount the Better Auth handler on /auth/*.
-// In OSS mode (the default), `getAuth()` returns null and this block is a
-// no-op. The handler owns its own basePath ("/auth") so we mount under "/" with
-// a wildcard. Better Auth handles every method itself.
-//
-// Issue #392: route every auth request through `getAuthForRequest(req)`
-// instead of the singleton. This picks the Better Auth instance whose
-// `baseURL` matches the caller's origin (floom.dev vs preview.floom.dev)
-// so verify-email and OAuth callbacks stay on the origin host.
-if (isCloudMode()) {
-  const auth = getAuth();
-  if (auth) {
-    // OAuth error bridge: when the user denies the OAuth consent screen or
-    // the provider returns an error, Better Auth redirects to
-    // <baseURL>/auth/error?error=<code>. Without this handler the user sees
-    // the raw backend response (plain text / Better Auth's built-in page),
-    // not Floom's branded UI. Bridge it to the frontend login page.
-    app.get('/auth/error', (c) => {
-      const error = c.req.query('error') || 'unknown';
-      const isDev = process.env.NODE_ENV !== 'production';
-      const frontendOrigin =
-        process.env.FLOOM_APP_URL ||
-        (isDev ? 'http://localhost:5173' : '');
-      if (frontendOrigin) {
-        return c.redirect(
-          `${frontendOrigin}/login?error=${encodeURIComponent(error)}`,
-        );
-      }
-      return c.json({ error: 'auth_failed', code: error }, 400);
-    });
-
-    // Issue #767 (waitlist bypass): in waitlist mode (`isDeployEnabled()`
-    // false), block account-creation auth endpoints before Better Auth runs.
-    // Keep GET /auth/* reachable (session checks, callbacks, etc.).
-    app.use('/auth/*', async (c, next) => {
-      const method = c.req.method;
-      const pathname = new URL(c.req.url).pathname;
-      const isSignupPath = /^\/auth\/(?:sign-up|signup)(?:\/|$)/.test(pathname);
-      if (method === 'POST' && isSignupPath && !isDeployEnabled()) {
-        return c.json({ error: 'sign-up disabled — join the waitlist' }, 403);
-      }
-      return next();
-    });
-
-    app.post('/auth/delete-user', async (c) => {
-      const auth = getAuthForRequest(c.req.raw);
-      if (!auth) {
-        return new Response('Auth not configured', { status: 503 });
-      }
-      const session = (await auth.api.getSession({
-        headers: c.req.raw.headers,
-      })) as { user?: { id: string; email: string } } | null;
-      if (!session?.user?.id || !session.user.email) {
-        return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
-      }
-      let confirmEmail = session.user.email;
-      try {
-        const body = (await c.req.json()) as { confirm_email?: unknown };
-        if (typeof body.confirm_email === 'string') confirmEmail = body.confirm_email;
-      } catch {
-        confirmEmail = session.user.email;
-      }
-      try {
-        const result = initiateAccountSoftDelete(session.user.id, confirmEmail);
-        return c.json({ success: true, message: 'User deleted', delete_at: result.delete_at });
-      } catch (err) {
-        if (err instanceof AccountDeleteError) {
-          return c.json({ error: err.message, code: err.code }, err.status as 400 | 401 | 404 | 409 | 410 | 422);
-        }
-        throw err;
-      }
-    });
-
-    // Hono `app.on(...)` accepts a method list + path. Better Auth's
-    // `handler` consumes the raw `Request` and returns a `Response`, which
-    // is exactly what `c.req.raw` and `c.body()` provide. We wrap the
-    // handler so we can (a) resolve the per-origin auth instance
-    // (#396 — verify-email / OAuth callbacks stay on the origin host),
-    // (b) strip `token` from password-endpoint response bodies (#375), and
-    // (c) pad sign-in/sign-up timing to a constant floor so email-
-    // enumeration timing attacks (#376) bottom out at the same wall clock
-    // on both the duplicate and fresh-user branches. See
-    // lib/auth-response-guard.ts for rationale.
-    app.on(
-      ['GET', 'POST', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'],
-      '/auth/*',
-      async (c) => {
-        const auth = getAuthForRequest(c.req.raw);
-        if (!auth) {
-          return new Response('Auth not configured', { status: 503 });
-        }
-        const pathname = new URL(c.req.url).pathname;
-        const method = c.req.method;
-        let reqForAuth = c.req.raw;
-        let signinEmailForDelay: string | null = null;
-        let pendingDeleteSignin = null as ReturnType<typeof getUserDeletionStateByEmail> | null;
-        if (method === 'POST' && pathname === '/auth/sign-in/email') {
-          const bodyText = await c.req.raw.clone().text();
-          const parsedEmail = parseEmailForSigninProgressiveDelay(bodyText);
-          if (parsedEmail) {
-            signinEmailForDelay = parsedEmail;
-            await applyProgressiveSigninDelayFromContext(c, parsedEmail);
-            const deletionState = getUserDeletionStateByEmail(parsedEmail);
-            if (deletionState?.deleted_at) {
-              if (isDeleteExpired(deletionState)) {
-                const earlyStartedAtMs = Date.now();
-                permanentlyDeleteExpiredAccountForEmail(parsedEmail);
-                const expired = new Response(
-                  JSON.stringify({
-                    error: 'Invalid email or password.',
-                    code: 'invalid_credentials',
-                  }),
-                  { status: 401, headers: { 'content-type': 'application/json' } },
-                );
-                await recordSigninEmailProgressiveDelayOutcome(c, parsedEmail, expired);
-                const padTiming = shouldPadAuthTiming(pathname);
-                if (padTiming) await padToFloor(earlyStartedAtMs);
-                return expired;
-              }
-              pendingDeleteSignin = deletionState;
-            }
-            reqForAuth = new Request(c.req.raw.url, {
-              method: c.req.raw.method,
-              headers: c.req.raw.headers,
-              body: bodyText,
-            });
-          }
-        }
-        const padTiming = shouldPadAuthTiming(pathname);
-        const startedAtMs = padTiming ? Date.now() : 0;
-        const raw = await auth.handler(reqForAuth);
-        let res = await sanitizeAuthResponse(reqForAuth, raw);
-        if (pendingDeleteSignin && res.status >= 200 && res.status < 300) {
-          revokeAccountSessions(pendingDeleteSignin.id);
-          res = new Response(JSON.stringify(softDeletedSignInBody(pendingDeleteSignin)), {
-            status: 403,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-        if (signinEmailForDelay) {
-          await recordSigninEmailProgressiveDelayOutcome(c, signinEmailForDelay, res);
-        }
-        if (padTiming) {
-          await padToFloor(startedAtMs);
-        }
-        return res;
-      },
-    );
-    console.log('[auth] FLOOM_CLOUD_MODE=true — Better Auth mounted at /auth/*');
+// /auth/* is owned by the selected AuthAdapter. Better Auth re-mounts its
+// existing live handler; alternate auth adapters expose their matching HTTP
+// surface behind the same base path.
+if (adapters.auth.mountHttp) {
+  await adapters.auth.mountHttp(app, '/auth');
+  if (isCloudMode()) {
+    console.log('[auth] AuthAdapter mounted at /auth/*');
   }
 }
 
@@ -1572,7 +1464,7 @@ if (webDist) {
         return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
       }
       const ctx = await resolveUserContext(c);
-      const access = getAppAccessDecision(appRow, ctx, url.searchParams.get('key'));
+      const access = await getAppAccessDecision(appRow, ctx, url.searchParams.get('key'));
       if (!access.ok) {
         if (access.status === 401) {
           return c.html(rewriteTitle(servedIndexHtml, 'Authentication required · Floom'), 401);
@@ -1626,14 +1518,15 @@ if (webDist) {
 // Boot sequence: seed then start embeddings backfill in the background.
 async function boot(): Promise<void> {
   // W4-minimal gap close: run Better Auth migrations on boot when
-  // FLOOM_CLOUD_MODE is enabled. Creates `user`, `session`, `account`,
-  // `verification` tables plus organization + api-key tables on first
-  // boot. Idempotent — subsequent boots are a no-op once tables exist.
+  // FLOOM_CLOUD_MODE is enabled and Better Auth is the selected auth
+  // adapter. Creates `user`, `session`, `account`, `verification` tables
+  // plus organization + api-key tables on first boot. Idempotent —
+  // subsequent boots are a no-op once tables exist.
   // Runs before seeding so any auth-dependent seed data has schemas to
   // write into. Blocks boot on failure — fail fast if the migration
   // step can't commit, rather than serving requests against a
   // half-initialized auth DB.
-  if (isCloudMode()) {
+  if (isCloudMode() && usesBetterAuthAdapter()) {
     try {
       await runAuthMigrations();
       const purgedSessions = purgeUnverifiedAuthSessions();
@@ -1699,7 +1592,7 @@ async function boot(): Promise<void> {
   // Then spin up the periodic sweeper so in-flight runs that stall past
   // the absolute timeout ceiling also get reaped.
   try {
-    const swept = sweepZombieRuns();
+    const swept = await sweepZombieRuns();
     if (swept > 0) {
       console.log(`[runner] boot sweeper reaped ${swept} zombie run${swept === 1 ? '' : 's'}`);
     }
@@ -1750,7 +1643,7 @@ async function boot(): Promise<void> {
     console.error('[launch-week] boot failed:', err);
   });
 
-  serve({ fetch: app.fetch, port: PORT }, (info) => {
+  server = serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[server] listening on http://localhost:${info.port}`);
     console.log(`[server] public url: ${PUBLIC_URL}`);
   });

@@ -24,23 +24,22 @@
 //
 // Secret bindings:
 //   - The creator declares `{ "IG_SESSIONID": "<vault-key>" }` at ingest time.
-//     The value is the name of a key in the creator's user_secrets vault that
+//     The value is the name of a key in the creator's user vault that
 //     should be mirrored into the container's env as IG_SESSIONID at run time.
 //   - At runtime the creator-secrets layer (see services/runner.ts) reads the
 //     vault value and injects it. We persist the binding as a 'creator_override'
-//     policy row + a copy of the plaintext secret in app_creator_secrets for
-//     the app's workspace. If the creator hasn't set that vault key yet, we
-//     still write the policy row; the run just errors cleanly with
-//     missing_secret instead of the creator discovering at run time.
+//     policy row + a copy of the plaintext secret for the app's workspace. If
+//     the creator hasn't set that vault key yet, we still write the policy row;
+//     the run just errors cleanly with missing_secret instead of the creator
+//     discovering at run time.
 import Docker from 'dockerode';
 import { db } from '../db.js';
-import { newAppId, newSecretId } from '../lib/ids.js';
+import { adapters } from '../adapters/index.js';
+import { newAppId } from '../lib/ids.js';
 import { generateLinkShareToken } from '../lib/link-share-token.js';
 import { normalizeManifest, ManifestError } from './manifest.js';
 import { slugify, SlugTakenError, deriveSlugSuggestions } from './openapi-ingest.js';
 import { auditLog } from './audit-log.js';
-import { setPolicy, setCreatorSecret } from './app_creator_secrets.js';
-import * as userSecrets from './user_secrets.js';
 import type { NormalizedManifest, SessionContext } from '../types.js';
 
 export const DOCKER_PUBLISH_FLAG = 'FLOOM_ENABLE_DOCKER_PUBLISH';
@@ -77,7 +76,7 @@ export class DockerImageIngestError extends Error {
 }
 
 /**
- * A user-supplied binding: container env var name → user_secrets vault key.
+ * A user-supplied binding: container env var name → user vault key.
  * At run time the creator-override layer reads the vault value and injects it
  * into the container's environment as `envKey`.
  *
@@ -87,6 +86,20 @@ export class DockerImageIngestError extends Error {
  * user's vault and set IG_SESSIONID=<that value> in the container env."
  */
 export type SecretBindings = Record<string, string>;
+
+async function setCreatorOverrideSecretViaAdapter(
+  app_id: string,
+  workspace_id: string,
+  key: string,
+  plaintext: string,
+): Promise<void> {
+  await adapters.secrets.setCreatorOverrideSecret(
+    { workspace_id },
+    app_id,
+    key,
+    plaintext,
+  );
+}
 
 /**
  * Minimum shape we accept in `manifest`. Callers who already know the Floom
@@ -336,9 +349,9 @@ export async function ingestAppFromDockerImage(args: {
    */
   manifest?: unknown;
   /**
-   * Map of container env var name → vault key in the caller's user_secrets.
+   * Map of container env var name → vault key in the caller's user vault.
    * Each binding becomes a creator_override policy row + a copy of the
-   * current vault value in app_creator_secrets. If the caller has no vault
+   * current vault value in creator-owned secret storage. If the caller has no vault
    * row for a referenced key we persist the binding anyway; runs will error
    * with missing_secret until the vault is populated.
    */
@@ -491,29 +504,34 @@ export async function ingestAppFromDockerImage(args: {
   if (existing) {
     appId = existing.id;
     created = false;
-    db.prepare(
-      `UPDATE apps SET
-         name=?, description=?, manifest=?, category=?, app_type='docker',
-         docker_image=?, base_url=NULL, auth_type=NULL, auth_config=NULL,
-         openapi_spec_url=NULL, openapi_spec_cached=NULL, visibility=?,
-         link_share_requires_auth=?, link_share_token=?,
-         is_async=0, webhook_url=NULL, timeout_ms=NULL, retries=0,
-         async_mode=NULL, max_run_retention_days=?, workspace_id=?, author=?, updated_at=datetime('now')
-       WHERE slug=?`,
-    ).run(
+    // Routed through adapters.storage.updateApp so the UPDATE SQL lives in
+    // one place (adapters/storage-sqlite.ts). The wrapper emits
+    // `updated_at = datetime('now')` automatically, so behavior is
+    // identical to the prior prepared statement.
+    await adapters.storage.updateApp(slug, {
       name,
       description,
-      manifestJson,
-      args.category || null,
-      args.docker_image_ref,
+      manifest: manifestJson,
+      category: args.category || null,
+      app_type: 'docker',
+      docker_image: args.docker_image_ref,
+      base_url: null,
+      auth_type: null,
+      auth_config: null,
+      openapi_spec_url: null,
+      openapi_spec_cached: null,
       visibility,
-      linkShareRequiresAuth,
-      linkShareToken,
-      maxRunRetentionDays,
-      args.workspace_id,
-      args.author_user_id,
-      slug,
-    );
+      link_share_requires_auth: linkShareRequiresAuth,
+      link_share_token: linkShareToken,
+      is_async: 0,
+      webhook_url: null,
+      timeout_ms: null,
+      retries: 0,
+      async_mode: null,
+      max_run_retention_days: maxRunRetentionDays,
+      workspace_id: args.workspace_id,
+      author: args.author_user_id,
+    });
   } else {
     appId = newAppId();
     created = true;
@@ -522,60 +540,68 @@ export async function ingestAppFromDockerImage(args: {
     // on the public Store after an admin flips them. Re-ingesting an
     // existing slug hits the UPDATE branch above and leaves publish_status
     // untouched — a previously-published app keeps its slot.
-    db.prepare(
-      `INSERT INTO apps (
-         id, slug, name, description, manifest, status, docker_image, code_path,
-         category, author, icon, app_type, base_url, auth_type, auth_config,
-         openapi_spec_url, openapi_spec_cached, visibility, link_share_requires_auth, link_share_token, is_async,
-         webhook_url, timeout_ms, retries, async_mode, max_run_retention_days, workspace_id, publish_status
-       ) VALUES (
-         ?, ?, ?, ?, ?, 'active', ?, ?,
-         ?, ?, NULL, 'docker', NULL, NULL, NULL,
-         NULL, NULL, ?, ?, ?, 0,
-         NULL, NULL, 0, NULL, ?, ?, 'pending_review'
-       )`,
-    ).run(
-      appId,
+    //
+    // Routed through adapters.storage.createApp: the wrapper builds the
+    // INSERT from the provided keys, so explicit NULLs translate directly
+    // into the SQL that used to be hand-written here.
+    await adapters.storage.createApp({
+      id: appId,
       slug,
       name,
       description,
-      manifestJson,
-      args.docker_image_ref,
+      manifest: manifestJson,
+      status: 'active',
+      docker_image: args.docker_image_ref,
       // code_path is unused when docker_image is set (same as seed.ts); we
       // store a placeholder so the NOT NULL constraint is satisfied.
-      `docker-image:${slug}`,
-      args.category || null,
-      args.author_user_id,
+      code_path: `docker-image:${slug}`,
+      category: args.category || null,
+      author: args.author_user_id,
+      icon: null,
+      app_type: 'docker',
+      base_url: null,
+      auth_type: null,
+      auth_config: null,
+      openapi_spec_url: null,
+      openapi_spec_cached: null,
       visibility,
-      linkShareRequiresAuth,
-      linkShareToken,
-      maxRunRetentionDays,
-      args.workspace_id,
-    );
+      link_share_requires_auth: linkShareRequiresAuth,
+      link_share_token: linkShareToken,
+      is_async: 0,
+      webhook_url: null,
+      timeout_ms: null,
+      retries: 0,
+      async_mode: null,
+      max_run_retention_days: maxRunRetentionDays,
+      workspace_id: args.workspace_id,
+      publish_status: 'pending_review',
+    } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
   }
 
   // Wire secret bindings. Each (envKey → vaultKey) becomes:
   //   1. a placeholder row in `secrets` so the per-app secrets UI sees it
   //   2. a 'creator_override' policy row so the runner uses the creator's value
-  //   3. a copy of the current vault plaintext in `app_creator_secrets`
+  //   3. a copy of the current vault plaintext in creator-owned storage
   //      (re-encrypted under the app's workspace DEK). Absent vault row ⇒
   //      skip step 3; runs will surface missing_secret until the creator
   //      populates their vault and republishes.
   if (args.secret_bindings && Object.keys(args.secret_bindings).length > 0) {
-    const insertSecret = db.prepare(
-      `INSERT OR IGNORE INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)`,
-    );
     for (const [envKey, vaultKey] of Object.entries(args.secret_bindings)) {
-      insertSecret.run(newSecretId(), envKey, '', appId);
-      setPolicy(appId, envKey, 'creator_override');
+      await adapters.secrets.setAdminSecret(appId, envKey, '');
+      await adapters.secrets.setCreatorPolicy(appId, envKey, 'creator_override');
 
       // Best-effort: copy the caller's current vault value into creator storage.
       // If no vault row exists OR we have no session ctx (OSS tests), we skip.
       if (args.ctx) {
         try {
-          const plaintext = userSecrets.get(args.ctx, vaultKey);
+          const plaintext = await adapters.secrets.get(args.ctx, vaultKey);
           if (plaintext && plaintext.length > 0) {
-            setCreatorSecret(appId, args.workspace_id, envKey, plaintext);
+            await setCreatorOverrideSecretViaAdapter(
+              appId,
+              args.workspace_id,
+              envKey,
+              plaintext,
+            );
           }
         } catch (err) {
           // Vault errors are cosmetic at ingest time; the run itself will

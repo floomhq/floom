@@ -69,13 +69,13 @@ const ctx = {
 };
 
 // ---- 1. set + get round-trip ----
-appMemory.set(ctx, 'flyfast', 'last_destination', 'LIS');
-const got = appMemory.get(ctx, 'flyfast', 'last_destination');
+await appMemory.set(ctx, 'flyfast', 'last_destination', 'LIS');
+const got = await appMemory.get(ctx, 'flyfast', 'last_destination');
 log('set + get round-trip: LIS', got === 'LIS');
 
 // ---- 2. set with JSON object value ----
-appMemory.set(ctx, 'flyfast', 'preferred_currency', { code: 'EUR', symbol: '€' });
-const currencyVal = appMemory.get(ctx, 'flyfast', 'preferred_currency');
+await appMemory.set(ctx, 'flyfast', 'preferred_currency', { code: 'EUR', symbol: '€' });
+const currencyVal = await appMemory.get(ctx, 'flyfast', 'preferred_currency');
 log(
   'set with object: round-trips JSON',
   currencyVal && currencyVal.code === 'EUR' && currencyVal.symbol === '€',
@@ -84,7 +84,7 @@ log(
 // ---- 3. set with non-declared key throws ----
 let threw = false;
 try {
-  appMemory.set(ctx, 'flyfast', 'not_declared', 'bogus');
+  await appMemory.set(ctx, 'flyfast', 'not_declared', 'bogus');
 } catch (err) {
   threw = err.name === 'MemoryKeyNotAllowedError';
 }
@@ -93,14 +93,14 @@ log('set with undeclared key throws MemoryKeyNotAllowedError', threw);
 // ---- 4. get with non-declared key throws ----
 let threw2 = false;
 try {
-  appMemory.get(ctx, 'flyfast', 'not_declared');
+  await appMemory.get(ctx, 'flyfast', 'not_declared');
 } catch (err) {
   threw2 = err.name === 'MemoryKeyNotAllowedError';
 }
 log('get with undeclared key throws MemoryKeyNotAllowedError', threw2);
 
 // ---- 5. list returns all populated keys ----
-const all = appMemory.list(ctx, 'flyfast');
+const all = await appMemory.list(ctx, 'flyfast');
 const keys = Object.keys(all).sort();
 log(
   'list: returns both populated keys',
@@ -108,20 +108,20 @@ log(
 );
 
 // ---- 6. del removes a key ----
-const removed = appMemory.del(ctx, 'flyfast', 'last_destination');
+const removed = await appMemory.del(ctx, 'flyfast', 'last_destination');
 log('del: returns true when a row was removed', removed === true);
-const post = appMemory.get(ctx, 'flyfast', 'last_destination');
+const post = await appMemory.get(ctx, 'flyfast', 'last_destination');
 log('del: subsequent get returns null', post === null);
 
 // ---- 7. del is idempotent on already-gone keys ----
-const removed2 = appMemory.del(ctx, 'flyfast', 'last_destination');
+const removed2 = await appMemory.del(ctx, 'flyfast', 'last_destination');
 log('del: second call returns false', removed2 === false);
 
 // ---- 8. isolation: different user_id never sees another user's rows ----
 const otherCtx = { ...ctx, user_id: 'alice' };
-appMemory.set(otherCtx, 'flyfast', 'preferred_currency', { code: 'USD' });
-const aliceCurrency = appMemory.get(otherCtx, 'flyfast', 'preferred_currency');
-const localCurrency = appMemory.get(ctx, 'flyfast', 'preferred_currency');
+await appMemory.set(otherCtx, 'flyfast', 'preferred_currency', { code: 'USD' });
+const aliceCurrency = await appMemory.get(otherCtx, 'flyfast', 'preferred_currency');
+const localCurrency = await appMemory.get(ctx, 'flyfast', 'preferred_currency');
 log('isolation: alice sees USD', aliceCurrency && aliceCurrency.code === 'USD');
 log('isolation: local user still sees EUR', localCurrency && localCurrency.code === 'EUR');
 
@@ -140,7 +140,7 @@ db.prepare(
   '"legacy"',
 );
 
-const loaded = appMemory.loadForRun(ctx, 'flyfast');
+const loaded = await appMemory.loadForRun(ctx, 'flyfast');
 log(
   'loadForRun: stale (undeclared) key NOT loaded',
   !('stale_key_from_old_manifest' in loaded),
@@ -164,7 +164,7 @@ db.prepare(
   'proxied:barebones',
   DEFAULT_WORKSPACE_ID,
 );
-const bb = appMemory.loadForRun(ctx, 'barebones');
+const bb = await appMemory.loadForRun(ctx, 'barebones');
 log('loadForRun: app with no memory_keys returns {}', Object.keys(bb).length === 0);
 
 // ---- cleanup ----

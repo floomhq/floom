@@ -214,7 +214,7 @@ connectionsRouter.get('/', async (c) => {
   try {
     const opts: { status?: ConnectionStatus } = {};
     if (parsed.data.status) opts.status = parsed.data.status;
-    const rows = listConnections(ctx, opts);
+    const rows = await listConnections(ctx, opts);
     return c.json({ connections: rows.map(serialize) });
   } catch (err) {
     return c.json(

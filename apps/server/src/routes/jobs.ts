@@ -9,14 +9,14 @@
 // The background worker (services/worker.ts) drains the queue and fires the
 // creator's webhook_url on completion.
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { newJobId } from '../lib/ids.js';
 import { createJob, formatJob, getJobBySlug, cancelJob } from '../services/jobs.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
-import type { AppRecord, NormalizedManifest } from '../types.js';
+import type { NormalizedManifest } from '../types.js';
 
 export const jobsRouter = new Hono<{ Variables: { slug: string } }>();
 
@@ -33,15 +33,13 @@ function buildJobUrls(publicUrl: string, slug: string, jobId: string) {
  */
 jobsRouter.post('/', async (c) => {
   const slug = c.req.param('slug') || '';
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const row = await adapters.storage.getApp(slug);
   if (!row) return c.json({ error: `App not found: ${slug}` }, 404);
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,
     author: row.author,
@@ -112,7 +110,7 @@ jobsRouter.post('/', async (c) => {
       : undefined;
 
   const jobId = newJobId();
-  createJob(jobId, {
+  await createJob(jobId, {
     app: row,
     action: actionName,
     inputs: validated,
@@ -127,6 +125,9 @@ jobsRouter.post('/', async (c) => {
         ? body.max_retries
         : null,
     perCallSecrets,
+    workspace_id: ctx.workspace_id,
+    user_id: ctx.user_id,
+    device_id: ctx.device_id ?? null,
   });
 
   const publicUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3051}`;
@@ -147,12 +148,10 @@ jobsRouter.post('/', async (c) => {
 jobsRouter.get('/:job_id', async (c) => {
   const slug = c.req.param('slug') || '';
   const jobId = c.req.param('job_id') || '';
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,
@@ -162,7 +161,7 @@ jobsRouter.get('/:job_id', async (c) => {
     ctx,
   });
   if (blocked) return blocked;
-  const job = getJobBySlug(slug, jobId);
+  const job = await getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
   return c.json(formatJob(job));
 });
@@ -173,12 +172,10 @@ jobsRouter.get('/:job_id', async (c) => {
 jobsRouter.post('/:job_id/cancel', async (c) => {
   const slug = c.req.param('slug') || '';
   const jobId = c.req.param('job_id') || '';
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,
@@ -188,8 +185,8 @@ jobsRouter.post('/:job_id/cancel', async (c) => {
     ctx,
   });
   if (blocked) return blocked;
-  const job = getJobBySlug(slug, jobId);
+  const job = await getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
-  const updated = cancelJob(jobId);
+  const updated = await cancelJob(jobId);
   return c.json(formatJob(updated || job));
 });

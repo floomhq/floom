@@ -26,6 +26,7 @@ export interface ProxiedRunInput {
   action: string;
   inputs: Record<string, unknown>;
   secrets: Record<string, string>;
+  timeoutMs?: number;
 }
 
 export type ProxiedErrorType =
@@ -532,9 +533,11 @@ export async function runProxied(input: ProxiedRunInput): Promise<ProxiedRunResu
     }
 
     const requestTimeoutMs =
-      app.timeout_ms && app.timeout_ms > 0
-        ? Math.max(30_000, app.timeout_ms)
-        : 30_000;
+      input.timeoutMs && input.timeoutMs > 0
+        ? input.timeoutMs
+        : app.timeout_ms && app.timeout_ms > 0
+          ? Math.max(30_000, app.timeout_ms)
+          : 30_000;
 
     const fetchInit: RequestInit = {
       method,

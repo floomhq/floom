@@ -219,7 +219,7 @@ log(
   finished.metadata_json && /integration\.test/.test(finished.metadata_json),
 );
 
-const list = composio.listConnections(ctx);
+const list = await composio.listConnections(ctx);
 log('integration: list shows 1 active', list.length === 1 && list[0].status === 'active');
 
 const exec = await composio.executeAction(ctx, 'gmail', 'GMAIL_SEND_EMAIL', {

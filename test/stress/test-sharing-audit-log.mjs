@@ -51,10 +51,10 @@ async function auditEndpoint(appId) {
 
 console.log('Sharing · audit log');
 const id = insertApp();
-let app = transitionVisibility(load(id), 'link', { actorUserId: 'local', reason: 'owner_enable_link' });
-app = transitionVisibility(app, 'private', { actorUserId: 'local', reason: 'owner_set_private' });
-app = transitionVisibility(app, 'pending_review', { actorUserId: 'local', reason: 'owner_submit_review' });
-app = transitionVisibility(app, 'changes_requested', {
+let app = await transitionVisibility(load(id), 'link', { actorUserId: 'local', reason: 'owner_enable_link' });
+app = await transitionVisibility(app, 'private', { actorUserId: 'local', reason: 'owner_set_private' });
+app = await transitionVisibility(app, 'pending_review', { actorUserId: 'local', reason: 'owner_submit_review' });
+app = await transitionVisibility(app, 'changes_requested', {
   actorUserId: 'local',
   reason: 'admin_reject',
   comment: 'Needs polish.',

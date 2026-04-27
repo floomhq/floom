@@ -1,13 +1,9 @@
 // Trimmed port of the marketplace runner. Loads secrets, dispatches a
 // container run, streams output to the log bus, and updates the run record.
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
-import { runAppContainer } from './docker.js';
-import { runProxied } from './proxied-runner.js';
+import { DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import type { AdapterBundle } from '../adapters/index.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
-import { invalidateHubCache } from '../lib/hub-cache.js';
 import { noteAppUnavailable } from '../lib/alerts.js';
-import * as userSecrets from './user_secrets.js';
-import * as creatorSecrets from './app_creator_secrets.js';
 import type { SecretPolicy } from '../types.js';
 import type {
   AppRecord,
@@ -47,97 +43,22 @@ interface UpdateRunArgs {
   logs?: string;
   duration_ms?: number | null;
   finished?: boolean;
+  is_public?: 0 | 1 | boolean;
 }
 
-export function updateRun(runId: string, patch: UpdateRunArgs): void {
-  const cols: string[] = [];
-  const values: unknown[] = [];
-  if (patch.status !== undefined) {
-    cols.push('status = ?');
-    values.push(patch.status);
-  }
-  if (patch.outputs !== undefined) {
-    cols.push('outputs = ?');
-    values.push(JSON.stringify(patch.outputs));
-  }
-  if (patch.error !== undefined) {
-    cols.push('error = ?');
-    values.push(patch.error);
-  }
-  if (patch.error_type !== undefined) {
-    cols.push('error_type = ?');
-    values.push(patch.error_type);
-  }
-  if (patch.upstream_status !== undefined) {
-    cols.push('upstream_status = ?');
-    values.push(patch.upstream_status);
-  }
-  if (patch.logs !== undefined) {
-    cols.push('logs = ?');
-    values.push(patch.logs);
-  }
-  if (patch.duration_ms !== undefined) {
-    cols.push('duration_ms = ?');
-    values.push(patch.duration_ms);
-  }
-  if (patch.finished) {
-    cols.push("finished_at = datetime('now')");
-  }
-  if (cols.length === 0) return;
-  values.push(runId);
-  db.prepare(`UPDATE runs SET ${cols.join(', ')} WHERE id = ?`).run(...values);
-
-  // Refresh apps.avg_run_ms whenever a run finishes successfully. Runs at
-  // most once per run completion and only when we have a concrete duration.
-  // This drives the data-driven sort in GET /api/hub (featured DESC,
-  // avg_run_ms ASC, ...) so the store reorders itself as real usage
-  // comes in.
-  if (patch.finished && patch.status === 'success' && typeof patch.duration_ms === 'number') {
-    refreshAppAvgRunMs(runId);
-  }
+async function getAdapters(): Promise<AdapterBundle> {
+  return (await import('../adapters/index.js')).adapters;
 }
 
-/**
- * Recompute the rolling average run time for the app that owns the given
- * run, looking at the last 20 successful runs. We keep the window small so
- * one old slow cold-start doesn't dominate the average forever. If the app
- * has no successful runs (shouldn't happen because this is called after a
- * success) the column is left as-is.
- */
-function refreshAppAvgRunMs(runId: string): void {
-  try {
-    const row = db
-      .prepare('SELECT app_id FROM runs WHERE id = ?')
-      .get(runId) as { app_id: string } | undefined;
-    if (!row) return;
-    const avgRow = db
-      .prepare(
-        `SELECT AVG(duration_ms) AS avg_ms FROM (
-           SELECT duration_ms FROM runs
-           WHERE app_id = ? AND status = 'success' AND duration_ms IS NOT NULL
-           ORDER BY started_at DESC
-           LIMIT 20
-         )`,
-      )
-      .get(row.app_id) as { avg_ms: number | null } | undefined;
-    const avg = avgRow?.avg_ms;
-    if (typeof avg === 'number' && Number.isFinite(avg)) {
-      db.prepare('UPDATE apps SET avg_run_ms = ? WHERE id = ?').run(
-        Math.round(avg),
-        row.app_id,
-      );
-      // Perf fix (2026-04-20): bust the /api/hub 5s cache so the freshly
-      // computed avg_run_ms drives the store sort order on the next
-      // directory read. Without this, the test suite's "hub: avg_run_ms
-      // populated after runs" assertion sees stale null values for up
-      // to 5s after each run completes.
-      invalidateHubCache();
-    }
-  } catch (err) {
-    // Avg tracking is best-effort. A missing column (on an old DB),
-    // concurrency, or a bad join never blocks the run completion path.
-    console.warn(`[runner] failed to refresh avg_run_ms: ${(err as Error).message}`);
-  }
+function runStartedMs(startedAt: string): number {
+  const normalized = startedAt.includes('T') ? startedAt : startedAt.replace(' ', 'T');
+  const parsed = Date.parse(normalized.endsWith('Z') ? normalized : `${normalized}Z`);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+export async function updateRun(runId: string, patch: UpdateRunArgs): Promise<void> {
+  const adapters = await getAdapters();
+  await adapters.storage.updateRun(runId, patch);
 }
 
 interface EntrypointResult {
@@ -148,7 +69,7 @@ interface EntrypointResult {
   logs?: string;
 }
 
-function parseEntrypointOutput(stdout: string): EntrypointResult | null {
+export function parseEntrypointOutput(stdout: string): EntrypointResult | null {
   const marker = '__FLOOM_RESULT__';
   const idx = stdout.lastIndexOf(marker);
   if (idx !== -1) {
@@ -229,7 +150,7 @@ export function detectSilentError(outputs: unknown): string | null {
   return null;
 }
 
-function extractUserLogs(stdout: string): string {
+export function extractUserLogs(stdout: string): string {
   const marker = '__FLOOM_RESULT__';
   const idx = stdout.lastIndexOf(marker);
   if (idx === -1) return stdout;
@@ -260,7 +181,7 @@ function extractUserLogs(stdout: string): string {
  * synthetic 'local' workspace+user, which is correct for OSS solo mode and
  * any pre-W2.1 call site that hasn't been migrated yet.
  */
-export function dispatchRun(
+export async function dispatchRun(
   app: AppRecord,
   manifest: NormalizedManifest,
   runId: string,
@@ -268,18 +189,20 @@ export function dispatchRun(
   inputs: Record<string, unknown>,
   perCallSecrets?: Record<string, string>,
   ctx?: SessionContext,
-): void {
-  // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
-  const globalRows = db
-    .prepare('SELECT name, value FROM secrets WHERE app_id IS NULL')
-    .all() as { name: string; value: string }[];
-  const appRows = db
-    .prepare('SELECT name, value FROM secrets WHERE app_id = ?')
-    .all(app.id) as { name: string; value: string }[];
+): Promise<void> {
+  const adapters = await getAdapters();
+  const secretsAdapter = adapters.secrets;
 
+  // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
   const mergedSecrets: Record<string, string> = {};
-  for (const row of globalRows) mergedSecrets[row.name] = row.value;
-  for (const row of appRows) mergedSecrets[row.name] = row.value;
+  for (const row of await secretsAdapter.listAdminSecrets(null)) {
+    const value = await secretsAdapter.getAdminSecret(null, row.key);
+    if (value !== null) mergedSecrets[row.key] = value;
+  }
+  for (const row of await secretsAdapter.listAdminSecrets(app.id)) {
+    const value = await secretsAdapter.getAdminSecret(app.id, row.key);
+    if (value !== null) mergedSecrets[row.key] = value;
+  }
 
   // Per-secret policy split (secrets-policy feature).
   //
@@ -295,9 +218,10 @@ export function dispatchRun(
   const needs = manifest.secrets_needed || [];
   if (needs.length > 0) {
     const policies = new Map<string, SecretPolicy>(
-      creatorSecrets
-        .listPolicies(app.id)
-        .map((p) => [p.key, p.policy as SecretPolicy]),
+      (await secretsAdapter.listCreatorPolicies(app.id)).map((p) => [
+        p.key,
+        p.policy as SecretPolicy,
+      ]),
     );
     const userVaultKeys = needs.filter(
       (k) => (policies.get(k) ?? 'user_vault') === 'user_vault',
@@ -312,7 +236,7 @@ export function dispatchRun(
     // added (those rows now default to 'local' via the migration).
     if (creatorKeys.length > 0) {
       try {
-        const creatorLevel = creatorSecrets.loadCreatorSecretsForRun(
+        const creatorLevel = await secretsAdapter.loadCreatorOverrideForRun(
           app.id,
           app.workspace_id || runtimeCtx.workspace_id,
           creatorKeys,
@@ -333,7 +257,10 @@ export function dispatchRun(
     // into a run that expects the creator's value.
     if (userVaultKeys.length > 0) {
       try {
-        const userLevel = userSecrets.loadForRun(runtimeCtx, userVaultKeys);
+        const userLevel = await secretsAdapter.loadUserVaultForRun(
+          runtimeCtx,
+          userVaultKeys,
+        );
         for (const [k, v] of Object.entries(userLevel)) {
           if (v && v.length > 0) mergedSecrets[k] = v;
         }
@@ -360,234 +287,94 @@ export function dispatchRun(
     if (mergedSecrets[name]) secrets[name] = mergedSecrets[name];
   }
 
-  updateRun(runId, { status: 'running' });
+  await updateRun(runId, { status: 'running' });
 
-  if (app.app_type === 'proxied') {
-    void runProxiedWorker({ app, manifest, runId, action, inputs, secrets });
-  } else {
-    void runActionWorker({
-      slug: app.slug,
-      appId: app.id,
-      runId,
-      action,
-      inputs,
-      secrets,
-      manifest,
-      image: app.docker_image ?? undefined,
-    });
-  }
+  void runRuntimeWorker({ app, manifest, runId, action, inputs, secrets, ctx: runtimeCtx });
 }
 
-async function runProxiedWorker(opts: {
+async function runRuntimeWorker(opts: {
   app: AppRecord;
   manifest: NormalizedManifest;
   runId: string;
   action: string;
   inputs: Record<string, unknown>;
   secrets: Record<string, string>;
+  ctx: SessionContext;
 }): Promise<void> {
   const logStream = getOrCreateStream(opts.runId);
   try {
-    const result = await runProxied({
-      app: opts.app,
-      manifest: opts.manifest,
-      action: opts.action,
-      inputs: opts.inputs,
-      secrets: opts.secrets,
-    });
-    for (const line of result.logs.split('\n')) {
-      if (line) logStream.append(line, 'stdout');
-    }
-    // Error taxonomy (2026-04-20): proxied-runner classifies the
-    // failure at source (auth_error / user_input_error / upstream_outage
-    // / network_unreachable / timeout / missing_secret). We persist its
-    // verdict verbatim so the client can render the matching headline
-    // without re-parsing the raw error string. Fall back to
-    // runtime_error only when the runner couldn't pick a class.
-    updateRun(opts.runId, {
-      status: result.status,
-      outputs: result.outputs,
-      error: result.error || null,
-      error_type:
-        result.status === 'error'
-          ? ((result.error_type as ErrorType | undefined) ?? 'runtime_error')
-          : null,
-      upstream_status: result.upstream_status ?? null,
-      logs: result.logs,
-      duration_ms: result.duration_ms,
-      finished: true,
-    });
-    if (result.status === 'error' && result.error_type === 'app_unavailable') {
-      noteAppUnavailable(opts.app.slug, result.error || 'app_unavailable');
-    }
-  } catch (err) {
-    // An exception here (as opposed to a returned error result) means
-    // runProxied itself crashed — that's a Floom-side bug, not an
-    // upstream issue. Classify as floom_internal_error so the runner
-    // surface shows the "Something broke inside Floom" headline with
-    // a "Report this" link, not the misleading "Can't reach this app".
-    const e = err as Error;
-    updateRun(opts.runId, {
-      status: 'error',
-      error: e.message || 'Proxied runner crashed',
-      error_type: 'floom_internal_error',
-      logs: e.stack || '',
-      finished: true,
-    });
-  } finally {
-    logStream.finish();
-  }
-}
-
-async function runActionWorker(opts: {
-  slug: string;
-  appId: string;
-  runId: string;
-  action: string;
-  inputs: Record<string, unknown>;
-  secrets: Record<string, string>;
-  manifest: NormalizedManifest;
-  image?: string;
-}): Promise<void> {
-  const logStream = getOrCreateStream(opts.runId);
-
-  try {
-    const result = await runAppContainer({
-      appId: opts.appId,
-      runId: opts.runId,
-      action: opts.action,
-      inputs: opts.inputs,
-      secrets: opts.secrets,
-      manifest: opts.manifest,
-      image: opts.image,
-      onOutput: (chunk, stream) => {
+    const adapters = await getAdapters();
+    const result = await adapters.runtime.execute(
+      opts.app,
+      opts.manifest,
+      opts.action,
+      opts.inputs,
+      opts.secrets,
+      opts.ctx,
+      (chunk, stream) => {
         const lines = chunk.split('\n');
         for (const line of lines) {
           if (line) logStream.append(line, stream);
         }
       },
-    });
+      { runId: opts.runId },
+    );
 
-    const parsed = parseEntrypointOutput(result.stdout);
-    const userLogs =
-      extractUserLogs(result.stdout) + (result.stderr ? '\n' + result.stderr : '');
-
-    if (result.timedOut) {
-      updateRun(opts.runId, {
-        status: 'timeout',
-        error: 'Run timed out',
-        error_type: 'timeout',
-        logs: userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      return;
-    }
-
-    if (result.oomKilled) {
-      updateRun(opts.runId, {
-        status: 'error',
-        error: 'Container ran out of memory. Increase RUNNER_MEMORY.',
-        error_type: 'oom',
-        logs: userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      return;
-    }
-
-    if (parsed && parsed.ok === true) {
-      // Some docker apps return `{ ok: true, outputs: { error: "..." } }` when
-      // an internal step failed (e.g. git clone with no auth, or a downstream
-      // generator returned a non-2xx). Treat those as runtime errors so the UI
-      // and `/api/run/<id>` surface a real failure instead of a silent
-      // "success" with an error buried in the outputs. Also covers openblog's
-      // batch shape where every article failed.
-      const silentErr = detectSilentError(parsed.outputs);
-      if (silentErr) {
-        updateRun(opts.runId, {
-          status: 'error',
-          outputs: parsed.outputs ?? null,
-          error: silentErr,
-          error_type: 'runtime_error',
-          logs: userLogs,
-          duration_ms: result.durationMs,
-          finished: true,
-        });
-        return;
-      }
-      updateRun(opts.runId, {
-        status: 'success',
-        outputs: parsed.outputs ?? null,
-        logs: userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      return;
-    }
-
-    if (parsed && parsed.ok === false) {
-      updateRun(opts.runId, {
-        status: 'error',
-        error: parsed.error || 'Unknown error',
-        error_type: parsed.error_type || 'runtime_error',
-        logs: (parsed.logs ? parsed.logs + '\n' : '') + userLogs,
-        duration_ms: result.durationMs,
-        finished: true,
-      });
-      if (parsed.error_type === 'app_unavailable') {
-        noteAppUnavailable(opts.slug, parsed.error || 'app_unavailable');
-      }
-      return;
-    }
-
-    updateRun(opts.runId, {
-      status: 'error',
-      error:
-        result.exitCode === 0
-          ? 'Container exited cleanly but emitted no result'
-          : `Container exited with code ${result.exitCode}`,
-      error_type: 'floom_internal_error',
-      logs: result.stdout + '\n' + result.stderr,
-      duration_ms: result.durationMs,
+    const patch: UpdateRunArgs = {
+      status: result.status,
+      error: result.status === 'error' || result.status === 'timeout' ? result.error || null : null,
+      error_type:
+        result.status === 'error' || result.status === 'timeout'
+          ? ((result.error_type as ErrorType | undefined) ?? 'runtime_error')
+          : null,
+      logs: result.logs,
+      duration_ms: result.duration_ms,
       finished: true,
-    });
+    };
+    if (
+      result.status === 'success' ||
+      opts.app.app_type === 'proxied' ||
+      result.outputs !== null
+    ) {
+      patch.outputs = result.outputs ?? null;
+    }
+    if (opts.app.app_type === 'proxied' || result.upstream_status !== undefined) {
+      patch.upstream_status = result.upstream_status ?? null;
+    }
+
+    await updateRun(opts.runId, patch);
+    if (result.status === 'error' && result.error_type === 'app_unavailable') {
+      noteAppUnavailable(opts.app.slug, result.error || 'app_unavailable');
+    }
   } catch (err) {
-    // The runner itself crashed — not an upstream problem, not the
-    // user's input. Classify as floom_internal_error so the UI doesn't
-    // tell the caller to "try again in a minute" when the fix is on
-    // our side.
-    //
-    // Exception (2026-04-20): docker.ts tags "no such image" failures
-    // with `floom_error_class === 'app_unavailable'`. Those are creator
-    // misconfig, not a Floom bug — surface as the dedicated class so
-    // the UI can render "This app isn't available" instead of the
-    // misleading "Something broke inside Floom" card.
+    // The selected runtime adapter crashed. That is a Floom-side runtime
+    // integration failure unless the lower layer tagged it as an unavailable app.
     const e = err as Error & { floom_error_class?: string };
     const klass = e.floom_error_class;
-    updateRun(opts.runId, {
+    await updateRun(opts.runId, {
       status: 'error',
-      error: e.message || 'Runner crashed',
+      error: e.message || 'Runtime adapter crashed',
       error_type: klass === 'app_unavailable' ? 'app_unavailable' : 'floom_internal_error',
       logs: e.stack || '',
       finished: true,
     });
     if (klass === 'app_unavailable') {
-      noteAppUnavailable(opts.slug, e.message || 'Runner crashed');
+      noteAppUnavailable(opts.app.slug, e.message || 'Runtime adapter crashed');
     }
   } finally {
     logStream.finish();
   }
 }
 
-export function getRun(runId: string): RunRecord | undefined {
-  return db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as RunRecord | undefined;
+export async function getRun(runId: string): Promise<RunRecord | undefined> {
+  const adapters = await getAdapters();
+  return adapters.storage.getRun(runId);
 }
 
 /**
  * Zombie-run sweeper (#349).
  *
- * Every run is dispatched fire-and-forget (`void runActionWorker(...)`) from
+ * Every run is dispatched fire-and-forget (`void runRuntimeWorker(...)`) from
  * {@link dispatchRun}. If the server process crashes, is OOM-killed, or is
  * redeployed mid-run, the inner `updateRun({..., finished: true})` call
  * never lands and the row stays `status='running'` forever. The /p/:slug
@@ -612,17 +399,16 @@ export function getRun(runId: string): RunRecord | undefined {
  * still inside `container.wait()` or streaming logs is never touched.
  * Only genuinely dead runs are reaped.
  */
-export function sweepZombieRuns(): number {
-  const rows = db
-    .prepare("SELECT id, started_at FROM runs WHERE status = 'running'")
-    .all() as { id: string; started_at: string }[];
+export async function sweepZombieRuns(): Promise<number> {
+  const adapters = await getAdapters();
+  const rows = await adapters.storage.listRuns({ status: 'running' });
   if (rows.length === 0) return 0;
   const nowMs = Date.now();
   let swept = 0;
   for (const row of rows) {
-    const startedMs = Date.parse(row.started_at + 'Z');
+    const startedMs = runStartedMs(row.started_at);
     const durationMs = Number.isFinite(startedMs) ? nowMs - startedMs : null;
-    updateRun(row.id, {
+    await updateRun(row.id, {
       status: 'error',
       error:
         'This run was interrupted while it was still processing. Try it again.',
@@ -650,23 +436,18 @@ export function startZombieRunSweeper(
 ): { stop: () => void } {
   const runnerTimeout = Number(process.env.RUNNER_TIMEOUT || 300_000);
   const ceiling = Math.max(ceilingMs ?? runnerTimeout + 5 * 60_000, 10 * 60_000);
-  const timer = setInterval(() => {
+  const timer = setInterval(async () => {
     try {
-      const cutoffIso = new Date(Date.now() - ceiling)
-        .toISOString()
-        .replace('T', ' ')
-        .slice(0, 19);
-      const rows = db
-        .prepare(
-          "SELECT id, started_at FROM runs WHERE status = 'running' AND started_at < ?",
-        )
-        .all(cutoffIso) as { id: string; started_at: string }[];
+      const cutoffMs = Date.now() - ceiling;
+      const adapters = await getAdapters();
+      const rows = await adapters.storage.listRuns({ status: 'running' });
       for (const row of rows) {
-        const startedMs = Date.parse(row.started_at + 'Z');
+        const startedMs = runStartedMs(row.started_at);
+        if (!Number.isFinite(startedMs) || startedMs >= cutoffMs) continue;
         const durationMs = Number.isFinite(startedMs)
           ? Date.now() - startedMs
           : null;
-        updateRun(row.id, {
+        await updateRun(row.id, {
           status: 'error',
           error:
             'This run stopped reporting progress and was reaped. Try it again.',

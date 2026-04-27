@@ -7,6 +7,7 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
 import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { newAppId, newBuildId } from '../lib/ids.js';
 import { buildAppImage } from './docker.js';
 import { ManifestError, normalizeManifest } from './manifest.js';
@@ -173,7 +174,7 @@ export async function createGithubBuild(args: {
     branch,
     manifestPath: args.manifest_path || null,
   });
-  const slug = uniqueSlug(args.slug || preflight.slug || preflight.manifest.name);
+  const slug = await uniqueSlug(args.slug || preflight.slug || preflight.manifest.name);
 
   const buildId = newBuildId();
   db.prepare(
@@ -189,11 +190,11 @@ export async function createGithubBuild(args: {
     parsed.owner,
     parsed.repo,
     branch,
-    preflight.path,
-    args.name || null,
-    args.slug || null,
-    args.workspace_id,
-    args.user_id,
+    preflight.path ?? null,
+    args.name ?? null,
+    args.slug ?? null,
+    args.workspace_id ?? null,
+    args.user_id ?? null,
   );
   enqueueGithubBuild(buildId);
   return getGithubBuild(buildId)!;
@@ -453,10 +454,10 @@ async function processBuild(buildId: string): Promise<void> {
     );
     const manifestDir = path.dirname(path.join(clone.checkout, manifestChoice.path));
 
-    const slug = row.app_slug || uniqueSlug(row.requested_slug || parsedManifest.slug || parsedManifest.manifest.name);
-    const existing = db
-      .prepare('SELECT id FROM apps WHERE slug = ?')
-      .get(slug) as { id: string } | undefined;
+    const slug =
+      row.app_slug ||
+      (await uniqueSlug(row.requested_slug || parsedManifest.slug || parsedManifest.manifest.name));
+    const existing = await adapters.storage.getApp(slug);
     const appId = existing?.id || newAppId();
 
     setBuildStatus(buildId, 'building', { app_slug: slug, manifest_path: manifestChoice.path });
@@ -466,7 +467,7 @@ async function processBuild(buildId: string): Promise<void> {
       docker_image: image,
       commit_sha: clone.commitSha,
     });
-    publishPrivateDockerApp({
+    await publishPrivateDockerApp({
       appId,
       slug,
       image,
@@ -681,7 +682,7 @@ async function buildImageForManifest(
   return result.tag;
 }
 
-function publishPrivateDockerApp(args: {
+async function publishPrivateDockerApp(args: {
   appId: string;
   slug: string;
   image: string;
@@ -690,72 +691,62 @@ function publishPrivateDockerApp(args: {
   workspaceId: string;
   userId: string;
   created: boolean;
-}): void {
+}): Promise<void> {
   if (args.created) {
-    db.prepare(
-      `INSERT INTO apps (
-         id, slug, name, description, manifest, status, docker_image, code_path,
-         category, author, icon, app_type, base_url, auth_type, auth_config,
-         openapi_spec_url, openapi_spec_cached, visibility, is_async,
-         webhook_url, timeout_ms, retries, async_mode, workspace_id, publish_status
-       ) VALUES (
-         ?, ?, ?, ?, ?, 'active', ?, ?,
-         ?, ?, NULL, 'docker', NULL, NULL, NULL,
-         NULL, NULL, 'private', 0,
-         NULL, NULL, 0, NULL, ?, 'published'
-       )`,
-    ).run(
-      args.appId,
-      args.slug,
-      args.manifest.name,
-      args.manifest.description,
-      JSON.stringify(args.manifest),
-      args.image,
-      `github:${args.slug}`,
-      args.category || null,
-      args.userId,
-      args.workspaceId,
-    );
+    await adapters.storage.createApp({
+      id: args.appId,
+      slug: args.slug,
+      name: args.manifest.name,
+      description: args.manifest.description,
+      manifest: JSON.stringify(args.manifest),
+      status: 'active',
+      docker_image: args.image,
+      code_path: `github:${args.slug}`,
+      category: args.category || null,
+      author: args.userId,
+      icon: null,
+      app_type: 'docker',
+      base_url: null,
+      auth_type: null,
+      auth_config: null,
+      openapi_spec_url: null,
+      openapi_spec_cached: null,
+      visibility: 'private',
+      is_async: 0,
+      webhook_url: null,
+      timeout_ms: null,
+      retries: 0,
+      async_mode: null,
+      workspace_id: args.workspaceId,
+      publish_status: 'published',
+    } as unknown as Parameters<typeof adapters.storage.createApp>[0]);
     return;
   }
 
-  db.prepare(
-    `UPDATE apps SET
-       name=?,
-       description=?,
-       manifest=?,
-       status='active',
-       docker_image=?,
-       code_path=?,
-       category=?,
-       app_type='docker',
-       base_url=NULL,
-       auth_type=NULL,
-       auth_config=NULL,
-       openapi_spec_url=NULL,
-       openapi_spec_cached=NULL,
-       visibility='private',
-       is_async=0,
-       webhook_url=NULL,
-       timeout_ms=NULL,
-       retries=0,
-       async_mode=NULL,
-       workspace_id=?,
-       author=?,
-       publish_status='published',
-       updated_at=datetime('now')
-     WHERE id=?`,
-  ).run(
-    args.manifest.name,
-    args.manifest.description,
-    JSON.stringify(args.manifest),
-    args.image,
-    `github:${args.slug}`,
-    args.category || null,
-    args.workspaceId,
-    args.userId,
-    args.appId,
-  );
+  await adapters.storage.updateApp(args.slug, {
+    name: args.manifest.name,
+    description: args.manifest.description,
+    manifest: JSON.stringify(args.manifest),
+    status: 'active',
+    docker_image: args.image,
+    code_path: `github:${args.slug}`,
+    category: args.category || null,
+    app_type: 'docker',
+    base_url: null,
+    auth_type: null,
+    auth_config: null,
+    openapi_spec_url: null,
+    openapi_spec_cached: null,
+    visibility: 'private',
+    is_async: 0,
+    webhook_url: null,
+    timeout_ms: null,
+    retries: 0,
+    async_mode: null,
+    workspace_id: args.workspaceId,
+    author: args.userId,
+    publish_status: 'published',
+  });
 }
 
 function setBuildStatus(
@@ -775,11 +766,11 @@ function setBuildStatus(
   db.prepare(`UPDATE builds SET ${updates.join(', ')} WHERE build_id = ?`).run(...values);
 }
 
-function uniqueSlug(input: string): string {
+async function uniqueSlug(input: string): Promise<string> {
   const base = slugify(input) || `app-${randomUUID().slice(0, 8)}`;
   let candidate = base;
   let suffix = 2;
-  while (db.prepare('SELECT 1 FROM apps WHERE slug = ?').get(candidate)) {
+  while (await adapters.storage.getApp(candidate)) {
     candidate = `${base}-${suffix++}`;
   }
   return candidate;

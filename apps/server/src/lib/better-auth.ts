@@ -28,6 +28,7 @@ import { getMigrations } from 'better-auth/db/migration';
 import { organization } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import { db } from '../db.js';
+import type { UserWriteColumn, UserWriteInput } from '../adapters/types.js';
 import { initiateAccountSoftDelete } from '../services/account-deletion.js';
 import {
   renderResetPasswordEmail,
@@ -40,13 +41,63 @@ import { provisionPersonalWorkspace } from '../services/workspaces.js';
 // Better Auth's `Auth` type is generic over its options. Inferring the exact
 // concrete type would couple every consumer to the full plugin tuple shape,
 // which TypeScript can't easily widen back to `Auth<BetterAuthOptions>`. We
-// expose a structural type with the bits Floom actually uses (handler +
-// api.getSession). Callers that need additional methods can cast.
+// expose a structural type with the bits Floom actually uses.
 export interface FloomAuth {
   handler: (req: Request) => Promise<Response>;
   api: {
     getSession: (args: { headers: Headers }) => Promise<unknown>;
+    signInEmail: (args: {
+      body: { email: string; password: string; rememberMe?: boolean };
+      headers?: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
+    signUpEmail: (args: {
+      body: {
+        email: string;
+        password: string;
+        name: string;
+        rememberMe?: boolean;
+      };
+      headers?: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
+    signOut: (args: {
+      headers: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
+    deleteUser: (args: {
+      body: { password?: string; token?: string; callbackURL?: string };
+      headers: Headers;
+      returnHeaders?: boolean;
+    }) => Promise<unknown>;
   };
+}
+
+type UserDeleteListener = (user_id: string) => void | Promise<void>;
+
+const userDeleteListeners: UserDeleteListener[] = [];
+
+async function upsertFloomUser(
+  input: UserWriteInput,
+  updateColumns: UserWriteColumn[],
+): Promise<void> {
+  const { adapters } = await import('../adapters/index.js');
+  await adapters.storage.upsertUser(input, updateColumns);
+}
+
+export function registerAuthUserDeleteListener(cb: UserDeleteListener): void {
+  userDeleteListeners.push(cb);
+}
+
+export async function notifyAuthUserDeleteListeners(user_id: string): Promise<void> {
+  for (const listener of userDeleteListeners) {
+    try {
+      await listener(user_id);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[auth] onUserDelete listener failed for user', user_id, err);
+    }
+  }
 }
 
 /**
@@ -431,13 +482,16 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
             try {
               // Priority 1: Mirror user into Floom's users table.
               // auth_provider 'better-auth' identifies these as cloud-managed accounts.
-              db.prepare(
-                `INSERT INTO users (id, email, name, auth_provider, auth_subject)
-                 VALUES (?, ?, ?, 'better-auth', ?)
-                 ON CONFLICT (id) DO UPDATE SET
-                   email = excluded.email,
-                   name = excluded.name`,
-              ).run(user.id, user.email, user.name || null, user.id);
+              await upsertFloomUser(
+                {
+                  id: user.id,
+                  email: user.email,
+                  name: user.name || null,
+                  auth_provider: 'better-auth',
+                  auth_subject: user.id,
+                },
+                ['email', 'name'],
+              );
 
               // Priority 2: Provision the personal workspace.
               // provisionPersonalWorkspace is idempotent: if the user somehow
@@ -492,6 +546,7 @@ function buildAuthOptions(_overrideBaseURL?: string): any {
         ): Promise<void> => {
           if (!user?.id || !user.email) return;
           initiateAccountSoftDelete(user.id, user.email);
+          await notifyAuthUserDeleteListeners(user.id);
           throw new Error('account_soft_delete_intercepted');
         },
       },
@@ -509,11 +564,22 @@ export function getAuth(): FloomAuth | null {
     cachedAuth = null;
     return null;
   }
-  const built = betterAuth(buildAuthOptions());
+  const built = betterAuth(buildAuthOptions()) as unknown as FloomAuth;
+  const originalDeleteUser = built.api.deleteUser.bind(built.api);
+  built.api.deleteUser = async (args) => {
+    try {
+      return await originalDeleteUser(args);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'account_soft_delete_intercepted') {
+        return { ok: true };
+      }
+      throw err;
+    }
+  };
   // Cast through `unknown` to widen the deeply-generic Better Auth return
   // type to the structural FloomAuth interface above. The shape is verified
   // by the integration test that round-trips a getSession call.
-  cachedAuth = built as unknown as FloomAuth;
+  cachedAuth = built;
   return cachedAuth;
 }
 

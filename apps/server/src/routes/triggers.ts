@@ -6,7 +6,7 @@
 // root path without interfering with the /api namespace.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { resolveUserContext } from '../services/session.js';
 import { notOwnerResponse, requireAuthenticatedInCloud } from '../lib/auth.js';
 import {
@@ -57,10 +57,8 @@ function ownerOf(app: AppRecord, ctx: { user_id: string; workspace_id: string; i
   return false;
 }
 
-function slugFor(appId: string): string | undefined {
-  const row = db.prepare('SELECT slug FROM apps WHERE id = ?').get(appId) as
-    | { slug: string }
-    | undefined;
+async function slugFor(appId: string): Promise<string | undefined> {
+  const row = await adapters.storage.getAppById(appId);
   return row?.slug;
 }
 
@@ -72,9 +70,7 @@ hubTriggersRouter.post('/:slug/triggers', async (c) => {
   if (gate) return gate;
 
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-    | AppRecord
-    | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!ownerOf(app, ctx)) {
     return notOwnerResponse(c);
@@ -134,7 +130,7 @@ hubTriggersRouter.post('/:slug/triggers', async (c) => {
   }
 
   try {
-    const trigger = createTrigger({
+    const trigger = await createTrigger({
       app_id: app.id,
       user_id: ctx.user_id,
       workspace_id: ctx.workspace_id,
@@ -172,11 +168,14 @@ meTriggersRouter.get('/', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
 
-  const rows = listTriggersForUser(ctx.user_id);
-  return c.json({
-    triggers: rows.map((r) =>
-      serializeTrigger(r, { app_slug: slugFor(r.app_id) }),
+  const rows = await listTriggersForUser(ctx.user_id);
+  const triggers = await Promise.all(
+    rows.map(async (r) =>
+      serializeTrigger(r, { app_slug: await slugFor(r.app_id) }),
     ),
+  );
+  return c.json({
+    triggers,
   });
 });
 
@@ -196,7 +195,7 @@ meTriggersRouter.patch('/:id', async (c) => {
   if (gate) return gate;
 
   const id = c.req.param('id');
-  const existing = getTrigger(id);
+  const existing = await getTrigger(id);
   if (!existing) {
     return c.json({ error: 'Trigger not found', code: 'not_found' }, 404);
   }
@@ -227,9 +226,7 @@ meTriggersRouter.patch('/:id', async (c) => {
 
   // If the caller is editing the action, validate it against the app manifest.
   if (parsed.data.action) {
-    const app = db
-      .prepare('SELECT * FROM apps WHERE id = ?')
-      .get(existing.app_id) as AppRecord | undefined;
+    const app = await adapters.storage.getAppById(existing.app_id);
     if (!app) {
       return c.json({ error: 'App no longer exists', code: 'app_missing' }, 409);
     }
@@ -255,12 +252,12 @@ meTriggersRouter.patch('/:id', async (c) => {
   }
 
   try {
-    const updated = updateTrigger(id, parsed.data);
+    const updated = await updateTrigger(id, parsed.data);
     if (!updated) {
       return c.json({ error: 'Trigger not found', code: 'not_found' }, 404);
     }
     return c.json({
-      trigger: serializeTrigger(updated, { app_slug: slugFor(updated.app_id) }),
+      trigger: serializeTrigger(updated, { app_slug: await slugFor(updated.app_id) }),
     });
   } catch (err) {
     return c.json(
@@ -278,7 +275,7 @@ meTriggersRouter.delete('/:id', async (c) => {
   if (gate) return gate;
 
   const id = c.req.param('id');
-  const existing = getTrigger(id);
+  const existing = await getTrigger(id);
   if (!existing) {
     return c.json({ error: 'Trigger not found', code: 'not_found' }, 404);
   }
@@ -288,6 +285,6 @@ meTriggersRouter.delete('/:id', async (c) => {
       403,
     );
   }
-  deleteTrigger(id);
+  await deleteTrigger(id);
   return c.json({ ok: true, id });
 });

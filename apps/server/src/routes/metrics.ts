@@ -3,7 +3,7 @@
 // Results are cached for 15s so a busy scrape doesn't hammer SQLite.
 
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { AUTH_DOCS_URL } from '../lib/auth.js';
 import { snapshotMcpToolCalls, snapshotRateLimitHits } from '../lib/metrics-counters.js';
 
@@ -25,21 +25,21 @@ function escapeLabel(v: string): string {
   return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
-function collectMetrics(): string {
+async function collectMetrics(): Promise<string> {
   const lines: string[] = [];
+  const [apps, runs] = await Promise.all([
+    adapters.storage.listApps(),
+    adapters.storage.listRuns(),
+  ]);
 
   // floom_apps_total
-  const apps = (db.prepare('SELECT COUNT(*) as c FROM apps').get() as { c: number }).c;
   lines.push('# HELP floom_apps_total Total number of registered apps in the Floom hub.');
   lines.push('# TYPE floom_apps_total gauge');
-  lines.push(`floom_apps_total ${apps}`);
+  lines.push(`floom_apps_total ${apps.length}`);
 
   // floom_runs_total{status=...}
-  const statusRows = db
-    .prepare(`SELECT status, COUNT(*) as count FROM runs GROUP BY status`)
-    .all() as Array<{ status: string; count: number }>;
   const statusCounts = new Map<string, number>();
-  for (const r of statusRows) statusCounts.set(r.status, r.count);
+  for (const r of runs) statusCounts.set(r.status, (statusCounts.get(r.status) || 0) + 1);
   lines.push('# HELP floom_runs_total Total runs grouped by status.');
   lines.push('# TYPE floom_runs_total counter');
   // Always emit the three documented statuses so Prometheus has stable series.
@@ -55,15 +55,15 @@ function collectMetrics(): string {
   // `device_id` also counts; anonymous visitors have user_id='local' and a
   // unique device_id, so we union the two. COALESCE so NULL user_id rows
   // fall back to device_id.
-  const activeUsers = (
-    db
-      .prepare(
-        `SELECT COUNT(DISTINCT COALESCE(user_id, '') || ':' || COALESCE(device_id, '')) as c
-         FROM runs
-         WHERE started_at >= datetime('now', '-1 day')`,
-      )
-      .get() as { c: number }
-  ).c;
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const activeUsers = new Set(
+    runs
+      .filter((run) => {
+        const ts = Date.parse(run.started_at);
+        return Number.isFinite(ts) && ts >= cutoff;
+      })
+      .map((run) => `${run.user_id || ''}:${run.device_id || ''}`),
+  ).size;
   lines.push('# HELP floom_active_users_last_24h Distinct (user_id, device_id) pairs that ran an app in the past 24h.');
   lines.push('# TYPE floom_active_users_last_24h gauge');
   lines.push(`floom_active_users_last_24h ${activeUsers}`);
@@ -103,7 +103,7 @@ function isEnabled(): boolean {
   return Boolean(process.env.METRICS_TOKEN && process.env.METRICS_TOKEN.length > 0);
 }
 
-metricsRouter.get('/', (c) => {
+metricsRouter.get('/', async (c) => {
   if (!isEnabled()) {
     // Secure-by-default: pretend the route doesn't exist.
     return c.notFound();
@@ -130,7 +130,7 @@ metricsRouter.get('/', (c) => {
 
   const now = Date.now();
   if (!cache || cache.expiresAt <= now) {
-    cache = { body: collectMetrics(), expiresAt: now + CACHE_TTL_MS };
+    cache = { body: await collectMetrics(), expiresAt: now + CACHE_TTL_MS };
   }
   return new Response(cache.body, {
     status: 200,

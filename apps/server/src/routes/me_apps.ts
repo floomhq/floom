@@ -20,8 +20,7 @@
 //   DELETE /api/me/apps/:slug/creator-secrets/:key
 //     Creator-only. Upsert / delete the creator-owned plaintext value
 //     for a key whose policy is 'creator_override'. Plaintext is
-//     AES-256-GCM encrypted under the creator's workspace DEK via the
-//     same envelope scheme that user_secrets uses.
+//     encrypted by the configured secrets adapter.
 //
 //   DELETE /api/me/apps/:slug
 //     Creator-only. Removes the app row (hard-delete; cascades per db.ts).
@@ -33,12 +32,10 @@
 // locally-seeded app, so the ownership check passes naturally.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
-import * as creatorSecrets from '../services/app_creator_secrets.js';
-import { SecretDecryptError } from '../services/user_secrets.js';
 import { checkAppVisibility, requireAuthenticatedInCloud } from '../lib/auth.js';
 import { sendEmail, renderAppInviteEmail } from '../lib/email.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
@@ -70,10 +67,8 @@ function safeManifest(raw: string): NormalizedManifest | null {
   }
 }
 
-function loadApp(slug: string): AppRecord | undefined {
-  return db
-    .prepare('SELECT * FROM apps WHERE slug = ?')
-    .get(slug) as AppRecord | undefined;
+async function loadApp(slug: string): Promise<AppRecord | undefined> {
+  return adapters.storage.getApp(slug);
 }
 
 function isOwner(
@@ -91,7 +86,34 @@ function isOwner(
   return false;
 }
 
-function serializeInvite(invite: ReturnType<typeof listInvites>[number]) {
+function creatorSecretWorkspace(
+  app: AppRecord,
+  ctx: { workspace_id: string },
+): { workspace_id: string } {
+  return { workspace_id: app.workspace_id || ctx.workspace_id };
+}
+
+function isSecretDecryptError(err: unknown): err is Error {
+  return err instanceof Error && err.name === 'SecretDecryptError';
+}
+
+async function creatorHasValue(
+  app: AppRecord,
+  ctx: { workspace_id: string },
+  key: string,
+): Promise<boolean> {
+  return (
+    (await adapters.secrets.getCreatorOverrideSecret(
+      creatorSecretWorkspace(app, ctx),
+      app.id,
+      key,
+    )) !== null
+  );
+}
+
+type SerializedInviteInput = Awaited<ReturnType<typeof listInvites>>[number];
+
+function serializeInvite(invite: SerializedInviteInput) {
   return {
     id: invite.id,
     invited_user_id: invite.invited_user_id,
@@ -120,7 +142,7 @@ meAppsRouter.get('/:slug/sharing', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
@@ -128,7 +150,7 @@ meAppsRouter.get('/:slug/sharing', async (c) => {
     slug: app.slug,
     visibility: canonicalVisibility(app.visibility),
     link_share_token: canonicalVisibility(app.visibility) === 'link' ? app.link_share_token : null,
-    invites: listInvites(app.id).map(serializeInvite),
+    invites: (await listInvites(app.id)).map(serializeInvite),
     review: {
       submitted_at: app.review_submitted_at,
       decided_at: app.review_decided_at,
@@ -142,7 +164,7 @@ meAppsRouter.patch('/:slug/sharing', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
@@ -165,7 +187,7 @@ meAppsRouter.patch('/:slug/sharing', async (c) => {
 
   let nextApp: AppRecord;
   try {
-    nextApp = transitionVisibility(app, to, {
+    nextApp = await transitionVisibility(app, to, {
       actorUserId: ctx.user_id,
       actorTokenId: ctx.agent_token_id,
       actorIp: getAuditActor(c, ctx).ip,
@@ -205,22 +227,13 @@ meAppsRouter.get('/:slug/sharing/user-search', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const q = (c.req.query('q') || '').trim().toLowerCase();
   if (q.length < 2) return c.json({ users: [] });
-  const users = db
-    .prepare(
-      `SELECT id, email, name
-         FROM users
-        WHERE LOWER(COALESCE(name, '')) LIKE ?
-           OR LOWER(COALESCE(email, '')) LIKE ?
-        ORDER BY name, email
-        LIMIT 10`,
-    )
-    .all(`%${q}%`, `%${q}%`) as Array<{ id: string; email: string | null; name: string | null }>;
+  const users = await adapters.storage.searchUsers(q, 10);
   return c.json({ users });
 });
 
@@ -228,7 +241,7 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
@@ -245,9 +258,9 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
 
   let invite;
   if (parsed.data.username) {
-    const user = findUserByUsername(parsed.data.username);
+    const user = await findUserByUsername(parsed.data.username);
     if (!user) return c.json({ error: 'User not found', code: 'user_not_found' }, 404);
-    invite = upsertInvite({
+    invite = await upsertInvite({
       appId: app.id,
       invitedByUserId: ctx.user_id,
       invitedUserId: user.id,
@@ -256,8 +269,8 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
     });
   } else {
     const email = parsed.data.email!.trim().toLowerCase();
-    const user = findUserByEmail(email);
-    invite = upsertInvite({
+    const user = await findUserByEmail(email);
+    invite = await upsertInvite({
       appId: app.id,
       invitedByUserId: ctx.user_id,
       invitedUserId: user?.id || null,
@@ -265,9 +278,7 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
       state: user ? 'pending_accept' : 'pending_email',
     });
     if (!user) {
-      const inviter = db.prepare(`SELECT name, email FROM users WHERE id = ?`).get(ctx.user_id) as
-        | { name: string | null; email: string | null }
-        | undefined;
+      const inviter = await adapters.storage.getUser(ctx.user_id);
       const rendered = renderAppInviteEmail({
         appName: app.name,
         inviterName: inviter?.name || inviter?.email || null,
@@ -279,7 +290,7 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
 
   if (canonicalVisibility(app.visibility) === 'private') {
     try {
-      transitionVisibility(app, 'invited', {
+      await transitionVisibility(app, 'invited', {
         actorUserId: ctx.user_id,
         actorTokenId: ctx.agent_token_id,
         actorIp: getAuditActor(c, ctx).ip,
@@ -300,10 +311,10 @@ meAppsRouter.post('/:slug/sharing/invite/:invite_id/revoke', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
-  const invite = revokeInvite(c.req.param('invite_id') || '', app.id);
+  const invite = await revokeInvite(c.req.param('invite_id') || '', app.id);
   if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
   return c.json({ ok: true, invite: serializeInvite(invite) });
 });
@@ -312,11 +323,11 @@ meAppsRouter.post('/:slug/sharing/submit-review', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   try {
-    const next = transitionVisibility(app, 'pending_review', {
+    const next = await transitionVisibility(app, 'pending_review', {
       actorUserId: ctx.user_id,
       actorTokenId: ctx.agent_token_id,
       actorIp: getAuditActor(c, ctx).ip,
@@ -333,11 +344,11 @@ meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   try {
-    const next = transitionVisibility(app, 'private', {
+    const next = await transitionVisibility(app, 'private', {
       actorUserId: ctx.user_id,
       actorTokenId: ctx.agent_token_id,
       actorIp: getAuditActor(c, ctx).ip,
@@ -356,7 +367,7 @@ meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
  * Returns `{ policies: SecretPolicyEntry[] }`. One entry per key in
  * `manifest.secrets_needed`, with default `policy='user_vault'` filled
  * in for keys that have no explicit row. `creator_has_value` is
- * populated from app_creator_secrets (presence only; no plaintext).
+ * populated through the secrets adapter (presence only; no plaintext).
  * Creator-only: non-owners must not learn which keys are overridden or
  * already configured on the creator's account.
  */
@@ -366,9 +377,9 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   if (gate) return gate;
 
   const slug = c.req.param('slug') || '';
-  const app = loadApp(slug);
+  const app = await loadApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,
@@ -389,22 +400,29 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   const neededKeys = manifest?.secrets_needed ?? [];
 
   const explicit = new Map<string, SecretPolicyEntry>(
-    creatorSecrets.listPolicies(app.id).map((p) => [p.key, p]),
+    await Promise.all(
+      (await adapters.secrets.listCreatorPolicies(app.id)).map(async (p) => [
+        p.key,
+        {
+          key: p.key,
+          policy: p.policy,
+          creator_has_value: await creatorHasValue(app, ctx, p.key),
+        },
+      ] as const),
+    ),
   );
 
-  const policies: SecretPolicyEntry[] = neededKeys.map((key) => {
-    const hit = explicit.get(key);
-    if (hit) return hit;
-    // Default: every needed key without a row is treated as user_vault.
-    // creator_has_value stays false because no row in
-    // app_creator_secrets should exist for a user_vault key (and even
-    // if one did, the policy controls injection, not storage).
-    return {
-      key,
-      policy: 'user_vault',
-      creator_has_value: creatorSecrets.hasCreatorValue(app.id, key),
-    };
-  });
+  const policies: SecretPolicyEntry[] = await Promise.all(
+    neededKeys.map(async (key) => {
+      const hit = explicit.get(key);
+      if (hit) return hit;
+      return {
+        key,
+        policy: 'user_vault',
+        creator_has_value: await creatorHasValue(app, ctx, key),
+      };
+    }),
+  );
 
   return c.json({ policies });
 });
@@ -424,7 +442,7 @@ meAppsRouter.put('/:slug/secret-policies/:key', async (c) => {
 
   const slug = c.req.param('slug') || '';
   const key = c.req.param('key') || '';
-  const app = loadApp(slug);
+  const app = await loadApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isOwner(app, ctx)) {
     return c.json(
@@ -464,8 +482,13 @@ meAppsRouter.put('/:slug/secret-policies/:key', async (c) => {
   }
 
   try {
-    const previousPolicy = creatorSecrets.getPolicy(app.id, key);
-    creatorSecrets.setPolicy(app.id, key, parsed.data.policy as SecretPolicy);
+    const previousPolicy =
+      (await adapters.secrets.getCreatorPolicy(app.id, key)) ?? 'user_vault';
+    await adapters.secrets.setCreatorPolicy(
+      app.id,
+      key,
+      parsed.data.policy as SecretPolicy,
+    );
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.policy_updated',
@@ -509,7 +532,7 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
 
   const slug = c.req.param('slug') || '';
   const key = c.req.param('key') || '';
-  const app = loadApp(slug);
+  const app = await loadApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isOwner(app, ctx)) {
     return c.json(
@@ -530,7 +553,8 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
     );
   }
 
-  const policy = creatorSecrets.getPolicy(app.id, key);
+  const policy =
+    (await adapters.secrets.getCreatorPolicy(app.id, key)) ?? 'user_vault';
   if (policy !== 'creator_override') {
     return c.json(
       {
@@ -561,10 +585,11 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
   }
 
   try {
-    const existed = creatorSecrets.hasCreatorValue(app.id, key);
-    creatorSecrets.setCreatorSecret(
+    const creatorCtx = creatorSecretWorkspace(app, ctx);
+    const existed = await creatorHasValue(app, ctx, key);
+    await adapters.secrets.setCreatorOverrideSecret(
+      creatorCtx,
       app.id,
-      app.workspace_id || ctx.workspace_id,
       key,
       parsed.data.value,
     );
@@ -584,7 +609,7 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
     });
     return c.json({ ok: true, key });
   } catch (err) {
-    if (err instanceof SecretDecryptError) {
+    if (isSecretDecryptError(err)) {
       return c.json(
         { error: err.message, code: 'secret_encrypt_failed' },
         500,
@@ -607,7 +632,7 @@ meAppsRouter.delete('/:slug/creator-secrets/:key', async (c) => {
 
   const slug = c.req.param('slug') || '';
   const key = c.req.param('key') || '';
-  const app = loadApp(slug);
+  const app = await loadApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isOwner(app, ctx)) {
     return c.json(
@@ -617,8 +642,13 @@ meAppsRouter.delete('/:slug/creator-secrets/:key', async (c) => {
   }
 
   try {
-    const existed = creatorSecrets.hasCreatorValue(app.id, key);
-    const removed = creatorSecrets.deleteCreatorSecret(app.id, key);
+    const creatorCtx = creatorSecretWorkspace(app, ctx);
+    const existed = await creatorHasValue(app, ctx, key);
+    const removed = await adapters.secrets.deleteCreatorOverrideSecret(
+      creatorCtx,
+      app.id,
+      key,
+    );
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.deleted',
@@ -656,7 +686,7 @@ meAppsRouter.delete('/:slug', async (c) => {
   if (gate) return gate;
 
   const slug = c.req.param('slug') || '';
-  const app = loadApp(slug);
+  const app = await loadApp(slug);
   if (!app || !isOwner(app, ctx)) {
     return c.json({ error: 'App not found', code: 'not_found' }, 404);
   }

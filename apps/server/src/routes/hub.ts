@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { mkdtempSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
 import { resolveUserContext } from '../services/session.js';
 import {
@@ -375,6 +376,7 @@ hubRouter.post('/ingest', async (c) => {
 // author = user_id.
 hubRouter.get('/mine', async (c) => {
   const ctx = await resolveUserContext(c);
+  // Product-specific: Studio ownership listing includes run-count and last-run aggregates.
   const rows = db
     .prepare(
       `SELECT apps.*, (
@@ -439,7 +441,7 @@ hubRouter.get('/:slug/runs', async (c) => {
   const slug = c.req.param('slug');
   const limit = Math.max(1, Math.min(100, Number(c.req.query('limit') || 20)));
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership check:
@@ -465,6 +467,7 @@ hubRouter.get('/:slug/runs', async (c) => {
     ? 'AND user_id = ?'
     : 'AND device_id = ?';
   const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+  // Product-specific: creator activity feed joins run details with caller-scoped privacy rules.
   const rows = db
     .prepare(
       `SELECT id, action, status, inputs, outputs, duration_ms,
@@ -543,7 +546,7 @@ hubRouter.get('/:slug/runs-by-day', async (c) => {
   const daysParam = Number(c.req.query('days') || 7);
   const days = Math.max(1, Math.min(90, Number.isFinite(daysParam) ? Math.floor(daysParam) : 7));
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership check mirrors /:slug/runs exactly (issue #124 semantics).
@@ -562,6 +565,7 @@ hubRouter.get('/:slug/runs-by-day', async (c) => {
   // db.ts) and is always set — it's indexed via idx_runs_app which
   // makes `app_id = ? AND started_at >= ?` a fast index scan.
   const windowStart = `date('now', '-${days - 1} days')`;
+  // Product-specific: Studio sparkline aggregate with SQLite date-window semantics.
   const rows = db
     .prepare(
       `SELECT date(started_at) AS day, COUNT(*) AS count
@@ -593,7 +597,7 @@ hubRouter.delete('/:slug', async (c) => {
   if (gate) return gate;
   const slug = c.req.param('slug');
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Only the author can delete. The OSS "local self-hoster can delete
@@ -654,7 +658,7 @@ hubRouter.patch('/:slug', async (c) => {
   if (gate) return gate;
   const slug = c.req.param('slug');
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership: same rule as DELETE. OSS local self-hoster bypass is scoped
@@ -679,11 +683,9 @@ hubRouter.patch('/:slug', async (c) => {
     );
   }
 
-  const updates: string[] = [];
-  const values: unknown[] = [];
+  const patch: Partial<AppRecord> = {};
   if (parsed.data.visibility) {
-    updates.push('visibility = ?');
-    values.push(parsed.data.visibility);
+    patch.visibility = parsed.data.visibility;
   }
 
   // primary_action lives in the JSON manifest, not in its own column.
@@ -716,17 +718,14 @@ hubRouter.patch('/:slug', async (c) => {
       (manifest as NormalizedManifest & { primary_action?: string }).primary_action =
         parsed.data.primary_action;
     }
-    updates.push('manifest = ?');
-    values.push(JSON.stringify(manifest));
+    patch.manifest = JSON.stringify(manifest);
   }
 
-  if (updates.length === 0) {
+  if (Object.keys(patch).length === 0) {
     return c.json({ error: 'No updatable fields in body', code: 'empty_patch' }, 400);
   }
-  updates.push("updated_at = datetime('now')");
-  values.push(app.id);
 
-  db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  await adapters.storage.updateApp(slug, patch);
   if (parsed.data.visibility && parsed.data.visibility !== app.visibility) {
     auditLog({
       actor: getAuditActor(c, ctx),
@@ -795,7 +794,7 @@ const HIDDEN_SLUGS: Set<string> = new Set(
     .filter(Boolean),
 );
 
-hubRouter.get('/', (c) => {
+hubRouter.get('/', async (c) => {
   const category = c.req.query('category');
   const sort = c.req.query('sort') || 'default';
   // Issue #144: `?include_fixtures=true` bypasses the E2E/PRR fixture
@@ -820,12 +819,6 @@ hubRouter.get('/', (c) => {
   //   4. name asc        — deterministic tiebreak
   // `sort=name`, `sort=newest`, `sort=category` remain supported for
   // creator views that want a predictable lexical order.
-  let orderBy =
-    'apps.featured DESC, (apps.avg_run_ms IS NULL) ASC, apps.avg_run_ms ASC, apps.created_at DESC, apps.name ASC';
-  if (sort === 'name') orderBy = 'apps.name ASC';
-  if (sort === 'newest') orderBy = 'apps.created_at DESC';
-  if (sort === 'category') orderBy = 'apps.category, apps.name';
-
   // Public directory: only apps with visibility='public' (or NULL for
   // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
   // Manual publish-review gate (#362): only 'published' apps are listed.
@@ -837,33 +830,55 @@ hubRouter.get('/', (c) => {
   // no separate column. The 5-second /api/hub in-memory cache absorbs
   // the repeated cost in practice. `stars`, `hero`, `thumbnail_url` are
   // plain row columns (see db.ts migration 2026-04-23).
-  const sql = `SELECT apps.*,
-                      users.name AS author_name,
-                      users.email AS author_email,
-                      (
-                        SELECT COUNT(*) FROM runs
-                         WHERE runs.app_id = apps.id
-                           AND date(runs.started_at) >= date('now','-6 days')
-                      ) AS runs_7d
-                 FROM apps
-                 LEFT JOIN users ON apps.author = users.id
-                 WHERE apps.status = 'active'
-                   AND (
-                     apps.visibility = 'public_live'
-                     OR (apps.visibility = 'public' AND apps.publish_status = 'published')
-                     OR (apps.visibility IS NULL AND apps.publish_status = 'published')
-                   )
-                   ${category ? 'AND apps.category = ?' : ''}
-                 ORDER BY ${orderBy}`;
-  const rowsAll = (category
-    ? db.prepare(sql).all(category)
-    : db.prepare(sql).all()) as Array<
-    AppRecord & {
-      author_name: string | null;
-      author_email: string | null;
-      runs_7d: number;
-    }
-  >;
+  const allApps = await adapters.storage.listApps();
+  const allRuns = await adapters.storage.listRuns();
+  const cutoffDate = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const runs7dByApp = new Map<string, number>();
+  for (const run of allRuns) {
+    if (run.started_at.slice(0, 10) < cutoffDate) continue;
+    runs7dByApp.set(run.app_id, (runs7dByApp.get(run.app_id) || 0) + 1);
+  }
+  const authorIds = Array.from(new Set(allApps.map((app) => app.author).filter(Boolean))) as string[];
+  const authorRows = await Promise.all(authorIds.map((id) => adapters.storage.getUser(id)));
+  const authors = new Map<string, { id: string; name: string | null; email: string | null }>();
+  for (const user of authorRows) {
+    if (user) authors.set(user.id, user);
+  }
+  const rowsAll = allApps
+    .filter((app) => {
+      if (app.status !== 'active') return false;
+      if (category && app.category !== category) return false;
+      return (
+        app.visibility === 'public_live' ||
+        (app.visibility === 'public' && app.publish_status === 'published') ||
+        (app.visibility === null && app.publish_status === 'published')
+      );
+    })
+    .map((app) => {
+      const author = app.author ? authors.get(app.author) : undefined;
+      return {
+        ...app,
+        author_name: author?.name ?? null,
+        author_email: author?.email ?? null,
+        runs_7d: runs7dByApp.get(app.id) || 0,
+      };
+    })
+    .sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'newest') return Date.parse(b.created_at) - Date.parse(a.created_at);
+      if (sort === 'category') {
+        return (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name);
+      }
+      return (
+        Number(b.featured) - Number(a.featured) ||
+        Number(a.avg_run_ms === null) - Number(b.avg_run_ms === null) ||
+        (a.avg_run_ms ?? 0) - (b.avg_run_ms ?? 0) ||
+        Date.parse(b.created_at) - Date.parse(a.created_at) ||
+        a.name.localeCompare(b.name)
+      );
+    });
 
   // Apply FLOOM_STORE_HIDE_SLUGS server-side filter first. This is the
   // canonical place to hide apps from the public directory; the
@@ -940,19 +955,16 @@ hubRouter.get('/', (c) => {
 // apps (see below).
 hubRouter.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db
-    .prepare(
-      `SELECT apps.*, users.name AS author_name, users.email AS author_email
-         FROM apps
-         LEFT JOIN users ON apps.author = users.id
-        WHERE apps.slug = ?`,
-    )
-    .get(slug) as
-    | (AppRecord & { author_name: string | null; author_email: string | null })
-    | undefined;
-  if (!row) return c.json({ error: 'App not found' }, 404);
+  const app = await adapters.storage.getApp(slug);
+  if (!app) return c.json({ error: 'App not found' }, 404);
+  const author = app.author ? await adapters.storage.getUser(app.author) : undefined;
+  const row = {
+    ...app,
+    author_name: author?.name ?? null,
+    author_email: author?.email ?? null,
+  } as AppRecord & { author_name: string | null; author_email: string | null };
   const ctx = await resolveUserContext(c);
-  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  const access = await getAppAccessDecision(row, ctx, c.req.query('key') || null);
   if (!access.ok) {
     if (access.status === 401) {
       return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
@@ -1049,7 +1061,7 @@ hubRouter.post('/:slug/renderer', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
@@ -1125,7 +1137,7 @@ hubRouter.delete('/:slug/renderer', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';

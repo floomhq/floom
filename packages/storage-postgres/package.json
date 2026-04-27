@@ -1,0 +1,41 @@
+{
+  "name": "@floomhq/storage-postgres",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Postgres StorageAdapter implementation for Floom protocol 0.2.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema.sql": "./dist/schema.sql"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/schema.sql dist/schema.sql",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/floomhq/floom.git",
+    "directory": "packages/storage-postgres"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "pg": "^8.16.3"
+  },
+  "peerDependencies": {
+    "@floom/adapter-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@floom/adapter-types": "workspace:*",
+    "@types/node": "20.17.9",
+    "@types/pg": "^8.15.6",
+    "typescript": "5.6.3"
+  }
+}

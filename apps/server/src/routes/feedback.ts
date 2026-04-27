@@ -93,6 +93,7 @@ feedbackRouter.post('/', async (c) => {
   const { text, email, url } = parsed.data;
 
   const id = `fb_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+  // Product-specific: in-app feedback/GitHub triage is not part of protocol storage.
   db.prepare(
     `INSERT INTO feedback
        (id, workspace_id, user_id, device_id, email, url, text, ip_hash)
@@ -211,6 +212,7 @@ feedbackRouter.get('/', async (c) => {
     );
   }
   const limit = Math.max(1, Math.min(500, Number(c.req.query('limit') || 100)));
+  // Product-specific: admin feedback triage is not part of protocol storage.
   const rows = db
     .prepare('SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?')
     .all(limit);

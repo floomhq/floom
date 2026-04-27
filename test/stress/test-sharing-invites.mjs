@@ -88,21 +88,21 @@ const byExistingEmail = await call(meAppsRouter, 'POST', '/invite-app/sharing/in
 });
 log('existing email invite is pending_accept', byExistingEmail.json?.invite?.state === 'pending_accept');
 
-const accepted = acceptInvite(byExistingEmail.json.invite.id, 'user_carol');
+const accepted = await acceptInvite(byExistingEmail.json.invite.id, 'user_carol');
 log('invitee can accept', accepted.changed && accepted.invite?.state === 'accepted');
-log('accepted invite grants access', userHasAcceptedInvite(appId, 'user_carol'));
+log('accepted invite grants access', await userHasAcceptedInvite(appId, 'user_carol'));
 
-const acceptedAgain = acceptInvite(byExistingEmail.json.invite.id, 'user_carol');
+const acceptedAgain = await acceptInvite(byExistingEmail.json.invite.id, 'user_carol');
 log('double accept is idempotent', !acceptedAgain.changed && acceptedAgain.invite?.state === 'accepted');
 
-const decline = upsertInvite({
+const decline = await upsertInvite({
   appId,
   invitedByUserId: 'local',
   invitedUserId: 'user_bob',
   invitedEmail: 'bob@example.com',
   state: 'pending_accept',
 });
-const declined = declineInvite(decline.id, 'user_bob');
+const declined = await declineInvite(decline.id, 'user_bob');
 log('invitee can decline', declined?.state === 'declined');
 
 const newEmail = await call(meAppsRouter, 'POST', '/invite-app/sharing/invite', {
@@ -113,7 +113,7 @@ db.prepare(
   `INSERT INTO users (id, workspace_id, email, name, auth_provider)
    VALUES ('user_new', 'local', 'newperson@example.com', 'New Person', 'local')`,
 ).run();
-const linked = linkPendingEmailInvites('user_new', 'newperson@example.com');
+const linked = await linkPendingEmailInvites('user_new', 'newperson@example.com');
 const linkedInvite = db.prepare(`SELECT * FROM app_invites WHERE id = ?`).get(newEmail.json.invite.id);
 log('signup links pending_email invite', linked === 1 && linkedInvite.state === 'pending_accept');
 

@@ -138,7 +138,7 @@ export type AppVisibility =
  * `ctx` (the resolved user context). Only the owner can pass the gate;
  * everyone else gets a 404 so the app's existence isn't leaked.
  */
-export function checkAppVisibility(
+export async function checkAppVisibility(
   c: Context,
   visibility: AppVisibility | string | null | undefined,
   owner?: {
@@ -150,7 +150,7 @@ export function checkAppVisibility(
     link_share_requires_auth?: number | boolean | null;
     ctx?: SessionContext | null;
   },
-): Response | null {
+): Promise<Response | null> {
   const v = (visibility || 'public') as AppVisibility;
   if (v === 'public' || v === 'public_live') return null;
 
@@ -160,7 +160,7 @@ export function checkAppVisibility(
     if (!ctx || !appId) {
       return c.json({ error: 'App not found', code: 'not_found' }, 404);
     }
-    const decision = getAppAccessDecision(
+    const decision = await getAppAccessDecision(
       {
         id: appId,
         slug: owner?.slug ?? null,

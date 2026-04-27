@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { ingestOpenApiApps } from './openapi-ingest.js';
 
 const HOST = process.env.FLOOM_LAUNCH_WEEK_HOST || '127.0.0.1';
@@ -187,19 +187,13 @@ function writeRuntimeAppsYaml(sidecars: LaunchWeekSidecar[]): string {
   return path;
 }
 
-function markFeatured(slugs: string[]): number {
-  const stmt = db.prepare(
-    `UPDATE apps SET featured = 1, updated_at = datetime('now') WHERE slug = ?`,
-  );
-  const tx = db.transaction((items: string[]) => {
-    let touched = 0;
-    for (const slug of items) {
-      const result = stmt.run(slug);
-      if (result.changes > 0) touched++;
-    }
-    return touched;
-  });
-  return tx(slugs);
+async function markFeatured(slugs: string[]): Promise<number> {
+  let touched = 0;
+  for (const slug of slugs) {
+    const updated = await adapters.storage.updateApp(slug, { featured: 1 });
+    if (updated) touched++;
+  }
+  return touched;
 }
 
 export interface LaunchWeekBootResult {
@@ -284,7 +278,7 @@ export async function startLaunchWeekApps(): Promise<LaunchWeekBootResult> {
   try {
     const result = await ingestOpenApiApps(runtimeYaml);
     const featured = ready.flatMap((s) => s.apps.filter((a) => a.featured).map((a) => a.slug));
-    const pinned = markFeatured(featured);
+    const pinned = await markFeatured(featured);
     console.log(
       `[launch-week] ingested ${result.apps_ingested} apps (${result.apps_failed} failed), marked ${pinned} featured`,
     );

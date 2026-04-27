@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { ingestOpenApiApps } from './openapi-ingest.js';
 
 /**
@@ -383,20 +383,12 @@ export async function startFastApps(): Promise<FastAppsBootResult> {
     );
     // Pin the fast apps + previously-featured demo apps to the top of the
     // store. Idempotent: re-running updates featured=1 on the same slugs.
-    // Apps that are not present in the DB are silently skipped because the
-    // WHERE clause filters by slug.
-    const markFeatured = db.prepare(
-      `UPDATE apps SET featured = 1, updated_at = datetime('now') WHERE slug = ?`,
-    );
-    const featuredTxn = db.transaction((slugs: string[]) => {
-      let touched = 0;
-      for (const slug of slugs) {
-        const r = markFeatured.run(slug);
-        if (r.changes > 0) touched++;
-      }
-      return touched;
-    });
-    const pinned = featuredTxn(Array.from(FEATURED_SLUGS));
+    // Apps that are not present in storage are silently skipped.
+    let pinned = 0;
+    for (const slug of FEATURED_SLUGS) {
+      const updated = await adapters.storage.updateApp(slug, { featured: 1 });
+      if (updated) pinned++;
+    }
     console.log(`[fast-apps] marked ${pinned} apps featured`);
     return {
       enabled: true,

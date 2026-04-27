@@ -84,7 +84,7 @@ insertRun('r_boot_a', sqliteTsFromDate(new Date(Date.now() - 10_000)));
 insertRun('r_boot_b', sqliteTsFromDate(new Date(Date.now() - 60_000)));
 insertRun('r_boot_c', sqliteTsFromDate(new Date(Date.now() - 3600_000)));
 
-const sweptBoot = sweepZombieRuns();
+const sweptBoot = await sweepZombieRuns();
 check('returns count of swept rows', sweptBoot === 3, `got ${sweptBoot}`);
 
 for (const id of ['r_boot_a', 'r_boot_b', 'r_boot_c']) {
@@ -113,7 +113,7 @@ for (const id of ['r_boot_a', 'r_boot_b', 'r_boot_c']) {
 }
 
 // Second call is a no-op (no running rows left).
-const sweptAgain = sweepZombieRuns();
+const sweptAgain = await sweepZombieRuns();
 check('second call is a no-op', sweptAgain === 0, `got ${sweptAgain}`);
 
 // --- Test 2: startZombieRunSweeper respects the age ceiling ---

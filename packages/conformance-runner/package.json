@@ -1,0 +1,9 @@
+{
+  "name": "@floom/conformance-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "floom-conformance": "bin/run.mjs"
+  }
+}

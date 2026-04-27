@@ -126,9 +126,9 @@ db.prepare(
 );
 
 // alice writes a memory row in alice's workspace
-appMemory.set(aliceCtx, 'testapp', 'notes', { secret: 'alice-data' });
+await appMemory.set(aliceCtx, 'testapp', 'notes', { secret: 'alice-data' });
 // bob writes one too (same app, same workspace, different user)
-appMemory.set(bobCtx, 'testapp', 'notes', { secret: 'bob-data' });
+await appMemory.set(bobCtx, 'testapp', 'notes', { secret: 'bob-data' });
 
 // also seed an app in eve's workspace so cross-workspace reads have data
 db.prepare(
@@ -144,7 +144,7 @@ db.prepare(
   eveWs.id,
   JSON.stringify(['notes']),
 );
-appMemory.set(eveCtx, 'eveapp', 'notes', { secret: 'eve-data' });
+await appMemory.set(eveCtx, 'eveapp', 'notes', { secret: 'eve-data' });
 
 // =====================================================================
 // Test 1: app_memory boundary
@@ -152,15 +152,15 @@ appMemory.set(eveCtx, 'eveapp', 'notes', { secret: 'eve-data' });
 console.log('\n[1] app_memory boundary');
 
 // 1a. alice reads her own row
-let aliceRow = appMemory.get(aliceCtx, 'testapp', 'notes');
+let aliceRow = await appMemory.get(aliceCtx, 'testapp', 'notes');
 log('alice can read her own memory key', aliceRow?.secret === 'alice-data');
 
 // 1b. bob reads his own row (in same workspace)
-let bobRow = appMemory.get(bobCtx, 'testapp', 'notes');
+let bobRow = await appMemory.get(bobCtx, 'testapp', 'notes');
 log('bob can read his own memory key', bobRow?.secret === 'bob-data');
 
 // 1c. listing alice's memory returns ONLY alice's value
-const aliceList = appMemory.list(aliceCtx, 'testapp');
+const aliceList = await appMemory.list(aliceCtx, 'testapp');
 log(
   "alice's list returns alice-data (not bob-data)",
   aliceList?.notes?.secret === 'alice-data',
@@ -171,7 +171,7 @@ log(
 );
 
 // 1d. bob's list returns ONLY bob's value
-const bobList = appMemory.list(bobCtx, 'testapp');
+const bobList = await appMemory.list(bobCtx, 'testapp');
 log(
   "bob's list returns bob-data (not alice-data)",
   bobList?.notes?.secret === 'bob-data',
@@ -182,26 +182,26 @@ log(
 );
 
 // 1e. eve (different workspace entirely) sees nothing on alice's app
-const eveListAlice = appMemory.list(eveCtx, 'testapp');
+const eveListAlice = await appMemory.list(eveCtx, 'testapp');
 log(
   'eve cannot list alice-workspace app from her own workspace context',
   Object.keys(eveListAlice).length === 0,
 );
-const eveGetAlice = appMemory.get(eveCtx, 'testapp', 'notes');
+const eveGetAlice = await appMemory.get(eveCtx, 'testapp', 'notes');
 log(
   'eve.get on alice-workspace app returns null (cross-workspace boundary)',
   eveGetAlice === null || eveGetAlice === undefined,
 );
 
 // 1f. eve reads her own
-const eveOwn = appMemory.get(eveCtx, 'eveapp', 'notes');
+const eveOwn = await appMemory.get(eveCtx, 'eveapp', 'notes');
 log('eve can read her own', eveOwn?.secret === 'eve-data');
 
 // 1g. alice tries to delete bob's key — del returns 0 (no row affected)
-const delAttempt = appMemory.del(aliceCtx, 'testapp', 'notes');
+const delAttempt = await appMemory.del(aliceCtx, 'testapp', 'notes');
 log('alice.del removes only her own row', delAttempt === 1 || delAttempt === true);
 // confirm bob's row still there
-const bobStillThere = appMemory.get(bobCtx, 'testapp', 'notes');
+const bobStillThere = await appMemory.get(bobCtx, 'testapp', 'notes');
 log('bob row still intact after alice.del', bobStillThere?.secret === 'bob-data');
 
 // =====================================================================
@@ -279,21 +279,21 @@ db.prepare(
    VALUES (?, ?, 'user', ?, ?, ?, ?, 'active')`,
 ).run('con_eve_n', eveWs.id, 'eve', 'notion', 'comp_e_n', 'user:eve');
 
-const aliceConns = composio.listConnections(aliceCtx);
+const aliceConns = await composio.listConnections(aliceCtx);
 log('alice connections: 1 row', aliceConns.length === 1);
 log(
   'alice connections: only own gmail',
   aliceConns[0]?.composio_connection_id === 'comp_a_g',
 );
 
-const bobConns = composio.listConnections(bobCtx);
+const bobConns = await composio.listConnections(bobCtx);
 log('bob connections: 1 row', bobConns.length === 1);
 log(
   'bob connections: only own gmail',
   bobConns[0]?.composio_connection_id === 'comp_b_g',
 );
 
-const eveConns = composio.listConnections(eveCtx);
+const eveConns = await composio.listConnections(eveCtx);
 log('eve connections: 1 row (own ws only)', eveConns.length === 1);
 log(
   'eve connections: notion in eve-ws',
@@ -304,7 +304,7 @@ log(
 // This simulates an attacker who guesses the workspace id but has alice's
 // auth. The query should still scope by user_id so alice gets nothing.
 const aliceWithEveWs = { ...aliceCtx, workspace_id: eveWs.id };
-const aliceForged = composio.listConnections(aliceWithEveWs);
+const aliceForged = await composio.listConnections(aliceWithEveWs);
 log(
   'alice with forged workspace_id sees no rows (predicate joins user+ws)',
   aliceForged.length === 0,

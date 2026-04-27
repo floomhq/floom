@@ -9,6 +9,7 @@
 //        for the target slug. See routes/hub.ts for the matching filter.
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
 import { hasValidAdminBearer } from '../lib/auth.js';
 import { isCloudMode } from '../lib/better-auth.js';
@@ -32,9 +33,7 @@ adminRouter.use('*', async (c, next) => {
   if (isCloudMode() && !ctx.is_authenticated) {
     return c.json({ error: 'Unauthorized', code: 'auth_required' }, 401);
   }
-  const user = db
-    .prepare(`SELECT is_admin FROM users WHERE id = ?`)
-    .get(ctx.user_id) as { is_admin: number } | undefined;
+  const user = await adapters.storage.getUser(ctx.user_id);
   if (!user || user.is_admin !== 1) {
     return c.json({ error: 'Forbidden', code: 'forbidden' }, 403);
   }
@@ -77,14 +76,10 @@ adminRouter.post('/apps/:slug/publish-status', async (c) => {
   }
 
   const ctx = await resolveUserContext(c);
-  const app = db
-    .prepare('SELECT id, slug, publish_status FROM apps WHERE slug = ?')
-    .get(slug) as Pick<AppRecord, 'id' | 'slug' | 'publish_status'> | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
-  db.prepare(
-    `UPDATE apps SET publish_status = ?, updated_at = datetime('now') WHERE id = ?`,
-  ).run(parsed.data.status, app.id);
+  await adapters.storage.updateApp(slug, { publish_status: parsed.data.status });
 
   // The /api/hub list endpoint caches responses for 5s. Bust it so the
   // newly-published app shows up on the Store immediately.
@@ -116,8 +111,8 @@ adminRouter.post('/apps/:slug/publish-status', async (c) => {
   });
 });
 
-function loadApp(slug: string): AppRecord | undefined {
-  return db.prepare(`SELECT * FROM apps WHERE slug = ?`).get(slug) as AppRecord | undefined;
+async function loadApp(slug: string): Promise<AppRecord | undefined> {
+  return adapters.storage.getApp(slug);
 }
 
 function serializeReviewApp(app: AppRecord) {
@@ -148,8 +143,8 @@ adminRouter.get('/review-queue', (c) => {
   return c.json({ apps: apps.map(serializeReviewApp) });
 });
 
-adminRouter.get('/review-queue/:slug', (c) => {
-  const app = loadApp(c.req.param('slug') || '');
+adminRouter.get('/review-queue/:slug', async (c) => {
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   return c.json({
     app: serializeReviewApp(app),
@@ -165,7 +160,7 @@ adminRouter.get('/review-queue/:slug', (c) => {
 
 adminRouter.post('/review-queue/:slug/approve', async (c) => {
   const ctx = await resolveUserContext(c);
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (canonicalVisibility(app.visibility) === 'public_live') {
     return c.json({ ok: true, app: serializeReviewApp(app), idempotent: true });
@@ -173,7 +168,7 @@ adminRouter.post('/review-queue/:slug/approve', async (c) => {
   if (canonicalVisibility(app.visibility) !== 'pending_review') {
     return c.json({ error: 'App is not pending review', code: 'invalid_review_state' }, 409);
   }
-  const next = transitionVisibility(app, 'public_live', {
+  const next = await transitionVisibility(app, 'public_live', {
     actorUserId: ctx.user_id,
     actorTokenId: ctx.agent_token_id,
     actorIp: getAuditActor(c, ctx).ip,
@@ -187,7 +182,7 @@ const RejectBody = z.object({ comment: z.string().min(1).max(10000) });
 
 adminRouter.post('/review-queue/:slug/reject', async (c) => {
   const ctx = await resolveUserContext(c);
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   let body: unknown;
   try {
@@ -205,7 +200,7 @@ adminRouter.post('/review-queue/:slug/reject', async (c) => {
   if (canonicalVisibility(app.visibility) !== 'pending_review') {
     return c.json({ error: 'App is not pending review', code: 'invalid_review_state' }, 409);
   }
-  const next = transitionVisibility(app, 'changes_requested', {
+  const next = await transitionVisibility(app, 'changes_requested', {
     actorUserId: ctx.user_id,
     actorTokenId: ctx.agent_token_id,
     actorIp: getAuditActor(c, ctx).ip,
@@ -220,7 +215,7 @@ const TakedownBody = z.object({ reason: z.string().min(1).max(10000).optional() 
 
 adminRouter.post('/apps/:slug/takedown', async (c) => {
   const ctx = await resolveUserContext(c);
-  const app = loadApp(c.req.param('slug') || '');
+  const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   let body: unknown = undefined;
   try {
@@ -232,7 +227,7 @@ adminRouter.post('/apps/:slug/takedown', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() }, 400);
   }
-  const next = transitionVisibility(app, 'private', {
+  const next = await transitionVisibility(app, 'private', {
     actorUserId: ctx.user_id,
     actorTokenId: ctx.agent_token_id,
     actorIp: getAuditActor(c, ctx).ip,

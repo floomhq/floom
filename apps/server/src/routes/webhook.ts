@@ -17,7 +17,7 @@
 // middleware (FLOOM_AUTH_TOKEN) would require a bearer token and external
 // senders can't provide one. The HMAC signature is the auth.
 import { Hono } from 'hono';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { AUTH_DOCS_URL, AUTH_HINT_SIGNATURE } from '../lib/auth.js';
 import { newJobId } from '../lib/ids.js';
 import { createJob } from '../services/jobs.js';
@@ -34,7 +34,7 @@ export const webhookRouter = new Hono();
 
 webhookRouter.post('/:path', async (c) => {
   const path = c.req.param('path');
-  const trigger = getTriggerByWebhookPath(path);
+  const trigger = await getTriggerByWebhookPath(path);
   if (!trigger) {
     // Return 404 to avoid leaking path-existence signals via timing.
     return c.json({ error: 'Webhook not found' }, 404);
@@ -78,7 +78,7 @@ webhookRouter.post('/:path', async (c) => {
     c.req.header('X-GitHub-Delivery') ||
     null;
   if (requestId) {
-    const isFresh = recordWebhookDelivery(trigger.id, requestId, Date.now());
+    const isFresh = await recordWebhookDelivery(trigger.id, requestId, Date.now());
     if (!isFresh) {
       // Replay. Respond 200 with a dedupe hint so the sender knows we saw it.
       return c.json({ ok: true, deduped: true, request_id: requestId }, 200);
@@ -87,9 +87,7 @@ webhookRouter.post('/:path', async (c) => {
 
   // Load the app; 409 if it's been deleted out from under us (the FK cascade
   // would normally delete the trigger too, but be defensive).
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(trigger.app_id) as AppRecord | undefined;
+  const app = await adapters.storage.getAppById(trigger.app_id) as AppRecord | undefined;
   if (!app) {
     return c.json({ error: 'App no longer exists', code: 'app_missing' }, 409);
   }
@@ -154,7 +152,7 @@ webhookRouter.post('/:path', async (c) => {
 
   const jobId = newJobId();
   try {
-    createJob(jobId, {
+    await createJob(jobId, {
       app,
       action: trigger.action,
       inputs: mergedInputs,
@@ -164,7 +162,7 @@ webhookRouter.post('/:path', async (c) => {
       perCallSecrets: null,
     });
     attachWebhookTriggerContext(jobId, trigger.id);
-    markWebhookFired(trigger.id, Date.now());
+    await markWebhookFired(trigger.id, Date.now());
   } catch (err) {
     console.error(
       `[webhook] enqueue failed trigger=${trigger.id}:`,
