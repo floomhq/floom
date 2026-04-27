@@ -9,7 +9,7 @@
 //
 // One worker per server process. Multiple replicas are safe because claimJob
 // uses an atomic UPDATE...WHERE status='queued'.
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { newRunId } from '../lib/ids.js';
 import {
   claimJob,
@@ -23,7 +23,6 @@ import { dispatchRun, getRun } from './runner.js';
 import { deliverWebhook, type WebhookPayload } from './webhook.js';
 import { getJobTriggerContext } from './triggers-worker.js';
 import type {
-  AppRecord,
   JobRecord,
   NormalizedManifest,
   RunRecord,
@@ -79,9 +78,7 @@ export async function processOneJob(): Promise<JobRecord | null> {
   const claimed = claimJob(candidate.id);
   if (!claimed) return null; // another worker won
 
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(claimed.app_id) as AppRecord | undefined;
+  const app = await adapters.storage.getAppById(claimed.app_id);
   if (!app) {
     failJob(claimed.id, { message: `App ${claimed.app_id} not found` }, null);
     await deliverCompletion(claimed.id);
@@ -110,9 +107,12 @@ export async function processOneJob(): Promise<JobRecord | null> {
     : undefined;
 
   const runId = newRunId();
-  db.prepare(
-    `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
-  ).run(runId, app.id, claimed.action, JSON.stringify(inputs));
+  await adapters.storage.createRun({
+    id: runId,
+    app_id: app.id,
+    action: claimed.action,
+    inputs,
+  });
 
   await dispatchRun(app, manifest, runId, claimed.action, inputs, perCallSecrets);
 
@@ -120,10 +120,12 @@ export async function processOneJob(): Promise<JobRecord | null> {
 
   if (!run) {
     // Timed out. Mark the run as timeout if we can, mark the job failed.
-    db.prepare(
-      `UPDATE runs SET status='timeout', error='Job timeout exceeded',
-        error_type='timeout', finished_at=datetime('now') WHERE id = ?`,
-    ).run(runId);
+    await adapters.storage.updateRun(runId, {
+      status: 'timeout',
+      error: 'Job timeout exceeded',
+      error_type: 'timeout',
+      finished: true,
+    });
     await handleFailure(claimed.id, {
       message: `Job exceeded timeout_ms=${claimed.timeout_ms}`,
       type: 'timeout',
@@ -171,7 +173,7 @@ async function waitForRunOrTimeout(
 ): Promise<RunRecord | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const row = getRun(runId);
+    const row = await getRun(runId);
     if (row && ['success', 'error', 'timeout'].includes(row.status)) return row;
     await new Promise((r) => setTimeout(r, RUN_POLL_INTERVAL_MS));
   }

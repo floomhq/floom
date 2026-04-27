@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { adapters } from '../adapters/index.js';
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import { DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
 import { newRunId } from '../lib/ids.js';
 import { dispatchRun, getRun } from '../services/runner.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
@@ -42,6 +42,7 @@ import {
   declineInvite,
   listPendingInvitesForUser,
 } from '../services/sharing.js';
+import { listFeedbackUrls } from '../services/feedback-stats.js';
 import type {
   AppRecord,
   NormalizedManifest,
@@ -309,7 +310,7 @@ runRouter.post('/', async (c) => {
 //     marked public.
 runRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
-  const row = getRun(id);
+  const row = await getRun(id);
   if (!row) return c.json({ error: 'Run not found' }, 404);
 
   const { app, blocked } = await loadAuthorizedRunApp(c, row.app_id);
@@ -341,7 +342,7 @@ runRouter.get('/:id', async (c) => {
 // intent is strictly "see the final output".
 runRouter.get('/:id/stream', async (c) => {
   const id = c.req.param('id');
-  const row = getRun(id);
+  const row = await getRun(id);
   if (!row) return c.json({ error: 'Run not found' }, 404);
   const { blocked } = await loadAuthorizedRunApp(c, row.app_id);
   if (blocked) return blocked;
@@ -378,7 +379,7 @@ runRouter.get('/:id/stream', async (c) => {
       },
       async () => {
         if (done) return;
-        const fresh = getRun(id);
+        const fresh = await getRun(id);
         if (fresh) {
           try {
             await send('status', formatRun(fresh));
@@ -396,7 +397,7 @@ runRouter.get('/:id/stream', async (c) => {
     }
 
     // Initial status
-    const fresh = getRun(id);
+    const fresh = await getRun(id);
     if (fresh) await send('status', formatRun(fresh));
 
     // If already done before subscribe, emit final status and close.
@@ -450,7 +451,7 @@ runRouter.get('/:id/stream', async (c) => {
 // page hydrates from.
 runRouter.post('/:id/share', async (c) => {
   const id = c.req.param('id');
-  const row = getRun(id);
+  const row = await getRun(id);
   if (!row) return c.json({ error: 'Run not found' }, 404);
 
   // App-level visibility still applies. Private apps never get a public
@@ -768,6 +769,33 @@ type StudioAppSummaryRow = {
   runs_7d: number;
 };
 
+function runStartedMs(run: Pick<RunRecord, 'started_at'>): number {
+  const normalized = run.started_at.includes('T')
+    ? run.started_at
+    : run.started_at.replace(' ', 'T');
+  const parsed = Date.parse(normalized.endsWith('Z') ? normalized : `${normalized}Z`);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function listRunsForAppIds(appIds: string[]): Promise<RunRecord[]> {
+  const batches = await Promise.all(
+    appIds.map((appId) => adapters.storage.listRuns({ app_id: appId })),
+  );
+  return batches.flat();
+}
+
+async function countRunsInWindow(
+  appIds: string[],
+  startMs: number,
+  endMs: number,
+): Promise<number> {
+  const runs = await listRunsForAppIds(appIds);
+  return runs.filter((run) => {
+    const started = runStartedMs(run);
+    return started >= startMs && started < endMs;
+  }).length;
+}
+
 function isStudioAppLive(publish_status: string | null): boolean {
   return !publish_status || publish_status === 'published';
 }
@@ -806,43 +834,24 @@ meRouter.get('/studio/stats', async (c) => {
   const appIds = apps.map((app) => app.id);
   const appSlugs = new Set(apps.map((app) => app.slug));
 
-  const membersRow = db
-    .prepare('SELECT COUNT(*) AS c FROM workspace_members WHERE workspace_id = ?')
-    .get(ctx.workspace_id) as { c: number } | undefined;
-  const workspaceMemberCount = Number(membersRow?.c || 0);
+  const workspaceMemberCount = (await adapters.storage.listWorkspaceMembers(ctx.workspace_id)).length;
 
   let runsCurrent = 0;
   let runsPrevious = 0;
   if (appIds.length > 0) {
-    const placeholders = appIds.map(() => '?').join(', ');
-    const currentRow = db
-      .prepare(
-        `SELECT COUNT(*) AS c
-           FROM runs
-          WHERE app_id IN (${placeholders})
-            AND started_at >= datetime('now', '-7 days')`,
-      )
-      .get(...appIds) as { c: number } | undefined;
-    runsCurrent = Number(currentRow?.c || 0);
-
-    const previousRow = db
-      .prepare(
-        `SELECT COUNT(*) AS c
-           FROM runs
-          WHERE app_id IN (${placeholders})
-            AND started_at >= datetime('now', '-14 days')
-            AND started_at < datetime('now', '-7 days')`,
-      )
-      .get(...appIds) as { c: number } | undefined;
-    runsPrevious = Number(previousRow?.c || 0);
+    const now = Date.now();
+    runsCurrent = await countRunsInWindow(appIds, now - 7 * 24 * 60 * 60 * 1000, now);
+    runsPrevious = await countRunsInWindow(
+      appIds,
+      now - 14 * 24 * 60 * 60 * 1000,
+      now - 7 * 24 * 60 * 60 * 1000,
+    );
   }
 
   // Feedback currently has no app_id/read-state columns. We count rows whose
   // saved URL points at /p/:slug for one of the workspace apps, and because
   // there's no read marker yet every matched row is "unread" by definition.
-  const feedbackRows = db
-    .prepare('SELECT url FROM feedback ORDER BY created_at DESC')
-    .all() as Array<{ url: string | null }>;
+  const feedbackRows = listFeedbackUrls();
   let feedbackUnread = 0;
   const feedbackApps = new Set<string>();
   for (const row of feedbackRows) {
@@ -897,55 +906,44 @@ meRouter.get('/studio/activity', async (c) => {
     return c.json({ runs: [] });
   }
 
-  const placeholders = appIds.map(() => '?').join(', ');
-  const rows = db
-    .prepare(
-      `SELECT runs.id, runs.action, runs.status, runs.duration_ms, runs.started_at,
-              runs.error, runs.user_id, runs.device_id,
-              apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon,
-              users.email AS user_email, users.name AS user_name
-         FROM runs
-         JOIN apps ON apps.id = runs.app_id
-         LEFT JOIN users ON users.id = runs.user_id
-        WHERE runs.app_id IN (${placeholders})
-        ORDER BY runs.started_at DESC
-        LIMIT ?`,
-    )
-    .all(...appIds, limit) as Array<{
-    id: string;
-    action: string;
-    status: string;
-    duration_ms: number | null;
-    started_at: string;
-    error: string | null;
-    user_id: string | null;
-    device_id: string | null;
-    app_slug: string;
-    app_name: string;
-    app_icon: string | null;
-    user_email: string | null;
-    user_name: string | null;
-  }>;
+  const appById = new Map(apps.map((app) => [app.id, app]));
+  const runs = (await listRunsForAppIds(appIds))
+    .sort((a, b) => runStartedMs(b) - runStartedMs(a))
+    .slice(0, limit);
+  const userEntries = await Promise.all(
+    [...new Set(runs.map((run) => run.user_id).filter((id): id is string => !!id))].map(
+      async (userId) => [userId, await adapters.storage.getUser(userId)] as const,
+    ),
+  );
+  const users = new Map(
+    userEntries
+      .filter((entry) => !!entry[1])
+      .map(([userId, user]) => [userId, user] as const),
+  );
 
   return c.json({
-    runs: rows.map((row) => ({
-      id: row.id,
-      action: row.action,
-      status: row.status,
-      duration_ms: row.duration_ms,
-      started_at: row.started_at,
-      error: row.error,
-      app_slug: row.app_slug,
-      app_name: row.app_name,
-      app_icon: row.app_icon,
-      user_label:
-        row.user_email ||
-        row.user_name ||
-        (row.device_id ? 'Anonymous user' : 'Unknown user'),
-      // The current runs schema does not persist Claude/Cursor/API provenance.
-      // Returning a truthful umbrella label beats fabricating a finer source.
-      source_label: 'Floom',
-    })),
+    runs: runs.map((run) => {
+      const app = appById.get(run.app_id);
+      const user = run.user_id ? users.get(run.user_id) : undefined;
+      return {
+        id: run.id,
+        action: run.action,
+        status: run.status,
+        duration_ms: run.duration_ms,
+        started_at: run.started_at,
+        error: run.error,
+        app_slug: app?.slug ?? null,
+        app_name: app?.name ?? null,
+        app_icon: app?.icon ?? null,
+        user_label:
+          user?.email ||
+          user?.name ||
+          (run.device_id ? 'Anonymous user' : 'Unknown user'),
+        // The current runs schema does not persist Claude/Cursor/API provenance.
+        // Returning a truthful umbrella label beats fabricating a finer source.
+        source_label: 'Floom',
+      };
+    }),
   });
 });
 
@@ -953,44 +951,24 @@ meRouter.get('/runs', async (c) => {
   const ctx = await resolveUserContext(c);
   const limit = Math.max(1, Math.min(200, Number(c.req.query('limit') || 50)));
 
-  // Two filters: authenticated caller scopes by user_id; anonymous caller
-  // scopes by device_id. Both also check workspace_id so cross-workspace
-  // leaks are impossible.
-  const scopeClause = ctx.is_authenticated
-    ? 'runs.workspace_id = ? AND runs.user_id = ?'
-    : 'runs.workspace_id = ? AND runs.device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
-
-  const rows = db
-    .prepare(
-      `SELECT runs.id, runs.action, runs.status, runs.duration_ms,
-              runs.started_at, runs.finished_at, runs.error, runs.error_type,
-              runs.inputs, runs.outputs,
-              apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
-         FROM runs
-         LEFT JOIN apps ON apps.id = runs.app_id
-        WHERE ${scopeClause}
-        ORDER BY runs.started_at DESC
-        LIMIT ?`,
-    )
-    .all(ctx.workspace_id, scopeParam, limit) as Array<{
-    id: string;
-    action: string;
-    status: string;
-    duration_ms: number | null;
-    started_at: string;
-    finished_at: string | null;
-    error: string | null;
-    error_type: string | null;
-    inputs: string | null;
-    outputs: string | null;
-    app_slug: string | null;
-    app_name: string | null;
-    app_icon: string | null;
-  }>;
+  const rows = await adapters.storage.listRuns(
+    ctx.is_authenticated
+      ? { workspace_id: ctx.workspace_id, user_id: ctx.user_id, limit }
+      : { workspace_id: ctx.workspace_id, device_id: ctx.device_id, limit },
+  );
+  const appsById = new Map(
+    (
+      await Promise.all(
+        [...new Set(rows.map((run) => run.app_id))].map(
+          async (appId) => [appId, await adapters.storage.getAppById(appId)] as const,
+        ),
+      )
+    ).filter((entry) => !!entry[1]),
+  );
 
   return c.json({
     runs: rows.map((r) => {
+      const app = appsById.get(r.app_id);
       // v15.1 /me uses inputs to derive a human-readable thread title
       // without a per-row detail fetch. Parse defensively — older rows
       // may have malformed or missing JSON.
@@ -1027,9 +1005,9 @@ meRouter.get('/runs', async (c) => {
         finished_at: r.finished_at,
         error: r.error,
         error_type: r.error_type,
-        app_slug: r.app_slug,
-        app_name: r.app_name,
-        app_icon: r.app_icon,
+        app_slug: app?.slug ?? null,
+        app_name: app?.name ?? null,
+        app_icon: app?.icon ?? null,
         inputs,
         outputs,
       };
@@ -1090,48 +1068,23 @@ meRouter.get('/runs/:id', async (c) => {
   const ctx = await resolveUserContext(c);
   const id = c.req.param('id');
 
-  const scopeClause = ctx.is_authenticated
-    ? 'runs.workspace_id = ? AND runs.user_id = ?'
-    : 'runs.workspace_id = ? AND runs.device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+  const row = await adapters.storage.getRun(id);
 
-  const row = db
-    .prepare(
-      `SELECT runs.*, apps.slug AS app_slug, apps.name AS app_name, apps.icon AS app_icon
-         FROM runs LEFT JOIN apps ON apps.id = runs.app_id
-        WHERE runs.id = ? AND ${scopeClause}
-        LIMIT 1`,
-    )
-    .get(id, ctx.workspace_id, scopeParam) as
-    | {
-        id: string;
-        app_id: string;
-        thread_id: string | null;
-        action: string;
-        inputs: string | null;
-        outputs: string | null;
-        logs: string;
-        status: string;
-        error: string | null;
-        error_type: string | null;
-        upstream_status: number | null;
-        duration_ms: number | null;
-        started_at: string;
-        finished_at: string | null;
-        app_slug: string | null;
-        app_name: string | null;
-        app_icon: string | null;
-      }
-    | undefined;
+  const ownsRun =
+    row &&
+    (row.workspace_id || DEFAULT_WORKSPACE_ID) === ctx.workspace_id &&
+    (ctx.is_authenticated ? row.user_id === ctx.user_id : row.device_id === ctx.device_id);
 
-  if (!row) return c.json({ error: 'Run not found' }, 404);
+  if (!row || !ownsRun) return c.json({ error: 'Run not found' }, 404);
+
+  const app = await adapters.storage.getAppById(row.app_id);
 
   return c.json({
     id: row.id,
     app_id: row.app_id,
-    app_slug: row.app_slug,
-    app_name: row.app_name,
-    app_icon: row.app_icon,
+    app_slug: app?.slug ?? null,
+    app_name: app?.name ?? null,
+    app_icon: app?.icon ?? null,
     thread_id: row.thread_id,
     action: row.action,
     inputs: safeParse(row.inputs),

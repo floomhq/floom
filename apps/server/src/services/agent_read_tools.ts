@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import type { Context } from 'hono';
 import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import { newRunId } from '../lib/ids.js';
 import {
   extractByokInputSecret,
@@ -192,6 +193,14 @@ function decodeCursor(cursor: string | undefined): { started_at: string; id: str
   throw new AgentToolError('invalid_input', 'Invalid cursor.', 400);
 }
 
+function runStartedMs(run: Pick<RunRecord, 'started_at'>): number {
+  const normalized = run.started_at.includes('T')
+    ? run.started_at
+    : run.started_at.replace(' ', 'T');
+  const parsed = Date.parse(normalized.endsWith('Z') ? normalized : `${normalized}Z`);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function publicBaseUrl(c: Context): string {
   const override = process.env.FLOOM_PUBLIC_ORIGIN || process.env.PUBLIC_URL || '';
   if (override.trim()) return override.replace(/\/+$/, '');
@@ -363,18 +372,16 @@ export async function runApp(
   }
 
   const runId = newRunId();
-  db.prepare(
-    `INSERT INTO runs (id, app_id, thread_id, action, inputs, status, workspace_id, user_id, device_id)
-     VALUES (?, ?, NULL, ?, ?, 'pending', ?, ?, ?)`,
-  ).run(
-    runId,
-    app.id,
-    actionName,
-    JSON.stringify(validated),
-    ctx.workspace_id,
-    ctx.user_id,
-    ctx.device_id,
-  );
+  await adapters.storage.createRun({
+    id: runId,
+    app_id: app.id,
+    thread_id: null,
+    action: actionName,
+    inputs: validated,
+    workspace_id: ctx.workspace_id,
+    user_id: ctx.user_id,
+    device_id: ctx.device_id,
+  });
   await dispatchRun(app, manifest, runId, actionName, validated, byok.perCallSecrets, ctx);
   const fresh = await waitForRun(runId);
   return formatAgentRun(fresh, app.slug, manifest.runtime);
@@ -385,14 +392,14 @@ async function waitForRun(runId: string): Promise<RunRecord> {
   const pollIntervalMs = 250;
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
-    const row = getRun(runId);
+    const row = await getRun(runId);
     if (!row) throw new AgentToolError('not_found', 'Run not found.', 404);
     if (row.status === 'success' || row.status === 'error' || row.status === 'timeout') {
       return row;
     }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
-  const row = getRun(runId);
+  const row = await getRun(runId);
   if (!row) throw new AgentToolError('not_found', 'Run not found.', 404);
   return row;
 }
@@ -421,99 +428,82 @@ function formatAgentRun(
   };
 }
 
-export function getAgentRun(
+export async function getAgentRun(
   ctx: SessionContext,
   runId: string,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   requireReadScope(ctx);
-  const row = db
-    .prepare(
-      `SELECT runs.*, apps.slug AS app_slug, apps.visibility AS app_visibility,
-              apps.publish_status AS app_publish_status, apps.status AS app_status,
-              apps.manifest AS app_manifest
-         FROM runs
-         JOIN apps ON apps.id = runs.app_id
-        WHERE runs.id = ?
-        LIMIT 1`,
-    )
-    .get(runId) as
-    | (RunRecord & {
-        app_slug: string;
-        app_visibility: AppRecord['visibility'] | null;
-        app_publish_status: AppRecord['publish_status'];
-        app_status: AppRecord['status'];
-        app_manifest: string;
-      })
-    | undefined;
+  const row = await adapters.storage.getRun(runId);
   if (!row) throw new AgentToolError('not_found', 'Run not found.', 404);
+  const app = await adapters.storage.getAppById(row.app_id);
+  if (!app) throw new AgentToolError('not_found', 'App not found.', 404);
   const owner =
     row.workspace_id === ctx.workspace_id &&
     row.user_id !== null &&
     row.user_id === ctx.user_id;
   const publicLiveRun =
     row.is_public === 1 &&
-    row.app_status === 'active' &&
-    (row.app_visibility === 'public' || row.app_visibility === null) &&
-    row.app_publish_status === 'published';
+    app.status === 'active' &&
+    (app.visibility === 'public' || app.visibility === null) &&
+    app.publish_status === 'published';
   if (!owner && !publicLiveRun) {
     throw new AgentToolError('not_accessible', 'Run is not accessible.', 403);
   }
   let runtime: string | undefined;
   try {
-    runtime = (JSON.parse(row.app_manifest) as NormalizedManifest).runtime;
+    runtime = (JSON.parse(app.manifest) as NormalizedManifest).runtime;
   } catch {
     runtime = undefined;
   }
-  return formatAgentRun(row, row.app_slug, runtime);
+  return formatAgentRun(row, app.slug, runtime);
 }
 
-export function listMyRuns(
+export async function listMyRuns(
   ctx: SessionContext,
   args: ListRunsArgs,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   requireAnyAgentScope(ctx);
   const limit = Math.max(1, Math.min(200, Number(args.limit || 50)));
   const cursor = decodeCursor(args.cursor);
-  const params: unknown[] = [ctx.workspace_id, ctx.user_id];
-  let where = 'runs.workspace_id = ? AND runs.user_id = ?';
+  const slugApp = args.slug ? await adapters.storage.getApp(args.slug) : undefined;
   if (args.slug) {
-    where += ' AND apps.slug = ?';
-    params.push(args.slug);
+    if (!slugApp) return { runs: [], next_cursor: null };
   }
-  if (args.since_ts) {
-    where += ' AND runs.started_at >= ?';
-    params.push(args.since_ts);
-  }
-  if (cursor) {
-    where += ' AND (runs.started_at < ? OR (runs.started_at = ? AND runs.id < ?))';
-    params.push(cursor.started_at, cursor.started_at, cursor.id);
-  }
-  const rows = db
-    .prepare(
-      `SELECT runs.id, runs.action, runs.status, runs.duration_ms, runs.started_at,
-              runs.finished_at, runs.inputs, apps.slug AS app_slug
-         FROM runs
-         JOIN apps ON apps.id = runs.app_id
-        WHERE ${where}
-        ORDER BY runs.started_at DESC, runs.id DESC
-        LIMIT ?`,
-    )
-    .all(...params, limit + 1) as Array<{
-    id: string;
-    action: string;
-    status: string;
-    duration_ms: number | null;
-    started_at: string;
-    finished_at: string | null;
-    inputs: string | null;
-    app_slug: string;
-  }>;
+  const sinceMs = args.since_ts ? Date.parse(args.since_ts) : null;
+  const cursorMs = cursor ? runStartedMs({ started_at: cursor.started_at }) : null;
+  const rows = (
+    await adapters.storage.listRuns({
+      workspace_id: ctx.workspace_id,
+      user_id: ctx.user_id,
+      ...(slugApp ? { app_id: slugApp.id } : {}),
+    })
+  )
+    .filter((run) => {
+      const started = runStartedMs(run);
+      if (sinceMs !== null && Number.isFinite(sinceMs) && started < sinceMs) return false;
+      if (cursor && cursorMs !== null) {
+        if (started > cursorMs) return false;
+        if (started === cursorMs && run.id >= cursor.id) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => runStartedMs(b) - runStartedMs(a) || b.id.localeCompare(a.id))
+    .slice(0, limit + 1);
+  const appById = new Map(
+    (
+      await Promise.all(
+        [...new Set(rows.map((run) => run.app_id))].map(
+          async (appId) => [appId, await adapters.storage.getAppById(appId)] as const,
+        ),
+      )
+    ).filter((entry) => !!entry[1]),
+  );
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {
     runs: page.map((run) => ({
       run_id: run.id,
-      slug: run.app_slug,
+      slug: appById.get(run.app_id)?.slug ?? null,
       action: run.action,
       status: run.status,
       started_at: run.started_at,

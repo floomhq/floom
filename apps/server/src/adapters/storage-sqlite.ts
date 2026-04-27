@@ -8,9 +8,8 @@
 //   - The existing codebase does NOT centralize storage in service
 //     functions. Most routes call `db.prepare(...)` directly. This
 //     wrapper re-uses the same SQL verbatim so behavior is identical.
-//   - Where a cleaner helper already exists (services/jobs.ts,
-//     services/runner.ts getRun/updateRun), the wrapper delegates to
-//     that helper instead of duplicating SQL.
+//   - Where a cleaner helper already exists (services/jobs.ts), the wrapper
+//     delegates to that helper instead of duplicating SQL.
 //   - Methods that do not yet have an in-tree caller (createApp,
 //     updateApp, deleteApp, createUser, listWorkspacesForUser) are still
 //     implemented with minimal SQL so the adapter surface is complete.
@@ -22,16 +21,13 @@
 // single source of truth.
 //
 import { db } from '../db.js';
+import { invalidateHubCache } from '../lib/hub-cache.js';
 import {
   createJob as jobsCreateJob,
   getJob as jobsGetJob,
   nextQueuedJob as jobsNextQueuedJob,
   claimJob as jobsClaimJob,
 } from '../services/jobs.js';
-import {
-  getRun as runnerGetRun,
-  updateRun as runnerUpdateRun,
-} from '../services/runner.js';
 import type {
   AppRecord,
   AppReviewRecord,
@@ -155,6 +151,35 @@ const appendRunTurnTxn = db.transaction((input: AppendRunTurnInput) => {
     .get(input.id) as RunTurnRecord;
 });
 
+function refreshAppAvgRunMs(runId: string): void {
+  try {
+    const row = db
+      .prepare('SELECT app_id FROM runs WHERE id = ?')
+      .get(runId) as { app_id: string } | undefined;
+    if (!row) return;
+    const avgRow = db
+      .prepare(
+        `SELECT AVG(duration_ms) AS avg_ms FROM (
+           SELECT duration_ms FROM runs
+           WHERE app_id = ? AND status = 'success' AND duration_ms IS NOT NULL
+           ORDER BY started_at DESC
+           LIMIT 20
+         )`,
+      )
+      .get(row.app_id) as { avg_ms: number | null } | undefined;
+    const avg = avgRow?.avg_ms;
+    if (typeof avg === 'number' && Number.isFinite(avg)) {
+      db.prepare('UPDATE apps SET avg_run_ms = ? WHERE id = ?').run(
+        Math.round(avg),
+        row.app_id,
+      );
+      invalidateHubCache();
+    }
+  } catch (err) {
+    console.warn(`[storage-sqlite] failed to refresh avg_run_ms: ${(err as Error).message}`);
+  }
+}
+
 function isRunTurnIndexConstraint(err: unknown): boolean {
   const error = err as { code?: unknown; message?: unknown };
   return (
@@ -277,7 +302,7 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
   },
 
   async getRun(id: string): Promise<RunRecord | undefined> {
-    return runnerGetRun(id);
+    return db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as RunRecord | undefined;
   },
 
   async listRuns(filter: RunListFilter = {}, ctx?: SessionContext): Promise<RunRecord[]> {
@@ -295,6 +320,10 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     if (filter.user_id) {
       clauses.push('user_id = ?');
       params.push(filter.user_id);
+    }
+    if (filter.device_id) {
+      clauses.push('device_id = ?');
+      params.push(filter.device_id);
     }
     if (filter.status) {
       clauses.push('status = ?');
@@ -325,7 +354,53 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       is_public?: 0 | 1 | boolean;
     },
   ): Promise<void> {
-    runnerUpdateRun(id, patch);
+    const cols: string[] = [];
+    const values: unknown[] = [];
+    if (patch.status !== undefined) {
+      cols.push('status = ?');
+      values.push(patch.status);
+    }
+    if (patch.outputs !== undefined) {
+      cols.push('outputs = ?');
+      values.push(JSON.stringify(patch.outputs));
+    }
+    if (patch.error !== undefined) {
+      cols.push('error = ?');
+      values.push(patch.error);
+    }
+    if (patch.error_type !== undefined) {
+      cols.push('error_type = ?');
+      values.push(patch.error_type);
+    }
+    if (patch.upstream_status !== undefined) {
+      cols.push('upstream_status = ?');
+      values.push(patch.upstream_status);
+    }
+    if (patch.logs !== undefined) {
+      cols.push('logs = ?');
+      values.push(patch.logs);
+    }
+    if (patch.duration_ms !== undefined) {
+      cols.push('duration_ms = ?');
+      values.push(patch.duration_ms);
+    }
+    if (patch.is_public !== undefined) {
+      cols.push('is_public = ?');
+      values.push(patch.is_public ? 1 : 0);
+    }
+    if (patch.finished) {
+      cols.push("finished_at = datetime('now')");
+    }
+    if (cols.length === 0) return;
+    values.push(id);
+    db.prepare(`UPDATE runs SET ${cols.join(', ')} WHERE id = ?`).run(...values);
+    if (
+      patch.finished &&
+      patch.status === 'success' &&
+      typeof patch.duration_ms === 'number'
+    ) {
+      refreshAppAvgRunMs(id);
+    }
   },
 
   async listStudioAppSummaries(
