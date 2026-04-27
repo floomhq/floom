@@ -32,6 +32,7 @@ import { SecretInput } from '../components/forms/SecretInput';
 import { MeRail } from '../components/me/MeRail';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader, TabBar } from './MeAppPage';
+import { StudioAppTabs } from './StudioAppPage';
 import { useSecrets } from '../hooks/useSecrets';
 import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
@@ -170,7 +171,7 @@ export function MeAppSecretsPage({
             <span>{slug}</span>
           )}
           <span style={{ margin: '0 6px' }}>›</span>
-          <span style={{ color: 'var(--ink)' }}>Secrets</span>
+          <span style={{ color: 'var(--ink)' }}>App creator secrets</span>
         </nav>
       )}
       {chrome === 'studio' && app && (
@@ -185,7 +186,7 @@ export function MeAppSecretsPage({
             {app.name}
           </Link>
           <span style={{ margin: '0 6px' }}>›</span>
-          <span style={{ color: 'var(--ink)' }}>Secrets</span>
+          <span style={{ color: 'var(--ink)' }}>App creator secrets</span>
         </nav>
       )}
 
@@ -208,6 +209,7 @@ export function MeAppSecretsPage({
           {app && (
             <>
               <AppHeader app={app} />
+              {chrome === 'studio' && <StudioAppTabs slug={app.slug} active="secrets" />}
               {chrome === 'me' && <TabBar slug={app.slug} active="secrets" />}
 
               <h2
@@ -218,7 +220,7 @@ export function MeAppSecretsPage({
                   margin: chrome === 'studio' ? '20px 0 4px' : '0 0 4px',
                 }}
               >
-                Secrets for {app.name}
+                App creator secrets
               </h2>
               <p
                 style={{
@@ -229,8 +231,8 @@ export function MeAppSecretsPage({
                 }}
               >
                 {isCreator
-                  ? 'Choose how each secret is supplied. You can set a shared value yourself or leave it to each user.'
-                  : 'Provide the credentials this app needs to run on your behalf. Values are write-only.'}
+                  ? 'Publisher-controlled secrets for this app only. These are separate from workspace BYOK keys used when running apps.'
+                  : 'Workspace BYOK keys are configured in Workspace settings. Values are write-only.'}
               </p>
 
               {policiesError && (
@@ -261,7 +263,7 @@ export function MeAppSecretsPage({
                     color: 'var(--muted)',
                   }}
                 >
-                  This app doesn’t declare any secrets. Nothing to configure
+                  This app doesn’t declare any app creator secrets. Nothing to configure
                   here.
                 </div>
               ) : isCreator ? (
@@ -303,8 +305,8 @@ export function MeAppSecretsPage({
                     color: 'var(--muted)',
                   }}
                 >
-                  The creator of this app supplies every required secret.
-                  There’s nothing for you to set here.
+                  The creator of this app supplies every required app creator secret.
+                  There’s nothing to set here.
                 </div>
               ) : (
                 <div
@@ -338,8 +340,8 @@ export function MeAppSecretsPage({
                   maxWidth: 620,
                 }}
               >
-                Secrets are AES-256 encrypted at rest and scoped to your
-                account. They’re injected at run time and never logged.
+                App creator secrets are AES-256 encrypted at rest and scoped to this app.
+                Workspace BYOK keys live in Workspace settings and are used when running apps.
               </p>
             </>
           )}
@@ -349,7 +351,7 @@ export function MeAppSecretsPage({
   if (chrome === 'studio') {
     return (
       <StudioLayout
-        title={app ? `${app.name} · Secrets · Studio` : 'Secrets · Studio'}
+        title={app ? `${app.name} · App creator secrets · Studio` : 'App creator secrets · Studio'}
         activeAppSlug={slug}
         activeSubsection="secrets"
       >
@@ -361,7 +363,7 @@ export function MeAppSecretsPage({
   return (
     <PageShell
       requireAuth="cloud"
-      title={app ? `${app.name} · Secrets · Floom` : 'Secrets · Floom'}
+      title={app ? `${app.name} · App creator secrets · Floom` : 'App creator secrets · Floom'}
       contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
       noIndex
     >

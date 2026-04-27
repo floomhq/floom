@@ -3,13 +3,13 @@
 // Layout (inspired by /tmp/v15-local/me-app.html): TopBar + shared
 // MeRail on the left, tabbed main column on the right. Overview shows
 // the app description, a "New run" CTA, and a recent-runs table.
-// Secrets lives on its own route /me/apps/:slug/secrets (rendered by
+// App creator secrets lives on its own route /me/apps/:slug/secrets (rendered by
 // MeAppSecretsPage) so the overview stays read-only and the tab
 // highlight is URL-driven.
 //
 // The Access / Analytics / Settings tabs from the wireframes are
 // intentionally marked "Coming soon" — MVP scope only ships Overview +
-// Secrets + New run.
+// App creator secrets + New run.
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -192,7 +192,7 @@ export function AppHeader({ app }: { app: AppDetail }) {
 type TabId = 'overview' | 'run' | 'secrets' | 'access' | 'analytics' | 'settings';
 
 export function TabBar({ slug, active }: { slug: string; active: TabId }) {
-  // Keeping Run between Overview and Secrets so the order matches the
+  // Keeping Run between Overview and app creator secrets so the order matches the
   // user's mental flow: "here's my app → let me use it → manage keys".
   // `/me/apps/:slug/run` is the exception to the v16 Studio redirect
   // rule (see `main.tsx`), so a TabBar link to it stays inside the
@@ -205,7 +205,7 @@ export function TabBar({ slug, active }: { slug: string; active: TabId }) {
   }> = [
     { id: 'overview', label: 'Overview', to: `/me/apps/${slug}` },
     { id: 'run', label: 'Run', to: `/me/apps/${slug}/run` },
-    { id: 'secrets', label: 'Secrets', to: `/me/apps/${slug}/secrets` },
+    { id: 'secrets', label: 'App creator secrets', to: `/me/apps/${slug}/secrets` },
     { id: 'access', label: 'Access', disabled: true },
     { id: 'analytics', label: 'Analytics', disabled: true },
     { id: 'settings', label: 'Settings', disabled: true },

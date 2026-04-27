@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader } from './MeAppPage';
+import { StudioAppTabs } from './StudioAppPage';
 import * as api from '../api/client';
 import type { AppDetail } from '../lib/types';
 
@@ -80,6 +81,7 @@ export function StudioAppAccessPage() {
       {app && (
         <>
           <AppHeader app={app} />
+          <StudioAppTabs slug={app.slug} active="access" />
 
           <h2 style={sectionHeader}>Visibility</h2>
           <p style={helpText}>
@@ -118,19 +120,17 @@ export function StudioAppAccessPage() {
             />
           </div>
 
-          <h2 style={{ ...sectionHeader, marginTop: 32 }}>API keys</h2>
+          <h2 style={{ ...sectionHeader, marginTop: 32 }}>Agent tokens</h2>
           <p style={helpText}>
-            Bearer-token authentication for programmatic callers. Create
-            a key and include it as <code>Authorization: Bearer …</code>.
+            Use workspace Agent tokens for programmatic callers. Create
+            one in Workspace settings and include it as <code>Authorization: Bearer floom_agent_••••••</code>.
           </p>
           <div data-testid="studio-access-keys-stub" style={emptyState}>
             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
               Coming v1.1
             </div>
             <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
-              Per-app bearer keys with expiry + scopes. Until then, every
-              caller uses the global session cookie (browser) or personal
-              access token (CLI / MCP).
+              Per-app token scopes arrive after launch. Workspace Agent tokens cover CLI, MCP, HTTP, and CI today.
             </p>
           </div>
         </>

@@ -8,9 +8,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { PageShell } from '../components/PageShell';
-import { MeRail } from '../components/me/MeRail';
-import { AppHeader, TabBar } from './MeAppPage';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
+import { AppHeader } from './MeAppPage';
 import { SecretsRequiredCard } from '../components/me/SecretsRequiredCard';
 import { RunSurface } from '../components/runner/RunSurface';
 import { useSecrets } from '../hooks/useSecrets';
@@ -75,7 +74,7 @@ export function MeAppRunPage() {
     if (!app || !secrets.entries) return null;
     // Union of manifest-level and per-action `secrets_needed`. Pre-fix
     // the runner's `auth_error` copy told owners to "add a secret in
-    // Secrets" but the preflight only looked at the manifest-level
+    // app creator secrets" but the preflight only looked at the manifest-level
     // list, so an OpenAPI app with per-operation security slipped past
     // this gate and hit 401 inside RunSurface instead. See
     // `lib/manifest-secrets.ts` and audit R12-2 / C1.
@@ -86,44 +85,30 @@ export function MeAppRunPage() {
   }, [app, secrets.entries]);
 
   return (
-    <PageShell
-      requireAuth="cloud"
+    <WorkspacePageShell
+      mode="run"
       title={app ? `${app.name} · Run · Floom` : 'Run · Floom'}
-      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
-      noIndex
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 'calc(100vh - 56px)' }}>
-        <MeRail activeAppSlug={slug} />
-        <main
-          style={{
-            flex: 1,
-            padding: '28px 40px 120px',
-            maxWidth: 1000,
-            margin: '0 auto',
-            width: '100%',
-            minWidth: 0,
-          }}
-        >
           <nav
             aria-label="Breadcrumb"
             style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
           >
-            <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
-              /me
+            <Link to="/run" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
+              Run
             </Link>
             <span style={{ margin: '0 6px' }}>›</span>
             {app ? (
               <Link
-                to={`/me/apps/${app.slug}`}
+                to={`/run/apps`}
                 style={{ color: 'var(--muted)', textDecoration: 'none' }}
               >
-                {app.name}
+                Apps
               </Link>
             ) : (
               <span>{slug}</span>
             )}
             <span style={{ margin: '0 6px' }}>›</span>
-            <span style={{ color: 'var(--ink)' }}>Run</span>
+            <span style={{ color: 'var(--ink)' }}>{app?.name || slug}</span>
           </nav>
 
           {error && (
@@ -145,7 +130,10 @@ export function MeAppRunPage() {
           {app && (
             <>
               <AppHeader app={app} />
-              <TabBar slug={app.slug} active="run" />
+              <RunAppTabs slug={app.slug} active="run" />
+              <div style={crossLinkStyle}>
+                Runs use workspace BYOK keys. <Link to="/settings/byok-keys" style={inlineLinkStyle}>Manage BYOK keys</Link>
+              </div>
 
               {missingKeys === null && secrets.error && !secrets.entries && (
                 <SecretsFetchError
@@ -175,9 +163,28 @@ export function MeAppRunPage() {
               )}
             </>
           )}
-        </main>
-      </div>
-    </PageShell>
+    </WorkspacePageShell>
+  );
+}
+
+export function RunAppTabs({ slug, active }: { slug: string; active: 'run' | 'triggers' }) {
+  const tabs = [
+    { id: 'run' as const, label: 'Run', to: `/run/apps/${slug}/run` },
+    { id: 'triggers' as const, label: 'Triggers', to: `/run/apps/${slug}/triggers` },
+  ];
+  return (
+    <div role="tablist" aria-label="Run app tabs" style={tabsStyle}>
+      {tabs.map((tab) => (
+        <Link
+          key={tab.id}
+          to={tab.to}
+          aria-current={active === tab.id ? 'page' : undefined}
+          style={tabStyle(active === tab.id)}
+        >
+          {tab.label}
+        </Link>
+      ))}
+    </div>
   );
 }
 
@@ -239,3 +246,37 @@ function SecretsFetchError({
     </div>
   );
 }
+
+const tabsStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: 4,
+  borderBottom: '1px solid var(--line)',
+  marginBottom: 18,
+};
+
+function tabStyle(active: boolean): React.CSSProperties {
+  return {
+    padding: '10px 14px',
+    fontSize: 13,
+    fontWeight: 700,
+    textDecoration: 'none',
+    color: active ? 'var(--ink)' : 'var(--muted)',
+    borderBottom: active ? '2px solid var(--ink)' : '2px solid transparent',
+  };
+}
+
+const crossLinkStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 10,
+  background: 'var(--card)',
+  padding: '12px 14px',
+  marginBottom: 18,
+  fontSize: 13,
+  color: 'var(--muted)',
+};
+
+const inlineLinkStyle: React.CSSProperties = {
+  color: 'var(--accent)',
+  fontWeight: 700,
+  textDecoration: 'none',
+};

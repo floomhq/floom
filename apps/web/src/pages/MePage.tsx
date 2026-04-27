@@ -381,9 +381,12 @@ export function MePage() {
 
   return (
     <MeLayout
-      title="Me · Floom"
+      title="Workspace Run · Floom"
       allowSignedOutShell={signedOutPreview}
-      headerVariant="inline"
+      eyebrow="Workspace"
+      heading="Workspace Run"
+      subtitle="Run installed apps, inspect workspace run history, and manage runtime credentials for this workspace."
+      headerVariant="default"
     >
       <div data-testid="me-page">
         {showWelcome && <WelcomeBanner onDismiss={dismissWelcome} />}
@@ -393,22 +396,22 @@ export function MePage() {
           <ErrorPanel message={runsError} />
         ) : (
           <>
-            <section data-testid="me-apps-preview" aria-label="Your apps preview" style={s.section}>
+            <section data-testid="me-apps-preview" aria-label="Workspace apps preview" style={s.section}>
               <header style={s.sectionHeader}>
                 <div>
-                  <h2 style={s.sectionH2}>Your apps</h2>
+                  <h2 style={s.sectionH2}>Apps</h2>
                   <p style={s.sectionCopy}>
-                    Re-run the apps you already know, without digging through the store.
+                    Re-run apps installed in this workspace without digging through the public directory.
                   </p>
                 </div>
-                <Link to="/me/apps" data-testid="me-apps-see-all" style={s.headerLink}>
+                <Link to="/run/apps" data-testid="me-apps-see-all" style={s.headerLink}>
                   See all →
                 </Link>
               </header>
 
               {previewApps === null ? (
                 <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
-                  Loading your apps…
+                  Loading workspace apps…
                 </div>
               ) : previewApps.length === 0 ? (
                 <HomeEmptyState signedOutPreview={signedOutPreview} testId="me-apps-preview-empty" />
@@ -442,10 +445,10 @@ export function MePage() {
                   <div>
                     <h2 style={s.sectionH2}>Recent runs</h2>
                     <p style={s.sectionCopy}>
-                      The last few things you ran across every app.
+                      The last few runs in this workspace.
                     </p>
                   </div>
-                  <Link to="/me/runs" data-testid="me-runs-see-all" style={s.headerLink}>
+                  <Link to="/run/runs" data-testid="me-runs-see-all" style={s.headerLink}>
                     See all →
                   </Link>
                 </header>
@@ -477,14 +480,20 @@ export function MePage() {
             )}
 
             <div style={s.settingsRow}>
-              <Link to="/me/secrets" style={s.settingsLink}>
-                API keys
+              <Link to="/settings/byok-keys" style={s.settingsLink}>
+                BYOK keys
               </Link>
               <span aria-hidden style={s.settingsSeparator}>
                 ·
               </span>
-              <Link to="/me/settings" style={s.settingsLink}>
-                Profile
+              <Link to="/settings/agent-tokens" style={s.settingsLink}>
+                Agent tokens
+              </Link>
+              <span aria-hidden style={s.settingsSeparator}>
+                ·
+              </span>
+              <Link to="/account/settings" style={s.settingsLink}>
+                Account settings
               </Link>
               <span aria-hidden style={s.settingsSeparator}>
                 ·

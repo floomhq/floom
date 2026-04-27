@@ -174,7 +174,7 @@ export function StudioAppsPage() {
                     marginBottom: 6,
                   }}
                 >
-                  My apps
+                  Studio
                 </div>
                 <h1
                   data-testid="studio-home-headline"
@@ -200,9 +200,9 @@ export function StudioAppsPage() {
                       maxWidth: 520,
                     }}
                   >
-                    Apps you&rsquo;ve built and published. Installed apps live on your{' '}
-                    <Link to="/me/apps" style={{ color: 'var(--accent)', fontWeight: 600 }}>
-                      Me · Installed
+                    Apps built and published in this workspace. Installed apps live in{' '}
+                    <Link to="/run/apps" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                      Workspace Run
                     </Link>{' '}
                     page.
                   </p>
@@ -448,7 +448,7 @@ function studioHeadline(
   liveCount: number,
   draftCount: number,
 ): string {
-  if (!apps) return 'Your apps';
+  if (!apps) return 'Apps in this workspace';
   if (apps.length === 0) return 'Ship your first app.';
   const liveLabel =
     liveCount === 0

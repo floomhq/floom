@@ -1,214 +1,261 @@
-// /me/secrets — Secrets tab of the Studio-tabbed dashboard.
-//
-// Global secrets (issue #548) are not yet shipped: secrets today live
-// per-app at /studio/:slug/secrets. This page is the tab nav hook: it
-// renders the tab highlight + an explainer + links into the per-app
-// secrets surface for every app the user owns. Once #548 lands, this
-// page becomes the real global-secrets UI and the per-app links stay
-// as drill-downs.
-//
-// Federico 2026-04-24: "add the tab nav hook" — so this exists now to
-// keep the tab strip complete (Overview · Apps · Runs · Secrets · Settings)
-// without blocking on the #548 backend.
-
-import type { CSSProperties } from 'react';
-import { Link } from 'react-router-dom';
-import { MeLayout } from '../components/me/MeLayout';
-import { AppIcon } from '../components/AppIcon';
+import { useEffect, useState } from 'react';
+import { WorkspaceHeader, WorkspacePageShell } from '../components/WorkspacePageShell';
 import { useSession } from '../hooks/useSession';
-import { useMyApps } from '../hooks/useMyApps';
+import * as api from '../api/client';
+import type { UserSecretEntry } from '../lib/types';
 
-const s: Record<string, CSSProperties> = {
-  h2: {
-    fontFamily: 'var(--font-display)',
-    fontSize: 20,
-    fontWeight: 800,
-    letterSpacing: '-0.025em',
-    lineHeight: 1.2,
-    margin: '0 0 6px',
-    color: 'var(--ink)',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: 'var(--muted)',
-    margin: '0 0 24px',
-    lineHeight: 1.55,
-    maxWidth: 620,
-  },
-  callout: {
-    border: '1px solid var(--line)',
-    borderRadius: 12,
-    background: 'var(--card)',
-    padding: '18px 20px',
-    marginBottom: 28,
-  },
-  calloutTitle: {
-    fontSize: 14,
-    fontWeight: 700,
-    color: 'var(--ink)',
-    margin: '0 0 6px',
-  },
-  calloutBody: {
-    fontSize: 13,
-    color: 'var(--muted)',
-    lineHeight: 1.55,
-    margin: 0,
-  },
-  list: {
-    border: '1px solid var(--line)',
-    borderRadius: 12,
-    background: 'var(--card)',
-    overflow: 'hidden',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '14px 16px',
-    textDecoration: 'none',
-    color: 'var(--ink)',
-  },
-  iconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    background: 'var(--bg)',
-    border: '1px solid var(--line)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-};
-
-export function MeSecretsPage() {
+export function SettingsByokKeysPage() {
   const { data: session } = useSession();
-  const { apps, loading } = useMyApps();
-  const signedOutPreview = !!session && session.cloud_mode && session.user.is_local;
+  const workspace = session?.active_workspace;
+  const [entries, setEntries] = useState<UserSecretEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [keyName, setKeyName] = useState('');
+  const [keyValue, setKeyValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function load() {
+    if (!workspace) return;
+    try {
+      const res = await api.listWorkspaceSecrets(workspace.id);
+      setEntries(res.entries);
+      setError(null);
+    } catch (err) {
+      setEntries([]);
+      setError((err as Error).message || 'Failed to load BYOK keys');
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, [workspace?.id]);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!workspace || !keyName.trim() || !keyValue.trim()) return;
+    setSaving(true);
+    try {
+      await api.setWorkspaceSecret(workspace.id, keyName.trim(), keyValue);
+      setKeyName('');
+      setKeyValue('');
+      await load();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to replace BYOK key');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(key: string) {
+    if (!workspace) return;
+    setSaving(true);
+    try {
+      await api.deleteWorkspaceSecret(workspace.id, key);
+      await load();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to delete BYOK key');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <MeLayout
-      activeTab="secrets"
-      title="Secrets · Me · Floom"
-      allowSignedOutShell={signedOutPreview}
-    >
-      <div data-testid="me-secrets-page">
-        <h2 style={s.h2}>Secrets</h2>
-        <p style={s.subtitle}>
-          Secrets let Floom call APIs on your behalf (database URL, API
-          keys, webhooks). For now, each app has its own secret store. A
-          global one is on the way.
-        </p>
+    <WorkspacePageShell mode="settings" title="BYOK keys | Floom">
+      <WorkspaceHeader
+        eyebrow="Workspace settings"
+        title="BYOK keys"
+        scope={`Applies to ${workspace?.name || 'this workspace'}.`}
+      />
 
-        <div style={s.callout}>
-          <div style={s.calloutTitle}>Global secrets are coming</div>
-          <p style={s.calloutBody}>
-            We&rsquo;re about to ship a single place to manage secrets shared
-            across all your apps. Until then, open any app below to set its
-            secrets.
-          </p>
+      <section style={cardStyle}>
+        <div style={sectionHeadStyle}>
+          <div>
+            <h2 style={h2Style}>Workspace BYOK keys</h2>
+            <p style={mutedStyle}>
+              Runtime credentials for installed apps. Values are encrypted and never shown again after save.
+            </p>
+          </div>
         </div>
 
-        {signedOutPreview ? (
-          <div
-            style={{
-              border: '1px dashed var(--line)',
-              borderRadius: 12,
-              background: 'var(--card)',
-              padding: '28px 22px',
-              textAlign: 'center',
-              color: 'var(--muted)',
-              fontSize: 14,
-            }}
-          >
-            Sign in to see your apps.
-          </div>
-        ) : loading ? (
-          <div style={{ ...s.list, padding: 16, color: 'var(--muted)', fontSize: 13 }}>
-            Loading your apps…
-          </div>
-        ) : !apps || apps.length === 0 ? (
-          <div
-            data-testid="me-secrets-no-apps"
-            style={{
-              border: '1px dashed var(--line)',
-              borderRadius: 12,
-              background: 'var(--card)',
-              padding: '28px 22px',
-              textAlign: 'center',
-            }}
-          >
-            <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
-              You don&rsquo;t have any apps yet. Publish one to start managing secrets.
-            </div>
-            <Link
-              to="/studio/build"
-              style={{
-                display: 'inline-block',
-                padding: '10px 18px',
-                background: 'var(--accent, #10b981)',
-                color: '#fff',
-                borderRadius: 8,
-                fontSize: 14,
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Publish your first app →
-            </Link>
+        {error ? <div role="alert" style={errorStyle}>{error}</div> : null}
+
+        <form onSubmit={save} style={formStyle}>
+          <input
+            value={keyName}
+            onChange={(e) => setKeyName(e.target.value.toUpperCase())}
+            placeholder="GEMINI_API_KEY"
+            aria-label="BYOK key name"
+            style={inputStyle}
+          />
+          <input
+            value={keyValue}
+            onChange={(e) => setKeyValue(e.target.value)}
+            placeholder="Paste value"
+            aria-label="BYOK key value"
+            type="password"
+            style={inputStyle}
+          />
+          <button type="submit" disabled={saving || !keyName.trim() || !keyValue.trim()} style={primaryButtonStyle}>
+            {saving ? 'Replacing...' : 'Replace'}
+          </button>
+        </form>
+
+        {entries === null ? (
+          <div style={placeholderStyle}>Loading BYOK keys...</div>
+        ) : entries.length === 0 ? (
+          <div data-testid="settings-byok-empty" style={emptyStyle}>
+            <strong>No BYOK keys yet</strong>
+            <p style={mutedStyle}>Add the first workspace credential above. Apps that require it can run from browser, CLI, HTTP, and MCP after it is saved.</p>
           </div>
         ) : (
-          <div data-testid="me-secrets-app-list" style={s.list}>
-            {apps.map((app, i) => (
-              <Link
-                key={app.slug}
-                to={`/studio/${app.slug}/secrets`}
-                data-testid={`me-secrets-app-${app.slug}`}
-                style={{
-                  ...s.row,
-                  borderBottom: i === apps.length - 1 ? 'none' : '1px solid var(--line)',
-                }}
-              >
-                <span aria-hidden style={s.iconWrap}>
-                  <AppIcon slug={app.slug} size={16} />
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: 'var(--ink)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {app.name || app.slug}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--muted)',
-                      fontFamily: 'JetBrains Mono, monospace',
-                    }}
-                  >
-                    /studio/{app.slug}/secrets
-                  </div>
+          <div data-testid="settings-byok-list" style={listStyle}>
+            {entries.map((entry) => (
+              <div key={entry.key} style={rowStyle}>
+                <div>
+                  <div style={monoStrongStyle}>{entry.key}</div>
+                  <div style={mutedSmallStyle}>Updated {entry.updated_at ? new Date(entry.updated_at).toLocaleString() : 'recently'}</div>
                 </div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--muted)',
-                    flexShrink: 0,
-                  }}
-                >
-                  Manage →
-                </span>
-              </Link>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setKeyName(entry.key)} style={secondaryButtonStyle}>
+                    Replace
+                  </button>
+                  <button type="button" onClick={() => void remove(entry.key)} disabled={saving} style={dangerButtonStyle}>
+                    Delete
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         )}
-      </div>
-    </MeLayout>
+      </section>
+    </WorkspacePageShell>
   );
 }
+
+export function MeSecretsPage() {
+  return <SettingsByokKeysPage />;
+}
+
+const cardStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 12,
+  background: 'var(--card)',
+  padding: 22,
+};
+
+const sectionHeadStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 14,
+  marginBottom: 18,
+};
+
+const h2Style: React.CSSProperties = {
+  fontSize: 16,
+  fontWeight: 750,
+  margin: '0 0 4px',
+  color: 'var(--ink)',
+};
+
+const mutedStyle: React.CSSProperties = {
+  fontSize: 13,
+  lineHeight: 1.55,
+  color: 'var(--muted)',
+  margin: 0,
+};
+
+const mutedSmallStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: 'var(--muted)',
+  marginTop: 4,
+};
+
+const formStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(180px, 0.8fr) minmax(220px, 1fr) auto',
+  gap: 10,
+  marginBottom: 18,
+};
+
+const inputStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 8,
+  padding: '10px 12px',
+  fontSize: 13,
+  color: 'var(--ink)',
+  background: 'var(--bg)',
+  fontFamily: 'inherit',
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  border: '1px solid var(--ink)',
+  borderRadius: 8,
+  padding: '10px 14px',
+  background: 'var(--ink)',
+  color: '#fff',
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 8,
+  padding: '8px 11px',
+  background: 'var(--bg)',
+  color: 'var(--ink)',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const dangerButtonStyle: React.CSSProperties = {
+  ...secondaryButtonStyle,
+  color: '#b91c1c',
+};
+
+const placeholderStyle: React.CSSProperties = {
+  color: 'var(--muted)',
+  fontSize: 13,
+  padding: 16,
+};
+
+const emptyStyle: React.CSSProperties = {
+  border: '1px dashed var(--line)',
+  borderRadius: 10,
+  padding: 18,
+  background: 'var(--bg)',
+};
+
+const listStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 10,
+  overflow: 'hidden',
+};
+
+const rowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  padding: '14px 16px',
+  borderBottom: '1px solid var(--line)',
+};
+
+const monoStrongStyle: React.CSSProperties = {
+  fontFamily: 'JetBrains Mono, monospace',
+  fontSize: 13,
+  fontWeight: 700,
+  color: 'var(--ink)',
+};
+
+const errorStyle: React.CSSProperties = {
+  background: '#fdecea',
+  border: '1px solid #f4b7b1',
+  color: '#c2321f',
+  borderRadius: 8,
+  padding: '10px 12px',
+  fontSize: 13,
+  marginBottom: 14,
+};

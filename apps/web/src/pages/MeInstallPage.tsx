@@ -5,7 +5,8 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PageShell } from '../components/PageShell';
+import { WorkspaceHeader, WorkspacePageShell } from '../components/WorkspacePageShell';
+import { useSession } from '../hooks/useSession';
 import * as api from '../api/client';
 import type { MeRunSummary } from '../lib/types';
 
@@ -15,6 +16,9 @@ export function MeInstallPage() {
   // users to a hardcoded canonical domain.
   const origin = window.location.origin;
   const mcpUrl = `${origin}/mcp`;
+  const { data: session } = useSession();
+  const workspaceName = session?.active_workspace?.name || 'Workspace';
+  const workspaceSlug = slugifyWorkspaceName(workspaceName);
 
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +49,10 @@ export function MeInstallPage() {
     return JSON.stringify(
       {
         mcpServers: {
-          [`floom-${slug}`]: {
+          [`floom-${workspaceSlug}`]: {
             command: 'npx',
             args: ['-y', 'mcp-remote', `${origin}/mcp/app/${slug}`],
+            env: { FLOOM_API_KEY: 'floom_agent_...' },
           },
         },
       },
@@ -57,47 +62,14 @@ export function MeInstallPage() {
   }
 
   return (
-    <PageShell requireAuth="cloud" title="Install to Claude | Floom" noIndex>
-      <div data-testid="install-page" style={{ maxWidth: 680 }}>
-        <nav
-          aria-label="Breadcrumb"
-          style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}
-        >
-          <Link to="/me" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
-            /me
-          </Link>
-          <span style={{ margin: '0 6px' }}>›</span>
-          <span style={{ color: 'var(--ink)' }}>Install to Claude</span>
-        </nav>
-
-        <h1
-          className="section-title-display"
-          style={{ fontSize: 32, margin: '0 0 6px' }}
-        >
-          Install to Claude Desktop
-        </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: 'var(--muted)',
-            margin: '0 0 24px',
-            lineHeight: 1.6,
-          }}
-        >
-          Pick an app you've run, then paste its config into your{' '}
-          <code
-            style={{
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: 12,
-              background: 'var(--bg)',
-              padding: '2px 6px',
-              borderRadius: 4,
-            }}
-          >
-            claude_desktop_config.json
-          </code>{' '}
-          and restart Claude Desktop.
-        </p>
+    <WorkspacePageShell mode="run" title="Install to Claude | Floom" mainMaxWidth={760}>
+      <div data-testid="install-page">
+        <WorkspaceHeader
+          eyebrow="Workspace Run"
+          title="Install Floom in Claude"
+          scope={`MCP entry name: floom-${workspaceSlug}. Agent tokens live in Workspace settings.`}
+          actions={<Link to="/settings/agent-tokens" style={settingsLinkStyle}>Agent tokens</Link>}
+        />
 
         <div
           style={{
@@ -127,7 +99,7 @@ export function MeInstallPage() {
               color: 'var(--muted)',
             }}
           >
-            Loading your apps…
+            Loading workspace apps…
           </div>
         )}
 
@@ -160,7 +132,7 @@ export function MeInstallPage() {
                 lineHeight: 1.55,
               }}
             >
-              Run an app from the store first. Each app you run unlocks its own
+              Run an app from the public directory first. Each app you run unlocks its own
               install config here.
             </p>
             <Link
@@ -262,8 +234,28 @@ export function MeInstallPage() {
           </>
         )}
       </div>
-    </PageShell>
+    </WorkspacePageShell>
   );
+}
+
+const settingsLinkStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 8,
+  padding: '9px 13px',
+  background: 'var(--card)',
+  color: 'var(--ink)',
+  fontSize: 13,
+  fontWeight: 700,
+  textDecoration: 'none',
+};
+
+function slugifyWorkspaceName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'workspace';
 }
 
 const stepLabelStyle: React.CSSProperties = {

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader } from './MeAppPage';
+import { StudioAppTabs } from './StudioAppPage';
 import * as api from '../api/client';
 import type { AppDetail, CreatorRun } from '../lib/types';
 import { formatTime } from '../lib/time';
@@ -55,6 +56,7 @@ export function StudioAppRunsPage() {
       {app && (
         <>
           <AppHeader app={app} />
+          <StudioAppTabs slug={app.slug} active="runs" />
           <h2 style={sectionHeader}>All runs</h2>
           {!runs && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
           {runs && runs.length === 0 && (

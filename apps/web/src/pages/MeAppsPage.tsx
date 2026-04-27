@@ -146,11 +146,11 @@ export function MeAppsPage() {
   return (
     <MeLayout
       activeTab="apps"
-      title="Your apps · Me · Floom"
+      title="Apps · Workspace Run · Floom"
       allowSignedOutShell={signedOutPreview}
-      eyebrow="Library"
-      heading="Your apps"
-      subtitle="Everything you’ve already run on Floom, sorted by the last time you used it."
+      eyebrow="Workspace Run"
+      heading="Apps"
+      subtitle="Runnable apps in this workspace, sorted by the last time they ran."
       actions={
         <Link to="/apps" style={s.headerLink}>
           Browse store →
@@ -162,19 +162,19 @@ export function MeAppsPage() {
           <header style={s.sectionHeader}>
             <div>
               <h2 style={s.sectionH2}>Run again</h2>
-              <p style={s.subtitle}>Pick up right where you left off.</p>
+              <p style={s.subtitle}>Pick up the last workspace run for each app.</p>
             </div>
           </header>
 
           {usedApps === null ? (
             <div style={{ ...s.card, padding: 18, color: 'var(--muted)', fontSize: 13.5 }}>
-              Loading your apps…
+              Loading workspace apps…
             </div>
           ) : usedApps.length === 0 ? (
             <div data-testid="me-apps-used-empty" style={s.emptyCard}>
               <h2 style={s.emptyTitle}>You haven’t run anything yet.</h2>
               <p style={s.emptyBody}>
-                Browse the store, try an app, and it will show up here for quick re-runs.
+                Browse the public directory, try an app, and it appears here for quick re-runs.
               </p>
               <Link to="/apps" style={s.button}>
                 Browse the store →

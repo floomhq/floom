@@ -4,9 +4,9 @@
 // Scoped to the caller by the server (/api/me/runs/:id), so a 404 means
 // either the run doesn't exist or it belongs to another user/device.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { PageShell } from '../components/PageShell';
+import { WorkspaceHeader, WorkspacePageShell } from '../components/WorkspacePageShell';
 import * as api from '../api/client';
 import type { MeRunDetail } from '../lib/types';
 import { formatTime } from '../lib/time';
@@ -15,6 +15,7 @@ export function MeRunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
   const [run, setRun] = useState<MeRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
 
   useEffect(() => {
     if (!runId) return;
@@ -24,11 +25,13 @@ export function MeRunDetailPage() {
       .catch((err) => setError((err as Error).message));
   }, [runId]);
 
+  const friendlyOutput = useMemo(() => (run ? friendlyEntries(run.outputs) : []), [run]);
+
   return (
-    <PageShell requireAuth="cloud" title="Run detail | Floom" noIndex>
-      <div data-testid="run-detail" style={{ maxWidth: 900 }}>
+    <WorkspacePageShell mode="run" title="Run detail | Floom">
+      <div data-testid="run-detail">
         <Link
-          to="/me/runs"
+          to="/run/runs"
           style={{
             fontSize: 13,
             color: 'var(--muted)',
@@ -63,7 +66,7 @@ export function MeRunDetailPage() {
             }}
           >
             {error.includes('404') || error.toLowerCase().includes('not found')
-              ? 'Run not found. It may belong to another device or user.'
+              ? 'Run not found in this workspace.'
               : error}
           </div>
         )}
@@ -79,44 +82,17 @@ export function MeRunDetailPage() {
 
         {run && (
           <>
-            <div style={{ marginBottom: 24 }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  marginBottom: 6,
-                }}
-              >
-                <h1
-                  style={{
-                    fontFamily: 'var(--font-display)',
-                    fontSize: 24,
-                    fontWeight: 700,
-                    letterSpacing: '-0.02em',
-                    lineHeight: 1.2,
-                    margin: 0,
-                    color: 'var(--ink)',
-                  }}
-                >
-                  {run.app_name || run.app_slug || 'Unknown app'}
-                </h1>
-                <StatusPill status={run.status} />
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                Action{' '}
-                <code
-                  style={{
-                    fontFamily: 'JetBrains Mono, monospace',
-                    color: 'var(--ink)',
-                  }}
-                >
-                  {run.action}
-                </code>{' '}
-                · Started {formatTime(run.started_at)}{' '}
-                {run.duration_ms != null && <> · {run.duration_ms}ms</>}
-              </div>
-            </div>
+            <WorkspaceHeader
+              eyebrow="Workspace Run"
+              title={run.app_name || run.app_slug || 'Run detail'}
+              scope={
+                <>
+                  Action <code style={codeInline}>{run.action}</code> · Started {formatTime(run.started_at)}
+                  {run.duration_ms != null && <> · {run.duration_ms}ms</>}
+                </>
+              }
+              actions={<StatusPill status={run.status} />}
+            />
 
             {run.error && (
               <div
@@ -148,9 +124,30 @@ export function MeRunDetailPage() {
               <JsonBlock value={run.inputs ?? {}} />
             </Section>
 
-            <Section title="Output">
-              <JsonBlock value={run.outputs ?? {}} />
-            </Section>
+            <section style={resultCardStyle}>
+              <div style={resultCardHeadStyle}>
+                <div>
+                  <div style={sectionLabelStyle}>Result</div>
+                  <h2 style={resultTitleStyle}>Output summary</h2>
+                </div>
+                <button type="button" onClick={() => setShowRaw((v) => !v)} style={toggleStyle}>
+                  {showRaw ? 'Hide raw JSON' : 'Show raw JSON'}
+                </button>
+              </div>
+              {friendlyOutput.length === 0 ? (
+                <p style={{ margin: 0, color: 'var(--muted)', fontSize: 13 }}>No structured output was returned.</p>
+              ) : (
+                <dl style={kvGridStyle}>
+                  {friendlyOutput.map(([key, value]) => (
+                    <div key={key} style={kvRowStyle}>
+                      <dt style={kvKeyStyle}>{labelize(key)}</dt>
+                      <dd style={kvValueStyle}>{formatFriendlyValue(value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              {showRaw ? <div style={{ marginTop: 16 }}><JsonBlock value={run.outputs ?? {}} /></div> : null}
+            </section>
 
             {run.logs && (
               <Section title="Logs">
@@ -179,8 +176,30 @@ export function MeRunDetailPage() {
           </>
         )}
       </div>
-    </PageShell>
+    </WorkspacePageShell>
   );
+}
+
+function friendlyEntries(value: unknown): Array<[string, unknown]> {
+  if (value == null) return [];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [['result', value]];
+  return Object.entries(value as Record<string, unknown>).slice(0, 12);
+}
+
+function labelize(key: string): string {
+  return key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function formatFriendlyValue(value: unknown): string {
+  if (value == null) return 'None';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map((item) => formatFriendlyValue(item)).join(', ');
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -255,3 +274,81 @@ function StatusPill({ status }: { status: string }) {
     </span>
   );
 }
+
+const sectionLabelStyle: React.CSSProperties = {
+  fontFamily: 'JetBrains Mono, monospace',
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'var(--muted)',
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+};
+
+const resultCardStyle: React.CSSProperties = {
+  background: '#fff8ed',
+  border: '1px solid #eadfce',
+  borderRadius: 12,
+  padding: 20,
+  marginBottom: 22,
+};
+
+const resultCardHeadStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 12,
+  marginBottom: 16,
+  flexWrap: 'wrap',
+};
+
+const resultTitleStyle: React.CSSProperties = {
+  fontSize: 18,
+  fontWeight: 750,
+  margin: '4px 0 0',
+  color: 'var(--ink)',
+};
+
+const toggleStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  background: 'var(--card)',
+  color: 'var(--ink)',
+  borderRadius: 8,
+  padding: '8px 11px',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const kvGridStyle: React.CSSProperties = {
+  margin: 0,
+  display: 'grid',
+  gap: 10,
+};
+
+const kvRowStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '160px minmax(0, 1fr)',
+  gap: 12,
+  alignItems: 'start',
+};
+
+const kvKeyStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'var(--muted)',
+};
+
+const kvValueStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: 13.5,
+  lineHeight: 1.55,
+  color: 'var(--ink)',
+  overflowWrap: 'anywhere',
+};
+
+const codeInline: React.CSSProperties = {
+  fontFamily: 'JetBrains Mono, monospace',
+  color: 'var(--ink)',
+};

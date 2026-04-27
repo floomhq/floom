@@ -1,33 +1,21 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
-import { StudioAppTabs } from './StudioAppPage';
 
-export function StudioAppTriggersPage() {
-  const { slug = '' } = useParams<{ slug: string }>();
-
+export function StudioEmptyPage() {
   return (
-    <StudioLayout title="Triggers · Studio" activeAppSlug={slug} activeSubsection="triggers">
-      <StudioAppTabs slug={slug} active="triggers" />
+    <StudioLayout title="Studio | Floom">
       <section style={cardStyle}>
         <div style={kickerStyle}>Studio</div>
-        <h1 style={h1Style}>Triggers are configured in Run</h1>
-        <p style={bodyStyle}>
-          Creators publish the app once. Each workspace configures webhooks and schedules from Run mode after installing the app.
-        </p>
-        <Link to={`/run/apps/${slug}/triggers`} style={primaryLinkStyle}>
-          Open Run triggers
-        </Link>
+        <h1 style={h1Style}>No apps in this workspace yet</h1>
+        <p style={bodyStyle}>Create the first app from a repo, OpenAPI spec, or local Floom manifest.</p>
+        <Link to="/studio/build" style={primaryLinkStyle}>New app</Link>
       </section>
     </StudioLayout>
   );
 }
 
-export function StudioTriggersTab() {
-  return <StudioAppTriggersPage />;
-}
-
 const cardStyle: React.CSSProperties = {
-  border: '1px solid var(--line)',
+  border: '1px dashed var(--line)',
   borderRadius: 12,
   background: 'var(--card)',
   padding: 24,
@@ -58,7 +46,6 @@ const bodyStyle: React.CSSProperties = {
   lineHeight: 1.6,
   color: 'var(--muted)',
   margin: '10px 0 20px',
-  maxWidth: 620,
 };
 
 const primaryLinkStyle: React.CSSProperties = {

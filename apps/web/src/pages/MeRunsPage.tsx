@@ -214,13 +214,13 @@ export function MeRunsPage() {
   return (
     <MeLayout
       activeTab="runs"
-      title="Run history · Me · Floom"
+      title="Runs · Workspace Run · Floom"
       allowSignedOutShell={signedOutPreview}
-      eyebrow="History"
-      heading="Recent runs"
-      subtitle="Everything you’ve run on Floom, ordered from newest to oldest."
+      eyebrow="Workspace Run"
+      heading="Runs"
+      subtitle="Workspace run history, ordered from newest to oldest."
       actions={
-        <Link to="/me" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--accent)', textDecoration: 'none' }}>
+        <Link to="/run" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--accent)', textDecoration: 'none' }}>
           Back home →
         </Link>
       }
@@ -260,7 +260,7 @@ export function MeRunsPage() {
         ) : visibleRuns.length === 0 ? (
           <EmptyRuns signedOutPreview={signedOutPreview} />
         ) : (
-          <div data-testid="me-runs-list" style={s.card}>
+          <div data-testid="me-runs-list" aria-label="Workspace run history" style={s.card}>
             {visibleRuns.map((run, index) => (
               <RunRow
                 key={run.id}
@@ -301,7 +301,7 @@ function RunRow({
 
   return (
     <Link
-      to={`/me/runs/${encodeURIComponent(run.id)}`}
+      to={`/run/runs/${encodeURIComponent(run.id)}`}
       data-testid={`me-run-row-${run.id}`}
       style={{
         ...s.runRow,

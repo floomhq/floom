@@ -1,29 +1,22 @@
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { StudioAppTabs } from './StudioAppPage';
 
-export function StudioAppTriggersPage() {
+export function StudioAppFeedbackPage() {
   const { slug = '' } = useParams<{ slug: string }>();
 
   return (
-    <StudioLayout title="Triggers · Studio" activeAppSlug={slug} activeSubsection="triggers">
-      <StudioAppTabs slug={slug} active="triggers" />
+    <StudioLayout title="Feedback · Studio" activeAppSlug={slug} activeSubsection="analytics">
+      <StudioAppTabs slug={slug} active="feedback" />
       <section style={cardStyle}>
         <div style={kickerStyle}>Studio</div>
-        <h1 style={h1Style}>Triggers are configured in Run</h1>
+        <h1 style={h1Style}>Feedback</h1>
         <p style={bodyStyle}>
-          Creators publish the app once. Each workspace configures webhooks and schedules from Run mode after installing the app.
+          User feedback and review signals for this app will appear here after launch. Public app reviews remain on the app page.
         </p>
-        <Link to={`/run/apps/${slug}/triggers`} style={primaryLinkStyle}>
-          Open Run triggers
-        </Link>
       </section>
     </StudioLayout>
   );
-}
-
-export function StudioTriggersTab() {
-  return <StudioAppTriggersPage />;
 }
 
 const cardStyle: React.CSSProperties = {
@@ -57,18 +50,6 @@ const bodyStyle: React.CSSProperties = {
   fontSize: 14,
   lineHeight: 1.6,
   color: 'var(--muted)',
-  margin: '10px 0 20px',
+  margin: '10px 0 0',
   maxWidth: 620,
-};
-
-const primaryLinkStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  border: '1px solid var(--ink)',
-  borderRadius: 8,
-  padding: '10px 14px',
-  background: 'var(--ink)',
-  color: '#fff',
-  textDecoration: 'none',
-  fontSize: 13,
-  fontWeight: 700,
 };

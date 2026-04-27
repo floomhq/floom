@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { StudioLayout } from '../components/studio/StudioLayout';
 import { AppHeader } from './MeAppPage';
+import { StudioAppTabs } from './StudioAppPage';
 import * as api from '../api/client';
 import type { AppDetail } from '../lib/types';
 
@@ -57,6 +58,7 @@ export function StudioAppAnalyticsPage() {
       {app && (
         <>
           <AppHeader app={app} />
+          <StudioAppTabs slug={app.slug} active="analytics" />
 
           <div
             data-testid="studio-analytics-stub"
