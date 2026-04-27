@@ -9,13 +9,14 @@
 //      all map 1:1 to existing exports.
 //   2. `services/app_creator_secrets.ts` — per-(app, creator) override
 //      vault. Keys the app's creator owns via a `creator_override`
-//      policy. Creator policy metadata is part of the adapter surface;
-//      creator secret value mutation still lives on the owner routes.
+//      policy. Creator policy metadata and value mutation are both part of
+//      the adapter surface.
 //
 // Master key: `FLOOM_MASTER_KEY` (read inside user_secrets.ts). Missing
 // in OSS default — the first `set` call that needs encryption will throw
 // `MasterKeyError`, same as the live code path today.
 
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { db } from '../db.js';
 import type { SecretPolicy, SessionContext } from '../types.js';
 import type { SecretsAdapter } from './types.js';
@@ -25,6 +26,8 @@ import {
   del as userDel,
   listMasked as userListMasked,
   loadForRun as userLoadForRun,
+  decryptValue,
+  getMasterKey,
 } from '../services/user_secrets.js';
 import {
   loadCreatorSecretsForRun,
@@ -32,12 +35,6 @@ import {
 } from '../services/app_creator_secrets.js';
 
 type LocalSecretsAdapter = SecretsAdapter & {
-  setCreatorOverrideSecret(
-    app_id: string,
-    workspace_id: string,
-    key: string,
-    plaintext: string,
-  ): Promise<void>;
   __setCreatorOverrideForTests(
     app_id: string,
     workspace_id: string,
@@ -45,6 +42,72 @@ type LocalSecretsAdapter = SecretsAdapter & {
     plaintext: string,
   ): Promise<void>;
 };
+
+const ADMIN_SECRET_ENVELOPE_PREFIX = 'floom:aes-gcm:v1:';
+
+function encryptAdminSecret(plaintext: string): string {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', getMasterKey(), nonce);
+  const ciphertext = Buffer.concat([
+    cipher.update(Buffer.from(plaintext, 'utf8')),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+  return `${ADMIN_SECRET_ENVELOPE_PREFIX}${nonce.toString('hex')}:${ciphertext.toString('hex')}:${authTag.toString('hex')}`;
+}
+
+function decryptAdminSecret(envelope: string): string {
+  if (!envelope.startsWith(ADMIN_SECRET_ENVELOPE_PREFIX)) {
+    return envelope;
+  }
+  const encoded = envelope.slice(ADMIN_SECRET_ENVELOPE_PREFIX.length);
+  const parts = encoded.split(':');
+  if (parts.length !== 3) {
+    throw new Error('admin secret envelope has wrong shape');
+  }
+  const [nonceHex, ciphertextHex, authTagHex] = parts;
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    getMasterKey(),
+    Buffer.from(nonceHex, 'hex'),
+  );
+  decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(ciphertextHex, 'hex')),
+    decipher.final(),
+  ]);
+  return plaintext.toString('utf8');
+}
+
+function writeAdminSecretValue(
+  app_id: string | null,
+  key: string,
+  value: string,
+): void {
+  const scopedApp = app_id ?? null;
+  const existing = db
+    .prepare(
+      scopedApp === null
+        ? 'SELECT id FROM secrets WHERE name = ? AND app_id IS NULL'
+        : 'SELECT id FROM secrets WHERE name = ? AND app_id = ?',
+    )
+    .get(...(scopedApp === null ? [key] : [key, scopedApp])) as
+    | { id: string }
+    | undefined;
+  if (existing) {
+    db.prepare('UPDATE secrets SET value = ? WHERE id = ?').run(
+      value,
+      existing.id,
+    );
+    return;
+  }
+  const id =
+    globalThis.crypto?.randomUUID?.() ||
+    `sec-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  db.prepare(
+    'INSERT INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)',
+  ).run(id, key, value, scopedApp);
+}
 
 export const localSecretsAdapter: LocalSecretsAdapter = {
   get(ctx: SessionContext, key: string): Promise<string | null> {
@@ -68,29 +131,7 @@ export const localSecretsAdapter: LocalSecretsAdapter = {
     key: string,
     plaintext: string,
   ): Promise<void> {
-    const scopedApp = app_id ?? null;
-    const existing = db
-      .prepare(
-        scopedApp === null
-          ? 'SELECT id FROM secrets WHERE name = ? AND app_id IS NULL'
-          : 'SELECT id FROM secrets WHERE name = ? AND app_id = ?',
-      )
-      .get(
-        ...(scopedApp === null ? [key] : [key, scopedApp]),
-      ) as { id: string } | undefined;
-    if (existing) {
-      db.prepare('UPDATE secrets SET value = ? WHERE id = ?').run(
-        plaintext,
-        existing.id,
-      );
-      return Promise.resolve();
-    }
-    const id =
-      globalThis.crypto?.randomUUID?.() ||
-      `sec-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    db.prepare(
-      'INSERT INTO secrets (id, name, value, app_id) VALUES (?, ?, ?, ?)',
-    ).run(id, key, plaintext, scopedApp);
+    writeAdminSecretValue(app_id, key, encryptAdminSecret(plaintext));
     return Promise.resolve();
   },
 
@@ -105,7 +146,12 @@ export const localSecretsAdapter: LocalSecretsAdapter = {
       .get(
         ...(scopedApp === null ? [key] : [key, scopedApp]),
       ) as { value: string } | undefined;
-    return Promise.resolve(row?.value ?? null);
+    if (!row) return Promise.resolve(null);
+    const plaintext = decryptAdminSecret(row.value);
+    if (!row.value.startsWith(ADMIN_SECRET_ENVELOPE_PREFIX)) {
+      writeAdminSecretValue(scopedApp, key, encryptAdminSecret(plaintext));
+    }
+    return Promise.resolve(plaintext);
   },
 
   listAdminSecrets(
@@ -204,13 +250,66 @@ export const localSecretsAdapter: LocalSecretsAdapter = {
   },
 
   setCreatorOverrideSecret(
-    app_id: string,
-    workspace_id: string,
-    key: string,
+    ctx: { workspace_id: string },
+    appId: string,
+    envKey: string,
     plaintext: string,
   ): Promise<void> {
-    setCreatorSecret(app_id, workspace_id, key, plaintext);
+    setCreatorSecret(appId, ctx.workspace_id, envKey, plaintext);
     return Promise.resolve();
+  },
+
+  getCreatorOverrideSecret(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKey: string,
+  ): Promise<string | null> {
+    const row = db
+      .prepare(
+        `SELECT workspace_id, ciphertext, nonce, auth_tag
+           FROM app_creator_secrets
+          WHERE app_id = ?
+            AND key = ?
+            AND workspace_id = ?`,
+      )
+      .get(appId, envKey, ctx.workspace_id) as
+      | {
+          workspace_id: string;
+          ciphertext: string;
+          nonce: string;
+          auth_tag: string;
+        }
+      | undefined;
+    if (!row) return Promise.resolve(null);
+    return Promise.resolve(
+      decryptValue(row.workspace_id, row.ciphertext, row.nonce, row.auth_tag),
+    );
+  },
+
+  listCreatorOverrideSecretsForRun(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKeys: string[],
+  ): Promise<Record<string, string>> {
+    return Promise.resolve(
+      loadCreatorSecretsForRun(appId, ctx.workspace_id, envKeys),
+    );
+  },
+
+  deleteCreatorOverrideSecret(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKey: string,
+  ): Promise<boolean> {
+    const res = db
+      .prepare(
+        `DELETE FROM app_creator_secrets
+          WHERE app_id = ?
+            AND key = ?
+            AND workspace_id = ?`,
+      )
+      .run(appId, envKey, ctx.workspace_id);
+    return Promise.resolve(res.changes > 0);
   },
 
   __setCreatorOverrideForTests(

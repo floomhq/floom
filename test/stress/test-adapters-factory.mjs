@@ -248,6 +248,10 @@ log('bundle.secrets.setCreatorPolicy is fn', typeof bundle.secrets.setCreatorPol
 log('bundle.secrets.getCreatorPolicy is fn', typeof bundle.secrets.getCreatorPolicy === 'function');
 log('bundle.secrets.listCreatorPolicies is fn', typeof bundle.secrets.listCreatorPolicies === 'function');
 log('bundle.secrets.deleteCreatorPolicy is fn', typeof bundle.secrets.deleteCreatorPolicy === 'function');
+log('bundle.secrets.setCreatorOverrideSecret is fn', typeof bundle.secrets.setCreatorOverrideSecret === 'function');
+log('bundle.secrets.getCreatorOverrideSecret is fn', typeof bundle.secrets.getCreatorOverrideSecret === 'function');
+log('bundle.secrets.listCreatorOverrideSecretsForRun is fn', typeof bundle.secrets.listCreatorOverrideSecretsForRun === 'function');
+log('bundle.secrets.deleteCreatorOverrideSecret is fn', typeof bundle.secrets.deleteCreatorOverrideSecret === 'function');
 log('bundle.observability.increment is fn', typeof bundle.observability.increment === 'function');
 
 __testing.STORAGE_IMPLS['static-missing-one'] = { ...__testing.STORAGE_IMPLS.sqlite };

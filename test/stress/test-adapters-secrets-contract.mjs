@@ -38,14 +38,7 @@ const { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } = await import(
   '../../apps/server/src/db.ts'
 );
 const { adapters } = await import('../../apps/server/src/adapters/index.ts');
-const creatorSecrets = await import(
-  '../../apps/server/src/services/app_creator_secrets.ts'
-);
 const secrets = adapters.secrets;
-const setCreatorOverrideForTests =
-  typeof secrets.__setCreatorOverrideForTests === 'function'
-    ? secrets.__setCreatorOverrideForTests.bind(secrets)
-    : null;
 
 let passed = 0;
 let failed = 0;
@@ -176,21 +169,12 @@ try {
     await secrets.set(ctx, 'NO_FALLBACK', 'user-fallback-must-not-load');
     await secrets.setCreatorPolicy('secrets-contract-app', 'CREATOR_ONLY', 'creator_override');
     await secrets.setCreatorPolicy('secrets-contract-app', 'NO_FALLBACK', 'creator_override');
-    if (setCreatorOverrideForTests) {
-      await setCreatorOverrideForTests(
-        'secrets-contract-app',
-        DEFAULT_WORKSPACE_ID,
-        'CREATOR_ONLY',
-        'creator-only-value',
-      );
-    } else {
-      creatorSecrets.setCreatorSecret(
-        'secrets-contract-app',
-        DEFAULT_WORKSPACE_ID,
-        'CREATOR_ONLY',
-        'creator-only-value',
-      );
-    }
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      'CREATOR_ONLY',
+      'creator-only-value',
+    );
     const creatorLoaded = await secrets.loadCreatorOverrideForRun(
       'secrets-contract-app',
       DEFAULT_WORKSPACE_ID,
@@ -202,6 +186,120 @@ try {
     const userLoaded = await secrets.loadUserVaultForRun(ctx, ['CREATOR_ONLY', 'USER_ONLY']);
     assert(userLoaded.USER_ONLY === 'user-only-value', `userLoaded=${JSON.stringify(userLoaded)}`);
     assert(!('CREATOR_ONLY' in userLoaded), 'user loader returned creator-only key');
+  });
+
+  await check('creator override get returns only selected workspace value', async () => {
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      'CREATOR_GET',
+      'creator-get-value',
+    );
+    assert(
+      await secrets.getCreatorOverrideSecret(
+        { workspace_id: DEFAULT_WORKSPACE_ID },
+        'secrets-contract-app',
+        'CREATOR_GET',
+      ) === 'creator-get-value',
+      'creator override get mismatch',
+    );
+    assert(
+      await secrets.getCreatorOverrideSecret(
+        { workspace_id: tenantCtx.workspace_id },
+        'secrets-contract-app',
+        'CREATOR_GET',
+      ) === null,
+      'creator override leaked across workspace',
+    );
+  });
+
+  await check('creator override listForRun filters requested keys', async () => {
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      'CREATOR_LIST_A',
+      'creator-list-a',
+    );
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      'CREATOR_LIST_B',
+      'creator-list-b',
+    );
+    await secrets.setCreatorPolicy('secrets-contract-app', 'CREATOR_LIST_A', 'creator_override');
+    await secrets.setCreatorPolicy('secrets-contract-app', 'CREATOR_LIST_B', 'creator_override');
+    const listed = await secrets.listCreatorOverrideSecretsForRun(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      ['CREATOR_LIST_A'],
+    );
+    assert(JSON.stringify(Object.keys(listed).sort()) === JSON.stringify(['CREATOR_LIST_A']), `keys=${JSON.stringify(listed)}`);
+    assert(listed.CREATOR_LIST_A === 'creator-list-a', `CREATOR_LIST_A=${listed.CREATOR_LIST_A}`);
+  });
+
+  await check('creator override delete is idempotent', async () => {
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      'CREATOR_DELETE',
+      'creator-delete-value',
+    );
+    assert(
+      await secrets.deleteCreatorOverrideSecret(
+        { workspace_id: DEFAULT_WORKSPACE_ID },
+        'secrets-contract-app',
+        'CREATOR_DELETE',
+      ) === true,
+      'delete existing creator override returned false',
+    );
+    assert(
+      await secrets.getCreatorOverrideSecret(
+        { workspace_id: DEFAULT_WORKSPACE_ID },
+        'secrets-contract-app',
+        'CREATOR_DELETE',
+      ) === null,
+      'deleted creator override remained readable',
+    );
+    assert(
+      await secrets.deleteCreatorOverrideSecret(
+        { workspace_id: DEFAULT_WORKSPACE_ID },
+        'secrets-contract-app',
+        'CREATOR_DELETE',
+      ) === false,
+      'delete missing creator override returned true',
+    );
+  });
+
+  await check('creator override write is app-scoped', async () => {
+    createApp('secrets-contract-app-c');
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app',
+      'CREATOR_SCOPED',
+      'creator-scoped-a',
+    );
+    await secrets.setCreatorOverrideSecret(
+      { workspace_id: DEFAULT_WORKSPACE_ID },
+      'secrets-contract-app-c',
+      'CREATOR_SCOPED',
+      'creator-scoped-c',
+    );
+    assert(
+      await secrets.getCreatorOverrideSecret(
+        { workspace_id: DEFAULT_WORKSPACE_ID },
+        'secrets-contract-app',
+        'CREATOR_SCOPED',
+      ) === 'creator-scoped-a',
+      'app A creator override mismatch',
+    );
+    assert(
+      await secrets.getCreatorOverrideSecret(
+        { workspace_id: DEFAULT_WORKSPACE_ID },
+        'secrets-contract-app-c',
+        'CREATOR_SCOPED',
+      ) === 'creator-scoped-c',
+      'app C creator override mismatch',
+    );
   });
 
   await check('creator policy CRUD round-trip', async () => {
@@ -276,20 +374,50 @@ try {
     assert(/^[0-9a-f]{32}$/i.test(row.auth_tag), 'auth_tag shape mismatch');
   });
 
-  await check('gcp-kms admin secret ciphertext opacity', async () => {
-    if (!selectedSecretsAdapter.includes('gcp-kms')) return;
+  await check('admin secret ciphertext opacity', async () => {
     const canary = 'ADMIN_CANARY_SECRET_aaa';
     await secrets.setAdminSecret('secrets-contract-app', 'ADMIN_CANARY_KEY', canary);
     const storageKey = `admin:${Buffer.from('secrets-contract-app', 'utf8').toString('base64url')}:${Buffer.from('ADMIN_CANARY_KEY', 'utf8').toString('base64url')}`;
-    const row = db
-      .prepare(
-        `SELECT ciphertext, nonce, auth_tag, encrypted_dek FROM encrypted_secrets
-         WHERE workspace_id = ? AND key = ?`,
-      )
-      .get('operator', storageKey);
-    assert(row, 'encrypted admin secret row missing');
+    const row = selectedSecretsAdapter.includes('gcp-kms')
+      ? db
+          .prepare(
+            `SELECT ciphertext, nonce, auth_tag, encrypted_dek FROM encrypted_secrets
+             WHERE workspace_id = ? AND key = ?`,
+          )
+          .get('operator', storageKey)
+      : db
+          .prepare(
+            `SELECT value FROM secrets
+             WHERE app_id = ? AND name = ?`,
+          )
+          .get('secrets-contract-app', 'ADMIN_CANARY_KEY');
+    assert(row, 'admin secret row missing');
     assert(!JSON.stringify(row).includes(canary), `admin backing row leaked plaintext: ${JSON.stringify(row)}`);
-    assert(typeof row.encrypted_dek === 'string' && row.encrypted_dek.length > 0, 'encrypted_dek missing');
+    if (selectedSecretsAdapter.includes('gcp-kms')) {
+      assert(typeof row.encrypted_dek === 'string' && row.encrypted_dek.length > 0, 'encrypted_dek missing');
+    } else {
+      assert(typeof row.value === 'string' && row.value.startsWith('floom:aes-gcm:v1:'), `local admin secret not encrypted: ${JSON.stringify(row)}`);
+    }
+  });
+
+  await check('local admin plaintext rows lazy-migrate on read', async () => {
+    if (selectedSecretsAdapter.includes('gcp-kms')) return;
+    const id = 'legacy-admin-secret-row';
+    const canary = 'LEGACY_ADMIN_CANARY_SECRET_aaa';
+    db.prepare(
+      `INSERT INTO secrets (id, name, value, app_id)
+       VALUES (?, ?, ?, ?)`,
+    ).run(id, 'LEGACY_ADMIN_CANARY_KEY', canary, 'secrets-contract-app');
+    assert(
+      await secrets.getAdminSecret('secrets-contract-app', 'LEGACY_ADMIN_CANARY_KEY') === canary,
+      'legacy plaintext admin value did not read',
+    );
+    const row = db
+      .prepare(`SELECT value FROM secrets WHERE id = ?`)
+      .get(id);
+    assert(row, 'legacy admin row missing after read');
+    assert(!JSON.stringify(row).includes(canary), `legacy admin row did not migrate: ${JSON.stringify(row)}`);
+    assert(typeof row.value === 'string' && row.value.startsWith('floom:aes-gcm:v1:'), `legacy admin row not encrypted: ${JSON.stringify(row)}`);
   });
 } finally {
   try {

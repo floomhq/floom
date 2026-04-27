@@ -96,23 +96,47 @@ await secrets.set(tenantCtx, 'API_KEY', 'tenant-b-secret');
 assert.equal(await secrets.get(ctx, 'API_KEY'), 'sk-live-secret');
 assert.equal(await secrets.get(tenantCtx, 'API_KEY'), 'tenant-b-secret');
 
-const testHook = secrets as typeof secrets & {
-  __setCreatorOverrideForTests(
-    app_id: string,
-    workspace_id: string,
-    key: string,
-    plaintext: string,
-  ): Promise<void>;
-};
-await testHook.__setCreatorOverrideForTests(
+await secrets.setCreatorOverrideSecret(
+  { workspace_id: 'workspace-a' },
   'app-1',
-  'workspace-a',
   'CREATOR_ONLY',
+  'creator-secret',
+);
+assert.equal(
+  await secrets.getCreatorOverrideSecret(
+    { workspace_id: 'workspace-a' },
+    'app-1',
+    'CREATOR_ONLY',
+  ),
   'creator-secret',
 );
 assert.deepEqual(
   await secrets.loadCreatorOverrideForRun('app-1', 'workspace-a', ['CREATOR_ONLY']),
   { CREATOR_ONLY: 'creator-secret' },
+);
+assert.deepEqual(
+  await secrets.listCreatorOverrideSecretsForRun(
+    { workspace_id: 'workspace-a' },
+    'app-1',
+    ['CREATOR_ONLY'],
+  ),
+  { CREATOR_ONLY: 'creator-secret' },
+);
+assert.equal(
+  await secrets.deleteCreatorOverrideSecret(
+    { workspace_id: 'workspace-a' },
+    'app-1',
+    'CREATOR_ONLY',
+  ),
+  true,
+);
+assert.equal(
+  await secrets.getCreatorOverrideSecret(
+    { workspace_id: 'workspace-a' },
+    'app-1',
+    'CREATOR_ONLY',
+  ),
+  null,
 );
 
 assert.equal(await secrets.delete(ctx, 'API_KEY'), true);

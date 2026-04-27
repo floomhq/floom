@@ -344,12 +344,24 @@ The reference impl is split across `apps/server/src/services/user_secrets.ts` (p
 
 ```ts
 interface SecretsAdapter {
-  get(ctx: SessionContext, key: string): string | null;
-  set(ctx: SessionContext, key: string, plaintext: string): void;
-  delete(ctx: SessionContext, key: string): boolean;
-  list(ctx: SessionContext): Array<{ key: string; updated_at: string }>;
-  loadUserVaultForRun(ctx: SessionContext, keys: string[]): Record<string, string>;
-  loadCreatorOverrideForRun(app_id: string, workspace_id: string, keys: string[]): Record<string, string>;
+  get(ctx: SessionContext, key: string): Promise<string | null>;
+  set(ctx: SessionContext, key: string, plaintext: string): Promise<void>;
+  delete(ctx: SessionContext, key: string): Promise<boolean>;
+  list(ctx: SessionContext): Promise<Array<{ key: string; updated_at: string }>>;
+  setAdminSecret(app_id: string | null, key: string, plaintext: string): Promise<void>;
+  getAdminSecret(app_id: string | null, key: string): Promise<string | null>;
+  listAdminSecrets(app_id: string | null): Promise<Array<{ key: string; updated_at: string }>>;
+  deleteAdminSecret(app_id: string | null, key: string): Promise<boolean>;
+  setCreatorPolicy(app_id: string, key: string, policy: SecretPolicy): Promise<void>;
+  getCreatorPolicy(app_id: string, key: string): Promise<SecretPolicy | null>;
+  listCreatorPolicies(app_id: string): Promise<Array<{ key: string; policy: SecretPolicy }>>;
+  deleteCreatorPolicy(app_id: string, key: string): Promise<boolean>;
+  loadUserVaultForRun(ctx: SessionContext, keys: string[]): Promise<Record<string, string>>;
+  loadCreatorOverrideForRun(app_id: string, workspace_id: string, keys: string[]): Promise<Record<string, string>>;
+  setCreatorOverrideSecret(ctx: { workspace_id: string }, appId: string, envKey: string, plaintext: string): Promise<void>;
+  getCreatorOverrideSecret(ctx: { workspace_id: string }, appId: string, envKey: string): Promise<string | null>;
+  listCreatorOverrideSecretsForRun(ctx: { workspace_id: string }, appId: string, envKeys: string[]): Promise<Record<string, string>>;
+  deleteCreatorOverrideSecret(ctx: { workspace_id: string }, appId: string, envKey: string): Promise<boolean>;
 }
 ```
 
@@ -359,6 +371,7 @@ interface SecretsAdapter {
 - `loadForRun` methods MUST filter to the caller's `keys` list, never return extras. Callers pass `manifest.secrets_needed` verbatim so unrelated creds never leak into apps that don't need them.
 - **Deletion is idempotent** — deleting a missing key returns false, not an error.
 - **Creator-override keys MUST NOT fall back to the user vault.** Precedence is control-plane's concern, but the adapter keeps the two namespaces distinct.
+- **Creator-override CRUD is adapter-owned.** Creator-secret HTTP routes and Docker image ingest call `setCreatorOverrideSecret`, `getCreatorOverrideSecret`, `listCreatorOverrideSecretsForRun`, and `deleteCreatorOverrideSecret` so KMS-backed deployments never split state with the local SQLite service.
 
 ### How to write one
 
@@ -486,6 +499,7 @@ A conformant `SecretsAdapter` MUST pass:
 - **`list` masks plaintext**: the returned array contains `key` and `updated_at` only; no `value`, no truncated preview of the plaintext, no ciphertext blob.
 - **`loadUserVaultForRun` filters by keys list**: given a vault with `KEY_A, KEY_B, KEY_C` and `keys = ['KEY_A']`, the returned record MUST contain `KEY_A` only. Extra keys MUST NOT leak.
 - **creator-override isolation**: keys written via creator-override (per-app) MUST NOT be returned by `loadUserVaultForRun`, and vice versa. The two namespaces are disjoint from the adapter's perspective.
+- **creator-override CRUD**: `setCreatorOverrideSecret`, `getCreatorOverrideSecret`, `listCreatorOverrideSecretsForRun`, and `deleteCreatorOverrideSecret` round-trip through the selected adapter and obey `ctx.workspace_id`.
 - **tenant isolation**: secrets set with `ctx.workspace_id = 'A'` MUST NOT be readable with `ctx.workspace_id = 'B'`, even if the key name matches.
 - **idempotent delete**: `delete(ctx, 'MISSING_KEY')` returns `false`, never throws.
 - **ciphertext opacity**: the adapter's backing store (sniffable via `storage.list*` or its native admin surface) MUST NOT contain the plaintext. This is a structural test: the suite writes `plaintext = 'CANARY_SECRET_aaa'` and greps the backing store for that string.

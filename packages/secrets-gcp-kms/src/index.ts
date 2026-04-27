@@ -41,12 +41,6 @@ type SecretStorage = Required<
 const OPERATOR_SECRET_WORKSPACE_ID = 'operator';
 
 interface TestableSecretsAdapter extends SecretsAdapter {
-  setCreatorOverrideSecret(
-    app_id: string,
-    workspace_id: string,
-    key: string,
-    plaintext: string,
-  ): Promise<void>;
   __setCreatorOverrideForTests?(
     app_id: string,
     workspace_id: string,
@@ -298,15 +292,51 @@ export function createGcpKmsSecretsAdapter(
     },
 
     async setCreatorOverrideSecret(
-      app_id: string,
-      workspace_id: string,
-      key: string,
+      ctx: { workspace_id: string },
+      appId: string,
+      envKey: string,
       plaintext: string,
     ): Promise<void> {
       await storage.setEncryptedSecret(
-        { workspace_id },
-        creatorSecretStorageKey(app_id, key),
+        { workspace_id: ctx.workspace_id },
+        creatorSecretStorageKey(appId, envKey),
         await encryptSecret(kms, plaintext),
+      );
+    },
+
+    async getCreatorOverrideSecret(
+      ctx: { workspace_id: string },
+      appId: string,
+      envKey: string,
+    ): Promise<string | null> {
+      const row = await storage.getEncryptedSecret(
+        { workspace_id: ctx.workspace_id },
+        creatorSecretStorageKey(appId, envKey),
+      );
+      return row ? await decryptSecretRow(kms, row) : null;
+    },
+
+    async listCreatorOverrideSecretsForRun(
+      ctx: { workspace_id: string },
+      appId: string,
+      envKeys: string[],
+    ): Promise<Record<string, string>> {
+      const rows = await loadEncryptedRows(
+        storage,
+        ctx.workspace_id,
+        envKeys.map((key) => creatorSecretStorageKey(appId, key)),
+      );
+      return await decryptRows(kms, rows);
+    },
+
+    async deleteCreatorOverrideSecret(
+      ctx: { workspace_id: string },
+      appId: string,
+      envKey: string,
+    ): Promise<boolean> {
+      return storage.deleteEncryptedSecret(
+        { workspace_id: ctx.workspace_id },
+        creatorSecretStorageKey(appId, envKey),
       );
     },
 
