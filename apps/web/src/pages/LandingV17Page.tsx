@@ -96,7 +96,12 @@ function pickStripes(apps: HubApp[]): Stripe[] {
   return picked.length >= 3 ? picked : FALLBACK_STRIPES;
 }
 
-export function LandingV17Page() {
+interface LandingV17PageProps {
+  variant?: 'full' | 'mvp';
+}
+
+export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
+  const isMvp = variant === 'mvp';
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
   const deployEnabledFlag = useDeployEnabled();
   const deployEnabled = deployEnabledFlag ?? readDeployEnabled();
@@ -240,9 +245,11 @@ export function LandingV17Page() {
             >
               The protocol + runtime for agentic work.
             </p>
-            <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)', margin: '-14px 0 28px' }}>
-              Vibe-coding speed. Production-grade safety.
-            </p>
+            {!isMvp && (
+              <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)', margin: '-14px 0 28px' }}>
+                Vibe-coding speed. Production-grade safety.
+              </p>
+            )}
 
             {/* CTA — runtime-gated by DEPLOY_ENABLED. Preview keeps the
                 original install-first branch; waitlist mode swaps the
@@ -335,13 +342,16 @@ export function LandingV17Page() {
 
         {/* Compact CLI reference strip below the hero — smaller than the
             original hero-inline version (Federico 2026-04-23 — moved out of
-            hero, kept below as a smaller block). */}
-        <section
-          data-testid="cli-reference-section"
-          style={{ padding: '32px 24px 8px' }}
-        >
-          <CliReference />
-        </section>
+            hero, kept below as a smaller block).
+            MVP variant: dropped (technical → /docs). */}
+        {!isMvp && (
+          <section
+            data-testid="cli-reference-section"
+            style={{ padding: '32px 24px 8px' }}
+          >
+            <CliReference />
+          </section>
+        )}
 
         {/* HOW IT WORKS — 3 steps */}
         <section
@@ -427,23 +437,14 @@ export function LandingV17Page() {
           </div>
         </section>
 
-        {/* WORKED EXAMPLE — one concrete run (#541, Federico 2026-04-23).
-            Dedicated mid-page band that shows the Lead Scorer output in
-            full (87/100 "Strong fit" on stripe.com). Separate from the
-            HeroDemo USE tab so a scroller who skipped the demo still
-            lands on a complete example before they leave. */}
-        <WorkedExample />
+        {/* WORKED EXAMPLE — MVP variant: dropped (heavy). */}
+        {!isMvp && <WorkedExample />}
 
-        {/* THREE SURFACES DIAGRAM — non-tech visual (#542). Inline SVG,
-            "paste app -> web page + MCP + API". Scales cleanly, single
-            brand accent for connectors, no bespoke PNG. */}
-        <ThreeSurfacesDiagram />
+        {/* THREE SURFACES DIAGRAM — MVP variant: dropped (technical → /docs). */}
+        {!isMvp && <ThreeSurfacesDiagram />}
 
-        {/* FIT BAND — who it's for / who it's not for (#543). Honest
-            about the shape before the visitor signs up. Placed between
-            the diagram and the showcase so the filter happens before
-            the product gallery. */}
-        <FitBand />
+        {/* FIT BAND — MVP variant: dropped (qualifying). */}
+        {!isMvp && <FitBand />}
 
         {/* SHOWCASE — 3 apps */}
         <section
@@ -495,93 +496,92 @@ export function LandingV17Page() {
           </div>
         </section>
 
-        {/* PUBLISH-CTA BOX */}
-        <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
-          <PublishCtaBox />
-        </section>
+        {/* PUBLISH-CTA BOX — MVP variant: dropped (creator-focused, MVP is consumer-first). */}
+        {!isMvp && (
+          <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
+            <PublishCtaBox />
+          </section>
+        )}
 
-        {/* DUAL AUDIENCES — makers + teams */}
-        <DualAudiences />
+        {/* DUAL AUDIENCES — MVP variant: dropped (heavy split). */}
+        {!isMvp && <DualAudiences />}
 
-        {/* PRICING TEASER — single $0 card */}
-        <PricingTeaser />
+        {/* PRICING TEASER — MVP variant: dropped (no pricing). */}
+        {!isMvp && <PricingTeaser />}
 
-        {/* BUILD CTA */}
-        <section
-          style={{
-            padding: '72px 28px',
-            maxWidth: 760,
-            margin: '0 auto',
-            textAlign: 'center',
-          }}
-        >
-          <h2
+        {/* BUILD CTA — MVP variant: dropped (creator-focused). */}
+        {!isMvp && (
+          <section
             style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 800,
-              fontSize: 26,
-              lineHeight: 1.1,
-              letterSpacing: '-0.025em',
-              margin: '0 0 8px',
+              padding: '72px 28px',
+              maxWidth: 760,
+              margin: '0 auto',
+              textAlign: 'center',
             }}
           >
-            Want to build yours?
-          </h2>
-          <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
-            The protocol is 40 lines of JSON. The docs walk you through your
-            first deploy in under 10 minutes.
-          </p>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <Link
-              to="/docs"
+            <h2
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                background: 'var(--accent)',
-                color: '#fff',
-                border: '1px solid var(--accent)',
-                borderRadius: 10,
-                padding: '11px 17px',
-                fontSize: 13.5,
-                fontWeight: 600,
-                textDecoration: 'none',
+                fontFamily: 'var(--font-display)',
+                fontWeight: 800,
+                fontSize: 26,
+                lineHeight: 1.1,
+                letterSpacing: '-0.025em',
+                margin: '0 0 8px',
               }}
             >
-              Open the docs
-            </Link>
-            <a
-              href="https://github.com/floomhq/floom"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                background: 'var(--card)',
-                color: 'var(--ink)',
-                border: '1px solid var(--line)',
-                borderRadius: 10,
-                padding: '11px 17px',
-                fontSize: 13.5,
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Star on GitHub
-            </a>
-          </div>
-        </section>
-        {/* WHO'S BEHIND IT — single-founder context + direct contact
-            (#589, Federico 2026-04-23). Sits near the bottom so a
-            visitor has already seen the product by the time they ask
-            "who's building this?". Photo is served from
-            /team/fede.jpg — a placeholder ships in the repo for
-            day-one parity; Federico overwrites the file locally when
-            he has a photo he likes. */}
-        <WhosBehind />
+              Want to build yours?
+            </h2>
+            <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
+              The protocol is 40 lines of JSON. The docs walk you through your
+              first deploy in under 10 minutes.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link
+                to="/docs"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 10,
+                  padding: '11px 17px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Open the docs
+              </Link>
+              <a
+                href="https://github.com/floomhq/floom"
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--card)',
+                  color: 'var(--ink)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  padding: '11px 17px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Star on GitHub
+              </a>
+            </div>
+          </section>
+        )}
+
+        {/* WHO'S BEHIND IT — MVP variant: dropped (→ /about). */}
+        {!isMvp && <WhosBehind />}
 
         {/* DISCORD CTA — quiet chip above the footer (#613,
             Federico 2026-04-23). Invite lives in MEMORY

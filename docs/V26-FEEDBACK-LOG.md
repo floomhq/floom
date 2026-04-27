@@ -2,6 +2,40 @@
 
 Federico's running feedback as he reviews `mvp.floom.dev` and `v26.floom.dev`. This is the source of truth so nothing falls through cracks. Each item: source screenshot (path), description, status (OPEN/IN-FLIGHT/FIXED), agent owning it.
 
+## MVP redesign — locked 2026-04-27 (Federico's vision)
+
+Spec doc: `/root/floom/docs/MVP-LAUNCH-PLAYBOOK-2026-04-27.md`. Federico's call: "for mvp why dont you hjust have one big box where you can get agent tokens and thats it? maybe plus instructions on how to get MCP and CLI running"
+
+Full vision: ONE PAGE post-auth = your agent token + MCP install snippet + CLI install snippet. NO rail, NO tabs, NO Studio/BYOK/Members/Billing.
+
+| # | Item | Status | Owner |
+|---|---|---|---|
+| MVP-R1 | One-box agent-token redesign (kill tabbed shell, kill rail, slim header) | IN-FLIGHT | a21a527cab0694309 |
+| MVP-R2 | Restore landing context (M5 was over-cut) — hero + 2-3 paragraphs + 3-step + apps preview | SUPERSEDED by R2-v2 | a21a527cab0694309 (built bare-bones, wrong direction) |
+| MVP-R2-v2 | Trim V17 landing to 7 sections (KEEP: TopBar slim, Hero + HeroDemo, WorksWithBelt, AppStripe, HowItWorks 3-step, DiscordCta, slim PublicFooter; DROP: ThreeSurfacesDiagram, CliReference, WorkedExample, PublishCtaBox, DualAudiences, FitBand, PricingTeaser, WhosBehind). Federico locked 2026-04-27. | FIXED | Option A: `variant="mvp"` prop on LandingV17Page. LandingMVPPage is a thin wrapper. |
+| MVP-R3 | One subtitle on landing — "Ship AI apps fast." + sub "The protocol and runtime for agentic work." (drop "Vibe-coding speed...") | FIXED | Kicker hidden via `!isMvp` guard in LandingV17Page. Same commit as MVP-R2-v2. |
+| MVP-R4 | Drop "Claude" bias from button labels ("Copy for Claude" → "Copy install" / "Get install snippet") | IN-FLIGHT | a21a527cab0694309 |
+| MVP-R5 | Header nav slim — drop GitHub badge from primary; anon = floom + Apps + Docs + Help + Sign in/up | IN-FLIGHT | a21a527cab0694309 |
+| MVP-R6 | Docs vs Help separate links (currently same URL — bug) | IN-FLIGHT | a21a527cab0694309 |
+| MVP-R7 | Drop "I want to run apps" vs "I want to publish apps" choice on signup | IN-FLIGHT | aa70d4ff785e9b4a1 (codex) |
+| MVP-R8 | Email/password form visible on /signup (currently shows only Google) | IN-FLIGHT | aa70d4ff785e9b4a1 (codex) |
+| MVP-R9 | OAuth redirect_uri fix (BETTER_AUTH_URL env mismatch) | IN-FLIGHT | aa70d4ff785e9b4a1 (codex) |
+| MVP-R10 | v26 sign-in "server hiccuped" investigate | IN-FLIGHT | aa70d4ff785e9b4a1 (codex) |
+| MVP-R11 | CLI symlink fix + token format double-prefix | IN-FLIGHT | a5b788d02973e59ce |
+| MVP-R12 | Book-a-call form next to feedback button | OPEN | needs Federico's cal.com link |
+| MVP-R13 | GitHub OAuth setup — Federico needs to create OAuth app + provide creds | OPEN | Federico |
+| MVP-R14 | Test stack: claude + codex + kimi cli for cross-validation | OPEN | next round |
+
+## v26 track (defer fixes, just document — MVP is P0 today)
+
+Federico: "/run/apps looks exactly like before, where are the ui/ux updates that we made? maybe not pushed? not just for this page but for whole https://v26.floom.dev/"
+
+Possible deploy state issue — confirmed assets are landing (asset hash refreshed), but visual changes may not be visible due to: (a) browser cache, (b) build pipeline didn't rebuild a specific component, (c) CSS scoped wrong, (d) v26 still using old layout components on some pages.
+
+Documented separately:
+- v26 header nav too busy (Apps · Docs · Pricing · GitHub 6 · Copy for Claude · Publish · Sign in · Sign up) — needs trim
+- v26 visual regressions to investigate post-MVP
+
 ## launch-mvp track (mvp.floom.dev)
 
 | # | Source | Issue | Status | Agent |
@@ -53,6 +87,8 @@ Federico's running feedback as he reviews `mvp.floom.dev` and `v26.floom.dev`. T
 - **V9** (Footer): Slimmed from 13 links to 9 (Product: Apps/Docs/Pricing/Changelog, Company: About/GitHub/Status, Legal: Terms/Privacy). Dropped Cookies, Legal, Runtime limits, Security. Commit: `074f467a`. Files: `apps/web/src/components/public/PublicFooter.tsx`.
 - **X1** ("Built in SF"): Removed location tagline from footer, now just "Ship AI apps fast." Commit: `074f467a`.
 - **V10** (ai-readiness-audit `floom_internal_error`): Root cause: `prepareDockerNetworkPolicy` called `server.listen(0, gateway)` where `gateway` (e.g., `172.25.0.1`) is a Docker bridge gateway on the HOST, not inside the server container. Fix: detect container mode via `HOSTNAME` env var (12-char hex), connect server container to run network, listen on `0.0.0.0`, expose container's IP on the run network as proxy URL. Verified: `run_jry5mxd5cgg8` succeeded (status=success). Commit: `cfc2d085`. Files: `apps/server/src/services/network-policy.ts`.
+- **MVP-R2-v2** (trim V17 landing to 7 sections): Added `variant?: 'full' | 'mvp'` prop to `LandingV17Page`. MVP variant wraps all 8 dropped sections with `{!isMvp && ...}`. `LandingMVPPage` is now a thin re-export wrapper (`<LandingV17Page variant="mvp" />`). Route `/` still uses `LandingMVPPage`; `/marketing` still shows full V17. typecheck + build both pass. Files: `apps/web/src/pages/LandingV17Page.tsx`, `apps/web/src/pages/LandingMVPPage.tsx`.
+- **MVP-R3** (one subtitle on landing): "Vibe-coding speed. Production-grade safety." kicker hidden in MVP variant via `{!isMvp && ...}`. Same commit as MVP-R2-v2.
 
 ## How to use this log
 - Update on every Federico screenshot/feedback.
