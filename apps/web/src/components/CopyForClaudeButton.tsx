@@ -1,226 +1,103 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 
-// v23 "Copy for Claude" affordance. Globally visible button + 3-row popover.
+// v26 "Copy for Claude" affordance. Globally visible button + tabbed popover.
 //
-// Federico-locked decisions (2026-04-26):
-//   • One neutral palette — no category tints. var(--card) bg, var(--line)
-//     border, monospace text. Result content carries meaning, not colour.
-//   • Row 1 — MCP server config: { "mcpServers": { "floom": { "url":
-//     "https://floom.dev/mcp" } } }   <- verified path. Earlier wireframes
-//     said /mcp/sse; that was wrong, do NOT use it.
-//   • Row 2 — CLI install: curl -fsSL https://floom.dev/install.sh | bash
-//   • Row 3 — context-aware. Hidden on routes where it adds nothing:
-//       /p/:slug          → run THIS app via the CLI
-//       /me, /me/*        → generic "use Floom from your agent" snippet
-//       /studio/:slug     → deploy-via-CLI snippet for THIS creator's app
-//       Other routes      → row 3 hidden (only Row 1 + Row 2)
-//
-// Behaviour: click toggles, click-outside closes, Esc closes. Per-row
-// "Copy" buttons flash green for 1.5s after clipboard write succeeds.
+// Federico v26 review: the stacked 3-row layout (MCP config + CLI + context)
+// was "a bit overwhelming". Fix: tabbed segmented control.
+//   - Default tab: Claude (most common).
+//   - Tabs: Claude / Cursor / Codex / CLI
+//   - One snippet per tab, one Copy button.
+//   - Mobile: horizontally-scrollable tab strip.
 
-type ContextSnippet = {
+type TabId = 'claude' | 'cursor' | 'codex' | 'cli';
+
+interface TabSpec {
+  id: TabId;
   label: string;
+  description: string;
   snippet: string;
-};
-
-const MCP_CONFIG_SNIPPET = `{ "mcpServers": { "floom": { "url": "https://floom.dev/mcp" } } }`;
-const CLI_INSTALL_SNIPPET = `curl -fsSL https://floom.dev/install.sh | bash`;
-
-function buildContextSnippet(pathname: string): ContextSnippet | null {
-  // /p/:slug — run THIS app
-  const pMatch = pathname.match(/^\/p\/([^/]+)/);
-  if (pMatch) {
-    const slug = pMatch[1];
-    return {
-      label: `For this app (${slug})`,
-      snippet: `floom run ${slug}`,
-    };
-  }
-  if (pathname === '/run') {
-    return {
-      label: 'WORKSPACE RUN',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom apps list`,
-    };
-  }
-  if (pathname === '/run/apps') {
-    return {
-      label: 'RUN APPS',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom apps list`,
-    };
-  }
-  if (pathname === '/run/runs' || pathname.startsWith('/run/runs/')) {
-    return {
-      label: 'RUN HISTORY',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom status`,
-    };
-  }
-  if (pathname === '/run/install') {
-    return {
-      label: 'INSTALL IN CLAUDE',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom apps list`,
-    };
-  }
-  const runAppMatch = pathname.match(/^\/run\/apps\/([^/]+)/);
-  if (runAppMatch) {
-    const slug = runAppMatch[1];
-    return {
-      label: `RUN THIS APP (${slug})`,
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom run ${slug}`,
-    };
-  }
-  if (pathname === '/settings/byok-keys') {
-    return {
-      label: 'MANAGE BYOK KEYS',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom apps list`,
-    };
-  }
-  if (pathname === '/settings/agent-tokens') {
-    return {
-      label: 'MANAGE AGENT TOKENS',
-      snippet: `floom auth login --token=floom_agent_••••••`,
-    };
-  }
-  if (pathname === '/settings/studio') {
-    return {
-      label: 'STUDIO SETTINGS',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom deploy`,
-    };
-  }
-  if (pathname === '/account/settings') {
-    return {
-      label: 'ACCOUNT SETTINGS',
-      snippet: `floom auth login --token=floom_agent_••••••`,
-    };
-  }
-  // /studio/:slug — creator-side deploy snippet for THIS app. Skip the
-  // bare /studio root and /studio/build flow (no slug to bind).
-  const studioMatch = pathname.match(/^\/studio\/([^/]+)/);
-  if (studioMatch && studioMatch[1] !== 'build') {
-    const slug = studioMatch[1];
-    return {
-      label: `For this app (${slug})`,
-      snippet: `floom deploy ${slug}`,
-    };
-  }
-  // /me + sub-pages — generic agent snippet
-  if (pathname === '/me' || pathname.startsWith('/me/')) {
-    return {
-      label: 'WORKSPACE RUN',
-      snippet: `floom auth login --token=floom_agent_••••••\nfloom apps list`,
-    };
-  }
-  // Elsewhere: hide row 3
-  return null;
 }
 
-const popoverStyle: CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 8px)',
-  right: 0,
-  zIndex: 60,
-  width: 380,
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 12,
-  boxShadow: 'var(--shadow-3, 0 12px 32px rgba(14,14,12,0.14))',
-  padding: 6,
-};
+const MCP_JSON = '{ "mcpServers": { "floom": { "url": "https://floom.dev/mcp" } } }';
+const CLI_SNIPPET = 'curl -fsSL https://floom.dev/install.sh | bash\nfloom auth login --token=floom_agent_••••••';
 
-const rowStyle: CSSProperties = {
-  padding: '11px 12px',
-  borderRadius: 8,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-};
-
-const rowLabelStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: 10.5,
-  fontWeight: 700,
-  color: 'var(--muted)',
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-};
-
-const snippetStyle: CSSProperties = {
-  fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-  fontSize: 11.5,
-  color: 'var(--ink)',
-  background: 'var(--bg)',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-  padding: '8px 10px',
-  overflowX: 'auto',
-  whiteSpace: 'pre',
-  lineHeight: 1.45,
-  margin: 0,
-};
+const TABS: TabSpec[] = [
+  {
+    id: 'claude',
+    label: 'Claude',
+    description: 'Claude Desktop / Claude Code · claude_mcp_config.json',
+    snippet: MCP_JSON,
+  },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    description: 'Cursor · cursor_mcp_config.json',
+    snippet: MCP_JSON,
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    description: 'OpenAI Codex CLI · .codex/mcp.json',
+    snippet: MCP_JSON,
+  },
+  {
+    id: 'cli',
+    label: 'CLI',
+    description: 'Install CLI + authenticate',
+    snippet: CLI_SNIPPET,
+  },
+];
 
 interface Props {
-  /**
-   * Mobile variant: render as a fixed bottom-right pill rather than the
-   * desktop popover-anchored button. The popover panel is reused; only
-   * the trigger chrome differs.
-   */
   variant?: 'desktop' | 'mobile';
 }
 
 export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
   const [open, setOpen] = useState(false);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>('claude');
+  const [copied, setCopied] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
 
-  const contextRow = useMemo(
-    () => buildContextSnippet(location.pathname),
-    [location.pathname],
-  );
-
-  // Click outside to close
   useEffect(() => {
     if (!open) return;
-    function onClick(e: MouseEvent) {
+    function handleClick(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  // Esc to close, returns focus to trigger
   useEffect(() => {
     if (!open) return;
-    function onKey(e: KeyboardEvent) {
+    function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setOpen(false);
         triggerRef.current?.focus();
       }
     }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
   }, [open]);
 
-  // Close popover on route change
   useEffect(() => {
     setOpen(false);
   }, [location.pathname]);
 
-  async function copyText(key: string, text: string) {
+  const currentTab = TABS.find((t) => t.id === activeTab) ?? TABS[0]!;
+
+  async function handleCopy() {
     try {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(currentTab.snippet);
       } else {
-        // Fallback for non-secure contexts (older browsers / http preview).
         const ta = document.createElement('textarea');
-        ta.value = text;
+        ta.value = currentTab.snippet;
         ta.setAttribute('readonly', '');
         ta.style.position = 'absolute';
         ta.style.left = '-9999px';
@@ -229,104 +106,138 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
         document.execCommand('copy');
         document.body.removeChild(ta);
       }
-      setCopiedKey(key);
-      window.setTimeout(() => {
-        setCopiedKey((k) => (k === key ? null : k));
-      }, 1500);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Silent fail — don't block the UI on a clipboard error.
+      // Silent fail.
     }
   }
 
-  const triggerLabel = 'Copy for Claude';
-
-  const desktopTriggerStyle: CSSProperties = {
-    position: 'relative',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '7px 12px',
-    borderRadius: 8,
-    border: '1px solid var(--line)',
-    background: copiedKey === '__all__' ? 'var(--accent-soft)' : 'var(--card)',
-    fontSize: 12.5,
-    fontWeight: 600,
-    color: 'var(--ink)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    transition: 'all 0.12s',
-  };
-
-  const mobileTriggerStyle: CSSProperties = {
-    position: 'fixed',
-    bottom: 18,
-    right: 18,
-    zIndex: 30,
-    background: 'var(--ink)',
-    color: '#fff',
-    borderRadius: 999,
-    padding: '11px 16px',
-    fontSize: 12.5,
-    fontWeight: 600,
-    boxShadow: '0 12px 32px rgba(14,14,12,0.18)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 7,
-    border: '1px solid var(--ink)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-  };
-
-  function CopyButton({
-    rowKey,
-    text,
-  }: {
-    rowKey: string;
-    text: string;
-  }) {
-    const isCopied = copiedKey === rowKey;
-    return (
-      <button
-        type="button"
-        data-testid={`mcp-copy-row-${rowKey}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          void copyText(rowKey, text);
-        }}
+  const popoverContents = (
+    <>
+      <div
+        role="tablist"
+        aria-label="Select tool"
         style={{
-          fontSize: 10.5,
-          color: 'var(--accent)',
-          background: 'var(--accent-soft)',
-          border: '1px solid var(--accent-border)',
-          padding: '2px 8px',
-          borderRadius: 6,
-          fontWeight: 600,
-          cursor: 'pointer',
-          letterSpacing: '0.04em',
-          fontFamily: 'inherit',
-          textTransform: 'uppercase',
+          display: 'flex',
+          borderBottom: '1px solid var(--line)',
+          background: 'var(--bg)',
+          padding: '0 4px',
+          overflowX: 'auto',
         }}
-        aria-label={isCopied ? 'Copied' : `Copy ${rowKey}`}
       >
-        {isCopied ? 'Copied' : 'Copy'}
-      </button>
-    );
-  }
+        {TABS.map((tab) => {
+          const isOn = tab.id === activeTab;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={isOn}
+              data-testid={`mcp-tab-${tab.id}`}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setCopied(false);
+              }}
+              style={{
+                padding: '10px 14px',
+                fontSize: 12,
+                fontWeight: isOn ? 700 : 500,
+                border: 'none',
+                background: 'transparent',
+                color: isOn ? 'var(--ink)' : 'var(--muted)',
+                borderBottom: isOn ? '2px solid var(--accent)' : '2px solid transparent',
+                marginBottom: -1,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                whiteSpace: 'nowrap',
+                transition: 'color .1s, border-color .1s',
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ padding: '14px 14px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span
+            style={{
+              fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'var(--muted)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase' as const,
+            }}
+          >
+            {currentTab.description}
+          </span>
+          <button
+            type="button"
+            data-testid={`mcp-copy-${activeTab}`}
+            onClick={() => void handleCopy()}
+            style={{
+              fontSize: 10.5,
+              color: 'var(--accent)',
+              background: 'var(--accent-soft)',
+              border: '1px solid var(--accent-border)',
+              padding: '2px 8px',
+              borderRadius: 6,
+              fontWeight: 600,
+              cursor: 'pointer',
+              letterSpacing: '0.04em',
+              fontFamily: 'inherit',
+              textTransform: 'uppercase' as const,
+            }}
+            aria-label={copied ? 'Copied' : `Copy ${activeTab} snippet`}
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <pre
+          style={{
+            fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 11.5,
+            color: 'var(--ink)',
+            background: 'var(--bg)',
+            border: '1px solid var(--line)',
+            borderRadius: 6,
+            padding: '10px 12px',
+            overflowX: 'auto',
+            whiteSpace: 'pre',
+            lineHeight: 1.5,
+            margin: 0,
+          }}
+        >
+          {currentTab.snippet}
+        </pre>
+        {activeTab === 'cli' && (
+          <p style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
+            Get your agent token in{' '}
+            <a href="/settings/agent-tokens" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>
+              Settings &rarr; Agent tokens
+            </a>
+          </p>
+        )}
+      </div>
+    </>
+  );
 
-  // Mobile pill: position is fixed bottom-right, the popover anchors to
-  // the trigger so it floats up-left from the pill.
+  const popoverBaseStyle: CSSProperties = {
+    position: 'absolute',
+    zIndex: 60,
+    width: 420,
+    background: 'var(--card)',
+    border: '1px solid var(--line)',
+    borderRadius: 12,
+    boxShadow: 'var(--shadow-3, 0 12px 32px rgba(14,14,12,0.14))',
+    overflow: 'hidden',
+  };
+
   if (variant === 'mobile') {
     return (
-      <div
-        ref={wrapRef}
-        style={{
-          position: 'fixed',
-          bottom: 18,
-          right: 18,
-          zIndex: 30,
-        }}
-        data-testid="mcp-copy-mobile-wrap"
-      >
+      <div ref={wrapRef} style={{ position: 'fixed', bottom: 18, right: 18, zIndex: 30 }} data-testid="mcp-copy-mobile-wrap">
         <button
           ref={triggerRef}
           type="button"
@@ -335,27 +246,28 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
           aria-expanded={open}
           aria-label="Copy MCP/CLI snippets"
           onClick={() => setOpen((v) => !v)}
-          style={mobileTriggerStyle}
+          style={{
+            background: 'var(--ink)',
+            color: '#fff',
+            borderRadius: 999,
+            padding: '11px 16px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            boxShadow: '0 12px 32px rgba(14,14,12,0.18)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 7,
+            border: '1px solid var(--ink)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
         >
           <ClipboardIcon />
-          {triggerLabel}
+          Copy for Claude
         </button>
         {open && (
-          <div
-            role="menu"
-            data-testid="mcp-popover"
-            style={{
-              ...popoverStyle,
-              top: 'auto',
-              bottom: 'calc(100% + 8px)',
-              right: 0,
-              width: 320,
-            }}
-          >
-            <PopoverContents
-              contextRow={contextRow}
-              CopyButton={CopyButton}
-            />
+          <div role="menu" data-testid="mcp-popover" style={{ ...popoverBaseStyle, top: 'auto', bottom: 'calc(100% + 8px)', right: 0, width: 340 }}>
+            {popoverContents}
           </div>
         )}
       </div>
@@ -372,101 +284,39 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
         aria-expanded={open}
         aria-label="Copy for Claude / MCP / CLI snippets"
         onClick={() => setOpen((v) => !v)}
-        style={desktopTriggerStyle}
+        style={{
+          position: 'relative',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '7px 12px',
+          borderRadius: 8,
+          border: '1px solid var(--line)',
+          background: 'var(--card)',
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: 'var(--ink)',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          transition: 'all 0.12s',
+        }}
       >
-        <span
-          aria-hidden="true"
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 999,
-            background: 'var(--accent)',
-            display: 'inline-block',
-          }}
-        />
+        <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--accent)', display: 'inline-block' }} />
         <ClipboardIcon />
-        {triggerLabel}
+        Copy for Claude
       </button>
       {open && (
-        <div
-          role="menu"
-          data-testid="mcp-popover"
-          style={popoverStyle}
-        >
-          <PopoverContents contextRow={contextRow} CopyButton={CopyButton} />
+        <div role="menu" data-testid="mcp-popover" style={{ ...popoverBaseStyle, top: 'calc(100% + 8px)', right: 0 }}>
+          {popoverContents}
         </div>
       )}
     </div>
   );
 }
 
-function PopoverContents({
-  contextRow,
-  CopyButton,
-}: {
-  contextRow: ContextSnippet | null;
-  CopyButton: (props: { rowKey: string; text: string }) => JSX.Element;
-}) {
-  return (
-    <>
-      <div style={rowStyle} data-testid="mcp-row-mcp">
-        <div style={rowLabelStyle}>
-          <span>MCP server config</span>
-          <CopyButton rowKey="mcp" text={MCP_CONFIG_SNIPPET} />
-        </div>
-        <pre style={snippetStyle}>{MCP_CONFIG_SNIPPET}</pre>
-      </div>
-      <div
-        aria-hidden="true"
-        style={{
-          height: 1,
-          background: 'var(--line, rgba(14,14,12,0.08))',
-          margin: '0 12px',
-        }}
-      />
-      <div style={rowStyle} data-testid="mcp-row-cli">
-        <div style={rowLabelStyle}>
-          <span>CLI install</span>
-          <CopyButton rowKey="cli" text={CLI_INSTALL_SNIPPET} />
-        </div>
-        <pre style={snippetStyle}>{CLI_INSTALL_SNIPPET}</pre>
-      </div>
-      {contextRow && (
-        <>
-          <div
-            aria-hidden="true"
-            style={{
-              height: 1,
-              background: 'var(--line, rgba(14,14,12,0.08))',
-              margin: '0 12px',
-            }}
-          />
-          <div style={rowStyle} data-testid="mcp-row-context">
-            <div style={rowLabelStyle}>
-              <span>{contextRow.label}</span>
-              <CopyButton rowKey="context" text={contextRow.snippet} />
-            </div>
-            <pre style={snippetStyle}>{contextRow.snippet}</pre>
-          </div>
-        </>
-      )}
-    </>
-  );
-}
-
 function ClipboardIcon() {
   return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="9" y="9" width="13" height="13" rx="2" />
       <path d="M5 15V5a2 2 0 0 1 2-2h10" />
     </svg>
