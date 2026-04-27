@@ -1386,6 +1386,61 @@ interface InputCardProps {
   onEditRerun: () => void;
 }
 
+function InputOutputGuide({ actionSpec }: { actionSpec: ActionSpec }) {
+  return (
+    <details
+      data-testid="run-surface-io-guide"
+      style={{
+        marginBottom: 12,
+        border: '1px solid var(--line)',
+        borderRadius: 10,
+        background: 'var(--bg)',
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          padding: '10px 12px',
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: 'var(--ink)',
+          listStyle: 'none',
+        }}
+      >
+        Input & output
+      </summary>
+      <div style={{ padding: '0 12px 12px' }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Input
+        </div>
+        <ul style={{ margin: '6px 0 10px', paddingLeft: 16 }}>
+          {actionSpec.inputs.map((inp) => (
+            <li key={inp.name} style={{ fontSize: 12.5, color: 'var(--ink)', marginBottom: 4 }}>
+              {(inp.label || inp.name) + (inp.required ? '' : ' (optional)')}
+              {inp.description ? (
+                <span style={{ color: 'var(--muted)' }}> — {inp.description}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Output
+        </div>
+        <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+          {actionSpec.outputs.map((out) => (
+            <li key={out.name} style={{ fontSize: 12.5, color: 'var(--ink)', marginBottom: 4 }}>
+              {out.label || out.name}
+              {out.description ? (
+                <span style={{ color: 'var(--muted)' }}> — {out.description}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
 function InputCard({
   app,
   actionSpec,
@@ -1556,6 +1611,7 @@ function InputCard({
           <RunningEyebrowTimer startedAt={runStartedAt} />
         )}
       </div>
+      <InputOutputGuide actionSpec={actionSpec} />
       {hasInputs ? (
         <form
           style={dimWrapStyle}

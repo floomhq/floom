@@ -59,6 +59,77 @@ interface Props {
   appSlug?: string;
 }
 
+function joinDescribedBy(...ids: Array<string | undefined>): string | undefined {
+  const parts = ids.filter(Boolean);
+  return parts.length > 0 ? parts.join(' ') : undefined;
+}
+
+function InputLabel({
+  id,
+  label,
+  required,
+  description,
+  descriptionId,
+  inline = false,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  description?: string;
+  descriptionId?: string;
+  inline?: boolean;
+}) {
+  const hasDescription = Boolean(description && description.trim().length > 0);
+  return (
+    <>
+      <label className="input-label" htmlFor={id} style={inline ? { margin: 0 } : undefined}>
+        <span>{label}</span>
+        {hasDescription && (
+          <button
+            type="button"
+            className="input-help-trigger"
+            tabIndex={-1}
+            aria-hidden="true"
+            title={description}
+            style={{
+              marginLeft: 6,
+              width: 16,
+              height: 16,
+              borderRadius: '50%',
+              border: '1px solid var(--line)',
+              background: 'var(--card)',
+              color: 'var(--muted)',
+              fontSize: 11,
+              lineHeight: '14px',
+              textAlign: 'center',
+              cursor: 'help',
+              padding: 0,
+            }}
+          >
+            i
+          </button>
+        )}
+        {!required && (
+          <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
+        )}
+      </label>
+      {hasDescription && (
+        <p
+          id={descriptionId}
+          style={{
+            margin: inline ? '4px 0 0' : '0 0 6px',
+            fontSize: 11,
+            color: 'var(--muted)',
+            lineHeight: 1.4,
+          }}
+        >
+          {description}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function InputField({
   spec,
   value,
@@ -73,6 +144,11 @@ export function InputField({
   const cleanLabel = (spec.label ?? '').replace(/\s*\(optional\)\s*$/i, '');
   const id = `${idPrefix}-${spec.name}`;
   const errorId = error ? `${id}-error` : undefined;
+  const descriptionId =
+    typeof spec.description === 'string' && spec.description.trim()
+      ? `${id}-desc`
+      : undefined;
+  const describedBy = joinDescribedBy(descriptionId, errorId);
   const invalid = Boolean(error);
   // Use inline style so we don't depend on a class that might not be
   // defined in every host context (InputField is used in multiple pages).
@@ -91,12 +167,13 @@ export function InputField({
     const isUrlArray = isArray && spec.name === 'urls';
     return (
       <div className="input-group">
-        <label className="input-label" htmlFor={id}>
-          {cleanLabel}
-          {!spec.required && (
-            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-          )}
-        </label>
+        <InputLabel
+          id={id}
+          label={cleanLabel}
+          required={spec.required}
+          description={spec.description}
+          descriptionId={descriptionId}
+        />
         <textarea
           id={id}
           className="input-field"
@@ -111,7 +188,7 @@ export function InputField({
           }
           value={str}
           aria-invalid={invalid || undefined}
-          aria-describedby={errorId}
+          aria-describedby={describedBy}
           onChange={(e) => onChange(e.target.value)}
           onBlur={(e) => {
             if (!isUrlArray) return;
@@ -137,16 +214,20 @@ export function InputField({
   if (spec.type === 'enum' && spec.options) {
     return (
       <div className="input-group">
-        <label className="input-label" htmlFor={id}>
-          {cleanLabel}
-        </label>
+        <InputLabel
+          id={id}
+          label={cleanLabel}
+          required={spec.required}
+          description={spec.description}
+          descriptionId={descriptionId}
+        />
         <select
           id={id}
           className="input-field"
           style={invalidStyle}
           value={str}
           aria-invalid={invalid || undefined}
-          aria-describedby={errorId}
+          aria-describedby={describedBy}
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">(pick one)</option>
@@ -164,12 +245,13 @@ export function InputField({
   if (spec.type === 'number') {
     return (
       <div className="input-group">
-        <label className="input-label" htmlFor={id}>
-          {cleanLabel}
-          {!spec.required && (
-            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-          )}
-        </label>
+        <InputLabel
+          id={id}
+          label={cleanLabel}
+          required={spec.required}
+          description={spec.description}
+          descriptionId={descriptionId}
+        />
         <input
           id={id}
           className="input-field"
@@ -178,7 +260,7 @@ export function InputField({
           placeholder={spec.placeholder}
           value={str}
           aria-invalid={invalid || undefined}
-          aria-describedby={errorId}
+          aria-describedby={describedBy}
           onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))}
         />
         {error && <FieldError id={errorId!} text={error} />}
@@ -197,10 +279,16 @@ export function InputField({
           type="checkbox"
           checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)}
+          aria-describedby={describedBy}
         />
-        <label className="input-label" htmlFor={id} style={{ margin: 0 }}>
-          {cleanLabel}
-        </label>
+        <InputLabel
+          id={id}
+          label={cleanLabel}
+          required={spec.required}
+          description={spec.description}
+          descriptionId={descriptionId}
+          inline
+        />
       </div>
     );
   }
@@ -222,6 +310,8 @@ export function InputField({
         label={cleanLabel}
         error={error}
         appSlug={appSlug}
+        description={spec.description}
+        descriptionId={descriptionId}
       />
     );
   }
@@ -233,12 +323,13 @@ export function InputField({
     const urlPlaceholder = spec.placeholder || 'linear.app (https:// optional)';
     return (
       <div className="input-group">
-        <label className="input-label" htmlFor={id}>
-          {cleanLabel}
-          {!spec.required && (
-            <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-          )}
-        </label>
+        <InputLabel
+          id={id}
+          label={cleanLabel}
+          required={spec.required}
+          description={spec.description}
+          descriptionId={descriptionId}
+        />
         <input
           id={id}
           className="input-field"
@@ -247,7 +338,7 @@ export function InputField({
           placeholder={urlPlaceholder}
           value={str}
           aria-invalid={invalid || undefined}
-          aria-describedby={errorId}
+          aria-describedby={describedBy}
           onChange={(e) => onChange(e.target.value)}
           onBlur={(e) => {
             const next = maybePrependHttps(e.target.value);
@@ -287,12 +378,13 @@ export function InputField({
 
   return (
     <div className="input-group">
-      <label className="input-label" htmlFor={id}>
-        {cleanLabel}
-        {!spec.required && (
-          <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-        )}
-      </label>
+      <InputLabel
+        id={id}
+        label={cleanLabel}
+        required={spec.required}
+        description={spec.description}
+        descriptionId={descriptionId}
+      />
       {textControl}
       {error && <FieldError id={errorId!} text={error} />}
     </div>
@@ -318,6 +410,8 @@ function FileInputControl({
   label,
   error: externalError,
   appSlug,
+  description,
+  descriptionId,
 }: {
   spec: InputSpec;
   value: unknown;
@@ -326,6 +420,8 @@ function FileInputControl({
   label: string;
   error?: string;
   appSlug?: string;
+  description?: string;
+  descriptionId?: string;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -348,6 +444,7 @@ function FileInputControl({
   const file = value instanceof File ? value : null;
   const err = externalError ?? localError ?? undefined;
   const errorId = err ? `${id}-error` : undefined;
+  const describedBy = joinDescribedBy(descriptionId, errorId);
 
   const accept_file = (f: File | null) => {
     setLocalError(null);
@@ -367,12 +464,13 @@ function FileInputControl({
 
   return (
     <div className="input-group">
-      <label className="input-label" htmlFor={id}>
-        {label}
-        {!spec.required && (
-          <span style={{ fontWeight: 400, color: 'var(--muted)' }}> (optional)</span>
-        )}
-      </label>
+      <InputLabel
+        id={id}
+        label={label}
+        required={spec.required}
+        description={description}
+        descriptionId={descriptionId}
+      />
       <div
         data-testid={`file-drop-${spec.name}`}
         onDragOver={(e) => {
@@ -395,7 +493,7 @@ function FileInputControl({
         }}
         role="button"
         tabIndex={0}
-        aria-describedby={errorId}
+        aria-describedby={describedBy}
         style={{
           border: `1.5px dashed ${err ? '#c44a2b' : dragging ? 'var(--accent)' : 'var(--line)'}`,
           borderRadius: 10,
@@ -526,7 +624,7 @@ function FileInputControl({
           type="file"
           accept={accept}
           aria-invalid={Boolean(err) || undefined}
-          aria-describedby={errorId}
+          aria-describedby={describedBy}
           style={{ display: 'none' }}
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null;
