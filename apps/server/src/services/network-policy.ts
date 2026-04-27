@@ -3,6 +3,7 @@ import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import { hostname } from 'node:os';
 import { domainToASCII } from 'node:url';
 import type { NormalizedManifest } from '../types.js';
 import { ManifestError } from './manifest.js';
@@ -223,7 +224,8 @@ async function authorizeTarget(
 
 async function startAllowlistProxy(
   runId: string,
-  listenHost: string,
+  bindHost: string,
+  advertisedHost: string,
   allowedDomains: string[],
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const sockets = new Set<net.Socket>();
@@ -317,7 +319,7 @@ async function startAllowlistProxy(
 
   const address = await new Promise<net.AddressInfo>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, listenHost, () => {
+    server.listen(0, bindHost, () => {
       server.off('error', reject);
       const addr = server.address();
       if (!addr || typeof addr === 'string') {
@@ -330,7 +332,7 @@ async function startAllowlistProxy(
   server.unref();
 
   return {
-    url: `http://${listenHost}:${address.port}`,
+    url: `http://${advertisedHost}:${address.port}`,
     close: () =>
       new Promise((resolve, reject) => {
         for (const socket of sockets) socket.destroy();
@@ -344,6 +346,46 @@ async function startAllowlistProxy(
           else resolve();
         });
       }),
+  };
+}
+
+function getNetworkContainerIp(
+  networkInfo: { Containers?: Record<string, { Name?: string; IPv4Address?: string }> },
+  containerId: string,
+): string | null {
+  const containers = networkInfo.Containers || {};
+  for (const [id, details] of Object.entries(containers)) {
+    const name = (details.Name || '').replace(/^\//, '');
+    if (id === containerId || id.startsWith(containerId) || name === containerId) {
+      const ip = details.IPv4Address?.split('/')[0];
+      if (ip && net.isIP(ip) === 4) return ip;
+    }
+  }
+  return null;
+}
+
+async function connectCurrentContainerToNetwork(
+  network: Docker.Network,
+): Promise<{ containerId: string; ip: string; cleanup: () => Promise<void> }> {
+  const containerId = hostname();
+  if (!containerId) {
+    throw new Error('current container hostname is empty');
+  }
+
+  await network.connect({ Container: containerId });
+  const info = await network.inspect();
+  const ip = getNetworkContainerIp(info, containerId);
+  if (!ip) {
+    await network.disconnect({ Container: containerId, Force: true }).catch(() => {});
+    throw new Error(`Docker network did not expose an IP for current container ${containerId}`);
+  }
+
+  return {
+    containerId,
+    ip,
+    cleanup: async () => {
+      await network.disconnect({ Container: containerId, Force: true });
+    },
   };
 }
 
@@ -364,6 +406,7 @@ export async function prepareDockerNetworkPolicy(
   const networkName = `floom-run-net-${runId.replace(/[^a-zA-Z0-9_.-]/g, '').slice(0, 48)}`;
   let network: Docker.Network | null = null;
   let proxy: { url: string; close: () => Promise<void> } | null = null;
+  let currentContainerNetwork: { ip: string; cleanup: () => Promise<void> } | null = null;
   try {
     network = await docker.createNetwork({
       Name: networkName,
@@ -376,7 +419,23 @@ export async function prepareDockerNetworkPolicy(
     if (!gateway) {
       throw new Error(`Docker network ${networkName} did not expose a gateway`);
     }
-    proxy = await startAllowlistProxy(runId, gateway, allowedDomains);
+
+    try {
+      proxy = await startAllowlistProxy(runId, gateway, gateway, allowedDomains);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EADDRNOTAVAIL') {
+        throw err;
+      }
+      currentContainerNetwork = await connectCurrentContainerToNetwork(network);
+      proxy = await startAllowlistProxy(
+        runId,
+        '0.0.0.0',
+        currentContainerNetwork.ip,
+        allowedDomains,
+      );
+    }
+
     const proxyUrl = proxy.url;
     return {
       networkMode: networkName,
@@ -399,6 +458,13 @@ export async function prepareDockerNetworkPolicy(
             errors.push((err as Error).message);
           }
         }
+        if (currentContainerNetwork) {
+          try {
+            await currentContainerNetwork.cleanup();
+          } catch (err) {
+            errors.push((err as Error).message);
+          }
+        }
         if (network) {
           try {
             await network.remove();
@@ -413,6 +479,7 @@ export async function prepareDockerNetworkPolicy(
     };
   } catch (err) {
     if (proxy) await proxy.close().catch(() => {});
+    if (currentContainerNetwork) await currentContainerNetwork.cleanup().catch(() => {});
     if (network) await network.remove().catch(() => {});
     throw err;
   }
