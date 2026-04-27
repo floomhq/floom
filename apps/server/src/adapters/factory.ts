@@ -191,6 +191,10 @@ const REQUIRED_METHODS: Record<AdapterKind, readonly string[]> = {
     'deleteCreatorPolicy',
     'loadUserVaultForRun',
     'loadCreatorOverrideForRun',
+    'setCreatorOverrideSecret',
+    'getCreatorOverrideSecret',
+    'listCreatorOverrideSecretsForRun',
+    'deleteCreatorOverrideSecret',
   ],
   observability: ['captureError', 'increment', 'timing', 'gauge'],
 };

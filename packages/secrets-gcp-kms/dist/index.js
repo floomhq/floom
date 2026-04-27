@@ -140,8 +140,19 @@ export function createGcpKmsSecretsAdapter(opts) {
             const rows = await loadEncryptedRows(storage, workspace_id, keys.map((key) => creatorSecretStorageKey(app_id, key)));
             return await decryptRows(kms, rows);
         },
-        async setCreatorOverrideSecret(app_id, workspace_id, key, plaintext) {
-            await storage.setEncryptedSecret({ workspace_id }, creatorSecretStorageKey(app_id, key), await encryptSecret(kms, plaintext));
+        async setCreatorOverrideSecret(ctx, appId, envKey, plaintext) {
+            await storage.setEncryptedSecret({ workspace_id: ctx.workspace_id }, creatorSecretStorageKey(appId, envKey), await encryptSecret(kms, plaintext));
+        },
+        async getCreatorOverrideSecret(ctx, appId, envKey) {
+            const row = await storage.getEncryptedSecret({ workspace_id: ctx.workspace_id }, creatorSecretStorageKey(appId, envKey));
+            return row ? await decryptSecretRow(kms, row) : null;
+        },
+        async listCreatorOverrideSecretsForRun(ctx, appId, envKeys) {
+            const rows = await loadEncryptedRows(storage, ctx.workspace_id, envKeys.map((key) => creatorSecretStorageKey(appId, key)));
+            return await decryptRows(kms, rows);
+        },
+        async deleteCreatorOverrideSecret(ctx, appId, envKey) {
+            return storage.deleteEncryptedSecret({ workspace_id: ctx.workspace_id }, creatorSecretStorageKey(appId, envKey));
         },
         async __setCreatorOverrideForTests(app_id, workspace_id, key, plaintext) {
             await storage.setEncryptedSecret({ workspace_id }, creatorSecretStorageKey(app_id, key), await encryptSecret(kms, plaintext));

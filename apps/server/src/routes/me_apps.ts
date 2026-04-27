@@ -37,9 +37,6 @@ import { adapters } from '../adapters/index.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
-// Creator value mutation remains in the legacy service until that plaintext
-// write surface is part of SecretsAdapter.
-import * as creatorSecrets from '../services/app_creator_secrets.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
 import { checkAppVisibility, requireAuthenticatedInCloud } from '../lib/auth.js';
 import { sendEmail, renderAppInviteEmail } from '../lib/email.js';
@@ -89,6 +86,27 @@ function isOwner(
     return true;
   }
   return false;
+}
+
+function creatorSecretWorkspace(
+  app: AppRecord,
+  ctx: { workspace_id: string },
+): { workspace_id: string } {
+  return { workspace_id: app.workspace_id || ctx.workspace_id };
+}
+
+async function creatorHasValue(
+  app: AppRecord,
+  ctx: { workspace_id: string },
+  key: string,
+): Promise<boolean> {
+  return (
+    (await adapters.secrets.getCreatorOverrideSecret(
+      creatorSecretWorkspace(app, ctx),
+      app.id,
+      key,
+    )) !== null
+  );
 }
 
 type SerializedInviteInput = Awaited<ReturnType<typeof listInvites>>[number];
@@ -380,29 +398,29 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   const neededKeys = manifest?.secrets_needed ?? [];
 
   const explicit = new Map<string, SecretPolicyEntry>(
-    (await adapters.secrets.listCreatorPolicies(app.id)).map((p) => [
-      p.key,
-      {
-        key: p.key,
-        policy: p.policy,
-        creator_has_value: creatorSecrets.hasCreatorValue(app.id, p.key),
-      },
-    ]),
+    await Promise.all(
+      (await adapters.secrets.listCreatorPolicies(app.id)).map(async (p) => [
+        p.key,
+        {
+          key: p.key,
+          policy: p.policy,
+          creator_has_value: await creatorHasValue(app, ctx, p.key),
+        },
+      ] as const),
+    ),
   );
 
-  const policies: SecretPolicyEntry[] = neededKeys.map((key) => {
-    const hit = explicit.get(key);
-    if (hit) return hit;
-    // Default: every needed key without a row is treated as user_vault.
-    // creator_has_value stays false because no row in
-    // app_creator_secrets should exist for a user_vault key (and even
-    // if one did, the policy controls injection, not storage).
-    return {
-      key,
-      policy: 'user_vault',
-      creator_has_value: creatorSecrets.hasCreatorValue(app.id, key),
-    };
-  });
+  const policies: SecretPolicyEntry[] = await Promise.all(
+    neededKeys.map(async (key) => {
+      const hit = explicit.get(key);
+      if (hit) return hit;
+      return {
+        key,
+        policy: 'user_vault',
+        creator_has_value: await creatorHasValue(app, ctx, key),
+      };
+    }),
+  );
 
   return c.json({ policies });
 });
@@ -565,10 +583,11 @@ meAppsRouter.put('/:slug/creator-secrets/:key', async (c) => {
   }
 
   try {
-    const existed = creatorSecrets.hasCreatorValue(app.id, key);
-    creatorSecrets.setCreatorSecret(
+    const creatorCtx = creatorSecretWorkspace(app, ctx);
+    const existed = await creatorHasValue(app, ctx, key);
+    await adapters.secrets.setCreatorOverrideSecret(
+      creatorCtx,
       app.id,
-      app.workspace_id || ctx.workspace_id,
       key,
       parsed.data.value,
     );
@@ -621,8 +640,13 @@ meAppsRouter.delete('/:slug/creator-secrets/:key', async (c) => {
   }
 
   try {
-    const existed = creatorSecrets.hasCreatorValue(app.id, key);
-    const removed = creatorSecrets.deleteCreatorSecret(app.id, key);
+    const creatorCtx = creatorSecretWorkspace(app, ctx);
+    const existed = await creatorHasValue(app, ctx, key);
+    const removed = await adapters.secrets.deleteCreatorOverrideSecret(
+      creatorCtx,
+      app.id,
+      key,
+    );
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.deleted',

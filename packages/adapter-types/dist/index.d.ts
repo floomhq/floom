@@ -685,6 +685,18 @@ export interface SecretsAdapter extends AdapterLifecycle {
     deleteCreatorPolicy(app_id: string, key: string): Promise<boolean>;
     loadUserVaultForRun(ctx: SessionContext, keys: string[]): Promise<Record<string, string>>;
     loadCreatorOverrideForRun(app_id: string, workspace_id: string, keys: string[]): Promise<Record<string, string>>;
+    setCreatorOverrideSecret(ctx: {
+        workspace_id: string;
+    }, appId: string, envKey: string, plaintext: string): Promise<void>;
+    getCreatorOverrideSecret(ctx: {
+        workspace_id: string;
+    }, appId: string, envKey: string): Promise<string | null>;
+    listCreatorOverrideSecretsForRun(ctx: {
+        workspace_id: string;
+    }, appId: string, envKeys: string[]): Promise<Record<string, string>>;
+    deleteCreatorOverrideSecret(ctx: {
+        workspace_id: string;
+    }, appId: string, envKey: string): Promise<boolean>;
 }
 export interface ObservabilityAdapter extends AdapterLifecycle {
     captureError(err: unknown, context?: Record<string, unknown>): void;

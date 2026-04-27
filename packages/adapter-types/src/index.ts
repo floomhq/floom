@@ -921,6 +921,27 @@ export interface SecretsAdapter extends AdapterLifecycle {
     workspace_id: string,
     keys: string[],
   ): Promise<Record<string, string>>;
+  setCreatorOverrideSecret(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKey: string,
+    plaintext: string,
+  ): Promise<void>;
+  getCreatorOverrideSecret(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKey: string,
+  ): Promise<string | null>;
+  listCreatorOverrideSecretsForRun(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKeys: string[],
+  ): Promise<Record<string, string>>;
+  deleteCreatorOverrideSecret(
+    ctx: { workspace_id: string },
+    appId: string,
+    envKey: string,
+  ): Promise<boolean>;
 }
 
 // =====================================================================

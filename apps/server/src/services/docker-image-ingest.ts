@@ -87,31 +87,18 @@ export class DockerImageIngestError extends Error {
  */
 export type SecretBindings = Record<string, string>;
 
-interface CreatorOverrideWritableSecretsAdapter {
-  setCreatorOverrideSecret?(
-    app_id: string,
-    workspace_id: string,
-    key: string,
-    plaintext: string,
-  ): Promise<void>;
-}
-
 async function setCreatorOverrideSecretViaAdapter(
   app_id: string,
   workspace_id: string,
   key: string,
   plaintext: string,
 ): Promise<void> {
-  const secrets = adapters.secrets as typeof adapters.secrets &
-    CreatorOverrideWritableSecretsAdapter;
-  const write = secrets.setCreatorOverrideSecret;
-  if (!write) {
-    throw new DockerImageIngestError(
-      'secrets_adapter_missing_creator_override_writer',
-      'Secrets adapter does not support creator override writes.',
-    );
-  }
-  await write.call(secrets, app_id, workspace_id, key, plaintext);
+  await adapters.secrets.setCreatorOverrideSecret(
+    { workspace_id },
+    app_id,
+    key,
+    plaintext,
+  );
 }
 
 /**
