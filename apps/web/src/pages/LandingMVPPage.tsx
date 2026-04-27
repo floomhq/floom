@@ -15,6 +15,9 @@
  */
 
 import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import * as api from '../api/client';
+import type { HubApp } from '../lib/types';
 
 // ---------- styles ----------
 
@@ -26,6 +29,18 @@ const CARD = '#fff';
 const LINE = 'rgba(14,14,12,0.1)';
 
 export function LandingMVPPage() {
+  const [featuredApps, setFeaturedApps] = useState<HubApp[]>([]);
+
+  useEffect(() => {
+    api.getHub()
+      .then(apps => {
+        const featured = apps.filter(a => a.featured).slice(0, 4);
+        // Fall back to top 4 by position if no featured flags set yet
+        setFeaturedApps(featured.length > 0 ? featured : apps.slice(0, 4));
+      })
+      .catch(() => { /* silently skip the section */ });
+  }, []);
+
   return (
     <div
       data-testid="landing-mvp"
@@ -339,19 +354,21 @@ export function LandingMVPPage() {
                 View all →
               </Link>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
-              {FEATURED_APPS.map(app => (
-                <Link
-                  key={app.slug}
-                  to={`/p/${app.slug}`}
-                  style={{ display: 'block', padding: '16px 18px', background: BG, border: `1px solid ${LINE}`, borderRadius: 10, textDecoration: 'none' }}
-                >
-                  <div style={{ fontSize: 24, marginBottom: 8 }}>{app.emoji}</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: INK, marginBottom: 4 }}>{app.name}</div>
-                  <div style={{ fontSize: 12, color: MUTED, lineHeight: 1.5 }}>{app.tagline}</div>
-                </Link>
-              ))}
-            </div>
+            {featuredApps.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+                {featuredApps.map(app => (
+                  <Link
+                    key={app.slug}
+                    to={`/p/${app.slug}`}
+                    style={{ display: 'block', padding: '16px 18px', background: BG, border: `1px solid ${LINE}`, borderRadius: 10, textDecoration: 'none' }}
+                  >
+                    {app.icon && <div style={{ fontSize: 24, marginBottom: 8 }}>{app.icon}</div>}
+                    <div style={{ fontSize: 14, fontWeight: 600, color: INK, marginBottom: 4 }}>{app.name}</div>
+                    <div style={{ fontSize: 12, color: MUTED, lineHeight: 1.5 }}>{app.description}</div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
@@ -414,9 +431,3 @@ const STEPS = [
   },
 ];
 
-const FEATURED_APPS = [
-  { slug: 'blog-writer', name: 'Blog writer', tagline: 'Draft long-form posts from a brief.', emoji: '✍️' },
-  { slug: 'lead-scorer', name: 'Lead scorer', tagline: 'Score a list of leads against an ICP.', emoji: '🎯' },
-  { slug: 'summariser', name: 'Summariser', tagline: 'Summarise any text or URL in seconds.', emoji: '📄' },
-  { slug: 'competitor-analysis', name: 'Competitor analysis', tagline: 'Compare two products side-by-side.', emoji: '🔍' },
-];
