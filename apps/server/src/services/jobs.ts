@@ -17,6 +17,9 @@ export interface CreateJobInput {
   timeoutMsOverride?: number | null;
   maxRetriesOverride?: number | null;
   perCallSecrets?: Record<string, string> | null;
+  workspace_id?: string | null;
+  user_id?: string | null;
+  device_id?: string | null;
 }
 
 export async function createJob(jobId: string, args: CreateJobInput): Promise<JobRecord> {
@@ -46,6 +49,9 @@ export async function createJob(jobId: string, args: CreateJobInput): Promise<Jo
     timeout_ms: timeout,
     max_retries: maxRetries,
     per_call_secrets_json: perCallSecretsJson,
+    workspace_id: args.workspace_id ?? null,
+    user_id: args.user_id ?? null,
+    device_id: args.device_id ?? null,
   });
 }
 

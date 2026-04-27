@@ -152,6 +152,9 @@ function createJobInput(id, app, input = {}) {
     timeoutMsOverride: 5_000,
     maxRetriesOverride: 0,
     perCallSecrets: null,
+    workspace_id: 'workspace-job-ctx-1',
+    user_id: 'user-job-ctx-1',
+    device_id: 'device-job-ctx-1',
   };
 }
 
@@ -378,6 +381,24 @@ try {
     const updated = await storage.getJob(job.id);
     assert(updated?.status === 'succeeded', `updated status=${updated?.status}`);
     assert(updated?.output_json === json({ ok: true }), `output_json=${updated?.output_json}`);
+  });
+
+  await check('jobs preserve enqueue SessionContext fields', async () => {
+    const app = await storage.createApp(appInput('app-jobs-ctx-1', 'app-jobs-ctx-1'));
+    const job = await storage.createJob({
+      ...createJobInput('job-ctx-1', app, { ctx: true }),
+      workspace_id: 'workspace-ctx-roundtrip',
+      user_id: 'user-ctx-roundtrip',
+      device_id: 'device-ctx-roundtrip',
+    });
+    const fetched = await storage.getJob(job.id);
+    assert(fetched?.workspace_id === 'workspace-ctx-roundtrip', `workspace_id=${fetched?.workspace_id}`);
+    assert(fetched?.user_id === 'user-ctx-roundtrip', `user_id=${fetched?.user_id}`);
+    assert(fetched?.device_id === 'device-ctx-roundtrip', `device_id=${fetched?.device_id}`);
+    const claimed = await storage.claimJob(job.id);
+    assert(claimed?.workspace_id === 'workspace-ctx-roundtrip', `claimed.workspace_id=${claimed?.workspace_id}`);
+    assert(claimed?.user_id === 'user-ctx-roundtrip', `claimed.user_id=${claimed?.user_id}`);
+    assert(claimed?.device_id === 'device-ctx-roundtrip', `claimed.device_id=${claimed?.device_id}`);
   });
 
   await check('jobs lifecycle helpers complete and fail through storage', async () => {

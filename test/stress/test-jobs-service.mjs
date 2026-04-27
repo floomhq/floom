@@ -5,13 +5,39 @@
 //
 // Run: node test/stress/test-jobs-service.mjs
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const tmp = mkdtempSync(join(tmpdir(), 'floom-jobs-test-'));
 process.env.DATA_DIR = tmp;
 process.env.FLOOM_DISABLE_JOB_WORKER = 'true';
+const runtimeCapturePath = join(tmp, 'runtime-ctx.json');
+const runtimeModulePath = join(tmp, 'runtime-adapter.mjs');
+writeFileSync(
+  runtimeModulePath,
+  `import { writeFileSync } from 'node:fs';
+
+export default {
+  kind: 'runtime',
+  name: 'jobs-service-context-capture',
+  protocolVersion: '^0.2',
+  adapter: {
+    async execute(_app, _manifest, _action, inputs, _secrets, ctx) {
+      writeFileSync(process.env.FLOOM_RUNTIME_CTX_CAPTURE, JSON.stringify({ ctx, inputs }));
+      return {
+        status: 'success',
+        outputs: { ok: true, inputs },
+        logs: '',
+        duration_ms: 1
+      };
+    }
+  }
+};
+`,
+);
+process.env.FLOOM_RUNTIME = runtimeModulePath;
+process.env.FLOOM_RUNTIME_CTX_CAPTURE = runtimeCapturePath;
 
 const { db } = await import('../../apps/server/dist/db.js');
 const { newJobId, newAppId } = await import('../../apps/server/dist/lib/ids.js');
@@ -149,6 +175,31 @@ log(
   nQueued === 1 && nSucc === 1,
   `queued=${nQueued} succeeded=${nSucc}`,
 );
+
+// 13. worker preserves queued SessionContext on the run and runtime dispatch
+await jobs.cancelJob(requeueId);
+const worker = await import('../../apps/server/dist/services/worker.js');
+const ctxJobId = newJobId();
+await jobs.createJob(ctxJobId, {
+  app: { ...app, webhook_url: null },
+  action: 'run',
+  inputs: { msg: 'ctx' },
+  workspace_id: 'workspace_A',
+  user_id: 'user_A',
+  device_id: 'device_A',
+});
+const processed = await worker.processOneJob();
+const ctxJob = await jobs.getJob(ctxJobId);
+const ctxRun = db.prepare('SELECT * FROM runs WHERE id = ?').get(ctxJob.run_id);
+const captured = JSON.parse(readFileSync(runtimeCapturePath, 'utf8'));
+log('worker ctx: processed queued job', processed && processed.id === ctxJobId, `processed=${processed?.id}`);
+log('worker ctx: job succeeded', ctxJob.status === 'succeeded', ctxJob.status);
+log('worker ctx: run workspace_id preserved', ctxRun.workspace_id === 'workspace_A', ctxRun.workspace_id);
+log('worker ctx: run user_id preserved', ctxRun.user_id === 'user_A', ctxRun.user_id);
+log('worker ctx: run device_id preserved', ctxRun.device_id === 'device_A', ctxRun.device_id);
+log('worker ctx: runtime ctx workspace_id preserved', captured.ctx.workspace_id === 'workspace_A', JSON.stringify(captured));
+log('worker ctx: runtime ctx user_id preserved', captured.ctx.user_id === 'user_A', JSON.stringify(captured));
+log('worker ctx: runtime ctx device_id preserved', captured.ctx.device_id === 'device_A', JSON.stringify(captured));
 
 // cleanup
 db.close();

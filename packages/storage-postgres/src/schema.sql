@@ -92,10 +92,16 @@ CREATE TABLE IF NOT EXISTS jobs (
   max_retries INTEGER NOT NULL DEFAULT 0,
   attempts INTEGER NOT NULL DEFAULT 0,
   per_call_secrets_json JSONB,
+  workspace_id TEXT,
+  user_id TEXT,
+  device_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ
 );
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS device_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_jobs_slug_status ON jobs(slug, status);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);

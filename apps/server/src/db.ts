@@ -452,6 +452,9 @@ db.exec(`
     max_retries INTEGER NOT NULL DEFAULT 0,
     attempts INTEGER NOT NULL DEFAULT 0,
     per_call_secrets_json TEXT,
+    workspace_id TEXT,
+    user_id TEXT,
+    device_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     started_at TEXT,
     finished_at TEXT
@@ -460,6 +463,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
   CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 `);
+const jobCols = (db.prepare(`PRAGMA table_info(jobs)`).all() as { name: string }[]).map(
+  (r) => r.name,
+);
+if (!jobCols.includes('workspace_id')) {
+  db.exec(`ALTER TABLE jobs ADD COLUMN workspace_id TEXT`);
+}
+if (!jobCols.includes('user_id')) {
+  db.exec(`ALTER TABLE jobs ADD COLUMN user_id TEXT`);
+}
+if (!jobCols.includes('device_id')) {
+  db.exec(`ALTER TABLE jobs ADD COLUMN device_id TEXT`);
+}
 
 // ---------- builds (Studio GitHub public-repo deploys, ADR-015) ----------
 // Each row tracks one async repo clone/build/publish attempt. Initial v1 launch

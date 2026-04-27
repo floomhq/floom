@@ -125,6 +125,9 @@ jobsRouter.post('/', async (c) => {
         ? body.max_retries
         : null,
     perCallSecrets,
+    workspace_id: ctx.workspace_id,
+    user_id: ctx.user_id,
+    device_id: ctx.device_id ?? null,
   });
 
   const publicUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 3051}`;

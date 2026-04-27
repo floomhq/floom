@@ -115,6 +115,9 @@ const JOB_COLUMNS = new Set<keyof JobRecord>([
   'max_retries',
   'attempts',
   'per_call_secrets_json',
+  'workspace_id',
+  'user_id',
+  'device_id',
   'created_at',
   'started_at',
   'finished_at',
@@ -226,8 +229,20 @@ function toNullableJson(value: unknown): string | null {
 function normalizeCreateJobInput(
   input: Omit<
     JobRecord,
-    'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'
-  > & { status?: JobStatus },
+    | 'created_at'
+    | 'started_at'
+    | 'finished_at'
+    | 'attempts'
+    | 'status'
+    | 'workspace_id'
+    | 'user_id'
+    | 'device_id'
+  > & {
+    status?: JobStatus;
+    workspace_id?: string | null;
+    user_id?: string | null;
+    device_id?: string | null;
+  },
 ): Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at'> {
   const raw = input as unknown as Record<string, unknown>;
   if (raw.app && typeof raw.app === 'object') {
@@ -263,6 +278,9 @@ function normalizeCreateJobInput(
         perCallSecrets && typeof perCallSecrets === 'object'
           ? JSON.stringify(perCallSecrets)
           : null,
+      workspace_id: stringOrNull(raw.workspace_id),
+      user_id: stringOrNull(raw.user_id),
+      device_id: stringOrNull(raw.device_id),
     };
   }
   return {
@@ -280,6 +298,9 @@ function normalizeCreateJobInput(
     max_retries: input.max_retries,
     attempts: 0,
     per_call_secrets_json: toNullableJson(input.per_call_secrets_json),
+    workspace_id: input.workspace_id ?? null,
+    user_id: input.user_id ?? null,
+    device_id: input.device_id ?? null,
   };
 }
 
@@ -772,15 +793,28 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
   async createJob(
     input: Omit<
       JobRecord,
-      'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'
-    > & { status?: JobStatus },
+      | 'created_at'
+      | 'started_at'
+      | 'finished_at'
+      | 'attempts'
+      | 'status'
+      | 'workspace_id'
+      | 'user_id'
+      | 'device_id'
+    > & {
+      status?: JobStatus;
+      workspace_id?: string | null;
+      user_id?: string | null;
+      device_id?: string | null;
+    },
   ): Promise<JobRecord> {
     const normalized = normalizeCreateJobInput(input);
     db.prepare(
       `INSERT INTO jobs (
          id, slug, app_id, action, status, input_json, output_json, error_json,
-         run_id, webhook_url, timeout_ms, max_retries, attempts, per_call_secrets_json
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         run_id, webhook_url, timeout_ms, max_retries, attempts, per_call_secrets_json,
+         workspace_id, user_id, device_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       normalized.id,
       normalized.slug,
@@ -796,6 +830,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       normalized.max_retries,
       normalized.attempts,
       normalized.per_call_secrets_json,
+      normalized.workspace_id,
+      normalized.user_id,
+      normalized.device_id,
     );
     const row = await this.getJob(normalized.id);
     if (!row) throw new Error(`createJob: failed to re-read row ${normalized.id}`);

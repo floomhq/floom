@@ -270,6 +270,9 @@ export interface JobRecord {
   max_retries: number;
   attempts: number;
   per_call_secrets_json: string | null;
+  workspace_id: string | null;
+  user_id: string | null;
+  device_id: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

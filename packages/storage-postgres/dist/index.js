@@ -82,6 +82,9 @@ const JOB_COLUMNS = new Set([
     'max_retries',
     'attempts',
     'per_call_secrets_json',
+    'workspace_id',
+    'user_id',
+    'device_id',
     'created_at',
     'started_at',
     'finished_at',
@@ -503,10 +506,11 @@ class PostgresStorageAdapter {
         const normalized = normalizeCreateJobInput(input);
         await this.execute(`INSERT INTO jobs (
          id, slug, app_id, action, status, input_json, output_json, error_json,
-         run_id, webhook_url, timeout_ms, max_retries, attempts, per_call_secrets_json
+         run_id, webhook_url, timeout_ms, max_retries, attempts, per_call_secrets_json,
+         workspace_id, user_id, device_id
        ) VALUES (
          $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb,
-         $9, $10, $11, $12, $13, $14::jsonb
+         $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17
        )`, [
             normalized.id,
             normalized.slug,
@@ -522,6 +526,9 @@ class PostgresStorageAdapter {
             normalized.max_retries,
             normalized.attempts,
             normalized.per_call_secrets_json,
+            normalized.workspace_id,
+            normalized.user_id,
+            normalized.device_id,
         ]);
         const row = await this.getJob(normalized.id);
         if (!row)
@@ -1653,6 +1660,9 @@ function normalizeCreateJobInput(input) {
             per_call_secrets_json: perCallSecrets && typeof perCallSecrets === 'object'
                 ? JSON.stringify(perCallSecrets)
                 : null,
+            workspace_id: stringOrNull(raw.workspace_id),
+            user_id: stringOrNull(raw.user_id),
+            device_id: stringOrNull(raw.device_id),
         };
     }
     return {
@@ -1670,6 +1680,9 @@ function normalizeCreateJobInput(input) {
         max_retries: input.max_retries,
         attempts: 0,
         per_call_secrets_json: toNullableJson(input.per_call_secrets_json),
+        workspace_id: input.workspace_id ?? null,
+        user_id: input.user_id ?? null,
+        device_id: input.device_id ?? null,
     };
 }
 function stringOrNull(value) {

@@ -317,6 +317,9 @@ function createPerAppMcpServer(
             action: actionName,
             inputs: validated,
             perCallSecrets,
+            workspace_id: ctx?.workspace_id ?? null,
+            user_id: ctx?.user_id ?? null,
+            device_id: ctx?.device_id ?? null,
           });
           const publicUrl =
             process.env.PUBLIC_URL ||

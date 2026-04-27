@@ -177,6 +177,9 @@ export interface JobRecord {
   max_retries: number;
   attempts: number;
   per_call_secrets_json: string | null;
+  workspace_id: string | null;
+  user_id: string | null;
+  device_id: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -631,7 +634,12 @@ export interface StorageAdapter extends AdapterLifecycle {
     revoked_at: string,
   ): Promise<AgentTokenRecord | undefined>;
 
-  createJob(input: Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'> & { status?: JobStatus }): Promise<JobRecord>;
+  createJob(input: Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status' | 'workspace_id' | 'user_id' | 'device_id'> & {
+    status?: JobStatus;
+    workspace_id?: string | null;
+    user_id?: string | null;
+    device_id?: string | null;
+  }): Promise<JobRecord>;
   getJob(id: string): Promise<JobRecord | undefined>;
   listJobs(filter?: JobListFilter): Promise<JobRecord[]>;
   claimJob(id: string): Promise<JobRecord | undefined>;

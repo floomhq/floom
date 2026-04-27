@@ -18,6 +18,7 @@ import {
   requeueJob,
 } from './jobs.js';
 import { dispatchRun } from './runner.js';
+import { buildContext } from './session.js';
 import { deliverWebhook, type WebhookPayload } from './webhook.js';
 import { getJobTriggerContext } from './triggers-worker.js';
 import type {
@@ -101,16 +102,23 @@ export async function processOneJob(): Promise<JobRecord | null> {
   const perCallSecrets = claimed.per_call_secrets_json
     ? (JSON.parse(claimed.per_call_secrets_json) as Record<string, string>)
     : undefined;
+  const ctx = contextFromJob(claimed);
 
   const runId = newRunId();
-  await adapters.storage.createRun({
+  const runInput: Parameters<typeof adapters.storage.createRun>[0] = {
     id: runId,
     app_id: app.id,
     action: claimed.action,
     inputs,
-  });
+  };
+  if (ctx) {
+    runInput.workspace_id = ctx.workspace_id;
+    runInput.user_id = ctx.user_id;
+    runInput.device_id = ctx.device_id;
+  }
+  await adapters.storage.createRun(runInput);
 
-  await dispatchRun(app, manifest, runId, claimed.action, inputs, perCallSecrets);
+  await dispatchRun(app, manifest, runId, claimed.action, inputs, perCallSecrets, ctx);
 
   const run = await waitForRunOrTimeout(runId, claimed.timeout_ms);
 
@@ -145,6 +153,21 @@ export async function processOneJob(): Promise<JobRecord | null> {
     runId,
   );
   return (await getJob(claimed.id)) || claimed;
+}
+
+function contextFromJob(job: JobRecord) {
+  if (!job.workspace_id || !job.user_id) {
+    console.warn(
+      `[worker] job=${job.id} missing persisted session context; using legacy dispatch context`,
+    );
+    return undefined;
+  }
+  return buildContext(
+    job.workspace_id,
+    job.user_id,
+    job.device_id || job.user_id,
+    !(job.workspace_id === 'local' && job.user_id === 'local'),
+  );
 }
 
 async function handleFailure(
