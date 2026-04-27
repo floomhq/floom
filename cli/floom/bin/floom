@@ -11,7 +11,18 @@
 
 set -euo pipefail
 
-BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  TARGET="$(readlink "$SOURCE")"
+  if [[ "$TARGET" == /* ]]; then
+    SOURCE="$TARGET"
+  else
+    SOURCE="$DIR/$TARGET"
+  fi
+done
+
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 ROOT_DIR="$(cd "$BIN_DIR/.." && pwd)"
 LIB_DIR="$ROOT_DIR/lib"
 

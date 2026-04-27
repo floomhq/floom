@@ -24,8 +24,6 @@ floom --help
 
 > **Do not run `npm install floom`.** The unscoped `floom` name on npm belongs to an unrelated third-party streaming tool; installing it will not give you the Floom CLI. Use the curl installer or the manual clone above.
 
-> **Do not run `npm install floom`.** The unscoped `floom` name on npm belongs to an unrelated third-party streaming tool; installing it will not give you the Floom CLI. Use the curl installer or the manual clone above.
-
 ## Requirements
 
 - `bash` (4+ preferred, works on 3.2)
@@ -39,7 +37,7 @@ floom --help
 floom init                     scaffold a floom.yaml in the current directory
 floom deploy [--dry-run]       validate + publish the current app
 floom status                   list your apps and recent runs
-floom auth <api-key> [url]     save API key to ~/.floom/config.json
+floom auth <agent-token> [url] save Agent token to ~/.floom/config.json
 floom --help                   show usage
 floom --version                print version
 ```
@@ -52,22 +50,22 @@ Order of resolution:
 2. `~/.floom/config.json` with `{"api_key": "...", "api_url": "https://floom.dev"}`
 3. Legacy `~/.claude/floom-skill-config.json` (from the old Claude Code skill)
 
-Get your API key at https://floom.dev/me/api-keys, then:
+Create an Agent token in Workspace settings at https://floom.dev/settings/agent-tokens, then:
 
 ```bash
-floom auth sk_live_xxx
+floom auth floom_agent_xxx
 ```
 
 Self-host:
 
 ```bash
-floom auth sk_live_xxx http://localhost:3051
+floom auth floom_agent_xxx http://localhost:3051
 ```
 
 Env-only (CI):
 
 ```bash
-export FLOOM_API_KEY=sk_live_xxx
+export FLOOM_API_KEY=floom_agent_xxx
 export FLOOM_API_URL=https://floom.dev
 floom status
 ```
