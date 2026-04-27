@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { resolveUserContext } from '../services/session.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import * as appMemory from '../services/app_memory.js';
+// TODO(adapters): migrate these legacy sync secret routes to SecretsAdapter.
 import * as userSecrets from '../services/user_secrets.js';
 import { MemoryKeyNotAllowedError } from '../services/app_memory.js';
 import { SecretDecryptError } from '../services/user_secrets.js';

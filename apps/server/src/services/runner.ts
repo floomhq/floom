@@ -6,7 +6,6 @@ import { runProxied } from './proxied-runner.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
 import { noteAppUnavailable } from '../lib/alerts.js';
-import * as userSecrets from './user_secrets.js';
 import * as creatorSecrets from './app_creator_secrets.js';
 import type { SecretPolicy } from '../types.js';
 import type {
@@ -265,7 +264,7 @@ export function extractUserLogs(stdout: string): string {
  * synthetic 'local' workspace+user, which is correct for OSS solo mode and
  * any pre-W2.1 call site that hasn't been migrated yet.
  */
-export function dispatchRun(
+export async function dispatchRun(
   app: AppRecord,
   manifest: NormalizedManifest,
   runId: string,
@@ -273,7 +272,7 @@ export function dispatchRun(
   inputs: Record<string, unknown>,
   perCallSecrets?: Record<string, string>,
   ctx?: SessionContext,
-): void {
+): Promise<void> {
   // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
   const globalRows = db
     .prepare('SELECT name, value FROM secrets WHERE app_id IS NULL')
@@ -299,7 +298,10 @@ export function dispatchRun(
   const runtimeCtx = ctx || defaultContext();
   const needs = manifest.secrets_needed || [];
   if (needs.length > 0) {
+    const secretsAdapter = (await import('../adapters/index.js')).adapters.secrets;
     const policies = new Map<string, SecretPolicy>(
+      // TODO(adapters): migrate policy reads to SecretsAdapter once that
+      // surface includes creator policy metadata.
       creatorSecrets
         .listPolicies(app.id)
         .map((p) => [p.key, p.policy as SecretPolicy]),
@@ -317,7 +319,7 @@ export function dispatchRun(
     // added (those rows now default to 'local' via the migration).
     if (creatorKeys.length > 0) {
       try {
-        const creatorLevel = creatorSecrets.loadCreatorSecretsForRun(
+        const creatorLevel = await secretsAdapter.loadCreatorOverrideForRun(
           app.id,
           app.workspace_id || runtimeCtx.workspace_id,
           creatorKeys,
@@ -338,7 +340,10 @@ export function dispatchRun(
     // into a run that expects the creator's value.
     if (userVaultKeys.length > 0) {
       try {
-        const userLevel = userSecrets.loadForRun(runtimeCtx, userVaultKeys);
+        const userLevel = await secretsAdapter.loadUserVaultForRun(
+          runtimeCtx,
+          userVaultKeys,
+        );
         for (const [k, v] of Object.entries(userLevel)) {
           if (v && v.length > 0) mergedSecrets[k] = v;
         }

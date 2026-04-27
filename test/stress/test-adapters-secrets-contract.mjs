@@ -120,15 +120,15 @@ try {
   createApp('secrets-contract-app');
 
   await check('set/get/delete round-trip', async () => {
-    secrets.set(ctx, 'ROUND_TRIP_KEY', 'round-trip-value');
-    assert(secrets.get(ctx, 'ROUND_TRIP_KEY') === 'round-trip-value', 'get did not return plaintext');
-    assert(secrets.delete(ctx, 'ROUND_TRIP_KEY') === true, 'delete existing returned false');
-    assert(secrets.get(ctx, 'ROUND_TRIP_KEY') === null, 'deleted key remained readable');
+    await secrets.set(ctx, 'ROUND_TRIP_KEY', 'round-trip-value');
+    assert(await secrets.get(ctx, 'ROUND_TRIP_KEY') === 'round-trip-value', 'get did not return plaintext');
+    assert(await secrets.delete(ctx, 'ROUND_TRIP_KEY') === true, 'delete existing returned false');
+    assert(await secrets.get(ctx, 'ROUND_TRIP_KEY') === null, 'deleted key remained readable');
   });
 
   await check('list masks plaintext and ciphertext', async () => {
-    secrets.set(ctx, 'MASKED_KEY', 'masked-super-secret');
-    const list = secrets.list(ctx);
+    await secrets.set(ctx, 'MASKED_KEY', 'masked-super-secret');
+    const list = await secrets.list(ctx);
     const row = list.find((item) => item.key === 'MASKED_KEY');
     assert(row, `list=${JSON.stringify(list)}`);
     assert(typeof row.updated_at === 'string' && row.updated_at.length > 0, 'updated_at missing');
@@ -138,21 +138,21 @@ try {
   });
 
   await check('loadUserVaultForRun filters by requested keys', async () => {
-    secrets.set(ctx, 'KEY_A', 'value-a');
-    secrets.set(ctx, 'KEY_B', 'value-b');
-    secrets.set(ctx, 'KEY_C', 'value-c');
-    const loaded = secrets.loadUserVaultForRun(ctx, ['KEY_A']);
+    await secrets.set(ctx, 'KEY_A', 'value-a');
+    await secrets.set(ctx, 'KEY_B', 'value-b');
+    await secrets.set(ctx, 'KEY_C', 'value-c');
+    const loaded = await secrets.loadUserVaultForRun(ctx, ['KEY_A']);
     assert(JSON.stringify(Object.keys(loaded).sort()) === JSON.stringify(['KEY_A']), `keys=${JSON.stringify(loaded)}`);
     assert(loaded.KEY_A === 'value-a', `KEY_A=${loaded.KEY_A}`);
   });
 
   await check('creator-override namespace is isolated from user vault', async () => {
-    secrets.set(ctx, 'USER_ONLY', 'user-only-value');
-    secrets.set(ctx, 'NO_FALLBACK', 'user-fallback-must-not-load');
+    await secrets.set(ctx, 'USER_ONLY', 'user-only-value');
+    await secrets.set(ctx, 'NO_FALLBACK', 'user-fallback-must-not-load');
     creatorSecrets.setPolicy('secrets-contract-app', 'CREATOR_ONLY', 'creator_override');
     creatorSecrets.setPolicy('secrets-contract-app', 'NO_FALLBACK', 'creator_override');
     if (setCreatorOverrideForTests) {
-      setCreatorOverrideForTests(
+      await setCreatorOverrideForTests(
         'secrets-contract-app',
         DEFAULT_WORKSPACE_ID,
         'CREATOR_ONLY',
@@ -166,7 +166,7 @@ try {
         'creator-only-value',
       );
     }
-    const creatorLoaded = secrets.loadCreatorOverrideForRun(
+    const creatorLoaded = await secrets.loadCreatorOverrideForRun(
       'secrets-contract-app',
       DEFAULT_WORKSPACE_ID,
       ['CREATOR_ONLY', 'USER_ONLY', 'NO_FALLBACK'],
@@ -174,29 +174,30 @@ try {
     assert(creatorLoaded.CREATOR_ONLY === 'creator-only-value', `creatorLoaded=${JSON.stringify(creatorLoaded)}`);
     assert(!('USER_ONLY' in creatorLoaded), 'creator loader returned user-vault key');
     assert(!('NO_FALLBACK' in creatorLoaded), 'creator loader fell back to user vault');
-    const userLoaded = secrets.loadUserVaultForRun(ctx, ['CREATOR_ONLY', 'USER_ONLY']);
+    const userLoaded = await secrets.loadUserVaultForRun(ctx, ['CREATOR_ONLY', 'USER_ONLY']);
     assert(userLoaded.USER_ONLY === 'user-only-value', `userLoaded=${JSON.stringify(userLoaded)}`);
     assert(!('CREATOR_ONLY' in userLoaded), 'user loader returned creator-only key');
   });
 
   await check('tenant isolation keeps same key separate by workspace_id', async () => {
-    secrets.set(ctx, 'TENANT_KEY', 'tenant-a-value');
-    secrets.set(tenantCtx, 'TENANT_KEY', 'tenant-b-value');
-    assert(secrets.get(ctx, 'TENANT_KEY') === 'tenant-a-value', 'tenant A read mismatch');
-    assert(secrets.get(tenantCtx, 'TENANT_KEY') === 'tenant-b-value', 'tenant B read mismatch');
+    await secrets.set(ctx, 'TENANT_KEY', 'tenant-a-value');
+    await secrets.set(tenantCtx, 'TENANT_KEY', 'tenant-b-value');
+    assert(await secrets.get(ctx, 'TENANT_KEY') === 'tenant-a-value', 'tenant A read mismatch');
+    assert(await secrets.get(tenantCtx, 'TENANT_KEY') === 'tenant-b-value', 'tenant B read mismatch');
+    const tenantLoaded = await secrets.loadUserVaultForRun(tenantCtx, ['KEY_A']);
     assert(
-      secrets.loadUserVaultForRun(tenantCtx, ['KEY_A']).KEY_A === undefined,
+      tenantLoaded.KEY_A === undefined,
       'tenant B loaded tenant A key',
     );
   });
 
   await check('idempotent delete returns false for missing key', async () => {
-    assert(secrets.delete(ctx, 'MISSING_SECRET_KEY') === false, 'delete missing returned true');
+    assert(await secrets.delete(ctx, 'MISSING_SECRET_KEY') === false, 'delete missing returned true');
   });
 
   await check('ciphertext opacity keeps plaintext out of backing store', async () => {
     const canary = 'CANARY_SECRET_aaa';
-    secrets.set(ctx, 'CANARY_KEY', canary);
+    await secrets.set(ctx, 'CANARY_KEY', canary);
     const row = db
       .prepare(
         `SELECT ciphertext, nonce, auth_tag FROM user_secrets

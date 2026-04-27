@@ -30,34 +30,34 @@ import {
 import { loadCreatorSecretsForRun } from '../services/app_creator_secrets.js';
 
 export const localSecretsAdapter: SecretsAdapter = {
-  get(ctx: SessionContext, key: string): string | null {
-    return userGet(ctx, key);
+  get(ctx: SessionContext, key: string): Promise<string | null> {
+    return Promise.resolve(userGet(ctx, key));
   },
 
-  set(ctx: SessionContext, key: string, plaintext: string): void {
-    userSet(ctx, key, plaintext);
+  set(ctx: SessionContext, key: string, plaintext: string): Promise<void> {
+    return Promise.resolve(userSet(ctx, key, plaintext));
   },
 
-  delete(ctx: SessionContext, key: string): boolean {
-    return userDel(ctx, key);
+  delete(ctx: SessionContext, key: string): Promise<boolean> {
+    return Promise.resolve(userDel(ctx, key));
   },
 
-  list(ctx: SessionContext): Array<{ key: string; updated_at: string }> {
-    return userListMasked(ctx);
+  list(ctx: SessionContext): Promise<Array<{ key: string; updated_at: string }>> {
+    return Promise.resolve(userListMasked(ctx));
   },
 
   loadUserVaultForRun(
     ctx: SessionContext,
     keys: string[],
-  ): Record<string, string> {
-    return userLoadForRun(ctx, keys);
+  ): Promise<Record<string, string>> {
+    return Promise.resolve(userLoadForRun(ctx, keys));
   },
 
   loadCreatorOverrideForRun(
     app_id: string,
     workspace_id: string,
     keys: string[],
-  ): Record<string, string> {
-    return loadCreatorSecretsForRun(app_id, workspace_id, keys);
+  ): Promise<Record<string, string>> {
+    return Promise.resolve(loadCreatorSecretsForRun(app_id, workspace_id, keys));
   },
 };

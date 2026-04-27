@@ -6,8 +6,8 @@ export interface GcpKmsSecretsAdapterOptions {
     kmsClient?: DekWrapper;
 }
 export interface DekWrapper {
-    encryptDek(dek: Buffer): Buffer;
-    decryptDek(encryptedDek: Buffer): Buffer;
+    encryptDek(dek: Buffer): Promise<Buffer>;
+    decryptDek(encryptedDek: Buffer): Promise<Buffer>;
 }
 export declare function createMockGcpKmsDekWrapper(): DekWrapper;
 export declare function createGcpKmsSecretsAdapter(opts: GcpKmsSecretsAdapterOptions): SecretsAdapter;

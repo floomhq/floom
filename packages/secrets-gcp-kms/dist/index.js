@@ -1,53 +1,31 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-const CHILD_SCRIPT = `
-import { readFileSync } from 'node:fs';
-const payload = JSON.parse(readFileSync(0, 'utf8'));
-const { KeyManagementServiceClient } = await import('@google-cloud/kms');
-const client = new KeyManagementServiceClient(
-  payload.projectId ? { projectId: payload.projectId } : undefined
-);
-if (payload.op === 'encrypt') {
-  const [response] = await client.encrypt({
-    name: payload.keyName,
-    plaintext: Buffer.from(payload.value, 'base64'),
-  });
-  process.stdout.write(Buffer.from(response.ciphertext ?? []).toString('base64'));
-} else if (payload.op === 'decrypt') {
-  const [response] = await client.decrypt({
-    name: payload.keyName,
-    ciphertext: Buffer.from(payload.value, 'base64'),
-  });
-  process.stdout.write(Buffer.from(response.plaintext ?? []).toString('base64'));
-} else {
-  throw new Error('unknown KMS op: ' + payload.op);
-}
-`;
 class GcpKmsDekWrapper {
     keyName;
     projectId;
+    clientPromise;
     constructor(keyName, projectId) {
         this.keyName = keyName;
         this.projectId = projectId;
     }
-    encryptDek(dek) {
-        return this.call('encrypt', dek);
-    }
-    decryptDek(encryptedDek) {
-        return this.call('decrypt', encryptedDek);
-    }
-    call(op, value) {
-        const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', CHILD_SCRIPT], {
-            input: JSON.stringify({
-                op,
-                keyName: this.keyName,
-                projectId: this.projectId,
-                value: value.toString('base64'),
-            }),
-            encoding: 'utf8',
-            maxBuffer: 1024 * 1024,
+    async encryptDek(dek) {
+        const client = await this.client();
+        const [response] = await client.encrypt({
+            name: this.keyName,
+            plaintext: dek,
         });
-        return Buffer.from(stdout.trim(), 'base64');
+        return Buffer.from(response.ciphertext ?? []);
+    }
+    async decryptDek(encryptedDek) {
+        const client = await this.client();
+        const [response] = await client.decrypt({
+            name: this.keyName,
+            ciphertext: encryptedDek,
+        });
+        return Buffer.from(response.plaintext ?? []);
+    }
+    client() {
+        this.clientPromise ??= import('@google-cloud/kms').then(({ KeyManagementServiceClient }) => new KeyManagementServiceClient(this.projectId ? { projectId: this.projectId } : undefined));
+        return this.clientPromise;
     }
 }
 class XorDekWrapper {
@@ -55,10 +33,10 @@ class XorDekWrapper {
         .update('floom-gcp-kms-conformance')
         .digest();
     encryptDek(dek) {
-        return this.xor(dek);
+        return Promise.resolve(this.xor(dek));
     }
     decryptDek(encryptedDek) {
-        return this.xor(encryptedDek);
+        return Promise.resolve(this.xor(encryptedDek));
     }
     xor(input) {
         const out = Buffer.alloc(input.length);
@@ -78,39 +56,39 @@ export function createGcpKmsSecretsAdapter(opts) {
             ? createMockGcpKmsDekWrapper()
             : new GcpKmsDekWrapper(opts.keyName, opts.projectId));
     const adapter = {
-        get(ctx, key) {
+        async get(ctx, key) {
             const row = storage.getUserSecretRow(ctx.workspace_id, ctx.user_id, key);
-            return row ? decryptSecretRow(kms, row) : null;
+            return row ? await decryptSecretRow(kms, row) : null;
         },
-        set(ctx, key, plaintext) {
+        async set(ctx, key, plaintext) {
             storage.upsertUserSecretRow({
                 workspace_id: ctx.workspace_id,
                 user_id: ctx.user_id,
                 key,
-                ...encryptSecret(kms, plaintext),
+                ...(await encryptSecret(kms, plaintext)),
             });
         },
-        delete(ctx, key) {
+        async delete(ctx, key) {
             return storage.deleteUserSecretRow(ctx.workspace_id, ctx.user_id, key);
         },
-        list(ctx) {
+        async list(ctx) {
             return storage.listUserSecretMetadata(ctx.workspace_id, ctx.user_id);
         },
-        loadUserVaultForRun(ctx, keys) {
+        async loadUserVaultForRun(ctx, keys) {
             const rows = storage.listUserSecretRows(ctx.workspace_id, ctx.user_id, keys);
-            return decryptRows(kms, rows);
+            return await decryptRows(kms, rows);
         },
-        loadCreatorOverrideForRun(app_id, _workspace_id, keys) {
+        async loadCreatorOverrideForRun(app_id, _workspace_id, keys) {
             const rows = storage.listCreatorOverrideSecretRowsForRun(app_id, keys);
-            return decryptRows(kms, rows);
+            return await decryptRows(kms, rows);
         },
-        __setCreatorOverrideForTests(app_id, workspace_id, key, plaintext) {
+        async __setCreatorOverrideForTests(app_id, workspace_id, key, plaintext) {
             storage.setSecretPolicy(app_id, key, 'creator_override');
             storage.upsertCreatorSecretRow({
                 app_id,
                 workspace_id,
                 key,
-                ...encryptSecret(kms, plaintext),
+                ...(await encryptSecret(kms, plaintext)),
             });
         },
     };
@@ -133,7 +111,7 @@ function requireSecretStorage(storage) {
     }
     return storage;
 }
-function encryptSecret(kms, plaintext) {
+async function encryptSecret(kms, plaintext) {
     const dek = randomBytes(32);
     const nonce = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', dek, nonce);
@@ -142,7 +120,7 @@ function encryptSecret(kms, plaintext) {
         cipher.final(),
     ]);
     const authTag = cipher.getAuthTag();
-    const encryptedDek = kms.encryptDek(dek);
+    const encryptedDek = await kms.encryptDek(dek);
     return {
         ciphertext: ciphertext.toString('hex'),
         nonce: nonce.toString('hex'),
@@ -150,11 +128,11 @@ function encryptSecret(kms, plaintext) {
         encrypted_dek: encryptedDek.toString('base64'),
     };
 }
-function decryptSecretRow(kms, row) {
+async function decryptSecretRow(kms, row) {
     if (!row.encrypted_dek) {
         throw new Error(`secret row ${row.key} is missing encrypted_dek`);
     }
-    const dek = kms.decryptDek(Buffer.from(row.encrypted_dek, 'base64'));
+    const dek = await kms.decryptDek(Buffer.from(row.encrypted_dek, 'base64'));
     const decipher = createDecipheriv('aes-256-gcm', dek, Buffer.from(row.nonce, 'hex'));
     decipher.setAuthTag(Buffer.from(row.auth_tag, 'hex'));
     const plaintext = Buffer.concat([
@@ -163,11 +141,11 @@ function decryptSecretRow(kms, row) {
     ]);
     return plaintext.toString('utf8');
 }
-function decryptRows(kms, rows) {
+async function decryptRows(kms, rows) {
     const out = {};
     for (const row of rows) {
         try {
-            out[row.key] = decryptSecretRow(kms, row);
+            out[row.key] = await decryptSecretRow(kms, row);
         }
         catch {
             continue;

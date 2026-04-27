@@ -375,7 +375,7 @@ export async function runApp(
     ctx.user_id,
     ctx.device_id,
   );
-  dispatchRun(app, manifest, runId, actionName, validated, byok.perCallSecrets, ctx);
+  await dispatchRun(app, manifest, runId, actionName, validated, byok.perCallSecrets, ctx);
   const fresh = await waitForRun(runId);
   return formatAgentRun(fresh, app.slug, manifest.runtime);
 }

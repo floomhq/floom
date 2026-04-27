@@ -351,7 +351,7 @@ function createPerAppMcpServer(
         // falls back to defaultContext() (the synthetic 'local' user)
         // and loses access to their own vault. See
         // docs/product-audit/deep/pd-05-three-surface-parity.md.
-        dispatchRun(
+        await dispatchRun(
           fresh,
           freshManifest,
           runId,

@@ -281,7 +281,7 @@ runRouter.post('/', async (c) => {
   //
   // BYOK key (if any) rides in as perCallSecrets — highest-precedence slot
   // in dispatchRun's merge order. Transient, never persisted.
-  dispatchRun(
+  await dispatchRun(
     row,
     manifest,
     runId,
@@ -624,7 +624,7 @@ slugRunRouter.post('/', async (c) => {
   // runner falls back to the synthetic 'local' workspace and every
   // authenticated user's /api/secrets POST is effectively invisible to
   // their own runs.
-  dispatchRun(
+  await dispatchRun(
     row,
     manifest,
     runId,

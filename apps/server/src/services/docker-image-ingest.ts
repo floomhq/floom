@@ -40,7 +40,10 @@ import { generateLinkShareToken } from '../lib/link-share-token.js';
 import { normalizeManifest, ManifestError } from './manifest.js';
 import { slugify, SlugTakenError, deriveSlugSuggestions } from './openapi-ingest.js';
 import { auditLog } from './audit-log.js';
+// TODO(adapters): migrate these legacy sync secret writes to SecretsAdapter
+// once creator-secret mutation is part of the adapter surface.
 import { setPolicy, setCreatorSecret } from './app_creator_secrets.js';
+// TODO(adapters): migrate this legacy sync vault read to SecretsAdapter.
 import * as userSecrets from './user_secrets.js';
 import type { NormalizedManifest, SessionContext } from '../types.js';
 

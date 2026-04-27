@@ -13,6 +13,7 @@ import {
   isByokGated,
   recordFreeRun,
 } from './byok-gate.js';
+// TODO(adapters): migrate this legacy sync secret read to SecretsAdapter.
 import * as userSecrets from '../services/user_secrets.js';
 import type { SessionContext } from '../types.js';
 

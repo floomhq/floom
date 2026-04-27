@@ -601,19 +601,19 @@ export interface AuthMagicLinkSentResult {
 // =====================================================================
 
 export interface SecretsAdapter {
-  get(ctx: SessionContext, key: string): string | null;
-  set(ctx: SessionContext, key: string, plaintext: string): void;
-  delete(ctx: SessionContext, key: string): boolean;
-  list(ctx: SessionContext): Array<{ key: string; updated_at: string }>;
+  get(ctx: SessionContext, key: string): Promise<string | null>;
+  set(ctx: SessionContext, key: string, plaintext: string): Promise<void>;
+  delete(ctx: SessionContext, key: string): Promise<boolean>;
+  list(ctx: SessionContext): Promise<Array<{ key: string; updated_at: string }>>;
   loadUserVaultForRun(
     ctx: SessionContext,
     keys: string[],
-  ): Record<string, string>;
+  ): Promise<Record<string, string>>;
   loadCreatorOverrideForRun(
     app_id: string,
     workspace_id: string,
     keys: string[],
-  ): Record<string, string>;
+  ): Promise<Record<string, string>>;
 }
 
 // =====================================================================

@@ -38,6 +38,8 @@ import { db } from '../db.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
+// TODO(adapters): migrate these legacy sync creator-secret routes to
+// SecretsAdapter once policy and creator-value mutation are in the contract.
 import * as creatorSecrets from '../services/app_creator_secrets.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
 import { checkAppVisibility, requireAuthenticatedInCloud } from '../lib/auth.js';

@@ -4,7 +4,6 @@ import {
   createHash,
   randomBytes,
 } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import type {
   CreatorSecretCiphertextRow,
   SecretCiphertextRow,
@@ -22,9 +21,13 @@ export interface GcpKmsSecretsAdapterOptions {
 }
 
 export interface DekWrapper {
-  encryptDek(dek: Buffer): Buffer;
-  decryptDek(encryptedDek: Buffer): Buffer;
+  encryptDek(dek: Buffer): Promise<Buffer>;
+  decryptDek(encryptedDek: Buffer): Promise<Buffer>;
 }
+
+type KmsClient = InstanceType<
+  typeof import('@google-cloud/kms').KeyManagementServiceClient
+>;
 
 type SecretStorage = Required<
   Pick<
@@ -46,63 +49,43 @@ interface TestableSecretsAdapter extends SecretsAdapter {
     workspace_id: string,
     key: string,
     plaintext: string,
-  ): void;
+  ): Promise<void>;
 }
-
-const CHILD_SCRIPT = `
-import { readFileSync } from 'node:fs';
-const payload = JSON.parse(readFileSync(0, 'utf8'));
-const { KeyManagementServiceClient } = await import('@google-cloud/kms');
-const client = new KeyManagementServiceClient(
-  payload.projectId ? { projectId: payload.projectId } : undefined
-);
-if (payload.op === 'encrypt') {
-  const [response] = await client.encrypt({
-    name: payload.keyName,
-    plaintext: Buffer.from(payload.value, 'base64'),
-  });
-  process.stdout.write(Buffer.from(response.ciphertext ?? []).toString('base64'));
-} else if (payload.op === 'decrypt') {
-  const [response] = await client.decrypt({
-    name: payload.keyName,
-    ciphertext: Buffer.from(payload.value, 'base64'),
-  });
-  process.stdout.write(Buffer.from(response.plaintext ?? []).toString('base64'));
-} else {
-  throw new Error('unknown KMS op: ' + payload.op);
-}
-`;
 
 class GcpKmsDekWrapper implements DekWrapper {
+  private clientPromise?: Promise<KmsClient>;
+
   constructor(
     private readonly keyName: string,
     private readonly projectId?: string,
   ) {}
 
-  encryptDek(dek: Buffer): Buffer {
-    return this.call('encrypt', dek);
+  async encryptDek(dek: Buffer): Promise<Buffer> {
+    const client = await this.client();
+    const [response] = await client.encrypt({
+      name: this.keyName,
+      plaintext: dek,
+    });
+    return Buffer.from(response.ciphertext ?? []);
   }
 
-  decryptDek(encryptedDek: Buffer): Buffer {
-    return this.call('decrypt', encryptedDek);
+  async decryptDek(encryptedDek: Buffer): Promise<Buffer> {
+    const client = await this.client();
+    const [response] = await client.decrypt({
+      name: this.keyName,
+      ciphertext: encryptedDek,
+    });
+    return Buffer.from(response.plaintext ?? []);
   }
 
-  private call(op: 'encrypt' | 'decrypt', value: Buffer): Buffer {
-    const stdout = execFileSync(
-      process.execPath,
-      ['--input-type=module', '-e', CHILD_SCRIPT],
-      {
-        input: JSON.stringify({
-          op,
-          keyName: this.keyName,
-          projectId: this.projectId,
-          value: value.toString('base64'),
-        }),
-        encoding: 'utf8',
-        maxBuffer: 1024 * 1024,
-      },
+  private client(): Promise<KmsClient> {
+    this.clientPromise ??= import('@google-cloud/kms').then(
+      ({ KeyManagementServiceClient }) =>
+        new KeyManagementServiceClient(
+          this.projectId ? { projectId: this.projectId } : undefined,
+        ),
     );
-    return Buffer.from(stdout.trim(), 'base64');
+    return this.clientPromise;
   }
 }
 
@@ -111,12 +94,12 @@ class XorDekWrapper implements DekWrapper {
     .update('floom-gcp-kms-conformance')
     .digest();
 
-  encryptDek(dek: Buffer): Buffer {
-    return this.xor(dek);
+  encryptDek(dek: Buffer): Promise<Buffer> {
+    return Promise.resolve(this.xor(dek));
   }
 
-  decryptDek(encryptedDek: Buffer): Buffer {
-    return this.xor(encryptedDek);
+  decryptDek(encryptedDek: Buffer): Promise<Buffer> {
+    return Promise.resolve(this.xor(encryptedDek));
   }
 
   private xor(input: Buffer): Buffer {
@@ -143,61 +126,67 @@ export function createGcpKmsSecretsAdapter(
       : new GcpKmsDekWrapper(opts.keyName, opts.projectId));
 
   const adapter: TestableSecretsAdapter = {
-    get(ctx: SessionContext, key: string): string | null {
+    async get(ctx: SessionContext, key: string): Promise<string | null> {
       const row = storage.getUserSecretRow(ctx.workspace_id, ctx.user_id, key);
-      return row ? decryptSecretRow(kms, row) : null;
+      return row ? await decryptSecretRow(kms, row) : null;
     },
 
-    set(ctx: SessionContext, key: string, plaintext: string): void {
+    async set(
+      ctx: SessionContext,
+      key: string,
+      plaintext: string,
+    ): Promise<void> {
       storage.upsertUserSecretRow({
         workspace_id: ctx.workspace_id,
         user_id: ctx.user_id,
         key,
-        ...encryptSecret(kms, plaintext),
+        ...(await encryptSecret(kms, plaintext)),
       });
     },
 
-    delete(ctx: SessionContext, key: string): boolean {
+    async delete(ctx: SessionContext, key: string): Promise<boolean> {
       return storage.deleteUserSecretRow(ctx.workspace_id, ctx.user_id, key);
     },
 
-    list(ctx: SessionContext): Array<{ key: string; updated_at: string }> {
+    async list(
+      ctx: SessionContext,
+    ): Promise<Array<{ key: string; updated_at: string }>> {
       return storage.listUserSecretMetadata(ctx.workspace_id, ctx.user_id);
     },
 
-    loadUserVaultForRun(
+    async loadUserVaultForRun(
       ctx: SessionContext,
       keys: string[],
-    ): Record<string, string> {
+    ): Promise<Record<string, string>> {
       const rows = storage.listUserSecretRows(
         ctx.workspace_id,
         ctx.user_id,
         keys,
       );
-      return decryptRows(kms, rows);
+      return await decryptRows(kms, rows);
     },
 
-    loadCreatorOverrideForRun(
+    async loadCreatorOverrideForRun(
       app_id: string,
       _workspace_id: string,
       keys: string[],
-    ): Record<string, string> {
+    ): Promise<Record<string, string>> {
       const rows = storage.listCreatorOverrideSecretRowsForRun(app_id, keys);
-      return decryptRows(kms, rows);
+      return await decryptRows(kms, rows);
     },
 
-    __setCreatorOverrideForTests(
+    async __setCreatorOverrideForTests(
       app_id: string,
       workspace_id: string,
       key: string,
       plaintext: string,
-    ): void {
+    ): Promise<void> {
       storage.setSecretPolicy(app_id, key, 'creator_override');
       storage.upsertCreatorSecretRow({
         app_id,
         workspace_id,
         key,
-        ...encryptSecret(kms, plaintext),
+        ...(await encryptSecret(kms, plaintext)),
       });
     },
   };
@@ -225,10 +214,10 @@ function requireSecretStorage(storage: StorageAdapter): SecretStorage {
   return storage as SecretStorage;
 }
 
-function encryptSecret(
+async function encryptSecret(
   kms: DekWrapper,
   plaintext: string,
-): Omit<SecretCiphertextWriteInput, 'workspace_id' | 'user_id' | 'key'> {
+): Promise<Omit<SecretCiphertextWriteInput, 'workspace_id' | 'user_id' | 'key'>> {
   const dek = randomBytes(32);
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', dek, nonce);
@@ -237,7 +226,7 @@ function encryptSecret(
     cipher.final(),
   ]);
   const authTag = cipher.getAuthTag();
-  const encryptedDek = kms.encryptDek(dek);
+  const encryptedDek = await kms.encryptDek(dek);
   return {
     ciphertext: ciphertext.toString('hex'),
     nonce: nonce.toString('hex'),
@@ -246,17 +235,17 @@ function encryptSecret(
   };
 }
 
-function decryptSecretRow(
+async function decryptSecretRow(
   kms: DekWrapper,
   row: Pick<
     SecretCiphertextRow | CreatorSecretCiphertextRow,
     'key' | 'ciphertext' | 'nonce' | 'auth_tag' | 'encrypted_dek'
   >,
-): string {
+): Promise<string> {
   if (!row.encrypted_dek) {
     throw new Error(`secret row ${row.key} is missing encrypted_dek`);
   }
-  const dek = kms.decryptDek(Buffer.from(row.encrypted_dek, 'base64'));
+  const dek = await kms.decryptDek(Buffer.from(row.encrypted_dek, 'base64'));
   const decipher = createDecipheriv(
     'aes-256-gcm',
     dek,
@@ -270,14 +259,14 @@ function decryptSecretRow(
   return plaintext.toString('utf8');
 }
 
-function decryptRows(
+async function decryptRows(
   kms: DekWrapper,
   rows: Array<SecretCiphertextRow | CreatorSecretCiphertextRow>,
-): Record<string, string> {
+): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const row of rows) {
     try {
-      out[row.key] = decryptSecretRow(kms, row);
+      out[row.key] = await decryptSecretRow(kms, row);
     } catch {
       continue;
     }

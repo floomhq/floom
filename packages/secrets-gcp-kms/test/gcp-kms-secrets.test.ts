@@ -100,8 +100,8 @@ const ctx = {
 };
 const tenantCtx = { ...ctx, workspace_id: 'workspace-b' };
 
-secrets.set(ctx, 'API_KEY', 'sk-live-secret');
-assert.equal(secrets.get(ctx, 'API_KEY'), 'sk-live-secret');
+await secrets.set(ctx, 'API_KEY', 'sk-live-secret');
+assert.equal(await secrets.get(ctx, 'API_KEY'), 'sk-live-secret');
 
 const backingRow = storage.getUserSecretRow('workspace-a', 'user-1', 'API_KEY');
 assert.ok(backingRow);
@@ -112,18 +112,18 @@ assert.match(backingRow.nonce, /^[0-9a-f]{24}$/);
 assert.match(backingRow.auth_tag, /^[0-9a-f]{32}$/);
 assert.ok(backingRow.encrypted_dek);
 
-const listed = secrets.list(ctx);
+const listed = await secrets.list(ctx);
 assert.deepEqual(listed.map((row) => row.key), ['API_KEY']);
 assert.ok(!JSON.stringify(listed).includes('sk-live-secret'));
 
-secrets.set(ctx, 'EXTRA', 'extra-value');
-assert.deepEqual(secrets.loadUserVaultForRun(ctx, ['API_KEY']), {
+await secrets.set(ctx, 'EXTRA', 'extra-value');
+assert.deepEqual(await secrets.loadUserVaultForRun(ctx, ['API_KEY']), {
   API_KEY: 'sk-live-secret',
 });
 
-secrets.set(tenantCtx, 'API_KEY', 'tenant-b-secret');
-assert.equal(secrets.get(ctx, 'API_KEY'), 'sk-live-secret');
-assert.equal(secrets.get(tenantCtx, 'API_KEY'), 'tenant-b-secret');
+await secrets.set(tenantCtx, 'API_KEY', 'tenant-b-secret');
+assert.equal(await secrets.get(ctx, 'API_KEY'), 'sk-live-secret');
+assert.equal(await secrets.get(tenantCtx, 'API_KEY'), 'tenant-b-secret');
 
 const testHook = secrets as typeof secrets & {
   __setCreatorOverrideForTests(
@@ -131,22 +131,22 @@ const testHook = secrets as typeof secrets & {
     workspace_id: string,
     key: string,
     plaintext: string,
-  ): void;
+  ): Promise<void>;
 };
-testHook.__setCreatorOverrideForTests(
+await testHook.__setCreatorOverrideForTests(
   'app-1',
   'workspace-a',
   'CREATOR_ONLY',
   'creator-secret',
 );
 assert.deepEqual(
-  secrets.loadCreatorOverrideForRun('app-1', 'workspace-a', ['CREATOR_ONLY']),
+  await secrets.loadCreatorOverrideForRun('app-1', 'workspace-a', ['CREATOR_ONLY']),
   { CREATOR_ONLY: 'creator-secret' },
 );
 
-assert.equal(secrets.delete(ctx, 'API_KEY'), true);
-assert.equal(secrets.get(ctx, 'API_KEY'), null);
-assert.equal(secrets.delete(ctx, 'API_KEY'), false);
+assert.equal(await secrets.delete(ctx, 'API_KEY'), true);
+assert.equal(await secrets.get(ctx, 'API_KEY'), null);
+assert.equal(await secrets.delete(ctx, 'API_KEY'), false);
 
 console.log('gcp-kms secrets unit tests passed');
 
