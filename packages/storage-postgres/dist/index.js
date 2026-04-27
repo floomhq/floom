@@ -34,6 +34,7 @@ const APP_COLUMNS = new Set([
     'timeout_ms',
     'retries',
     'async_mode',
+    'max_run_retention_days',
     'workspace_id',
     'memory_keys',
     'featured',

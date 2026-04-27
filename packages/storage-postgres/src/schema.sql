@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS apps (
   timeout_ms INTEGER,
   retries INTEGER NOT NULL DEFAULT 0,
   async_mode TEXT,
+  max_run_retention_days INTEGER,
   workspace_id TEXT NOT NULL DEFAULT 'local',
   memory_keys TEXT,
   featured BOOLEAN NOT NULL DEFAULT false,
