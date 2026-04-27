@@ -1,6 +1,18 @@
+/**
+ * MobileDrawer — v26 mobile navigation drawer.
+ *
+ * v26 changes (V26-IA-SPEC §12):
+ *   - No "Workspace settings" group (access via /settings from workspace name)
+ *   - No "Account" group (access via /settings/general)
+ *   - Run section: Apps · Runs
+ *   - Studio section: Apps · Runs · + New app
+ *   - Settings link (workspace name)
+ *   - Docs + Sign out at bottom
+ */
+
 import type { CSSProperties, ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Box, Home, KeyRound, LockKeyhole, Settings, UserRound, X } from 'lucide-react';
+import { Box, Play, Plus, Settings, X } from 'lucide-react';
 import { WorkspaceIdentityBlock } from './WorkspaceIdentityBlock';
 import { useMyApps } from '../hooks/useMyApps';
 import { useSession } from '../hooks/useSession';
@@ -16,8 +28,6 @@ export function MobileDrawer({ open, onClose, onSignOut }: Props) {
   const { data, isAuthenticated } = useSession();
   const { apps } = useMyApps();
   if (!open) return null;
-
-  const studioLabel = apps && apps.length > 0 ? `Apps · ${apps.length}` : 'Apps';
 
   return (
     <>
@@ -36,75 +46,93 @@ export function MobileDrawer({ open, onClose, onSignOut }: Props) {
           </button>
         </div>
         <div style={groupsStyle}>
-          <DrawerGroup label="Run">
-            <DrawerLink to="/run" active={location.pathname === '/run'} onClose={onClose} icon={<Home size={15} />}>
-              Overview
-            </DrawerLink>
-            <DrawerLink
-              to="/run/apps"
-              active={location.pathname === '/run/apps' || location.pathname.startsWith('/run/apps/')}
-              onClose={onClose}
-              icon={<Box size={15} />}
-            >
-              Apps
-            </DrawerLink>
-            <DrawerLink
-              to="/run/runs"
-              active={location.pathname === '/run/runs' || location.pathname.startsWith('/run/runs/')}
-              onClose={onClose}
-              icon={<Home size={15} />}
-            >
-              Runs
-            </DrawerLink>
-          </DrawerGroup>
-          <DrawerGroup label="Studio">
-            <DrawerLink to="/studio" active={location.pathname === '/studio'} onClose={onClose} icon={<Home size={15} />}>
-              Home
-            </DrawerLink>
-            <DrawerLink to="/studio/apps" active={location.pathname === '/studio/apps'} onClose={onClose} icon={<Box size={15} />}>
-              {studioLabel}
-            </DrawerLink>
-            <DrawerLink to="/studio/runs" active={location.pathname === '/studio/runs'} onClose={onClose} icon={<Home size={15} />}>
-              All runs
-            </DrawerLink>
-          </DrawerGroup>
-          <DrawerGroup label="Workspace settings">
-            <DrawerLink
-              to="/settings/byok-keys"
-              active={location.pathname === '/settings/byok-keys'}
-              onClose={onClose}
-              icon={<LockKeyhole size={15} />}
-            >
-              BYOK keys
-            </DrawerLink>
-            <DrawerLink
-              to="/settings/agent-tokens"
-              active={location.pathname === '/settings/agent-tokens'}
-              onClose={onClose}
-              icon={<KeyRound size={15} />}
-            >
-              Agent tokens
-            </DrawerLink>
-            <DrawerLink
-              to="/settings/studio"
-              active={location.pathname === '/settings/studio'}
-              onClose={onClose}
-              icon={<Settings size={15} />}
-            >
-              Studio settings
-            </DrawerLink>
-          </DrawerGroup>
-          <DrawerGroup label="Account">
-            <DrawerLink
-              to="/account/settings"
-              active={location.pathname === '/account/settings'}
-              onClose={onClose}
-              icon={<UserRound size={15} />}
-            >
-              Account settings
-            </DrawerLink>
+          {isAuthenticated ? (
+            <>
+              <DrawerGroup label="Run">
+                <DrawerLink
+                  to="/run/apps"
+                  active={location.pathname === '/run/apps' || location.pathname.startsWith('/run/apps/')}
+                  onClose={onClose}
+                  icon={<Box size={15} />}
+                >
+                  Apps {apps ? `· ${apps.length}` : ''}
+                </DrawerLink>
+                <DrawerLink
+                  to="/run/runs"
+                  active={location.pathname === '/run/runs' || location.pathname.startsWith('/run/runs/')}
+                  onClose={onClose}
+                  icon={<Play size={15} />}
+                >
+                  Runs
+                </DrawerLink>
+              </DrawerGroup>
+              <DrawerGroup label="Studio">
+                <DrawerLink
+                  to="/studio/apps"
+                  active={location.pathname === '/studio/apps' || (
+                    location.pathname.startsWith('/studio/') &&
+                    !location.pathname.startsWith('/studio/runs')
+                  )}
+                  onClose={onClose}
+                  icon={<Box size={15} />}
+                >
+                  Apps
+                </DrawerLink>
+                <DrawerLink
+                  to="/studio/runs"
+                  active={location.pathname === '/studio/runs' || location.pathname.startsWith('/studio/runs/')}
+                  onClose={onClose}
+                  icon={<Play size={15} />}
+                >
+                  Runs
+                </DrawerLink>
+                <DrawerLink
+                  to="/studio/build"
+                  active={location.pathname === '/studio/build'}
+                  onClose={onClose}
+                  icon={<Plus size={15} />}
+                >
+                  New app
+                </DrawerLink>
+              </DrawerGroup>
+              <DrawerGroup label="Settings">
+                <DrawerLink
+                  to="/settings/general"
+                  active={location.pathname.startsWith('/settings')}
+                  onClose={onClose}
+                  icon={<Settings size={15} />}
+                >
+                  Workspace settings
+                </DrawerLink>
+              </DrawerGroup>
+            </>
+          ) : (
+            <DrawerGroup label="Discover">
+              <DrawerLink to="/apps" active={location.pathname === '/apps'} onClose={onClose} icon={<Box size={15} />}>
+                Apps
+              </DrawerLink>
+              <DrawerLink to="/docs" active={location.pathname.startsWith('/docs')} onClose={onClose} icon={<Box size={15} />}>
+                Docs
+              </DrawerLink>
+              <DrawerLink to="/pricing" active={location.pathname === '/pricing'} onClose={onClose} icon={<Box size={15} />}>
+                Pricing
+              </DrawerLink>
+            </DrawerGroup>
+          )}
+
+          <DrawerGroup label="">
+            {isAuthenticated && (
+              <DrawerLink
+                to="/docs"
+                active={location.pathname.startsWith('/docs')}
+                onClose={onClose}
+                icon={<Box size={15} />}
+              >
+                Docs
+              </DrawerLink>
+            )}
             {!isAuthenticated ? (
-              <DrawerLink to="/login" active={location.pathname === '/login'} onClose={onClose} icon={<UserRound size={15} />}>
+              <DrawerLink to="/login" active={location.pathname === '/login'} onClose={onClose} icon={<Box size={15} />}>
                 Sign in
               </DrawerLink>
             ) : null}
@@ -134,7 +162,7 @@ export function MobileDrawer({ open, onClose, onSignOut }: Props) {
 function DrawerGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section style={groupStyle}>
-      <div style={labelStyle}>{label}</div>
+      {label && <div style={labelStyle}>{label}</div>}
       {children}
     </section>
   );
@@ -257,13 +285,16 @@ const buttonLinkStyle: CSSProperties = {
   border: '1px solid transparent',
   fontFamily: 'inherit',
   cursor: 'pointer',
+  background: 'none',
+  textAlign: 'left',
 };
 
 const footStyle: CSSProperties = {
+  padding: '13px 16px',
   borderTop: '1px solid var(--line)',
-  padding: '12px 14px',
-  color: 'var(--muted)',
   fontSize: 12,
+  color: 'var(--muted)',
+  fontWeight: 600,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
