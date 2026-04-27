@@ -372,6 +372,10 @@ hubRouter.post('/ingest', async (c) => {
 // GET /api/hub/mine — apps owned by the caller's active workspace.
 hubRouter.get('/mine', async (c) => {
   const ctx = await resolveUserContext(c);
+  // #870: in Cloud mode an anonymous caller must not list another user's apps.
+  // OSS / self-hosted (non-cloud) keeps the legacy single-workspace behaviour.
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
   const rows = db
     .prepare(
       `SELECT apps.*, (
