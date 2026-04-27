@@ -268,9 +268,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
       >
         {/* Logo lockup (#632): mark from <Logo /> + wordmark rendered
             directly here so we can bump font-size past Logo.tsx's baked-in
-            14px. Gap 8px keeps mark and wordmark optically balanced. */}
+            14px. Gap 8px keeps mark and wordmark optically balanced.
+            v26 spec: route-aware — landing if logged-out, /run/apps if logged-in. */}
         <Link
-          to="/"
+          to={showAuthedChrome ? '/run/apps' : '/'}
           className="brand"
           style={{
             display: 'inline-flex',
