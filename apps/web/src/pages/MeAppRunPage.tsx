@@ -1,16 +1,10 @@
-// MVP stub: /me/apps/:slug/run — replaced with ComingSoon for launch.
+// MVP stub: /me/apps/:slug/run → redirect for launch.
 // RunAppTabs export preserved as MeAppTriggersPage etc. depend on it.
 
-import { Link } from 'react-router-dom';
-import { WorkspacePageShell } from '../components/WorkspacePageShell';
-import { ComingSoon } from '../components/ComingSoon';
+import { Link, Navigate } from 'react-router-dom';
 
 export function MeAppRunPage() {
-  return (
-    <WorkspacePageShell mode="run" title="Run app · Floom">
-      <ComingSoon feature="App run surface" />
-    </WorkspacePageShell>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 export function RunAppTabs({ slug, active }: { slug: string; active: 'run' | 'triggers' }) {
