@@ -1,14 +1,9 @@
-// MVP stub: /settings/byok-keys — replaced with ComingSoon for launch.
+// MVP stub: /settings/byok-keys → redirect for launch.
 
-import { WorkspacePageShell } from '../components/WorkspacePageShell';
-import { ComingSoon } from '../components/ComingSoon';
+import { Navigate } from 'react-router-dom';
 
 export function SettingsByokKeysPage() {
-  return (
-    <WorkspacePageShell mode="settings" title="BYOK Keys · Settings · Floom">
-      <ComingSoon feature="BYOK keys" />
-    </WorkspacePageShell>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 export function MeSecretsPage() {
