@@ -168,7 +168,7 @@ adminRouter.post('/review-queue/:slug/approve', async (c) => {
   if (canonicalVisibility(app.visibility) !== 'pending_review') {
     return c.json({ error: 'App is not pending review', code: 'invalid_review_state' }, 409);
   }
-  const next = transitionVisibility(app, 'public_live', {
+  const next = await transitionVisibility(app, 'public_live', {
     actorUserId: ctx.user_id,
     actorTokenId: ctx.agent_token_id,
     actorIp: getAuditActor(c, ctx).ip,
@@ -200,7 +200,7 @@ adminRouter.post('/review-queue/:slug/reject', async (c) => {
   if (canonicalVisibility(app.visibility) !== 'pending_review') {
     return c.json({ error: 'App is not pending review', code: 'invalid_review_state' }, 409);
   }
-  const next = transitionVisibility(app, 'changes_requested', {
+  const next = await transitionVisibility(app, 'changes_requested', {
     actorUserId: ctx.user_id,
     actorTokenId: ctx.agent_token_id,
     actorIp: getAuditActor(c, ctx).ip,
@@ -227,7 +227,7 @@ adminRouter.post('/apps/:slug/takedown', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() }, 400);
   }
-  const next = transitionVisibility(app, 'private', {
+  const next = await transitionVisibility(app, 'private', {
     actorUserId: ctx.user_id,
     actorTokenId: ctx.agent_token_id,
     actorIp: getAuditActor(c, ctx).ip,

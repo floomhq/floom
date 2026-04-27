@@ -34,7 +34,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { adapters } from '../adapters/index.js';
-import { db } from '../db.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import { auditLog, getAuditActor } from '../services/audit-log.js';
 import { resolveUserContext } from '../services/session.js';
@@ -92,7 +91,9 @@ function isOwner(
   return false;
 }
 
-function serializeInvite(invite: ReturnType<typeof listInvites>[number]) {
+type SerializedInviteInput = Awaited<ReturnType<typeof listInvites>>[number];
+
+function serializeInvite(invite: SerializedInviteInput) {
   return {
     id: invite.id,
     invited_user_id: invite.invited_user_id,
@@ -129,7 +130,7 @@ meAppsRouter.get('/:slug/sharing', async (c) => {
     slug: app.slug,
     visibility: canonicalVisibility(app.visibility),
     link_share_token: canonicalVisibility(app.visibility) === 'link' ? app.link_share_token : null,
-    invites: listInvites(app.id).map(serializeInvite),
+    invites: (await listInvites(app.id)).map(serializeInvite),
     review: {
       submitted_at: app.review_submitted_at,
       decided_at: app.review_decided_at,
@@ -166,7 +167,7 @@ meAppsRouter.patch('/:slug/sharing', async (c) => {
 
   let nextApp: AppRecord;
   try {
-    nextApp = transitionVisibility(app, to, {
+    nextApp = await transitionVisibility(app, to, {
       actorUserId: ctx.user_id,
       actorTokenId: ctx.agent_token_id,
       actorIp: getAuditActor(c, ctx).ip,
@@ -212,16 +213,7 @@ meAppsRouter.get('/:slug/sharing/user-search', async (c) => {
 
   const q = (c.req.query('q') || '').trim().toLowerCase();
   if (q.length < 2) return c.json({ users: [] });
-  const users = db
-    .prepare(
-      `SELECT id, email, name
-         FROM users
-        WHERE LOWER(COALESCE(name, '')) LIKE ?
-           OR LOWER(COALESCE(email, '')) LIKE ?
-        ORDER BY name, email
-        LIMIT 10`,
-    )
-    .all(`%${q}%`, `%${q}%`) as Array<{ id: string; email: string | null; name: string | null }>;
+  const users = await adapters.storage.searchUsers(q, 10);
   return c.json({ users });
 });
 
@@ -246,9 +238,9 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
 
   let invite;
   if (parsed.data.username) {
-    const user = findUserByUsername(parsed.data.username);
+    const user = await findUserByUsername(parsed.data.username);
     if (!user) return c.json({ error: 'User not found', code: 'user_not_found' }, 404);
-    invite = upsertInvite({
+    invite = await upsertInvite({
       appId: app.id,
       invitedByUserId: ctx.user_id,
       invitedUserId: user.id,
@@ -257,8 +249,8 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
     });
   } else {
     const email = parsed.data.email!.trim().toLowerCase();
-    const user = findUserByEmail(email);
-    invite = upsertInvite({
+    const user = await findUserByEmail(email);
+    invite = await upsertInvite({
       appId: app.id,
       invitedByUserId: ctx.user_id,
       invitedUserId: user?.id || null,
@@ -278,7 +270,7 @@ meAppsRouter.post('/:slug/sharing/invite', async (c) => {
 
   if (canonicalVisibility(app.visibility) === 'private') {
     try {
-      transitionVisibility(app, 'invited', {
+      await transitionVisibility(app, 'invited', {
         actorUserId: ctx.user_id,
         actorTokenId: ctx.agent_token_id,
         actorIp: getAuditActor(c, ctx).ip,
@@ -302,7 +294,7 @@ meAppsRouter.post('/:slug/sharing/invite/:invite_id/revoke', async (c) => {
   const app = await loadApp(c.req.param('slug') || '');
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
-  const invite = revokeInvite(c.req.param('invite_id') || '', app.id);
+  const invite = await revokeInvite(c.req.param('invite_id') || '', app.id);
   if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
   return c.json({ ok: true, invite: serializeInvite(invite) });
 });
@@ -315,7 +307,7 @@ meAppsRouter.post('/:slug/sharing/submit-review', async (c) => {
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   try {
-    const next = transitionVisibility(app, 'pending_review', {
+    const next = await transitionVisibility(app, 'pending_review', {
       actorUserId: ctx.user_id,
       actorTokenId: ctx.agent_token_id,
       actorIp: getAuditActor(c, ctx).ip,
@@ -336,7 +328,7 @@ meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   if (!isAppOwner(app, ctx)) return c.json({ error: 'App not found', code: 'not_found' }, 404);
   try {
-    const next = transitionVisibility(app, 'private', {
+    const next = await transitionVisibility(app, 'private', {
       actorUserId: ctx.user_id,
       actorTokenId: ctx.agent_token_id,
       actorIp: getAuditActor(c, ctx).ip,
@@ -367,7 +359,7 @@ meAppsRouter.get('/:slug/secret-policies', async (c) => {
   const slug = c.req.param('slug') || '';
   const app = await loadApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,

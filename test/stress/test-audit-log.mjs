@@ -97,7 +97,7 @@ console.log('ADR-013 audit log');
 
 // Happy paths --------------------------------------------------------
 const visibilityAppId = insertApp('audit-visibility');
-transitionVisibility(loadApp(visibilityAppId), 'link', {
+await transitionVisibility(loadApp(visibilityAppId), 'link', {
   actorUserId: 'local',
   reason: 'owner_enable_link',
 });
@@ -180,7 +180,7 @@ log('admin single-entry endpoint returns row', oneEntry.status === 200 && oneEnt
 const concurrentAppIds = Array.from({ length: 20 }, (_, i) => insertApp(`audit-concurrent-${i}`));
 await Promise.all(
   concurrentAppIds.map(async (id) => {
-    transitionVisibility(loadApp(id), 'link', {
+    await transitionVisibility(loadApp(id), 'link', {
       actorUserId: 'local',
       reason: 'owner_enable_link',
     });

@@ -39,7 +39,7 @@ jobsRouter.post('/', async (c) => {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,
     author: row.author,
@@ -148,7 +148,7 @@ jobsRouter.get('/:job_id', async (c) => {
   const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,
@@ -172,7 +172,7 @@ jobsRouter.post('/:job_id/cancel', async (c) => {
   const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: `App not found: ${slug}` }, 404);
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,

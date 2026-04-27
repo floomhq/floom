@@ -362,6 +362,189 @@ try {
     assert(updated.name === 'Storage User Updated', `name=${updated.name}`);
   });
 
+  await check('workspace CRUD, members, active workspace, and invites round-trip', async () => {
+    const user = await storage.createUser({
+      id: 'workspace-user-1',
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      email: 'workspace-user-1@example.com',
+      name: 'Workspace User',
+      auth_provider: 'contract',
+      auth_subject: 'workspace-user-1',
+    });
+    const workspace = await storage.createWorkspace({
+      id: 'workspace-contract-1',
+      slug: 'workspace-contract-1',
+      name: 'Workspace Contract',
+      plan: 'cloud_free',
+    });
+    assert((await storage.getWorkspace(workspace.id))?.slug === workspace.slug, 'getWorkspace mismatch');
+    assert((await storage.getWorkspaceBySlug(workspace.slug))?.id === workspace.id, 'getWorkspaceBySlug mismatch');
+    const renamed = await storage.updateWorkspace(workspace.id, { name: 'Workspace Contract Updated' });
+    assert(renamed?.name === 'Workspace Contract Updated', `name=${renamed?.name}`);
+    const member = await storage.addUserToWorkspace(workspace.id, user.id, 'admin');
+    assert(member.role === 'admin', `role=${member.role}`);
+    assert((await storage.countWorkspaceAdmins(workspace.id)) === 1, 'admin count mismatch');
+    const changed = await storage.updateWorkspaceMemberRole(workspace.id, user.id, 'editor');
+    assert(changed?.role === 'editor', `changed=${json(changed)}`);
+    const members = await storage.listWorkspaceMembers(workspace.id);
+    assert(members.some((row) => row.user_id === user.id && row.email === user.email), `members=${json(members)}`);
+    await storage.setActiveWorkspace(user.id, workspace.id);
+    assert((await storage.getActiveWorkspaceId(user.id)) === workspace.id, 'active workspace mismatch');
+    const invite = await storage.createWorkspaceInvite({
+      id: 'workspace-invite-1',
+      workspace_id: workspace.id,
+      email: 'invitee@example.com',
+      role: 'editor',
+      invited_by_user_id: user.id,
+      token: 'workspace-invite-token-1',
+      status: 'pending',
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    assert((await storage.getPendingWorkspaceInviteByToken(invite.token))?.id === invite.id, 'pending invite lookup mismatch');
+    assert((await storage.listWorkspaceInvites(workspace.id)).some((row) => row.id === invite.id), 'listWorkspaceInvites missing invite');
+    await storage.acceptWorkspaceInvite(invite.id);
+    await storage.clearActiveWorkspaceForWorkspace(workspace.id);
+    assert((await storage.getActiveWorkspaceId(user.id)) === null, 'active workspace did not clear');
+    assert((await storage.removeUserFromWorkspace(workspace.id, user.id)) === true, 'remove member returned false');
+    assert((await storage.deleteWorkspace(workspace.id)) === true, 'deleteWorkspace returned false');
+  });
+
+  await check('app memory CRUD and scoped listing round-trip', async () => {
+    await storage.upsertAppMemory({
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      app_slug: 'memory-contract-app',
+      user_id: DEFAULT_WORKSPACE_ID,
+      device_id: 'device-memory-1',
+      key: 'notes',
+      value: json({ ok: true }),
+    });
+    const row = await storage.getAppMemory({
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      app_slug: 'memory-contract-app',
+      user_id: DEFAULT_WORKSPACE_ID,
+      key: 'notes',
+    });
+    assert(row?.value === json({ ok: true }), `row=${json(row)}`);
+    const listed = await storage.listAppMemory(DEFAULT_WORKSPACE_ID, 'memory-contract-app', DEFAULT_WORKSPACE_ID, ['notes']);
+    assert(listed.length === 1 && listed[0].key === 'notes', `listed=${json(listed)}`);
+    assert((await storage.deleteAppMemory({
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      app_slug: 'memory-contract-app',
+      user_id: DEFAULT_WORKSPACE_ID,
+      key: 'notes',
+    })) === true, 'deleteAppMemory existing returned false');
+  });
+
+  await check('connections CRUD round-trip with owner scoping', async () => {
+    const conn = await storage.upsertConnection({
+      id: 'connection-contract-1',
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      owner_kind: 'user',
+      owner_id: DEFAULT_WORKSPACE_ID,
+      provider: 'gmail',
+      composio_connection_id: 'cc_contract_1',
+      composio_account_id: 'user:local',
+      status: 'pending',
+      metadata_json: null,
+    });
+    assert(conn.provider === 'gmail', `conn=${json(conn)}`);
+    assert((await storage.getConnection(conn.id))?.id === conn.id, 'getConnection mismatch');
+    assert((await storage.getConnectionByOwnerProvider({
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      owner_kind: 'user',
+      owner_id: DEFAULT_WORKSPACE_ID,
+      provider: 'gmail',
+    }))?.id === conn.id, 'natural connection lookup mismatch');
+    const active = await storage.updateConnection(conn.id, { status: 'active', metadata_json: json({ email: 'a@example.com' }) });
+    assert(active?.status === 'active', `active=${json(active)}`);
+    const listed = await storage.listConnections({ workspace_id: DEFAULT_WORKSPACE_ID, owner_kind: 'user', owner_id: DEFAULT_WORKSPACE_ID, status: 'active' });
+    assert(listed.some((row) => row.id === conn.id), `listed=${json(listed)}`);
+    assert((await storage.deleteConnection(conn.id)) === true, 'deleteConnection existing returned false');
+  });
+
+  await check('sharing link state, app invites, and visibility audit round-trip', async () => {
+    const app = await storage.createApp(appInput('app-sharing-1', 'app-sharing-1'));
+    const updated = await storage.updateAppSharing(app.id, {
+      visibility: 'link',
+      link_share_token: 'link-token-contract',
+      link_share_requires_auth: 1,
+      publish_status: 'published',
+    });
+    assert(updated?.visibility === 'link' && updated.link_share_token === 'link-token-contract', `updated=${json(updated)}`);
+    const link = await storage.getLinkShareByAppSlug(app.slug);
+    assert(link?.link_share_token === 'link-token-contract' && link.link_share_requires_auth === 1, `link=${json(link)}`);
+    const audit = await storage.createVisibilityAudit({
+      id: 'visibility-audit-1',
+      app_id: app.id,
+      from_state: 'private',
+      to_state: 'link',
+      actor_user_id: DEFAULT_WORKSPACE_ID,
+      reason: 'owner_enable_link',
+      metadata: json({ contract: true }),
+    });
+    assert((await storage.listVisibilityAudit(app.id)).some((row) => row.id === audit.id), 'visibility audit missing');
+    const invite = await storage.upsertAppInvite({
+      id: 'app-invite-1',
+      app_id: app.id,
+      invited_user_id: DEFAULT_WORKSPACE_ID,
+      invited_email: 'local@example.com',
+      state: 'pending_accept',
+      invited_by_user_id: DEFAULT_WORKSPACE_ID,
+    });
+    const accepted = await storage.acceptAppInvite(invite.id, DEFAULT_WORKSPACE_ID);
+    assert(accepted.changed === true && accepted.invite?.state === 'accepted', `accepted=${json(accepted)}`);
+    assert((await storage.userHasAcceptedAppInvite(app.id, DEFAULT_WORKSPACE_ID)) === true, 'accepted invite not visible');
+    assert((await storage.listAppInvites(app.id)).some((row) => row.id === invite.id), 'listAppInvites missing invite');
+  });
+
+  await check('triggers CRUD, due listing, firing marker, and webhook dedupe round-trip', async () => {
+    const app = await storage.createApp(appInput('app-triggers-1', 'app-triggers-1'));
+    const now = Date.now();
+    const trigger = await storage.createTrigger({
+      id: 'trigger-contract-1',
+      app_id: app.id,
+      user_id: DEFAULT_WORKSPACE_ID,
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      action: 'run',
+      inputs: json({ x: 1 }),
+      trigger_type: 'schedule',
+      cron_expression: '* * * * *',
+      tz: 'UTC',
+      webhook_secret: null,
+      webhook_url_path: null,
+      next_run_at: now - 1,
+      last_fired_at: null,
+      enabled: 1,
+      retry_policy: null,
+      created_at: now,
+      updated_at: now,
+    });
+    assert((await storage.getTrigger(trigger.id))?.id === trigger.id, 'getTrigger mismatch');
+    assert((await storage.listTriggersForApp(app.id)).some((row) => row.id === trigger.id), 'listTriggersForApp missing trigger');
+    assert((await storage.listTriggersForUser(DEFAULT_WORKSPACE_ID)).some((row) => row.id === trigger.id), 'listTriggersForUser missing trigger');
+    assert((await storage.listDueTriggers(now)).some((row) => row.id === trigger.id), 'listDueTriggers missing trigger');
+    assert((await storage.advanceTriggerSchedule(trigger.id, now + 60_000, now, trigger.next_run_at, true)) === true, 'advanceTriggerSchedule did not claim');
+    await storage.markTriggerFired(trigger.id, now + 1);
+    assert((await storage.getTrigger(trigger.id))?.last_fired_at === now + 1, 'markTriggerFired mismatch');
+    const webhook = await storage.createTrigger({
+      ...trigger,
+      id: 'trigger-contract-2',
+      trigger_type: 'webhook',
+      cron_expression: null,
+      tz: null,
+      webhook_secret: 'secret',
+      webhook_url_path: 'hook-contract-1',
+      next_run_at: null,
+      last_fired_at: null,
+      created_at: now + 2,
+      updated_at: now + 2,
+    });
+    assert((await storage.getTriggerByWebhookPath(webhook.webhook_url_path))?.id === webhook.id, 'webhook path lookup mismatch');
+    assert((await storage.recordTriggerWebhookDelivery(webhook.id, 'req-1', now, 86_400_000)) === true, 'first webhook delivery was not fresh');
+    assert((await storage.recordTriggerWebhookDelivery(webhook.id, 'req-1', now, 86_400_000)) === false, 'duplicate webhook delivery was fresh');
+    assert((await storage.deleteTrigger(trigger.id)) === true, 'deleteTrigger existing returned false');
+  });
+
   await check('admin secrets CRUD round-trip and idempotent delete', async () => {
     const app = await storage.createApp(appInput('app-admin-secrets-1', 'app-admin-secrets-1'));
     await storage.upsertAdminSecret('GLOBAL_TOKEN', 'global-1', null);

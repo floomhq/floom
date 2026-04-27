@@ -1,9 +1,14 @@
 import type {
   AppListFilter,
+  AppMemoryRecord,
+  AppInviteRecord,
   AppReviewListFilter,
   AppReviewRecord,
   AppRecord,
   AgentTokenRecord,
+  ConnectionOwnerKind,
+  ConnectionRecord,
+  ConnectionStatus,
   ErrorType,
   JobRecord,
   JobStatus,
@@ -16,11 +21,18 @@ import type {
   StudioAppSummaryFilter,
   StudioAppSummaryRecord,
   StorageAdapter,
+  TriggerRecord,
   UserRecord,
   UserWriteColumn,
   UserWriteInput,
+  VisibilityAuditRecord,
+  WorkspaceInviteRecord,
+  WorkspaceMemberRecord,
+  WorkspaceMemberRole,
+  WorkspaceMemberWithUserRecord,
   WorkspaceRecord,
   WorkspaceRole,
+  LinkShareRecord,
 } from '@floom/adapter-types';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -61,6 +73,12 @@ const APP_COLUMNS = new Set([
   'openapi_spec_url',
   'openapi_spec_cached',
   'visibility',
+  'link_share_token',
+  'link_share_requires_auth',
+  'review_submitted_at',
+  'review_decided_at',
+  'review_decided_by',
+  'review_comment',
   'is_async',
   'webhook_url',
   'timeout_ms',
@@ -79,6 +97,7 @@ const APP_COLUMNS = new Set([
 ]);
 
 const APP_BOOLEAN_COLUMNS = new Set(['is_async', 'featured', 'hero']);
+const APP_SHARING_BOOLEAN_COLUMNS = new Set(['link_share_requires_auth']);
 const RUN_JSON_COLUMNS = new Set(['inputs', 'outputs']);
 const RUN_BOOLEAN_COLUMNS = new Set(['is_public']);
 const JOB_JSON_COLUMNS = new Set([
@@ -689,6 +708,58 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
   }
 
+  async getWorkspaceBySlug(slug: string): Promise<WorkspaceRecord | undefined> {
+    return one(
+      (await this.query(
+        'SELECT id, slug, name, plan, wrapped_dek, created_at FROM workspaces WHERE slug = $1',
+        [slug],
+      )).map(normalizeWorkspace),
+    );
+  }
+
+  async createWorkspace(input: {
+    id: string;
+    slug: string;
+    name: string;
+    plan: string;
+  }): Promise<WorkspaceRecord> {
+    const row = one(
+      (await this.query(
+        `INSERT INTO workspaces (id, slug, name, plan)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, slug, name, plan, wrapped_dek, created_at`,
+        [input.id, input.slug, input.name, input.plan],
+      )).map(normalizeWorkspace),
+    );
+    if (!row) throw new Error(`createWorkspace: failed to re-read row ${input.id}`);
+    return row;
+  }
+
+  async updateWorkspace(
+    id: string,
+    patch: Partial<Pick<WorkspaceRecord, 'name' | 'slug' | 'plan' | 'wrapped_dek'>>,
+  ): Promise<WorkspaceRecord | undefined> {
+    const keys = Object.keys(patch);
+    assertColumns('workspaces', keys, new Set(['name', 'slug', 'plan', 'wrapped_dek']));
+    if (keys.length === 0) return this.getWorkspace(id);
+    const values = keys.map((key) => (patch as Record<string, unknown>)[key]);
+    values.push(id);
+    const set = keys.map((key, index) => `${key} = $${index + 1}`).join(', ');
+    return one(
+      (await this.query(
+        `UPDATE workspaces SET ${set}
+          WHERE id = $${values.length}
+          RETURNING id, slug, name, plan, wrapped_dek, created_at`,
+        values,
+      )).map(normalizeWorkspace),
+    );
+  }
+
+  async deleteWorkspace(id: string): Promise<boolean> {
+    const result = await this.execute('DELETE FROM workspaces WHERE id = $1', [id]);
+    return result.rowCount > 0;
+  }
+
   async listWorkspacesForUser(
     user_id: string,
   ): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>> {
@@ -700,6 +771,196 @@ class PostgresStorageAdapter implements StorageAdapter {
         ORDER BY w.created_at ASC`,
       [user_id],
     )).map(normalizeWorkspaceWithRole);
+  }
+
+  async addUserToWorkspace(
+    workspace_id: string,
+    user_id: string,
+    role: WorkspaceMemberRole,
+  ): Promise<WorkspaceMemberRecord> {
+    const row = one(
+      (await this.query(
+        `INSERT INTO workspace_members (workspace_id, user_id, role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role
+         RETURNING *`,
+        [workspace_id, user_id, role],
+      )).map(normalizeWorkspaceMember),
+    );
+    if (!row) throw new Error(`addUserToWorkspace: failed to re-read ${workspace_id}:${user_id}`);
+    return row;
+  }
+
+  async updateWorkspaceMemberRole(
+    workspace_id: string,
+    user_id: string,
+    role: WorkspaceMemberRole,
+  ): Promise<WorkspaceMemberRecord | undefined> {
+    return one(
+      (await this.query(
+        `UPDATE workspace_members
+            SET role = $1
+          WHERE workspace_id = $2 AND user_id = $3
+          RETURNING *`,
+        [role, workspace_id, user_id],
+      )).map(normalizeWorkspaceMember),
+    );
+  }
+
+  async removeUserFromWorkspace(workspace_id: string, user_id: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await this.ensureReady();
+      await client.query('BEGIN');
+      const result = await client.query(
+        'DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+        [workspace_id, user_id],
+      );
+      await client.query(
+        'DELETE FROM user_active_workspace WHERE user_id = $1 AND workspace_id = $2',
+        [user_id, workspace_id],
+      );
+      await client.query('COMMIT');
+      return (result.rowCount ?? 0) > 0;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getWorkspaceMemberRole(
+    workspace_id: string,
+    user_id: string,
+  ): Promise<WorkspaceMemberRole | null> {
+    const row = one(await this.query(
+      'SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2',
+      [workspace_id, user_id],
+    ));
+    if (!row || typeof row.role !== 'string') return null;
+    return row.role === 'admin' || row.role === 'editor' || row.role === 'viewer'
+      ? row.role
+      : 'viewer';
+  }
+
+  async countWorkspaceAdmins(workspace_id: string): Promise<number> {
+    const row = one(await this.query(
+      `SELECT COUNT(*) AS c FROM workspace_members
+        WHERE workspace_id = $1 AND role = 'admin'`,
+      [workspace_id],
+    ));
+    return Number(row?.c || 0);
+  }
+
+  async listWorkspaceMembers(workspace_id: string): Promise<WorkspaceMemberWithUserRecord[]> {
+    return (await this.query(
+      `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.email, u.name
+         FROM workspace_members m
+         LEFT JOIN users u ON u.id = m.user_id
+        WHERE m.workspace_id = $1
+        ORDER BY m.joined_at ASC`,
+      [workspace_id],
+    )).map(normalizeWorkspaceMemberWithUser);
+  }
+
+  async getActiveWorkspaceId(user_id: string): Promise<string | null> {
+    const row = one(await this.query(
+      'SELECT workspace_id FROM user_active_workspace WHERE user_id = $1',
+      [user_id],
+    ));
+    return typeof row?.workspace_id === 'string' ? row.workspace_id : null;
+  }
+
+  async setActiveWorkspace(user_id: string, workspace_id: string): Promise<void> {
+    await this.execute(
+      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         workspace_id = EXCLUDED.workspace_id,
+         updated_at = EXCLUDED.updated_at`,
+      [user_id, workspace_id],
+    );
+  }
+
+  async clearActiveWorkspaceForWorkspace(workspace_id: string): Promise<void> {
+    await this.execute('DELETE FROM user_active_workspace WHERE workspace_id = $1', [workspace_id]);
+  }
+
+  async createWorkspaceInvite(
+    input: Omit<WorkspaceInviteRecord, 'created_at' | 'accepted_at'>,
+  ): Promise<WorkspaceInviteRecord> {
+    const row = one(
+      (await this.query(
+        `INSERT INTO workspace_invites
+           (id, workspace_id, email, role, invited_by_user_id, token, status, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [
+          input.id,
+          input.workspace_id,
+          input.email,
+          input.role,
+          input.invited_by_user_id,
+          input.token,
+          input.status,
+          input.expires_at,
+        ],
+      )).map(normalizeWorkspaceInvite),
+    );
+    if (!row) throw new Error(`createWorkspaceInvite: failed to re-read row ${input.id}`);
+    return row;
+  }
+
+  async getPendingWorkspaceInviteByToken(token: string): Promise<WorkspaceInviteRecord | undefined> {
+    return one(
+      (await this.query(
+        `SELECT * FROM workspace_invites WHERE token = $1 AND status = 'pending'`,
+        [token],
+      )).map(normalizeWorkspaceInvite),
+    );
+  }
+
+  async listWorkspaceInvites(workspace_id: string): Promise<WorkspaceInviteRecord[]> {
+    return (await this.query(
+      `SELECT * FROM workspace_invites
+        WHERE workspace_id = $1
+        ORDER BY created_at DESC`,
+      [workspace_id],
+    )).map(normalizeWorkspaceInvite);
+  }
+
+  async deletePendingWorkspaceInvites(workspace_id: string, email: string): Promise<number> {
+    const result = await this.execute(
+      `DELETE FROM workspace_invites
+        WHERE workspace_id = $1 AND email = $2 AND status = 'pending'`,
+      [workspace_id, email],
+    );
+    return result.rowCount;
+  }
+
+  async markWorkspaceInviteStatus(id: string, status: WorkspaceInviteRecord['status']): Promise<void> {
+    await this.execute('UPDATE workspace_invites SET status = $1 WHERE id = $2', [status, id]);
+  }
+
+  async acceptWorkspaceInvite(id: string): Promise<void> {
+    await this.execute(
+      `UPDATE workspace_invites
+          SET status = 'accepted',
+              accepted_at = now()
+        WHERE id = $1`,
+      [id],
+    );
+  }
+
+  async revokeWorkspaceInvite(workspace_id: string, invite_id: string): Promise<boolean> {
+    const result = await this.execute(
+      `UPDATE workspace_invites
+          SET status = 'revoked'
+        WHERE id = $1 AND workspace_id = $2 AND status = 'pending'`,
+      [invite_id, workspace_id],
+    );
+    return result.rowCount > 0;
   }
 
   async getUser(id: string): Promise<UserRecord | undefined> {
@@ -722,6 +983,39 @@ class PostgresStorageAdapter implements StorageAdapter {
         [email],
       )).map(normalizeUser),
     );
+  }
+
+  async findUserByUsername(
+    username: string,
+  ): Promise<Pick<UserRecord, 'id' | 'email' | 'name'> | undefined> {
+    const normalized = username.trim().replace(/^@/, '').toLowerCase();
+    if (!normalized) return undefined;
+    return one(await this.query(
+      `SELECT id, email, name
+         FROM users
+        WHERE LOWER(name) = $1
+           OR LOWER(email) = $1
+           OR LOWER(split_part(email, '@', 1)) = $1
+        LIMIT 1`,
+      [normalized],
+    )) as Pick<UserRecord, 'id' | 'email' | 'name'> | undefined;
+  }
+
+  async searchUsers(
+    query: string,
+    limit = 10,
+  ): Promise<Array<Pick<UserRecord, 'id' | 'email' | 'name'>>> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return (await this.query(
+      `SELECT id, email, name
+         FROM users
+        WHERE LOWER(COALESCE(name, '')) LIKE $1
+           OR LOWER(COALESCE(email, '')) LIKE $1
+        ORDER BY name, email
+        LIMIT $2`,
+      [`%${q}%`, nonNegativeInt(limit)],
+    )) as Array<Pick<UserRecord, 'id' | 'email' | 'name'>>;
   }
 
   async createUser(input: UserWriteInput): Promise<UserRecord> {
@@ -766,6 +1060,546 @@ class PostgresStorageAdapter implements StorageAdapter {
     const row = await this.getUser(input.id);
     if (!row) throw new Error(`upsertUser: failed to re-read row ${input.id}`);
     return row;
+  }
+
+  async getAppMemory(
+    row: Pick<AppMemoryRecord, 'workspace_id' | 'app_slug' | 'user_id' | 'key'>,
+  ): Promise<AppMemoryRecord | undefined> {
+    return one(
+      (await this.query(
+        `SELECT * FROM app_memory
+          WHERE workspace_id = $1
+            AND app_slug = $2
+            AND user_id = $3
+            AND key = $4`,
+        [row.workspace_id, row.app_slug, row.user_id, row.key],
+      )).map(normalizeAppMemory),
+    );
+  }
+
+  async upsertAppMemory(
+    input: Omit<AppMemoryRecord, 'updated_at'>,
+  ): Promise<AppMemoryRecord> {
+    const row = one(
+      (await this.query(
+        `INSERT INTO app_memory (workspace_id, app_slug, user_id, device_id, key, value, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now())
+         ON CONFLICT (workspace_id, app_slug, user_id, key)
+           DO UPDATE SET value = EXCLUDED.value,
+                         device_id = COALESCE(EXCLUDED.device_id, app_memory.device_id),
+                         updated_at = now()
+         RETURNING *`,
+        [
+          input.workspace_id,
+          input.app_slug,
+          input.user_id,
+          input.device_id,
+          input.key,
+          input.value,
+        ],
+      )).map(normalizeAppMemory),
+    );
+    if (!row) throw new Error(`upsertAppMemory: failed to re-read ${input.app_slug}:${input.key}`);
+    return row;
+  }
+
+  async deleteAppMemory(
+    row: Pick<AppMemoryRecord, 'workspace_id' | 'app_slug' | 'user_id' | 'key'>,
+  ): Promise<boolean> {
+    const result = await this.execute(
+      `DELETE FROM app_memory
+        WHERE workspace_id = $1
+          AND app_slug = $2
+          AND user_id = $3
+          AND key = $4`,
+      [row.workspace_id, row.app_slug, row.user_id, row.key],
+    );
+    return result.rowCount > 0;
+  }
+
+  async listAppMemory(
+    workspace_id: string,
+    app_slug: string,
+    user_id: string,
+    keys?: string[],
+  ): Promise<AppMemoryRecord[]> {
+    if (keys && keys.length === 0) return [];
+    const params: unknown[] = [workspace_id, app_slug, user_id];
+    const keyClause = keys && keys.length > 0 ? ` AND key = ANY($4::text[])` : '';
+    if (keys && keys.length > 0) params.push(keys);
+    return (await this.query(
+      `SELECT * FROM app_memory
+        WHERE workspace_id = $1
+          AND app_slug = $2
+          AND user_id = $3${keyClause}
+        ORDER BY key`,
+      params,
+    )).map(normalizeAppMemory);
+  }
+
+  async listConnections(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    status?: ConnectionStatus;
+  }): Promise<ConnectionRecord[]> {
+    const params: unknown[] = [input.workspace_id, input.owner_kind, input.owner_id];
+    const statusClause = input.status ? ` AND status = $4` : '';
+    if (input.status) params.push(input.status);
+    return (await this.query(
+      `SELECT * FROM connections
+        WHERE workspace_id = $1
+          AND owner_kind = $2
+          AND owner_id = $3${statusClause}
+        ORDER BY provider`,
+      params,
+    )).map(normalizeConnection);
+  }
+
+  async getConnection(id: string): Promise<ConnectionRecord | undefined> {
+    return one((await this.query('SELECT * FROM connections WHERE id = $1', [id])).map(normalizeConnection));
+  }
+
+  async getConnectionByOwnerProvider(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    provider: string;
+  }): Promise<ConnectionRecord | undefined> {
+    return one((await this.query(
+      `SELECT * FROM connections
+        WHERE workspace_id = $1
+          AND owner_kind = $2
+          AND owner_id = $3
+          AND provider = $4`,
+      [input.workspace_id, input.owner_kind, input.owner_id, input.provider],
+    )).map(normalizeConnection));
+  }
+
+  async getConnectionByOwnerComposioId(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    composio_connection_id: string;
+  }): Promise<ConnectionRecord | undefined> {
+    return one((await this.query(
+      `SELECT * FROM connections
+        WHERE workspace_id = $1
+          AND owner_kind = $2
+          AND owner_id = $3
+          AND composio_connection_id = $4`,
+      [input.workspace_id, input.owner_kind, input.owner_id, input.composio_connection_id],
+    )).map(normalizeConnection));
+  }
+
+  async upsertConnection(
+    input: Omit<ConnectionRecord, 'created_at' | 'updated_at'>,
+  ): Promise<ConnectionRecord> {
+    const row = one((await this.query(
+      `INSERT INTO connections
+         (id, workspace_id, owner_kind, owner_id, provider,
+          composio_connection_id, composio_account_id, status, metadata_json,
+          created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, now(), now())
+       ON CONFLICT (workspace_id, owner_kind, owner_id, provider)
+         DO UPDATE SET composio_connection_id = EXCLUDED.composio_connection_id,
+                       composio_account_id = EXCLUDED.composio_account_id,
+                       status = EXCLUDED.status,
+                       metadata_json = EXCLUDED.metadata_json,
+                       updated_at = now()
+       RETURNING *`,
+      [
+        input.id,
+        input.workspace_id,
+        input.owner_kind,
+        input.owner_id,
+        input.provider,
+        input.composio_connection_id,
+        input.composio_account_id,
+        input.status,
+        input.metadata_json,
+      ],
+    )).map(normalizeConnection));
+    if (!row) throw new Error(`upsertConnection: failed to re-read ${input.provider}`);
+    return row;
+  }
+
+  async updateConnection(
+    id: string,
+    patch: Partial<Pick<ConnectionRecord, 'status' | 'metadata_json' | 'composio_connection_id' | 'composio_account_id'>>,
+  ): Promise<ConnectionRecord | undefined> {
+    const keys = Object.keys(patch);
+    if (keys.length === 0) return this.getConnection(id);
+    const values = keys.map((key) => (patch as Record<string, unknown>)[key]);
+    values.push(id);
+    const set = keys
+      .map((key, index) =>
+        key === 'metadata_json' ? `${key} = $${index + 1}::jsonb` : `${key} = $${index + 1}`,
+      )
+      .join(', ');
+    return one((await this.query(
+      `UPDATE connections SET ${set}, updated_at = now()
+        WHERE id = $${values.length}
+        RETURNING *`,
+      values,
+    )).map(normalizeConnection));
+  }
+
+  async deleteConnection(id: string): Promise<boolean> {
+    const result = await this.execute('DELETE FROM connections WHERE id = $1', [id]);
+    return result.rowCount > 0;
+  }
+
+  async getLinkShareByAppSlug(slug: string): Promise<LinkShareRecord | undefined> {
+    return one((await this.query(
+      `SELECT id AS app_id, slug AS app_slug, visibility, link_share_token,
+              link_share_requires_auth, updated_at
+         FROM apps
+        WHERE slug = $1`,
+      [slug],
+    )).map(normalizeLinkShare));
+  }
+
+  async updateAppSharing(
+    app_id: string,
+    patch: Partial<Pick<AppRecord, 'visibility' | 'link_share_token' | 'link_share_requires_auth' | 'publish_status' | 'review_submitted_at' | 'review_decided_at' | 'review_decided_by' | 'review_comment'>>,
+  ): Promise<AppRecord | undefined> {
+    const keys = Object.keys(patch);
+    assertColumns('apps', keys, APP_COLUMNS);
+    if (keys.length === 0) return this.getAppById(app_id);
+    const values = keys.map((key) =>
+      APP_SHARING_BOOLEAN_COLUMNS.has(key)
+        ? Boolean((patch as Record<string, unknown>)[key])
+        : (patch as Record<string, unknown>)[key],
+    );
+    values.push(app_id);
+    const set = keys.map((key, index) => `${key} = $${index + 1}`).join(', ');
+    return one((await this.query(
+      `UPDATE apps SET ${set}, updated_at = now()
+        WHERE id = $${values.length}
+        RETURNING *`,
+      values,
+    )).map(normalizeApp));
+  }
+
+  async createVisibilityAudit(
+    input: Omit<VisibilityAuditRecord, 'created_at'>,
+  ): Promise<VisibilityAuditRecord> {
+    const row = one((await this.query(
+      `INSERT INTO app_visibility_audit
+         (id, app_id, from_state, to_state, actor_user_id, reason, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        input.id,
+        input.app_id,
+        input.from_state,
+        input.to_state,
+        input.actor_user_id,
+        input.reason,
+        input.metadata,
+      ],
+    )).map(normalizeVisibilityAudit));
+    if (!row) throw new Error(`createVisibilityAudit: failed to re-read row ${input.id}`);
+    return row;
+  }
+
+  async listVisibilityAudit(app_id?: string | null): Promise<VisibilityAuditRecord[]> {
+    if (app_id) {
+      return (await this.query(
+        `SELECT * FROM app_visibility_audit
+          WHERE app_id = $1
+          ORDER BY created_at DESC`,
+        [app_id],
+      )).map(normalizeVisibilityAudit);
+    }
+    return (await this.query(
+      `SELECT * FROM app_visibility_audit ORDER BY created_at DESC LIMIT 200`,
+      [],
+    )).map(normalizeVisibilityAudit);
+  }
+
+  async listAppInvites(app_id: string): Promise<AppInviteRecord[]> {
+    return (await this.query(
+      `SELECT app_invites.*,
+              users.name AS invited_user_name,
+              users.email AS invited_user_email
+         FROM app_invites
+         LEFT JOIN users ON users.id = app_invites.invited_user_id
+        WHERE app_invites.app_id = $1
+        ORDER BY app_invites.created_at DESC`,
+      [app_id],
+    )).map(normalizeAppInvite);
+  }
+
+  async upsertAppInvite(
+    input: Omit<AppInviteRecord, 'id' | 'created_at' | 'accepted_at' | 'revoked_at'> & { id: string },
+  ): Promise<AppInviteRecord> {
+    const existing = one((await this.query(
+      `SELECT * FROM app_invites
+        WHERE app_id = $1
+          AND (
+            ($2::text IS NOT NULL AND invited_user_id = $2)
+            OR ($3::text IS NOT NULL AND LOWER(invited_email) = LOWER($3))
+          )
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [input.app_id, input.invited_user_id || null, input.invited_email || null],
+    )).map(normalizeAppInvite));
+    if (existing && !['revoked', 'declined'].includes(existing.state)) return existing;
+    const row = one((await this.query(
+      `INSERT INTO app_invites
+         (id, app_id, invited_user_id, invited_email, state, invited_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        input.id,
+        input.app_id,
+        input.invited_user_id || null,
+        input.invited_email || null,
+        input.state,
+        input.invited_by_user_id,
+      ],
+    )).map(normalizeAppInvite));
+    if (!row) throw new Error(`upsertAppInvite: failed to re-read row ${input.id}`);
+    return row;
+  }
+
+  async revokeAppInvite(invite_id: string, app_id: string): Promise<AppInviteRecord | undefined> {
+    const existing = one((await this.query(
+      'SELECT * FROM app_invites WHERE id = $1 AND app_id = $2',
+      [invite_id, app_id],
+    )).map(normalizeAppInvite));
+    if (!existing) return undefined;
+    if (existing.state === 'revoked') return existing;
+    return one((await this.query(
+      `UPDATE app_invites
+          SET state = 'revoked',
+              revoked_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [invite_id],
+    )).map(normalizeAppInvite));
+  }
+
+  async acceptAppInvite(invite_id: string, user_id: string): Promise<{ invite: AppInviteRecord | undefined; changed: boolean }> {
+    const existing = one((await this.query(
+      'SELECT * FROM app_invites WHERE id = $1',
+      [invite_id],
+    )).map(normalizeAppInvite));
+    if (!existing || existing.invited_user_id !== user_id) return { invite: undefined, changed: false };
+    if (existing.state === 'accepted') return { invite: existing, changed: false };
+    if (existing.state !== 'pending_accept') return { invite: existing, changed: false };
+    const invite = one((await this.query(
+      `UPDATE app_invites
+          SET state = 'accepted',
+              accepted_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [invite_id],
+    )).map(normalizeAppInvite));
+    return { invite, changed: true };
+  }
+
+  async declineAppInvite(invite_id: string, user_id: string): Promise<AppInviteRecord | undefined> {
+    const existing = one((await this.query(
+      'SELECT * FROM app_invites WHERE id = $1',
+      [invite_id],
+    )).map(normalizeAppInvite));
+    if (!existing || existing.invited_user_id !== user_id) return undefined;
+    if (existing.state === 'accepted' || existing.state === 'pending_accept') {
+      return one((await this.query(
+        `UPDATE app_invites SET state = 'declined' WHERE id = $1 RETURNING *`,
+        [invite_id],
+      )).map(normalizeAppInvite));
+    }
+    return existing;
+  }
+
+  async linkPendingEmailAppInvites(user_id: string, email: string): Promise<number> {
+    const result = await this.execute(
+      `UPDATE app_invites
+          SET invited_user_id = $1,
+              state = 'pending_accept'
+        WHERE state = 'pending_email'
+          AND LOWER(invited_email) = LOWER($2)`,
+      [user_id, email],
+    );
+    return result.rowCount;
+  }
+
+  async listPendingAppInvitesForUser(user_id: string): Promise<AppInviteRecord[]> {
+    return (await this.query(
+      `SELECT app_invites.*,
+              apps.slug AS app_slug,
+              apps.name AS app_name,
+              apps.description AS app_description
+         FROM app_invites
+         JOIN apps ON apps.id = app_invites.app_id
+        WHERE app_invites.invited_user_id = $1
+          AND app_invites.state = 'pending_accept'
+        ORDER BY app_invites.created_at DESC`,
+      [user_id],
+    )).map(normalizeAppInvite);
+  }
+
+  async userHasAcceptedAppInvite(app_id: string, user_id: string): Promise<boolean> {
+    const row = one(await this.query(
+      `SELECT 1 AS ok
+         FROM app_invites
+        WHERE app_id = $1
+          AND invited_user_id = $2
+          AND state = 'accepted'
+        LIMIT 1`,
+      [app_id, user_id],
+    ));
+    return Boolean(row);
+  }
+
+  async createTrigger(input: TriggerRecord): Promise<TriggerRecord> {
+    const row = one((await this.query(
+      `INSERT INTO triggers (
+         id, app_id, user_id, workspace_id, action, inputs, trigger_type,
+         cron_expression, tz, webhook_secret, webhook_url_path, next_run_at,
+         last_fired_at, enabled, retry_policy, created_at, updated_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12,
+         $13, $14, $15::jsonb, $16, $17
+       )
+       RETURNING *`,
+      [
+        input.id,
+        input.app_id,
+        input.user_id,
+        input.workspace_id,
+        input.action,
+        input.inputs,
+        input.trigger_type,
+        input.cron_expression,
+        input.tz,
+        input.webhook_secret,
+        input.webhook_url_path,
+        input.next_run_at,
+        input.last_fired_at,
+        Boolean(input.enabled),
+        input.retry_policy,
+        input.created_at,
+        input.updated_at,
+      ],
+    )).map(normalizeTrigger));
+    if (!row) throw new Error(`createTrigger: failed to re-read row ${input.id}`);
+    return row;
+  }
+
+  async getTrigger(id: string): Promise<TriggerRecord | undefined> {
+    return one((await this.query('SELECT * FROM triggers WHERE id = $1', [id])).map(normalizeTrigger));
+  }
+
+  async getTriggerByWebhookPath(path: string): Promise<TriggerRecord | undefined> {
+    return one((await this.query('SELECT * FROM triggers WHERE webhook_url_path = $1', [path])).map(normalizeTrigger));
+  }
+
+  async listTriggersForUser(user_id: string): Promise<TriggerRecord[]> {
+    return (await this.query(
+      'SELECT * FROM triggers WHERE user_id = $1 ORDER BY created_at DESC',
+      [user_id],
+    )).map(normalizeTrigger);
+  }
+
+  async listTriggersForApp(app_id: string): Promise<TriggerRecord[]> {
+    return (await this.query(
+      'SELECT * FROM triggers WHERE app_id = $1 ORDER BY created_at DESC',
+      [app_id],
+    )).map(normalizeTrigger);
+  }
+
+  async listDueTriggers(now_ms: number): Promise<TriggerRecord[]> {
+    return (await this.query(
+      `SELECT * FROM triggers
+        WHERE trigger_type = 'schedule'
+          AND enabled = true
+          AND next_run_at IS NOT NULL
+          AND next_run_at <= $1
+        ORDER BY next_run_at ASC`,
+      [now_ms],
+    )).map(normalizeTrigger);
+  }
+
+  async updateTrigger(id: string, patch: Partial<TriggerRecord>): Promise<TriggerRecord | undefined> {
+    const keys = Object.keys(patch).filter((key) => key !== 'id');
+    if (keys.length === 0) return this.getTrigger(id);
+    const values = keys.map((key) => {
+      const value = (patch as Record<string, unknown>)[key];
+      if (key === 'inputs' || key === 'retry_policy') return toNullableJson(value);
+      if (key === 'enabled') return Boolean(value);
+      return value;
+    });
+    values.push(id);
+    const set = keys.map((key, index) =>
+      key === 'inputs' || key === 'retry_policy'
+        ? `${key} = $${index + 1}::jsonb`
+        : `${key} = $${index + 1}`,
+    ).join(', ');
+    return one((await this.query(
+      `UPDATE triggers SET ${set}
+        WHERE id = $${values.length}
+        RETURNING *`,
+      values,
+    )).map(normalizeTrigger));
+  }
+
+  async deleteTrigger(id: string): Promise<boolean> {
+    const result = await this.execute('DELETE FROM triggers WHERE id = $1', [id]);
+    return result.rowCount > 0;
+  }
+
+  async markTriggerFired(id: string, now_ms: number): Promise<void> {
+    await this.execute(
+      `UPDATE triggers SET last_fired_at = $1, updated_at = $1 WHERE id = $2`,
+      [now_ms, id],
+    );
+  }
+
+  async advanceTriggerSchedule(
+    id: string,
+    next_run_at: number,
+    now_ms: number,
+    expected_next_run_at?: number | null,
+    fire = true,
+  ): Promise<boolean> {
+    const values: unknown[] = [next_run_at, now_ms, id];
+    const fireSet = fire ? ', last_fired_at = $2' : '';
+    let where = 'id = $3';
+    if (expected_next_run_at !== undefined) {
+      values.push(expected_next_run_at);
+      where += ` AND next_run_at IS NOT DISTINCT FROM $4`;
+    }
+    const result = await this.execute(
+      `UPDATE triggers
+          SET next_run_at = $1${fireSet},
+              updated_at = $2
+        WHERE ${where}`,
+      values,
+    );
+    return result.rowCount > 0;
+  }
+
+  async recordTriggerWebhookDelivery(
+    trigger_id: string,
+    request_id: string,
+    now_ms: number,
+    ttl_ms: number,
+  ): Promise<boolean> {
+    await this.execute('DELETE FROM trigger_webhook_deliveries WHERE received_at < $1', [
+      now_ms - ttl_ms,
+    ]);
+    const result = await this.execute(
+      `INSERT INTO trigger_webhook_deliveries (trigger_id, request_id, received_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (trigger_id, request_id) DO NOTHING`,
+      [trigger_id, request_id, now_ms],
+    );
+    return result.rowCount > 0;
   }
 
   async listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]> {
@@ -934,6 +1768,7 @@ function normalizeApp(row: Record<string, unknown>): AppRecord {
   return {
     ...row,
     is_async: booleanToTinyInt(row.is_async),
+    link_share_requires_auth: booleanToTinyInt(row.link_share_requires_auth),
     featured: booleanToTinyInt(row.featured),
     hero: booleanToTinyInt(row.hero),
     created_at: timestampColumnToString(row.created_at),
@@ -1037,11 +1872,102 @@ function normalizeWorkspaceWithRole(
   return normalizeWorkspace(row) as WorkspaceRecord & { role: WorkspaceRole };
 }
 
+function normalizeWorkspaceMember(row: Record<string, unknown>): WorkspaceMemberRecord {
+  return {
+    ...row,
+    joined_at: timestampColumnToString(row.joined_at),
+  } as WorkspaceMemberRecord;
+}
+
+function normalizeWorkspaceMemberWithUser(
+  row: Record<string, unknown>,
+): WorkspaceMemberWithUserRecord {
+  return normalizeWorkspaceMember(row) as WorkspaceMemberWithUserRecord;
+}
+
+function normalizeWorkspaceInvite(row: Record<string, unknown>): WorkspaceInviteRecord {
+  return {
+    ...row,
+    created_at: timestampColumnToString(row.created_at),
+    expires_at: timestampColumnToString(row.expires_at),
+    accepted_at:
+      row.accepted_at === null || row.accepted_at === undefined
+        ? null
+        : timestampColumnToString(row.accepted_at),
+  } as WorkspaceInviteRecord;
+}
+
 function normalizeUser(row: Record<string, unknown>): UserRecord {
   return {
     ...row,
     created_at: timestampColumnToString(row.created_at),
   } as UserRecord;
+}
+
+function normalizeAppMemory(row: Record<string, unknown>): AppMemoryRecord {
+  return {
+    ...row,
+    updated_at: timestampColumnToString(row.updated_at),
+  } as AppMemoryRecord;
+}
+
+function normalizeConnection(row: Record<string, unknown>): ConnectionRecord {
+  return {
+    ...row,
+    metadata_json: jsonColumnToString(row.metadata_json),
+    created_at: timestampColumnToString(row.created_at),
+    updated_at: timestampColumnToString(row.updated_at),
+  } as ConnectionRecord;
+}
+
+function normalizeLinkShare(row: Record<string, unknown>): LinkShareRecord {
+  return {
+    ...row,
+    link_share_requires_auth: booleanToTinyInt(row.link_share_requires_auth),
+    updated_at: timestampColumnToString(row.updated_at),
+  } as LinkShareRecord;
+}
+
+function normalizeVisibilityAudit(row: Record<string, unknown>): VisibilityAuditRecord {
+  return {
+    ...row,
+    metadata: jsonColumnToString(row.metadata),
+    created_at: timestampColumnToString(row.created_at),
+  } as VisibilityAuditRecord;
+}
+
+function normalizeAppInvite(row: Record<string, unknown>): AppInviteRecord {
+  return {
+    ...row,
+    created_at: timestampColumnToString(row.created_at),
+    accepted_at:
+      row.accepted_at === null || row.accepted_at === undefined
+        ? null
+        : timestampColumnToString(row.accepted_at),
+    revoked_at:
+      row.revoked_at === null || row.revoked_at === undefined
+        ? null
+        : timestampColumnToString(row.revoked_at),
+  } as AppInviteRecord;
+}
+
+function normalizeTrigger(row: Record<string, unknown>): TriggerRecord {
+  return {
+    ...row,
+    inputs: jsonColumnToString(row.inputs) || '{}',
+    retry_policy: jsonColumnToString(row.retry_policy),
+    enabled: booleanToTinyInt(row.enabled),
+    next_run_at:
+      row.next_run_at === null || row.next_run_at === undefined
+        ? null
+        : Number(row.next_run_at),
+    last_fired_at:
+      row.last_fired_at === null || row.last_fired_at === undefined
+        ? null
+        : Number(row.last_fired_at),
+    created_at: Number(row.created_at),
+    updated_at: Number(row.updated_at),
+  } as TriggerRecord;
 }
 
 function normalizeSecret(row: Record<string, unknown>): SecretRecord {

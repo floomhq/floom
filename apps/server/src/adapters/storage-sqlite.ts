@@ -36,6 +36,9 @@ import type {
   AppRecord,
   AppReviewRecord,
   AgentTokenRecord,
+  ConnectionOwnerKind,
+  ConnectionRecord,
+  ConnectionStatus,
   ErrorType,
   JobRecord,
   JobStatus,
@@ -44,15 +47,22 @@ import type {
   RunThreadRecord,
   RunTurnRecord,
   SecretRecord,
+  TriggerRecord,
   UserRecord,
+  WorkspaceInviteRecord,
+  WorkspaceMemberRecord,
+  WorkspaceMemberRole,
   WorkspaceRecord,
   WorkspaceRole,
 } from '../types.js';
 import type {
   AppListFilter,
+  AppMemoryRecord,
+  AppInviteRecord,
   AppReviewListFilter,
   CreatorSecretCiphertextRow,
   CreatorSecretCiphertextWriteInput,
+  LinkShareRecord,
   RunListFilter,
   SecretCiphertextRow,
   SecretCiphertextWriteInput,
@@ -61,6 +71,8 @@ import type {
   StorageAdapter,
   UserWriteColumn,
   UserWriteInput,
+  VisibilityAuditRecord,
+  WorkspaceMemberWithUserRecord,
 } from './types.js';
 
 type UserDeleteListener = (user_id: string) => void | Promise<void>;
@@ -536,6 +548,47 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(id) as WorkspaceRecord | undefined;
   },
 
+  async getWorkspaceBySlug(slug: string): Promise<WorkspaceRecord | undefined> {
+    return db
+      .prepare('SELECT * FROM workspaces WHERE slug = ?')
+      .get(slug) as WorkspaceRecord | undefined;
+  },
+
+  async createWorkspace(input: {
+    id: string;
+    slug: string;
+    name: string;
+    plan: string;
+  }): Promise<WorkspaceRecord> {
+    db.prepare(
+      `INSERT INTO workspaces (id, slug, name, plan) VALUES (?, ?, ?, ?)`,
+    ).run(input.id, input.slug, input.name, input.plan);
+    return (await this.getWorkspace(input.id)) as WorkspaceRecord;
+  },
+
+  async updateWorkspace(
+    id: string,
+    patch: Partial<Pick<WorkspaceRecord, 'name' | 'slug' | 'plan' | 'wrapped_dek'>>,
+  ): Promise<WorkspaceRecord | undefined> {
+    const keys = Object.keys(patch);
+    if (keys.length === 0) return this.getWorkspace(id);
+    const allowed = new Set(['name', 'slug', 'plan', 'wrapped_dek']);
+    for (const key of keys) {
+      if (!allowed.has(key)) throw new Error(`Unknown workspaces column: ${key}`);
+    }
+    const set = keys.map((key) => `${key} = ?`).join(', ');
+    db.prepare(`UPDATE workspaces SET ${set} WHERE id = ?`).run(
+      ...keys.map((key) => (patch as Record<string, unknown>)[key]),
+      id,
+    );
+    return this.getWorkspace(id);
+  },
+
+  async deleteWorkspace(id: string): Promise<boolean> {
+    const result = db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+    return result.changes > 0;
+  },
+
   async listWorkspacesForUser(
     user_id: string,
   ): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>> {
@@ -550,6 +603,189 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .all(user_id) as Array<WorkspaceRecord & { role: WorkspaceRole }>;
   },
 
+  async addUserToWorkspace(
+    workspace_id: string,
+    user_id: string,
+    role: WorkspaceMemberRole,
+  ): Promise<WorkspaceMemberRecord> {
+    db.prepare(
+      `INSERT INTO workspace_members (workspace_id, user_id, role)
+       VALUES (?, ?, ?)
+       ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = excluded.role`,
+    ).run(workspace_id, user_id, role);
+    return db
+      .prepare('SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+      .get(workspace_id, user_id) as WorkspaceMemberRecord;
+  },
+
+  async updateWorkspaceMemberRole(
+    workspace_id: string,
+    user_id: string,
+    role: WorkspaceMemberRole,
+  ): Promise<WorkspaceMemberRecord | undefined> {
+    db.prepare(
+      `UPDATE workspace_members SET role = ? WHERE workspace_id = ? AND user_id = ?`,
+    ).run(role, workspace_id, user_id);
+    return db
+      .prepare('SELECT * FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+      .get(workspace_id, user_id) as WorkspaceMemberRecord | undefined;
+  },
+
+  async removeUserFromWorkspace(
+    workspace_id: string,
+    user_id: string,
+  ): Promise<boolean> {
+    const tx = db.transaction(() => {
+      const res = db
+        .prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+        .run(workspace_id, user_id);
+      db.prepare(
+        'DELETE FROM user_active_workspace WHERE user_id = ? AND workspace_id = ?',
+      ).run(user_id, workspace_id);
+      return res.changes;
+    });
+    return tx() > 0;
+  },
+
+  async getWorkspaceMemberRole(
+    workspace_id: string,
+    user_id: string,
+  ): Promise<WorkspaceMemberRole | null> {
+    const row = db
+      .prepare('SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+      .get(workspace_id, user_id) as { role: string } | undefined;
+    if (!row) return null;
+    return row.role === 'admin' || row.role === 'editor' || row.role === 'viewer'
+      ? row.role
+      : 'viewer';
+  },
+
+  async countWorkspaceAdmins(workspace_id: string): Promise<number> {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) as c FROM workspace_members WHERE workspace_id = ? AND role = 'admin'`,
+      )
+      .get(workspace_id) as { c: number };
+    return row.c;
+  },
+
+  async listWorkspaceMembers(
+    workspace_id: string,
+  ): Promise<WorkspaceMemberWithUserRecord[]> {
+    return db
+      .prepare(
+        `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.email, u.name
+           FROM workspace_members m
+           LEFT JOIN users u ON u.id = m.user_id
+          WHERE m.workspace_id = ?
+          ORDER BY m.joined_at ASC`,
+      )
+      .all(workspace_id) as WorkspaceMemberWithUserRecord[];
+  },
+
+  async getActiveWorkspaceId(user_id: string): Promise<string | null> {
+    const row = db
+      .prepare('SELECT workspace_id FROM user_active_workspace WHERE user_id = ?')
+      .get(user_id) as { workspace_id: string } | undefined;
+    return row?.workspace_id || null;
+  },
+
+  async setActiveWorkspace(user_id: string, workspace_id: string): Promise<void> {
+    db.prepare(
+      `INSERT INTO user_active_workspace (user_id, workspace_id, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT (user_id) DO UPDATE SET
+         workspace_id = excluded.workspace_id,
+         updated_at = excluded.updated_at`,
+    ).run(user_id, workspace_id);
+  },
+
+  async clearActiveWorkspaceForWorkspace(workspace_id: string): Promise<void> {
+    db.prepare('DELETE FROM user_active_workspace WHERE workspace_id = ?').run(workspace_id);
+  },
+
+  async createWorkspaceInvite(
+    input: Omit<WorkspaceInviteRecord, 'created_at' | 'accepted_at'>,
+  ): Promise<WorkspaceInviteRecord> {
+    db.prepare(
+      `INSERT INTO workspace_invites
+         (id, workspace_id, email, role, invited_by_user_id, token, status, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.workspace_id,
+      input.email,
+      input.role,
+      input.invited_by_user_id,
+      input.token,
+      input.status,
+      input.expires_at,
+    );
+    return db
+      .prepare('SELECT * FROM workspace_invites WHERE id = ?')
+      .get(input.id) as WorkspaceInviteRecord;
+  },
+
+  async getPendingWorkspaceInviteByToken(
+    token: string,
+  ): Promise<WorkspaceInviteRecord | undefined> {
+    return db
+      .prepare(`SELECT * FROM workspace_invites WHERE token = ? AND status = 'pending'`)
+      .get(token) as WorkspaceInviteRecord | undefined;
+  },
+
+  async listWorkspaceInvites(workspace_id: string): Promise<WorkspaceInviteRecord[]> {
+    return db
+      .prepare(
+        `SELECT * FROM workspace_invites
+          WHERE workspace_id = ?
+          ORDER BY created_at DESC`,
+      )
+      .all(workspace_id) as WorkspaceInviteRecord[];
+  },
+
+  async deletePendingWorkspaceInvites(
+    workspace_id: string,
+    email: string,
+  ): Promise<number> {
+    const res = db
+      .prepare(
+        `DELETE FROM workspace_invites
+          WHERE workspace_id = ? AND email = ? AND status = 'pending'`,
+      )
+      .run(workspace_id, email);
+    return res.changes;
+  },
+
+  async markWorkspaceInviteStatus(
+    id: string,
+    status: WorkspaceInviteRecord['status'],
+  ): Promise<void> {
+    db.prepare(`UPDATE workspace_invites SET status = ? WHERE id = ?`).run(status, id);
+  },
+
+  async acceptWorkspaceInvite(id: string): Promise<void> {
+    db.prepare(
+      `UPDATE workspace_invites
+          SET status = 'accepted',
+              accepted_at = datetime('now')
+        WHERE id = ?`,
+    ).run(id);
+  },
+
+  async revokeWorkspaceInvite(
+    workspace_id: string,
+    invite_id: string,
+  ): Promise<boolean> {
+    const res = db
+      .prepare(
+        `UPDATE workspace_invites SET status = 'revoked'
+          WHERE id = ? AND workspace_id = ? AND status = 'pending'`,
+      )
+      .run(invite_id, workspace_id);
+    return res.changes > 0;
+  },
+
   async getUser(id: string): Promise<UserRecord | undefined> {
     return db
       .prepare('SELECT * FROM users WHERE id = ?')
@@ -560,6 +796,45 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     return db
       .prepare('SELECT * FROM users WHERE email = ?')
       .get(email) as UserRecord | undefined;
+  },
+
+  async findUserByUsername(
+    username: string,
+  ): Promise<Pick<UserRecord, 'id' | 'email' | 'name'> | undefined> {
+    const normalized = username.trim().replace(/^@/, '').toLowerCase();
+    if (!normalized) return undefined;
+    return db
+      .prepare(
+        `SELECT id, email, name
+           FROM users
+          WHERE LOWER(name) = ?
+             OR LOWER(email) = ?
+             OR LOWER(substr(email, 1, instr(email, '@') - 1)) = ?
+          LIMIT 1`,
+      )
+      .get(normalized, normalized, normalized) as
+      | Pick<UserRecord, 'id' | 'email' | 'name'>
+      | undefined;
+  },
+
+  async searchUsers(
+    query: string,
+    limit = 10,
+  ): Promise<Array<Pick<UserRecord, 'id' | 'email' | 'name'>>> {
+    const q = query.trim().toLowerCase();
+    if (q.length === 0) return [];
+    return db
+      .prepare(
+        `SELECT id, email, name
+           FROM users
+          WHERE LOWER(COALESCE(name, '')) LIKE ?
+             OR LOWER(COALESCE(email, '')) LIKE ?
+          ORDER BY name, email
+          LIMIT ?`,
+      )
+      .all(`%${q}%`, `%${q}%`, Math.max(1, Math.floor(limit))) as Array<
+      Pick<UserRecord, 'id' | 'email' | 'name'>
+    >;
   },
 
   async createUser(input: UserWriteInput): Promise<UserRecord> {
@@ -606,6 +881,572 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
 
   onUserDelete(cb: UserDeleteListener): void {
     userDeleteListeners.push(cb);
+  },
+
+  // ---------- app memory ----------
+  async getAppMemory(
+    row: Pick<AppMemoryRecord, 'workspace_id' | 'app_slug' | 'user_id' | 'key'>,
+  ): Promise<AppMemoryRecord | undefined> {
+    return db
+      .prepare(
+        `SELECT * FROM app_memory
+          WHERE workspace_id = ?
+            AND app_slug = ?
+            AND user_id = ?
+            AND key = ?`,
+      )
+      .get(row.workspace_id, row.app_slug, row.user_id, row.key) as
+      | AppMemoryRecord
+      | undefined;
+  },
+
+  async upsertAppMemory(
+    input: Omit<AppMemoryRecord, 'updated_at'>,
+  ): Promise<AppMemoryRecord> {
+    db.prepare(
+      `INSERT INTO app_memory (workspace_id, app_slug, user_id, device_id, key, value, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT (workspace_id, app_slug, user_id, key)
+         DO UPDATE SET value = excluded.value,
+                       device_id = COALESCE(excluded.device_id, app_memory.device_id),
+                       updated_at = datetime('now')`,
+    ).run(
+      input.workspace_id,
+      input.app_slug,
+      input.user_id,
+      input.device_id,
+      input.key,
+      input.value,
+    );
+    return (await this.getAppMemory(input)) as AppMemoryRecord;
+  },
+
+  async deleteAppMemory(
+    row: Pick<AppMemoryRecord, 'workspace_id' | 'app_slug' | 'user_id' | 'key'>,
+  ): Promise<boolean> {
+    const res = db
+      .prepare(
+        `DELETE FROM app_memory
+          WHERE workspace_id = ?
+            AND app_slug = ?
+            AND user_id = ?
+            AND key = ?`,
+      )
+      .run(row.workspace_id, row.app_slug, row.user_id, row.key);
+    return res.changes > 0;
+  },
+
+  async listAppMemory(
+    workspace_id: string,
+    app_slug: string,
+    user_id: string,
+    keys?: string[],
+  ): Promise<AppMemoryRecord[]> {
+    if (keys && keys.length === 0) return [];
+    const params: unknown[] = [workspace_id, app_slug, user_id];
+    let keyClause = '';
+    if (keys && keys.length > 0) {
+      keyClause = ` AND key IN (${keys.map(() => '?').join(', ')})`;
+      params.push(...keys);
+    }
+    return db
+      .prepare(
+        `SELECT * FROM app_memory
+          WHERE workspace_id = ?
+            AND app_slug = ?
+            AND user_id = ?${keyClause}
+          ORDER BY key`,
+      )
+      .all(...params) as AppMemoryRecord[];
+  },
+
+  // ---------- connections ----------
+  async listConnections(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    status?: ConnectionStatus;
+  }): Promise<ConnectionRecord[]> {
+    const params: unknown[] = [input.workspace_id, input.owner_kind, input.owner_id];
+    let statusClause = '';
+    if (input.status) {
+      statusClause = ' AND status = ?';
+      params.push(input.status);
+    }
+    return db
+      .prepare(
+        `SELECT * FROM connections
+          WHERE workspace_id = ?
+            AND owner_kind = ?
+            AND owner_id = ?${statusClause}
+          ORDER BY provider`,
+      )
+      .all(...params) as ConnectionRecord[];
+  },
+
+  async getConnection(id: string): Promise<ConnectionRecord | undefined> {
+    return db
+      .prepare('SELECT * FROM connections WHERE id = ?')
+      .get(id) as ConnectionRecord | undefined;
+  },
+
+  async getConnectionByOwnerProvider(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    provider: string;
+  }): Promise<ConnectionRecord | undefined> {
+    return db
+      .prepare(
+        `SELECT * FROM connections
+          WHERE workspace_id = ?
+            AND owner_kind = ?
+            AND owner_id = ?
+            AND provider = ?`,
+      )
+      .get(input.workspace_id, input.owner_kind, input.owner_id, input.provider) as
+      | ConnectionRecord
+      | undefined;
+  },
+
+  async getConnectionByOwnerComposioId(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    composio_connection_id: string;
+  }): Promise<ConnectionRecord | undefined> {
+    return db
+      .prepare(
+        `SELECT * FROM connections
+          WHERE workspace_id = ?
+            AND owner_kind = ?
+            AND owner_id = ?
+            AND composio_connection_id = ?`,
+      )
+      .get(
+        input.workspace_id,
+        input.owner_kind,
+        input.owner_id,
+        input.composio_connection_id,
+      ) as ConnectionRecord | undefined;
+  },
+
+  async upsertConnection(
+    input: Omit<ConnectionRecord, 'created_at' | 'updated_at'>,
+  ): Promise<ConnectionRecord> {
+    db.prepare(
+      `INSERT INTO connections
+         (id, workspace_id, owner_kind, owner_id, provider,
+          composio_connection_id, composio_account_id, status, metadata_json,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT (workspace_id, owner_kind, owner_id, provider)
+         DO UPDATE SET composio_connection_id = excluded.composio_connection_id,
+                       composio_account_id = excluded.composio_account_id,
+                       status = excluded.status,
+                       metadata_json = excluded.metadata_json,
+                       updated_at = datetime('now')`,
+    ).run(
+      input.id,
+      input.workspace_id,
+      input.owner_kind,
+      input.owner_id,
+      input.provider,
+      input.composio_connection_id,
+      input.composio_account_id,
+      input.status,
+      input.metadata_json,
+    );
+    return (await this.getConnectionByOwnerProvider(input)) as ConnectionRecord;
+  },
+
+  async updateConnection(
+    id: string,
+    patch: Partial<
+      Pick<
+        ConnectionRecord,
+        'status' | 'metadata_json' | 'composio_connection_id' | 'composio_account_id'
+      >
+    >,
+  ): Promise<ConnectionRecord | undefined> {
+    const keys = Object.keys(patch);
+    if (keys.length === 0) return this.getConnection(id);
+    const set = keys.map((key) => `${key} = ?`).join(', ');
+    db.prepare(
+      `UPDATE connections SET ${set}, updated_at = datetime('now') WHERE id = ?`,
+    ).run(...keys.map((key) => (patch as Record<string, unknown>)[key]), id);
+    return this.getConnection(id);
+  },
+
+  async deleteConnection(id: string): Promise<boolean> {
+    const res = db.prepare('DELETE FROM connections WHERE id = ?').run(id);
+    return res.changes > 0;
+  },
+
+  // ---------- sharing ----------
+  async getLinkShareByAppSlug(slug: string): Promise<LinkShareRecord | undefined> {
+    const row = db
+      .prepare(
+        `SELECT id AS app_id, slug AS app_slug, visibility, link_share_token,
+                link_share_requires_auth, updated_at
+           FROM apps
+          WHERE slug = ?`,
+      )
+      .get(slug) as LinkShareRecord | undefined;
+    return row;
+  },
+
+  async updateAppSharing(
+    app_id: string,
+    patch: Partial<
+      Pick<
+        AppRecord,
+        | 'visibility'
+        | 'link_share_token'
+        | 'link_share_requires_auth'
+        | 'publish_status'
+        | 'review_submitted_at'
+        | 'review_decided_at'
+        | 'review_decided_by'
+        | 'review_comment'
+      >
+    >,
+  ): Promise<AppRecord | undefined> {
+    const keys = Object.keys(patch);
+    if (keys.length > 0) {
+      const set = keys.map((key) => `${key} = ?`).join(', ');
+      db.prepare(
+        `UPDATE apps SET ${set}, updated_at = datetime('now') WHERE id = ?`,
+      ).run(...keys.map((key) => (patch as Record<string, unknown>)[key]), app_id);
+    }
+    return db.prepare('SELECT * FROM apps WHERE id = ?').get(app_id) as
+      | AppRecord
+      | undefined;
+  },
+
+  async createVisibilityAudit(
+    input: Omit<VisibilityAuditRecord, 'created_at'>,
+  ): Promise<VisibilityAuditRecord> {
+    db.prepare(
+      `INSERT INTO app_visibility_audit
+         (id, app_id, from_state, to_state, actor_user_id, reason, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.app_id,
+      input.from_state,
+      input.to_state,
+      input.actor_user_id,
+      input.reason,
+      input.metadata,
+    );
+    return db
+      .prepare('SELECT * FROM app_visibility_audit WHERE id = ?')
+      .get(input.id) as VisibilityAuditRecord;
+  },
+
+  async listVisibilityAudit(app_id?: string | null): Promise<VisibilityAuditRecord[]> {
+    if (app_id) {
+      return db
+        .prepare(
+          `SELECT * FROM app_visibility_audit
+            WHERE app_id = ?
+            ORDER BY created_at DESC`,
+        )
+        .all(app_id) as VisibilityAuditRecord[];
+    }
+    return db
+      .prepare(`SELECT * FROM app_visibility_audit ORDER BY created_at DESC LIMIT 200`)
+      .all() as VisibilityAuditRecord[];
+  },
+
+  async listAppInvites(app_id: string): Promise<AppInviteRecord[]> {
+    return db
+      .prepare(
+        `SELECT app_invites.*,
+                users.name AS invited_user_name,
+                users.email AS invited_user_email
+           FROM app_invites
+           LEFT JOIN users ON users.id = app_invites.invited_user_id
+          WHERE app_invites.app_id = ?
+          ORDER BY app_invites.created_at DESC`,
+      )
+      .all(app_id) as AppInviteRecord[];
+  },
+
+  async upsertAppInvite(
+    input: Omit<AppInviteRecord, 'id' | 'created_at' | 'accepted_at' | 'revoked_at'> & {
+      id: string;
+    },
+  ): Promise<AppInviteRecord> {
+    const existing = db
+      .prepare(
+        `SELECT * FROM app_invites
+          WHERE app_id = ?
+            AND (
+              (? IS NOT NULL AND invited_user_id = ?)
+              OR (? IS NOT NULL AND LOWER(invited_email) = LOWER(?))
+            )
+          ORDER BY created_at DESC
+          LIMIT 1`,
+      )
+      .get(
+        input.app_id,
+        input.invited_user_id || null,
+        input.invited_user_id || null,
+        input.invited_email || null,
+        input.invited_email || null,
+      ) as AppInviteRecord | undefined;
+    if (existing && !['revoked', 'declined'].includes(existing.state)) {
+      return existing;
+    }
+    db.prepare(
+      `INSERT INTO app_invites
+         (id, app_id, invited_user_id, invited_email, state, invited_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.app_id,
+      input.invited_user_id || null,
+      input.invited_email || null,
+      input.state,
+      input.invited_by_user_id,
+    );
+    return db.prepare('SELECT * FROM app_invites WHERE id = ?').get(input.id) as AppInviteRecord;
+  },
+
+  async revokeAppInvite(
+    invite_id: string,
+    app_id: string,
+  ): Promise<AppInviteRecord | undefined> {
+    const invite = db
+      .prepare('SELECT * FROM app_invites WHERE id = ? AND app_id = ?')
+      .get(invite_id, app_id) as AppInviteRecord | undefined;
+    if (!invite) return undefined;
+    if (invite.state !== 'revoked') {
+      db.prepare(
+        `UPDATE app_invites
+            SET state = 'revoked',
+                revoked_at = datetime('now')
+          WHERE id = ?`,
+      ).run(invite.id);
+    }
+    return db.prepare('SELECT * FROM app_invites WHERE id = ?').get(invite.id) as AppInviteRecord;
+  },
+
+  async acceptAppInvite(
+    invite_id: string,
+    user_id: string,
+  ): Promise<{ invite: AppInviteRecord | undefined; changed: boolean }> {
+    const invite = db
+      .prepare('SELECT * FROM app_invites WHERE id = ?')
+      .get(invite_id) as AppInviteRecord | undefined;
+    if (!invite || invite.invited_user_id !== user_id) {
+      return { invite: undefined, changed: false };
+    }
+    if (invite.state === 'accepted') return { invite, changed: false };
+    if (invite.state !== 'pending_accept') return { invite, changed: false };
+    db.prepare(
+      `UPDATE app_invites
+          SET state = 'accepted',
+              accepted_at = datetime('now')
+        WHERE id = ?`,
+    ).run(invite.id);
+    return {
+      invite: db.prepare('SELECT * FROM app_invites WHERE id = ?').get(invite.id) as AppInviteRecord,
+      changed: true,
+    };
+  },
+
+  async declineAppInvite(
+    invite_id: string,
+    user_id: string,
+  ): Promise<AppInviteRecord | undefined> {
+    const invite = db
+      .prepare('SELECT * FROM app_invites WHERE id = ?')
+      .get(invite_id) as AppInviteRecord | undefined;
+    if (!invite || invite.invited_user_id !== user_id) return undefined;
+    if (invite.state === 'accepted' || invite.state === 'pending_accept') {
+      db.prepare(`UPDATE app_invites SET state = 'declined' WHERE id = ?`).run(invite.id);
+    }
+    return db.prepare('SELECT * FROM app_invites WHERE id = ?').get(invite.id) as AppInviteRecord;
+  },
+
+  async linkPendingEmailAppInvites(user_id: string, email: string): Promise<number> {
+    const res = db
+      .prepare(
+        `UPDATE app_invites
+            SET invited_user_id = ?,
+                state = 'pending_accept'
+          WHERE state = 'pending_email'
+            AND LOWER(invited_email) = LOWER(?)`,
+      )
+      .run(user_id, email);
+    return res.changes;
+  },
+
+  async listPendingAppInvitesForUser(user_id: string): Promise<AppInviteRecord[]> {
+    return db
+      .prepare(
+        `SELECT app_invites.*,
+                apps.slug AS app_slug,
+                apps.name AS app_name,
+                apps.description AS app_description
+           FROM app_invites
+           JOIN apps ON apps.id = app_invites.app_id
+          WHERE app_invites.invited_user_id = ?
+            AND app_invites.state = 'pending_accept'
+          ORDER BY app_invites.created_at DESC`,
+      )
+      .all(user_id) as AppInviteRecord[];
+  },
+
+  async userHasAcceptedAppInvite(app_id: string, user_id: string): Promise<boolean> {
+    const row = db
+      .prepare(
+        `SELECT 1 AS ok
+           FROM app_invites
+          WHERE app_id = ?
+            AND invited_user_id = ?
+            AND state = 'accepted'
+          LIMIT 1`,
+      )
+      .get(app_id, user_id) as { ok: number } | undefined;
+    return Boolean(row);
+  },
+
+  // ---------- triggers ----------
+  async createTrigger(input: TriggerRecord): Promise<TriggerRecord> {
+    db.prepare(
+      `INSERT INTO triggers (
+         id, app_id, user_id, workspace_id, action, inputs, trigger_type,
+         cron_expression, tz, webhook_secret, webhook_url_path, next_run_at,
+         last_fired_at, enabled, retry_policy, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.app_id,
+      input.user_id,
+      input.workspace_id,
+      input.action,
+      input.inputs,
+      input.trigger_type,
+      input.cron_expression,
+      input.tz,
+      input.webhook_secret,
+      input.webhook_url_path,
+      input.next_run_at,
+      input.last_fired_at,
+      input.enabled,
+      input.retry_policy,
+      input.created_at,
+      input.updated_at,
+    );
+    return (await this.getTrigger(input.id)) as TriggerRecord;
+  },
+
+  async getTrigger(id: string): Promise<TriggerRecord | undefined> {
+    return db.prepare('SELECT * FROM triggers WHERE id = ?').get(id) as
+      | TriggerRecord
+      | undefined;
+  },
+
+  async getTriggerByWebhookPath(path: string): Promise<TriggerRecord | undefined> {
+    return db
+      .prepare('SELECT * FROM triggers WHERE webhook_url_path = ?')
+      .get(path) as TriggerRecord | undefined;
+  },
+
+  async listTriggersForUser(user_id: string): Promise<TriggerRecord[]> {
+    return db
+      .prepare('SELECT * FROM triggers WHERE user_id = ? ORDER BY created_at DESC')
+      .all(user_id) as TriggerRecord[];
+  },
+
+  async listTriggersForApp(app_id: string): Promise<TriggerRecord[]> {
+    return db
+      .prepare('SELECT * FROM triggers WHERE app_id = ? ORDER BY created_at DESC')
+      .all(app_id) as TriggerRecord[];
+  },
+
+  async listDueTriggers(now_ms: number): Promise<TriggerRecord[]> {
+    return db
+      .prepare(
+        `SELECT * FROM triggers
+          WHERE trigger_type = 'schedule'
+            AND enabled = 1
+            AND next_run_at IS NOT NULL
+            AND next_run_at <= ?
+          ORDER BY next_run_at ASC`,
+      )
+      .all(now_ms) as TriggerRecord[];
+  },
+
+  async updateTrigger(
+    id: string,
+    patch: Partial<TriggerRecord>,
+  ): Promise<TriggerRecord | undefined> {
+    const keys = Object.keys(patch).filter((key) => key !== 'id');
+    if (keys.length > 0) {
+      const set = keys.map((key) => `${key} = ?`).join(', ');
+      db.prepare(`UPDATE triggers SET ${set} WHERE id = ?`).run(
+        ...keys.map((key) => (patch as Record<string, unknown>)[key]),
+        id,
+      );
+    }
+    return this.getTrigger(id);
+  },
+
+  async deleteTrigger(id: string): Promise<boolean> {
+    const res = db.prepare('DELETE FROM triggers WHERE id = ?').run(id);
+    return res.changes > 0;
+  },
+
+  async markTriggerFired(id: string, now_ms: number): Promise<void> {
+    db.prepare(
+      `UPDATE triggers SET last_fired_at = ?, updated_at = ? WHERE id = ?`,
+    ).run(now_ms, now_ms, id);
+  },
+
+  async advanceTriggerSchedule(
+    id: string,
+    next_run_at: number,
+    now_ms: number,
+    expected_next_run_at?: number | null,
+    fire = true,
+  ): Promise<boolean> {
+    const set = fire
+      ? `next_run_at = ?, last_fired_at = ?, updated_at = ?`
+      : `next_run_at = ?, updated_at = ?`;
+    const values: unknown[] = fire
+      ? [next_run_at, now_ms, now_ms, id]
+      : [next_run_at, now_ms, id];
+    let where = 'id = ?';
+    if (expected_next_run_at !== undefined) {
+      where += ' AND next_run_at IS ?';
+      values.push(expected_next_run_at);
+    }
+    const res = db.prepare(`UPDATE triggers SET ${set} WHERE ${where}`).run(...values);
+    return res.changes > 0;
+  },
+
+  async recordTriggerWebhookDelivery(
+    trigger_id: string,
+    request_id: string,
+    now_ms: number,
+    ttl_ms: number,
+  ): Promise<boolean> {
+    db.prepare('DELETE FROM trigger_webhook_deliveries WHERE received_at < ?').run(
+      now_ms - ttl_ms,
+    );
+    const res = db
+      .prepare(
+        `INSERT OR IGNORE INTO trigger_webhook_deliveries
+           (trigger_id, request_id, received_at)
+         VALUES (?, ?, ?)`,
+      )
+      .run(trigger_id, request_id, now_ms);
+    return res.changes > 0;
   },
 
   // ---------- admin secret pointers ----------

@@ -62,7 +62,7 @@ async function loadAuthorizedRunApp(
   const app = await adapters.storage.getAppById(appId);
   if (!app) return { app: undefined, blocked: null };
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, app.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, app.visibility || 'public', {
     app_id: app.id,
     slug: app.slug,
     author: app.author,
@@ -208,7 +208,7 @@ runRouter.post('/', async (c) => {
   if (row.status !== 'active') {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
-  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,
     author: row.author,
@@ -550,7 +550,7 @@ slugRunRouter.post('/', async (c) => {
   const gate = runGate(c, ctx, { slug, checkBody: false });
   if (!gate.ok) return runGateResponse(c, gate);
 
-  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,
     author: row.author,
@@ -719,7 +719,7 @@ meRouter.get('/invites', async (c) => {
   if (isCloudMode() && !ctx.is_authenticated) {
     return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
   }
-  const invites = listPendingInvitesForUser(ctx.user_id).map((invite) => ({
+  const invites = (await listPendingInvitesForUser(ctx.user_id)).map((invite) => ({
     id: invite.id,
     app_id: invite.app_id,
     invited_email: invite.invited_email,
@@ -737,7 +737,7 @@ meRouter.post('/invites/:invite_id/accept', async (c) => {
   if (isCloudMode() && !ctx.is_authenticated) {
     return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
   }
-  const { invite, changed } = acceptInvite(c.req.param('invite_id') || '', ctx.user_id);
+  const { invite, changed } = await acceptInvite(c.req.param('invite_id') || '', ctx.user_id);
   if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
   if (!changed && invite.state !== 'accepted') {
     return c.json({ error: 'Invite is not acceptable', code: 'invalid_invite_state' }, 409);
@@ -750,7 +750,7 @@ meRouter.post('/invites/:invite_id/decline', async (c) => {
   if (isCloudMode() && !ctx.is_authenticated) {
     return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
   }
-  const invite = declineInvite(c.req.param('invite_id') || '', ctx.user_id);
+  const invite = await declineInvite(c.req.param('invite_id') || '', ctx.user_id);
   if (!invite) return c.json({ error: 'Invite not found', code: 'not_found' }, 404);
   return c.json({ ok: true, invite });
 });

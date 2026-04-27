@@ -25,6 +25,11 @@ import {
   readyScheduleTriggers,
 } from './triggers.js';
 import type { AppRecord, TriggerRecord } from '../types.js';
+import type { StorageAdapter } from '../adapters/types.js';
+
+async function storage(): Promise<StorageAdapter> {
+  return (await import('../adapters/index.js')).adapters.storage;
+}
 
 const POLL_INTERVAL_MS = Number(process.env.FLOOM_TRIGGERS_POLL_MS || 30_000);
 const CATCH_UP_WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -41,7 +46,7 @@ export function startTriggersWorker(): void {
   const tick = async () => {
     if (!running) return;
     try {
-      tickOnce();
+      await tickOnce();
     } catch (err) {
       console.error('[triggers-worker] tick error:', err);
     } finally {
@@ -64,13 +69,13 @@ export function stopTriggersWorker(): void {
  * deterministically without waiting for setTimeout. Returns the number
  * of triggers fired this tick.
  */
-export function tickOnce(): number {
+export async function tickOnce(): Promise<number> {
   const now = Date.now();
-  const ready = readyScheduleTriggers(now);
+  const ready = await readyScheduleTriggers(now);
   let fired = 0;
   for (const trigger of ready) {
     try {
-      fired += processTrigger(trigger, now) ? 1 : 0;
+      fired += (await processTrigger(trigger, now)) ? 1 : 0;
     } catch (err) {
       console.error(
         `[triggers-worker] failed trigger=${trigger.id} app=${trigger.app_id}:`,
@@ -91,7 +96,7 @@ export function tickOnce(): number {
  * is idempotent against the same trigger because the job id is fresh
  * every call, but double-enqueue would double-fire the app).
  */
-function processTrigger(trigger: TriggerRecord, now: number): boolean {
+async function processTrigger(trigger: TriggerRecord, now: number): Promise<boolean> {
   if (!trigger.cron_expression) return false;
   const readNextRun = trigger.next_run_at;
   if (readNextRun === null) return false;
@@ -104,26 +109,32 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
     );
     const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
     // Claim: only update if no one else already advanced it.
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at = ?`,
-    ).run(nextMs, now, trigger.id, readNextRun);
+    await (await storage()).advanceTriggerSchedule(
+      trigger.id,
+      nextMs,
+      now,
+      readNextRun,
+      false,
+    );
     return false;
   }
 
   // Load the app; if it's been deleted under us (CASCADE would normally
   // remove the trigger, but belt-and-suspenders), skip.
-  const app = db
-    .prepare('SELECT * FROM apps WHERE id = ?')
-    .get(trigger.app_id) as AppRecord | undefined;
+  const app = (await (await storage()).getAppById(trigger.app_id)) as AppRecord | undefined;
   if (!app || app.status !== 'active') {
     console.warn(
       `[triggers-worker] trigger=${trigger.id} app missing or inactive, skipping`,
     );
     // Still advance so we don't hot-loop.
     const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at = ?`,
-    ).run(nextMs, now, trigger.id, readNextRun);
+    await (await storage()).advanceTriggerSchedule(
+      trigger.id,
+      nextMs,
+      now,
+      readNextRun,
+      false,
+    );
     return false;
   }
 
@@ -140,9 +151,13 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
       `[triggers-worker] trigger=${trigger.id} action="${trigger.action}" not in manifest, skipping`,
     );
     const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-    db.prepare(
-      `UPDATE triggers SET next_run_at = ?, updated_at = ? WHERE id = ? AND next_run_at = ?`,
-    ).run(nextMs, now, trigger.id, readNextRun);
+    await (await storage()).advanceTriggerSchedule(
+      trigger.id,
+      nextMs,
+      now,
+      readNextRun,
+      false,
+    );
     return false;
   }
 
@@ -156,16 +171,14 @@ function processTrigger(trigger: TriggerRecord, now: number): boolean {
   // Claim step: advance next_run_at atomically. If another worker won
   // the race, our UPDATE changes 0 rows and we skip the fire.
   const nextMs = nextCronFireMs(trigger.cron_expression, now, trigger.tz);
-  const claim = db
-    .prepare(
-      `UPDATE triggers
-          SET next_run_at = ?,
-              last_fired_at = ?,
-              updated_at = ?
-        WHERE id = ? AND next_run_at = ?`,
-    )
-    .run(nextMs, now, now, trigger.id, readNextRun);
-  if (claim.changes === 0) {
+  const claimed = await (await storage()).advanceTriggerSchedule(
+    trigger.id,
+    nextMs,
+    now,
+    readNextRun,
+    true,
+  );
+  if (!claimed) {
     return false; // another worker won
   }
 

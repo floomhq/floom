@@ -50,7 +50,7 @@ db.prepare(
 ).run();
 
 const id = insertApp();
-const first = transitionVisibility(db.prepare(`SELECT * FROM apps WHERE id = ?`).get(id), 'link', {
+const first = await transitionVisibility(db.prepare(`SELECT * FROM apps WHERE id = ?`).get(id), 'link', {
   actorUserId: 'owner',
   reason: 'owner_enable_link',
 });
@@ -65,11 +65,11 @@ log('invalid token returns 404', badToken.status === 404, `got ${badToken.status
 const goodToken = await fetchHub(`/link-app?key=${first.link_share_token}`);
 log('valid token returns 200', goodToken.status === 200, `got ${goodToken.status}`);
 
-const privateAgain = transitionVisibility(first, 'private', {
+const privateAgain = await transitionVisibility(first, 'private', {
   actorUserId: 'owner',
   reason: 'owner_set_private',
 });
-const rotated = transitionVisibility(privateAgain, 'link', {
+const rotated = await transitionVisibility(privateAgain, 'link', {
   actorUserId: 'owner',
   reason: 'owner_enable_link',
   rotateLinkToken: true,

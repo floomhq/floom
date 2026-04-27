@@ -79,7 +79,7 @@ Pick your execution substrate (Firecracker, K8s Job, Cloud Run, WASM), implement
 
 ## StorageAdapter
 
-**Purpose.** Persists Floom's durable state: apps, runs, run threads/turns, agent tokens, jobs, workspaces, users, and admin secret pointers. (Per-user / per-creator secret ciphertext is owned by `SecretsAdapter`, not this one.)
+**Purpose.** Persists Floom's durable protocol state: apps, runs, run threads/turns, agent tokens, jobs, workspaces, users, app memory, OAuth connections, app sharing state, triggers, and admin secret pointers. (Per-user / per-creator secret ciphertext is owned by `SecretsAdapter`, not this one.)
 
 The reference impl uses `better-sqlite3` against a local file (`data/floom-chat.db`); see `apps/server/src/db.ts` for the schema and migrations.
 
@@ -133,10 +133,63 @@ interface StorageAdapter {
 
   // workspaces + users
   getWorkspace(id: string): WorkspaceRecord | undefined;
+  getWorkspaceBySlug(slug: string): WorkspaceRecord | undefined;
+  createWorkspace(input): WorkspaceRecord;
+  updateWorkspace(id, patch): WorkspaceRecord | undefined;
+  deleteWorkspace(id): boolean;
   listWorkspacesForUser(user_id: string): Array<WorkspaceRecord & { role }>;
+  addUserToWorkspace(workspace_id, user_id, role): WorkspaceMemberRecord;
+  updateWorkspaceMemberRole(workspace_id, user_id, role): WorkspaceMemberRecord | undefined;
+  removeUserFromWorkspace(workspace_id, user_id): boolean;
+  listWorkspaceMembers(workspace_id): WorkspaceMemberWithUserRecord[];
+  getActiveWorkspaceId(user_id): string | null;
+  setActiveWorkspace(user_id, workspace_id): void;
+  createWorkspaceInvite(input): WorkspaceInviteRecord;
+  listWorkspaceInvites(workspace_id): WorkspaceInviteRecord[];
   getUser(id: string): UserRecord | undefined;
   getUserByEmail(email: string): UserRecord | undefined;
+  findUserByUsername(username): { id, email, name } | undefined;
+  searchUsers(query, limit?): Array<{ id, email, name }>;
   createUser(input): UserRecord;
+
+  // app memory
+  getAppMemory(scope): AppMemoryRecord | undefined;
+  upsertAppMemory(input): AppMemoryRecord;
+  deleteAppMemory(scope): boolean;
+  listAppMemory(workspace_id, app_slug, user_id, keys?): AppMemoryRecord[];
+
+  // OAuth connections
+  listConnections(scope): ConnectionRecord[];
+  getConnection(id): ConnectionRecord | undefined;
+  getConnectionByOwnerProvider(scope): ConnectionRecord | undefined;
+  getConnectionByOwnerComposioId(scope): ConnectionRecord | undefined;
+  upsertConnection(input): ConnectionRecord;
+  updateConnection(id, patch): ConnectionRecord | undefined;
+  deleteConnection(id): boolean;
+
+  // app sharing
+  getLinkShareByAppSlug(slug): LinkShareRecord | undefined;
+  updateAppSharing(app_id, patch): AppRecord | undefined;
+  createVisibilityAudit(input): VisibilityAuditRecord;
+  listVisibilityAudit(app_id?): VisibilityAuditRecord[];
+  listAppInvites(app_id): AppInviteRecord[];
+  upsertAppInvite(input): AppInviteRecord;
+  revokeAppInvite(invite_id, app_id): AppInviteRecord | undefined;
+  acceptAppInvite(invite_id, user_id): { invite, changed };
+  listPendingAppInvitesForUser(user_id): AppInviteRecord[];
+
+  // triggers
+  createTrigger(input): TriggerRecord;
+  getTrigger(id): TriggerRecord | undefined;
+  getTriggerByWebhookPath(path): TriggerRecord | undefined;
+  listTriggersForUser(user_id): TriggerRecord[];
+  listTriggersForApp(app_id): TriggerRecord[];
+  listDueTriggers(now_ms): TriggerRecord[];
+  updateTrigger(id, patch): TriggerRecord | undefined;
+  deleteTrigger(id): boolean;
+  markTriggerFired(id, now_ms): void;
+  advanceTriggerSchedule(id, next_run_at, now_ms, expected_next_run_at?, fire?): boolean;
+  recordTriggerWebhookDelivery(trigger_id, request_id, now_ms, ttl_ms): boolean;
 
   // admin secret pointers (global + per-app)
   listAdminSecrets(app_id?: string | null): SecretRecord[];
@@ -152,6 +205,11 @@ interface StorageAdapter {
 - **Run turns.** `appendRunTurn` MUST append at the next monotonically increasing `turn_index` for the thread and `listRunTurns` MUST return rows in ascending `turn_index` order.
 - **Agent tokens.** `createAgentToken` MUST persist the pre-hashed token only; plaintext tokens never enter storage. `revokeAgentTokenForUser` MUST be idempotent and preserve the first `revoked_at` timestamp.
 - **Tenant scoping.** Every tenant-addressable table filters on `workspace_id`. OSS adapters MAY hardcode `workspace_id = 'local'` but MUST keep the column so the same queries work in Cloud mode.
+- **Workspaces.** Workspace CRUD, membership, active workspace, and invite methods are protocol-level. Adapters MUST preserve tenant isolation and MUST make membership deletion clear matching active-workspace pointers.
+- **App memory.** App memory is per-workspace, per-app, per-user durable state injected into runs. Adapters MUST scope by `(workspace_id, app_slug, user_id)` and MUST support listing by an optional key allowlist.
+- **Connections.** OAuth connection rows are protocol-level auth state for app execution. Adapters MUST enforce the natural key `(workspace_id, owner_kind, owner_id, provider)` and MUST support lookup by provider and Composio connection id.
+- **Sharing.** Link-share tokens, invite rows, and visibility audit rows are protocol-level public-access state. Adapters MUST keep invite acceptance idempotent and MUST return `false`/`undefined` for missing revoke/delete targets.
+- **Triggers.** Schedule/webhook triggers are protocol-level run initiation state. Adapters MUST support due-trigger listing, atomic schedule advancement with an expected `next_run_at`, and webhook delivery dedupe.
 - **Idempotency.** `createApp` / `createRun` with a pre-existing id MUST either upsert or throw a deterministic error. Callers retry on network failure.
 
 ### How to write one

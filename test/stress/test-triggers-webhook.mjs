@@ -100,7 +100,7 @@ db.prepare(
 console.log('triggers: webhook tests');
 
 // 1. Create webhook trigger.
-const t = triggers.createTrigger({
+const t = await triggers.createTrigger({
   app_id: appId,
   user_id: DEFAULT_USER_ID,
   workspace_id: DEFAULT_WORKSPACE_ID,
@@ -206,7 +206,7 @@ const res3 = await post('/hook/never-minted-xxxxx', goodBody, {
 log('unknown path: 404', res3.status === 404, `status=${res3.status}`);
 
 // 6. Disabled trigger → 204 silently, no job.
-triggers.updateTrigger(t.id, { enabled: false });
+await triggers.updateTrigger(t.id, { enabled: false });
 const silentBody = JSON.stringify({ inputs: { when: 'disabled' } });
 const silentSig = triggers.signWebhookBody(secret, silentBody);
 const jobsBeforeSilent = db.prepare('SELECT COUNT(*) as n FROM jobs').get().n;

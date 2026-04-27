@@ -949,7 +949,7 @@ hubRouter.get('/:slug', async (c) => {
     author_email: author?.email ?? null,
   } as AppRecord & { author_name: string | null; author_email: string | null };
   const ctx = await resolveUserContext(c);
-  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  const access = await getAppAccessDecision(row, ctx, c.req.query('key') || null);
   if (!access.ok) {
     if (access.status === 401) {
       return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);

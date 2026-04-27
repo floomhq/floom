@@ -170,7 +170,7 @@ db.prepare(
    VALUES (?, 'link-api-app', 'Link API App', 'test app', ?, 'active', 'proxied:test', 'local', 'local', 'proxied', ?, 'private', 'pending_review')`,
 ).run(appId, JSON.stringify(manifest), `http://127.0.0.1:${UPSTREAM_PORT}`);
 
-const linked = transitionVisibility(db.prepare(`SELECT * FROM apps WHERE id = ?`).get(appId), 'link', {
+const linked = await transitionVisibility(db.prepare(`SELECT * FROM apps WHERE id = ?`).get(appId), 'link', {
   actorUserId: 'local',
   reason: 'owner_enable_link',
 });

@@ -1577,7 +1577,7 @@ if (webDist) {
         return c.html(rewriteTitle(servedIndexHtml, 'App not found · Floom'), 404);
       }
       const ctx = await resolveUserContext(c);
-      const access = getAppAccessDecision(appRow, ctx, url.searchParams.get('key'));
+      const access = await getAppAccessDecision(appRow, ctx, url.searchParams.get('key'));
       if (!access.ok) {
         if (access.status === 401) {
           return c.html(rewriteTitle(servedIndexHtml, 'Authentication required · Floom'), 401);

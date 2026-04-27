@@ -323,6 +323,121 @@ export interface RunTurnRecord {
 export type WorkspaceMemberRole = 'admin' | 'editor' | 'viewer';
 export type WorkspaceRole = WorkspaceMemberRole | 'guest';
 
+export interface WorkspaceMemberRecord {
+  workspace_id: string;
+  user_id: string;
+  role: WorkspaceMemberRole | string;
+  joined_at: string;
+}
+
+export interface WorkspaceMemberWithUserRecord extends WorkspaceMemberRecord {
+  email: string | null;
+  name: string | null;
+}
+
+export interface WorkspaceInviteRecord {
+  id: string;
+  workspace_id: string;
+  email: string;
+  role: WorkspaceRole;
+  invited_by_user_id: string;
+  token: string;
+  status: 'pending' | 'accepted' | 'revoked' | 'expired';
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+}
+
+export interface AppMemoryRecord {
+  workspace_id: string;
+  app_slug: string;
+  user_id: string;
+  device_id: string | null;
+  key: string;
+  value: string;
+  updated_at: string;
+}
+
+export type ConnectionOwnerKind = 'device' | 'user';
+export type ConnectionStatus = 'pending' | 'active' | 'revoked' | 'expired';
+
+export interface ConnectionRecord {
+  id: string;
+  workspace_id: string;
+  owner_kind: ConnectionOwnerKind;
+  owner_id: string;
+  provider: string;
+  composio_connection_id: string;
+  composio_account_id: string;
+  status: ConnectionStatus;
+  metadata_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AppInviteState =
+  | 'pending_email'
+  | 'pending_accept'
+  | 'accepted'
+  | 'revoked'
+  | 'declined';
+
+export interface AppInviteRecord {
+  id: string;
+  app_id: string;
+  invited_user_id: string | null;
+  invited_email: string | null;
+  state: AppInviteState;
+  created_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  invited_by_user_id: string;
+  invited_user_name?: string | null;
+  invited_user_email?: string | null;
+}
+
+export interface LinkShareRecord {
+  app_id: string;
+  app_slug: string;
+  visibility: AppVisibility;
+  link_share_token: string | null;
+  link_share_requires_auth: 0 | 1;
+  updated_at: string;
+}
+
+export interface VisibilityAuditRecord {
+  id: string;
+  app_id: string;
+  from_state: string | null;
+  to_state: string;
+  actor_user_id: string;
+  reason: string;
+  metadata: string | null;
+  created_at: string;
+}
+
+export type TriggerType = 'schedule' | 'webhook';
+
+export interface TriggerRecord {
+  id: string;
+  app_id: string;
+  user_id: string;
+  workspace_id: string;
+  action: string;
+  inputs: string;
+  trigger_type: TriggerType;
+  cron_expression: string | null;
+  tz: string | null;
+  webhook_secret: string | null;
+  webhook_url_path: string | null;
+  next_run_at: number | null;
+  last_fired_at: number | null;
+  enabled: 0 | 1;
+  retry_policy: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface SessionContext {
   workspace_id: string;
   user_id: string;
@@ -480,11 +595,120 @@ export interface StorageAdapter {
   updateJob(id: string, patch: Partial<JobRecord>): Promise<void>;
 
   getWorkspace(id: string): Promise<WorkspaceRecord | undefined>;
+  getWorkspaceBySlug(slug: string): Promise<WorkspaceRecord | undefined>;
+  createWorkspace(input: {
+    id: string;
+    slug: string;
+    name: string;
+    plan: string;
+  }): Promise<WorkspaceRecord>;
+  updateWorkspace(
+    id: string,
+    patch: Partial<Pick<WorkspaceRecord, 'name' | 'slug' | 'plan' | 'wrapped_dek'>>,
+  ): Promise<WorkspaceRecord | undefined>;
+  deleteWorkspace(id: string): Promise<boolean>;
   listWorkspacesForUser(user_id: string): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>>;
+  addUserToWorkspace(
+    workspace_id: string,
+    user_id: string,
+    role: WorkspaceMemberRole,
+  ): Promise<WorkspaceMemberRecord>;
+  updateWorkspaceMemberRole(
+    workspace_id: string,
+    user_id: string,
+    role: WorkspaceMemberRole,
+  ): Promise<WorkspaceMemberRecord | undefined>;
+  removeUserFromWorkspace(workspace_id: string, user_id: string): Promise<boolean>;
+  getWorkspaceMemberRole(
+    workspace_id: string,
+    user_id: string,
+  ): Promise<WorkspaceMemberRole | null>;
+  countWorkspaceAdmins(workspace_id: string): Promise<number>;
+  listWorkspaceMembers(workspace_id: string): Promise<WorkspaceMemberWithUserRecord[]>;
+  getActiveWorkspaceId(user_id: string): Promise<string | null>;
+  setActiveWorkspace(user_id: string, workspace_id: string): Promise<void>;
+  clearActiveWorkspaceForWorkspace(workspace_id: string): Promise<void>;
+  createWorkspaceInvite(input: Omit<WorkspaceInviteRecord, 'created_at' | 'accepted_at'>): Promise<WorkspaceInviteRecord>;
+  getPendingWorkspaceInviteByToken(token: string): Promise<WorkspaceInviteRecord | undefined>;
+  listWorkspaceInvites(workspace_id: string): Promise<WorkspaceInviteRecord[]>;
+  deletePendingWorkspaceInvites(workspace_id: string, email: string): Promise<number>;
+  markWorkspaceInviteStatus(id: string, status: WorkspaceInviteRecord['status']): Promise<void>;
+  acceptWorkspaceInvite(id: string): Promise<void>;
+  revokeWorkspaceInvite(workspace_id: string, invite_id: string): Promise<boolean>;
+
   getUser(id: string): Promise<UserRecord | undefined>;
   getUserByEmail(email: string): Promise<UserRecord | undefined>;
+  findUserByUsername(username: string): Promise<Pick<UserRecord, 'id' | 'email' | 'name'> | undefined>;
+  searchUsers(query: string, limit?: number): Promise<Array<Pick<UserRecord, 'id' | 'email' | 'name'>>>;
   createUser(input: UserWriteInput): Promise<UserRecord>;
   upsertUser(input: UserWriteInput, updateColumns: UserWriteColumn[]): Promise<UserRecord>;
+
+  getAppMemory(row: Pick<AppMemoryRecord, 'workspace_id' | 'app_slug' | 'user_id' | 'key'>): Promise<AppMemoryRecord | undefined>;
+  upsertAppMemory(input: Omit<AppMemoryRecord, 'updated_at'>): Promise<AppMemoryRecord>;
+  deleteAppMemory(row: Pick<AppMemoryRecord, 'workspace_id' | 'app_slug' | 'user_id' | 'key'>): Promise<boolean>;
+  listAppMemory(
+    workspace_id: string,
+    app_slug: string,
+    user_id: string,
+    keys?: string[],
+  ): Promise<AppMemoryRecord[]>;
+
+  listConnections(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    status?: ConnectionStatus;
+  }): Promise<ConnectionRecord[]>;
+  getConnection(id: string): Promise<ConnectionRecord | undefined>;
+  getConnectionByOwnerProvider(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    provider: string;
+  }): Promise<ConnectionRecord | undefined>;
+  getConnectionByOwnerComposioId(input: {
+    workspace_id: string;
+    owner_kind: ConnectionOwnerKind;
+    owner_id: string;
+    composio_connection_id: string;
+  }): Promise<ConnectionRecord | undefined>;
+  upsertConnection(input: Omit<ConnectionRecord, 'created_at' | 'updated_at'>): Promise<ConnectionRecord>;
+  updateConnection(id: string, patch: Partial<Pick<ConnectionRecord, 'status' | 'metadata_json' | 'composio_connection_id' | 'composio_account_id'>>): Promise<ConnectionRecord | undefined>;
+  deleteConnection(id: string): Promise<boolean>;
+
+  getLinkShareByAppSlug(slug: string): Promise<LinkShareRecord | undefined>;
+  updateAppSharing(
+    app_id: string,
+    patch: Partial<Pick<AppRecord, 'visibility' | 'link_share_token' | 'link_share_requires_auth' | 'publish_status' | 'review_submitted_at' | 'review_decided_at' | 'review_decided_by' | 'review_comment'>>,
+  ): Promise<AppRecord | undefined>;
+  createVisibilityAudit(input: Omit<VisibilityAuditRecord, 'created_at'>): Promise<VisibilityAuditRecord>;
+  listVisibilityAudit(app_id?: string | null): Promise<VisibilityAuditRecord[]>;
+  listAppInvites(app_id: string): Promise<AppInviteRecord[]>;
+  upsertAppInvite(input: Omit<AppInviteRecord, 'id' | 'created_at' | 'accepted_at' | 'revoked_at'> & { id: string }): Promise<AppInviteRecord>;
+  revokeAppInvite(invite_id: string, app_id: string): Promise<AppInviteRecord | undefined>;
+  acceptAppInvite(invite_id: string, user_id: string): Promise<{ invite: AppInviteRecord | undefined; changed: boolean }>;
+  declineAppInvite(invite_id: string, user_id: string): Promise<AppInviteRecord | undefined>;
+  linkPendingEmailAppInvites(user_id: string, email: string): Promise<number>;
+  listPendingAppInvitesForUser(user_id: string): Promise<AppInviteRecord[]>;
+  userHasAcceptedAppInvite(app_id: string, user_id: string): Promise<boolean>;
+
+  createTrigger(input: TriggerRecord): Promise<TriggerRecord>;
+  getTrigger(id: string): Promise<TriggerRecord | undefined>;
+  getTriggerByWebhookPath(path: string): Promise<TriggerRecord | undefined>;
+  listTriggersForUser(user_id: string): Promise<TriggerRecord[]>;
+  listTriggersForApp(app_id: string): Promise<TriggerRecord[]>;
+  listDueTriggers(now_ms: number): Promise<TriggerRecord[]>;
+  updateTrigger(id: string, patch: Partial<TriggerRecord>): Promise<TriggerRecord | undefined>;
+  deleteTrigger(id: string): Promise<boolean>;
+  markTriggerFired(id: string, now_ms: number): Promise<void>;
+  advanceTriggerSchedule(
+    id: string,
+    next_run_at: number,
+    now_ms: number,
+    expected_next_run_at?: number | null,
+    fire?: boolean,
+  ): Promise<boolean>;
+  recordTriggerWebhookDelivery(trigger_id: string, request_id: string, now_ms: number, ttl_ms: number): Promise<boolean>;
 
   listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]>;
   upsertAdminSecret(name: string, value: string, app_id?: string | null): Promise<void>;

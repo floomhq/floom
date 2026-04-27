@@ -42,7 +42,7 @@ function load(id) {
   return db.prepare(`SELECT * FROM apps WHERE id = ?`).get(id);
 }
 
-function move(id, to, reason) {
+async function move(id, to, reason) {
   return transitionVisibility(load(id), to, { actorUserId: 'local', reason });
 }
 
@@ -68,7 +68,7 @@ const legal = [
 
 for (const [from, to, reason] of legal) {
   reset(id, from);
-  const next = move(id, to, reason);
+  const next = await move(id, to, reason);
   log(`${from} -> ${to}`, next.visibility === to, `got ${next.visibility}`);
 }
 
@@ -84,7 +84,7 @@ for (const [from, to, reason] of illegal) {
   reset(id, from);
   let threw = false;
   try {
-    move(id, to, reason);
+    await move(id, to, reason);
   } catch {
     threw = true;
   }

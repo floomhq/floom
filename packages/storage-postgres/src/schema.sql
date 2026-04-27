@@ -16,7 +16,13 @@ CREATE TABLE IF NOT EXISTS apps (
   auth_config TEXT,
   openapi_spec_url TEXT,
   openapi_spec_cached TEXT,
-  visibility TEXT NOT NULL DEFAULT 'public',
+  visibility TEXT NOT NULL DEFAULT 'private',
+  link_share_token TEXT,
+  link_share_requires_auth BOOLEAN NOT NULL DEFAULT false,
+  review_submitted_at TIMESTAMPTZ,
+  review_decided_at TIMESTAMPTZ,
+  review_decided_by TEXT,
+  review_comment TEXT,
   is_async BOOLEAN NOT NULL DEFAULT false,
   webhook_url TEXT,
   timeout_ms INTEGER,
@@ -38,6 +44,12 @@ CREATE INDEX IF NOT EXISTS idx_apps_category ON apps(category);
 CREATE INDEX IF NOT EXISTS idx_apps_featured_avg ON apps(featured, avg_run_ms);
 CREATE INDEX IF NOT EXISTS idx_apps_publish_status ON apps(publish_status);
 CREATE INDEX IF NOT EXISTS idx_apps_workspace ON apps(workspace_id);
+ALTER TABLE apps ADD COLUMN IF NOT EXISTS link_share_token TEXT;
+ALTER TABLE apps ADD COLUMN IF NOT EXISTS link_share_requires_auth BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE apps ADD COLUMN IF NOT EXISTS review_submitted_at TIMESTAMPTZ;
+ALTER TABLE apps ADD COLUMN IF NOT EXISTS review_decided_at TIMESTAMPTZ;
+ALTER TABLE apps ADD COLUMN IF NOT EXISTS review_decided_by TEXT;
+ALTER TABLE apps ADD COLUMN IF NOT EXISTS review_comment TEXT;
 
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
@@ -155,6 +167,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth
   ON users(auth_provider, auth_subject)
   WHERE auth_subject IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS app_invites (
+  id TEXT PRIMARY KEY,
+  app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  invited_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  invited_email TEXT,
+  state TEXT NOT NULL CHECK (state IN ('pending_email', 'pending_accept', 'accepted', 'revoked', 'declined')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  accepted_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  invited_by_user_id TEXT NOT NULL REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_app_invites_app_user
+  ON app_invites(app_id, invited_user_id);
+CREATE INDEX IF NOT EXISTS idx_app_invites_email
+  ON app_invites(invited_email);
+
+CREATE TABLE IF NOT EXISTS app_visibility_audit (
+  id TEXT PRIMARY KEY,
+  app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  from_state TEXT,
+  to_state TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL REFERENCES users(id),
+  reason TEXT NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_app_visibility_audit_app_created
+  ON app_visibility_audit(app_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS workspace_members (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

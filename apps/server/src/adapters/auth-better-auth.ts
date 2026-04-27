@@ -297,7 +297,7 @@ async function resolveBetterAuthSession(
     return null;
   }
 
-  linkPendingEmailInvites(userId, session.user.email);
+  await linkPendingEmailInvites(userId, session.user.email);
   const activeWorkspaceId = resolveWorkspaceForAuthUser(
     userId,
     session.user.email,

@@ -1248,7 +1248,7 @@ mcpRouter.all('/app/:slug', async (c) => {
     );
   }
   const ctx = await resolveUserContext(c);
-  const blocked = checkAppVisibility(c, row.visibility || 'public', {
+  const blocked = await checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,
     author: row.author,

@@ -240,31 +240,31 @@ try {
 log('finish: cross-owner attempt → ConnectionNotFoundError', notFoundErr);
 
 // ---- 8. listConnections: scoped to caller ----
-const list1 = composio.listConnections(deviceCtx);
+const list1 = await composio.listConnections(deviceCtx);
 log('list(device): 1 connection', list1.length === 1);
 log('list(device): gmail', list1[0].provider === 'gmail' && list1[0].status === 'active');
 
 // Connect notion for same device
 const init2 = await composio.initiateConnection(deviceCtx, 'notion');
 await composio.finishConnection(deviceCtx, init2.connection_id);
-const list2 = composio.listConnections(deviceCtx);
+const list2 = await composio.listConnections(deviceCtx);
 log('list(device): 2 connections', list2.length === 2);
 
 // Status filter
-const onlyActive = composio.listConnections(deviceCtx, { status: 'active' });
+const onlyActive = await composio.listConnections(deviceCtx, { status: 'active' });
 log('list(device, active): 2 rows', onlyActive.length === 2);
-const onlyPending = composio.listConnections(deviceCtx, { status: 'pending' });
+const onlyPending = await composio.listConnections(deviceCtx, { status: 'pending' });
 log('list(device, pending): 0 rows', onlyPending.length === 0);
 
 // Different device → empty list
 const otherCtx2 = { ...deviceCtx, device_id: 'dev-other' };
-const otherList = composio.listConnections(otherCtx2);
+const otherList = await composio.listConnections(otherCtx2);
 log('list(other device): isolated (0 rows)', otherList.length === 0);
 
 // ---- 9. getConnection by provider ----
-const got = composio.getConnection(deviceCtx, 'gmail');
+const got = await composio.getConnection(deviceCtx, 'gmail');
 log('getConnection: returns the gmail row', got && got.provider === 'gmail');
-const notExist = composio.getConnection(deviceCtx, 'stripe');
+const notExist = await composio.getConnection(deviceCtx, 'stripe');
 log('getConnection: unknown → null', notExist === null);
 
 // ---- 10. executeAction ----
@@ -330,11 +330,11 @@ const lastCall = state.initiateCalls[state.initiateCalls.length - 1];
 log('user flow: Composio called with user: prefix', lastCall.userId === 'user:alice');
 
 await composio.finishConnection(userCtx, initA.connection_id);
-const aliceList = composio.listConnections(userCtx);
+const aliceList = await composio.listConnections(userCtx);
 log('user flow: alice owns 1 connection', aliceList.length === 1);
 
 // Device list still isolated
-const deviceListAfter = composio.listConnections(deviceCtx);
+const deviceListAfter = await composio.listConnections(deviceCtx);
 log(
   'user flow: device list not polluted by alice',
   deviceListAfter.every((c) => c.owner_kind === 'device'),
@@ -360,7 +360,7 @@ db.prepare(
   'comp_x',
   'device:dev-123',
 );
-const homeList = composio.listConnections(deviceCtx);
+const homeList = await composio.listConnections(deviceCtx);
 const foreign = homeList.find((c) => c.workspace_id === 'ws-other');
 log('cross-workspace isolation: no foreign rows leaked', !foreign);
 

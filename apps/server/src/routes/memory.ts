@@ -38,7 +38,7 @@ memoryRouter.get('/:app_slug', async (c) => {
   const ctx = await resolveUserContext(c);
   const slug = c.req.param('app_slug') || '';
   try {
-    const entries = appMemory.list(ctx, slug);
+    const entries = await appMemory.list(ctx, slug);
     return c.json({ entries });
   } catch (err) {
     return c.json(
@@ -74,7 +74,7 @@ memoryRouter.post('/:app_slug', async (c) => {
     );
   }
   try {
-    appMemory.set(ctx, slug, parsed.data.key, parsed.data.value);
+    await appMemory.set(ctx, slug, parsed.data.key, parsed.data.value);
     return c.json({ ok: true, key: parsed.data.key });
   } catch (err) {
     if (err instanceof MemoryKeyNotAllowedError) {
@@ -104,7 +104,7 @@ memoryRouter.delete('/:app_slug/:key', async (c) => {
   const slug = c.req.param('app_slug') || '';
   const key = c.req.param('key') || '';
   try {
-    const removed = appMemory.del(ctx, slug, key);
+    const removed = await appMemory.del(ctx, slug, key);
     return c.json({ ok: true, removed });
   } catch (err) {
     return c.json(
