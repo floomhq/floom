@@ -1,293 +1,97 @@
-# Launch Blocker Audit - 2026-04-28
+# Launch Blocker Audit - 2026-04-27
 
-Audit run: 2026-04-27, roughly 14 hours before the Tuesday launch window.
+Scope: Track C re-verification for OAuth, Resend, migration dry-run scope, and remaining launch blockers.
 
-Scope: Federico's punch list for Layer 5 R1-R3 plus launch-adjacent gaps that were visible from code, local prod-like data, HTTP smoke tests, browser screenshots, and stress tests.
+## Current Launch Status
 
-## Top 3 Blocking Items for Federico
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Google OAuth | PASS | Playwright drove Better Auth social start; redirect host was `accounts.google.com`; callback was `https://preview.floom.dev/auth/callback/google`; Google rendered the sign-in page with no redirect URI mismatch |
+| GitHub OAuth | DEFERRED | Preview container has empty `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`; route returns `GitHub auth not configured` without crashing |
+| Resend delivery | PASS | Real Resend message IDs captured for signup confirmation, password reset, and app invite |
+| Migration dry-run | PASS for v1 | Federico clarified v1 is single-user-per-workspace; synthetic multi-user conflict assertion is v1.1 scope |
+| Remaining Federico-only gate | OPEN | Actual production deploy and post-deploy smoke |
 
-1. Production OAuth completion: GitHub and Google provider start URLs now resolve against `https://floom.dev`, but the full provider callback/login path requires real provider credentials and a browser session on prod or staging.
-2. Real Resend delivery: verification, password reset, and invite templates render and the fallback path works without `RESEND_API_KEY`; live delivery needs a production `RESEND_API_KEY` and a real inbox check.
-3. Real production data dry-run: the migration passed a prod-like local dataset and idempotency/concurrent-write simulation, but the launch gate still needs a backup/restore dry-run against a copy of the production DB before promotion.
+## Top Remaining Items for Federico
 
-## Punch List Findings
+1. Provision GitHub OAuth credentials if GitHub sign-in is part of launch.
+2. Run actual production deploy.
+3. Run post-deploy smoke on production after deploy.
 
-### 1. Prod Schema Migration Safety
+## OAuth Verification
 
-Finding:
-- `workspace_secrets` migration is present in `apps/server/src/db.ts`.
-- Added `runWorkspaceSecretsBackfill()` export and `test/stress/test-workspace-secrets-backfill.mjs`.
-- The test creates multiple users, multiple workspaces, legacy encrypted secrets, mixed same-workspace values, a pre-existing conflict row, and a post-first-pass write.
-- Idempotency verified: rerunning the backfill keeps one row per `(workspace_id, app_slug, key)` and does not duplicate conflict rows.
-- Conflict behavior verified: mixed legacy values for one workspace/key are recorded in `workspace_secret_backfill_conflicts`; the migration does not guess.
-- Concurrent-write simulation verified: a legacy user secret written after the first pass is picked up by a later backfill pass.
+Google: **PASS**.
 
-Fix applied:
-- Backfill now clears stale conflict rows when a later pass sees a single canonical value for that group.
-- Rollback steps added to `docs/ROLLBACK.md`.
+- Server built with `npx tsc -p .`.
+- Server restarted on port `3051` with live preview Google credentials from `floom-preview-launch`.
+- `/api/session/me` returned `cloud_mode=true`, `auth_providers.google=true`, `auth_providers.github=false`, and `deploy_enabled=true`.
+- Better Auth social start is `POST /auth/sign-in/social`.
+- Google start returned HTTP `200`.
+- Captured provider host: `accounts.google.com`.
+- Captured callback URL: `https://preview.floom.dev/auth/callback/google`.
+- Playwright screenshot: `/tmp/floom-track-c/oauth/google-provider-page.png`.
+- Raw capture: `/tmp/floom-track-c/oauth-results.json`.
 
-Residual risk:
-- Module-load migration runs before the HTTP server accepts traffic, so true HTTP concurrency during normal boot is not active. Manual backfills while writers are active still require draining writes, rerunning `runWorkspaceSecretsBackfill()`, and inspecting `workspace_secret_backfill_conflicts`.
+GitHub: **DEFERRED**.
 
-### 2. FLOOM_API_KEY Grandfather Period
+- `GITHUB_OAUTH_CLIENT_ID` is empty in the live preview container.
+- `GITHUB_OAUTH_CLIENT_SECRET` is empty in the live preview container.
+- `/api/session/me.auth_providers.github=false`.
+- `POST /auth/sign-in/social` with `provider=github` returns:
 
-Finding:
-- Local prod-like DB: `data/floom-chat.db`.
-- `agent_tokens` count in that DB: `0`.
-- No existing `FLOOM_API_KEY` agent tokens were available locally to prove a real grandfather token.
-- Code inspection confirms agent tokens resolve through `resolveUserContext()` and carry authoritative `workspace_id` from `agent_tokens`.
-
-Expected behavior:
-- Pre-Round 1 `floom_agent_*` tokens: continue to resolve if a matching `agent_tokens` row exists. The token row's `workspace_id` scopes the run and wins over cookies.
-- Post-Round 1 tokens: minted through the workspace token surfaces and scoped to the active or explicit workspace.
-- Legacy non-agent `floom_*` Better Auth API keys: still handled by the Better Auth API-key plugin in cloud mode; none were found in the local prod-like DB.
-
-Fix applied:
-- Added/extended workspace token coverage in the R1-R3 stress suite.
-
-Residual risk:
-- Federico needs one real pre-cutover production token, if any exist, tested against staging/prod because the local prod-like DB has no token rows.
-
-### 3. Demo Apps End-to-End Smoke
-
-Finding:
-- Active launch demos are `competitor-lens`, `ai-readiness-audit`, and `pitch-coach`.
-- BYOK gate still referenced the old demo roster (`lead-scorer`, `competitor-analyzer`, `resume-screener`).
-
-Fix applied:
-- Updated `apps/server/src/lib/byok-gate.ts` to gate the current three launch demos.
-- Added `test/stress/test-launch-demo-http-smoke.mjs`.
-- Added/updated demo stress coverage in `test/stress/test-launch-demos.mjs` and `test/stress/test-mcp-byok-gating.mjs`.
-
-Verified:
-- Each demo can run through `/api/:slug/run` using a workspace BYOK `GEMINI_API_KEY`.
-- The upstream fixture receives the workspace key.
-- `runs.workspace_id` and `runs.user_id` are written as `local`.
-- HTTP result returns successfully.
-
-Residual risk:
-- The smoke uses proxied fixture apps, not live Dockerized demo images. Real prod demo containers plus a real Gemini key remain a manual launch gate.
-
-### 4. `/embed/:slug` Status
-
-Finding:
-- `/embed/:slug` returned 404.
-- L1 deferred embed to v1.1.
-
-Fix applied:
-- Server direct loads now return `302` to `/p/:slug` with `cache-control: no-cache`.
-- Client-side navigation also redirects `/embed/:slug` to `/p/:slug`.
-- Added route coverage in `test/stress/test-routes.mjs`.
-
-Residual risk:
-- None for v1.0. Real embed UX remains v1.1 scope.
-
-### 5. Pricing/Docs Page Existence
-
-Finding:
-- `/pricing` exists and is routed.
-- `/docs` exists and is routed.
-- Public TopBar links are real nav items, not dead anchors.
-
-Fix applied:
-- No Pricing/Docs fix needed.
-
-Residual risk:
-- None found for these two routes in this audit.
-
-### 6. OAuth Providers Smoke
-
-Finding:
-- `test/stress/test-auth-dynamic-baseurl.mjs` verifies the dynamic auth base URL behavior.
-- Extended coverage to include GitHub, matching the existing Google check.
-- Verified social sign-in start URLs use `https://floom.dev` when the request host is production.
-
-Fix applied:
-- Added GitHub OAuth start-route assertions alongside Google.
-
-Residual risk:
-- Full provider callback/login completion requires real GitHub and Google OAuth credentials configured for the prod callback URL.
-
-### 7. Email/Resend
-
-Finding:
-- Email service has template paths for verification, password reset, and workspace invites.
-- Without `RESEND_API_KEY`, `sendEmail()` logs a fallback and does not crash.
-
-Fix applied:
-- Added `test/stress/test-email-transactional.mjs`.
-
-Verified:
-- Signup confirmation template renders.
-- Password reset template renders.
-- Workspace invite template renders.
-- Missing-Resend fallback path returns success without throwing.
-
-Residual risk:
-- Live delivery, DKIM/domain config, and inbox receipt require Federico to run the production Resend check.
-
-### 8. Public Store Curation
-
-Finding:
-- `FLOOM_STORE_HIDE_SLUGS` is wired in `apps/server/src/routes/hub.ts`.
-- The env var is parsed at module load and filters `GET /api/hub`.
-- Direct `GET /api/hub/:slug` still works for hidden slugs, which keeps deep links/admin checks possible.
-
-Fix applied:
-- Added `test/stress/test-hub-store-hide-slugs.mjs`.
-
-Launch-visible slugs verified in code:
-- `competitor-lens`
-- `ai-readiness-audit`
-- `pitch-coach`
-
-Hidden-slug policy:
-- Hide every public app slug not approved for launch.
-- This repo snapshot does not contain a canonical 13-app launch list. Current client launch/demo allowlists only identify the three slugs above.
-
-Residual risk:
-- Federico needs to provide or confirm the full 13-app launch list before setting the production `FLOOM_STORE_HIDE_SLUGS` value.
-
-### 9. Status Page / Legal Pages
-
-Finding:
-- `/terms` exists.
-- `/privacy` exists.
-- `/status` was missing.
-- Footer did not link Status.
-
-Fix applied:
-- Added `apps/web/src/pages/StatusPage.tsx`.
-- Added `/status` client and server route metadata.
-- Added Status link to `PublicFooter`.
-- Moved the footer mobile media rule out of an inline `<style>` block into bundled CSS to satisfy the current CSP.
-
-Verified:
-- Browser screenshot: `/tmp/floom-status-page.png`.
-- The page rendered the status content, footer link, and no loading state.
-- Browser console showed only `[sentry] disabled`; style element count was `0`.
-
-Residual risk:
-- `/status` is a launch-week placeholder, not a real uptime provider integration.
-
-### 10. Rollback Plan
-
-Finding:
-- `docs/ROLLBACK.md` existed.
-
-Fix applied:
-- Added a concrete Tuesday 2026-04-28 P0 rollback section covering freeze/evidence, code rollback, schema rollback, DNS rollback, and recovery checks.
-
-Residual risk:
-- Code rollback needs the exact pre-launch tag or image digest recorded before promotion.
-- Schema rollback from `workspace_secrets` requires restoring from backup if migrated data must be preserved.
-
-### 11. Launch Comms
-
-Finding:
-- This is out of code scope but launch-critical.
-
-Fix applied:
-- Created `/root/floom-internal/launch-comms-2026-04-28.md` with owner checklist, gates, X copy, Discord copy, ProductHunt notes, and Hacker News note.
-
-Residual risk:
-- Federico needs to choose exact launch time and whether ProductHunt/HN are in-scope for Tuesday.
-
-## Pre-Launch Checklist
-
-Run from `/root/floom`:
-
-```bash
-pnpm typecheck
-pnpm --filter @floom/server build
-pnpm --filter @floom/web build
-node test/stress/test-workspace-secrets.mjs
-node test/stress/test-workspace-secrets-backfill.mjs
-node test/stress/test-agent-tokens-workspace.mjs
-node test/stress/test-hub-store-hide-slugs.mjs
-node test/stress/test-routes.mjs
-node test/stress/test-email-transactional.mjs
-node test/stress/test-auth-dynamic-baseurl.mjs
-pnpm exec tsx test/stress/test-launch-demos.mjs
-node test/stress/test-mcp-byok-gating.mjs
-node test/stress/test-launch-demo-http-smoke.mjs
-node test/stress/test-mcp-run-parity.mjs
-node test/stress/test-redirects.mjs
+```json
+{
+  "error": "GitHub auth not configured",
+  "code": "provider_not_configured",
+  "provider": "github"
+}
 ```
 
-Production/staging manual gates:
+Federico needs to create a GitHub OAuth app, configure `https://preview.floom.dev/auth/callback/github` and `https://floom.dev/auth/callback/github`, set the two GitHub env vars, restart, and re-run the same start-route check.
 
-```bash
-curl -I https://floom.dev/status
-curl -I https://floom.dev/embed/competitor-lens
-curl -s https://floom.dev/api/hub | jq '.apps[].slug'
-```
+## Resend Verification
 
-UI clicks:
-- Open `https://floom.dev/status`; confirm the page renders the four operational rows.
-- Open `https://floom.dev/embed/competitor-lens`; confirm it lands on `/p/competitor-lens`.
-- Click TopBar `Docs`; confirm `/docs`.
-- Click TopBar `Pricing`; confirm `/pricing`.
-- Start GitHub sign-in; confirm provider redirect leaves Floom and callback returns to Floom.
-- Start Google sign-in; confirm provider redirect leaves Floom and callback returns to Floom.
-- Sign up with a test inbox; confirm verification email receipt.
-- Use password reset with a test inbox; confirm reset email receipt.
+Resend: **PASS**.
 
-Production env reminders:
-
-```bash
-export FLOOM_STORE_HIDE_SLUGS="<comma-separated non-launch slugs>"
-export RESEND_API_KEY="<prod key>"
-export GITHUB_CLIENT_ID="<prod id>"
-export GITHUB_CLIENT_SECRET="<prod secret>"
-export GOOGLE_CLIENT_ID="<prod id>"
-export GOOGLE_CLIENT_SECRET="<prod secret>"
-```
-
-Before migration:
-
-```bash
-sqlite3 "$PROD_DB_COPY" ".backup '/tmp/floom-pre-launch-2026-04-28.db'"
-sqlite3 "$PROD_DB_COPY" "select count(*) from user_secrets;"
-sqlite3 "$PROD_DB_COPY" "select count(*) from workspace_secrets;"
-sqlite3 "$PROD_DB_COPY" "select count(*) from workspace_secret_backfill_conflicts;"
-```
-
-After migration:
-
-```bash
-sqlite3 "$PROD_DB_COPY" "select workspace_id, app_slug, key, count(*) from workspace_secrets group by 1,2,3 having count(*) > 1;"
-sqlite3 "$PROD_DB_COPY" "select * from workspace_secret_backfill_conflicts limit 20;"
-```
-
-## Verification Evidence
-
-Passed locally:
+Only this recipient was used:
 
 ```text
-pnpm --filter @floom/server build
-pnpm --filter @floom/web build
-pnpm typecheck
-node test/stress/test-workspace-secrets.mjs
-node test/stress/test-workspace-secrets-backfill.mjs
-node test/stress/test-agent-tokens-workspace.mjs
-node test/stress/test-hub-store-hide-slugs.mjs
-node test/stress/test-routes.mjs
-node test/stress/test-email-transactional.mjs
-node test/stress/test-auth-dynamic-baseurl.mjs
-pnpm exec tsx test/stress/test-launch-demos.mjs
-node test/stress/test-mcp-byok-gating.mjs
-node test/stress/test-launch-demo-http-smoke.mjs
-node test/stress/test-mcp-run-parity.mjs
-node test/stress/test-redirects.mjs
+depontefede+floom-test@gmail.com
 ```
 
-Browser verification:
+Captured real Resend provider IDs:
 
-```text
-/status title: Status · Floom
-Rendered text includes: Floom system status, Runtime API, Operational
-Style element count: 0
-Screenshot: /tmp/floom-status-page.png
+| Kind | Message id |
+| --- | --- |
+| `SIGNUP_CONFIRMATION` | `69bc2cce-09e9-4e49-ba6c-36ed656b3362` |
+| `PASSWORD_RESET` | `627dbfed-a51e-4533-9b75-eefbb9080df7` |
+| `APP_INVITE` | `8437c5bf-8904-41d5-a316-44437bb140e1` |
+
+Workspace-member invite email is not implemented yet. The workspace invite route returns an invite plus `accept_url`; it does not call `sendEmail()`.
+
+Raw capture: `/tmp/floom-track-c/email-results.json`.
+
+## Migration Verification
+
+Migration: **PASS for v1**.
+
+The earlier strict conflict failure came from synthetic multi-user-per-workspace data. Federico clarified that this is not a v1 scenario. For v1, each workspace has one user, so the conflict-resolution assertion is out of scope and moves to v1.1.
+
+Still-real bug:
+
+- Rollback by dropping `workspace_secrets` breaks workspace-secret readers with `no such table: workspace_secrets`.
+- Keep the rollback fix recommendation: leave the table present but empty during rollback, or add table-missing fallback in workspace-secret readers.
+
+Details: `docs/MIGRATION-DRY-RUN.md`.
+
+## Verification Commands Run
+
+```bash
+npx tsc -p .
+pnpm --filter @floom/server typecheck
+pnpm --filter @floom/web typecheck
 ```
 
+## Final Gate
+
+Code and preview-provider verification are no longer blocking Track C. The only remaining launch blockers are Federico-controlled production deployment and post-deploy smoke verification on the real production URL.

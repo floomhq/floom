@@ -468,6 +468,46 @@ if (isCloudMode()) {
         let reqForAuth = c.req.raw;
         let signinEmailForDelay: string | null = null;
         let pendingDeleteSignin = null as ReturnType<typeof getUserDeletionStateByEmail> | null;
+        if (method === 'POST' && pathname === '/auth/sign-in/social') {
+          const bodyText = await c.req.raw.clone().text();
+          try {
+            const body = JSON.parse(bodyText) as { provider?: unknown };
+            const provider = typeof body.provider === 'string' ? body.provider : null;
+            if (
+              provider === 'github' &&
+              (!process.env.GITHUB_OAUTH_CLIENT_ID || !process.env.GITHUB_OAUTH_CLIENT_SECRET)
+            ) {
+              return c.json(
+                {
+                  error: 'GitHub auth not configured',
+                  code: 'provider_not_configured',
+                  provider: 'github',
+                },
+                503,
+              );
+            }
+            if (
+              provider === 'google' &&
+              (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET)
+            ) {
+              return c.json(
+                {
+                  error: 'Google auth not configured',
+                  code: 'provider_not_configured',
+                  provider: 'google',
+                },
+                503,
+              );
+            }
+          } catch {
+            // Let Better Auth own malformed social sign-in payload errors.
+          }
+          reqForAuth = new Request(c.req.raw.url, {
+            method: c.req.raw.method,
+            headers: c.req.raw.headers,
+            body: bodyText,
+          });
+        }
         if (method === 'POST' && pathname === '/auth/sign-in/email') {
           const bodyText = await c.req.raw.clone().text();
           const parsedEmail = parseEmailForSigninProgressiveDelay(bodyText);
