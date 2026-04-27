@@ -1199,12 +1199,27 @@ class PostgresStorageAdapter {
        ON CONFLICT (trigger_id, request_id) DO NOTHING`, [trigger_id, request_id, now_ms]);
         return result.rowCount > 0;
     }
-    async listAdminSecrets(app_id, _ctx) {
+    async listAdminSecrets(app_id, ctx) {
         if (app_id === undefined) {
+            if (ctx?.workspace_id) {
+                return (await this.query(`SELECT secrets.*
+             FROM secrets
+             INNER JOIN apps ON apps.id = secrets.app_id
+            WHERE apps.workspace_id = $1
+            ORDER BY secrets.name`, [ctx.workspace_id])).map(normalizeSecret);
+            }
             return (await this.query('SELECT * FROM secrets ORDER BY name', [])).map(normalizeSecret);
         }
         if (app_id === null) {
             return (await this.query('SELECT * FROM secrets WHERE app_id IS NULL ORDER BY name', [])).map(normalizeSecret);
+        }
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT secrets.*
+           FROM secrets
+           INNER JOIN apps ON apps.id = secrets.app_id
+          WHERE secrets.app_id = $1
+            AND apps.workspace_id = $2
+          ORDER BY secrets.name`, [app_id, ctx.workspace_id])).map(normalizeSecret);
         }
         return (await this.query('SELECT * FROM secrets WHERE app_id = $1 ORDER BY name', [app_id])).map(normalizeSecret);
     }

@@ -84,7 +84,7 @@ agentsRouter.get('/runs', async (c) => {
   const ctx = await resolveUserContext(c);
   try {
     return c.json(
-      listMyRuns(ctx, {
+      await listMyRuns(ctx, {
         slug: c.req.query('slug'),
         limit: numericLimit(c.req.query('limit')),
         cursor: c.req.query('cursor'),
@@ -100,7 +100,7 @@ agentsRouter.get('/runs', async (c) => {
 agentsRouter.get('/runs/:run_id', async (c) => {
   const ctx = await resolveUserContext(c);
   try {
-    return c.json(getAgentRun(ctx, c.req.param('run_id')));
+    return c.json(await getAgentRun(ctx, c.req.param('run_id')));
   } catch (err) {
     const { status, body, headers } = agentToolErrorBody(err);
     return jsonError(body, status, headers);

@@ -12,7 +12,7 @@ TypeScript declarations: [`@floom/adapter-types`](../packages/adapter-types/src/
 
 ## v0.2 status
 
-Protocol v0.2 is the first complete adapter protocol release. It ships the following P0 closures:
+Protocol v0.2 is the first complete adapter interface release. It ships the following P0 closures:
 
 - Runtime dispatch invokes `adapters.runtime.execute` from [`apps/server/src/services/runner.ts`](../apps/server/src/services/runner.ts).
 - Request session resolution invokes `adapters.auth.getSession` from [`apps/server/src/services/session.ts`](../apps/server/src/services/session.ts).
@@ -20,6 +20,14 @@ Protocol v0.2 is the first complete adapter protocol release. It ships the follo
 - `StorageAdapter` covers workspaces, users, OAuth connections, app sharing, triggers, app memory, run threads, run turns, jobs, admin secret pointers, and encrypted secret rows in [`packages/adapter-types/src/index.ts`](../packages/adapter-types/src/index.ts).
 - The factory validates adapter `kind`, `protocolVersion`, required method surface, and module shape at boot in [`apps/server/src/adapters/factory.ts`](../apps/server/src/adapters/factory.ts).
 - Encrypted-secret storage methods (`getEncryptedSecret`, `setEncryptedSecret`, `listEncryptedSecrets`, `deleteEncryptedSecret`) are part of the storage contract and are implemented by the SQLite and Postgres storage adapters.
+
+Live server wiring status:
+
+- Runtime is closed for P0 #1.
+- Auth is closed for P0 #2.
+- Storage is substantively closed; the jobs queue service still uses direct SQLite helpers in [`apps/server/src/services/jobs.ts`](../apps/server/src/services/jobs.ts), and that migration lands in `protocol-jobs-storage`.
+- Secrets are substantively closed; user-facing route migration lands in `protocol-secrets-routes`.
+- Observability is closed.
 
 It also ships the P1 hardening set:
 
@@ -33,17 +41,18 @@ It also ships the P1 hardening set:
 - The Postgres storage adapter accepts pool settings through `createPostgresAdapter(...)` options and reads connection configuration from env-backed defaults.
 - `appendRunTurn` is atomic: SQLite uses a transaction with the `(thread_id, turn_index)` uniqueness guard and retry path, Postgres uses a transaction plus advisory lock, and the storage contract runs 50 parallel appends.
 
-Deferred items:
+Deferred items and known limitations:
 
 - npm publication ships with the v0.5 release; the package structure and `package.json` exports are present today, but the monorepo still uses `workspace:*` dependencies.
 - Out-of-tree `@floom-community/*` adapters work through dynamic import registration, but no community adapter is shipped by this repo.
 - Docker-dependent runtime conformance assertions keep environmental skips when the selected adapter is not Docker or the host has no reachable Docker daemon.
+- Product-specific paths such as waitlist marketing, ops health probes, and retention sweepers intentionally bypass adapters where they sit outside the public adapter protocol; those bypasses carry local explanatory comments.
 
 ## Changelog
 
 ### v0.2.0 - 2026-04-27
 
-- First complete adapter protocol release: the five concern interfaces, factory registration, protocol-version validation, lifecycle hooks, conformance runner, five contract suites, storage expansion, async secrets path, live runtime/auth wiring, and first-party optional adapter packages are all present in the repo.
+- First complete adapter interface release: the five concern interfaces, factory registration, protocol-version validation, lifecycle hooks, conformance runner, five contract suites, storage expansion, async secrets path, live runtime/auth wiring, and first-party optional adapter packages are present in the repo.
 
 ---
 

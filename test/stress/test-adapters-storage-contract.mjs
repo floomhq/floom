@@ -79,6 +79,24 @@ function json(value) {
   return JSON.stringify(value);
 }
 
+function sorted(values) {
+  return [...values].sort();
+}
+
+function assertOnlyIds(label, rows, expectedIds) {
+  assertOnlyField(label, rows, 'id', expectedIds);
+}
+
+function assertOnlyKeys(label, rows, expectedKeys) {
+  assertOnlyField(label, rows, 'key', expectedKeys);
+}
+
+function assertOnlyField(label, rows, field, expectedValues) {
+  const actual = sorted(rows.map((row) => row[field]));
+  const expected = sorted(expectedValues);
+  assert(json(actual) === json(expected), `${label}: expected=${json(expected)}, actual=${json(actual)}, rows=${json(rows)}`);
+}
+
 function appInput(id, slug, workspace_id = DEFAULT_WORKSPACE_ID) {
   return {
     id,
@@ -728,6 +746,12 @@ try {
       device_id: 'tenant-default-device',
       is_authenticated: true,
     };
+    const ctxB = {
+      workspace_id: 'tenant-default-b',
+      user_id: 'tenant-default-user',
+      device_id: 'tenant-default-device',
+      is_authenticated: true,
+    };
     const appA = await storage.createApp(appInput('tenant-default-app-a', 'tenant-default-app-a', 'tenant-default-a'));
     const appB = await storage.createApp(appInput('tenant-default-app-b', 'tenant-default-app-b', 'tenant-default-b'));
     await storage.createRun({
@@ -746,10 +770,387 @@ try {
     });
     const apps = await storage.listApps({}, ctxA);
     const runs = await storage.listRuns({}, ctxA);
+    const appsB = await storage.listApps(undefined, ctxB);
+    const runsB = await storage.listRuns(undefined, ctxB);
     assert(apps.some((row) => row.id === appA.id), `apps missing tenant A=${json(apps)}`);
     assert(!apps.some((row) => row.id === appB.id), `apps leaked tenant B=${json(apps)}`);
     assert(runs.some((row) => row.id === 'tenant-default-run-a'), `runs missing tenant A=${json(runs)}`);
     assert(!runs.some((row) => row.id === 'tenant-default-run-b'), `runs leaked tenant B=${json(runs)}`);
+    assert(appsB.some((row) => row.id === appB.id), `apps missing tenant B=${json(appsB)}`);
+    assert(!appsB.some((row) => row.id === appA.id), `apps leaked tenant A=${json(appsB)}`);
+    assert(runsB.some((row) => row.id === 'tenant-default-run-b'), `runs missing tenant B=${json(runsB)}`);
+    assert(!runsB.some((row) => row.id === 'tenant-default-run-a'), `runs leaked tenant A=${json(runsB)}`);
+  });
+
+  await check('SessionContext tenant isolation covers every storage list surface with workspace data', async () => {
+    const workspaceA = 'tenant-list-a';
+    const workspaceB = 'tenant-list-b';
+    const userId = 'tenant-list-user';
+    const now = new Date().toISOString();
+    const nowMs = Date.now();
+    const ctxA = {
+      workspace_id: workspaceA,
+      user_id: userId,
+      device_id: 'tenant-list-device-a',
+      is_authenticated: true,
+    };
+    const ctxB = {
+      workspace_id: workspaceB,
+      user_id: userId,
+      device_id: 'tenant-list-device-b',
+      is_authenticated: true,
+    };
+
+    await storage.createWorkspace({
+      id: workspaceA,
+      slug: workspaceA,
+      name: 'Tenant List A',
+      plan: 'cloud_free',
+    });
+    await storage.createWorkspace({
+      id: workspaceB,
+      slug: workspaceB,
+      name: 'Tenant List B',
+      plan: 'cloud_free',
+    });
+    await storage.createUser({
+      id: userId,
+      workspace_id: workspaceA,
+      email: 'tenant-list-user@example.com',
+      name: 'Tenant List User',
+      auth_provider: 'contract',
+      auth_subject: userId,
+    });
+    await storage.addUserToWorkspace(workspaceA, userId, 'admin');
+    await storage.addUserToWorkspace(workspaceB, userId, 'viewer');
+
+    const appA = await storage.createApp(appInput('tenant-list-app-a', 'tenant-list-app-a', workspaceA));
+    const appB = await storage.createApp(appInput('tenant-list-app-b', 'tenant-list-app-b', workspaceB));
+    await storage.createRun({
+      id: 'tenant-list-run-a',
+      app_id: appA.id,
+      action: 'run',
+      inputs: {},
+      workspace_id: workspaceA,
+      user_id: userId,
+      device_id: ctxA.device_id,
+    });
+    await storage.createRun({
+      id: 'tenant-list-run-b',
+      app_id: appB.id,
+      action: 'run',
+      inputs: {},
+      workspace_id: workspaceB,
+      user_id: userId,
+      device_id: ctxB.device_id,
+    });
+
+    await storage.createAppReview({
+      id: 'tenant-list-review-a',
+      workspace_id: workspaceA,
+      app_slug: appA.slug,
+      user_id: userId,
+      rating: 5,
+      title: 'A',
+      body: null,
+      created_at: now,
+      updated_at: now,
+    });
+    await storage.createAppReview({
+      id: 'tenant-list-review-b',
+      workspace_id: workspaceB,
+      app_slug: appB.slug,
+      user_id: userId,
+      rating: 4,
+      title: 'B',
+      body: null,
+      created_at: now,
+      updated_at: now,
+    });
+
+    await storage.createRunThread({ id: 'tenant-list-thread-a', workspace_id: workspaceA, user_id: userId, device_id: ctxA.device_id });
+    await storage.createRunThread({ id: 'tenant-list-thread-b', workspace_id: workspaceB, user_id: userId, device_id: ctxB.device_id });
+    await storage.appendRunTurn({ id: 'tenant-list-turn-a', thread_id: 'tenant-list-thread-a', kind: 'user', payload: json({ workspace: workspaceA }) });
+    await storage.appendRunTurn({ id: 'tenant-list-turn-b', thread_id: 'tenant-list-thread-b', kind: 'user', payload: json({ workspace: workspaceB }) });
+
+    await storage.createAgentToken({
+      id: 'tenant-list-token-a',
+      prefix: 'floomtok',
+      hash: 'hash-tenant-list-token-a',
+      label: 'Tenant token A',
+      scope: 'read-write',
+      workspace_id: workspaceA,
+      user_id: userId,
+      created_at: now,
+      last_used_at: null,
+      revoked_at: null,
+      rate_limit_per_minute: 60,
+    });
+    await storage.createAgentToken({
+      id: 'tenant-list-token-b',
+      prefix: 'floomtok',
+      hash: 'hash-tenant-list-token-b',
+      label: 'Tenant token B',
+      scope: 'read-write',
+      workspace_id: workspaceB,
+      user_id: userId,
+      created_at: now,
+      last_used_at: null,
+      revoked_at: null,
+      rate_limit_per_minute: 60,
+    });
+
+    await storage.createWorkspaceInvite({
+      id: 'tenant-list-workspace-invite-a',
+      workspace_id: workspaceA,
+      email: 'tenant-list-invite-a@example.com',
+      role: 'viewer',
+      invited_by_user_id: userId,
+      token: 'tenant-list-workspace-token-a',
+      status: 'pending',
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    await storage.createWorkspaceInvite({
+      id: 'tenant-list-workspace-invite-b',
+      workspace_id: workspaceB,
+      email: 'tenant-list-invite-b@example.com',
+      role: 'viewer',
+      invited_by_user_id: userId,
+      token: 'tenant-list-workspace-token-b',
+      status: 'pending',
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+
+    await storage.upsertAppMemory({
+      workspace_id: workspaceA,
+      app_slug: appA.slug,
+      user_id: userId,
+      device_id: ctxA.device_id,
+      key: 'tenant-memory-a',
+      value: json({ workspace: workspaceA }),
+    });
+    await storage.upsertAppMemory({
+      workspace_id: workspaceB,
+      app_slug: appB.slug,
+      user_id: userId,
+      device_id: ctxB.device_id,
+      key: 'tenant-memory-b',
+      value: json({ workspace: workspaceB }),
+    });
+
+    await storage.upsertConnection({
+      id: 'tenant-list-connection-a',
+      workspace_id: workspaceA,
+      owner_kind: 'user',
+      owner_id: userId,
+      provider: 'gmail',
+      composio_connection_id: 'cc_tenant_list_a',
+      composio_account_id: 'acct_tenant_list_a',
+      status: 'active',
+      metadata_json: null,
+    });
+    await storage.upsertConnection({
+      id: 'tenant-list-connection-b',
+      workspace_id: workspaceB,
+      owner_kind: 'user',
+      owner_id: userId,
+      provider: 'gmail',
+      composio_connection_id: 'cc_tenant_list_b',
+      composio_account_id: 'acct_tenant_list_b',
+      status: 'active',
+      metadata_json: null,
+    });
+
+    await storage.createVisibilityAudit({
+      id: 'tenant-list-audit-a',
+      app_id: appA.id,
+      from_state: 'private',
+      to_state: 'link',
+      actor_user_id: userId,
+      reason: 'tenant_contract_a',
+      metadata: null,
+    });
+    await storage.createVisibilityAudit({
+      id: 'tenant-list-audit-b',
+      app_id: appB.id,
+      from_state: 'private',
+      to_state: 'link',
+      actor_user_id: userId,
+      reason: 'tenant_contract_b',
+      metadata: null,
+    });
+
+    await storage.upsertAppInvite({
+      id: 'tenant-list-app-invite-a',
+      app_id: appA.id,
+      invited_user_id: userId,
+      invited_email: null,
+      state: 'pending_accept',
+      invited_by_user_id: userId,
+    });
+    await storage.upsertAppInvite({
+      id: 'tenant-list-app-invite-b',
+      app_id: appB.id,
+      invited_user_id: userId,
+      invited_email: null,
+      state: 'pending_accept',
+      invited_by_user_id: userId,
+    });
+
+    await storage.createTrigger({
+      id: 'tenant-list-trigger-a',
+      app_id: appA.id,
+      user_id: userId,
+      workspace_id: workspaceA,
+      action: 'run',
+      inputs: json({ workspace: workspaceA }),
+      trigger_type: 'schedule',
+      cron_expression: '* * * * *',
+      tz: 'UTC',
+      webhook_secret: null,
+      webhook_url_path: null,
+      next_run_at: nowMs - 1,
+      last_fired_at: null,
+      enabled: 1,
+      retry_policy: null,
+      created_at: nowMs,
+      updated_at: nowMs,
+    });
+    await storage.createTrigger({
+      id: 'tenant-list-trigger-b',
+      app_id: appB.id,
+      user_id: userId,
+      workspace_id: workspaceB,
+      action: 'run',
+      inputs: json({ workspace: workspaceB }),
+      trigger_type: 'schedule',
+      cron_expression: '* * * * *',
+      tz: 'UTC',
+      webhook_secret: null,
+      webhook_url_path: null,
+      next_run_at: nowMs - 1,
+      last_fired_at: null,
+      enabled: 1,
+      retry_policy: null,
+      created_at: nowMs,
+      updated_at: nowMs,
+    });
+
+    await storage.upsertAdminSecret('TENANT_LIST_ADMIN_A', 'a', appA.id);
+    await storage.upsertAdminSecret('TENANT_LIST_ADMIN_B', 'b', appB.id);
+    await storage.setEncryptedSecret({ workspace_id: workspaceA }, 'TENANT_LIST_ENCRYPTED_A', {
+      ciphertext: 'ciphertext-tenant-list-a',
+      nonce: 'nonce-a',
+      auth_tag: 'tag-a',
+      encrypted_dek: 'dek-a',
+    });
+    await storage.setEncryptedSecret({ workspace_id: workspaceB }, 'TENANT_LIST_ENCRYPTED_B', {
+      ciphertext: 'ciphertext-tenant-list-b',
+      nonce: 'nonce-b',
+      auth_tag: 'tag-b',
+      encrypted_dek: 'dek-b',
+    });
+
+    if (storage.upsertUserSecretRow && storage.listUserSecretRows && storage.listUserSecretMetadata) {
+      storage.upsertUserSecretRow({
+        workspace_id: workspaceA,
+        user_id: userId,
+        key: 'TENANT_LIST_USER_SECRET_A',
+        ciphertext: 'user-cipher-a',
+        nonce: 'user-nonce-a',
+        auth_tag: 'user-tag-a',
+        encrypted_dek: 'user-dek-a',
+      });
+      storage.upsertUserSecretRow({
+        workspace_id: workspaceB,
+        user_id: userId,
+        key: 'TENANT_LIST_USER_SECRET_B',
+        ciphertext: 'user-cipher-b',
+        nonce: 'user-nonce-b',
+        auth_tag: 'user-tag-b',
+        encrypted_dek: 'user-dek-b',
+      });
+    }
+
+    if (storage.setSecretPolicy && storage.upsertCreatorSecretRow && storage.listCreatorOverrideSecretRowsForRun) {
+      storage.setSecretPolicy(appA.id, 'TENANT_LIST_CREATOR_SECRET_A', 'creator_override');
+      storage.setSecretPolicy(appB.id, 'TENANT_LIST_CREATOR_SECRET_B', 'creator_override');
+      storage.upsertCreatorSecretRow({
+        app_id: appA.id,
+        workspace_id: workspaceA,
+        key: 'TENANT_LIST_CREATOR_SECRET_A',
+        ciphertext: 'creator-cipher-a',
+        nonce: 'creator-nonce-a',
+        auth_tag: 'creator-tag-a',
+        encrypted_dek: 'creator-dek-a',
+      });
+      storage.upsertCreatorSecretRow({
+        app_id: appB.id,
+        workspace_id: workspaceB,
+        key: 'TENANT_LIST_CREATOR_SECRET_B',
+        ciphertext: 'creator-cipher-b',
+        nonce: 'creator-nonce-b',
+        auth_tag: 'creator-tag-b',
+        encrypted_dek: 'creator-dek-b',
+      });
+    }
+
+    assertOnlyIds('listApps ctx A', await storage.listApps(undefined, ctxA), [appA.id]);
+    assertOnlyIds('listApps ctx B', await storage.listApps(undefined, ctxB), [appB.id]);
+    assertOnlyIds('listRuns ctx A', await storage.listRuns(undefined, ctxA), ['tenant-list-run-a']);
+    assertOnlyIds('listRuns ctx B', await storage.listRuns(undefined, ctxB), ['tenant-list-run-b']);
+    assertOnlyIds('listStudioAppSummaries filter A', await storage.listStudioAppSummaries({ workspace_id: workspaceA }, ctxA), [appA.id]);
+    assertOnlyIds('listStudioAppSummaries filter B', await storage.listStudioAppSummaries({ workspace_id: workspaceB }, ctxB), [appB.id]);
+    assertOnlyIds('listAppReviews ctx A', await storage.listAppReviews(undefined, ctxA), ['tenant-list-review-a']);
+    assertOnlyIds('listAppReviews ctx B', await storage.listAppReviews(undefined, ctxB), ['tenant-list-review-b']);
+    assertOnlyIds('listRunTurns ctx A', await storage.listRunTurns('tenant-list-thread-a', ctxA), ['tenant-list-turn-a']);
+    assertOnlyIds('listRunTurns ctx B', await storage.listRunTurns('tenant-list-thread-b', ctxB), ['tenant-list-turn-b']);
+    assertOnlyIds('listRunTurns mismatch', await storage.listRunTurns('tenant-list-thread-a', ctxB), []);
+    assertOnlyIds('listAgentTokensForUser ctx A', await storage.listAgentTokensForUser(userId, ctxA), ['tenant-list-token-a']);
+    assertOnlyIds('listAgentTokensForUser ctx B', await storage.listAgentTokensForUser(userId, ctxB), ['tenant-list-token-b']);
+    assertOnlyIds('listWorkspacesForUser ctx A', await storage.listWorkspacesForUser(userId, ctxA), [workspaceA]);
+    assertOnlyIds('listWorkspacesForUser ctx B', await storage.listWorkspacesForUser(userId, ctxB), [workspaceB]);
+    assertOnlyField('listWorkspaceMembers ctx A', await storage.listWorkspaceMembers(workspaceA, ctxA), 'user_id', [userId]);
+    assertOnlyIds('listWorkspaceMembers mismatch', await storage.listWorkspaceMembers(workspaceA, ctxB), []);
+    assertOnlyIds('listWorkspaceInvites ctx A', await storage.listWorkspaceInvites(workspaceA, ctxA), ['tenant-list-workspace-invite-a']);
+    assertOnlyIds('listWorkspaceInvites mismatch', await storage.listWorkspaceInvites(workspaceA, ctxB), []);
+    assertOnlyKeys('listAppMemory ctx A', await storage.listAppMemory(workspaceA, appA.slug, userId, undefined, ctxA), ['tenant-memory-a']);
+    assertOnlyKeys('listAppMemory ctx B', await storage.listAppMemory(workspaceB, appB.slug, userId, undefined, ctxB), ['tenant-memory-b']);
+    assertOnlyKeys('listAppMemory mismatch', await storage.listAppMemory(workspaceA, appA.slug, userId, undefined, ctxB), []);
+    assertOnlyIds('listConnections ctx A', await storage.listConnections({ workspace_id: workspaceA, owner_kind: 'user', owner_id: userId }, ctxA), ['tenant-list-connection-a']);
+    assertOnlyIds('listConnections ctx B', await storage.listConnections({ workspace_id: workspaceB, owner_kind: 'user', owner_id: userId }, ctxB), ['tenant-list-connection-b']);
+    assertOnlyIds('listConnections mismatch', await storage.listConnections({ workspace_id: workspaceA, owner_kind: 'user', owner_id: userId }, ctxB), []);
+    assertOnlyIds('listVisibilityAudit ctx A', await storage.listVisibilityAudit(undefined, ctxA), ['tenant-list-audit-a']);
+    assertOnlyIds('listVisibilityAudit ctx B', await storage.listVisibilityAudit(undefined, ctxB), ['tenant-list-audit-b']);
+    assertOnlyIds('listAppInvites ctx A', await storage.listAppInvites(appA.id, ctxA), ['tenant-list-app-invite-a']);
+    assertOnlyIds('listAppInvites mismatch', await storage.listAppInvites(appA.id, ctxB), []);
+    assertOnlyIds('listPendingAppInvitesForUser ctx A', await storage.listPendingAppInvitesForUser(userId, ctxA), ['tenant-list-app-invite-a']);
+    assertOnlyIds('listPendingAppInvitesForUser ctx B', await storage.listPendingAppInvitesForUser(userId, ctxB), ['tenant-list-app-invite-b']);
+    assertOnlyIds('listTriggersForUser ctx A', await storage.listTriggersForUser(userId, ctxA), ['tenant-list-trigger-a']);
+    assertOnlyIds('listTriggersForUser ctx B', await storage.listTriggersForUser(userId, ctxB), ['tenant-list-trigger-b']);
+    assertOnlyIds('listTriggersForApp ctx A', await storage.listTriggersForApp(appA.id, ctxA), ['tenant-list-trigger-a']);
+    assertOnlyIds('listTriggersForApp mismatch', await storage.listTriggersForApp(appA.id, ctxB), []);
+    assertOnlyIds('listDueTriggers ctx A', await storage.listDueTriggers(nowMs, ctxA), ['tenant-list-trigger-a']);
+    assertOnlyIds('listDueTriggers ctx B', await storage.listDueTriggers(nowMs, ctxB), ['tenant-list-trigger-b']);
+    assertOnlyField('listAdminSecrets ctx A', await storage.listAdminSecrets(undefined, ctxA), 'name', ['TENANT_LIST_ADMIN_A']);
+    assertOnlyField('listAdminSecrets ctx B', await storage.listAdminSecrets(undefined, ctxB), 'name', ['TENANT_LIST_ADMIN_B']);
+    assertOnlyField('listAdminSecrets mismatch', await storage.listAdminSecrets(appA.id, ctxB), 'name', []);
+    assertOnlyKeys('listEncryptedSecrets ctx A', await storage.listEncryptedSecrets({ workspace_id: workspaceA }), ['TENANT_LIST_ENCRYPTED_A']);
+    assertOnlyKeys('listEncryptedSecrets ctx B', await storage.listEncryptedSecrets({ workspace_id: workspaceB }), ['TENANT_LIST_ENCRYPTED_B']);
+
+    if (storage.listUserSecretRows && storage.listUserSecretMetadata) {
+      assertOnlyKeys('listUserSecretRows ctx A', storage.listUserSecretRows(workspaceA, userId, ['TENANT_LIST_USER_SECRET_A', 'TENANT_LIST_USER_SECRET_B'], ctxA), ['TENANT_LIST_USER_SECRET_A']);
+      assertOnlyKeys('listUserSecretRows ctx B', storage.listUserSecretRows(workspaceB, userId, ['TENANT_LIST_USER_SECRET_A', 'TENANT_LIST_USER_SECRET_B'], ctxB), ['TENANT_LIST_USER_SECRET_B']);
+      assertOnlyKeys('listUserSecretRows mismatch', storage.listUserSecretRows(workspaceA, userId, ['TENANT_LIST_USER_SECRET_A'], ctxB), []);
+      assertOnlyKeys('listUserSecretMetadata ctx A', storage.listUserSecretMetadata(workspaceA, userId, ctxA), ['TENANT_LIST_USER_SECRET_A']);
+      assertOnlyKeys('listUserSecretMetadata ctx B', storage.listUserSecretMetadata(workspaceB, userId, ctxB), ['TENANT_LIST_USER_SECRET_B']);
+    }
+
+    if (storage.listCreatorOverrideSecretRowsForRun) {
+      assertOnlyKeys('listCreatorOverrideSecretRowsForRun ctx A', storage.listCreatorOverrideSecretRowsForRun(appA.id, ['TENANT_LIST_CREATOR_SECRET_A', 'TENANT_LIST_CREATOR_SECRET_B'], ctxA), ['TENANT_LIST_CREATOR_SECRET_A']);
+      assertOnlyKeys('listCreatorOverrideSecretRowsForRun ctx B', storage.listCreatorOverrideSecretRowsForRun(appB.id, ['TENANT_LIST_CREATOR_SECRET_A', 'TENANT_LIST_CREATOR_SECRET_B'], ctxB), ['TENANT_LIST_CREATOR_SECRET_B']);
+      assertOnlyKeys('listCreatorOverrideSecretRowsForRun mismatch', storage.listCreatorOverrideSecretRowsForRun(appA.id, ['TENANT_LIST_CREATOR_SECRET_A'], ctxB), []);
+    }
   });
 
   await check('transactional read-after-write is visible to another connection', async () => {

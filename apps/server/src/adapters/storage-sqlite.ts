@@ -1667,8 +1667,19 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
   },
 
   // ---------- admin secret pointers ----------
-  async listAdminSecrets(app_id?: string | null, _ctx?: SessionContext): Promise<SecretRecord[]> {
+  async listAdminSecrets(app_id?: string | null, ctx?: SessionContext): Promise<SecretRecord[]> {
     if (app_id === undefined) {
+      if (ctx?.workspace_id) {
+        return db
+          .prepare(
+            `SELECT secrets.*
+               FROM secrets
+               INNER JOIN apps ON apps.id = secrets.app_id
+              WHERE apps.workspace_id = ?
+              ORDER BY secrets.name`,
+          )
+          .all(ctx.workspace_id) as SecretRecord[];
+      }
       return db
         .prepare('SELECT * FROM secrets ORDER BY name')
         .all() as SecretRecord[];
@@ -1677,6 +1688,18 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       return db
         .prepare('SELECT * FROM secrets WHERE app_id IS NULL ORDER BY name')
         .all() as SecretRecord[];
+    }
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT secrets.*
+             FROM secrets
+             INNER JOIN apps ON apps.id = secrets.app_id
+            WHERE secrets.app_id = ?
+              AND apps.workspace_id = ?
+            ORDER BY secrets.name`,
+        )
+        .all(app_id, ctx.workspace_id) as SecretRecord[];
     }
     return db
       .prepare('SELECT * FROM secrets WHERE app_id = ? ORDER BY name')
