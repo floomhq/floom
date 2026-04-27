@@ -133,19 +133,16 @@ const menuItemStyle: CSSProperties = {
 //     Right (waitlist): GH stars · Publish (CTA) · Join waitlist
 //
 //   Authenticated (deploy mode):
-//     Centre: Studio · Run                                           (2 items)
+//     Centre: Studio · My runs                                       (2 items)
 //     Right:  GH stars · Copy for Claude · + New app · avatar dropdown
-//     Avatar dropdown: header (name + email) · Apps store · BYOK keys ·
-//                      Agent tokens · Settings · — · Pricing · Docs ·
-//                      — · Sign out
+//     Avatar dropdown: Account settings · Docs · Help · Sign out
 //
 // Why the split: Federico 2026-04-25 — "Pricing, Docs etc don't matter
 // so much when I am already logged in, so the nav and the priorities of
 // what to click next change." Discovery items demote to the dropdown for
 // authed users; the centre nav surfaces only their day-to-day work
-// surfaces. MECE labelling: /run = "Run" (consumer, v24 rename
-// 2026-04-26), /studio = "Studio" (creator). URL slugs stay; only the
-// visible label changes.
+// surfaces. MECE labelling: /run = "My runs" (consumer), /studio =
+// "Studio" (creator). URL slugs stay; only the visible label changes.
 //
 // Two clean states only — never a 3rd. Preview vs prod differ in the
 // CTA wording (Publish vs Join waitlist), not the nav structure.
@@ -241,6 +238,11 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
     location.pathname.startsWith('/protocol') ||
     location.pathname.startsWith('/docs');
   const isStudio = location.pathname.startsWith('/studio');
+  const isRun =
+    location.pathname === '/run' ||
+    location.pathname.startsWith('/run/') ||
+    location.pathname === '/me' ||
+    location.pathname.startsWith('/me/');
   const isPublishNav =
     location.pathname === '/studio/build' || location.pathname === '/deploy';
 
@@ -332,10 +334,40 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
 
         {/* Centre nav — branches on auth state (v26-IA-SPEC §10 + §12).
             Anonymous: Apps · Docs · Pricing (discovery surfaces).
-            Authenticated (slim): nothing in centre — left rail handles
-            mode/page navigation. TopBar becomes logo + actions only.
-            v26 spec: "Drop Apps/Docs/Pricing from authenticated TopBar." */}
-        {!showAuthedChrome && (
+            Authenticated: Studio · My runs (work surfaces). */}
+        {showAuthedChrome ? (
+          <nav
+            className="topbar-links topbar-links-desktop topbar-centre-nav"
+            aria-label="Primary"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 2,
+            }}
+          >
+            <Link
+              to="/studio"
+              data-testid="topbar-studio"
+              aria-current={isStudio ? 'page' : undefined}
+              style={navLinkStyle(isStudio)}
+            >
+              Studio
+            </Link>
+            <Link
+              to="/run/runs"
+              data-testid="topbar-my-runs"
+              aria-current={isRun ? 'page' : undefined}
+              style={navLinkStyle(isRun)}
+            >
+              My runs
+            </Link>
+          </nav>
+        ) : (
           <nav
             className="topbar-links topbar-links-desktop topbar-centre-nav"
             aria-label="Primary"
@@ -398,7 +430,7 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
               2026-04-26). Hidden only on auth pages so they stay focused.
               The popover handles its own state, click-outside, and Esc.
               Anon centre nav: Apps · Docs · Pricing → Copy-for-Claude →
-              Sign in / Sign up. Authed: Run · Studio →
+              Sign in / Sign up. Authed: Studio · My runs →
               Copy-for-Claude → + New app → avatar. */}
           {!isLoginPage && <CopyForClaudeButton />}
 
@@ -581,69 +613,13 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     zIndex: 50,
                   }}
                 >
-                  {/* v26 avatar dropdown (V26-IA-SPEC §12.5):
-                      header (name + email) · Account settings · — ·
-                      Docs · Help · — · Sign out.
-                      Pricing demoted to anon TopBar only (§10c).
-                      Docs moves from rail to here (§12.5). */}
-                  <div
-                    style={{
-                      padding: '8px 12px 6px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2,
-                    }}
-                    aria-hidden="true"
-                  >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: INK,
-                        lineHeight: 1.2,
-                      }}
-                      data-testid="topbar-user-header-name"
-                    >
-                      {userLabel}
-                    </span>
-                    {user?.email && (
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          color: MUTED,
-                          lineHeight: 1.2,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        data-testid="topbar-user-header-email"
-                      >
-                        {user.email}
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(14,14,12,0.08)',
-                      margin: '4px 0',
-                    }}
-                    aria-hidden="true"
-                  />
+                  {/* v26 avatar dropdown (ADR-29): Account settings · Docs · Help · Sign out. */}
                   <DropdownItem
                     to="/settings/general"
                     label="Account settings"
                     testId="topbar-user-settings"
                     onSelect={() => setDropOpen(false)}
                     active={location.pathname.startsWith('/settings')}
-                  />
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(14,14,12,0.08)',
-                      margin: '4px 0',
-                    }}
-                    aria-hidden="true"
                   />
                   <DropdownItem
                     to="/docs"
@@ -657,14 +633,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     label="Help"
                     testId="topbar-user-help"
                     onSelect={() => setDropOpen(false)}
-                  />
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(14,14,12,0.08)',
-                      margin: '4px 0',
-                    }}
-                    aria-hidden="true"
                   />
                   <button
                     type="button"
