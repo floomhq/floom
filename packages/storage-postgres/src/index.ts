@@ -9,6 +9,7 @@ import type {
   ConnectionOwnerKind,
   ConnectionRecord,
   ConnectionStatus,
+  EncryptedSecretRecord,
   ErrorType,
   JobRecord,
   JobStatus,
@@ -18,6 +19,7 @@ import type {
   RunThreadRecord,
   RunTurnRecord,
   SecretRecord,
+  SessionContext,
   StudioAppSummaryFilter,
   StudioAppSummaryRecord,
   StorageAdapter,
@@ -160,11 +162,12 @@ class PostgresStorageAdapter implements StorageAdapter {
     return one((await this.query('SELECT * FROM apps WHERE id = $1', [id])).map(normalizeApp));
   }
 
-  async listApps(filter: AppListFilter = {}): Promise<AppRecord[]> {
+  async listApps(filter: AppListFilter = {}, ctx?: SessionContext): Promise<AppRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
-    if (filter.workspace_id) {
-      params.push(filter.workspace_id);
+    const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+    if (workspaceId) {
+      params.push(workspaceId);
       clauses.push(`workspace_id = $${params.length}`);
     }
     if (filter.visibility) {
@@ -265,15 +268,16 @@ class PostgresStorageAdapter implements StorageAdapter {
     return one((await this.query('SELECT * FROM runs WHERE id = $1', [id])).map(normalizeRun));
   }
 
-  async listRuns(filter: RunListFilter = {}): Promise<RunRecord[]> {
+  async listRuns(filter: RunListFilter = {}, ctx?: SessionContext): Promise<RunRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.app_id) {
       params.push(filter.app_id);
       clauses.push(`app_id = $${params.length}`);
     }
-    if (filter.workspace_id) {
-      params.push(filter.workspace_id);
+    const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+    if (workspaceId) {
+      params.push(workspaceId);
       clauses.push(`workspace_id = $${params.length}`);
     }
     if (filter.user_id) {
@@ -361,8 +365,9 @@ class PostgresStorageAdapter implements StorageAdapter {
 
   async listStudioAppSummaries(
     filter: StudioAppSummaryFilter,
+    ctx?: SessionContext,
   ): Promise<StudioAppSummaryRecord[]> {
-    const params: unknown[] = [filter.workspace_id];
+    const params: unknown[] = [filter.workspace_id ?? ctx?.workspace_id];
     const authorClause =
       filter.author === undefined || filter.author === null ? '' : ` AND apps.author = $2`;
     if (authorClause) params.push(filter.author);
@@ -417,15 +422,16 @@ class PostgresStorageAdapter implements StorageAdapter {
     return one((await this.query('SELECT * FROM app_reviews WHERE id = $1', [id])).map(normalizeAppReview));
   }
 
-  async listAppReviews(filter: AppReviewListFilter = {}): Promise<AppReviewRecord[]> {
+  async listAppReviews(filter: AppReviewListFilter = {}, ctx?: SessionContext): Promise<AppReviewRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.app_slug) {
       params.push(filter.app_slug);
       clauses.push(`app_slug = $${params.length}`);
     }
-    if (filter.workspace_id) {
-      params.push(filter.workspace_id);
+    const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+    if (workspaceId) {
+      params.push(workspaceId);
       clauses.push(`workspace_id = $${params.length}`);
     }
     if (filter.user_id) {
@@ -500,7 +506,20 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
   }
 
-  async listRunTurns(thread_id: string): Promise<RunTurnRecord[]> {
+  async listRunTurns(thread_id: string, ctx?: SessionContext): Promise<RunTurnRecord[]> {
+    if (ctx?.workspace_id) {
+      return (
+        await this.query(
+          `SELECT run_turns.*
+             FROM run_turns
+             INNER JOIN run_threads ON run_threads.id = run_turns.thread_id
+            WHERE run_turns.thread_id = $1
+              AND run_threads.workspace_id = $2
+            ORDER BY run_turns.turn_index ASC`,
+          [thread_id, ctx.workspace_id],
+        )
+      ).map(normalizeRunTurn);
+    }
     return (
       await this.query(
         'SELECT * FROM run_turns WHERE thread_id = $1 ORDER BY turn_index ASC',
@@ -580,7 +599,18 @@ class PostgresStorageAdapter implements StorageAdapter {
     return row;
   }
 
-  async listAgentTokensForUser(user_id: string): Promise<AgentTokenRecord[]> {
+  async listAgentTokensForUser(user_id: string, ctx?: SessionContext): Promise<AgentTokenRecord[]> {
+    if (ctx?.workspace_id) {
+      return (
+        await this.query(
+          `SELECT * FROM agent_tokens
+            WHERE user_id = $1
+              AND workspace_id = $2
+            ORDER BY created_at DESC`,
+          [user_id, ctx.workspace_id],
+        )
+      ).map(normalizeAgentToken);
+    }
     return (
       await this.query(
         `SELECT * FROM agent_tokens
@@ -762,7 +792,19 @@ class PostgresStorageAdapter implements StorageAdapter {
 
   async listWorkspacesForUser(
     user_id: string,
+    ctx?: SessionContext,
   ): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>> {
+    if (ctx?.workspace_id) {
+      return (await this.query(
+        `SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
+           FROM workspaces w
+           INNER JOIN workspace_members m ON m.workspace_id = w.id
+          WHERE m.user_id = $1
+            AND w.id = $2
+          ORDER BY w.created_at ASC`,
+        [user_id, ctx.workspace_id],
+      )).map(normalizeWorkspaceWithRole);
+    }
     return (await this.query(
       `SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
          FROM workspaces w
@@ -853,7 +895,8 @@ class PostgresStorageAdapter implements StorageAdapter {
     return Number(row?.c || 0);
   }
 
-  async listWorkspaceMembers(workspace_id: string): Promise<WorkspaceMemberWithUserRecord[]> {
+  async listWorkspaceMembers(workspace_id: string, ctx?: SessionContext): Promise<WorkspaceMemberWithUserRecord[]> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     return (await this.query(
       `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.email, u.name
          FROM workspace_members m
@@ -921,7 +964,8 @@ class PostgresStorageAdapter implements StorageAdapter {
     );
   }
 
-  async listWorkspaceInvites(workspace_id: string): Promise<WorkspaceInviteRecord[]> {
+  async listWorkspaceInvites(workspace_id: string, ctx?: SessionContext): Promise<WorkspaceInviteRecord[]> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     return (await this.query(
       `SELECT * FROM workspace_invites
         WHERE workspace_id = $1
@@ -1122,7 +1166,9 @@ class PostgresStorageAdapter implements StorageAdapter {
     app_slug: string,
     user_id: string,
     keys?: string[],
+    ctx?: SessionContext,
   ): Promise<AppMemoryRecord[]> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     if (keys && keys.length === 0) return [];
     const params: unknown[] = [workspace_id, app_slug, user_id];
     const keyClause = keys && keys.length > 0 ? ` AND key = ANY($4::text[])` : '';
@@ -1142,7 +1188,8 @@ class PostgresStorageAdapter implements StorageAdapter {
     owner_kind: ConnectionOwnerKind;
     owner_id: string;
     status?: ConnectionStatus;
-  }): Promise<ConnectionRecord[]> {
+  }, ctx?: SessionContext): Promise<ConnectionRecord[]> {
+    if (ctx?.workspace_id && input.workspace_id !== ctx.workspace_id) return [];
     const params: unknown[] = [input.workspace_id, input.owner_kind, input.owner_id];
     const statusClause = input.status ? ` AND status = $4` : '';
     if (input.status) params.push(input.status);
@@ -1304,13 +1351,35 @@ class PostgresStorageAdapter implements StorageAdapter {
     return row;
   }
 
-  async listVisibilityAudit(app_id?: string | null): Promise<VisibilityAuditRecord[]> {
+  async listVisibilityAudit(app_id?: string | null, ctx?: SessionContext): Promise<VisibilityAuditRecord[]> {
     if (app_id) {
+      if (ctx?.workspace_id) {
+        return (await this.query(
+          `SELECT app_visibility_audit.*
+             FROM app_visibility_audit
+             INNER JOIN apps ON apps.id = app_visibility_audit.app_id
+            WHERE app_visibility_audit.app_id = $1
+              AND apps.workspace_id = $2
+            ORDER BY app_visibility_audit.created_at DESC`,
+          [app_id, ctx.workspace_id],
+        )).map(normalizeVisibilityAudit);
+      }
       return (await this.query(
         `SELECT * FROM app_visibility_audit
           WHERE app_id = $1
           ORDER BY created_at DESC`,
         [app_id],
+      )).map(normalizeVisibilityAudit);
+    }
+    if (ctx?.workspace_id) {
+      return (await this.query(
+        `SELECT app_visibility_audit.*
+           FROM app_visibility_audit
+           INNER JOIN apps ON apps.id = app_visibility_audit.app_id
+          WHERE apps.workspace_id = $1
+          ORDER BY app_visibility_audit.created_at DESC
+          LIMIT 200`,
+        [ctx.workspace_id],
       )).map(normalizeVisibilityAudit);
     }
     return (await this.query(
@@ -1319,16 +1388,19 @@ class PostgresStorageAdapter implements StorageAdapter {
     )).map(normalizeVisibilityAudit);
   }
 
-  async listAppInvites(app_id: string): Promise<AppInviteRecord[]> {
+  async listAppInvites(app_id: string, ctx?: SessionContext): Promise<AppInviteRecord[]> {
+    const workspaceClause = ctx?.workspace_id ? ' AND apps.workspace_id = $2' : '';
+    const params = ctx?.workspace_id ? [app_id, ctx.workspace_id] : [app_id];
     return (await this.query(
       `SELECT app_invites.*,
               users.name AS invited_user_name,
               users.email AS invited_user_email
          FROM app_invites
+         INNER JOIN apps ON apps.id = app_invites.app_id
          LEFT JOIN users ON users.id = app_invites.invited_user_id
-        WHERE app_invites.app_id = $1
+        WHERE app_invites.app_id = $1${workspaceClause}
         ORDER BY app_invites.created_at DESC`,
-      [app_id],
+      params,
     )).map(normalizeAppInvite);
   }
 
@@ -1428,7 +1500,9 @@ class PostgresStorageAdapter implements StorageAdapter {
     return result.rowCount;
   }
 
-  async listPendingAppInvitesForUser(user_id: string): Promise<AppInviteRecord[]> {
+  async listPendingAppInvitesForUser(user_id: string, ctx?: SessionContext): Promise<AppInviteRecord[]> {
+    const workspaceClause = ctx?.workspace_id ? ' AND apps.workspace_id = $2' : '';
+    const params = ctx?.workspace_id ? [user_id, ctx.workspace_id] : [user_id];
     return (await this.query(
       `SELECT app_invites.*,
               apps.slug AS app_slug,
@@ -1437,9 +1511,9 @@ class PostgresStorageAdapter implements StorageAdapter {
          FROM app_invites
          JOIN apps ON apps.id = app_invites.app_id
         WHERE app_invites.invited_user_id = $1
-          AND app_invites.state = 'pending_accept'
+          AND app_invites.state = 'pending_accept'${workspaceClause}
         ORDER BY app_invites.created_at DESC`,
-      [user_id],
+      params,
     )).map(normalizeAppInvite);
   }
 
@@ -1499,29 +1573,49 @@ class PostgresStorageAdapter implements StorageAdapter {
     return one((await this.query('SELECT * FROM triggers WHERE webhook_url_path = $1', [path])).map(normalizeTrigger));
   }
 
-  async listTriggersForUser(user_id: string): Promise<TriggerRecord[]> {
+  async listTriggersForUser(user_id: string, ctx?: SessionContext): Promise<TriggerRecord[]> {
+    if (ctx?.workspace_id) {
+      return (await this.query(
+        `SELECT * FROM triggers
+          WHERE user_id = $1
+            AND workspace_id = $2
+          ORDER BY created_at DESC`,
+        [user_id, ctx.workspace_id],
+      )).map(normalizeTrigger);
+    }
     return (await this.query(
       'SELECT * FROM triggers WHERE user_id = $1 ORDER BY created_at DESC',
       [user_id],
     )).map(normalizeTrigger);
   }
 
-  async listTriggersForApp(app_id: string): Promise<TriggerRecord[]> {
+  async listTriggersForApp(app_id: string, ctx?: SessionContext): Promise<TriggerRecord[]> {
+    if (ctx?.workspace_id) {
+      return (await this.query(
+        `SELECT * FROM triggers
+          WHERE app_id = $1
+            AND workspace_id = $2
+          ORDER BY created_at DESC`,
+        [app_id, ctx.workspace_id],
+      )).map(normalizeTrigger);
+    }
     return (await this.query(
       'SELECT * FROM triggers WHERE app_id = $1 ORDER BY created_at DESC',
       [app_id],
     )).map(normalizeTrigger);
   }
 
-  async listDueTriggers(now_ms: number): Promise<TriggerRecord[]> {
+  async listDueTriggers(now_ms: number, ctx?: SessionContext): Promise<TriggerRecord[]> {
+    const workspaceClause = ctx?.workspace_id ? ' AND workspace_id = $2' : '';
+    const params = ctx?.workspace_id ? [now_ms, ctx.workspace_id] : [now_ms];
     return (await this.query(
       `SELECT * FROM triggers
         WHERE trigger_type = 'schedule'
           AND enabled = true
           AND next_run_at IS NOT NULL
-          AND next_run_at <= $1
+          AND next_run_at <= $1${workspaceClause}
         ORDER BY next_run_at ASC`,
-      [now_ms],
+      params,
     )).map(normalizeTrigger);
   }
 
@@ -1602,7 +1696,7 @@ class PostgresStorageAdapter implements StorageAdapter {
     return result.rowCount > 0;
   }
 
-  async listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]> {
+  async listAdminSecrets(app_id?: string | null, _ctx?: SessionContext): Promise<SecretRecord[]> {
     if (app_id === undefined) {
       return (await this.query('SELECT * FROM secrets ORDER BY name', [])).map(normalizeSecret);
     }
@@ -1640,6 +1734,81 @@ class PostgresStorageAdapter implements StorageAdapter {
             name,
             app_id,
           ]);
+    return result.rowCount > 0;
+  }
+
+  async getEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+  ): Promise<EncryptedSecretRecord | undefined> {
+    return one(
+      (await this.query(
+        `SELECT workspace_id, key, ciphertext, nonce, auth_tag, encrypted_dek,
+                created_at, updated_at
+           FROM encrypted_secrets
+          WHERE workspace_id = $1
+            AND key = $2`,
+        [ctx.workspace_id, key],
+      )).map(normalizeEncryptedSecret),
+    );
+  }
+
+  async setEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+    payload: {
+      ciphertext: string;
+      nonce: string;
+      auth_tag: string;
+      encrypted_dek: string;
+    },
+  ): Promise<void> {
+    await this.execute(
+      `INSERT INTO encrypted_secrets
+         (workspace_id, key, ciphertext, nonce, auth_tag, encrypted_dek, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (workspace_id, key)
+       DO UPDATE SET ciphertext = EXCLUDED.ciphertext,
+                     nonce = EXCLUDED.nonce,
+                     auth_tag = EXCLUDED.auth_tag,
+                     encrypted_dek = EXCLUDED.encrypted_dek,
+                     updated_at = now()`,
+      [
+        ctx.workspace_id,
+        key,
+        payload.ciphertext,
+        payload.nonce,
+        payload.auth_tag,
+        payload.encrypted_dek,
+      ],
+    );
+  }
+
+  async listEncryptedSecrets(
+    ctx: { workspace_id: string },
+  ): Promise<Array<{ key: string; updated_at: string }>> {
+    return (await this.query(
+      `SELECT key, updated_at
+         FROM encrypted_secrets
+        WHERE workspace_id = $1
+        ORDER BY key`,
+      [ctx.workspace_id],
+    )).map((row) => ({
+      key: String(row.key),
+      updated_at: timestampColumnToString(row.updated_at),
+    }));
+  }
+
+  async deleteEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+  ): Promise<boolean> {
+    const result = await this.execute(
+      `DELETE FROM encrypted_secrets
+        WHERE workspace_id = $1
+          AND key = $2`,
+      [ctx.workspace_id, key],
+    );
     return result.rowCount > 0;
   }
 
@@ -1975,6 +2144,14 @@ function normalizeSecret(row: Record<string, unknown>): SecretRecord {
     ...row,
     created_at: timestampColumnToString(row.created_at),
   } as SecretRecord;
+}
+
+function normalizeEncryptedSecret(row: Record<string, unknown>): EncryptedSecretRecord {
+  return {
+    ...row,
+    created_at: timestampColumnToString(row.created_at),
+    updated_at: timestampColumnToString(row.updated_at),
+  } as EncryptedSecretRecord;
 }
 
 function normalizeCreateJobInput(

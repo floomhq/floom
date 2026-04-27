@@ -264,6 +264,17 @@ export interface SecretRecord {
   created_at: string;
 }
 
+export interface EncryptedSecretRecord {
+  workspace_id: string;
+  key: string;
+  ciphertext: string;
+  nonce: string;
+  auth_tag: string;
+  encrypted_dek: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkspaceRecord {
   id: string;
   slug: string;
@@ -514,7 +525,7 @@ export interface RuntimeAdapter {
 export interface StorageAdapter {
   getApp(slug: string): Promise<AppRecord | undefined>;
   getAppById(id: string): Promise<AppRecord | undefined>;
-  listApps(filter?: AppListFilter): Promise<AppRecord[]>;
+  listApps(filter?: AppListFilter, ctx?: SessionContext): Promise<AppRecord[]>;
   createApp(input: Omit<AppRecord, 'created_at' | 'updated_at'>): Promise<AppRecord>;
   updateApp(slug: string, patch: Partial<AppRecord>): Promise<AppRecord | undefined>;
   deleteApp(slug: string): Promise<boolean>;
@@ -530,7 +541,7 @@ export interface StorageAdapter {
     device_id?: string | null;
   }): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | undefined>;
-  listRuns(filter?: RunListFilter): Promise<RunRecord[]>;
+  listRuns(filter?: RunListFilter, ctx?: SessionContext): Promise<RunRecord[]>;
   updateRun(
     id: string,
     patch: {
@@ -546,11 +557,11 @@ export interface StorageAdapter {
     },
   ): Promise<void>;
 
-  listStudioAppSummaries(filter: StudioAppSummaryFilter): Promise<StudioAppSummaryRecord[]>;
+  listStudioAppSummaries(filter: StudioAppSummaryFilter, ctx?: SessionContext): Promise<StudioAppSummaryRecord[]>;
 
   createAppReview(input: AppReviewRecord): Promise<AppReviewRecord>;
   getAppReview(id: string): Promise<AppReviewRecord | undefined>;
-  listAppReviews(filter?: AppReviewListFilter): Promise<AppReviewRecord[]>;
+  listAppReviews(filter?: AppReviewListFilter, ctx?: SessionContext): Promise<AppReviewRecord[]>;
   updateAppReview(
     id: string,
     patch: Pick<AppReviewRecord, 'rating'> & Partial<Pick<AppReviewRecord, 'title' | 'body' | 'updated_at'>>,
@@ -565,7 +576,7 @@ export interface StorageAdapter {
     device_id?: string | null;
   }): Promise<RunThreadRecord>;
   getRunThread(id: string): Promise<RunThreadRecord | undefined>;
-  listRunTurns(thread_id: string): Promise<RunTurnRecord[]>;
+  listRunTurns(thread_id: string, ctx?: SessionContext): Promise<RunTurnRecord[]>;
   appendRunTurn(input: {
     id: string;
     thread_id: string;
@@ -578,7 +589,7 @@ export interface StorageAdapter {
   ): Promise<RunThreadRecord | undefined>;
 
   createAgentToken(input: AgentTokenRecord): Promise<AgentTokenRecord>;
-  listAgentTokensForUser(user_id: string): Promise<AgentTokenRecord[]>;
+  listAgentTokensForUser(user_id: string, ctx?: SessionContext): Promise<AgentTokenRecord[]>;
   getAgentTokenForUser(
     id: string,
     user_id: string,
@@ -607,7 +618,7 @@ export interface StorageAdapter {
     patch: Partial<Pick<WorkspaceRecord, 'name' | 'slug' | 'plan' | 'wrapped_dek'>>,
   ): Promise<WorkspaceRecord | undefined>;
   deleteWorkspace(id: string): Promise<boolean>;
-  listWorkspacesForUser(user_id: string): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>>;
+  listWorkspacesForUser(user_id: string, ctx?: SessionContext): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>>;
   addUserToWorkspace(
     workspace_id: string,
     user_id: string,
@@ -624,13 +635,13 @@ export interface StorageAdapter {
     user_id: string,
   ): Promise<WorkspaceMemberRole | null>;
   countWorkspaceAdmins(workspace_id: string): Promise<number>;
-  listWorkspaceMembers(workspace_id: string): Promise<WorkspaceMemberWithUserRecord[]>;
+  listWorkspaceMembers(workspace_id: string, ctx?: SessionContext): Promise<WorkspaceMemberWithUserRecord[]>;
   getActiveWorkspaceId(user_id: string): Promise<string | null>;
   setActiveWorkspace(user_id: string, workspace_id: string): Promise<void>;
   clearActiveWorkspaceForWorkspace(workspace_id: string): Promise<void>;
   createWorkspaceInvite(input: Omit<WorkspaceInviteRecord, 'created_at' | 'accepted_at'>): Promise<WorkspaceInviteRecord>;
   getPendingWorkspaceInviteByToken(token: string): Promise<WorkspaceInviteRecord | undefined>;
-  listWorkspaceInvites(workspace_id: string): Promise<WorkspaceInviteRecord[]>;
+  listWorkspaceInvites(workspace_id: string, ctx?: SessionContext): Promise<WorkspaceInviteRecord[]>;
   deletePendingWorkspaceInvites(workspace_id: string, email: string): Promise<number>;
   markWorkspaceInviteStatus(id: string, status: WorkspaceInviteRecord['status']): Promise<void>;
   acceptWorkspaceInvite(id: string): Promise<void>;
@@ -651,6 +662,7 @@ export interface StorageAdapter {
     app_slug: string,
     user_id: string,
     keys?: string[],
+    ctx?: SessionContext,
   ): Promise<AppMemoryRecord[]>;
 
   listConnections(input: {
@@ -658,7 +670,7 @@ export interface StorageAdapter {
     owner_kind: ConnectionOwnerKind;
     owner_id: string;
     status?: ConnectionStatus;
-  }): Promise<ConnectionRecord[]>;
+  }, ctx?: SessionContext): Promise<ConnectionRecord[]>;
   getConnection(id: string): Promise<ConnectionRecord | undefined>;
   getConnectionByOwnerProvider(input: {
     workspace_id: string;
@@ -682,22 +694,22 @@ export interface StorageAdapter {
     patch: Partial<Pick<AppRecord, 'visibility' | 'link_share_token' | 'link_share_requires_auth' | 'publish_status' | 'review_submitted_at' | 'review_decided_at' | 'review_decided_by' | 'review_comment'>>,
   ): Promise<AppRecord | undefined>;
   createVisibilityAudit(input: Omit<VisibilityAuditRecord, 'created_at'>): Promise<VisibilityAuditRecord>;
-  listVisibilityAudit(app_id?: string | null): Promise<VisibilityAuditRecord[]>;
-  listAppInvites(app_id: string): Promise<AppInviteRecord[]>;
+  listVisibilityAudit(app_id?: string | null, ctx?: SessionContext): Promise<VisibilityAuditRecord[]>;
+  listAppInvites(app_id: string, ctx?: SessionContext): Promise<AppInviteRecord[]>;
   upsertAppInvite(input: Omit<AppInviteRecord, 'id' | 'created_at' | 'accepted_at' | 'revoked_at'> & { id: string }): Promise<AppInviteRecord>;
   revokeAppInvite(invite_id: string, app_id: string): Promise<AppInviteRecord | undefined>;
   acceptAppInvite(invite_id: string, user_id: string): Promise<{ invite: AppInviteRecord | undefined; changed: boolean }>;
   declineAppInvite(invite_id: string, user_id: string): Promise<AppInviteRecord | undefined>;
   linkPendingEmailAppInvites(user_id: string, email: string): Promise<number>;
-  listPendingAppInvitesForUser(user_id: string): Promise<AppInviteRecord[]>;
+  listPendingAppInvitesForUser(user_id: string, ctx?: SessionContext): Promise<AppInviteRecord[]>;
   userHasAcceptedAppInvite(app_id: string, user_id: string): Promise<boolean>;
 
   createTrigger(input: TriggerRecord): Promise<TriggerRecord>;
   getTrigger(id: string): Promise<TriggerRecord | undefined>;
   getTriggerByWebhookPath(path: string): Promise<TriggerRecord | undefined>;
-  listTriggersForUser(user_id: string): Promise<TriggerRecord[]>;
-  listTriggersForApp(app_id: string): Promise<TriggerRecord[]>;
-  listDueTriggers(now_ms: number): Promise<TriggerRecord[]>;
+  listTriggersForUser(user_id: string, ctx?: SessionContext): Promise<TriggerRecord[]>;
+  listTriggersForApp(app_id: string, ctx?: SessionContext): Promise<TriggerRecord[]>;
+  listDueTriggers(now_ms: number, ctx?: SessionContext): Promise<TriggerRecord[]>;
   updateTrigger(id: string, patch: Partial<TriggerRecord>): Promise<TriggerRecord | undefined>;
   deleteTrigger(id: string): Promise<boolean>;
   markTriggerFired(id: string, now_ms: number): Promise<void>;
@@ -710,9 +722,23 @@ export interface StorageAdapter {
   ): Promise<boolean>;
   recordTriggerWebhookDelivery(trigger_id: string, request_id: string, now_ms: number, ttl_ms: number): Promise<boolean>;
 
-  listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]>;
+  listAdminSecrets(app_id?: string | null, ctx?: SessionContext): Promise<SecretRecord[]>;
   upsertAdminSecret(name: string, value: string, app_id?: string | null): Promise<void>;
   deleteAdminSecret(name: string, app_id?: string | null): Promise<boolean>;
+
+  getEncryptedSecret(ctx: { workspace_id: string }, key: string): Promise<EncryptedSecretRecord | undefined>;
+  setEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+    payload: {
+      ciphertext: string;
+      nonce: string;
+      auth_tag: string;
+      encrypted_dek: string;
+    },
+  ): Promise<void>;
+  listEncryptedSecrets(ctx: { workspace_id: string }): Promise<Array<{ key: string; updated_at: string }>>;
+  deleteEncryptedSecret(ctx: { workspace_id: string }, key: string): Promise<boolean>;
 
   // optional encrypted per-user / creator secret row store
   getUserSecretRow?(
@@ -724,10 +750,12 @@ export interface StorageAdapter {
     workspace_id: string,
     user_id: string,
     keys: string[],
+    ctx?: SessionContext,
   ): SecretCiphertextRow[];
   listUserSecretMetadata?(
     workspace_id: string,
     user_id: string,
+    ctx?: SessionContext,
   ): Array<{ key: string; updated_at: string }>;
   upsertUserSecretRow?(row: SecretCiphertextWriteInput): void;
   deleteUserSecretRow?(
@@ -744,6 +772,7 @@ export interface StorageAdapter {
   listCreatorOverrideSecretRowsForRun?(
     app_id: string,
     keys: string[],
+    ctx?: SessionContext,
   ): CreatorSecretCiphertextRow[];
 }
 

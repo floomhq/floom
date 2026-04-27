@@ -104,11 +104,12 @@ class PostgresStorageAdapter {
     async getAppById(id) {
         return one((await this.query('SELECT * FROM apps WHERE id = $1', [id])).map(normalizeApp));
     }
-    async listApps(filter = {}) {
+    async listApps(filter = {}, ctx) {
         const clauses = [];
         const params = [];
-        if (filter.workspace_id) {
-            params.push(filter.workspace_id);
+        const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+        if (workspaceId) {
+            params.push(workspaceId);
             clauses.push(`workspace_id = $${params.length}`);
         }
         if (filter.visibility) {
@@ -185,15 +186,16 @@ class PostgresStorageAdapter {
     async getRun(id) {
         return one((await this.query('SELECT * FROM runs WHERE id = $1', [id])).map(normalizeRun));
     }
-    async listRuns(filter = {}) {
+    async listRuns(filter = {}, ctx) {
         const clauses = [];
         const params = [];
         if (filter.app_id) {
             params.push(filter.app_id);
             clauses.push(`app_id = $${params.length}`);
         }
-        if (filter.workspace_id) {
-            params.push(filter.workspace_id);
+        const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+        if (workspaceId) {
+            params.push(workspaceId);
             clauses.push(`workspace_id = $${params.length}`);
         }
         if (filter.user_id) {
@@ -263,8 +265,8 @@ class PostgresStorageAdapter {
             await this.refreshAppAvgRunMs(id);
         }
     }
-    async listStudioAppSummaries(filter) {
-        const params = [filter.workspace_id];
+    async listStudioAppSummaries(filter, ctx) {
+        const params = [filter.workspace_id ?? ctx?.workspace_id];
         const authorClause = filter.author === undefined || filter.author === null ? '' : ` AND apps.author = $2`;
         if (authorClause)
             params.push(filter.author);
@@ -311,15 +313,16 @@ class PostgresStorageAdapter {
     async getAppReview(id) {
         return one((await this.query('SELECT * FROM app_reviews WHERE id = $1', [id])).map(normalizeAppReview));
     }
-    async listAppReviews(filter = {}) {
+    async listAppReviews(filter = {}, ctx) {
         const clauses = [];
         const params = [];
         if (filter.app_slug) {
             params.push(filter.app_slug);
             clauses.push(`app_slug = $${params.length}`);
         }
-        if (filter.workspace_id) {
-            params.push(filter.workspace_id);
+        const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+        if (workspaceId) {
+            params.push(workspaceId);
             clauses.push(`workspace_id = $${params.length}`);
         }
         if (filter.user_id) {
@@ -368,7 +371,15 @@ class PostgresStorageAdapter {
     async getRunThread(id) {
         return one((await this.query('SELECT * FROM run_threads WHERE id = $1', [id])).map(normalizeRunThread));
     }
-    async listRunTurns(thread_id) {
+    async listRunTurns(thread_id, ctx) {
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT run_turns.*
+             FROM run_turns
+             INNER JOIN run_threads ON run_threads.id = run_turns.thread_id
+            WHERE run_turns.thread_id = $1
+              AND run_threads.workspace_id = $2
+            ORDER BY run_turns.turn_index ASC`, [thread_id, ctx.workspace_id])).map(normalizeRunTurn);
+        }
         return (await this.query('SELECT * FROM run_turns WHERE thread_id = $1 ORDER BY turn_index ASC', [thread_id])).map(normalizeRunTurn);
     }
     async appendRunTurn(input) {
@@ -416,7 +427,13 @@ class PostgresStorageAdapter {
             throw new Error(`createAgentToken: failed to re-read row ${input.id}`);
         return row;
     }
-    async listAgentTokensForUser(user_id) {
+    async listAgentTokensForUser(user_id, ctx) {
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT * FROM agent_tokens
+            WHERE user_id = $1
+              AND workspace_id = $2
+            ORDER BY created_at DESC`, [user_id, ctx.workspace_id])).map(normalizeAgentToken);
+        }
         return (await this.query(`SELECT * FROM agent_tokens
           WHERE user_id = $1
           ORDER BY created_at DESC`, [user_id])).map(normalizeAgentToken);
@@ -526,7 +543,15 @@ class PostgresStorageAdapter {
         const result = await this.execute('DELETE FROM workspaces WHERE id = $1', [id]);
         return result.rowCount > 0;
     }
-    async listWorkspacesForUser(user_id) {
+    async listWorkspacesForUser(user_id, ctx) {
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
+           FROM workspaces w
+           INNER JOIN workspace_members m ON m.workspace_id = w.id
+          WHERE m.user_id = $1
+            AND w.id = $2
+          ORDER BY w.created_at ASC`, [user_id, ctx.workspace_id])).map(normalizeWorkspaceWithRole);
+        }
         return (await this.query(`SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
          FROM workspaces w
          INNER JOIN workspace_members m ON m.workspace_id = w.id
@@ -579,7 +604,9 @@ class PostgresStorageAdapter {
         WHERE workspace_id = $1 AND role = 'admin'`, [workspace_id]));
         return Number(row?.c || 0);
     }
-    async listWorkspaceMembers(workspace_id) {
+    async listWorkspaceMembers(workspace_id, ctx) {
+        if (ctx?.workspace_id && workspace_id !== ctx.workspace_id)
+            return [];
         return (await this.query(`SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.email, u.name
          FROM workspace_members m
          LEFT JOIN users u ON u.id = m.user_id
@@ -621,7 +648,9 @@ class PostgresStorageAdapter {
     async getPendingWorkspaceInviteByToken(token) {
         return one((await this.query(`SELECT * FROM workspace_invites WHERE token = $1 AND status = 'pending'`, [token])).map(normalizeWorkspaceInvite));
     }
-    async listWorkspaceInvites(workspace_id) {
+    async listWorkspaceInvites(workspace_id, ctx) {
+        if (ctx?.workspace_id && workspace_id !== ctx.workspace_id)
+            return [];
         return (await this.query(`SELECT * FROM workspace_invites
         WHERE workspace_id = $1
         ORDER BY created_at DESC`, [workspace_id])).map(normalizeWorkspaceInvite);
@@ -749,7 +778,9 @@ class PostgresStorageAdapter {
           AND key = $4`, [row.workspace_id, row.app_slug, row.user_id, row.key]);
         return result.rowCount > 0;
     }
-    async listAppMemory(workspace_id, app_slug, user_id, keys) {
+    async listAppMemory(workspace_id, app_slug, user_id, keys, ctx) {
+        if (ctx?.workspace_id && workspace_id !== ctx.workspace_id)
+            return [];
         if (keys && keys.length === 0)
             return [];
         const params = [workspace_id, app_slug, user_id];
@@ -762,7 +793,9 @@ class PostgresStorageAdapter {
           AND user_id = $3${keyClause}
         ORDER BY key`, params)).map(normalizeAppMemory);
     }
-    async listConnections(input) {
+    async listConnections(input, ctx) {
+        if (ctx?.workspace_id && input.workspace_id !== ctx.workspace_id)
+            return [];
         const params = [input.workspace_id, input.owner_kind, input.owner_id];
         const statusClause = input.status ? ` AND status = $4` : '';
         if (input.status)
@@ -871,22 +904,41 @@ class PostgresStorageAdapter {
             throw new Error(`createVisibilityAudit: failed to re-read row ${input.id}`);
         return row;
     }
-    async listVisibilityAudit(app_id) {
+    async listVisibilityAudit(app_id, ctx) {
         if (app_id) {
+            if (ctx?.workspace_id) {
+                return (await this.query(`SELECT app_visibility_audit.*
+             FROM app_visibility_audit
+             INNER JOIN apps ON apps.id = app_visibility_audit.app_id
+            WHERE app_visibility_audit.app_id = $1
+              AND apps.workspace_id = $2
+            ORDER BY app_visibility_audit.created_at DESC`, [app_id, ctx.workspace_id])).map(normalizeVisibilityAudit);
+            }
             return (await this.query(`SELECT * FROM app_visibility_audit
           WHERE app_id = $1
           ORDER BY created_at DESC`, [app_id])).map(normalizeVisibilityAudit);
         }
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT app_visibility_audit.*
+           FROM app_visibility_audit
+           INNER JOIN apps ON apps.id = app_visibility_audit.app_id
+          WHERE apps.workspace_id = $1
+          ORDER BY app_visibility_audit.created_at DESC
+          LIMIT 200`, [ctx.workspace_id])).map(normalizeVisibilityAudit);
+        }
         return (await this.query(`SELECT * FROM app_visibility_audit ORDER BY created_at DESC LIMIT 200`, [])).map(normalizeVisibilityAudit);
     }
-    async listAppInvites(app_id) {
+    async listAppInvites(app_id, ctx) {
+        const workspaceClause = ctx?.workspace_id ? ' AND apps.workspace_id = $2' : '';
+        const params = ctx?.workspace_id ? [app_id, ctx.workspace_id] : [app_id];
         return (await this.query(`SELECT app_invites.*,
               users.name AS invited_user_name,
               users.email AS invited_user_email
          FROM app_invites
+         INNER JOIN apps ON apps.id = app_invites.app_id
          LEFT JOIN users ON users.id = app_invites.invited_user_id
-        WHERE app_invites.app_id = $1
-        ORDER BY app_invites.created_at DESC`, [app_id])).map(normalizeAppInvite);
+        WHERE app_invites.app_id = $1${workspaceClause}
+        ORDER BY app_invites.created_at DESC`, params)).map(normalizeAppInvite);
     }
     async upsertAppInvite(input) {
         const existing = one((await this.query(`SELECT * FROM app_invites
@@ -958,7 +1010,9 @@ class PostgresStorageAdapter {
           AND LOWER(invited_email) = LOWER($2)`, [user_id, email]);
         return result.rowCount;
     }
-    async listPendingAppInvitesForUser(user_id) {
+    async listPendingAppInvitesForUser(user_id, ctx) {
+        const workspaceClause = ctx?.workspace_id ? ' AND apps.workspace_id = $2' : '';
+        const params = ctx?.workspace_id ? [user_id, ctx.workspace_id] : [user_id];
         return (await this.query(`SELECT app_invites.*,
               apps.slug AS app_slug,
               apps.name AS app_name,
@@ -966,8 +1020,8 @@ class PostgresStorageAdapter {
          FROM app_invites
          JOIN apps ON apps.id = app_invites.app_id
         WHERE app_invites.invited_user_id = $1
-          AND app_invites.state = 'pending_accept'
-        ORDER BY app_invites.created_at DESC`, [user_id])).map(normalizeAppInvite);
+          AND app_invites.state = 'pending_accept'${workspaceClause}
+        ORDER BY app_invites.created_at DESC`, params)).map(normalizeAppInvite);
     }
     async userHasAcceptedAppInvite(app_id, user_id) {
         const row = one(await this.query(`SELECT 1 AS ok
@@ -1016,19 +1070,33 @@ class PostgresStorageAdapter {
     async getTriggerByWebhookPath(path) {
         return one((await this.query('SELECT * FROM triggers WHERE webhook_url_path = $1', [path])).map(normalizeTrigger));
     }
-    async listTriggersForUser(user_id) {
+    async listTriggersForUser(user_id, ctx) {
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT * FROM triggers
+          WHERE user_id = $1
+            AND workspace_id = $2
+          ORDER BY created_at DESC`, [user_id, ctx.workspace_id])).map(normalizeTrigger);
+        }
         return (await this.query('SELECT * FROM triggers WHERE user_id = $1 ORDER BY created_at DESC', [user_id])).map(normalizeTrigger);
     }
-    async listTriggersForApp(app_id) {
+    async listTriggersForApp(app_id, ctx) {
+        if (ctx?.workspace_id) {
+            return (await this.query(`SELECT * FROM triggers
+          WHERE app_id = $1
+            AND workspace_id = $2
+          ORDER BY created_at DESC`, [app_id, ctx.workspace_id])).map(normalizeTrigger);
+        }
         return (await this.query('SELECT * FROM triggers WHERE app_id = $1 ORDER BY created_at DESC', [app_id])).map(normalizeTrigger);
     }
-    async listDueTriggers(now_ms) {
+    async listDueTriggers(now_ms, ctx) {
+        const workspaceClause = ctx?.workspace_id ? ' AND workspace_id = $2' : '';
+        const params = ctx?.workspace_id ? [now_ms, ctx.workspace_id] : [now_ms];
         return (await this.query(`SELECT * FROM triggers
         WHERE trigger_type = 'schedule'
           AND enabled = true
           AND next_run_at IS NOT NULL
-          AND next_run_at <= $1
-        ORDER BY next_run_at ASC`, [now_ms])).map(normalizeTrigger);
+          AND next_run_at <= $1${workspaceClause}
+        ORDER BY next_run_at ASC`, params)).map(normalizeTrigger);
     }
     async updateTrigger(id, patch) {
         const keys = Object.keys(patch).filter((key) => key !== 'id');
@@ -1080,7 +1148,7 @@ class PostgresStorageAdapter {
        ON CONFLICT (trigger_id, request_id) DO NOTHING`, [trigger_id, request_id, now_ms]);
         return result.rowCount > 0;
     }
-    async listAdminSecrets(app_id) {
+    async listAdminSecrets(app_id, _ctx) {
         if (app_id === undefined) {
             return (await this.query('SELECT * FROM secrets ORDER BY name', [])).map(normalizeSecret);
         }
@@ -1102,6 +1170,46 @@ class PostgresStorageAdapter {
                 name,
                 app_id,
             ]);
+        return result.rowCount > 0;
+    }
+    async getEncryptedSecret(ctx, key) {
+        return one((await this.query(`SELECT workspace_id, key, ciphertext, nonce, auth_tag, encrypted_dek,
+                created_at, updated_at
+           FROM encrypted_secrets
+          WHERE workspace_id = $1
+            AND key = $2`, [ctx.workspace_id, key])).map(normalizeEncryptedSecret));
+    }
+    async setEncryptedSecret(ctx, key, payload) {
+        await this.execute(`INSERT INTO encrypted_secrets
+         (workspace_id, key, ciphertext, nonce, auth_tag, encrypted_dek, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (workspace_id, key)
+       DO UPDATE SET ciphertext = EXCLUDED.ciphertext,
+                     nonce = EXCLUDED.nonce,
+                     auth_tag = EXCLUDED.auth_tag,
+                     encrypted_dek = EXCLUDED.encrypted_dek,
+                     updated_at = now()`, [
+            ctx.workspace_id,
+            key,
+            payload.ciphertext,
+            payload.nonce,
+            payload.auth_tag,
+            payload.encrypted_dek,
+        ]);
+    }
+    async listEncryptedSecrets(ctx) {
+        return (await this.query(`SELECT key, updated_at
+         FROM encrypted_secrets
+        WHERE workspace_id = $1
+        ORDER BY key`, [ctx.workspace_id])).map((row) => ({
+            key: String(row.key),
+            updated_at: timestampColumnToString(row.updated_at),
+        }));
+    }
+    async deleteEncryptedSecret(ctx, key) {
+        const result = await this.execute(`DELETE FROM encrypted_secrets
+        WHERE workspace_id = $1
+          AND key = $2`, [ctx.workspace_id, key]);
         return result.rowCount > 0;
     }
     async query(sql, values) {
@@ -1377,6 +1485,13 @@ function normalizeSecret(row) {
     return {
         ...row,
         created_at: timestampColumnToString(row.created_at),
+    };
+}
+function normalizeEncryptedSecret(row) {
+    return {
+        ...row,
+        created_at: timestampColumnToString(row.created_at),
+        updated_at: timestampColumnToString(row.updated_at),
     };
 }
 function normalizeCreateJobInput(input) {

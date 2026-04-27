@@ -33,6 +33,8 @@ function preserveSelectedConcernEnv() {
   }
 }
 preserveSelectedConcernEnv();
+const selectedSecretsAdapter =
+  process.env.FLOOM_CONFORMANCE_ADAPTER || process.env.FLOOM_SECRETS || 'local';
 
 const { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } = await import(
   '../../apps/server/src/db.ts'
@@ -198,13 +200,21 @@ try {
   await check('ciphertext opacity keeps plaintext out of backing store', async () => {
     const canary = 'CANARY_SECRET_aaa';
     await secrets.set(ctx, 'CANARY_KEY', canary);
-    const row = db
-      .prepare(
-        `SELECT ciphertext, nonce, auth_tag FROM user_secrets
-         WHERE workspace_id = ? AND user_id = ? AND key = ?`,
-      )
-      .get(ctx.workspace_id, ctx.user_id, 'CANARY_KEY');
-    assert(row, 'user_secrets row missing');
+    const gcpStorageKey = `user:${Buffer.from(ctx.user_id, 'utf8').toString('base64url')}:${Buffer.from('CANARY_KEY', 'utf8').toString('base64url')}`;
+    const row = selectedSecretsAdapter.includes('gcp-kms')
+      ? db
+          .prepare(
+            `SELECT ciphertext, nonce, auth_tag FROM encrypted_secrets
+             WHERE workspace_id = ? AND key = ?`,
+          )
+          .get(ctx.workspace_id, gcpStorageKey)
+      : db
+          .prepare(
+            `SELECT ciphertext, nonce, auth_tag FROM user_secrets
+             WHERE workspace_id = ? AND user_id = ? AND key = ?`,
+          )
+          .get(ctx.workspace_id, ctx.user_id, 'CANARY_KEY');
+    assert(row, selectedSecretsAdapter.includes('gcp-kms') ? 'encrypted_secrets row missing' : 'user_secrets row missing');
     assert(!JSON.stringify(row).includes(canary), `backing row leaked plaintext: ${JSON.stringify(row)}`);
     assert(/^[0-9a-f]+$/i.test(row.ciphertext), 'ciphertext is not hex-like');
     assert(/^[0-9a-f]{24}$/i.test(row.nonce), 'nonce shape mismatch');

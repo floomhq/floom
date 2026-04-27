@@ -62,10 +62,12 @@ import type {
   AppReviewListFilter,
   CreatorSecretCiphertextRow,
   CreatorSecretCiphertextWriteInput,
+  EncryptedSecretRecord,
   LinkShareRecord,
   RunListFilter,
   SecretCiphertextRow,
   SecretCiphertextWriteInput,
+  SessionContext,
   StudioAppSummaryFilter,
   StudioAppSummaryRecord,
   StorageAdapter,
@@ -117,6 +119,22 @@ function userInsertValues(
   return keys.map((key) => input[key]);
 }
 
+function ensureEncryptedSecretsTable(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS encrypted_secrets (
+      workspace_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      ciphertext TEXT NOT NULL,
+      nonce TEXT NOT NULL,
+      auth_tag TEXT NOT NULL,
+      encrypted_dek TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (workspace_id, key)
+    );
+  `);
+}
+
 export const sqliteStorageAdapter: SqliteStorageAdapter = {
   // ---------- apps ----------
   async getApp(slug: string): Promise<AppRecord | undefined> {
@@ -131,12 +149,13 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(id) as AppRecord | undefined;
   },
 
-  async listApps(filter: AppListFilter = {}): Promise<AppRecord[]> {
+  async listApps(filter: AppListFilter = {}, ctx?: SessionContext): Promise<AppRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
-    if (filter.workspace_id) {
+    const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+    if (workspaceId) {
       clauses.push('workspace_id = ?');
-      params.push(filter.workspace_id);
+      params.push(workspaceId);
     }
     if (filter.visibility) {
       clauses.push('visibility = ?');
@@ -230,16 +249,17 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     return runnerGetRun(id);
   },
 
-  async listRuns(filter: RunListFilter = {}): Promise<RunRecord[]> {
+  async listRuns(filter: RunListFilter = {}, ctx?: SessionContext): Promise<RunRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.app_id) {
       clauses.push('app_id = ?');
       params.push(filter.app_id);
     }
-    if (filter.workspace_id) {
+    const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+    if (workspaceId) {
       clauses.push('workspace_id = ?');
-      params.push(filter.workspace_id);
+      params.push(workspaceId);
     }
     if (filter.user_id) {
       clauses.push('user_id = ?');
@@ -279,8 +299,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
 
   async listStudioAppSummaries(
     filter: StudioAppSummaryFilter,
+    ctx?: SessionContext,
   ): Promise<StudioAppSummaryRecord[]> {
-    const params: unknown[] = [filter.workspace_id];
+    const params: unknown[] = [filter.workspace_id ?? ctx?.workspace_id];
     const authorClause =
       filter.author === undefined || filter.author === null ? '' : ' AND apps.author = ?';
     if (authorClause) params.push(filter.author);
@@ -333,16 +354,17 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(id) as AppReviewRecord | undefined;
   },
 
-  async listAppReviews(filter: AppReviewListFilter = {}): Promise<AppReviewRecord[]> {
+  async listAppReviews(filter: AppReviewListFilter = {}, ctx?: SessionContext): Promise<AppReviewRecord[]> {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.app_slug) {
       clauses.push('app_slug = ?');
       params.push(filter.app_slug);
     }
-    if (filter.workspace_id) {
+    const workspaceId = filter.workspace_id ?? ctx?.workspace_id;
+    if (workspaceId) {
       clauses.push('workspace_id = ?');
-      params.push(filter.workspace_id);
+      params.push(workspaceId);
     }
     if (filter.user_id) {
       clauses.push('user_id = ?');
@@ -406,7 +428,19 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(id) as RunThreadRecord | undefined;
   },
 
-  async listRunTurns(thread_id: string): Promise<RunTurnRecord[]> {
+  async listRunTurns(thread_id: string, ctx?: SessionContext): Promise<RunTurnRecord[]> {
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT run_turns.*
+             FROM run_turns
+             INNER JOIN run_threads ON run_threads.id = run_turns.thread_id
+            WHERE run_turns.thread_id = ?
+              AND run_threads.workspace_id = ?
+            ORDER BY run_turns.turn_index ASC`,
+        )
+        .all(thread_id, ctx.workspace_id) as RunTurnRecord[];
+    }
     return db
       .prepare('SELECT * FROM run_turns WHERE thread_id = ? ORDER BY turn_index ASC')
       .all(thread_id) as RunTurnRecord[];
@@ -471,7 +505,17 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(input.id) as AgentTokenRecord;
   },
 
-  async listAgentTokensForUser(user_id: string): Promise<AgentTokenRecord[]> {
+  async listAgentTokensForUser(user_id: string, ctx?: SessionContext): Promise<AgentTokenRecord[]> {
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT * FROM agent_tokens
+            WHERE user_id = ?
+              AND workspace_id = ?
+            ORDER BY created_at DESC`,
+        )
+        .all(user_id, ctx.workspace_id) as AgentTokenRecord[];
+    }
     return db
       .prepare(
         `SELECT * FROM agent_tokens
@@ -591,7 +635,20 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
 
   async listWorkspacesForUser(
     user_id: string,
+    ctx?: SessionContext,
   ): Promise<Array<WorkspaceRecord & { role: WorkspaceRole }>> {
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT w.*, m.role as role
+             FROM workspaces w
+             INNER JOIN workspace_members m ON m.workspace_id = w.id
+            WHERE m.user_id = ?
+              AND w.id = ?
+            ORDER BY w.created_at ASC`,
+        )
+        .all(user_id, ctx.workspace_id) as Array<WorkspaceRecord & { role: WorkspaceRole }>;
+    }
     return db
       .prepare(
         `SELECT w.*, m.role as role
@@ -671,7 +728,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
 
   async listWorkspaceMembers(
     workspace_id: string,
+    ctx?: SessionContext,
   ): Promise<WorkspaceMemberWithUserRecord[]> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     return db
       .prepare(
         `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.email, u.name
@@ -734,7 +793,8 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(token) as WorkspaceInviteRecord | undefined;
   },
 
-  async listWorkspaceInvites(workspace_id: string): Promise<WorkspaceInviteRecord[]> {
+  async listWorkspaceInvites(workspace_id: string, ctx?: SessionContext): Promise<WorkspaceInviteRecord[]> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     return db
       .prepare(
         `SELECT * FROM workspace_invites
@@ -941,7 +1001,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     app_slug: string,
     user_id: string,
     keys?: string[],
+    ctx?: SessionContext,
   ): Promise<AppMemoryRecord[]> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     if (keys && keys.length === 0) return [];
     const params: unknown[] = [workspace_id, app_slug, user_id];
     let keyClause = '';
@@ -966,7 +1028,8 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     owner_kind: ConnectionOwnerKind;
     owner_id: string;
     status?: ConnectionStatus;
-  }): Promise<ConnectionRecord[]> {
+  }, ctx?: SessionContext): Promise<ConnectionRecord[]> {
+    if (ctx?.workspace_id && input.workspace_id !== ctx.workspace_id) return [];
     const params: unknown[] = [input.workspace_id, input.owner_kind, input.owner_id];
     let statusClause = '';
     if (input.status) {
@@ -1145,8 +1208,20 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(input.id) as VisibilityAuditRecord;
   },
 
-  async listVisibilityAudit(app_id?: string | null): Promise<VisibilityAuditRecord[]> {
+  async listVisibilityAudit(app_id?: string | null, ctx?: SessionContext): Promise<VisibilityAuditRecord[]> {
     if (app_id) {
+      if (ctx?.workspace_id) {
+        return db
+          .prepare(
+            `SELECT app_visibility_audit.*
+               FROM app_visibility_audit
+               INNER JOIN apps ON apps.id = app_visibility_audit.app_id
+              WHERE app_visibility_audit.app_id = ?
+                AND apps.workspace_id = ?
+              ORDER BY app_visibility_audit.created_at DESC`,
+          )
+          .all(app_id, ctx.workspace_id) as VisibilityAuditRecord[];
+      }
       return db
         .prepare(
           `SELECT * FROM app_visibility_audit
@@ -1155,23 +1230,38 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
         )
         .all(app_id) as VisibilityAuditRecord[];
     }
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT app_visibility_audit.*
+             FROM app_visibility_audit
+             INNER JOIN apps ON apps.id = app_visibility_audit.app_id
+            WHERE apps.workspace_id = ?
+            ORDER BY app_visibility_audit.created_at DESC
+            LIMIT 200`,
+        )
+        .all(ctx.workspace_id) as VisibilityAuditRecord[];
+    }
     return db
       .prepare(`SELECT * FROM app_visibility_audit ORDER BY created_at DESC LIMIT 200`)
       .all() as VisibilityAuditRecord[];
   },
 
-  async listAppInvites(app_id: string): Promise<AppInviteRecord[]> {
+  async listAppInvites(app_id: string, ctx?: SessionContext): Promise<AppInviteRecord[]> {
+    const workspaceClause = ctx?.workspace_id ? ' AND apps.workspace_id = ?' : '';
+    const params = ctx?.workspace_id ? [app_id, ctx.workspace_id] : [app_id];
     return db
       .prepare(
         `SELECT app_invites.*,
                 users.name AS invited_user_name,
                 users.email AS invited_user_email
            FROM app_invites
+           INNER JOIN apps ON apps.id = app_invites.app_id
            LEFT JOIN users ON users.id = app_invites.invited_user_id
-          WHERE app_invites.app_id = ?
+          WHERE app_invites.app_id = ?${workspaceClause}
           ORDER BY app_invites.created_at DESC`,
       )
-      .all(app_id) as AppInviteRecord[];
+      .all(...params) as AppInviteRecord[];
   },
 
   async upsertAppInvite(
@@ -1285,7 +1375,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     return res.changes;
   },
 
-  async listPendingAppInvitesForUser(user_id: string): Promise<AppInviteRecord[]> {
+  async listPendingAppInvitesForUser(user_id: string, ctx?: SessionContext): Promise<AppInviteRecord[]> {
+    const workspaceClause = ctx?.workspace_id ? ' AND apps.workspace_id = ?' : '';
+    const params = ctx?.workspace_id ? [user_id, ctx.workspace_id] : [user_id];
     return db
       .prepare(
         `SELECT app_invites.*,
@@ -1295,10 +1387,10 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
            FROM app_invites
            JOIN apps ON apps.id = app_invites.app_id
           WHERE app_invites.invited_user_id = ?
-            AND app_invites.state = 'pending_accept'
+            AND app_invites.state = 'pending_accept'${workspaceClause}
           ORDER BY app_invites.created_at DESC`,
       )
-      .all(user_id) as AppInviteRecord[];
+      .all(...params) as AppInviteRecord[];
   },
 
   async userHasAcceptedAppInvite(app_id: string, user_id: string): Promise<boolean> {
@@ -1357,29 +1449,51 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       .get(path) as TriggerRecord | undefined;
   },
 
-  async listTriggersForUser(user_id: string): Promise<TriggerRecord[]> {
+  async listTriggersForUser(user_id: string, ctx?: SessionContext): Promise<TriggerRecord[]> {
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT * FROM triggers
+            WHERE user_id = ?
+              AND workspace_id = ?
+            ORDER BY created_at DESC`,
+        )
+        .all(user_id, ctx.workspace_id) as TriggerRecord[];
+    }
     return db
       .prepare('SELECT * FROM triggers WHERE user_id = ? ORDER BY created_at DESC')
       .all(user_id) as TriggerRecord[];
   },
 
-  async listTriggersForApp(app_id: string): Promise<TriggerRecord[]> {
+  async listTriggersForApp(app_id: string, ctx?: SessionContext): Promise<TriggerRecord[]> {
+    if (ctx?.workspace_id) {
+      return db
+        .prepare(
+          `SELECT * FROM triggers
+            WHERE app_id = ?
+              AND workspace_id = ?
+            ORDER BY created_at DESC`,
+        )
+        .all(app_id, ctx.workspace_id) as TriggerRecord[];
+    }
     return db
       .prepare('SELECT * FROM triggers WHERE app_id = ? ORDER BY created_at DESC')
       .all(app_id) as TriggerRecord[];
   },
 
-  async listDueTriggers(now_ms: number): Promise<TriggerRecord[]> {
+  async listDueTriggers(now_ms: number, ctx?: SessionContext): Promise<TriggerRecord[]> {
+    const workspaceClause = ctx?.workspace_id ? ' AND workspace_id = ?' : '';
+    const params = ctx?.workspace_id ? [now_ms, ctx.workspace_id] : [now_ms];
     return db
       .prepare(
         `SELECT * FROM triggers
           WHERE trigger_type = 'schedule'
             AND enabled = 1
             AND next_run_at IS NOT NULL
-            AND next_run_at <= ?
+            AND next_run_at <= ?${workspaceClause}
           ORDER BY next_run_at ASC`,
       )
-      .all(now_ms) as TriggerRecord[];
+      .all(...params) as TriggerRecord[];
   },
 
   async updateTrigger(
@@ -1450,7 +1564,7 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
   },
 
   // ---------- admin secret pointers ----------
-  async listAdminSecrets(app_id?: string | null): Promise<SecretRecord[]> {
+  async listAdminSecrets(app_id?: string | null, _ctx?: SessionContext): Promise<SecretRecord[]> {
     if (app_id === undefined) {
       return db
         .prepare('SELECT * FROM secrets ORDER BY name')
@@ -1514,6 +1628,82 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     return res.changes > 0;
   },
 
+  async getEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+  ): Promise<EncryptedSecretRecord | undefined> {
+    ensureEncryptedSecretsTable();
+    return db
+      .prepare(
+        `SELECT workspace_id, key, ciphertext, nonce, auth_tag, encrypted_dek,
+                created_at, updated_at
+           FROM encrypted_secrets
+          WHERE workspace_id = ?
+            AND key = ?`,
+      )
+      .get(ctx.workspace_id, key) as EncryptedSecretRecord | undefined;
+  },
+
+  async setEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+    payload: {
+      ciphertext: string;
+      nonce: string;
+      auth_tag: string;
+      encrypted_dek: string;
+    },
+  ): Promise<void> {
+    ensureEncryptedSecretsTable();
+    db.prepare(
+      `INSERT INTO encrypted_secrets
+         (workspace_id, key, ciphertext, nonce, auth_tag, encrypted_dek, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT (workspace_id, key)
+         DO UPDATE SET ciphertext = excluded.ciphertext,
+                       nonce = excluded.nonce,
+                       auth_tag = excluded.auth_tag,
+                       encrypted_dek = excluded.encrypted_dek,
+                       updated_at = datetime('now')`,
+    ).run(
+      ctx.workspace_id,
+      key,
+      payload.ciphertext,
+      payload.nonce,
+      payload.auth_tag,
+      payload.encrypted_dek,
+    );
+  },
+
+  async listEncryptedSecrets(
+    ctx: { workspace_id: string },
+  ): Promise<Array<{ key: string; updated_at: string }>> {
+    ensureEncryptedSecretsTable();
+    return db
+      .prepare(
+        `SELECT key, updated_at
+           FROM encrypted_secrets
+          WHERE workspace_id = ?
+          ORDER BY key`,
+      )
+      .all(ctx.workspace_id) as Array<{ key: string; updated_at: string }>;
+  },
+
+  async deleteEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+  ): Promise<boolean> {
+    ensureEncryptedSecretsTable();
+    const res = db
+      .prepare(
+        `DELETE FROM encrypted_secrets
+          WHERE workspace_id = ?
+            AND key = ?`,
+      )
+      .run(ctx.workspace_id, key);
+    return res.changes > 0;
+  },
+
   // ---------- encrypted per-user / creator secret rows ----------
   getUserSecretRow(
     workspace_id: string,
@@ -1536,7 +1726,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
     workspace_id: string,
     user_id: string,
     keys: string[],
+    ctx?: SessionContext,
   ): SecretCiphertextRow[] {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     if (keys.length === 0) return [];
     const placeholders = keys.map(() => '?').join(', ');
     return db
@@ -1554,7 +1746,9 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
   listUserSecretMetadata(
     workspace_id: string,
     user_id: string,
+    ctx?: SessionContext,
   ): Array<{ key: string; updated_at: string }> {
+    if (ctx?.workspace_id && workspace_id !== ctx.workspace_id) return [];
     return db
       .prepare(
         `SELECT key, updated_at
@@ -1644,9 +1838,12 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
   listCreatorOverrideSecretRowsForRun(
     app_id: string,
     keys: string[],
+    ctx?: SessionContext,
   ): CreatorSecretCiphertextRow[] {
     if (keys.length === 0) return [];
+    const workspaceClause = ctx?.workspace_id ? ' AND s.workspace_id = ?' : '';
     const placeholders = keys.map(() => '?').join(', ');
+    const params = ctx?.workspace_id ? [app_id, ...keys, ctx.workspace_id] : [app_id, ...keys];
     return db
       .prepare(
         `SELECT s.app_id, s.workspace_id, s.key, s.ciphertext, s.nonce,
@@ -1657,8 +1854,8 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
             AND p.key = s.key
             AND p.policy = 'creator_override'
           WHERE s.app_id = ?
-            AND s.key IN (${placeholders})`,
+            AND s.key IN (${placeholders})${workspaceClause}`,
       )
-      .all(app_id, ...keys) as CreatorSecretCiphertextRow[];
+      .all(...params) as CreatorSecretCiphertextRow[];
   },
 };

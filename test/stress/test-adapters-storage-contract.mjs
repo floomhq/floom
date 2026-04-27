@@ -557,6 +557,68 @@ try {
     assert((await storage.deleteAdminSecret('APP_TOKEN', app.id)) === false, 'deleteAdminSecret missing was not false');
   });
 
+  await check('encrypted secrets set/get round-trip stores ciphertext only', async () => {
+    await storage.createWorkspace({
+      id: 'encrypted-workspace-a',
+      slug: 'encrypted-workspace-a',
+      name: 'Encrypted Workspace A',
+      plan: 'cloud_free',
+    });
+    await storage.setEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY', {
+      ciphertext: 'ciphertext-a',
+      nonce: 'nonce-a',
+      auth_tag: 'tag-a',
+      encrypted_dek: 'dek-a',
+    });
+    const row = await storage.getEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY');
+    assert(row?.workspace_id === 'encrypted-workspace-a', `row=${json(row)}`);
+    assert(row.key === 'API_KEY', `key=${row.key}`);
+    assert(row.ciphertext === 'ciphertext-a', `ciphertext=${row.ciphertext}`);
+    assert(!json(row).includes('plaintext'), `row leaked plaintext marker=${json(row)}`);
+  });
+
+  await check('encrypted secrets list is metadata-only and workspace scoped', async () => {
+    await storage.createWorkspace({
+      id: 'encrypted-workspace-b',
+      slug: 'encrypted-workspace-b',
+      name: 'Encrypted Workspace B',
+      plan: 'cloud_free',
+    });
+    await storage.setEncryptedSecret({ workspace_id: 'encrypted-workspace-b' }, 'API_KEY', {
+      ciphertext: 'ciphertext-b',
+      nonce: 'nonce-b',
+      auth_tag: 'tag-b',
+      encrypted_dek: 'dek-b',
+    });
+    const listedA = await storage.listEncryptedSecrets({ workspace_id: 'encrypted-workspace-a' });
+    const listedB = await storage.listEncryptedSecrets({ workspace_id: 'encrypted-workspace-b' });
+    assert(listedA.some((row) => row.key === 'API_KEY'), `listedA=${json(listedA)}`);
+    assert(listedB.some((row) => row.key === 'API_KEY'), `listedB=${json(listedB)}`);
+    assert(!json(listedA).includes('ciphertext-a'), `listedA exposed ciphertext=${json(listedA)}`);
+    assert(!json(listedB).includes('ciphertext-b'), `listedB exposed ciphertext=${json(listedB)}`);
+  });
+
+  await check('encrypted secrets upsert refreshes payload', async () => {
+    await storage.setEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY', {
+      ciphertext: 'ciphertext-a2',
+      nonce: 'nonce-a2',
+      auth_tag: 'tag-a2',
+      encrypted_dek: 'dek-a2',
+    });
+    const row = await storage.getEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY');
+    assert(row?.ciphertext === 'ciphertext-a2', `row=${json(row)}`);
+    assert(row.nonce === 'nonce-a2', `nonce=${row.nonce}`);
+    assert(row.auth_tag === 'tag-a2', `auth_tag=${row.auth_tag}`);
+    assert(row.encrypted_dek === 'dek-a2', `encrypted_dek=${row.encrypted_dek}`);
+  });
+
+  await check('encrypted secrets delete is idempotent and scoped', async () => {
+    assert((await storage.deleteEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY')) === true, 'delete existing returned false');
+    assert((await storage.getEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY')) === undefined, 'deleted encrypted secret remained readable');
+    assert((await storage.getEncryptedSecret({ workspace_id: 'encrypted-workspace-b' }, 'API_KEY')) !== undefined, 'delete crossed workspace boundary');
+    assert((await storage.deleteEncryptedSecret({ workspace_id: 'encrypted-workspace-a' }, 'API_KEY')) === false, 'delete missing did not return false');
+  });
+
   await check('slug collision is deterministic and never silently overwrites', async () => {
     const first = await storage.createApp(appInput('app-collision-1', 'app-collision'));
     let threw = false;
@@ -631,10 +693,37 @@ try {
       assert((await storage.listRuns({ workspace_id: 'tenant-a' })).every((row) => row.workspace_id === 'tenant-a'), 'tenant-a listRuns leaked');
       assert((await storage.listRuns({ workspace_id: 'tenant-b' })).every((row) => row.workspace_id === 'tenant-b'), 'tenant-b listRuns leaked');
     }
-    skip(
-      'unfiltered tenant default',
-      'StorageAdapter has no SessionContext argument; default tenant policy is enforced by callers that pass workspace_id',
-    );
+  });
+
+  await check('unfiltered tenant default scopes list methods by SessionContext workspace_id', async () => {
+    const ctxA = {
+      workspace_id: 'tenant-default-a',
+      user_id: 'tenant-default-user',
+      device_id: 'tenant-default-device',
+      is_authenticated: true,
+    };
+    const appA = await storage.createApp(appInput('tenant-default-app-a', 'tenant-default-app-a', 'tenant-default-a'));
+    const appB = await storage.createApp(appInput('tenant-default-app-b', 'tenant-default-app-b', 'tenant-default-b'));
+    await storage.createRun({
+      id: 'tenant-default-run-a',
+      app_id: appA.id,
+      action: 'run',
+      inputs: {},
+      workspace_id: 'tenant-default-a',
+    });
+    await storage.createRun({
+      id: 'tenant-default-run-b',
+      app_id: appB.id,
+      action: 'run',
+      inputs: {},
+      workspace_id: 'tenant-default-b',
+    });
+    const apps = await storage.listApps({}, ctxA);
+    const runs = await storage.listRuns({}, ctxA);
+    assert(apps.some((row) => row.id === appA.id), `apps missing tenant A=${json(apps)}`);
+    assert(!apps.some((row) => row.id === appB.id), `apps leaked tenant B=${json(apps)}`);
+    assert(runs.some((row) => row.id === 'tenant-default-run-a'), `runs missing tenant A=${json(runs)}`);
+    assert(!runs.some((row) => row.id === 'tenant-default-run-b'), `runs leaked tenant B=${json(runs)}`);
   });
 
   await check('transactional read-after-write is visible to another connection', async () => {

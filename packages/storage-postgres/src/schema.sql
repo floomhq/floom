@@ -251,6 +251,18 @@ CREATE TABLE IF NOT EXISTS user_secrets (
   PRIMARY KEY (workspace_id, user_id, key)
 );
 
+CREATE TABLE IF NOT EXISTS encrypted_secrets (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  ciphertext TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  auth_tag TEXT NOT NULL,
+  encrypted_dek TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (workspace_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS connections (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

@@ -165,6 +165,10 @@ const REQUIRED_METHODS: Record<AdapterKind, readonly string[]> = {
     'listAdminSecrets',
     'upsertAdminSecret',
     'deleteAdminSecret',
+    'getEncryptedSecret',
+    'setEncryptedSecret',
+    'listEncryptedSecrets',
+    'deleteEncryptedSecret',
   ],
   auth: ['getSession', 'signIn', 'signUp', 'signOut', 'onUserDelete'],
   secrets: [

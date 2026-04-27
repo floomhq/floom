@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import type {
-  CreatorSecretCiphertextRow,
-  CreatorSecretCiphertextWriteInput,
-  SecretCiphertextRow,
-  SecretCiphertextWriteInput,
+  EncryptedSecretRecord,
   StorageAdapter,
 } from '@floom/adapter-types';
 import {
@@ -12,76 +9,50 @@ import {
 } from '../src/index.ts';
 
 class MemorySecretStorage {
-  readonly userRows = new Map<string, SecretCiphertextRow>();
-  readonly creatorRows = new Map<string, CreatorSecretCiphertextRow>();
-  readonly policies = new Map<string, 'user_vault' | 'creator_override'>();
+  readonly rows = new Map<string, EncryptedSecretRecord>();
 
-  getUserSecretRow(
-    workspace_id: string,
-    user_id: string,
+  async getEncryptedSecret(
+    ctx: { workspace_id: string },
     key: string,
-  ): SecretCiphertextRow | undefined {
-    return this.userRows.get(userKey(workspace_id, user_id, key));
+  ): Promise<EncryptedSecretRecord | undefined> {
+    return this.rows.get(rowKey(ctx.workspace_id, key));
   }
 
-  listUserSecretRows(
-    workspace_id: string,
-    user_id: string,
-    keys: string[],
-  ): SecretCiphertextRow[] {
-    return keys
-      .map((key) => this.getUserSecretRow(workspace_id, user_id, key))
-      .filter((row): row is SecretCiphertextRow => !!row);
-  }
-
-  listUserSecretMetadata(
-    workspace_id: string,
-    user_id: string,
-  ): Array<{ key: string; updated_at: string }> {
-    return [...this.userRows.values()]
-      .filter((row) => row.workspace_id === workspace_id && row.user_id === user_id)
+  async listEncryptedSecrets(
+    ctx: { workspace_id: string },
+  ): Promise<Array<{ key: string; updated_at: string }>> {
+    return [...this.rows.values()]
+      .filter((row) => row.workspace_id === ctx.workspace_id)
       .map((row) => ({ key: row.key, updated_at: row.updated_at }))
       .sort((a, b) => a.key.localeCompare(b.key));
   }
 
-  upsertUserSecretRow(row: SecretCiphertextWriteInput): void {
-    this.userRows.set(userKey(row.workspace_id, row.user_id, row.key), {
-      ...row,
-      updated_at: new Date().toISOString(),
+  async setEncryptedSecret(
+    ctx: { workspace_id: string },
+    key: string,
+    payload: {
+      ciphertext: string;
+      nonce: string;
+      auth_tag: string;
+      encrypted_dek: string;
+    },
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const existing = this.rows.get(rowKey(ctx.workspace_id, key));
+    this.rows.set(rowKey(ctx.workspace_id, key), {
+      workspace_id: ctx.workspace_id,
+      key,
+      ...payload,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
     });
   }
 
-  deleteUserSecretRow(
-    workspace_id: string,
-    user_id: string,
+  async deleteEncryptedSecret(
+    ctx: { workspace_id: string },
     key: string,
-  ): boolean {
-    return this.userRows.delete(userKey(workspace_id, user_id, key));
-  }
-
-  setSecretPolicy(
-    app_id: string,
-    key: string,
-    policy: 'user_vault' | 'creator_override',
-  ): void {
-    this.policies.set(`${app_id}:${key}`, policy);
-  }
-
-  upsertCreatorSecretRow(row: CreatorSecretCiphertextWriteInput): void {
-    this.creatorRows.set(`${row.app_id}:${row.key}`, {
-      ...row,
-      updated_at: new Date().toISOString(),
-    });
-  }
-
-  listCreatorOverrideSecretRowsForRun(
-    app_id: string,
-    keys: string[],
-  ): CreatorSecretCiphertextRow[] {
-    return keys
-      .filter((key) => this.policies.get(`${app_id}:${key}`) === 'creator_override')
-      .map((key) => this.creatorRows.get(`${app_id}:${key}`))
-      .filter((row): row is CreatorSecretCiphertextRow => !!row);
+  ): Promise<boolean> {
+    return this.rows.delete(rowKey(ctx.workspace_id, key));
   }
 }
 
@@ -103,7 +74,7 @@ const tenantCtx = { ...ctx, workspace_id: 'workspace-b' };
 await secrets.set(ctx, 'API_KEY', 'sk-live-secret');
 assert.equal(await secrets.get(ctx, 'API_KEY'), 'sk-live-secret');
 
-const backingRow = storage.getUserSecretRow('workspace-a', 'user-1', 'API_KEY');
+const backingRow = [...storage.rows.values()].find((row) => row.workspace_id === 'workspace-a');
 assert.ok(backingRow);
 assert.notEqual(backingRow.ciphertext, 'sk-live-secret');
 assert.ok(!JSON.stringify(backingRow).includes('sk-live-secret'));
@@ -150,6 +121,6 @@ assert.equal(await secrets.delete(ctx, 'API_KEY'), false);
 
 console.log('gcp-kms secrets unit tests passed');
 
-function userKey(workspace_id: string, user_id: string, key: string): string {
-  return `${workspace_id}:${user_id}:${key}`;
+function rowKey(workspace_id: string, key: string): string {
+  return `${workspace_id}:${key}`;
 }

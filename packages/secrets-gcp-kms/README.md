@@ -15,5 +15,5 @@ const secrets = createGcpKmsSecretsAdapter({
 });
 ```
 
-The provided storage adapter must expose Floom's optional encrypted secret row
-methods from `@floom/adapter-types`.
+The provided storage adapter must expose Floom's encrypted secret row methods
+from `@floom/adapter-types`.

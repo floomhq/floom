@@ -141,6 +141,10 @@ const adapter = {
   async listAdminSecrets() { return []; },
   async upsertAdminSecret() {},
   async deleteAdminSecret() { return false; },
+  async getEncryptedSecret() { return undefined; },
+  async setEncryptedSecret() {},
+  async listEncryptedSecrets() { return []; },
+  async deleteEncryptedSecret() { return false; },
 };
 
 for (const method of ${JSON.stringify(missingMethods)}) {
@@ -214,6 +218,10 @@ const storageGetAppResult = bundle.storage.getApp('__factory_missing__');
 log('bundle.storage.getApp returns Promise', storageGetAppResult instanceof Promise);
 await storageGetAppResult;
 log('default sqlite storage passes completeness validation', typeof bundle.storage.createAgentToken === 'function');
+log('bundle.storage.getEncryptedSecret is fn', typeof bundle.storage.getEncryptedSecret === 'function');
+log('bundle.storage.setEncryptedSecret is fn', typeof bundle.storage.setEncryptedSecret === 'function');
+log('bundle.storage.listEncryptedSecrets is fn', typeof bundle.storage.listEncryptedSecrets === 'function');
+log('bundle.storage.deleteEncryptedSecret is fn', typeof bundle.storage.deleteEncryptedSecret === 'function');
 log('bundle.auth.getSession is fn', typeof bundle.auth.getSession === 'function');
 log('bundle.secrets.get is fn', typeof bundle.secrets.get === 'function');
 log('bundle.observability.increment is fn', typeof bundle.observability.increment === 'function');

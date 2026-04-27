@@ -5,9 +5,7 @@ import {
   randomBytes,
 } from 'node:crypto';
 import type {
-  CreatorSecretCiphertextRow,
-  SecretCiphertextRow,
-  SecretCiphertextWriteInput,
+  EncryptedSecretRecord,
   SecretsAdapter,
   SessionContext,
   StorageAdapter,
@@ -32,14 +30,10 @@ type KmsClient = InstanceType<
 type SecretStorage = Required<
   Pick<
     StorageAdapter,
-    | 'getUserSecretRow'
-    | 'listUserSecretRows'
-    | 'listUserSecretMetadata'
-    | 'upsertUserSecretRow'
-    | 'deleteUserSecretRow'
-    | 'setSecretPolicy'
-    | 'upsertCreatorSecretRow'
-    | 'listCreatorOverrideSecretRowsForRun'
+    | 'getEncryptedSecret'
+    | 'setEncryptedSecret'
+    | 'listEncryptedSecrets'
+    | 'deleteEncryptedSecret'
   >
 >;
 
@@ -127,7 +121,10 @@ export function createGcpKmsSecretsAdapter(
 
   const adapter: TestableSecretsAdapter = {
     async get(ctx: SessionContext, key: string): Promise<string | null> {
-      const row = storage.getUserSecretRow(ctx.workspace_id, ctx.user_id, key);
+      const row = await storage.getEncryptedSecret(
+        { workspace_id: ctx.workspace_id },
+        userSecretStorageKey(ctx.user_id, key),
+      );
       return row ? await decryptSecretRow(kms, row) : null;
     },
 
@@ -136,42 +133,55 @@ export function createGcpKmsSecretsAdapter(
       key: string,
       plaintext: string,
     ): Promise<void> {
-      storage.upsertUserSecretRow({
-        workspace_id: ctx.workspace_id,
-        user_id: ctx.user_id,
-        key,
-        ...(await encryptSecret(kms, plaintext)),
-      });
+      await storage.setEncryptedSecret(
+        { workspace_id: ctx.workspace_id },
+        userSecretStorageKey(ctx.user_id, key),
+        await encryptSecret(kms, plaintext),
+      );
     },
 
     async delete(ctx: SessionContext, key: string): Promise<boolean> {
-      return storage.deleteUserSecretRow(ctx.workspace_id, ctx.user_id, key);
+      return storage.deleteEncryptedSecret(
+        { workspace_id: ctx.workspace_id },
+        userSecretStorageKey(ctx.user_id, key),
+      );
     },
 
     async list(
       ctx: SessionContext,
     ): Promise<Array<{ key: string; updated_at: string }>> {
-      return storage.listUserSecretMetadata(ctx.workspace_id, ctx.user_id);
+      const rows = await storage.listEncryptedSecrets({ workspace_id: ctx.workspace_id });
+      return rows
+        .map((row) => {
+          const key = userSecretKeyFromStorageKey(ctx.user_id, row.key);
+          return key ? { key, updated_at: row.updated_at } : null;
+        })
+        .filter((row): row is { key: string; updated_at: string } => row !== null)
+        .sort((a, b) => a.key.localeCompare(b.key));
     },
 
     async loadUserVaultForRun(
       ctx: SessionContext,
       keys: string[],
     ): Promise<Record<string, string>> {
-      const rows = storage.listUserSecretRows(
+      const rows = await loadEncryptedRows(
+        storage,
         ctx.workspace_id,
-        ctx.user_id,
-        keys,
+        keys.map((key) => userSecretStorageKey(ctx.user_id, key)),
       );
       return await decryptRows(kms, rows);
     },
 
     async loadCreatorOverrideForRun(
       app_id: string,
-      _workspace_id: string,
+      workspace_id: string,
       keys: string[],
     ): Promise<Record<string, string>> {
-      const rows = storage.listCreatorOverrideSecretRowsForRun(app_id, keys);
+      const rows = await loadEncryptedRows(
+        storage,
+        workspace_id,
+        keys.map((key) => creatorSecretStorageKey(app_id, key)),
+      );
       return await decryptRows(kms, rows);
     },
 
@@ -181,13 +191,11 @@ export function createGcpKmsSecretsAdapter(
       key: string,
       plaintext: string,
     ): Promise<void> {
-      storage.setSecretPolicy(app_id, key, 'creator_override');
-      storage.upsertCreatorSecretRow({
-        app_id,
-        workspace_id,
-        key,
-        ...(await encryptSecret(kms, plaintext)),
-      });
+      await storage.setEncryptedSecret(
+        { workspace_id },
+        creatorSecretStorageKey(app_id, key),
+        await encryptSecret(kms, plaintext),
+      );
     },
   };
 
@@ -196,14 +204,10 @@ export function createGcpKmsSecretsAdapter(
 
 function requireSecretStorage(storage: StorageAdapter): SecretStorage {
   const methods: Array<keyof SecretStorage> = [
-    'getUserSecretRow',
-    'listUserSecretRows',
-    'listUserSecretMetadata',
-    'upsertUserSecretRow',
-    'deleteUserSecretRow',
-    'setSecretPolicy',
-    'upsertCreatorSecretRow',
-    'listCreatorOverrideSecretRowsForRun',
+    'getEncryptedSecret',
+    'setEncryptedSecret',
+    'listEncryptedSecrets',
+    'deleteEncryptedSecret',
   ];
   const missing = methods.filter((method) => typeof storage[method] !== 'function');
   if (missing.length > 0) {
@@ -217,7 +221,12 @@ function requireSecretStorage(storage: StorageAdapter): SecretStorage {
 async function encryptSecret(
   kms: DekWrapper,
   plaintext: string,
-): Promise<Omit<SecretCiphertextWriteInput, 'workspace_id' | 'user_id' | 'key'>> {
+): Promise<{
+  ciphertext: string;
+  nonce: string;
+  auth_tag: string;
+  encrypted_dek: string;
+}> {
   const dek = randomBytes(32);
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', dek, nonce);
@@ -238,7 +247,7 @@ async function encryptSecret(
 async function decryptSecretRow(
   kms: DekWrapper,
   row: Pick<
-    SecretCiphertextRow | CreatorSecretCiphertextRow,
+    EncryptedSecretRecord,
     'key' | 'ciphertext' | 'nonce' | 'auth_tag' | 'encrypted_dek'
   >,
 ): Promise<string> {
@@ -261,17 +270,62 @@ async function decryptSecretRow(
 
 async function decryptRows(
   kms: DekWrapper,
-  rows: Array<SecretCiphertextRow | CreatorSecretCiphertextRow>,
+  rows: EncryptedSecretRecord[],
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const row of rows) {
     try {
-      out[row.key] = await decryptSecretRow(kms, row);
+      const decodedKey = decodedSecretKey(row.key);
+      if (decodedKey) out[decodedKey] = await decryptSecretRow(kms, row);
     } catch {
       continue;
     }
   }
   return out;
+}
+
+async function loadEncryptedRows(
+  storage: SecretStorage,
+  workspace_id: string,
+  storageKeys: string[],
+): Promise<EncryptedSecretRecord[]> {
+  const rows = await Promise.all(
+    storageKeys.map((key) => storage.getEncryptedSecret({ workspace_id }, key)),
+  );
+  return rows.filter((row): row is EncryptedSecretRecord => row !== undefined);
+}
+
+function userSecretStorageKey(user_id: string, key: string): string {
+  return `user:${encodeComponent(user_id)}:${encodeComponent(key)}`;
+}
+
+function creatorSecretStorageKey(app_id: string, key: string): string {
+  return `creator:${encodeComponent(app_id)}:${encodeComponent(key)}`;
+}
+
+function userSecretKeyFromStorageKey(user_id: string, storageKey: string): string | null {
+  const prefix = `user:${encodeComponent(user_id)}:`;
+  if (!storageKey.startsWith(prefix)) return null;
+  return decodeComponent(storageKey.slice(prefix.length));
+}
+
+function decodedSecretKey(storageKey: string): string | null {
+  const parts = storageKey.split(':');
+  if (parts.length !== 3) return null;
+  if (parts[0] !== 'user' && parts[0] !== 'creator') return null;
+  return decodeComponent(parts[2]);
+}
+
+function encodeComponent(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64url');
+}
+
+function decodeComponent(value: string): string | null {
+  try {
+    return Buffer.from(value, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
 }
 
 interface FactoryOptions {

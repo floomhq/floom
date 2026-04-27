@@ -57,53 +57,45 @@ export function createGcpKmsSecretsAdapter(opts) {
             : new GcpKmsDekWrapper(opts.keyName, opts.projectId));
     const adapter = {
         async get(ctx, key) {
-            const row = storage.getUserSecretRow(ctx.workspace_id, ctx.user_id, key);
+            const row = await storage.getEncryptedSecret({ workspace_id: ctx.workspace_id }, userSecretStorageKey(ctx.user_id, key));
             return row ? await decryptSecretRow(kms, row) : null;
         },
         async set(ctx, key, plaintext) {
-            storage.upsertUserSecretRow({
-                workspace_id: ctx.workspace_id,
-                user_id: ctx.user_id,
-                key,
-                ...(await encryptSecret(kms, plaintext)),
-            });
+            await storage.setEncryptedSecret({ workspace_id: ctx.workspace_id }, userSecretStorageKey(ctx.user_id, key), await encryptSecret(kms, plaintext));
         },
         async delete(ctx, key) {
-            return storage.deleteUserSecretRow(ctx.workspace_id, ctx.user_id, key);
+            return storage.deleteEncryptedSecret({ workspace_id: ctx.workspace_id }, userSecretStorageKey(ctx.user_id, key));
         },
         async list(ctx) {
-            return storage.listUserSecretMetadata(ctx.workspace_id, ctx.user_id);
+            const rows = await storage.listEncryptedSecrets({ workspace_id: ctx.workspace_id });
+            return rows
+                .map((row) => {
+                const key = userSecretKeyFromStorageKey(ctx.user_id, row.key);
+                return key ? { key, updated_at: row.updated_at } : null;
+            })
+                .filter((row) => row !== null)
+                .sort((a, b) => a.key.localeCompare(b.key));
         },
         async loadUserVaultForRun(ctx, keys) {
-            const rows = storage.listUserSecretRows(ctx.workspace_id, ctx.user_id, keys);
+            const rows = await loadEncryptedRows(storage, ctx.workspace_id, keys.map((key) => userSecretStorageKey(ctx.user_id, key)));
             return await decryptRows(kms, rows);
         },
-        async loadCreatorOverrideForRun(app_id, _workspace_id, keys) {
-            const rows = storage.listCreatorOverrideSecretRowsForRun(app_id, keys);
+        async loadCreatorOverrideForRun(app_id, workspace_id, keys) {
+            const rows = await loadEncryptedRows(storage, workspace_id, keys.map((key) => creatorSecretStorageKey(app_id, key)));
             return await decryptRows(kms, rows);
         },
         async __setCreatorOverrideForTests(app_id, workspace_id, key, plaintext) {
-            storage.setSecretPolicy(app_id, key, 'creator_override');
-            storage.upsertCreatorSecretRow({
-                app_id,
-                workspace_id,
-                key,
-                ...(await encryptSecret(kms, plaintext)),
-            });
+            await storage.setEncryptedSecret({ workspace_id }, creatorSecretStorageKey(app_id, key), await encryptSecret(kms, plaintext));
         },
     };
     return adapter;
 }
 function requireSecretStorage(storage) {
     const methods = [
-        'getUserSecretRow',
-        'listUserSecretRows',
-        'listUserSecretMetadata',
-        'upsertUserSecretRow',
-        'deleteUserSecretRow',
-        'setSecretPolicy',
-        'upsertCreatorSecretRow',
-        'listCreatorOverrideSecretRowsForRun',
+        'getEncryptedSecret',
+        'setEncryptedSecret',
+        'listEncryptedSecrets',
+        'deleteEncryptedSecret',
     ];
     const missing = methods.filter((method) => typeof storage[method] !== 'function');
     if (missing.length > 0) {
@@ -145,13 +137,50 @@ async function decryptRows(kms, rows) {
     const out = {};
     for (const row of rows) {
         try {
-            out[row.key] = await decryptSecretRow(kms, row);
+            const decodedKey = decodedSecretKey(row.key);
+            if (decodedKey)
+                out[decodedKey] = await decryptSecretRow(kms, row);
         }
         catch {
             continue;
         }
     }
     return out;
+}
+async function loadEncryptedRows(storage, workspace_id, storageKeys) {
+    const rows = await Promise.all(storageKeys.map((key) => storage.getEncryptedSecret({ workspace_id }, key)));
+    return rows.filter((row) => row !== undefined);
+}
+function userSecretStorageKey(user_id, key) {
+    return `user:${encodeComponent(user_id)}:${encodeComponent(key)}`;
+}
+function creatorSecretStorageKey(app_id, key) {
+    return `creator:${encodeComponent(app_id)}:${encodeComponent(key)}`;
+}
+function userSecretKeyFromStorageKey(user_id, storageKey) {
+    const prefix = `user:${encodeComponent(user_id)}:`;
+    if (!storageKey.startsWith(prefix))
+        return null;
+    return decodeComponent(storageKey.slice(prefix.length));
+}
+function decodedSecretKey(storageKey) {
+    const parts = storageKey.split(':');
+    if (parts.length !== 3)
+        return null;
+    if (parts[0] !== 'user' && parts[0] !== 'creator')
+        return null;
+    return decodeComponent(parts[2]);
+}
+function encodeComponent(value) {
+    return Buffer.from(value, 'utf8').toString('base64url');
+}
+function decodeComponent(value) {
+    try {
+        return Buffer.from(value, 'base64url').toString('utf8');
+    }
+    catch {
+        return null;
+    }
 }
 export default {
     kind: 'secrets',

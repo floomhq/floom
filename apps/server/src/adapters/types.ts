@@ -18,6 +18,7 @@ export type {
   ConnectionOwnerKind,
   ConnectionRecord,
   ConnectionStatus,
+  EncryptedSecretRecord,
   ErrorType,
   InputSpec,
   InputType,
