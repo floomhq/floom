@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { adminRouter } from './routes/admin.js';
 import { accountDeleteRouter } from './routes/account_delete.js';
-import { healthRouter } from './routes/health.js';
+import { healthRouter, healthzRouter } from './routes/health.js';
 import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
 import { pickRouter } from './routes/pick.js';
@@ -181,6 +181,7 @@ app.use('/api/admin/*', restrictedCors);
 app.use('/api/hub/*', openCors);
 app.use('/api/hub', openCors);
 app.use('/api/health/*', openCors);
+app.use('/api/healthz', openCors);
 // GH stars proxy — public read-only, no credentials.
 app.use('/api/gh-stars', openCors);
 app.use('/api/gh-stars/*', openCors);
@@ -286,6 +287,8 @@ app.use('/api/*', writeRateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
+// GH #852: /api/healthz — lightweight probe for watchdogs + uptime monitors.
+app.route('/api/healthz', healthzRouter);
 // Server-side proxy for the floomhq/floom GitHub star count. Browser
 // fetches from api.github.com were getting 403-rate-limited on every
 // page load (anonymous budget is 60/hour/IP). See routes/gh-stars.ts.
