@@ -1,0 +1,18 @@
+# Launch Scorecards — proxied-mode examples.
+# Start the upstream first: node examples/launch-scorecards/server.mjs
+# Then point Floom at this file via FLOOM_APPS_CONFIG.
+
+apps:
+  - slug: linkedin-roaster
+    type: proxied
+    openapi_spec_url: http://localhost:4120/linkedin-roaster/openapi.json
+    display_name: LinkedIn Roaster
+    description: "Score a founder or operator LinkedIn profile and return sharper positioning, headline, About rewrite, and post ideas."
+    category: marketing
+
+  - slug: yc-pitch-deck-critic
+    type: proxied
+    openapi_spec_url: http://localhost:4120/yc-pitch-deck-critic/openapi.json
+    display_name: YC Pitch Deck Critic
+    description: "Score an early-stage pitch deck narrative and return a focused diagnosis."
+    category: fundraising

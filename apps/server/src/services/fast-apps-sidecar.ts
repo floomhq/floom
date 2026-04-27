@@ -3,7 +3,7 @@
 // At boot the Floom server forks `examples/fast-apps/server.mjs` as a child
 // process on localhost:$FAST_APPS_PORT (default 4200). Once the sidecar
 // answers its /health probe, we call ingestOpenApiApps on
-// `examples/fast-apps/apps.yaml` so the seven utility apps land in the
+// a runtime apps.yaml so the utility apps land in the
 // hub alongside any other proxied apps declared via FLOOM_APPS_CONFIG.
 //
 // Opt-out: set FLOOM_FAST_APPS=false (or 0) in the environment. Useful for
@@ -22,8 +22,7 @@ import { ingestOpenApiApps } from './openapi-ingest.js';
 
 /**
  * Slugs that should be pinned as `featured` in the store after ingest.
- *  - The seven new fast-apps (uuid, password, hash, base64, json-format,
- *    jwt-decode, word-count) are always fastest so they go first.
+ *  - Fast-apps are always fastest so they go first.
  *  - Three bundled seed apps (hook-stats, claude-wrapped, session-recall)
  *    are marked featured for continuity with the previous-wave demo flow;
  *    Federico wants them pinned even though their docker runtime is
@@ -37,6 +36,11 @@ const FEATURED_SLUGS = new Set<string>([
   'json-format',
   'jwt-decode',
   'word-count',
+  'regex-test',
+  'slugify',
+  'url-encode',
+  'utm-builder',
+  'qr-code',
   'hook-stats',
   'claude-wrapped',
   'session-recall',
@@ -80,7 +84,7 @@ function findSidecarScript(): string | null {
 }
 
 /**
- * App descriptors for the seven fast apps. We materialize a temporary
+ * App descriptors for the fast apps. We materialize a temporary
  * apps.yaml at boot using the *actual* sidecar port so tests and multi-
  * instance deployments can bind to any port without touching the shipped
  * examples/fast-apps/apps.yaml file on disk.
@@ -184,6 +188,51 @@ const FAST_APP_DESCRIPTORS: FastAppDescriptor[] = [
       'Count words, characters, lines, sentences, and paragraphs. Estimates reading time at 220 words per minute.',
     category: 'writing',
     icon: 'word-count',
+  },
+  {
+    slug: 'regex-test',
+    display_name: 'Regex Test',
+    description:
+      'Test a JavaScript regex against sample text. Returns matches, capture groups, named captures, indices, and invalid-pattern errors.',
+    category: 'developer-tools',
+    icon: 'regex-test',
+  },
+  {
+    slug: 'slugify',
+    display_name: 'Slugify',
+    description:
+      'Convert text into URL-safe slugs. Lowercase, strip diacritics, collapse separators, and optionally cap length.',
+    category: 'developer-tools',
+    icon: 'slugify',
+  },
+  {
+    slug: 'url-encode',
+    display_name: 'URL Encode',
+    description:
+      'Percent-encode or decode URLs, path segments, and query parameters without leaving your browser workflow.',
+    category: 'developer-tools',
+    icon: 'url-encode',
+  },
+  {
+    slug: 'utm-builder',
+    display_name: 'UTM Builder',
+    description:
+      'Build campaign URLs with utm_source, utm_medium, utm_campaign, and optional content, term, or id parameters.',
+    category: 'marketing',
+    icon: 'utm-builder',
+  },
+  {
+    slug: 'qr-code',
+    display_name: 'QR Code Studio',
+    description:
+      'Generate a standards-compliant QR SVG and data URL from text or a URL. Zero dependencies, zero AI tokens.',
+    category: 'developer-tools',
+    icon: 'qr-code',
+    render: {
+      output_component: 'ImageView',
+      src_field: 'data_url',
+      alt: 'Generated QR code',
+    },
   },
 ];
 

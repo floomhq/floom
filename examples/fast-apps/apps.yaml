@@ -1,4 +1,4 @@
-# Fast Apps — seven deterministic utility apps bundled with the Floom server.
+# Fast Apps — deterministic utility apps bundled with the Floom server.
 #
 # The sidecar server (examples/fast-apps/server.mjs) runs as a child process
 # next to the main Floom server on localhost:$FAST_APPS_PORT (default 4200).
@@ -71,3 +71,43 @@ apps:
     description: "Count words, characters, lines, sentences, and paragraphs. Estimates reading time at 220 words per minute."
     category: writing
     icon: word-count
+
+  - slug: regex-test
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/regex-test.json
+    display_name: Regex Test
+    description: "Test a JavaScript regex against sample text. Returns matches, capture groups, named captures, indices, and invalid-pattern errors."
+    category: developer-tools
+    icon: regex-test
+
+  - slug: slugify
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/slugify.json
+    display_name: Slugify
+    description: "Convert text into URL-safe slugs. Lowercase, strip diacritics, collapse separators, and optionally cap length."
+    category: developer-tools
+    icon: slugify
+
+  - slug: url-encode
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/url-encode.json
+    display_name: URL Encode
+    description: "Percent-encode or decode URLs, path segments, and query parameters without leaving your browser workflow."
+    category: developer-tools
+    icon: url-encode
+
+  - slug: utm-builder
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/utm-builder.json
+    display_name: UTM Builder
+    description: "Build campaign URLs with utm_source, utm_medium, utm_campaign, and optional content, term, or id parameters."
+    category: marketing
+    icon: utm-builder
+
+  - slug: qr-code
+    type: proxied
+    openapi_spec_url: http://127.0.0.1:4200/openapi/qr-code.json
+    display_name: QR Code Studio
+    description: "Generate a standards-compliant QR SVG and data URL from text or a URL. Zero dependencies, zero AI tokens."
+    category: developer-tools
+    icon: qr-code

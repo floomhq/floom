@@ -44,6 +44,7 @@ import { seedFromFile } from './services/seed.js';
 import { seedLaunchDemos } from './services/launch-demos.js';
 import { ingestOpenApiApps } from './services/openapi-ingest.js';
 import { startFastApps } from './services/fast-apps-sidecar.js';
+import { startLaunchWeekApps } from './services/launch-week-sidecars.js';
 import { backfillAppEmbeddings } from './services/embeddings.js';
 import { globalAuthMiddleware } from './lib/auth.js';
 import { agentTokenAuthMiddleware } from './lib/agent-tokens.js';
@@ -1735,12 +1736,18 @@ async function boot(): Promise<void> {
   startGithubBuildWorker();
 
   // Fast Apps sidecar: fork examples/fast-apps/server.mjs and ingest its
-  // seven deterministic utility apps. Opt-out via FLOOM_FAST_APPS=false.
+  // deterministic utility apps. Opt-out via FLOOM_FAST_APPS=false.
   // Merged from wave/W4M-fast-apps (0.4.0-minimal.2) into wave/W4M-test-fixes
   // so the published image has both gap-close auth migrations AND the fast-
   // apps sidecar.
   startFastApps().catch((err) => {
     console.error('[fast-apps] boot failed:', err);
+  });
+
+  // Launch Week sidecars: scorecards, local-session analyzers, and builder
+  // intake apps. Opt-in via FLOOM_LAUNCH_WEEK_APPS=true.
+  startLaunchWeekApps().catch((err) => {
+    console.error('[launch-week] boot failed:', err);
   });
 
   serve({ fetch: app.fetch, port: PORT }, (info) => {

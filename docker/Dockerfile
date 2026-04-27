@@ -39,6 +39,12 @@ COPY cli/floom/install.sh ./cli/floom/install.sh
 # Copy the fast-apps sidecar bundle into the build context so the runtime
 # stage can grab it from the builder image. Pure .mjs source, no build step.
 COPY examples/fast-apps ./examples/fast-apps
+# Launch Week proxied sidecars: scorecards, session analyzers, and intake app.
+COPY examples/launch-scorecards ./examples/launch-scorecards
+COPY examples/claude-wrapped ./examples/claude-wrapped
+COPY examples/session-recall ./examples/session-recall
+COPY examples/hook-stats ./examples/hook-stats
+COPY examples/floom-this ./examples/floom-this
 # Launch demos: the showcase apps shipped as self-contained python:3.12-slim
 # images. services/launch-demos.ts reads each demo's Dockerfile + source
 # from these dirs on boot and builds the image against the host docker
@@ -135,6 +141,14 @@ COPY --from=builder /app/packages/renderer/src ./packages/renderer/src
 # Set FLOOM_FAST_APPS=false to skip this on environments that prefer an
 # empty hub.
 COPY --from=builder /app/examples/fast-apps ./examples/fast-apps
+
+# Launch Week proxied sidecars. Pure Node.js, no deps, forked at server boot.
+# Set FLOOM_LAUNCH_WEEK_APPS=true to enable on preview/test environments.
+COPY --from=builder /app/examples/launch-scorecards ./examples/launch-scorecards
+COPY --from=builder /app/examples/claude-wrapped ./examples/claude-wrapped
+COPY --from=builder /app/examples/session-recall ./examples/session-recall
+COPY --from=builder /app/examples/hook-stats ./examples/hook-stats
+COPY --from=builder /app/examples/floom-this ./examples/floom-this
 
 # Launch demos: source dirs consumed at boot by services/launch-demos.ts
 # to build + register the showcase apps. Roster swapped 2026-04-25 to

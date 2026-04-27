@@ -1,6 +1,6 @@
 # Fast Apps
 
-Seven deterministic utility apps bundled with the Floom server as a single
+Deterministic utility apps bundled with the Floom server as a single
 Node.js proxied-mode sidecar. Designed for live demos: every handler runs in
 under one millisecond, every response is deterministic given the same input,
 and none of them require external APIs or secrets.
@@ -16,9 +16,14 @@ and none of them require external APIs or secrets.
 | `json-format` | JSON Formatter | Pretty print JSON with configurable indent and optional key sorting. |
 | `jwt-decode` | JWT Decoder | Decode a JWT header and payload without verifying the signature. |
 | `word-count` | Word Count | Count words, characters, lines, sentences, paragraphs, reading time. |
+| `regex-test` | Regex Test | Test a JavaScript regex and return matches, groups, named captures, and indices. |
+| `slugify` | Slugify | Convert text into a URL-safe slug with separator and length controls. |
+| `url-encode` | URL Encode | Percent-encode or decode full URLs, path segments, and query values. |
+| `utm-builder` | UTM Builder | Build campaign URLs with standard UTM parameters. |
+| `qr-code` | QR Code Studio | Generate a QR Code SVG and data URL for short URLs or text. |
 
 All apps are in the `developer-tools` category, except `word-count` which is
-in `writing`.
+in `writing` and `utm-builder` which is in `marketing`.
 
 ## Running
 
@@ -59,6 +64,16 @@ curl -s -X POST http://127.0.0.1:4200/hash/run \
 curl -s -X POST http://127.0.0.1:4200/jwt-decode/run \
   -H 'content-type: application/json' \
   -d '{"token":"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmbG9vbSJ9.sig"}'
+
+# Build a campaign URL
+curl -s -X POST http://127.0.0.1:4200/utm-builder/run \
+  -H 'content-type: application/json' \
+  -d '{"base_url":"https://floom.dev/apps","source":"linkedin","medium":"social","campaign":"launch-week"}'
+
+# Generate a QR Code SVG
+curl -s -X POST http://127.0.0.1:4200/qr-code/run \
+  -H 'content-type: application/json' \
+  -d '{"text":"https://floom.dev","margin":4,"scale":8}'
 ```
 
 Every endpoint also has a matching OpenAPI 3.0 spec at
@@ -78,6 +93,11 @@ container:
 | json-format | ~0.5 ms | ~0.7 ms | ~5.1 ms |
 | jwt-decode | ~0.5 ms | ~0.6 ms | ~0.9 ms |
 | word-count | ~0.5 ms | ~0.6 ms | ~2.8 ms |
+| regex-test | unmeasured | unmeasured | unmeasured |
+| slugify | unmeasured | unmeasured | unmeasured |
+| url-encode | unmeasured | unmeasured | unmeasured |
+| utm-builder | unmeasured | unmeasured | unmeasured |
+| qr-code | unmeasured | unmeasured | unmeasured |
 
 The Floom proxied-runner adds a few milliseconds of overhead (inputs
 validation, fetch, output parsing, DB write), keeping end-to-end run time
@@ -97,3 +117,6 @@ under 50 ms for every app.
 - JWT decoding reads the first two base64url segments and parses them as
   JSON. Signature is returned but never verified, and the response is
   explicitly marked `verified: false`.
+- QR Code Studio is a dependency-free QR Code Model 2 generator for byte-mode
+  inputs up to version 5-L (106 UTF-8 bytes). It returns SVG text and a
+  `data:image/svg+xml;base64,...` URL.

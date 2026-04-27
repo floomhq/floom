@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// E2E stress test for the fast-apps wave (seven proxied utility apps).
+// E2E stress test for the fast-apps wave (proxied utility apps).
 //
 // 1. Boot the Floom server with a clean temp DATA_DIR. The server's boot
 //    hook auto-forks examples/fast-apps/server.mjs and ingests its
-//    apps.yaml, so all seven apps land in /api/hub.
-// 2. Verify /api/hub returns the seven apps, sorted with featured first
+//    apps.yaml, so all bundled apps land in /api/hub.
+// 2. Verify /api/hub returns the bundled apps, sorted with featured first
 //    and (once any avg_run_ms has been recorded) fastest next.
 // 3. For each app, fire a happy-path POST /api/:slug/run, poll GET
 //    /api/run/:id until the run finishes, and assert:
@@ -185,12 +185,17 @@ const registered = await waitForCondition(async () => {
       'json-format',
       'jwt-decode',
       'word-count',
+      'regex-test',
+      'slugify',
+      'url-encode',
+      'utm-builder',
+      'qr-code',
     ].every((s) => slugs.has(s));
   } catch {
     return false;
   }
 }, 15_000);
-log('hub: all seven fast apps registered', registered);
+log('hub: all bundled fast apps registered', registered);
 if (!registered) {
   console.log('\n0 passed, 1 failed');
   process.exit(1);
@@ -203,14 +208,15 @@ if (!registered) {
   const first = hub[0];
   log('hub: returns `featured` boolean', typeof first.featured === 'boolean', typeof first.featured);
   log('hub: returns `avg_run_ms` (null or number)', 'avg_run_ms' in first);
-  // All seven fast apps should be marked featured = true.
+  // All bundled fast apps should be marked featured = true.
   const fastSlugs = new Set([
     'uuid', 'password', 'hash', 'base64', 'json-format', 'jwt-decode', 'word-count',
+    'regex-test', 'slugify', 'url-encode', 'utm-builder', 'qr-code',
   ]);
   const fastFeatured = hub
     .filter((a) => fastSlugs.has(a.slug))
     .every((a) => a.featured === true);
-  log('hub: all seven fast apps marked featured', fastFeatured);
+  log('hub: all bundled fast apps marked featured', fastFeatured);
   // First app in the response should be featured (no `sort=name` override).
   log('hub: first app is featured', first.featured === true, `got ${first.slug} featured=${first.featured}`);
 }
@@ -265,6 +271,45 @@ const HAPPY_CASES = {
     check: (out) =>
       out?.words === 15 && out.chars === 77 && out.reading_time_minutes >= 1,
   },
+  'regex-test': {
+    inputs: { pattern: '(?<word>floom)', flags: 'i', text: 'Floom turns scripts into apps.' },
+    check: (out) =>
+      out?.is_valid === true &&
+      out.match_count === 1 &&
+      out.matches?.[0]?.match === 'Floom' &&
+      out.matches?.[0]?.named_groups?.word === 'Floom',
+  },
+  slugify: {
+    inputs: { text: 'Floom Launch Week: 10 Tiny Apps!', separator: '-', lowercase: true, max_length: 48 },
+    check: (out) => out?.slug === 'floom-launch-week-10-tiny-apps' && out.length === 30,
+  },
+  'url-encode': {
+    inputs: { text: 'hello world & floom', mode: 'encode', component: 'query', plus_for_space: true },
+    check: (out) => out?.result === 'hello+world+%26+floom' && out.component === 'query',
+  },
+  'utm-builder': {
+    inputs: {
+      base_url: 'https://floom.dev/apps?existing=1#top',
+      source: 'linkedin',
+      medium: 'social',
+      campaign: 'launch-week',
+      content: 'day-2-qr',
+    },
+    check: (out) =>
+      out?.url === 'https://floom.dev/apps?existing=1&utm_source=linkedin&utm_medium=social&utm_campaign=launch-week&utm_content=day-2-qr#top' &&
+      out.utm?.utm_source === 'linkedin',
+  },
+  'qr-code': {
+    inputs: { text: 'https://floom.dev', margin: 4, scale: 8 },
+    check: (out) =>
+      typeof out?.svg === 'string' &&
+      out.svg.startsWith('<svg ') &&
+      out.svg.includes('<path ') &&
+      typeof out.data_url === 'string' &&
+      out.data_url.startsWith('data:image/svg+xml;base64,') &&
+      out.version >= 1 &&
+      out.size === 21 + 4 * (out.version - 1),
+  },
 };
 
 /**
@@ -306,6 +351,11 @@ const INVALID_CASES = {
   'json-format': { text: 'not-json{' },
   'jwt-decode': { token: 'one.two' },
   'word-count': { text: 42 }, // wrong type
+  'regex-test': { pattern: 'x', flags: 'z', text: 'broken regex' },
+  slugify: { text: 'x', separator: 'ab' },
+  'url-encode': { text: '%E0%A4%A', mode: 'decode', component: 'query' },
+  'utm-builder': { base_url: 'not-a-url', source: 'x', medium: 'y', campaign: 'z' },
+  'qr-code': { text: 'x'.repeat(107) },
 };
 
 for (const [slug, bad] of Object.entries(INVALID_CASES)) {
