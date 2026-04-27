@@ -343,6 +343,13 @@ export function MeAppSecretsPage({
                 App creator secrets are AES-256 encrypted at rest and scoped to this app.
                 Workspace BYOK keys live in Workspace settings and are used when running apps.
               </p>
+
+              {/* v26 §8: Workspace BYOK requirements section (Studio only).
+                  Shows which BYOK keys from the runner's workspace this app
+                  expects. This is a declaration — keys are set in /settings/byok-keys. */}
+              {chrome === 'studio' && (
+                <WorkspaceBYOKRequirements neededKeys={neededKeys} />
+              )}
             </>
           )}
     </>
@@ -916,6 +923,132 @@ function SecretRow({ secretKey, entry, onSave, onRemove }: SecretRowProps) {
           {err}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v26 §8: Workspace BYOK requirements section (Studio per-app secrets page).
+// Declares which BYOK keys from the runner's workspace this app expects.
+// Keys are set by runners in /settings/byok-keys — this is read-only for the
+// publisher. The spec says it's a declaration, not an edit surface.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function WorkspaceBYOKRequirements({
+  neededKeys,
+}: {
+  neededKeys: string[];
+}) {
+  return (
+    <div
+      data-testid="workspace-byok-requirements"
+      style={{ marginTop: 32 }}
+    >
+      <h2
+        style={{
+          fontSize: 16,
+          fontWeight: 700,
+          color: 'var(--ink)',
+          margin: '0 0 4px',
+        }}
+      >
+        Workspace BYOK requirements
+      </h2>
+      <p
+        style={{
+          fontSize: 13,
+          color: 'var(--muted)',
+          margin: '0 0 16px',
+          lineHeight: 1.55,
+        }}
+      >
+        BYOK keys this app expects from the runner's workspace. Runners set
+        these in{' '}
+        <Link
+          to="/settings/byok-keys"
+          style={{ color: 'var(--accent)', textDecoration: 'none' }}
+        >
+          Workspace settings › BYOK keys
+        </Link>
+        .
+      </p>
+
+      {neededKeys.length === 0 ? (
+        <div
+          data-testid="workspace-byok-requirements-empty"
+          style={{
+            border: '1px dashed var(--line)',
+            borderRadius: 10,
+            padding: '20px 18px',
+            background: 'var(--card)',
+            fontSize: 13,
+            color: 'var(--muted)',
+          }}
+        >
+          This app doesn't declare any workspace BYOK key requirements. Runners
+          don't need to configure any keys to use it.
+        </div>
+      ) : (
+        <div
+          data-testid="workspace-byok-requirements-list"
+          style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        >
+          {neededKeys.map((key) => (
+            <div
+              key={key}
+              data-testid={`byok-requirement-${key}`}
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                padding: '11px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <code
+                style={{
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                }}
+              >
+                {key}
+              </code>
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  fontSize: 11,
+                  color: 'var(--muted)',
+                }}
+              >
+                declared by app
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p
+        style={{
+          fontSize: 11,
+          color: 'var(--muted)',
+          marginTop: 16,
+          lineHeight: 1.5,
+          maxWidth: 560,
+        }}
+      >
+        This list is derived from{' '}
+        <code
+          style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}
+        >
+          secrets_needed
+        </code>{' '}
+        in your app's manifest. Update the manifest to add or remove
+        declarations.
+      </p>
     </div>
   );
 }
