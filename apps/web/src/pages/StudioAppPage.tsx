@@ -1,9 +1,7 @@
-// MVP stub: /studio/:slug — replaced with ComingSoon for launch.
+// MVP stub: /studio/:slug → redirect for launch.
 // StudioAppTabs export preserved as other Studio pages depend on it.
 
-import { Link, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
-import { ComingSoon } from '../components/ComingSoon';
+import { Link, Navigate } from 'react-router-dom';
 
 type StudioAppTabId = 'overview' | 'runs' | 'secrets' | 'access' | 'analytics' | 'source' | 'feedback' | 'triggers';
 
@@ -35,12 +33,7 @@ export function StudioAppTabs({ slug, active }: { slug: string; active: StudioAp
 }
 
 export function StudioAppPage() {
-  const { slug = '' } = useParams<{ slug: string }>();
-  return (
-    <StudioLayout title="App · Studio · Floom" activeAppSlug={slug} activeSubsection="overview">
-      <ComingSoon feature="Studio app overview" />
-    </StudioLayout>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 const studioTabsStyle: React.CSSProperties = {
