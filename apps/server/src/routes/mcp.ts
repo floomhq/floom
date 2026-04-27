@@ -1234,7 +1234,36 @@ async function handleMcp(server: McpServer, rawRequest: Request): Promise<Respon
     enableJsonResponse: true,
   });
   await server.connect(transport);
-  return transport.handleRequest(rawRequest);
+
+  // GH #850 / #856 — The MCP SDK hardcodes a check that the Accept header
+  // contains BOTH "application/json" AND "text/event-stream". Standard
+  // JSON-RPC clients (curl, Cursor, Claude Desktop in non-streaming mode)
+  // only send "Accept: application/json" and get rejected with 406.
+  //
+  // Fix: if the request is a POST with a JSON body but the Accept header is
+  // missing text/event-stream, synthesise a new request that also accepts
+  // SSE. The transport honours enableJsonResponse=true and returns plain
+  // JSON regardless, so this doesn't change the response format — it just
+  // stops the SDK from rejecting well-formed JSON-RPC clients at the gate.
+  let request = rawRequest;
+  if (rawRequest.method === 'POST') {
+    const accept = rawRequest.headers.get('accept') ?? '';
+    const needsPatch =
+      !accept.includes('text/event-stream') || !accept.includes('application/json');
+    if (needsPatch) {
+      const patchedHeaders = new Headers(rawRequest.headers);
+      // Preserve any existing Accept value and append the two types the SDK
+      // requires. Duplicates in the Accept header are harmless per RFC 7231.
+      const patched =
+        [accept, 'application/json', 'text/event-stream']
+          .filter(Boolean)
+          .join(', ');
+      patchedHeaders.set('accept', patched);
+      request = new Request(rawRequest, { headers: patchedHeaders });
+    }
+  }
+
+  return transport.handleRequest(request);
 }
 
 // /mcp — admin surface (ingest_app, list_apps, search_apps, get_app).
