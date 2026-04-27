@@ -352,12 +352,35 @@ try {
     const job = await storage.createJob(createJobInput('job-crud-1', app, { x: 1 }));
     assert(job.status === 'queued', `status=${job.status}`);
     assert((await storage.getJob(job.id))?.id === job.id, 'getJob mismatch');
+    const listed = await storage.listJobs({ slug: app.slug, status: 'queued', limit: 1 });
+    assert(listed.length === 1 && listed[0].id === job.id, `listJobs=${json(listed)}`);
     const claimed = await storage.claimNextJob();
     assert(claimed?.id === job.id, `claimed=${claimed?.id}`);
     await storage.updateJob(job.id, { output_json: json({ ok: true }), status: 'succeeded' });
     const updated = await storage.getJob(job.id);
     assert(updated?.status === 'succeeded', `updated status=${updated?.status}`);
     assert(updated?.output_json === json({ ok: true }), `output_json=${updated?.output_json}`);
+  });
+
+  await check('jobs lifecycle helpers complete and fail through storage', async () => {
+    const app = await storage.createApp(appInput('app-jobs-lifecycle-1', 'app-jobs-lifecycle-1'));
+    const complete = await storage.createJob(createJobInput('job-lifecycle-complete-1', app, { ok: true }));
+    const claimedComplete = await storage.claimJob(complete.id);
+    assert(claimedComplete?.status === 'running', `claimed status=${claimedComplete?.status}`);
+    const completed = await storage.markJobComplete(complete.id, { result: 42 }, 'run-lifecycle-1');
+    assert(completed?.status === 'succeeded', `completed status=${completed?.status}`);
+    assert(completed?.run_id === 'run-lifecycle-1', `completed run_id=${completed?.run_id}`);
+    assert(completed?.output_json === json({ result: 42 }), `completed output=${completed?.output_json}`);
+    assert(!!completed?.finished_at, 'completed finished_at missing');
+
+    const fail = await storage.createJob(createJobInput('job-lifecycle-fail-1', app, { ok: false }));
+    const claimedFail = await storage.claimJob(fail.id);
+    assert(claimedFail?.status === 'running', `failed claim status=${claimedFail?.status}`);
+    const failedJob = await storage.markJobFailed(fail.id, { message: 'boom' }, 'run-lifecycle-2');
+    assert(failedJob?.status === 'failed', `failed status=${failedJob?.status}`);
+    assert(failedJob?.run_id === 'run-lifecycle-2', `failed run_id=${failedJob?.run_id}`);
+    assert(failedJob?.error_json === json({ message: 'boom' }), `failed error=${failedJob?.error_json}`);
+    assert(!!failedJob?.finished_at, 'failed finished_at missing');
   });
 
   await check('users and workspaces round-trip through adapter reads', async () => {

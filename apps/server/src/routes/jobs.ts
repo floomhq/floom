@@ -110,7 +110,7 @@ jobsRouter.post('/', async (c) => {
       : undefined;
 
   const jobId = newJobId();
-  createJob(jobId, {
+  await createJob(jobId, {
     app: row,
     action: actionName,
     inputs: validated,
@@ -158,7 +158,7 @@ jobsRouter.get('/:job_id', async (c) => {
     ctx,
   });
   if (blocked) return blocked;
-  const job = getJobBySlug(slug, jobId);
+  const job = await getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
   return c.json(formatJob(job));
 });
@@ -182,8 +182,8 @@ jobsRouter.post('/:job_id/cancel', async (c) => {
     ctx,
   });
   if (blocked) return blocked;
-  const job = getJobBySlug(slug, jobId);
+  const job = await getJobBySlug(slug, jobId);
   if (!job) return c.json({ error: `Job not found: ${jobId}` }, 404);
-  const updated = cancelJob(jobId);
+  const updated = await cancelJob(jobId);
   return c.json(formatJob(updated || job));
 });

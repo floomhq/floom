@@ -531,6 +531,40 @@ class PostgresStorageAdapter {
     async getJob(id) {
         return one((await this.query('SELECT * FROM jobs WHERE id = $1', [id])).map(normalizeJob));
     }
+    async listJobs(filter = {}) {
+        const where = [];
+        const values = [];
+        if (filter.slug) {
+            values.push(filter.slug);
+            where.push(`slug = $${values.length}`);
+        }
+        if (filter.app_id) {
+            values.push(filter.app_id);
+            where.push(`app_id = $${values.length}`);
+        }
+        if (filter.status) {
+            values.push(filter.status);
+            where.push(`status = $${values.length}`);
+        }
+        let sql = 'SELECT * FROM jobs';
+        if (where.length > 0)
+            sql += ` WHERE ${where.join(' AND ')}`;
+        sql += ' ORDER BY created_at ASC';
+        if (typeof filter.limit === 'number' && filter.limit > 0) {
+            values.push(filter.limit);
+            sql += ` LIMIT $${values.length}`;
+        }
+        return (await this.query(sql, values)).map(normalizeJob);
+    }
+    async claimJob(id) {
+        return one((await this.query(`UPDATE jobs
+            SET status = 'running',
+                started_at = now(),
+                attempts = attempts + 1
+          WHERE id = $1
+            AND status = 'queued'
+          RETURNING *`, [id])).map(normalizeJob));
+    }
     async claimNextJob() {
         const rows = (await this.query(`WITH next AS (
          SELECT id FROM jobs
@@ -561,6 +595,33 @@ class PostgresStorageAdapter {
             .map((key, index) => JOB_JSON_COLUMNS.has(key) ? `${key} = $${index + 1}::jsonb` : `${key} = $${index + 1}`)
             .join(', ');
         await this.execute(`UPDATE jobs SET ${set} WHERE id = $${values.length}`, values);
+    }
+    async markJobComplete(id, outputs, run_id) {
+        return one((await this.query(`UPDATE jobs
+            SET status = 'succeeded',
+                output_json = $1::jsonb,
+                run_id = $2,
+                finished_at = now()
+          WHERE id = $3
+          RETURNING *`, [toNullableJson(outputs), run_id, id])).map(normalizeJob));
+    }
+    async markJobFailed(id, error, run_id) {
+        return one((await this.query(`UPDATE jobs
+            SET status = 'failed',
+                error_json = $1::jsonb,
+                run_id = $2,
+                finished_at = now()
+          WHERE id = $3
+          RETURNING *`, [toNullableJson(error), run_id, id])).map(normalizeJob));
+    }
+    async cancelJob(id) {
+        const cancelled = one((await this.query(`UPDATE jobs
+            SET status = 'cancelled',
+                finished_at = now()
+          WHERE id = $1
+            AND status IN ('queued', 'running')
+          RETURNING *`, [id])).map(normalizeJob));
+        return cancelled ?? this.getJob(id);
     }
     async getWorkspace(id) {
         return one((await this.query('SELECT id, slug, name, plan, wrapped_dek, created_at FROM workspaces WHERE id = $1', [

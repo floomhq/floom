@@ -182,6 +182,13 @@ export interface JobRecord {
   finished_at: string | null;
 }
 
+export interface JobListFilter {
+  slug?: string;
+  app_id?: string;
+  status?: JobStatus;
+  limit?: number;
+}
+
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'timeout';
 
 export type ErrorType =
@@ -626,8 +633,13 @@ export interface StorageAdapter extends AdapterLifecycle {
 
   createJob(input: Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'> & { status?: JobStatus }): Promise<JobRecord>;
   getJob(id: string): Promise<JobRecord | undefined>;
+  listJobs(filter?: JobListFilter): Promise<JobRecord[]>;
+  claimJob(id: string): Promise<JobRecord | undefined>;
   claimNextJob(): Promise<JobRecord | undefined>;
   updateJob(id: string, patch: Partial<JobRecord>): Promise<void>;
+  markJobComplete(id: string, outputs: unknown, run_id: string | null): Promise<JobRecord | undefined>;
+  markJobFailed(id: string, error: unknown, run_id: string | null): Promise<JobRecord | undefined>;
+  cancelJob(id: string): Promise<JobRecord | undefined>;
 
   getWorkspace(id: string): Promise<WorkspaceRecord | undefined>;
   getWorkspaceBySlug(slug: string): Promise<WorkspaceRecord | undefined>;

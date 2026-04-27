@@ -312,7 +312,7 @@ function createPerAppMcpServer(
         // /api/:slug/jobs/:id or receives a webhook on completion.
         if (fresh.is_async) {
           const jobId = newJobId();
-          createJob(jobId, {
+          await createJob(jobId, {
             app: fresh,
             action: actionName,
             inputs: validated,

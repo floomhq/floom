@@ -65,7 +65,7 @@ console.log('jobs service tests');
 
 // 1. createJob inserts a queued row
 const jobId = newJobId();
-const created = jobs.createJob(jobId, {
+const created = await jobs.createJob(jobId, {
   app,
   action: 'run',
   inputs: { msg: 'hello' },
@@ -80,25 +80,25 @@ log('createJob: attempts=0', created.attempts === 0);
 log('createJob: per_call_secrets_json stored', created.per_call_secrets_json.includes('secret'));
 
 // 2. getJob returns the row
-const fetched = jobs.getJob(jobId);
+const fetched = await jobs.getJob(jobId);
 log('getJob: same status', fetched.id === jobId && fetched.status === 'queued');
 
 // 3. nextQueuedJob returns it
-const next = jobs.nextQueuedJob();
+const next = await jobs.nextQueuedJob();
 log('nextQueuedJob: returns our queued job', next && next.id === jobId);
 
 // 4. claimJob atomically flips queued → running
-const claimed = jobs.claimJob(jobId);
+const claimed = await jobs.claimJob(jobId);
 log('claimJob: flipped to running', claimed && claimed.status === 'running');
 log('claimJob: attempts incremented', claimed.attempts === 1);
 log('claimJob: started_at populated', !!claimed.started_at);
 
 // 5. claimJob on a running row returns undefined (no race)
-const raceClaim = jobs.claimJob(jobId);
+const raceClaim = await jobs.claimJob(jobId);
 log('claimJob: running row cannot be re-claimed', raceClaim === undefined);
 
 // 6. completeJob
-const done = jobs.completeJob(jobId, { result: 42 }, 'run_abc');
+const done = await jobs.completeJob(jobId, { result: 42 }, 'run_abc');
 log('completeJob: status=succeeded', done.status === 'succeeded');
 log('completeJob: output_json captured', done.output_json.includes('42'));
 log('completeJob: run_id captured', done.run_id === 'run_abc');
@@ -106,32 +106,32 @@ log('completeJob: finished_at populated', !!done.finished_at);
 
 // 7. failJob round-trip
 const failedId = newJobId();
-jobs.createJob(failedId, {
+await jobs.createJob(failedId, {
   app,
   action: 'run',
   inputs: { msg: 'fail' },
 });
-jobs.claimJob(failedId);
-const failedRow = jobs.failJob(failedId, { message: 'boom', type: 'runtime_error' }, null);
+await jobs.claimJob(failedId);
+const failedRow = await jobs.failJob(failedId, { message: 'boom', type: 'runtime_error' }, null);
 log('failJob: status=failed', failedRow.status === 'failed');
 log('failJob: error_json contains message', failedRow.error_json.includes('boom'));
 
 // 8. cancelJob
 const cancelId = newJobId();
-jobs.createJob(cancelId, { app, action: 'run', inputs: {} });
-const cancelled = jobs.cancelJob(cancelId);
+await jobs.createJob(cancelId, { app, action: 'run', inputs: {} });
+const cancelled = await jobs.cancelJob(cancelId);
 log('cancelJob: status=cancelled', cancelled.status === 'cancelled');
 
 // 9. cancelJob on terminal is idempotent no-op
-const reCancel = jobs.cancelJob(failedId);
+const reCancel = await jobs.cancelJob(failedId);
 log('cancelJob: terminal row stays terminal', reCancel.status === 'failed');
 
 // 10. requeueJob flips failed → queued and clears state
 const requeueId = newJobId();
-jobs.createJob(requeueId, { app, action: 'run', inputs: {} });
-jobs.claimJob(requeueId);
-jobs.failJob(requeueId, { message: 'fail' }, null);
-const requeued = jobs.requeueJob(requeueId);
+await jobs.createJob(requeueId, { app, action: 'run', inputs: {} });
+await jobs.claimJob(requeueId);
+await jobs.failJob(requeueId, { message: 'fail' }, null);
+const requeued = await jobs.requeueJob(requeueId);
 log('requeueJob: back to queued', requeued.status === 'queued');
 log('requeueJob: error cleared', requeued.error_json === null);
 log('requeueJob: attempts preserved', requeued.attempts === 1);
@@ -142,8 +142,8 @@ log('formatJob: exposes parsed output', formatted.output && formatted.output.res
 log('formatJob: does not leak per_call_secrets_json', !('per_call_secrets_json' in formatted));
 
 // 12. countJobsByStatus
-const nQueued = jobs.countJobsByStatus('queued');
-const nSucc = jobs.countJobsByStatus('succeeded');
+const nQueued = await jobs.countJobsByStatus('queued');
+const nSucc = await jobs.countJobsByStatus('succeeded');
 log(
   'countJobsByStatus: queued=1, succeeded=1',
   nQueued === 1 && nSucc === 1,

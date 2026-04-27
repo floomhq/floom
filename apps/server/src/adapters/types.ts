@@ -27,6 +27,7 @@ export type {
   InputSpec,
   InputType,
   JobRecord,
+  JobListFilter,
   JobStatus,
   LegacyAppVisibility,
   LinkShareRecord,

@@ -7,16 +7,14 @@
 // (or the job's timeout_ms to elapse), updates the job, fires the webhook,
 // and retries on failure if `max_retries` allows.
 //
-// One worker per server process. Multiple replicas are safe because claimJob
-// uses an atomic UPDATE...WHERE status='queued'.
+// One worker per server process. Multiple replicas are safe because the
+// storage adapter claim path is atomic.
 import { adapters } from '../adapters/index.js';
 import { newRunId } from '../lib/ids.js';
 import {
-  claimJob,
   completeJob,
   failJob,
   getJob,
-  nextQueuedJob,
   requeueJob,
 } from './jobs.js';
 import { dispatchRun } from './runner.js';
@@ -73,14 +71,12 @@ export function stopJobWorker(): void {
  * deterministically without waiting for the setTimeout loop.
  */
 export async function processOneJob(): Promise<JobRecord | null> {
-  const candidate = nextQueuedJob();
-  if (!candidate) return null;
-  const claimed = claimJob(candidate.id);
-  if (!claimed) return null; // another worker won
+  const claimed = await adapters.storage.claimNextJob();
+  if (!claimed) return null;
 
   const app = await adapters.storage.getAppById(claimed.app_id);
   if (!app) {
-    failJob(claimed.id, { message: `App ${claimed.app_id} not found` }, null);
+    await failJob(claimed.id, { message: `App ${claimed.app_id} not found` }, null);
     await deliverCompletion(claimed.id);
     return claimed;
   }
@@ -89,7 +85,7 @@ export async function processOneJob(): Promise<JobRecord | null> {
   try {
     manifest = JSON.parse(app.manifest) as NormalizedManifest;
   } catch (err) {
-    failJob(
+    await failJob(
       claimed.id,
       { message: `Manifest corrupted: ${(err as Error).message}` },
       null,
@@ -130,13 +126,13 @@ export async function processOneJob(): Promise<JobRecord | null> {
       message: `Job exceeded timeout_ms=${claimed.timeout_ms}`,
       type: 'timeout',
     }, runId);
-    return getJob(claimed.id) || claimed;
+    return (await getJob(claimed.id)) || claimed;
   }
 
   if (run.status === 'success') {
-    completeJob(claimed.id, run.outputs ? safeJsonParse(run.outputs) : null, runId);
+    await completeJob(claimed.id, run.outputs ? safeJsonParse(run.outputs) : null, runId);
     await deliverCompletion(claimed.id);
-    return getJob(claimed.id) || claimed;
+    return (await getJob(claimed.id)) || claimed;
   }
 
   // Error / timeout path
@@ -148,7 +144,7 @@ export async function processOneJob(): Promise<JobRecord | null> {
     },
     runId,
   );
-  return getJob(claimed.id) || claimed;
+  return (await getJob(claimed.id)) || claimed;
 }
 
 async function handleFailure(
@@ -156,14 +152,14 @@ async function handleFailure(
   error: { message: string; type?: string; details?: unknown },
   runId: string | null,
 ): Promise<void> {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) return;
   if (job.attempts <= job.max_retries) {
     // Retries remain — re-queue silently. No webhook yet.
-    requeueJob(jobId);
+    await requeueJob(jobId);
     return;
   }
-  failJob(jobId, error, runId);
+  await failJob(jobId, error, runId);
   await deliverCompletion(jobId);
 }
 
@@ -181,7 +177,7 @@ async function waitForRunOrTimeout(
 }
 
 async function deliverCompletion(jobId: string): Promise<void> {
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) return;
   if (!job.webhook_url) return;
 
