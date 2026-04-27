@@ -105,16 +105,29 @@ function bearerToken(headers: Headers): string | null {
   return match?.[1]?.trim() || null;
 }
 
-function sessionFromClaims(claims: JwtClaims): SessionContext {
+function sessionFromClaims(
+  claims: JwtClaims,
+  workspace_id: string,
+  email?: string | null,
+): SessionContext {
   return {
-    workspace_id: claims.workspace_id || DEFAULT_WORKSPACE_ID,
+    workspace_id,
     user_id: claims.sub,
     device_id: 'magic-link',
     is_authenticated: true,
     auth_user_id: claims.sub,
     auth_session_id: claims.jti,
-    email: claims.email,
+    email: email || claims.email,
   };
+}
+
+async function resolveWorkspaceId(
+  storage: StorageAdapter,
+  user: UserRecord,
+  fallback?: string | null,
+): Promise<string> {
+  const memberships = await storage.listWorkspacesForUser(user.id);
+  return memberships[0]?.id || user.workspace_id || fallback || DEFAULT_WORKSPACE_ID;
 }
 
 async function findGlobalSecret(
@@ -270,7 +283,7 @@ export function createMagicLinkAuthAdapter(
       return null;
     }
 
-    await storage.upsertUser(
+    const updatedUser = await storage.upsertUser(
       {
         id: user.id,
         workspace_id: user.workspace_id || DEFAULT_WORKSPACE_ID,
@@ -284,9 +297,10 @@ export function createMagicLinkAuthAdapter(
     await storage.deleteAdminSecret(key, null);
 
     const sessionId = randomUUID();
+    const workspaceId = await resolveWorkspaceId(storage, updatedUser, user.workspace_id);
     const session_token = jwt.sign(
       {
-        workspace_id: user.workspace_id || DEFAULT_WORKSPACE_ID,
+        workspace_id: workspaceId,
         email: record.email,
       },
       jwtSecret,
@@ -298,13 +312,17 @@ export function createMagicLinkAuthAdapter(
         jwtid: sessionId,
       },
     );
-    const session = sessionFromClaims({
-      sub: user.id,
-      workspace_id: user.workspace_id || DEFAULT_WORKSPACE_ID,
-      email: record.email,
-      jti: sessionId,
-      iss: jwtIssuer,
-    });
+    const session = sessionFromClaims(
+      {
+        sub: user.id,
+        workspace_id: workspaceId,
+        email: record.email,
+        jti: sessionId,
+        iss: jwtIssuer,
+      },
+      workspaceId,
+      record.email,
+    );
 
     return {
       session,
@@ -329,7 +347,14 @@ export function createMagicLinkAuthAdapter(
         }) as JwtClaims;
         if (!claims.sub || !claims.jti) return null;
         if (await isRevoked(storage, claims.jti)) return null;
-        return sessionFromClaims(claims);
+        const user = await storage.getUser(claims.sub);
+        if (!user) return null;
+        const workspaceId = await resolveWorkspaceId(
+          storage,
+          user,
+          claims.workspace_id,
+        );
+        return sessionFromClaims(claims, workspaceId, user.email);
       } catch {
         return null;
       }

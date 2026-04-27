@@ -3,25 +3,42 @@
 // Wraps the reference `lib/better-auth.ts` module so it satisfies the
 // `AuthAdapter` interface declared in `adapters/types.ts`.
 //
-// `getSession(request)` calls Better Auth's `api.getSession({ headers })`
-// directly, same as `resolveUserContext` does today for Hono requests. The
-// sign-in/sign-up/sign-out methods are the equivalent programmatic surface for
-// callers that don't want to go through the mounted `/auth/*` HTTP handler.
-//
-// OSS mode: Better Auth is disabled (FLOOM_CLOUD_MODE unset), so
-// `getAuth()` returns null. `getSession` returns null in that case — the
-// reference `resolveUserContext` synthesizes a local-mode SessionContext
-// elsewhere; the adapter doesn't need to replicate that because the
-// cloud/OSS branching is a routing-layer concern.
+// `getSession(request)` owns the full server-side SessionContext resolution:
+// agent-token bearer auth, OSS local fallback, Better Auth validation, user
+// mirroring, workspace resolution, and device rekeying.
 
 import type { SessionContext } from '../types.js';
-import type { AuthAdapter } from './types.js';
-import { DEFAULT_WORKSPACE_ID, DEFAULT_USER_ID, db } from '../db.js';
+import type { AuthAdapter, UserWriteColumn, UserWriteInput } from './types.js';
+import {
+  DEFAULT_WORKSPACE_ID,
+  DEFAULT_USER_ID,
+  db,
+  isSeededAdminEmail,
+} from '../db.js';
 import {
   getAuth,
   isCloudMode,
   registerAuthUserDeleteListener,
 } from '../lib/better-auth.js';
+import {
+  agentContextToSessionContext,
+  extractAgentTokenPrefix,
+  hashAgentToken,
+  isAgentTokenString,
+  touchAgentTokenLastUsed,
+} from '../lib/agent-tokens.js';
+import {
+  getActiveWorkspaceId,
+  provisionPersonalWorkspace,
+} from '../services/workspaces.js';
+import { linkPendingEmailInvites } from '../services/sharing.js';
+import {
+  getUserDeletionState,
+  isDeleteExpired,
+  permanentDeleteAccount,
+  revokeAccountSessions,
+} from '../services/account-deletion.js';
+import { rekeyDevice } from '../services/device-rekey.js';
 
 type BetterAuthSession = {
   user: {
@@ -29,6 +46,7 @@ type BetterAuthSession = {
     email: string;
     name?: string | null;
     emailVerified?: boolean;
+    image?: string | null;
   };
   session: { id: string };
 };
@@ -50,6 +68,7 @@ type AuthEmailResult = {
 
 const sessionCookieByToken = new Map<string, string>();
 const sessionCookieByUserId = new Map<string, string>();
+const DEVICE_COOKIE_NAME = 'floom_device';
 
 function authCallHeaders(cookie?: string): Headers {
   const origin = process.env.BETTER_AUTH_URL || 'http://localhost:3051';
@@ -92,6 +111,25 @@ function firstCookieFromSetCookie(setCookie: string | null | undefined): string 
   return first || undefined;
 }
 
+function cookieValue(headers: Headers, name: string): string | null {
+  const raw = headers.get('cookie') || headers.get('Cookie');
+  if (!raw) return null;
+  for (const part of raw.split(';')) {
+    const [rawName, ...rest] = part.trim().split('=');
+    if (rawName === name && rest.length > 0) {
+      const value = decodeURIComponent(rest.join('=')).trim();
+      return value.length > 0 ? value : null;
+    }
+  }
+  return null;
+}
+
+function bearerToken(headers: Headers): string | null {
+  const raw = headers.get('authorization') || headers.get('Authorization');
+  const match = raw?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
 function rememberSessionCookie(
   userId: string | undefined,
   token: string | null | undefined,
@@ -102,16 +140,184 @@ function rememberSessionCookie(
   if (token) sessionCookieByToken.set(token, setCookie);
 }
 
-function sessionContextFromEmailResult(result: AuthEmailResult): SessionContext {
+function userInsertKeys(input: UserWriteInput): Array<keyof UserWriteInput> {
+  return (Object.keys(input) as Array<keyof UserWriteInput>).filter(
+    (key) => input[key] !== undefined,
+  );
+}
+
+function upsertFloomUser(
+  input: UserWriteInput,
+  updateColumns: UserWriteColumn[],
+): void {
+  const keys = userInsertKeys(input);
+  const keySet = new Set(keys);
+  for (const column of updateColumns) {
+    if (!keySet.has(column)) {
+      throw new Error(`Cannot upsert users.${String(column)} from an omitted value`);
+    }
+  }
+  const placeholders = keys.map(() => '?').join(', ');
+  const updates = updateColumns
+    .map((column) => `${column} = excluded.${column}`)
+    .join(', ');
+  db.prepare(
+    `INSERT INTO users (${keys.join(', ')}) VALUES (${placeholders})
+     ON CONFLICT (id) DO UPDATE SET ${updates}`,
+  ).run(...keys.map((key) => input[key]));
+}
+
+function ossSession(device_id: string): SessionContext {
+  return {
+    workspace_id: DEFAULT_WORKSPACE_ID,
+    user_id: DEFAULT_USER_ID,
+    device_id,
+    is_authenticated: false,
+  };
+}
+
+function agentSessionFromRequest(request: Request, device_id: string): SessionContext | null {
+  const token = bearerToken(request.headers);
+  if (!token || !isAgentTokenString(token)) return null;
+  const hash = hashAgentToken(token);
+  const row = db
+    .prepare(
+      `SELECT * FROM agent_tokens
+        WHERE hash = ?
+          AND revoked_at IS NULL
+        LIMIT 1`,
+    )
+    .get(hash) as
+    | {
+        id: string;
+        prefix: string;
+        workspace_id: string;
+        user_id: string;
+        scope: 'read' | 'read-write' | 'publish-only';
+        rate_limit_per_minute: number;
+        last_used_at: string | null;
+        revoked_at: string | null;
+        created_at: string;
+        hash: string;
+        label: string;
+      }
+    | undefined;
+  if (!row || row.prefix !== extractAgentTokenPrefix(token)) return null;
+  touchAgentTokenLastUsed(row);
+  return agentContextToSessionContext(
+    {
+      agent_token_id: row.id,
+      user_id: row.user_id,
+      workspace_id: row.workspace_id,
+      scope: row.scope,
+      rate_limit_per_minute: row.rate_limit_per_minute,
+    },
+    device_id,
+  );
+}
+
+async function sessionContextFromEmailResult(
+  result: AuthEmailResult,
+): Promise<SessionContext> {
   if (!result.user?.id || !result.user.email) {
     throw new Error('Better Auth email flow did not return a user.');
   }
+  const workspaceId = resolveWorkspaceForAuthUser(
+    result.user.id,
+    result.user.email,
+    null,
+  );
   return {
-    workspace_id: DEFAULT_WORKSPACE_ID,
+    workspace_id: workspaceId,
     user_id: result.user.id,
     device_id: 'unknown',
     is_authenticated: true,
+    auth_user_id: result.user.id,
     email: result.user.email,
+  };
+}
+
+function resolveWorkspaceForAuthUser(
+  userId: string,
+  email: string,
+  name?: string | null,
+): string {
+  let activeWorkspaceId = getActiveWorkspaceId(userId);
+  if (!activeWorkspaceId) {
+    activeWorkspaceId = provisionPersonalWorkspace(userId, email, name);
+  }
+  return activeWorkspaceId;
+}
+
+function mirrorAuthUser(session: BetterAuthSession): void {
+  const userId = session.user.id;
+  const isSeededAdmin = isSeededAdminEmail(session.user.email);
+  upsertFloomUser(
+    {
+      id: userId,
+      email: session.user.email,
+      name: session.user.name || null,
+      image: session.user.image || null,
+      auth_provider: 'better-auth',
+      auth_subject: userId,
+      ...(isSeededAdmin ? { is_admin: 1 as const } : {}),
+    },
+    isSeededAdmin
+      ? ['email', 'name', 'image', 'is_admin']
+      : ['email', 'name', 'image'],
+  );
+}
+
+async function resolveBetterAuthSession(
+  auth: NonNullable<ReturnType<typeof getAuth>>,
+  headers: Headers,
+  device_id: string,
+): Promise<SessionContext | null> {
+  let session: BetterAuthSession | null = null;
+  try {
+    const result = (await auth.api.getSession({ headers })) as BetterAuthSession | null;
+    if (result?.user) session = result;
+  } catch {
+    session = null;
+  }
+
+  if (!session?.user) return null;
+  if (session.user.emailVerified === false) return null;
+
+  const userId = session.user.id;
+  mirrorAuthUser(session);
+
+  const deletionState = getUserDeletionState(userId);
+  if (deletionState?.deleted_at) {
+    if (isDeleteExpired(deletionState)) {
+      permanentDeleteAccount(userId);
+    } else {
+      revokeAccountSessions(userId);
+    }
+    return null;
+  }
+
+  linkPendingEmailInvites(userId, session.user.email);
+  const activeWorkspaceId = resolveWorkspaceForAuthUser(
+    userId,
+    session.user.email,
+    session.user.name,
+  );
+
+  try {
+    rekeyDevice(device_id, userId, activeWorkspaceId);
+  } catch {
+    // Rekey is opportunistic; auth success remains authoritative.
+  }
+
+  return {
+    workspace_id: activeWorkspaceId,
+    user_id: userId,
+    device_id,
+    is_authenticated: true,
+    auth_user_id: userId,
+    auth_session_id: session.session?.id,
+    email: session.user.email,
   };
 }
 
@@ -154,9 +360,13 @@ async function signInWithBetterAuth(input: {
       returnHeaders: true,
     })) as AuthApiResult<AuthEmailResult>,
   );
-  const session = sessionContextFromEmailResult(response);
   const set_cookie = headers?.get('set-cookie') ?? undefined;
   const cookie = firstCookieFromSetCookie(set_cookie);
+  const session =
+    cookie
+      ? (await resolveBetterAuthSession(auth, authCallHeaders(cookie), 'unknown')) ??
+        (await sessionContextFromEmailResult(response))
+      : await sessionContextFromEmailResult(response);
   rememberSessionCookie(session.user_id, response.token, cookie);
   return {
     session,
@@ -167,38 +377,17 @@ async function signInWithBetterAuth(input: {
 
 export const betterAuthAdapter: AuthAdapter = {
   async getSession(request: Request): Promise<SessionContext | null> {
+    const device_id = cookieValue(request.headers, DEVICE_COOKIE_NAME) || 'unknown';
+    const agentSession = agentSessionFromRequest(request, device_id);
+    if (agentSession) return agentSession;
+
     if (!isCloudMode()) {
-      // OSS mode: one user, one workspace, no auth wall.
-      return {
-        workspace_id: DEFAULT_WORKSPACE_ID,
-        user_id: DEFAULT_USER_ID,
-        device_id: 'local',
-        is_authenticated: false,
-      };
+      return ossSession(device_id);
     }
+
     const auth = getAuth();
     if (!auth) return null;
-    try {
-      const result = (await auth.api.getSession({
-        headers: request.headers,
-      })) as BetterAuthSession | null;
-      if (!result || !result.user) return null;
-      // Workspace resolution is a separate concern in the reference
-      // server (services/session.ts reads the active_workspace_id cookie
-      // or the user's first membership). This adapter returns the
-      // minimum viable session — workspace_id defaulted to DEFAULT_WORKSPACE_ID
-      // for callers that just need { user_id, is_authenticated }.
-      // Full workspace wiring is follow-on work.
-      return {
-        workspace_id: DEFAULT_WORKSPACE_ID,
-        user_id: result.user.id,
-        device_id: 'unknown',
-        is_authenticated: true,
-        email: result.user.email,
-      };
-    } catch {
-      return null;
-    }
+    return resolveBetterAuthSession(auth, request.headers, device_id);
   },
 
   async signIn(input): Promise<{

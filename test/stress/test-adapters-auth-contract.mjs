@@ -1,11 +1,8 @@
 #!/usr/bin/env node
-// Contract tests for the AuthAdapter — the migration target for whoever
-// wires `adapters.auth.signIn/signUp/signOut/onUserDelete` through Better
-// Auth.
+// Contract tests for the AuthAdapter.
 //
 // These tests DEFINE what the AuthAdapter contract looks like from a
-// caller's perspective. The adapter migration is complete when this file
-// reports 5 passing and exits 0.
+// caller's perspective. A conforming adapter reports 5 passing and exits 0.
 //
 // Run: tsx test/stress/test-adapters-auth-contract.mjs
 
@@ -83,7 +80,14 @@ function skip(label, reason) {
 }
 
 function isSessionResult(result) {
-  return !!(result && result.session && typeof result.session.user_id === 'string');
+  return !!(
+    result &&
+    result.session &&
+    typeof result.session.user_id === 'string' &&
+    result.session.user_id.length > 0 &&
+    typeof result.session.workspace_id === 'string' &&
+    result.session.workspace_id.length > 0
+  );
 }
 
 function isMagicLinkSent(result) {
@@ -119,8 +123,6 @@ try {
   // the Floom-side `users` mirror row is populated by the databaseHook)
   // and return a SessionContext. It MUST NOT throw.
   //
-  // Today: the stub throws notYetWired('signUp'). We catch the throw and
-  // record the expected-fail so the runner keeps going.
   {
     const label = 'signUp creates a user row';
     const email = `signup-${Date.now()}@example.com`;
@@ -173,9 +175,6 @@ try {
   // plus either `set_cookie` or `token`. It MUST NOT throw for a valid
   // credential pair.
   //
-  // Today: the stub throws notYetWired('signIn'). Note this test is
-  // also currently blocked by signUp not working — once the migration
-  // lands both gates open together.
   {
     const label = 'signIn resolves session';
     const email = `signin-${Date.now()}@example.com`;
@@ -204,7 +203,9 @@ try {
         if (
           hasSentStatus &&
           hasVerifiedSession &&
-          resolved?.user_id === verified.session.user_id
+          resolved?.user_id === verified.session.user_id &&
+          typeof resolved?.workspace_id === 'string' &&
+          resolved.workspace_id.length > 0
         ) {
           ok(label);
         } else {
@@ -297,39 +298,65 @@ try {
     const invocations = [];
     try {
       if (authMode === 'magic-link') {
-        skip(
-          label,
-          'magic-link stores users through StorageAdapter, whose protocol 0.2 surface has no deleteUser event',
+        adapters.auth.onUserDelete((user_id) => {
+          invocations.push(user_id);
+        });
+        const email = `onuserdelete-${Date.now()}@example.com`;
+        const signedUp = await adapters.auth.signUp({
+          email,
+          name: 'Contract Delete',
+        });
+        const verified = await adapters.auth.verifyMagicLink?.(
+          signedUp?.debug_token || '',
         );
+        const storageWithDelete = adapters.storage;
+        if (!verified?.session?.user_id) {
+          fail(label, `verified=${JSON.stringify(verified)}`);
+        } else if (typeof storageWithDelete.deleteUser !== 'function') {
+          fail(label, 'StorageAdapter implementation has no deleteUser test hook');
+        } else {
+          await storageWithDelete.deleteUser(verified.session.user_id);
+          if (
+            invocations.length === 1 &&
+            invocations[0] === verified.session.user_id
+          ) {
+            ok(label);
+          } else {
+            fail(
+              label,
+              `invocations=${JSON.stringify(invocations)}, expected=${verified.session.user_id}`,
+            );
+          }
+        }
       } else {
-      adapters.auth.onUserDelete((user_id) => {
-        invocations.push(user_id);
-      });
-      const email = `onuserdelete-${Date.now()}@example.com`;
-      const password = 'hunter2-hunter2';
-      const signedUp = await adapters.auth.signUp({
-        email,
-        password,
-        name: 'Contract Delete',
-      });
-      const cookie = firstCookieFromSetCookie(signedUp.set_cookie);
-      const auth = betterAuth.getAuth();
-      await auth.api.deleteUser({
-        body: { password },
-        headers: new Headers({
-          cookie,
-          host: 'localhost:3051',
-          origin: 'http://localhost:3051',
-        }),
-      });
-      if (invocations.length === 1 && invocations[0] === signedUp.session.user_id) {
-        ok(label);
-      } else {
-        fail(
-          label,
-          `invocations=${JSON.stringify(invocations)}, expected=${signedUp.session.user_id}`,
-        );
-      }
+        adapters.auth.onUserDelete((user_id) => {
+          invocations.push(user_id);
+        });
+        const email = `onuserdelete-${Date.now()}@example.com`;
+        const password = 'hunter2-hunter2';
+        const signedUp = await adapters.auth.signUp({
+          email,
+          password,
+          name: 'Contract Delete',
+        });
+        const cookie = firstCookieFromSetCookie(signedUp.set_cookie);
+        const auth = betterAuth.getAuth();
+        await auth.api.deleteUser({
+          body: { password },
+          headers: new Headers({
+            cookie,
+            host: 'localhost:3051',
+            origin: 'http://localhost:3051',
+          }),
+        });
+        if (invocations.length === 1 && invocations[0] === signedUp.session.user_id) {
+          ok(label);
+        } else {
+          fail(
+            label,
+            `invocations=${JSON.stringify(invocations)}, expected=${signedUp.session.user_id}`,
+          );
+        }
       }
     } catch (err) {
       fail(
@@ -340,27 +367,45 @@ try {
   }
 
   // ========================================================================
-  // 5. getSession reads current session from cookie (control — passes today)
+  // 5. getSession reads the current session and resolves workspace context
   // ========================================================================
   //
-  // Sanity anchor: the one AuthAdapter method that IS wired should
-  // still return null for an unauthenticated request in cloud mode.
-  // If this starts failing, the adapter's migration broke the already-
-  // working path, which is what the next contributor must avoid.
+  // CONTRACT: getSession(request) resolves an authenticated request to a
+  // SessionContext with both user_id and workspace_id populated.
   {
-    const label = 'getSession reads current session from cookie';
+    const label = 'getSession returns populated SessionContext';
     try {
-      const req = new Request('http://localhost:3051/api/anything', {
-        headers: new Headers(),
-      });
-      const result = await adapters.auth.getSession(req);
-      if (result === null) {
+      const email = `getsession-${Date.now()}@example.com`;
+      const password = 'hunter2-hunter2';
+      await adapters.auth.signUp({ email, password, name: 'Contract Session' });
+      const signedIn = await adapters.auth.signIn({ email, password });
+      const verified =
+        authMode === 'magic-link'
+          ? await adapters.auth.verifyMagicLink?.(signedIn?.debug_token || '')
+          : signedIn;
+      const headers =
+        authMode === 'magic-link'
+          ? new Headers({
+              authorization: `Bearer ${verified?.token}`,
+              host: 'localhost:3051',
+            })
+          : new Headers({
+              cookie: firstCookieFromSetCookie(verified?.set_cookie),
+              host: 'localhost:3051',
+            });
+      const result = await adapters.auth.getSession(
+        new Request('http://localhost:3051/api/anything', { headers }),
+      );
+      if (
+        result?.user_id === verified?.session?.user_id &&
+        typeof result.workspace_id === 'string' &&
+        result.workspace_id.length > 0
+      ) {
         ok(label);
       } else {
-        // Cloud mode with no cookie: null is the only correct answer.
         fail(
           label,
-          `expected null for unauthenticated cloud-mode request, got ${JSON.stringify(result)}`,
+          `result=${JSON.stringify(result)}, verified=${JSON.stringify(verified)}`,
         );
       }
     } catch (err) {

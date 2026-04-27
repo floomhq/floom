@@ -63,6 +63,20 @@ import type {
   UserWriteInput,
 } from './types.js';
 
+type UserDeleteListener = (user_id: string) => void | Promise<void>;
+type SqliteStorageAdapter = StorageAdapter & {
+  deleteUser(id: string): Promise<boolean>;
+  onUserDelete(cb: UserDeleteListener): void;
+};
+
+const userDeleteListeners: UserDeleteListener[] = [];
+
+async function notifyUserDeleteListeners(user_id: string): Promise<void> {
+  for (const cb of userDeleteListeners) {
+    await cb(user_id);
+  }
+}
+
 const USER_WRITE_COLUMNS = new Set<keyof UserWriteInput>([
   'id',
   'workspace_id',
@@ -91,7 +105,7 @@ function userInsertValues(
   return keys.map((key) => input[key]);
 }
 
-export const sqliteStorageAdapter: StorageAdapter = {
+export const sqliteStorageAdapter: SqliteStorageAdapter = {
   // ---------- apps ----------
   async getApp(slug: string): Promise<AppRecord | undefined> {
     return db
@@ -581,6 +595,17 @@ export const sqliteStorageAdapter: StorageAdapter = {
          ${updates}`,
     ).run(...userInsertValues(input, keys));
     return (await this.getUser(input.id)) as UserRecord;
+  },
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    const deleted = Number(result.changes || 0) > 0;
+    if (deleted) await notifyUserDeleteListeners(id);
+    return deleted;
+  },
+
+  onUserDelete(cb: UserDeleteListener): void {
+    userDeleteListeners.push(cb);
   },
 
   // ---------- admin secret pointers ----------
