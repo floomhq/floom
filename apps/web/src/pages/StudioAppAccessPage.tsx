@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { AppHeader } from './MeAppPage';
 import { StudioAppTabs } from './StudioAppPage';
 import * as api from '../api/client';
@@ -71,10 +71,9 @@ export function StudioAppAccessPage() {
   }
 
   return (
-    <StudioLayout
+    <WorkspacePageShell
+      mode="studio"
       title={app ? `${app.name} · Access · Studio` : 'Access · Studio'}
-      activeAppSlug={slug}
-      activeSubsection="access"
     >
       {error && <div style={errorStyle}>{error}</div>}
       {notice && <div style={noticeStyle}>{notice}</div>}
@@ -135,7 +134,7 @@ export function StudioAppAccessPage() {
           </div>
         </>
       )}
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 

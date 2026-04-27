@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { AppHeader } from './MeAppPage';
 import { StudioAppTabs } from './StudioAppPage';
 import * as api from '../api/client';
@@ -47,10 +47,9 @@ export function StudioAppRunsPage() {
   }, [slug, nav]);
 
   return (
-    <StudioLayout
+    <WorkspacePageShell
+      mode="studio"
       title={app ? `${app.name} · Runs · Studio` : 'Runs · Studio'}
-      activeAppSlug={slug}
-      activeSubsection="runs"
     >
       {error && <div style={errorStyle}>{error}</div>}
       {app && (
@@ -105,7 +104,7 @@ export function StudioAppRunsPage() {
           )}
         </>
       )}
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 

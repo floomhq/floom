@@ -7,19 +7,19 @@
 
 import type { ReactNode } from 'react';
 import { BuildPage } from './BuildPage';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { useSession } from '../hooks/useSession';
 
 function StudioLayoutAdapter({ children, title }: { children: ReactNode; title?: string }) {
   const { data } = useSession();
   const workspaceName = data?.active_workspace?.name || 'Workspace';
   return (
-    <StudioLayout title={title} allowSignedOutShell>
+    <WorkspacePageShell mode="studio" title={title} allowSignedOutShell>
       <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
         Target workspace: {workspaceName}
       </div>
       {children}
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 

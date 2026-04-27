@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { AppHeader } from './MeAppPage';
 import { StudioAppTabs } from './StudioAppPage';
 import { CustomRendererPanel } from '../components/CustomRendererPanel';
@@ -49,10 +49,9 @@ export function StudioAppRendererPage() {
   }, [slug, nav]);
 
   return (
-    <StudioLayout
+    <WorkspacePageShell
+      mode="studio"
       title={app ? `${app.name} · Renderer · Studio` : 'Renderer · Studio'}
-      activeAppSlug={slug}
-      activeSubsection="renderer"
     >
       {error && (
         <div
@@ -118,6 +117,6 @@ export function StudioAppRendererPage() {
           </div>
         </>
       )}
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }

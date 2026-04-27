@@ -30,7 +30,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PageShell } from '../components/PageShell';
 import { SecretInput } from '../components/forms/SecretInput';
 import { MeRail } from '../components/me/MeRail';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { AppHeader, TabBar } from './MeAppPage';
 import { StudioAppTabs } from './StudioAppPage';
 import { useSecrets } from '../hooks/useSecrets';
@@ -357,13 +357,12 @@ export function MeAppSecretsPage({
 
   if (chrome === 'studio') {
     return (
-      <StudioLayout
+      <WorkspacePageShell
+        mode="studio"
         title={app ? `${app.name} · App creator secrets · Studio` : 'App creator secrets · Studio'}
-        activeAppSlug={slug}
-        activeSubsection="secrets"
       >
         {body}
-      </StudioLayout>
+      </WorkspacePageShell>
     );
   }
 

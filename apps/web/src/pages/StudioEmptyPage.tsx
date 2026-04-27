@@ -1,16 +1,16 @@
 import { Link } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 
 export function StudioEmptyPage() {
   return (
-    <StudioLayout title="Studio | Floom">
+    <WorkspacePageShell mode="studio" title="Studio | Floom">
       <section style={cardStyle}>
         <div style={kickerStyle}>Studio</div>
         <h1 style={h1Style}>No apps in this workspace yet</h1>
         <p style={bodyStyle}>Create the first app from a repo, OpenAPI spec, or local Floom manifest.</p>
         <Link to="/studio/build" style={primaryLinkStyle}>New app</Link>
       </section>
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 

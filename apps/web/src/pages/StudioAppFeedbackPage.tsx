@@ -1,12 +1,12 @@
 import { useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { StudioAppTabs } from './StudioAppPage';
 
 export function StudioAppFeedbackPage() {
   const { slug = '' } = useParams<{ slug: string }>();
 
   return (
-    <StudioLayout title="Feedback · Studio" activeAppSlug={slug} activeSubsection="analytics">
+    <WorkspacePageShell mode="studio" title="Feedback · Studio">
       <StudioAppTabs slug={slug} active="feedback" />
       <section style={cardStyle}>
         <div style={kickerStyle}>Studio</div>
@@ -15,7 +15,7 @@ export function StudioAppFeedbackPage() {
           User feedback and review signals for this app will appear here after launch. Public app reviews remain on the app page.
         </p>
       </section>
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 

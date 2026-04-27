@@ -1,12 +1,12 @@
 import { Link, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { StudioAppTabs } from './StudioAppPage';
 
 export function StudioAppTriggersPage() {
   const { slug = '' } = useParams<{ slug: string }>();
 
   return (
-    <StudioLayout title="Triggers · Studio" activeAppSlug={slug} activeSubsection="triggers">
+    <WorkspacePageShell mode="studio" title="Triggers · Studio">
       <StudioAppTabs slug={slug} active="triggers" />
       <section style={cardStyle}>
         <div style={kickerStyle}>Studio</div>
@@ -18,7 +18,7 @@ export function StudioAppTriggersPage() {
           Open Run triggers
         </Link>
       </section>
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 
