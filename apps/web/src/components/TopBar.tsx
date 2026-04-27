@@ -234,11 +234,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
     location.pathname.startsWith('/protocol') ||
     location.pathname.startsWith('/docs');
   const isStudio = location.pathname.startsWith('/studio');
-  const isRun =
-    location.pathname === '/run' ||
-    location.pathname.startsWith('/run/') ||
-    location.pathname === '/me' ||
-    location.pathname.startsWith('/me/');
   const isPublishNav =
     location.pathname === '/studio/build' || location.pathname === '/deploy';
 
@@ -329,42 +324,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Centre nav — v26-IA-SPEC §10 + §12:
+        {/* Centre nav — v26-IA-SPEC §10 + §12.5:
             Anonymous: Apps · Docs · Pricing (discovery surfaces).
-            Authenticated: Studio · My runs. */}
-        {showAuthedChrome ? (
-          <nav
-            className="topbar-links topbar-links-desktop topbar-centre-nav"
-            aria-label="Primary"
-            style={{
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'auto',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 2,
-            }}
-          >
-            <Link
-              to="/studio"
-              data-testid="topbar-studio"
-              aria-current={isStudio ? 'page' : undefined}
-              style={navLinkStyle(isStudio)}
-            >
-              Studio
-            </Link>
-            <Link
-              to="/run/runs"
-              data-testid="topbar-my-runs"
-              aria-current={isRun ? 'page' : undefined}
-              style={navLinkStyle(isRun)}
-            >
-              My runs
-            </Link>
-          </nav>
-        ) : (
+            Authenticated: no centre nav — Studio/My runs live in the rail,
+            not the TopBar. Slim authenticated TopBar = logo + Copy for
+            Claude + + New app + avatar only (§12.5). V11 fix 2026-04-27. */}
+        {showAuthedChrome ? null : (
           <nav
             className="topbar-links topbar-links-desktop topbar-centre-nav"
             aria-label="Primary"
@@ -415,12 +380,12 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             alignItems: 'center',
           }}
         >
-          {/* GitHub stars badge — always on so social proof is visible
-              whether or not the viewer is logged in. Placed before the
-              auth pills so the hierarchy stays Sign-up > GH on preview,
-              and GH becomes the single rightmost affordance on
-              waitlist-prod (where Sign in / Sign up are hidden). */}
-          {!isLoginPage && <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />}
+          {/* GitHub stars badge — social proof for anonymous visitors only.
+              Hidden for authenticated users per §12.5: slim authenticated
+              TopBar = floom + Copy for Claude + + New app + avatar.
+              No badge clutter for signed-in users who know the product.
+              V11 fix 2026-04-27. */}
+          {!isLoginPage && !showAuthedChrome && <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />}
 
           {/* Copy-for-Claude — globally present (anon + authed). Sits
               between centre nav and CTA/avatar cluster (Federico-locked

@@ -18,6 +18,14 @@ import { waitlistHref } from '../../lib/waitlistCta';
 // 2026-04-20 (about-page ship): added a one-line identity strip above
 // the link row — preserved here as the "Ship AI apps fast." tagline
 // that mirrors the current landing H1.
+//
+// V26 (2026-04-27): slim 3-col footer per Federico's feedback.
+//   Product: Apps · Docs · Pricing · Changelog
+//   Company: About · GitHub · Status
+//   Legal: Terms · Privacy
+// Removed: Cookies (covered by Privacy), Legal (Terms covers it),
+//   Runtime limits + Security (moved to Docs). Removed "Built in SF"
+//   tagline (X1: misleading, Federico in Hamburg moving to SF).
 
 const COL_STYLE: React.CSSProperties = {
   display: 'flex',
@@ -97,18 +105,14 @@ export function PublicFooter() {
         <div style={COL_STYLE}>
           <div style={COL_LABEL_STYLE}>Company</div>
           <FootLink to="/about">About</FootLink>
-          <FootLink to="/status">Status</FootLink>
           <FootLink href="https://github.com/floomhq/floom">GitHub</FootLink>
-          <FootLink to="/docs/limits">Runtime limits</FootLink>
-          <FootLink to="/docs/security">Security</FootLink>
+          <FootLink to="/status">Status</FootLink>
         </div>
 
         <div style={COL_STYLE}>
           <div style={COL_LABEL_STYLE}>Legal</div>
           <FootLink to="/terms">Terms</FootLink>
           <FootLink to="/privacy">Privacy</FootLink>
-          <FootLink to="/cookies">Cookies</FootLink>
-          <FootLink to="/legal">Legal</FootLink>
         </div>
       </div>
 
@@ -123,7 +127,7 @@ export function PublicFooter() {
             margin: '0 0 6px',
           }}
         >
-          Ship AI apps fast. &middot; Built in SF
+          Ship AI apps fast.
         </div>
         {!deployEnabled && (
           <div
