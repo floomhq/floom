@@ -14,7 +14,7 @@
 set -euo pipefail
 
 REPO_URL="${FLOOM_REPO_URL:-https://github.com/floomhq/floom.git}"
-BRANCH="${FLOOM_BRANCH:-main}"
+BRANCH="${FLOOM_BRANCH:-launch-mvp}"
 INSTALL_ROOT="${FLOOM_INSTALL_ROOT:-$HOME/.floom}"
 REPO_DIR="$INSTALL_ROOT/repo"
 BIN_DIR="${FLOOM_BIN_DIR:-$HOME/.local/bin}"
