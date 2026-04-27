@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { db } from '../db.js';
+import { adapters } from '../adapters/index.js';
 import {
   extractAgentTokenPrefix,
   generateAgentToken,
@@ -128,24 +128,7 @@ agentKeysRouter.post('/', async (c) => {
     rate_limit_per_minute: normalizeRateLimit(parsed.data.rate_limit_per_minute),
   };
 
-  db.prepare(
-    `INSERT INTO agent_tokens
-       (id, prefix, hash, label, scope, workspace_id, user_id, created_at,
-        last_used_at, revoked_at, rate_limit_per_minute)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    row.id,
-    row.prefix,
-    row.hash,
-    row.label,
-    row.scope,
-    row.workspace_id,
-    row.user_id,
-    row.created_at,
-    row.last_used_at,
-    row.revoked_at,
-    row.rate_limit_per_minute,
-  );
+  await adapters.storage.createAgentToken(row);
   auditLog({
     actor: getAuditActor(c, ctx),
     action: 'agent_token.minted',
@@ -179,13 +162,7 @@ agentKeysRouter.get('/', async (c) => {
   const gate = requireUserSessionForAgentKeyMutation(c, ctx);
   if (gate) return gate;
 
-  const rows = db
-    .prepare(
-      `SELECT * FROM agent_tokens
-        WHERE user_id = ?
-        ORDER BY created_at DESC`,
-    )
-    .all(ctx.user_id) as AgentTokenRecord[];
+  const rows = await adapters.storage.listAgentTokensForUser(ctx.user_id);
   return c.json(rows.map(publicAgentToken));
 });
 
@@ -195,19 +172,13 @@ agentKeysRouter.post('/:id/revoke', async (c) => {
   if (gate) return gate;
 
   const id = c.req.param('id');
-  const before = db
-    .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
-    .get(id, ctx.user_id) as AgentTokenRecord | undefined;
-  db.prepare(
-    `UPDATE agent_tokens
-       SET revoked_at = COALESCE(revoked_at, ?)
-    WHERE id = ?
-       AND user_id = ?`,
-  ).run(new Date().toISOString(), id, ctx.user_id);
+  const before = await adapters.storage.getAgentTokenForUser(id, ctx.user_id);
+  const after = await adapters.storage.revokeAgentTokenForUser(
+    id,
+    ctx.user_id,
+    new Date().toISOString(),
+  );
   if (before) {
-    const after = db
-      .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
-      .get(id, ctx.user_id) as AgentTokenRecord | undefined;
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'agent_token.revoked',

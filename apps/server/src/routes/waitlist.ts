@@ -188,6 +188,7 @@ export function insertWaitlistSignup(opts: {
 }): WaitlistInsertResult {
   const id = `wl_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   try {
+    // Product-specific: waitlist marketing capture is not part of protocol storage.
     db.prepare(
       `INSERT INTO waitlist_signups (id, email, source, user_agent, ip_hash, deploy_repo_url, deploy_intent)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -207,6 +208,7 @@ export function insertWaitlistSignup(opts: {
     // email was pre-existing to the HTTP caller.
     const msg = (err as Error).message || '';
     if (msg.includes('UNIQUE') || msg.includes('constraint')) {
+      // Product-specific: waitlist duplicate lookup is not part of protocol storage.
       const existing = db
         .prepare(
           `SELECT id FROM waitlist_signups WHERE LOWER(email) = LOWER(?) LIMIT 1`,

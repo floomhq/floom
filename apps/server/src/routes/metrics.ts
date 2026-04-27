@@ -29,12 +29,14 @@ function collectMetrics(): string {
   const lines: string[] = [];
 
   // floom_apps_total
+  // Ops-specific: Prometheus scrape aggregates local operational counters.
   const apps = (db.prepare('SELECT COUNT(*) as c FROM apps').get() as { c: number }).c;
   lines.push('# HELP floom_apps_total Total number of registered apps in the Floom hub.');
   lines.push('# TYPE floom_apps_total gauge');
   lines.push(`floom_apps_total ${apps}`);
 
   // floom_runs_total{status=...}
+  // Ops-specific: Prometheus scrape aggregates local operational counters.
   const statusRows = db
     .prepare(`SELECT status, COUNT(*) as count FROM runs GROUP BY status`)
     .all() as Array<{ status: string; count: number }>;
@@ -55,6 +57,7 @@ function collectMetrics(): string {
   // `device_id` also counts; anonymous visitors have user_id='local' and a
   // unique device_id, so we union the two. COALESCE so NULL user_id rows
   // fall back to device_id.
+  // Ops-specific: Prometheus scrape aggregates local operational counters.
   const activeUsers = (
     db
       .prepare(

@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { mkdtempSync, writeFileSync, existsSync, unlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
 import { resolveUserContext } from '../services/session.js';
 import {
@@ -375,6 +376,7 @@ hubRouter.post('/ingest', async (c) => {
 // author = user_id.
 hubRouter.get('/mine', async (c) => {
   const ctx = await resolveUserContext(c);
+  // Product-specific: Studio ownership listing includes run-count and last-run aggregates.
   const rows = db
     .prepare(
       `SELECT apps.*, (
@@ -439,7 +441,7 @@ hubRouter.get('/:slug/runs', async (c) => {
   const slug = c.req.param('slug');
   const limit = Math.max(1, Math.min(100, Number(c.req.query('limit') || 20)));
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership check:
@@ -465,6 +467,7 @@ hubRouter.get('/:slug/runs', async (c) => {
     ? 'AND user_id = ?'
     : 'AND device_id = ?';
   const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+  // Product-specific: creator activity feed joins run details with caller-scoped privacy rules.
   const rows = db
     .prepare(
       `SELECT id, action, status, inputs, outputs, duration_ms,
@@ -543,7 +546,7 @@ hubRouter.get('/:slug/runs-by-day', async (c) => {
   const daysParam = Number(c.req.query('days') || 7);
   const days = Math.max(1, Math.min(90, Number.isFinite(daysParam) ? Math.floor(daysParam) : 7));
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership check mirrors /:slug/runs exactly (issue #124 semantics).
@@ -562,6 +565,7 @@ hubRouter.get('/:slug/runs-by-day', async (c) => {
   // db.ts) and is always set — it's indexed via idx_runs_app which
   // makes `app_id = ? AND started_at >= ?` a fast index scan.
   const windowStart = `date('now', '-${days - 1} days')`;
+  // Product-specific: Studio sparkline aggregate with SQLite date-window semantics.
   const rows = db
     .prepare(
       `SELECT date(started_at) AS day, COUNT(*) AS count
@@ -593,7 +597,7 @@ hubRouter.delete('/:slug', async (c) => {
   if (gate) return gate;
   const slug = c.req.param('slug');
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Only the author can delete. The OSS "local self-hoster can delete
@@ -654,7 +658,7 @@ hubRouter.patch('/:slug', async (c) => {
   if (gate) return gate;
   const slug = c.req.param('slug');
 
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found' }, 404);
 
   // Ownership: same rule as DELETE. OSS local self-hoster bypass is scoped
@@ -679,11 +683,9 @@ hubRouter.patch('/:slug', async (c) => {
     );
   }
 
-  const updates: string[] = [];
-  const values: unknown[] = [];
+  const patch: Partial<AppRecord> = {};
   if (parsed.data.visibility) {
-    updates.push('visibility = ?');
-    values.push(parsed.data.visibility);
+    patch.visibility = parsed.data.visibility;
   }
 
   // primary_action lives in the JSON manifest, not in its own column.
@@ -716,17 +718,14 @@ hubRouter.patch('/:slug', async (c) => {
       (manifest as NormalizedManifest & { primary_action?: string }).primary_action =
         parsed.data.primary_action;
     }
-    updates.push('manifest = ?');
-    values.push(JSON.stringify(manifest));
+    patch.manifest = JSON.stringify(manifest);
   }
 
-  if (updates.length === 0) {
+  if (Object.keys(patch).length === 0) {
     return c.json({ error: 'No updatable fields in body', code: 'empty_patch' }, 400);
   }
-  updates.push("updated_at = datetime('now')");
-  values.push(app.id);
 
-  db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  await adapters.storage.updateApp(slug, patch);
   if (parsed.data.visibility && parsed.data.visibility !== app.visibility) {
     auditLog({
       actor: getAuditActor(c, ctx),
@@ -855,6 +854,7 @@ hubRouter.get('/', (c) => {
                    )
                    ${category ? 'AND apps.category = ?' : ''}
                  ORDER BY ${orderBy}`;
+  // Product-specific: public hub listing joins author metadata and rollup counts.
   const rowsAll = (category
     ? db.prepare(sql).all(category)
     : db.prepare(sql).all()) as Array<
@@ -940,17 +940,14 @@ hubRouter.get('/', (c) => {
 // apps (see below).
 hubRouter.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db
-    .prepare(
-      `SELECT apps.*, users.name AS author_name, users.email AS author_email
-         FROM apps
-         LEFT JOIN users ON apps.author = users.id
-        WHERE apps.slug = ?`,
-    )
-    .get(slug) as
-    | (AppRecord & { author_name: string | null; author_email: string | null })
-    | undefined;
-  if (!row) return c.json({ error: 'App not found' }, 404);
+  const app = await adapters.storage.getApp(slug);
+  if (!app) return c.json({ error: 'App not found' }, 404);
+  const author = app.author ? await adapters.storage.getUser(app.author) : undefined;
+  const row = {
+    ...app,
+    author_name: author?.name ?? null,
+    author_email: author?.email ?? null,
+  } as AppRecord & { author_name: string | null; author_email: string | null };
   const ctx = await resolveUserContext(c);
   const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
   if (!access.ok) {
@@ -1049,7 +1046,7 @@ hubRouter.post('/:slug/renderer', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';
@@ -1125,7 +1122,7 @@ hubRouter.delete('/:slug/renderer', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   const slug = c.req.param('slug');
-  const app = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const app = await adapters.storage.getApp(slug);
   if (!app) return c.json({ error: 'App not found', code: 'not_found' }, 404);
 
   const isOssLocal = !ctx.is_authenticated && ctx.workspace_id === 'local';

@@ -11,6 +11,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { adapters } from '../adapters/index.js';
 import { db } from '../db.js';
 import { newRunId, newJobId } from '../lib/ids.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
@@ -215,9 +216,7 @@ function createPerAppMcpServer(
       },
       async (rawInputs) => {
         recordMcpToolCall(toolName);
-        const fresh = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as
-          | AppRecord
-          | undefined;
+        const fresh = await adapters.storage.getAppById(app.id);
         if (!fresh) {
           return {
             isError: true,
@@ -280,12 +279,10 @@ function createPerAppMcpServer(
         // missing_secrets error so the MCP client can prompt the user.
         if (actionSecretsNeeded.length > 0) {
           const available = new Set<string>();
-          // Server-side persisted secrets
-          const rows = db
-            .prepare(
-              "SELECT name FROM secrets WHERE (app_id IS NULL OR app_id = ?) AND value != ''",
-            )
-            .all(fresh.id) as { name: string }[];
+          const rows = [
+            ...(await adapters.storage.listAdminSecrets(null)),
+            ...(await adapters.storage.listAdminSecrets(fresh.id)),
+          ].filter((row) => row.value !== '');
           for (const r of rows) available.add(r.name);
           // Per-call secrets
           for (const k of Object.keys(perCallSecrets || {})) available.add(k);
@@ -342,9 +339,12 @@ function createPerAppMcpServer(
           };
         }
 
-        db.prepare(
-          `INSERT INTO runs (id, app_id, action, inputs, status) VALUES (?, ?, ?, ?, 'pending')`,
-        ).run(runId, fresh.id, actionName, JSON.stringify(validated));
+        await adapters.storage.createRun({
+          id: runId,
+          app_id: fresh.id,
+          action: actionName,
+          inputs: validated,
+        });
         // Parity with POST /api/run + POST /api/:slug/run: pass the
         // resolved SessionContext so dispatchRun can merge the caller's
         // user-vault secrets. Without this every authed MCP consumer
@@ -888,6 +888,7 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
         " AND (visibility = 'public_live' OR visibility = 'public' OR visibility IS NULL OR author = ?)" +
         (category ? ' AND category = ?' : '') +
         ' ORDER BY featured DESC, name ASC';
+      // Product-specific: MCP gallery mixes public discovery with caller-owned private apps.
       const rows = (category
         ? db.prepare(sql).all(ctx.user_id, category)
         : db.prepare(sql).all(ctx.user_id)) as AppRecord[];
@@ -982,9 +983,7 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       },
     },
     async ({ slug }) => {
-      const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as
-        | AppRecord
-        | undefined;
+      const row = await adapters.storage.getApp(slug);
       if (!row) {
         return {
           isError: true,
@@ -1234,7 +1233,7 @@ mcpRouter.all('/search', async (c) => {
 // /mcp/app/:slug — per-app MCP
 mcpRouter.all('/app/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  const row = await adapters.storage.getApp(slug);
   if (!row) {
     // Wrap unknown-app errors in a JSON-RPC envelope so MCP clients see a
     // protocol-level error, not a bare HTTP 404. Return 200 per JSON-RPC
