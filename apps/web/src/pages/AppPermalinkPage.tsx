@@ -580,7 +580,7 @@ export function AppPermalinkPage() {
     }
     for (const s of app.manifest.secrets_needed ?? []) {
       if (typeof s === 'string' && s.trim()) {
-        add(`sec-${s}`, `Secrets: ${s.trim()}`);
+        add(`sec-${s}`, `App creator secrets: ${s.trim()}`);
       }
     }
     if (app.is_async) add('async', 'Async jobs');
