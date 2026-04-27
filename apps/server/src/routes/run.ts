@@ -117,14 +117,26 @@ function checkRunAccess(
   // local workspace.
   const runWorkspace = run.workspace_id || DEFAULT_WORKSPACE_ID;
 
-  // OSS single-user box back-compat: when Floom boots without
-  // FLOOM_CLOUD_MODE the whole environment is one user. `fetch`-based
-  // clients (curl, CI scripts, node tests) don't carry the device cookie
-  // across calls, so enforcing device_id parity would 404 every legit
-  // poll on the self-host flow. Unauthenticated reads on the synthetic
-  // 'local' workspace are allowed; Cloud deployments never hit this
-  // branch because isCloudMode() is true.
-  if (!isCloudMode() && runWorkspace === DEFAULT_WORKSPACE_ID) {
+  // OSS single-user box back-compat + anon cloud API back-compat:
+  //
+  // When Floom boots in OSS mode (no FLOOM_CLOUD_MODE), the whole
+  // environment is one user. `fetch`-based clients (curl, CI scripts,
+  // node tests) don't carry the device cookie across calls, so enforcing
+  // device_id parity would 404 every legit poll on the self-host flow.
+  //
+  // The same problem applies to anonymous callers in Cloud mode who hit
+  // the slug-based endpoint (POST /api/:slug/run). All anon runs land in
+  // DEFAULT_WORKSPACE_ID with user_id=local. A curl-based caller creates
+  // the run in one request and polls in another — without a persistent
+  // cookie jar the device_id differs between the two calls. Blocking the
+  // poll would break every documented curl example and the /p/:slug runner
+  // UI (which polls via XHR before the device cookie is set). Since the
+  // run is unclaimed (user_id=local/null) and lives in the synthetic local
+  // workspace, no cross-user leak is possible: authenticated users' runs
+  // always carry a real workspace_id ≠ DEFAULT_WORKSPACE_ID after rekey.
+  const runUser = run.user_id || null;
+  const isUnclaimed = runUser === null || runUser === DEFAULT_USER_ID;
+  if (runWorkspace === DEFAULT_WORKSPACE_ID && isUnclaimed) {
     return 'owner';
   }
 
@@ -142,8 +154,10 @@ function checkRunAccess(
       return 'owner';
     }
   } else {
-    const runUser = run.user_id || null;
-    const isUnclaimed = runUser === null || runUser === DEFAULT_USER_ID;
+    // Anon user outside the DEFAULT_WORKSPACE_ID (e.g. an invite-accepted
+    // anonymous session that landed in a real workspace). Require
+    // device_id match as before — these runs ARE scoped to a specific
+    // device and must not leak to other anonymous visitors.
     if (
       runWorkspace === ctx.workspace_id &&
       isUnclaimed &&
