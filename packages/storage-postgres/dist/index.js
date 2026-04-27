@@ -231,6 +231,10 @@ class PostgresStorageAdapter {
             params.push(filter.user_id);
             clauses.push(`user_id = $${params.length}`);
         }
+        if (filter.device_id) {
+            params.push(filter.device_id);
+            clauses.push(`device_id = $${params.length}`);
+        }
         if (filter.status) {
             params.push(filter.status);
             clauses.push(`status = $${params.length}`);

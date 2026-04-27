@@ -176,10 +176,12 @@ try {
       thread_id: 'thread-1',
       action: 'run',
       inputs: { prompt: 'hello' },
+      device_id: 'device-crud-1',
     });
     assert(run.status === 'pending', `status=${run.status}`);
     assert((await storage.getRun(run.id))?.id === run.id, 'getRun mismatch');
     assert((await storage.listRuns({ app_id: app.id })).some((row) => row.id === run.id), 'listRuns missing run');
+    assert((await storage.listRuns({ device_id: 'device-crud-1' })).some((row) => row.id === run.id), 'listRuns device_id missing run');
     await storage.updateRun(run.id, {
       status: 'success',
       outputs: { ok: true },

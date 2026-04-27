@@ -1,8 +1,8 @@
 // Trimmed port of the marketplace runner. Loads secrets, dispatches a
 // container run, streams output to the log bus, and updates the run record.
-import { db, DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import { DEFAULT_USER_ID, DEFAULT_WORKSPACE_ID } from '../db.js';
+import type { AdapterBundle } from '../adapters/index.js';
 import { getOrCreateStream } from '../lib/log-stream.js';
-import { invalidateHubCache } from '../lib/hub-cache.js';
 import { noteAppUnavailable } from '../lib/alerts.js';
 import type { SecretPolicy } from '../types.js';
 import type {
@@ -46,99 +46,19 @@ interface UpdateRunArgs {
   is_public?: 0 | 1 | boolean;
 }
 
-export function updateRun(runId: string, patch: UpdateRunArgs): void {
-  const cols: string[] = [];
-  const values: unknown[] = [];
-  if (patch.status !== undefined) {
-    cols.push('status = ?');
-    values.push(patch.status);
-  }
-  if (patch.outputs !== undefined) {
-    cols.push('outputs = ?');
-    values.push(JSON.stringify(patch.outputs));
-  }
-  if (patch.error !== undefined) {
-    cols.push('error = ?');
-    values.push(patch.error);
-  }
-  if (patch.error_type !== undefined) {
-    cols.push('error_type = ?');
-    values.push(patch.error_type);
-  }
-  if (patch.upstream_status !== undefined) {
-    cols.push('upstream_status = ?');
-    values.push(patch.upstream_status);
-  }
-  if (patch.logs !== undefined) {
-    cols.push('logs = ?');
-    values.push(patch.logs);
-  }
-  if (patch.duration_ms !== undefined) {
-    cols.push('duration_ms = ?');
-    values.push(patch.duration_ms);
-  }
-  if (patch.is_public !== undefined) {
-    cols.push('is_public = ?');
-    values.push(patch.is_public ? 1 : 0);
-  }
-  if (patch.finished) {
-    cols.push("finished_at = datetime('now')");
-  }
-  if (cols.length === 0) return;
-  values.push(runId);
-  db.prepare(`UPDATE runs SET ${cols.join(', ')} WHERE id = ?`).run(...values);
-
-  // Refresh apps.avg_run_ms whenever a run finishes successfully. Runs at
-  // most once per run completion and only when we have a concrete duration.
-  // This drives the data-driven sort in GET /api/hub (featured DESC,
-  // avg_run_ms ASC, ...) so the store reorders itself as real usage
-  // comes in.
-  if (patch.finished && patch.status === 'success' && typeof patch.duration_ms === 'number') {
-    refreshAppAvgRunMs(runId);
-  }
+async function getAdapters(): Promise<AdapterBundle> {
+  return (await import('../adapters/index.js')).adapters;
 }
 
-/**
- * Recompute the rolling average run time for the app that owns the given
- * run, looking at the last 20 successful runs. We keep the window small so
- * one old slow cold-start doesn't dominate the average forever. If the app
- * has no successful runs (shouldn't happen because this is called after a
- * success) the column is left as-is.
- */
-function refreshAppAvgRunMs(runId: string): void {
-  try {
-    const row = db
-      .prepare('SELECT app_id FROM runs WHERE id = ?')
-      .get(runId) as { app_id: string } | undefined;
-    if (!row) return;
-    const avgRow = db
-      .prepare(
-        `SELECT AVG(duration_ms) AS avg_ms FROM (
-           SELECT duration_ms FROM runs
-           WHERE app_id = ? AND status = 'success' AND duration_ms IS NOT NULL
-           ORDER BY started_at DESC
-           LIMIT 20
-         )`,
-      )
-      .get(row.app_id) as { avg_ms: number | null } | undefined;
-    const avg = avgRow?.avg_ms;
-    if (typeof avg === 'number' && Number.isFinite(avg)) {
-      db.prepare('UPDATE apps SET avg_run_ms = ? WHERE id = ?').run(
-        Math.round(avg),
-        row.app_id,
-      );
-      // Perf fix (2026-04-20): bust the /api/hub 5s cache so the freshly
-      // computed avg_run_ms drives the store sort order on the next
-      // directory read. Without this, the test suite's "hub: avg_run_ms
-      // populated after runs" assertion sees stale null values for up
-      // to 5s after each run completes.
-      invalidateHubCache();
-    }
-  } catch (err) {
-    // Avg tracking is best-effort. A missing column (on an old DB),
-    // concurrency, or a bad join never blocks the run completion path.
-    console.warn(`[runner] failed to refresh avg_run_ms: ${(err as Error).message}`);
-  }
+function runStartedMs(startedAt: string): number {
+  const normalized = startedAt.includes('T') ? startedAt : startedAt.replace(' ', 'T');
+  const parsed = Date.parse(normalized.endsWith('Z') ? normalized : `${normalized}Z`);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+export async function updateRun(runId: string, patch: UpdateRunArgs): Promise<void> {
+  const adapters = await getAdapters();
+  await adapters.storage.updateRun(runId, patch);
 }
 
 interface EntrypointResult {
@@ -270,7 +190,8 @@ export async function dispatchRun(
   perCallSecrets?: Record<string, string>,
   ctx?: SessionContext,
 ): Promise<void> {
-  const secretsAdapter = (await import('../adapters/index.js')).adapters.secrets;
+  const adapters = await getAdapters();
+  const secretsAdapter = adapters.secrets;
 
   // Load secrets: merge global (app_id IS NULL) + per-app (app_id = this app).
   const mergedSecrets: Record<string, string> = {};
@@ -366,7 +287,7 @@ export async function dispatchRun(
     if (mergedSecrets[name]) secrets[name] = mergedSecrets[name];
   }
 
-  updateRun(runId, { status: 'running' });
+  await updateRun(runId, { status: 'running' });
 
   void runRuntimeWorker({ app, manifest, runId, action, inputs, secrets, ctx: runtimeCtx });
 }
@@ -382,7 +303,7 @@ async function runRuntimeWorker(opts: {
 }): Promise<void> {
   const logStream = getOrCreateStream(opts.runId);
   try {
-    const { adapters } = await import('../adapters/index.js');
+    const adapters = await getAdapters();
     const result = await adapters.runtime.execute(
       opts.app,
       opts.manifest,
@@ -421,7 +342,7 @@ async function runRuntimeWorker(opts: {
       patch.upstream_status = result.upstream_status ?? null;
     }
 
-    updateRun(opts.runId, patch);
+    await updateRun(opts.runId, patch);
     if (result.status === 'error' && result.error_type === 'app_unavailable') {
       noteAppUnavailable(opts.app.slug, result.error || 'app_unavailable');
     }
@@ -430,7 +351,7 @@ async function runRuntimeWorker(opts: {
     // integration failure unless the lower layer tagged it as an unavailable app.
     const e = err as Error & { floom_error_class?: string };
     const klass = e.floom_error_class;
-    updateRun(opts.runId, {
+    await updateRun(opts.runId, {
       status: 'error',
       error: e.message || 'Runtime adapter crashed',
       error_type: klass === 'app_unavailable' ? 'app_unavailable' : 'floom_internal_error',
@@ -445,8 +366,9 @@ async function runRuntimeWorker(opts: {
   }
 }
 
-export function getRun(runId: string): RunRecord | undefined {
-  return db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as RunRecord | undefined;
+export async function getRun(runId: string): Promise<RunRecord | undefined> {
+  const adapters = await getAdapters();
+  return adapters.storage.getRun(runId);
 }
 
 /**
@@ -477,17 +399,16 @@ export function getRun(runId: string): RunRecord | undefined {
  * still inside `container.wait()` or streaming logs is never touched.
  * Only genuinely dead runs are reaped.
  */
-export function sweepZombieRuns(): number {
-  const rows = db
-    .prepare("SELECT id, started_at FROM runs WHERE status = 'running'")
-    .all() as { id: string; started_at: string }[];
+export async function sweepZombieRuns(): Promise<number> {
+  const adapters = await getAdapters();
+  const rows = await adapters.storage.listRuns({ status: 'running' });
   if (rows.length === 0) return 0;
   const nowMs = Date.now();
   let swept = 0;
   for (const row of rows) {
-    const startedMs = Date.parse(row.started_at + 'Z');
+    const startedMs = runStartedMs(row.started_at);
     const durationMs = Number.isFinite(startedMs) ? nowMs - startedMs : null;
-    updateRun(row.id, {
+    await updateRun(row.id, {
       status: 'error',
       error:
         'This run was interrupted while it was still processing. Try it again.',
@@ -515,23 +436,18 @@ export function startZombieRunSweeper(
 ): { stop: () => void } {
   const runnerTimeout = Number(process.env.RUNNER_TIMEOUT || 300_000);
   const ceiling = Math.max(ceilingMs ?? runnerTimeout + 5 * 60_000, 10 * 60_000);
-  const timer = setInterval(() => {
+  const timer = setInterval(async () => {
     try {
-      const cutoffIso = new Date(Date.now() - ceiling)
-        .toISOString()
-        .replace('T', ' ')
-        .slice(0, 19);
-      const rows = db
-        .prepare(
-          "SELECT id, started_at FROM runs WHERE status = 'running' AND started_at < ?",
-        )
-        .all(cutoffIso) as { id: string; started_at: string }[];
+      const cutoffMs = Date.now() - ceiling;
+      const adapters = await getAdapters();
+      const rows = await adapters.storage.listRuns({ status: 'running' });
       for (const row of rows) {
-        const startedMs = Date.parse(row.started_at + 'Z');
+        const startedMs = runStartedMs(row.started_at);
+        if (!Number.isFinite(startedMs) || startedMs >= cutoffMs) continue;
         const durationMs = Number.isFinite(startedMs)
           ? Date.now() - startedMs
           : null;
-        updateRun(row.id, {
+        await updateRun(row.id, {
           status: 'error',
           error:
             'This run stopped reporting progress and was reaped. Try it again.',

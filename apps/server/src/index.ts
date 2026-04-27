@@ -1591,7 +1591,7 @@ async function boot(): Promise<void> {
   // Then spin up the periodic sweeper so in-flight runs that stall past
   // the absolute timeout ceiling also get reaped.
   try {
-    const swept = sweepZombieRuns();
+    const swept = await sweepZombieRuns();
     if (swept > 0) {
       console.log(`[runner] boot sweeper reaped ${swept} zombie run${swept === 1 ? '' : 's'}`);
     }

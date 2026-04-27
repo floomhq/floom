@@ -118,12 +118,12 @@ async function waitForRun(runId: string): Promise<RunRecord> {
   const POLL_INTERVAL_MS = 2000;
   const deadline = Date.now() + MAX_WAIT_MS;
   while (Date.now() < deadline) {
-    const row = getRun(runId);
+    const row = await getRun(runId);
     if (!row) throw new Error(`Run ${runId} not found`);
     if (['success', 'error', 'timeout'].includes(row.status)) return row;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
-  const row = getRun(runId);
+  const row = await getRun(runId);
   if (!row) throw new Error(`Run ${runId} not found`);
   return row;
 }
@@ -1171,7 +1171,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ run_id }) => {
       recordMcpToolCall('get_run');
       try {
-        return mcpJson(getAgentRun(ctx, run_id));
+        return mcpJson(await getAgentRun(ctx, run_id));
       } catch (err) {
         return mcpError(err);
       }
@@ -1194,7 +1194,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ slug, limit, cursor, since_ts }) => {
       recordMcpToolCall('list_my_runs');
       try {
-        return mcpJson(listMyRuns(ctx, { slug, limit, cursor, since_ts }));
+        return mcpJson(await listMyRuns(ctx, { slug, limit, cursor, since_ts }));
       } catch (err) {
         return mcpError(err);
       }

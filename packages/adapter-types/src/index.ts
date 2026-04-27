@@ -519,6 +519,7 @@ export interface RunListFilter {
   app_id?: string;
   workspace_id?: string;
   user_id?: string;
+  device_id?: string;
   status?: RunStatus;
   limit?: number;
   offset?: number;
