@@ -283,6 +283,31 @@ export function BuildPage({ postPublishHref, layout: Layout = PageShell }: Build
     setSampleError(null);
     setSampleOutput(null);
     try {
+      // The app must exist in the DB before /api/run can dispatch it.
+      // Pre-register as private so the sample run can resolve the slug.
+      // ingestApp is idempotent — if the app already exists (e.g. user edited
+      // slug after detection), this is a no-op returning created=false.
+      // In cloud mode this requires auth — redirect to sign-up if not authed.
+      try {
+        await api.ingestApp({
+          openapi_url: detected.openapi_spec_url,
+          name,
+          slug,
+          description: description || undefined,
+          category: category || undefined,
+          visibility: 'private',
+        });
+      } catch (ingestErr) {
+        const e = ingestErr as { status?: number; message?: string };
+        if (e.status === 401) {
+          navigate('/signup?next=' + encodeURIComponent(authReturnPath));
+          return;
+        }
+        // Any other ingest failure (e.g. slug collision): surface as sample error.
+        setSampleError(e.message || 'Could not register app for sample run.');
+        setStep('preview');
+        return;
+      }
       const { run_id } = await api.startRun(slug, sampleInputs, undefined, sampleAction.name);
       setSampleRunId(run_id);
       const outcome = await pollRun(run_id);
