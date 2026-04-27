@@ -6,11 +6,11 @@ Federico's running feedback as he reviews `mvp.floom.dev` and `v26.floom.dev`. T
 
 | # | Source | Issue | Status | Agent |
 |---|---|---|---|---|
-| M1 | SS 10.57.37 | Login page primitive: empty right column + awkward "No password" copy + "you are in the right place" line | IN-FLIGHT | ac487988005004b26 |
-| M2 | SS 10.58.01 | Stubbed pages should redirect to `/me/agent-keys`, not show ComingSoon card | IN-FLIGHT | ac487988005004b26 |
-| M3 | (implied) | Post-auth default landing should be `/me/agent-keys`, not `/run/apps` | IN-FLIGHT | ac487988005004b26 |
-| M4 | (implied) | UX audit of all MVP-visible pages | IN-FLIGHT | ac487988005004b26 |
-| M5 | (verbal Q) | mvp.floom.dev / landing is the FULL marketing landing — too full for MVP scope (sign up → mint MCP token). Should be slim landing with one big hero CTA + brief explanation. | OPEN | (new agent) |
+| M1 | SS 10.57.37 | Login page primitive: empty right column + awkward "No password" copy + "you are in the right place" line | OPEN — held until M2/M3 verified, agent ac487988 stalled, M1 separate run needed | next round |
+| M2 | SS 10.58.01 | Stubbed pages should redirect to `/me/agent-keys`, not show ComingSoon card | FIXED — 16 redirect commits c409dd5a..a1af0e01, mvp container redeployed asset B61LaRdr | a3e424eb2b8121df1 |
+| M3 | (implied) | Post-auth default landing should be `/me/agent-keys`, not `/run/apps` | FIXED — 84d63da3 LoginPage L70 safeNext default → /me/agent-keys | a3e424eb2b8121df1 |
+| M4 | (implied) | UX audit of all MVP-visible pages | OPEN — held until M2/M3 verified | next round |
+| M5 | (verbal Q) | mvp.floom.dev / landing is the FULL marketing landing — too full for MVP scope (sign up → mint MCP token). Should be slim landing with one big hero CTA + brief explanation. | FIXED a3e17fc9 — `LandingMVPPage.tsx` created; `main.tsx` on `launch-mvp` wires `/` → `LandingMVPPage`, `/marketing` → `LandingV17Page`; hero + 3-step explainer + mini footer | this session |
 
 ## v26 polish track (v26.floom.dev, branch `ui/v23-p-slug-runsurface`)
 
@@ -27,10 +27,10 @@ Federico's running feedback as he reviews `mvp.floom.dev` and `v26.floom.dev`. T
 | V9 | SS 11.04.16 | Footer cluttered: 13 links across 3 columns, redundancy (Cookies/Legal, Status/Changelog), wrong tag "Built in SF" | FIXED 074f467a — slim 3-col (Product: Apps/Docs/Pricing/Changelog, Company: About/GitHub/Status, Legal: Terms/Privacy); dropped Cookies, Legal, Runtime limits, Security | this session |
 | V10 | SS 11.04.35 | Run on `/p/ai-readiness-audit` fails with `run_8wda96xryr1d` — `floom_internal_error` | FIXED cfc2d085 — root cause: `listen EADDRNOTAVAIL 172.25.0.1` (gateway IP not available inside server container); fix: connect server container to run network, listen 0.0.0.0, expose container IP; verified run_jry5mxd5cgg8 success | this session |
 | V11 | SS 11.05.45 | Header nav not clean — `Studio` + `My runs` + GitHub `6` badge shouldn't be in TopBar (per §12.5: slim TopBar = floom + Copy-for-Claude + + New app + avatar) | FIXED 074f467a — removed authed centre nav (Studio/My runs) and GitHub badge from authed state; anon TopBar unchanged | this session |
-| V12 | SS 11.06.40 | Click on app card on `/run/apps` goes to `/p/:slug` (public) — should go to private workspace view `/run/apps/:slug` | OPEN | (new agent) |
-| V13 | SS 11.06.40 | Counter mismatch: rail says "Apps 0", content stat says "Apps 1 installed" — different sources of truth | OPEN | (new agent) |
-| V14 | SS 11.06.40 | Auto-install on first run: ran public app once → it now appears in workspace as "installed" without explicit claim. Either: (a) language wrong (call it "recently used" not "installed"), or (b) require explicit Install action | OPEN | (new agent) |
-| V15 | SS 11.06.40 | Stat "RUNS 7D" shows `—` despite "last run just now" on the same page — stat not refreshing after new run | IN-FLIGHT | a3e2374cc94737519 |
+| V12 | SS 11.06.40 | Click on app card on `/run/apps` goes to `/p/:slug` (public) — should go to private workspace view `/run/apps/:slug` | FIXED a860a79c — `SlugToRunRedirect` component in `main.tsx` routes `/run/apps/:slug` → `/run/apps/:slug/run`; AppsList href fixed by ee51dd14 | this session |
+| V13 | SS 11.06.40 | Counter mismatch: rail says "Apps 0", content stat says "Apps 1 installed" — different sources of truth | FIXED a860a79c — `RunRail` now uses `useMyRuns` hook (run history) instead of `useMyApps` (creator apps); count = unique app_slugs in run history | this session |
+| V14 | SS 11.06.40 | Auto-install on first run: ran public app once → it now appears in workspace as "installed" without explicit claim. Either: (a) language wrong (call it "recently used" not "installed"), or (b) require explicit Install action | FIXED ee51dd14 — stat label changed from "installed" to "in workspace" | this session |
+| V15 | SS 11.06.40 | Stat "RUNS 7D" shows `—` despite "last run just now" on the same page — stat not refreshing after new run | FIXED ee51dd14 — `runs7d` computed from already-fetched `useMyRuns` data (filter by started_at >= now-7d); no separate fetch needed | this session |
 | V16 | (verbal) | Black-bg sweep must cover ALL pages incl `/docs`, `/apps`, `/pricing`, marketing — not just app surfaces | FIXED dd8b23a4 — `--terminal-bg` in wireframe.css updated #0e0e0c→#1b1a17; swept all TSX/CSS: zero pure #000/bg-black/bg-zinc-950 anywhere; deployed v26 verified | this agent |
 | V17 | (verbal) | `/docs` has the same sidebar/content shift bug as /run/studio (layout shifts based on content width) | FIXED dd8b23a4 — `DocsPageShell` (flex + fixed 260px sidebar, mirrors WorkspacePageShell); DocsLandingPage+DocsPage migrated; deployed v26 verified | this agent |
 | V18 | GH #850 #856 | MCP rejects JSON-only clients — `Accept: application/json` without `text/event-stream` returns 406 Not Acceptable | FIXED e8566da9 — patch incoming POST request to add `text/event-stream` to Accept header before handing off to SDK transport; `enableJsonResponse: true` already ensures JSON response | this session |
