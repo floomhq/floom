@@ -187,7 +187,7 @@ async function processTrigger(trigger: TriggerRecord, now: number): Promise<bool
   // job worker handles both by invoking dispatchRun identically.
   const jobId = newJobId();
   try {
-    createJob(jobId, {
+    await createJob(jobId, {
       app,
       action: trigger.action,
       inputs,

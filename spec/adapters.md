@@ -181,8 +181,13 @@ interface StorageAdapter {
   // jobs
   createJob(input): JobRecord;
   getJob(id: string): JobRecord | undefined;
+  listJobs(filter?: { slug?: string; app_id?: string; status?: JobStatus; limit?: number }): JobRecord[];
+  claimJob(id: string): JobRecord | undefined; // atomic claim by id
   claimNextJob(): JobRecord | undefined; // atomic dequeue
   updateJob(id: string, patch: Partial<JobRecord>): void;
+  markJobComplete(id: string, outputs: unknown, run_id: string | null): JobRecord | undefined;
+  markJobFailed(id: string, error: unknown, run_id: string | null): JobRecord | undefined;
+  cancelJob(id: string): JobRecord | undefined;
 
   // workspaces + users
   getWorkspace(id: string): WorkspaceRecord | undefined;

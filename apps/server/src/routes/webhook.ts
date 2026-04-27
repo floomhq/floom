@@ -152,7 +152,7 @@ webhookRouter.post('/:path', async (c) => {
 
   const jobId = newJobId();
   try {
-    createJob(jobId, {
+    await createJob(jobId, {
       app,
       action: trigger.action,
       inputs: mergedInputs,

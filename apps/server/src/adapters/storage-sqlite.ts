@@ -8,8 +8,6 @@
 //   - The existing codebase does NOT centralize storage in service
 //     functions. Most routes call `db.prepare(...)` directly. This
 //     wrapper re-uses the same SQL verbatim so behavior is identical.
-//   - Where a cleaner helper already exists (services/jobs.ts), the wrapper
-//     delegates to that helper instead of duplicating SQL.
 //   - Methods that do not yet have an in-tree caller (createApp,
 //     updateApp, deleteApp, createUser, listWorkspacesForUser) are still
 //     implemented with minimal SQL so the adapter surface is complete.
@@ -22,12 +20,6 @@
 //
 import { db } from '../db.js';
 import { invalidateHubCache } from '../lib/hub-cache.js';
-import {
-  createJob as jobsCreateJob,
-  getJob as jobsGetJob,
-  nextQueuedJob as jobsNextQueuedJob,
-  claimJob as jobsClaimJob,
-} from '../services/jobs.js';
 import type {
   AppRecord,
   AppReviewRecord,
@@ -60,6 +52,7 @@ import type {
   CreatorSecretCiphertextWriteInput,
   EncryptedSecretRecord,
   LinkShareRecord,
+  JobListFilter,
   RunListFilter,
   SecretCiphertextRow,
   SecretCiphertextWriteInput,
@@ -103,6 +96,35 @@ const USER_WRITE_COLUMNS = new Set<keyof UserWriteInput>([
   'image',
   'is_admin',
   'composio_user_id',
+]);
+
+const DEFAULT_JOB_TIMEOUT_MS = 30 * 60 * 1000;
+
+const JOB_COLUMNS = new Set<keyof JobRecord>([
+  'id',
+  'slug',
+  'app_id',
+  'action',
+  'status',
+  'input_json',
+  'output_json',
+  'error_json',
+  'run_id',
+  'webhook_url',
+  'timeout_ms',
+  'max_retries',
+  'attempts',
+  'per_call_secrets_json',
+  'created_at',
+  'started_at',
+  'finished_at',
+]);
+
+const JOB_JSON_COLUMNS = new Set<keyof JobRecord>([
+  'input_json',
+  'output_json',
+  'error_json',
+  'per_call_secrets_json',
 ]);
 
 function userInsertKeys(input: UserWriteInput): Array<keyof UserWriteInput> {
@@ -190,6 +212,101 @@ function isRunTurnIndexConstraint(err: unknown): boolean {
     )
   );
 }
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function toNullableJson(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function normalizeCreateJobInput(
+  input: Omit<
+    JobRecord,
+    'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'
+  > & { status?: JobStatus },
+): Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at'> {
+  const raw = input as unknown as Record<string, unknown>;
+  if (raw.app && typeof raw.app === 'object') {
+    const app = raw.app as AppRecord;
+    const timeoutOverride = raw.timeoutMsOverride;
+    const maxRetriesOverride = raw.maxRetriesOverride;
+    const perCallSecrets = raw.perCallSecrets;
+    return {
+      id: String(raw.id),
+      slug: app.slug,
+      app_id: app.id,
+      action: String(raw.action),
+      status: 'queued',
+      input_json: JSON.stringify(raw.inputs ?? {}),
+      output_json: null,
+      error_json: null,
+      run_id: null,
+      webhook_url: stringOrNull(raw.webhookUrlOverride) ?? app.webhook_url,
+      timeout_ms:
+        typeof timeoutOverride === 'number'
+          ? timeoutOverride
+          : app.timeout_ms && app.timeout_ms > 0
+            ? app.timeout_ms
+            : DEFAULT_JOB_TIMEOUT_MS,
+      max_retries:
+        typeof maxRetriesOverride === 'number'
+          ? maxRetriesOverride
+          : typeof app.retries === 'number' && app.retries >= 0
+            ? app.retries
+            : 0,
+      attempts: 0,
+      per_call_secrets_json:
+        perCallSecrets && typeof perCallSecrets === 'object'
+          ? JSON.stringify(perCallSecrets)
+          : null,
+    };
+  }
+  return {
+    id: input.id,
+    slug: input.slug,
+    app_id: input.app_id,
+    action: input.action,
+    status: input.status ?? 'queued',
+    input_json: toNullableJson(input.input_json),
+    output_json: toNullableJson(input.output_json),
+    error_json: toNullableJson(input.error_json),
+    run_id: input.run_id,
+    webhook_url: input.webhook_url,
+    timeout_ms: input.timeout_ms,
+    max_retries: input.max_retries,
+    attempts: 0,
+    per_call_secrets_json: toNullableJson(input.per_call_secrets_json),
+  };
+}
+
+function jobPatchValue(key: string, value: unknown): unknown {
+  if (JOB_JSON_COLUMNS.has(key as keyof JobRecord)) return toNullableJson(value);
+  return value;
+}
+
+const claimNextJobTxn = db.transaction(() => {
+  const next = db
+    .prepare(`SELECT id FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`)
+    .get() as { id: string } | undefined;
+  if (!next) return undefined;
+  const res = db
+    .prepare(
+      `UPDATE jobs
+         SET status='running',
+             started_at=datetime('now'),
+             attempts=attempts + 1
+       WHERE id = ? AND status = 'queued'`,
+    )
+    .run(next.id);
+  if (res.changes === 0) return undefined;
+  return db.prepare('SELECT * FROM jobs WHERE id = ?').get(next.id) as
+    | JobRecord
+    | undefined;
+});
 
 export const sqliteStorageAdapter: SqliteStorageAdapter = {
   // ---------- apps ----------
@@ -658,34 +775,137 @@ export const sqliteStorageAdapter: SqliteStorageAdapter = {
       'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'
     > & { status?: JobStatus },
   ): Promise<JobRecord> {
-    // services/jobs.ts createJob takes (jobId, args); re-shape the input.
-    const { id, ...rest } = input;
-    return jobsCreateJob(id, rest as unknown as Parameters<typeof jobsCreateJob>[1]);
+    const normalized = normalizeCreateJobInput(input);
+    db.prepare(
+      `INSERT INTO jobs (
+         id, slug, app_id, action, status, input_json, output_json, error_json,
+         run_id, webhook_url, timeout_ms, max_retries, attempts, per_call_secrets_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      normalized.id,
+      normalized.slug,
+      normalized.app_id,
+      normalized.action,
+      normalized.status,
+      normalized.input_json,
+      normalized.output_json,
+      normalized.error_json,
+      normalized.run_id,
+      normalized.webhook_url,
+      normalized.timeout_ms,
+      normalized.max_retries,
+      normalized.attempts,
+      normalized.per_call_secrets_json,
+    );
+    const row = await this.getJob(normalized.id);
+    if (!row) throw new Error(`createJob: failed to re-read row ${normalized.id}`);
+    return row;
   },
 
   async getJob(id: string): Promise<JobRecord | undefined> {
-    return jobsGetJob(id);
+    return db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as
+      | JobRecord
+      | undefined;
+  },
+
+  async listJobs(filter: JobListFilter = {}): Promise<JobRecord[]> {
+    const where: string[] = [];
+    const values: unknown[] = [];
+    if (filter.slug) {
+      where.push('slug = ?');
+      values.push(filter.slug);
+    }
+    if (filter.app_id) {
+      where.push('app_id = ?');
+      values.push(filter.app_id);
+    }
+    if (filter.status) {
+      where.push('status = ?');
+      values.push(filter.status);
+    }
+    let sql = 'SELECT * FROM jobs';
+    if (where.length > 0) sql += ` WHERE ${where.join(' AND ')}`;
+    sql += ' ORDER BY created_at ASC';
+    if (typeof filter.limit === 'number' && filter.limit > 0) {
+      sql += ' LIMIT ?';
+      values.push(filter.limit);
+    }
+    return db.prepare(sql).all(...values) as JobRecord[];
+  },
+
+  async claimJob(id: string): Promise<JobRecord | undefined> {
+    const res = db
+      .prepare(
+        `UPDATE jobs
+           SET status='running',
+               started_at=datetime('now'),
+               attempts=attempts + 1
+         WHERE id = ? AND status = 'queued'`,
+      )
+      .run(id);
+    if (res.changes === 0) return undefined;
+    return this.getJob(id);
   },
 
   async claimNextJob(): Promise<JobRecord | undefined> {
-    const next = jobsNextQueuedJob();
-    if (!next) return undefined;
-    return jobsClaimJob(next.id);
+    return claimNextJobTxn();
   },
 
   async updateJob(id: string, patch: Partial<JobRecord>): Promise<void> {
     const keys = Object.keys(patch).filter((k) => k !== 'id');
+    for (const key of keys) {
+      if (!JOB_COLUMNS.has(key as keyof JobRecord)) {
+        throw new Error(`Unknown jobs column: ${key}`);
+      }
+    }
     if (keys.length === 0) return;
     const set = keys.map((k) => `${k} = ?`).join(', ');
     db.prepare(`UPDATE jobs SET ${set} WHERE id = ?`).run(
-      ...keys.map((k) => {
-        const v = (patch as Record<string, unknown>)[k];
-        // inputs/result are JSON columns; stringify objects.
-        if (v !== null && typeof v === 'object') return JSON.stringify(v);
-        return v;
-      }),
+      ...keys.map((k) => jobPatchValue(k, (patch as Record<string, unknown>)[k])),
       id,
     );
+  },
+
+  async markJobComplete(
+    id: string,
+    outputs: unknown,
+    run_id: string | null,
+  ): Promise<JobRecord | undefined> {
+    db.prepare(
+      `UPDATE jobs
+         SET status='succeeded',
+             output_json=?,
+             run_id=?,
+             finished_at=datetime('now')
+       WHERE id = ?`,
+    ).run(toNullableJson(outputs), run_id, id);
+    return this.getJob(id);
+  },
+
+  async markJobFailed(
+    id: string,
+    error: unknown,
+    run_id: string | null,
+  ): Promise<JobRecord | undefined> {
+    db.prepare(
+      `UPDATE jobs
+         SET status='failed',
+             error_json=?,
+             run_id=?,
+             finished_at=datetime('now')
+       WHERE id = ?`,
+    ).run(toNullableJson(error), run_id, id);
+    return this.getJob(id);
+  },
+
+  async cancelJob(id: string): Promise<JobRecord | undefined> {
+    db.prepare(
+      `UPDATE jobs
+         SET status='cancelled',
+             finished_at=datetime('now')
+       WHERE id = ? AND status IN ('queued', 'running')`,
+    ).run(id);
+    return this.getJob(id);
   },
 
   // ---------- workspaces + users ----------

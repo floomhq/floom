@@ -119,6 +119,12 @@ export interface JobRecord {
     started_at: string | null;
     finished_at: string | null;
 }
+export interface JobListFilter {
+    slug?: string;
+    app_id?: string;
+    status?: JobStatus;
+    limit?: number;
+}
 export type RunStatus = 'pending' | 'running' | 'success' | 'error' | 'timeout';
 export type ErrorType = 'timeout' | 'runtime_error' | 'missing_secret' | 'oom' | 'build_error' | 'user_input_error' | 'auth_error' | 'upstream_outage' | 'network_unreachable' | 'floom_internal_error' | 'app_unavailable';
 export interface RunRecord {
@@ -469,8 +475,13 @@ export interface StorageAdapter extends AdapterLifecycle {
         status?: JobStatus;
     }): Promise<JobRecord>;
     getJob(id: string): Promise<JobRecord | undefined>;
+    listJobs(filter?: JobListFilter): Promise<JobRecord[]>;
+    claimJob(id: string): Promise<JobRecord | undefined>;
     claimNextJob(): Promise<JobRecord | undefined>;
     updateJob(id: string, patch: Partial<JobRecord>): Promise<void>;
+    markJobComplete(id: string, outputs: unknown, run_id: string | null): Promise<JobRecord | undefined>;
+    markJobFailed(id: string, error: unknown, run_id: string | null): Promise<JobRecord | undefined>;
+    cancelJob(id: string): Promise<JobRecord | undefined>;
     getWorkspace(id: string): Promise<WorkspaceRecord | undefined>;
     getWorkspaceBySlug(slug: string): Promise<WorkspaceRecord | undefined>;
     createWorkspace(input: {
