@@ -171,6 +171,33 @@ export interface UserRecord {
     created_at: string;
 }
 export type AgentTokenScope = 'read' | 'read-write' | 'publish-only';
+export interface AgentTokenRecord {
+    id: string;
+    prefix: string;
+    hash: string;
+    label: string;
+    scope: AgentTokenScope;
+    workspace_id: string;
+    user_id: string;
+    created_at: string;
+    last_used_at: string | null;
+    revoked_at: string | null;
+    rate_limit_per_minute: number;
+}
+export interface RunThreadRecord {
+    id: string;
+    title: string | null;
+    created_at: string;
+    updated_at: string;
+}
+export interface RunTurnRecord {
+    id: string;
+    thread_id: string;
+    turn_index: number;
+    kind: 'user' | 'assistant';
+    payload: string;
+    created_at: string;
+}
 export type WorkspaceMemberRole = 'admin' | 'editor' | 'viewer';
 export type WorkspaceRole = WorkspaceMemberRole | 'guest';
 export interface SessionContext {
@@ -239,6 +266,28 @@ export interface StorageAdapter {
         duration_ms?: number | null;
         finished?: boolean;
     }): Promise<void>;
+    createRunThread(input: {
+        id: string;
+        title?: string | null;
+        workspace_id?: string;
+        user_id?: string | null;
+        device_id?: string | null;
+    }): Promise<RunThreadRecord>;
+    getRunThread(id: string): Promise<RunThreadRecord | undefined>;
+    listRunTurns(thread_id: string): Promise<RunTurnRecord[]>;
+    appendRunTurn(input: {
+        id: string;
+        thread_id: string;
+        kind: RunTurnRecord['kind'];
+        payload: string;
+    }): Promise<RunTurnRecord>;
+    updateRunThread(id: string, patch: {
+        title?: string | null;
+    }): Promise<RunThreadRecord | undefined>;
+    createAgentToken(input: AgentTokenRecord): Promise<AgentTokenRecord>;
+    listAgentTokensForUser(user_id: string): Promise<AgentTokenRecord[]>;
+    getAgentTokenForUser(id: string, user_id: string): Promise<AgentTokenRecord | undefined>;
+    revokeAgentTokenForUser(id: string, user_id: string, revoked_at: string): Promise<AgentTokenRecord | undefined>;
     createJob(input: Omit<JobRecord, 'created_at' | 'started_at' | 'finished_at' | 'attempts' | 'status'> & {
         status?: JobStatus;
     }): Promise<JobRecord>;

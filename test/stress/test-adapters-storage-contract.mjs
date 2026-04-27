@@ -194,6 +194,72 @@ try {
     assert((await storage.getRun(run.id)) === undefined, 'run did not cascade with app delete');
   });
 
+  await check('run threads and turns round-trip with ordered append', async () => {
+    const thread = await storage.createRunThread({
+      id: 'thread-contract-1',
+      title: null,
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      user_id: 'local',
+      device_id: 'device-contract-1',
+    });
+    assert(thread.id === 'thread-contract-1', `id=${thread.id}`);
+    assert((await storage.getRunThread(thread.id))?.id === thread.id, 'getRunThread mismatch');
+    const first = await storage.appendRunTurn({
+      id: 'turn-contract-1',
+      thread_id: thread.id,
+      kind: 'user',
+      payload: json({ text: 'hello' }),
+    });
+    const second = await storage.appendRunTurn({
+      id: 'turn-contract-2',
+      thread_id: thread.id,
+      kind: 'assistant',
+      payload: json({ summary: 'world' }),
+    });
+    assert(first.turn_index === 0, `first index=${first.turn_index}`);
+    assert(second.turn_index === 1, `second index=${second.turn_index}`);
+    const turns = await storage.listRunTurns(thread.id);
+    assert(turns.length === 2, `turns=${turns.length}`);
+    assert(turns[0].id === first.id && turns[1].id === second.id, `turn order=${json(turns.map((t) => t.id))}`);
+    const titled = await storage.updateRunThread(thread.id, { title: 'Contract title' });
+    assert(titled?.title === 'Contract title', `title=${titled?.title}`);
+    const touched = await storage.updateRunThread(thread.id, {});
+    assert(touched?.id === thread.id, 'touch returned missing thread');
+  });
+
+  await check('agent tokens round-trip with idempotent revoke', async () => {
+    const user = await storage.createUser({
+      id: 'agent-user-1',
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      email: 'agent-user-1@example.com',
+      name: 'Agent User',
+      auth_provider: 'contract',
+      auth_subject: 'agent-subject-1',
+    });
+    const createdAt = new Date().toISOString();
+    const token = await storage.createAgentToken({
+      id: 'agent-token-1',
+      prefix: 'floomtok',
+      hash: 'hash-agent-token-1',
+      label: 'Contract token',
+      scope: 'read-write',
+      workspace_id: DEFAULT_WORKSPACE_ID,
+      user_id: user.id,
+      created_at: createdAt,
+      last_used_at: null,
+      revoked_at: null,
+      rate_limit_per_minute: 60,
+    });
+    assert(token.id === 'agent-token-1', `id=${token.id}`);
+    assert((await storage.getAgentTokenForUser(token.id, user.id))?.hash === token.hash, 'getAgentTokenForUser mismatch');
+    assert((await storage.listAgentTokensForUser(user.id)).some((row) => row.id === token.id), 'listAgentTokensForUser missing token');
+    const revoked = await storage.revokeAgentTokenForUser(token.id, user.id, '2026-04-27T00:00:00.000Z');
+    assert(revoked?.revoked_at !== null, 'revoke did not set revoked_at');
+    const revokedAgain = await storage.revokeAgentTokenForUser(token.id, user.id, '2026-04-28T00:00:00.000Z');
+    assert(revokedAgain?.revoked_at === revoked?.revoked_at, 'second revoke changed revoked_at');
+    assert((await storage.revokeAgentTokenForUser('missing-agent-token', user.id, createdAt)) === undefined, 'missing revoke did not return undefined');
+  });
+
   await check('jobs CRUD round-trip with claim/update', async () => {
     const app = await storage.createApp(appInput('app-jobs-1', 'app-jobs-1'));
     const job = await storage.createJob(createJobInput('job-crud-1', app, { x: 1 }));

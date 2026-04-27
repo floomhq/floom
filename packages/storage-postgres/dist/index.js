@@ -250,6 +250,86 @@ class PostgresStorageAdapter {
             await this.refreshAppAvgRunMs(id);
         }
     }
+    async createRunThread(input) {
+        const row = one((await this.query(`INSERT INTO run_threads (id, title, workspace_id, user_id, device_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`, [
+            input.id,
+            input.title ?? null,
+            input.workspace_id ?? 'local',
+            input.user_id ?? null,
+            input.device_id ?? null,
+        ])).map(normalizeRunThread));
+        if (!row)
+            throw new Error(`createRunThread: failed to re-read row ${input.id}`);
+        return row;
+    }
+    async getRunThread(id) {
+        return one((await this.query('SELECT * FROM run_threads WHERE id = $1', [id])).map(normalizeRunThread));
+    }
+    async listRunTurns(thread_id) {
+        return (await this.query('SELECT * FROM run_turns WHERE thread_id = $1 ORDER BY turn_index ASC', [thread_id])).map(normalizeRunTurn);
+    }
+    async appendRunTurn(input) {
+        const row = one((await this.query(`INSERT INTO run_turns (id, thread_id, turn_index, kind, payload)
+         SELECT $1, $2, COALESCE(MAX(turn_index), -1) + 1, $3, $4
+           FROM run_turns
+          WHERE thread_id = $2
+         RETURNING *`, [input.id, input.thread_id, input.kind, input.payload])).map(normalizeRunTurn));
+        if (!row)
+            throw new Error(`appendRunTurn: failed to re-read row ${input.id}`);
+        return row;
+    }
+    async updateRunThread(id, patch) {
+        const rows = patch.title !== undefined
+            ? await this.query(`UPDATE run_threads
+                SET title = $1,
+                    updated_at = now()
+              WHERE id = $2
+              RETURNING *`, [patch.title, id])
+            : await this.query(`UPDATE run_threads
+                SET updated_at = now()
+              WHERE id = $1
+              RETURNING *`, [id]);
+        return one(rows.map(normalizeRunThread));
+    }
+    async createAgentToken(input) {
+        const row = one((await this.query(`INSERT INTO agent_tokens
+           (id, prefix, hash, label, scope, workspace_id, user_id, created_at,
+            last_used_at, revoked_at, rate_limit_per_minute)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING *`, [
+            input.id,
+            input.prefix,
+            input.hash,
+            input.label,
+            input.scope,
+            input.workspace_id,
+            input.user_id,
+            input.created_at,
+            input.last_used_at,
+            input.revoked_at,
+            input.rate_limit_per_minute,
+        ])).map(normalizeAgentToken));
+        if (!row)
+            throw new Error(`createAgentToken: failed to re-read row ${input.id}`);
+        return row;
+    }
+    async listAgentTokensForUser(user_id) {
+        return (await this.query(`SELECT * FROM agent_tokens
+          WHERE user_id = $1
+          ORDER BY created_at DESC`, [user_id])).map(normalizeAgentToken);
+    }
+    async getAgentTokenForUser(id, user_id) {
+        return one((await this.query('SELECT * FROM agent_tokens WHERE id = $1 AND user_id = $2', [id, user_id])).map(normalizeAgentToken));
+    }
+    async revokeAgentTokenForUser(id, user_id, revoked_at) {
+        return one((await this.query(`UPDATE agent_tokens
+            SET revoked_at = COALESCE(revoked_at, $1)
+          WHERE id = $2
+            AND user_id = $3
+          RETURNING *`, [revoked_at, id, user_id])).map(normalizeAgentToken));
+    }
     async createJob(input) {
         const normalized = normalizeCreateJobInput(input);
         await this.execute(`INSERT INTO jobs (
@@ -515,6 +595,31 @@ function normalizeRun(row) {
             ? null
             : timestampColumnToString(out.finished_at);
     return out;
+}
+function normalizeRunThread(row) {
+    return {
+        ...row,
+        created_at: timestampColumnToString(row.created_at),
+        updated_at: timestampColumnToString(row.updated_at),
+    };
+}
+function normalizeRunTurn(row) {
+    return {
+        ...row,
+        created_at: timestampColumnToString(row.created_at),
+    };
+}
+function normalizeAgentToken(row) {
+    return {
+        ...row,
+        created_at: timestampColumnToString(row.created_at),
+        last_used_at: row.last_used_at === null || row.last_used_at === undefined
+            ? null
+            : timestampColumnToString(row.last_used_at),
+        revoked_at: row.revoked_at === null || row.revoked_at === undefined
+            ? null
+            : timestampColumnToString(row.revoked_at),
+    };
 }
 function normalizeJob(row) {
     const out = { ...row };

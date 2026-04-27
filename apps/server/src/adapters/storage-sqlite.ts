@@ -34,11 +34,14 @@ import {
 } from '../services/runner.js';
 import type {
   AppRecord,
+  AgentTokenRecord,
   ErrorType,
   JobRecord,
   JobStatus,
   RunRecord,
   RunStatus,
+  RunThreadRecord,
+  RunTurnRecord,
   SecretRecord,
   UserRecord,
   WorkspaceRecord,
@@ -235,6 +238,132 @@ export const sqliteStorageAdapter: StorageAdapter = {
     },
   ): Promise<void> {
     runnerUpdateRun(id, patch);
+  },
+
+  async createRunThread(input: {
+    id: string;
+    title?: string | null;
+    workspace_id?: string;
+    user_id?: string | null;
+    device_id?: string | null;
+  }): Promise<RunThreadRecord> {
+    db.prepare(
+      `INSERT INTO run_threads (id, title, workspace_id, user_id, device_id)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.title ?? null,
+      input.workspace_id ?? 'local',
+      input.user_id ?? null,
+      input.device_id ?? null,
+    );
+    return db
+      .prepare('SELECT * FROM run_threads WHERE id = ?')
+      .get(input.id) as RunThreadRecord;
+  },
+
+  async getRunThread(id: string): Promise<RunThreadRecord | undefined> {
+    return db
+      .prepare('SELECT * FROM run_threads WHERE id = ?')
+      .get(id) as RunThreadRecord | undefined;
+  },
+
+  async listRunTurns(thread_id: string): Promise<RunTurnRecord[]> {
+    return db
+      .prepare('SELECT * FROM run_turns WHERE thread_id = ? ORDER BY turn_index ASC')
+      .all(thread_id) as RunTurnRecord[];
+  },
+
+  async appendRunTurn(input: {
+    id: string;
+    thread_id: string;
+    kind: RunTurnRecord['kind'];
+    payload: string;
+  }): Promise<RunTurnRecord> {
+    const lastTurn = db
+      .prepare('SELECT MAX(turn_index) as max_idx FROM run_turns WHERE thread_id = ?')
+      .get(input.thread_id) as { max_idx: number | null };
+    const nextIdx = (lastTurn.max_idx ?? -1) + 1;
+    db.prepare(
+      `INSERT INTO run_turns (id, thread_id, turn_index, kind, payload)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(input.id, input.thread_id, nextIdx, input.kind, input.payload);
+    return db
+      .prepare('SELECT * FROM run_turns WHERE id = ?')
+      .get(input.id) as RunTurnRecord;
+  },
+
+  async updateRunThread(
+    id: string,
+    patch: { title?: string | null },
+  ): Promise<RunThreadRecord | undefined> {
+    if (patch.title !== undefined) {
+      db.prepare(
+        `UPDATE run_threads SET title = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run(patch.title, id);
+    } else {
+      db.prepare(`UPDATE run_threads SET updated_at = datetime('now') WHERE id = ?`).run(id);
+    }
+    return db
+      .prepare('SELECT * FROM run_threads WHERE id = ?')
+      .get(id) as RunThreadRecord | undefined;
+  },
+
+  async createAgentToken(input: AgentTokenRecord): Promise<AgentTokenRecord> {
+    db.prepare(
+      `INSERT INTO agent_tokens
+         (id, prefix, hash, label, scope, workspace_id, user_id, created_at,
+          last_used_at, revoked_at, rate_limit_per_minute)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.prefix,
+      input.hash,
+      input.label,
+      input.scope,
+      input.workspace_id,
+      input.user_id,
+      input.created_at,
+      input.last_used_at,
+      input.revoked_at,
+      input.rate_limit_per_minute,
+    );
+    return db
+      .prepare('SELECT * FROM agent_tokens WHERE id = ?')
+      .get(input.id) as AgentTokenRecord;
+  },
+
+  async listAgentTokensForUser(user_id: string): Promise<AgentTokenRecord[]> {
+    return db
+      .prepare(
+        `SELECT * FROM agent_tokens
+          WHERE user_id = ?
+          ORDER BY created_at DESC`,
+      )
+      .all(user_id) as AgentTokenRecord[];
+  },
+
+  async getAgentTokenForUser(
+    id: string,
+    user_id: string,
+  ): Promise<AgentTokenRecord | undefined> {
+    return db
+      .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
+      .get(id, user_id) as AgentTokenRecord | undefined;
+  },
+
+  async revokeAgentTokenForUser(
+    id: string,
+    user_id: string,
+    revoked_at: string,
+  ): Promise<AgentTokenRecord | undefined> {
+    db.prepare(
+      `UPDATE agent_tokens
+         SET revoked_at = COALESCE(revoked_at, ?)
+       WHERE id = ?
+         AND user_id = ?`,
+    ).run(revoked_at, id, user_id);
+    return this.getAgentTokenForUser(id, user_id);
   },
 
   // ---------- jobs ----------

@@ -70,7 +70,7 @@ Pick your execution substrate (Firecracker, K8s Job, Cloud Run, WASM), implement
 
 ## StorageAdapter
 
-**Purpose.** Persists Floom's durable state: apps, runs, jobs, workspaces, users, and admin secret pointers. (Per-user / per-creator secret ciphertext is owned by `SecretsAdapter`, not this one.)
+**Purpose.** Persists Floom's durable state: apps, runs, run threads/turns, agent tokens, jobs, workspaces, users, and admin secret pointers. (Per-user / per-creator secret ciphertext is owned by `SecretsAdapter`, not this one.)
 
 The reference impl uses `better-sqlite3` against a local file (`data/floom-chat.db`); see `apps/server/src/db.ts` for the schema and migrations.
 
@@ -91,6 +91,30 @@ interface StorageAdapter {
   getRun(id: string): RunRecord | undefined;
   listRuns(filter?: RunListFilter): RunRecord[];
   updateRun(id: string, patch: RunPatch): void;
+
+  // run threads + turns
+  createRunThread(input: {
+    id: string;
+    title?: string | null;
+    workspace_id?: string;
+    user_id?: string | null;
+    device_id?: string | null;
+  }): RunThreadRecord;
+  getRunThread(id: string): RunThreadRecord | undefined;
+  listRunTurns(thread_id: string): RunTurnRecord[];
+  appendRunTurn(input: {
+    id: string;
+    thread_id: string;
+    kind: 'user' | 'assistant';
+    payload: string;
+  }): RunTurnRecord;
+  updateRunThread(id: string, patch: { title?: string | null }): RunThreadRecord | undefined;
+
+  // agent tokens
+  createAgentToken(input: AgentTokenRecord): AgentTokenRecord;
+  listAgentTokensForUser(user_id: string): AgentTokenRecord[];
+  getAgentTokenForUser(id: string, user_id: string): AgentTokenRecord | undefined;
+  revokeAgentTokenForUser(id: string, user_id: string, revoked_at: string): AgentTokenRecord | undefined;
 
   // jobs
   createJob(input): JobRecord;
@@ -116,6 +140,8 @@ interface StorageAdapter {
 
 - **FK ordering on delete.** Deleting an app MUST cascade to its runs, jobs, secret-policy rows, and creator-secret rows. The SQLite impl uses `ON DELETE CASCADE`; adapters without FK cascades MUST emulate it.
 - **Transaction boundaries.** `createRun` + `updateRun` across the lifecycle of one run MUST be serializable wrt reads. The job worker poll MUST be atomic with `claimJob` — two workers picking the same job is a correctness bug.
+- **Run turns.** `appendRunTurn` MUST append at the next monotonically increasing `turn_index` for the thread and `listRunTurns` MUST return rows in ascending `turn_index` order.
+- **Agent tokens.** `createAgentToken` MUST persist the pre-hashed token only; plaintext tokens never enter storage. `revokeAgentTokenForUser` MUST be idempotent and preserve the first `revoked_at` timestamp.
 - **Tenant scoping.** Every tenant-addressable table filters on `workspace_id`. OSS adapters MAY hardcode `workspace_id = 'local'` but MUST keep the column so the same queries work in Cloud mode.
 - **Idempotency.** `createApp` / `createRun` with a pre-existing id MUST either upsert or throw a deterministic error. Callers retry on network failure.
 

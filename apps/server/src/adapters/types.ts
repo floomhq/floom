@@ -1,5 +1,6 @@
 export type {
   ActionSpec,
+  AgentTokenRecord,
   AppListFilter,
   AppRecord,
   AppVisibility,
@@ -21,9 +22,11 @@ export type {
   OutputSpec,
   OutputType,
   RenderConfig,
+  RunThreadRecord,
   RunListFilter,
   RunRecord,
   RunStatus,
+  RunTurnRecord,
   RuntimeAdapter,
   RuntimeResult,
   CreatorSecretCiphertextRow,
