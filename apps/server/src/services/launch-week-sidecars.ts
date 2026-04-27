@@ -44,7 +44,7 @@ const SIDECARS: LaunchWeekSidecar[] = [
         slug: 'linkedin-roaster',
         display_name: 'LinkedIn Roaster',
         description:
-          'Score a founder or operator LinkedIn profile and return sharper positioning, headline, About rewrite, and post ideas.',
+          'Paste a LinkedIn profile URL and get sharper positioning, headline, About rewrite, and post ideas.',
         category: 'marketing',
         openapiPath: '/linkedin-roaster/openapi.json',
         featured: true,
@@ -53,7 +53,7 @@ const SIDECARS: LaunchWeekSidecar[] = [
         slug: 'yc-pitch-deck-critic',
         display_name: 'YC Pitch Deck Critic',
         description:
-          'Score an early-stage pitch deck narrative and return YC-style objections, rewrites, and next steps.',
+          'Upload a pitch deck outline or text export and get YC-style objections, rewrites, and next steps.',
         category: 'fundraising',
         openapiPath: '/yc-pitch-deck-critic/openapi.json',
         featured: true,
@@ -70,7 +70,7 @@ const SIDECARS: LaunchWeekSidecar[] = [
         slug: 'hook-stats',
         display_name: 'Hook Stats',
         description:
-          'Analyze Claude Code bash-commands.log. Top commands, git stats, per-day activity.',
+          'Upload a Claude Code bash-commands.log and get top commands, git stats, and per-day activity.',
         category: 'productivity',
         openapiPath: '/openapi.json',
         featured: true,
@@ -87,7 +87,7 @@ const SIDECARS: LaunchWeekSidecar[] = [
         slug: 'claude-wrapped',
         display_name: 'Claude Wrapped',
         description:
-          'Spotify Wrapped for Claude Code. Visualize AI coding stats from pasted session transcripts.',
+          'Spotify Wrapped for Claude Code. Upload exported session files and visualize AI coding stats.',
         category: 'productivity',
         openapiPath: '/openapi.json',
         featured: true,
@@ -104,7 +104,7 @@ const SIDECARS: LaunchWeekSidecar[] = [
         slug: 'session-recall',
         display_name: 'Session Recall',
         description:
-          'Search and analyze Claude Code session transcripts. Keyword search, recent messages, and retry-loop report.',
+          'Upload a Claude Code session file and search, recall, or generate a retry-loop report.',
         category: 'productivity',
         openapiPath: '/openapi.json',
         featured: true,
@@ -121,7 +121,7 @@ const SIDECARS: LaunchWeekSidecar[] = [
         slug: 'floom-this',
         display_name: 'Floom This',
         description:
-          'Describe a script or repo and get the Floom app shape: inputs, outputs, build plan, and next step.',
+          'Paste a GitHub repo URL and get the Floom app shape: inputs, outputs, build plan, and next step.',
         category: 'developer-tools',
         openapiPath: '/floom-this/openapi.json',
         featured: true,

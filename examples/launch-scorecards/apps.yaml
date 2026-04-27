@@ -7,12 +7,12 @@ apps:
     type: proxied
     openapi_spec_url: http://localhost:4120/linkedin-roaster/openapi.json
     display_name: LinkedIn Roaster
-    description: "Score a founder or operator LinkedIn profile and return sharper positioning, headline, About rewrite, and post ideas."
+    description: "Paste a LinkedIn profile URL and get sharper positioning, headline, About rewrite, and post ideas."
     category: marketing
 
   - slug: yc-pitch-deck-critic
     type: proxied
     openapi_spec_url: http://localhost:4120/yc-pitch-deck-critic/openapi.json
     display_name: YC Pitch Deck Critic
-    description: "Score an early-stage pitch deck narrative and return a focused diagnosis."
+    description: "Upload a pitch deck outline or text export and return a focused YC-style diagnosis."
     category: fundraising

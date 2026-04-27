@@ -4,7 +4,7 @@
 // Exposes:
 //   GET  /openapi.json → OpenAPI 3.0 spec
 //   GET  /health       → liveness probe
-//   POST /generate     → parse pasted Claude Code .jsonl files and generate
+//   POST /generate     → parse uploaded/pasted Claude Code .jsonl files and generate
 //                        a Spotify-Wrapped-style HTML report
 //
 // Pure Node.js, no external dependencies, no API keys. Drop-in replacement for
@@ -23,7 +23,7 @@ const spec = {
     title: 'Claude Wrapped',
     version: '0.2.0',
     description:
-      'Spotify Wrapped for Claude Code. Visualize your AI coding stats from one or more session JSONL files.',
+      'Spotify Wrapped for Claude Code. Upload an exported session JSONL file and visualize your AI coding stats.',
   },
   servers: [{ url: `http://localhost:${PORT}` }],
   paths: {
@@ -32,19 +32,24 @@ const spec = {
         operationId: 'generate',
         summary: 'Generate a Claude Code Wrapped report',
         description:
-          'Parse pasted Claude Code session JSONL contents and return a Spotify-Wrapped-style HTML report. Separate multiple sessions with a line containing only ---',
+          'Parse an uploaded Claude Code session JSONL file, or pasted JSONL fallback, and return a Spotify-Wrapped-style HTML report.',
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['jsonl_sessions'],
+                required: ['jsonl_sessions_file'],
                 properties: {
+                  jsonl_sessions_file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Claude Code .jsonl session file selected from your machine.',
+                  },
                   jsonl_sessions: {
                     type: 'string',
                     description:
-                      'Full contents of one or more ~/.claude/projects/.../<session>.jsonl files. Separate multiple sessions with a line of only ---',
+                      'Optional pasted JSONL fallback. Separate multiple sessions with a line of only ---',
                   },
                   author: {
                     type: 'string',
@@ -221,6 +226,26 @@ function analyzeWrapped({ jsonlSessions, author, projectSlug }) {
 
 // ---------- HTTP ----------
 
+function decodeUploadedText(value, fieldName) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  if (value.__file !== true || typeof value.content_b64 !== 'string') return '';
+  try {
+    return Buffer.from(value.content_b64, 'base64').toString('utf-8');
+  } catch {
+    throw new Error(`could not decode uploaded ${fieldName}`);
+  }
+}
+
+function resolveJsonlSessions(body) {
+  const uploaded = decodeUploadedText(body.jsonl_sessions_file, 'jsonl_sessions_file');
+  const pasted = typeof body.jsonl_sessions === 'string' ? body.jsonl_sessions : '';
+  const value = uploaded || pasted;
+  if (!value.trim()) {
+    throw new Error("missing required field 'jsonl_sessions_file' or pasted jsonl_sessions");
+  }
+  return value;
+}
+
 async function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -260,13 +285,16 @@ const server = createServer(async (req, res) => {
       } catch {
         return sendJson(res, 400, { error: 'invalid json body' });
       }
-      if (typeof body.jsonl_sessions !== 'string') {
+      let jsonlSessions;
+      try {
+        jsonlSessions = resolveJsonlSessions(body);
+      } catch (error) {
         return sendJson(res, 400, {
-          error: "missing required field 'jsonl_sessions' (string)",
+          error: error.message,
         });
       }
       const result = analyzeWrapped({
-        jsonlSessions: body.jsonl_sessions,
+        jsonlSessions,
         author: body.author || 'Claude Code User',
         projectSlug: body.project_slug || 'my-project',
       });

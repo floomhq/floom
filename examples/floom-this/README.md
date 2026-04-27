@@ -1,6 +1,6 @@
 # Floom This
 
-Day 7 deterministic Floom intake app. It accepts a script or workflow description and returns a zero-token app intake card with a floomability score, suggested slug, required inputs, suggested outputs, build plan, next step, and share card.
+Day 7 deterministic Floom intake app. It accepts a public GitHub repo URL plus optional workflow context and returns a zero-token app intake card with a floomability score, suggested slug, required inputs, suggested outputs, build plan, next step, and share card.
 
 ## Run
 
@@ -35,7 +35,7 @@ The manifest registers one proxied app:
 }
 ```
 
-`script_description` is required. `repo_url`, `input_type`, `desired_output`, and `contact` are optional.
+`repo_url` is required. `script_description`, `input_type`, `desired_output`, and `contact` are optional context.
 
 ## Response
 
@@ -43,7 +43,7 @@ The manifest registers one proxied app:
 {
   "floomability_score": 86,
   "suggested_app_slug": "score-inbound-lead-csv",
-  "required_inputs": ["script_description", "repo_url", "csv_input", "contact"],
+  "required_inputs": ["repo_url", "csv_input", "contact"],
   "suggested_outputs": ["prioritized lead list", "execution_summary", "next_action"],
   "build_plan": [
     "Define the score-inbound-lead-csv request schema around csv input and script_description.",
@@ -59,10 +59,10 @@ The manifest registers one proxied app:
 
 ## Validation
 
-Missing or blank `script_description` returns HTTP 400:
+Missing or blank `repo_url` returns HTTP 400:
 
 ```json
 {
-  "error": "missing required field 'script_description'"
+  "error": "missing required field 'repo_url'"
 }
 ```

@@ -4,7 +4,7 @@
 // Exposes:
 //   GET  /openapi.json  → OpenAPI 3.0 spec describing the `analyze` operation
 //   GET  /health        → liveness probe
-//   POST /analyze       → parse a bash-commands.log and return stats
+//   POST /analyze       → parse an uploaded/pasted bash-commands.log and return stats
 //
 // Pure Node.js, no external dependencies, no API keys. Drop-in replacement for
 // the former docker-hosted bundled app.
@@ -22,7 +22,7 @@ const spec = {
     title: 'Hook Stats',
     version: '0.2.0',
     description:
-      'Analyze your Claude Code bash command log. Top commands, git stats, per-day activity.',
+      'Upload your Claude Code bash command log. Get top commands, git stats, and per-day activity.',
   },
   servers: [{ url: `http://localhost:${PORT}` }],
   paths: {
@@ -31,19 +31,24 @@ const spec = {
         operationId: 'analyze',
         summary: 'Analyze a bash-commands.log',
         description:
-          'Parse a Claude Code bash-commands.log and return top commands, git stats, and per-day activity.',
+          'Parse an uploaded Claude Code bash-commands.log, or pasted log fallback, and return top commands, git stats, and per-day activity.',
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['log_content'],
+                required: ['log_file'],
                 properties: {
+                  log_file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Claude Code bash-commands.log selected from your machine.',
+                  },
                   log_content: {
                     type: 'string',
                     description:
-                      'Full contents of ~/.claude/bash-commands.log. Each line begins with a [timestamp] prefix.',
+                      'Optional pasted log fallback. Each line begins with a [timestamp] prefix.',
                   },
                 },
               },
@@ -165,6 +170,26 @@ function analyzeLog(logContent) {
 
 // ---------- HTTP plumbing ----------
 
+function decodeUploadedText(value, fieldName) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  if (value.__file !== true || typeof value.content_b64 !== 'string') return '';
+  try {
+    return Buffer.from(value.content_b64, 'base64').toString('utf-8');
+  } catch {
+    throw new Error(`could not decode uploaded ${fieldName}`);
+  }
+}
+
+function resolveLogContent(body) {
+  const uploaded = decodeUploadedText(body.log_file, 'log_file');
+  const pasted = typeof body.log_content === 'string' ? body.log_content : '';
+  const value = uploaded || pasted;
+  if (!value.trim()) {
+    throw new Error("missing required field 'log_file' or pasted log_content");
+  }
+  return value;
+}
+
 async function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -206,12 +231,13 @@ const server = createServer(async (req, res) => {
       } catch {
         return sendJson(res, 400, { error: 'invalid json body' });
       }
-      if (typeof body.log_content !== 'string') {
-        return sendJson(res, 400, {
-          error: "missing required field 'log_content' (string)",
-        });
+      let logContent;
+      try {
+        logContent = resolveLogContent(body);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
       }
-      const result = analyzeLog(body.log_content);
+      const result = analyzeLog(logContent);
       return sendJson(res, 200, result);
     }
 

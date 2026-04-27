@@ -7,5 +7,5 @@ apps:
     type: proxied
     openapi_spec_url: http://localhost:4112/openapi.json
     display_name: Session Recall
-    description: "Search and analyze Claude Code session transcripts. Keyword search, recent messages, and retry-loop report."
+    description: "Upload a Claude Code session file and search, recall, or generate a retry-loop report."
     category: productivity

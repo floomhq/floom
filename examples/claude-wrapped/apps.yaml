@@ -7,5 +7,5 @@ apps:
     type: proxied
     openapi_spec_url: http://localhost:4111/openapi.json
     display_name: Claude Wrapped
-    description: "Spotify Wrapped for Claude Code. Visualize your AI coding stats from session transcripts."
+    description: "Spotify Wrapped for Claude Code. Upload exported session files and visualize AI coding stats."
     category: productivity

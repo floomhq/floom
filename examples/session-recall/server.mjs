@@ -22,7 +22,7 @@ const spec = {
     title: 'Session Recall',
     version: '0.2.0',
     description:
-      'Search and analyze Claude Code session transcripts. Keyword search, recent messages, and retry-loop report.',
+      'Upload and analyze Claude Code session transcripts. Keyword search, recent messages, and retry-loop report.',
   },
   servers: [{ url: `http://localhost:${PORT}` }],
   paths: {
@@ -31,18 +31,23 @@ const spec = {
         operationId: 'search',
         summary: 'Keyword search across a session',
         description:
-          'AND-logic keyword search across the events of a pasted Claude Code session .jsonl file.',
+          'AND-logic keyword search across the events of an uploaded Claude Code session .jsonl file.',
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['jsonl_session', 'keywords'],
+                required: ['jsonl_session_file', 'keywords'],
                 properties: {
+                  jsonl_session_file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Claude Code .jsonl session file selected from your machine.',
+                  },
                   jsonl_session: {
                     type: 'string',
-                    description: 'Full contents of a ~/.claude/projects/.../<session>.jsonl file.',
+                    description: 'Optional pasted JSONL fallback.',
                   },
                   keywords: {
                     type: 'string',
@@ -88,9 +93,17 @@ const spec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['jsonl_session'],
+                required: ['jsonl_session_file'],
                 properties: {
-                  jsonl_session: { type: 'string' },
+                  jsonl_session_file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Claude Code .jsonl session file selected from your machine.',
+                  },
+                  jsonl_session: {
+                    type: 'string',
+                    description: 'Optional pasted JSONL fallback.',
+                  },
                   count: { type: 'number', default: 20 },
                 },
               },
@@ -124,8 +137,18 @@ const spec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['jsonl_session'],
-                properties: { jsonl_session: { type: 'string' } },
+                required: ['jsonl_session_file'],
+                properties: {
+                  jsonl_session_file: {
+                    type: 'string',
+                    format: 'binary',
+                    description: 'Claude Code .jsonl session file selected from your machine.',
+                  },
+                  jsonl_session: {
+                    type: 'string',
+                    description: 'Optional pasted JSONL fallback.',
+                  },
+                },
               },
             },
           },
@@ -323,6 +346,26 @@ function report(jsonl) {
 
 // ---------- HTTP ----------
 
+function decodeUploadedText(value, fieldName) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  if (value.__file !== true || typeof value.content_b64 !== 'string') return '';
+  try {
+    return Buffer.from(value.content_b64, 'base64').toString('utf-8');
+  } catch {
+    throw new Error(`could not decode uploaded ${fieldName}`);
+  }
+}
+
+function resolveJsonlSession(body) {
+  const uploaded = decodeUploadedText(body.jsonl_session_file, 'jsonl_session_file');
+  const pasted = typeof body.jsonl_session === 'string' ? body.jsonl_session : '';
+  const value = uploaded || pasted;
+  if (!value.trim()) {
+    throw new Error("missing required field 'jsonl_session_file' or pasted jsonl_session");
+  }
+  return value;
+}
+
 async function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -360,12 +403,18 @@ const server = createServer(async (req, res) => {
       } catch {
         return sendJson(res, 400, { error: 'invalid json body' });
       }
-      if (typeof body.jsonl_session !== 'string' || typeof body.keywords !== 'string') {
+      if (typeof body.keywords !== 'string') {
         return sendJson(res, 400, {
-          error: "missing required fields 'jsonl_session' + 'keywords'",
+          error: "missing required field 'keywords'",
         });
       }
-      return sendJson(res, 200, search(body.jsonl_session, body.keywords, Number(body.max_results) || 15));
+      let jsonlSession;
+      try {
+        jsonlSession = resolveJsonlSession(body);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
+      }
+      return sendJson(res, 200, search(jsonlSession, body.keywords, Number(body.max_results) || 15));
     }
 
     if (req.method === 'POST' && url.pathname === '/recent') {
@@ -375,10 +424,13 @@ const server = createServer(async (req, res) => {
       } catch {
         return sendJson(res, 400, { error: 'invalid json body' });
       }
-      if (typeof body.jsonl_session !== 'string') {
-        return sendJson(res, 400, { error: "missing required field 'jsonl_session'" });
+      let jsonlSession;
+      try {
+        jsonlSession = resolveJsonlSession(body);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
       }
-      return sendJson(res, 200, recent(body.jsonl_session, Number(body.count) || 20));
+      return sendJson(res, 200, recent(jsonlSession, Number(body.count) || 20));
     }
 
     if (req.method === 'POST' && url.pathname === '/report') {
@@ -388,10 +440,13 @@ const server = createServer(async (req, res) => {
       } catch {
         return sendJson(res, 400, { error: 'invalid json body' });
       }
-      if (typeof body.jsonl_session !== 'string') {
-        return sendJson(res, 400, { error: "missing required field 'jsonl_session'" });
+      let jsonlSession;
+      try {
+        jsonlSession = resolveJsonlSession(body);
+      } catch (error) {
+        return sendJson(res, 400, { error: error.message });
       }
-      return sendJson(res, 200, report(body.jsonl_session));
+      return sendJson(res, 200, report(jsonlSession));
     }
 
     sendJson(res, 404, { error: 'not found', path: url.pathname });

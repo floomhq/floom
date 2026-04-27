@@ -2,8 +2,8 @@
 // Floom This - Day 7 deterministic intake app.
 //
 // Pure Node.js sidecar for proxied Floom registration. No npm dependencies,
-// no model calls, no secrets. It converts a script/workflow description into
-// a deterministic app intake card.
+// no model calls, no secrets. It converts a public repo plus optional context
+// into a deterministic Floom app intake card.
 //
 // Run: node examples/floom-this/server.mjs
 // Env: PORT=4117 (default)
@@ -35,14 +35,14 @@ const spec = {
     title: 'Floom This',
     version: '0.1.0',
     description:
-      'Deterministic intake app that turns a script or workflow description into a Floom app plan.',
+      'Deterministic intake app that turns a public repo or script workflow into a Floom app plan.',
   },
   servers: [{ url: `${PUBLIC_BASE}${BASE_PATH}` }],
   paths: {
     '/analyze': {
       post: {
         operationId: 'analyzeFloomThis',
-        summary: 'Analyze a script or workflow for Floom app intake',
+        summary: 'Analyze a repo or script workflow for Floom app intake',
         description:
           'Returns a zero-token deterministic intake card with score, slug, inputs, outputs, build plan, and next step.',
         requestBody: {
@@ -51,15 +51,17 @@ const spec = {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['script_description'],
+                required: ['repo_url'],
                 properties: {
                   repo_url: {
                     type: 'string',
-                    description: 'Optional public or private repository URL for implementation context.',
+                    format: 'uri',
+                    description: 'Public GitHub repository URL, for example https://github.com/floomhq/floom.',
                   },
                   script_description: {
                     type: 'string',
-                    description: 'Required description of the script, workflow, or manual process to Floom.',
+                    description:
+                      'Optional context: which script, CLI command, workflow, or manual process to turn into an app.',
                   },
                   input_type: {
                     type: 'string',
@@ -94,6 +96,7 @@ const spec = {
                     'build_plan',
                     'next_step',
                     'share_card',
+                    'repo_summary',
                   ],
                   properties: {
                     floomability_score: { type: 'number' },
@@ -103,6 +106,7 @@ const spec = {
                     build_plan: { type: 'array', items: { type: 'string' } },
                     next_step: { type: 'string' },
                     share_card: { type: 'string' },
+                    repo_summary: { type: 'string' },
                   },
                 },
               },
@@ -209,6 +213,83 @@ function toSlug(value) {
   return parts.length ? parts.join('-').slice(0, 48) : 'floom-this-app';
 }
 
+function parseGithubRepoUrl(value) {
+  const raw = cleanText(value);
+  if (!raw) throw httpError(400, "missing required field 'repo_url'");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw httpError(400, 'repo_url must be a valid GitHub repository URL');
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (host !== 'github.com') throw httpError(400, 'repo_url must be a github.com repository URL');
+  const [owner, repoWithSuffix] = url.pathname.split('/').filter(Boolean);
+  if (!owner || !repoWithSuffix) throw httpError(400, 'repo_url must include owner and repo');
+  const repo = repoWithSuffix.replace(/\.git$/i, '');
+  return { owner, repo, url: `https://github.com/${owner}/${repo}` };
+}
+
+async function fetchGithubText(url) {
+  const res = await fetch(url, {
+    headers: {
+      accept: 'application/vnd.github.raw',
+      'user-agent': 'floom-launch-week',
+    },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!res.ok) return '';
+  const text = await res.text();
+  return text.slice(0, 16_000);
+}
+
+async function fetchGithubJson(url) {
+  const res = await fetch(url, {
+    headers: {
+      accept: 'application/vnd.github+json',
+      'user-agent': 'floom-launch-week',
+    },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function inspectRepo(repoUrl) {
+  const parsed = parseGithubRepoUrl(repoUrl);
+  const apiBase = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`;
+  const [repo, readme, packageJson] = await Promise.all([
+    fetchGithubJson(apiBase),
+    fetchGithubText(`${apiBase}/readme`),
+    fetchGithubText(`${apiBase}/contents/package.json`),
+  ]);
+  if (!repo) throw httpError(404, 'GitHub repository could not be fetched or is private');
+
+  let packageName = '';
+  let scripts = [];
+  try {
+    if (packageJson) {
+      const pkg = JSON.parse(packageJson);
+      packageName = cleanText(pkg.name);
+      scripts = Object.keys(pkg.scripts || {}).slice(0, 8);
+    }
+  } catch {
+    // package.json can be absent or not JSON in non-JS repos.
+  }
+
+  return {
+    ...parsed,
+    name: cleanText(repo.name) || parsed.repo,
+    description: cleanText(repo.description),
+    language: cleanText(repo.language),
+    topics: Array.isArray(repo.topics) ? repo.topics.slice(0, 8) : [],
+    stars: Number(repo.stargazers_count || 0),
+    packageName,
+    scripts,
+    readmePreview: cleanText(readme).slice(0, 2200),
+  };
+}
+
 function normalizeInputType(inputType, description) {
   const raw = cleanText(inputType).toLowerCase();
   if (INPUT_TYPES.has(raw)) return raw;
@@ -224,9 +305,11 @@ function normalizeInputType(inputType, description) {
 }
 
 function inferRequiredInputs(inputType, hasRepo, hasContact) {
-  const inputs = ['script_description'];
-  if (hasRepo || inputType === 'repo') inputs.push('repo_url');
-  if (inputType !== 'text') inputs.push(inputType === 'mixed' ? 'input_payload' : `${inputType}_input`);
+  const inputs = hasRepo ? ['repo_url'] : ['script_description'];
+  if (!hasRepo && inputType === 'repo') inputs.push('repo_url');
+  if (inputType !== 'text' && !(hasRepo && inputType === 'repo')) {
+    inputs.push(inputType === 'mixed' ? 'input_payload' : `${inputType}_input`);
+  }
   if (hasContact) inputs.push('contact');
   return Array.from(new Set(inputs));
 }
@@ -267,34 +350,46 @@ function scoreFloomability({ description, inputType, desiredOutput, hasRepo }) {
   return Math.max(1, Math.min(100, score));
 }
 
-function buildPlan({ slug, inputType, outputs, hasRepo }) {
+function buildPlan({ slug, inputType, outputs, hasRepo, repo }) {
   const plan = [
-    `Define the ${slug} request schema around ${inputType} input and script_description.`,
+    `Define the ${slug} request schema around ${inputType} input${hasRepo ? ' and repo_url' : ' and script_description'}.`,
     'Implement deterministic validation, normalization, and result formatting.',
     `Return ${outputs.join(', ')} plus a compact share card for handoff.`,
     'Add OpenAPI metadata and smoke tests for success, validation, and health routes.',
   ];
   if (hasRepo) {
-    plan.splice(1, 0, 'Inspect the repository entrypoint and map the current script behavior to a proxied endpoint.');
+    const repoHint = repo?.scripts?.length
+      ? `Detected package scripts: ${repo.scripts.join(', ')}.`
+      : 'Inspect the repository entrypoint and map the current script behavior to a proxied endpoint.';
+    plan.splice(1, 0, repoHint);
   }
   return plan;
 }
 
-function analyze(body) {
-  const scriptDescription = cleanText(body.script_description);
-  if (!scriptDescription) {
-    throw httpError(400, "missing required field 'script_description'");
-  }
-
+async function analyze(body) {
   const repoUrl = cleanText(body.repo_url);
+  const repo = await inspectRepo(repoUrl);
   const contact = cleanText(body.contact);
   const desiredOutput = cleanText(body.desired_output);
-  const inputType = normalizeInputType(body.input_type, scriptDescription);
-  const slug = toSlug(scriptDescription);
-  const outputs = inferOutputs(desiredOutput, scriptDescription);
+  const scriptDescription = cleanText(body.script_description);
+  const repoContext = [
+    repo.name,
+    repo.description,
+    repo.language,
+    repo.topics.join(' '),
+    repo.packageName,
+    repo.scripts.join(' '),
+    scriptDescription,
+    repo.readmePreview,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const inputType = normalizeInputType(body.input_type, repoContext);
+  const slug = toSlug(scriptDescription || repo.name || repo.repo);
+  const outputs = inferOutputs(desiredOutput, repoContext);
   const requiredInputs = inferRequiredInputs(inputType, Boolean(repoUrl), Boolean(contact));
   const floomabilityScore = scoreFloomability({
-    description: scriptDescription,
+    description: repoContext,
     inputType,
     desiredOutput,
     hasRepo: Boolean(repoUrl),
@@ -304,6 +399,7 @@ function analyze(body) {
     inputType,
     outputs,
     hasRepo: Boolean(repoUrl),
+    repo,
   });
   const nextStep =
     floomabilityScore >= 75
@@ -317,11 +413,20 @@ function analyze(body) {
     suggested_outputs: outputs,
     build_plan: plan,
     next_step: nextStep,
+    repo_summary: [
+      `${repo.owner}/${repo.repo}`,
+      repo.description || 'No repository description provided.',
+      repo.language ? `Primary language: ${repo.language}` : '',
+      repo.scripts.length ? `Scripts: ${repo.scripts.join(', ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
     share_card: [
       `Floom This: ${slug}`,
       `Score: ${floomabilityScore}/100`,
       `Input: ${inputType}`,
       `Outputs: ${outputs.join(', ')}`,
+      `Repo: ${repo.url}`,
       contact ? `Contact: ${contact}` : 'Contact: not provided',
     ].join('\n'),
   };
@@ -351,7 +456,7 @@ const server = createServer(async (req, res) => {
       }
 
       try {
-        return sendJson(res, 200, analyze(body));
+        return sendJson(res, 200, await analyze(body));
       } catch (err) {
         return sendJson(res, err.statusCode || 500, { error: err.message || 'internal error' });
       }

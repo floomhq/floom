@@ -9,7 +9,8 @@
 //   POST /linkedin-roaster/score
 //   POST /yc-pitch-deck-critic/score
 //
-// Pure Node.js, no external dependencies, no API keys.
+// Pure Node.js, no external dependencies. LinkedIn URL scraping uses APIFY_API_KEY
+// when configured, with pasted profile text as a deterministic fallback.
 //
 // Run: node examples/launch-scorecards/server.mjs
 // Env: PORT=4120 (default)
@@ -17,7 +18,12 @@
 import { createServer } from 'node:http';
 
 const PORT = Number(process.env.PORT || 4120);
-const MAX_BODY_BYTES = 256 * 1024;
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
+const APIFY_BASE_URL = 'https://api.apify.com/v2';
+const LINKEDIN_ACTOR_ID =
+  process.env.APIFY_LINKEDIN_ACTOR_ID || 'harvestapi~linkedin-profile-scraper';
+const APIFY_TIMEOUT_MS = Number(process.env.APIFY_LINKEDIN_TIMEOUT_MS || 45_000);
+const APIFY_POLL_MS = Number(process.env.APIFY_LINKEDIN_POLL_MS || 2_500);
 
 function appSpec({ title, description, path, operationId, inputProperties, required }) {
   return {
@@ -103,14 +109,21 @@ function scorecardSchema() {
 const linkedinSpec = appSpec({
   title: 'LinkedIn Roaster',
   description:
-    'Score a founder or operator LinkedIn profile for positioning clarity, specificity, credibility, and conversion intent.',
+    'Paste a LinkedIn profile URL. The app fetches the public profile, then scores positioning clarity, specificity, credibility, and conversion intent.',
   path: '/linkedin-roaster/score',
   operationId: 'scoreLinkedinProfile',
-  required: ['profile_text'],
+  required: ['linkedin_url'],
   inputProperties: {
+    linkedin_url: {
+      type: 'string',
+      format: 'uri',
+      description:
+        'Public LinkedIn profile URL, for example https://www.linkedin.com/in/federicodeponte/.',
+    },
     profile_text: {
       type: 'string',
-      description: 'Pasted LinkedIn profile text, including headline, About section, experience, or featured summary.',
+      description:
+        'Optional fallback text if the profile cannot be fetched. Include headline, About, experience, or featured summary.',
     },
     audience: {
       type: 'string',
@@ -128,15 +141,21 @@ const linkedinSpec = appSpec({
 const deckSpec = appSpec({
   title: 'YC Pitch Deck Critic',
   description:
-    'Score an early-stage pitch deck narrative for YC-style clarity, urgency, insight, market, traction, and ask.',
+    'Upload an early-stage deck outline or text export and score it for YC-style clarity, urgency, insight, market, traction, and ask.',
   path: '/yc-pitch-deck-critic/score',
   operationId: 'scorePitchDeck',
-  required: ['deck'],
+  required: ['deck_file'],
   inputProperties: {
+    deck_file: {
+      type: 'string',
+      format: 'binary',
+      description:
+        'Deck text export, Markdown outline, or slide transcript selected from your machine.',
+    },
     deck: {
       type: 'string',
       description:
-        'Pitch deck text, slide outline, or pasted narrative. Slide headings improve the diagnosis.',
+        'Optional pasted deck fallback. Slide headings improve the diagnosis.',
     },
     company: {
       type: 'string',
@@ -195,9 +214,201 @@ function scoreBand(score) {
   return 'Needs a sharper core';
 }
 
-function scoreLinkedinProfile(body) {
-  const profile = String(body.profile_text || '').trim();
-  if (!profile) throw new Error('profile_text is required');
+function httpError(statusCode, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+function normalizeLinkedinUrl(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+
+  let candidate = raw;
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = candidate.includes('linkedin.com/')
+      ? `https://${candidate}`
+      : `https://www.linkedin.com/in/${candidate.replace(/^@/, '')}`;
+  }
+
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw httpError(400, 'linkedin_url must be a valid LinkedIn profile URL or handle');
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (host !== 'linkedin.com' || !url.pathname.toLowerCase().startsWith('/in/')) {
+    throw httpError(400, 'linkedin_url must point to a public linkedin.com/in/... profile');
+  }
+
+  url.protocol = 'https:';
+  url.hostname = 'www.linkedin.com';
+  url.search = '';
+  url.hash = '';
+  return url.toString().replace(/\/$/, '');
+}
+
+function apifyToken() {
+  return process.env.APIFY_API_KEY || process.env.APIFY_TOKEN || '';
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function apifyJson(url, options = {}) {
+  const token = apifyToken();
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      ...(options.headers || {}),
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const text = await res.text();
+  let json = {};
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text.slice(0, 500) };
+    }
+  }
+  if (!res.ok) {
+    throw httpError(res.status, `Apify returned HTTP ${res.status}`);
+  }
+  return json;
+}
+
+async function fetchLinkedinProfile(linkedinUrl) {
+  if (!apifyToken()) {
+    throw httpError(
+      503,
+      'LinkedIn URL fetch is not configured. Set APIFY_API_KEY or provide profile_text as fallback.',
+    );
+  }
+
+  const started = await apifyJson(
+    `${APIFY_BASE_URL}/acts/${encodeURIComponent(LINKEDIN_ACTOR_ID)}/runs`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ urls: [linkedinUrl] }),
+    },
+  );
+  const runId = started?.data?.id;
+  if (!runId) throw httpError(502, 'Apify did not return an actor run id');
+
+  const deadline = Date.now() + APIFY_TIMEOUT_MS;
+  let run = started.data;
+  while (Date.now() < deadline) {
+    if (['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'].includes(run.status)) break;
+    await sleep(APIFY_POLL_MS);
+    const polled = await apifyJson(`${APIFY_BASE_URL}/actor-runs/${runId}`);
+    run = polled.data || run;
+  }
+
+  if (run.status !== 'SUCCEEDED') {
+    throw httpError(504, `LinkedIn profile fetch did not complete in time (${run.status || 'pending'})`);
+  }
+
+  const items = await apifyJson(`${APIFY_BASE_URL}/actor-runs/${runId}/dataset/items`);
+  const profile = Array.isArray(items) ? items[0] : null;
+  if (!profile || typeof profile !== 'object') {
+    throw httpError(502, 'LinkedIn profile fetch returned no profile data');
+  }
+  return profile;
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function summarizeExperience(profile) {
+  const experience = profile.experience || profile.positions || profile.jobs || [];
+  if (!Array.isArray(experience)) return '';
+  return experience
+    .slice(0, 5)
+    .map((job) => {
+      if (!job || typeof job !== 'object') return '';
+      const title = firstString(job.title, job.position, job.role);
+      const company = firstString(job.companyName, job.company, job.organization);
+      const description = firstString(job.description, job.summary);
+      return [title, company, description].filter(Boolean).join(' — ');
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function profileToText(profile, linkedinUrl) {
+  const fullName = firstString(profile.fullName, profile.name, profile.firstName);
+  const headline = firstString(profile.headline, profile.occupation, profile.title);
+  const about = firstString(profile.about, profile.summary, profile.description, profile.bio);
+  const location = firstString(profile.location, profile.addressWithoutCountry, profile.geoLocationName);
+  const currentCompany = firstString(
+    profile.currentCompany,
+    profile.currentCompanyName,
+    profile.companyName,
+  );
+  const experiences = summarizeExperience(profile);
+  return [
+    fullName && `Name: ${fullName}`,
+    headline && `Headline: ${headline}`,
+    location && `Location: ${location}`,
+    currentCompany && `Current company: ${currentCompany}`,
+    about && `About:\n${about}`,
+    experiences && `Experience:\n${experiences}`,
+    `LinkedIn: ${linkedinUrl}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+async function resolveLinkedinProfileText(body) {
+  const fallback = String(body.profile_text || '').trim();
+  const linkedinUrl = normalizeLinkedinUrl(body.linkedin_url);
+  if (!linkedinUrl && fallback) {
+    return {
+      profile: fallback,
+      linkedinUrl: '',
+      source: 'pasted_profile_text',
+      scrapeStatus: 'not_requested',
+    };
+  }
+  if (!linkedinUrl) throw httpError(400, 'linkedin_url is required');
+
+  try {
+    const scraped = await fetchLinkedinProfile(linkedinUrl);
+    return {
+      profile: profileToText(scraped, linkedinUrl),
+      linkedinUrl,
+      source: 'apify_linkedin_profile',
+      scrapeStatus: 'succeeded',
+    };
+  } catch (error) {
+    if (fallback) {
+      return {
+        profile: fallback,
+        linkedinUrl,
+        source: 'pasted_profile_text',
+        scrapeStatus: `fallback_after_${error.statusCode || 'fetch'}_error`,
+      };
+    }
+    throw error;
+  }
+}
+
+async function scoreLinkedinProfile(body) {
+  const resolved = await resolveLinkedinProfileText(body);
+  const profile = resolved.profile;
+  if (!profile) throw httpError(400, 'linkedin_url or profile_text is required');
 
   const audience = String(body.audience || 'startup founders').trim();
   const goal = String(body.goal || 'drive relevant inbound messages').trim();
@@ -303,6 +514,9 @@ function scoreLinkedinProfile(body) {
 
   const finalScore = clampScore(score);
   return {
+    linkedin_url: resolved.linkedinUrl || undefined,
+    profile_source: resolved.source,
+    scrape_status: resolved.scrapeStatus,
     score: finalScore,
     verdict: scoreBand(finalScore),
     diagnosis:
@@ -337,9 +551,34 @@ function scoreLinkedinProfile(body) {
   };
 }
 
+function decodeUploadedText(value, fieldName) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  if (value.__file !== true || typeof value.content_b64 !== 'string') return '';
+  const name = typeof value.name === 'string' ? value.name.toLowerCase() : '';
+  const mime = typeof value.mime_type === 'string' ? value.mime_type.toLowerCase() : '';
+  if (name.endsWith('.pdf') || name.endsWith('.pptx') || mime.includes('pdf') || mime.includes('presentation')) {
+    throw httpError(
+      400,
+      `${fieldName} needs a text export, Markdown outline, or slide transcript for this deterministic launch app.`,
+    );
+  }
+  try {
+    return Buffer.from(value.content_b64, 'base64').toString('utf-8');
+  } catch {
+    throw httpError(400, `could not decode uploaded ${fieldName}`);
+  }
+}
+
+function resolveDeckText(body) {
+  const uploaded = decodeUploadedText(body.deck_file, 'deck_file');
+  const pasted = typeof body.deck === 'string' ? body.deck : '';
+  const deck = (uploaded || pasted).trim();
+  if (!deck) throw httpError(400, "missing required field 'deck_file' or pasted deck");
+  return deck;
+}
+
 function scorePitchDeck(body) {
-  const deck = String(body.deck || '').trim();
-  if (!deck) throw new Error('deck is required');
+  const deck = resolveDeckText(body);
 
   const company = String(body.company || 'Startup').trim();
   const stage = String(body.stage || 'pre-seed').trim();
@@ -486,9 +725,9 @@ async function route(req, res) {
 
   if (req.method === 'POST' && pathname === '/linkedin-roaster/score') {
     try {
-      sendJson(res, 200, scoreLinkedinProfile(await readJson(req)));
+      sendJson(res, 200, await scoreLinkedinProfile(await readJson(req)));
     } catch (error) {
-      sendJson(res, 400, { error: error.message });
+      sendJson(res, error.statusCode || 400, { error: error.message });
     }
     return;
   }
@@ -497,7 +736,7 @@ async function route(req, res) {
     try {
       sendJson(res, 200, scorePitchDeck(await readJson(req)));
     } catch (error) {
-      sendJson(res, 400, { error: error.message });
+      sendJson(res, error.statusCode || 400, { error: error.message });
     }
     return;
   }

@@ -7,5 +7,5 @@ apps:
     type: proxied
     openapi_spec_url: http://localhost:4110/openapi.json
     display_name: Hook Stats
-    description: "Analyze your Claude Code bash-commands.log. Top commands, git stats, per-day activity."
+    description: "Upload a Claude Code bash-commands.log and get top commands, git stats, and per-day activity."
     category: productivity
