@@ -13,8 +13,7 @@ import {
   isByokGated,
   recordFreeRun,
 } from './byok-gate.js';
-// TODO(adapters): migrate this legacy sync secret read to SecretsAdapter.
-import * as userSecrets from '../services/user_secrets.js';
+import { adapters } from '../adapters/index.js';
 import type { SessionContext } from '../types.js';
 
 export const USER_API_KEY_HEADER = 'x-user-api-key';
@@ -108,25 +107,27 @@ export function runGate(
   return { ok: true };
 }
 
-function hasUserVaultGeminiKey(ctx: SessionContext): boolean {
+async function hasUserVaultGeminiKey(ctx: SessionContext): Promise<boolean> {
   try {
-    return userSecrets.listMasked(ctx).some((secret) => secret.key === 'GEMINI_API_KEY');
+    const value = await adapters.secrets.get(ctx, 'GEMINI_API_KEY');
+    return value !== null && value.length > 0;
   } catch {
     return false;
   }
 }
 
-export function runByokGate(
+export async function runByokGate(
   c: Context,
   ctx: SessionContext,
   slug: string,
   providedApiKey: string | null,
   options: { allowUserVaultKey?: boolean } = {},
-): RunByokGateResult {
+): Promise<RunByokGateResult> {
   if (!isByokGated(slug) || hasValidAdminBearer(c)) return { ok: true };
 
   const hasProvidedKey = providedApiKey !== null;
-  const hasVaultKey = options.allowUserVaultKey === true && hasUserVaultGeminiKey(ctx);
+  const hasVaultKey =
+    options.allowUserVaultKey === true && (await hasUserVaultGeminiKey(ctx));
   const ip = extractIp(c);
   const uaHash = hashUserAgent(c.req.header('user-agent'));
   const decision = decideByok(ip, slug, hasProvidedKey || hasVaultKey, undefined, uaHash);

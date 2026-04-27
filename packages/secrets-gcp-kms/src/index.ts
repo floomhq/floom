@@ -41,6 +41,12 @@ type SecretStorage = Required<
 const OPERATOR_SECRET_WORKSPACE_ID = 'operator';
 
 interface TestableSecretsAdapter extends SecretsAdapter {
+  setCreatorOverrideSecret(
+    app_id: string,
+    workspace_id: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void>;
   __setCreatorOverrideForTests?(
     app_id: string,
     workspace_id: string,
@@ -289,6 +295,19 @@ export function createGcpKmsSecretsAdapter(
         keys.map((key) => creatorSecretStorageKey(app_id, key)),
       );
       return await decryptRows(kms, rows);
+    },
+
+    async setCreatorOverrideSecret(
+      app_id: string,
+      workspace_id: string,
+      key: string,
+      plaintext: string,
+    ): Promise<void> {
+      await storage.setEncryptedSecret(
+        { workspace_id },
+        creatorSecretStorageKey(app_id, key),
+        await encryptSecret(kms, plaintext),
+      );
     },
 
     async __setCreatorOverrideForTests(

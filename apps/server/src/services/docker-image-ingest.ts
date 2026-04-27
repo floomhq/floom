@@ -24,14 +24,14 @@
 //
 // Secret bindings:
 //   - The creator declares `{ "IG_SESSIONID": "<vault-key>" }` at ingest time.
-//     The value is the name of a key in the creator's user_secrets vault that
+//     The value is the name of a key in the creator's user vault that
 //     should be mirrored into the container's env as IG_SESSIONID at run time.
 //   - At runtime the creator-secrets layer (see services/runner.ts) reads the
 //     vault value and injects it. We persist the binding as a 'creator_override'
-//     policy row + a copy of the plaintext secret in app_creator_secrets for
-//     the app's workspace. If the creator hasn't set that vault key yet, we
-//     still write the policy row; the run just errors cleanly with
-//     missing_secret instead of the creator discovering at run time.
+//     policy row + a copy of the plaintext secret for the app's workspace. If
+//     the creator hasn't set that vault key yet, we still write the policy row;
+//     the run just errors cleanly with missing_secret instead of the creator
+//     discovering at run time.
 import Docker from 'dockerode';
 import { db } from '../db.js';
 import { adapters } from '../adapters/index.js';
@@ -40,11 +40,6 @@ import { generateLinkShareToken } from '../lib/link-share-token.js';
 import { normalizeManifest, ManifestError } from './manifest.js';
 import { slugify, SlugTakenError, deriveSlugSuggestions } from './openapi-ingest.js';
 import { auditLog } from './audit-log.js';
-// Creator value mutation remains in the legacy service until that plaintext
-// write surface is part of SecretsAdapter.
-import { setCreatorSecret } from './app_creator_secrets.js';
-// TODO(adapters): migrate this legacy sync vault read to SecretsAdapter.
-import * as userSecrets from './user_secrets.js';
 import type { NormalizedManifest, SessionContext } from '../types.js';
 
 export const DOCKER_PUBLISH_FLAG = 'FLOOM_ENABLE_DOCKER_PUBLISH';
@@ -81,7 +76,7 @@ export class DockerImageIngestError extends Error {
 }
 
 /**
- * A user-supplied binding: container env var name → user_secrets vault key.
+ * A user-supplied binding: container env var name → user vault key.
  * At run time the creator-override layer reads the vault value and injects it
  * into the container's environment as `envKey`.
  *
@@ -91,6 +86,33 @@ export class DockerImageIngestError extends Error {
  * user's vault and set IG_SESSIONID=<that value> in the container env."
  */
 export type SecretBindings = Record<string, string>;
+
+interface CreatorOverrideWritableSecretsAdapter {
+  setCreatorOverrideSecret?(
+    app_id: string,
+    workspace_id: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void>;
+}
+
+async function setCreatorOverrideSecretViaAdapter(
+  app_id: string,
+  workspace_id: string,
+  key: string,
+  plaintext: string,
+): Promise<void> {
+  const secrets = adapters.secrets as typeof adapters.secrets &
+    CreatorOverrideWritableSecretsAdapter;
+  const write = secrets.setCreatorOverrideSecret;
+  if (!write) {
+    throw new DockerImageIngestError(
+      'secrets_adapter_missing_creator_override_writer',
+      'Secrets adapter does not support creator override writes.',
+    );
+  }
+  await write.call(secrets, app_id, workspace_id, key, plaintext);
+}
 
 /**
  * Minimum shape we accept in `manifest`. Callers who already know the Floom
@@ -340,9 +362,9 @@ export async function ingestAppFromDockerImage(args: {
    */
   manifest?: unknown;
   /**
-   * Map of container env var name → vault key in the caller's user_secrets.
+   * Map of container env var name → vault key in the caller's user vault.
    * Each binding becomes a creator_override policy row + a copy of the
-   * current vault value in app_creator_secrets. If the caller has no vault
+   * current vault value in creator-owned secret storage. If the caller has no vault
    * row for a referenced key we persist the binding anyway; runs will error
    * with missing_secret until the vault is populated.
    */
@@ -572,7 +594,7 @@ export async function ingestAppFromDockerImage(args: {
   // Wire secret bindings. Each (envKey → vaultKey) becomes:
   //   1. a placeholder row in `secrets` so the per-app secrets UI sees it
   //   2. a 'creator_override' policy row so the runner uses the creator's value
-  //   3. a copy of the current vault plaintext in `app_creator_secrets`
+  //   3. a copy of the current vault plaintext in creator-owned storage
   //      (re-encrypted under the app's workspace DEK). Absent vault row ⇒
   //      skip step 3; runs will surface missing_secret until the creator
   //      populates their vault and republishes.
@@ -585,9 +607,14 @@ export async function ingestAppFromDockerImage(args: {
       // If no vault row exists OR we have no session ctx (OSS tests), we skip.
       if (args.ctx) {
         try {
-          const plaintext = userSecrets.get(args.ctx, vaultKey);
+          const plaintext = await adapters.secrets.get(args.ctx, vaultKey);
           if (plaintext && plaintext.length > 0) {
-            setCreatorSecret(appId, args.workspace_id, envKey, plaintext);
+            await setCreatorOverrideSecretViaAdapter(
+              appId,
+              args.workspace_id,
+              envKey,
+              plaintext,
+            );
           }
         } catch (err) {
           // Vault errors are cosmetic at ingest time; the run itself will

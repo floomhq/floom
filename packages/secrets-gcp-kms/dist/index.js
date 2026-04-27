@@ -140,6 +140,9 @@ export function createGcpKmsSecretsAdapter(opts) {
             const rows = await loadEncryptedRows(storage, workspace_id, keys.map((key) => creatorSecretStorageKey(app_id, key)));
             return await decryptRows(kms, rows);
         },
+        async setCreatorOverrideSecret(app_id, workspace_id, key, plaintext) {
+            await storage.setEncryptedSecret({ workspace_id }, creatorSecretStorageKey(app_id, key), await encryptSecret(kms, plaintext));
+        },
         async __setCreatorOverrideForTests(app_id, workspace_id, key, plaintext) {
             await storage.setEncryptedSecret({ workspace_id }, creatorSecretStorageKey(app_id, key), await encryptSecret(kms, plaintext));
         },

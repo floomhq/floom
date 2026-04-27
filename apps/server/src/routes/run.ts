@@ -255,7 +255,7 @@ runRouter.post('/', async (c) => {
   // treated the same for launch — cloud auth'd callers share the same budget
   // as anon. We can split later if abuse materializes.
   const userApiKey = extractUserApiKey(c);
-  const byokGate = runByokGate(c, ctx, row.slug, userApiKey);
+  const byokGate = await runByokGate(c, ctx, row.slug, userApiKey);
   if (!byokGate.ok) return runGateResponse(c, byokGate);
 
   // W4M.1: scope the run by the current session so /api/me/runs can filter
@@ -603,7 +603,7 @@ slugRunRouter.post('/', async (c) => {
   // self-host), so it shares the same 5-free-runs-then-BYOK rule for the
   // 3 hero demo apps.
   const userApiKeySlug = extractUserApiKey(c);
-  const byokGate = runByokGate(c, ctx, row.slug, userApiKeySlug);
+  const byokGate = await runByokGate(c, ctx, row.slug, userApiKeySlug);
   if (!byokGate.ok) return runGateResponse(c, byokGate);
 
   // W4M.1: scope the run by the current session. `ctx` already resolved

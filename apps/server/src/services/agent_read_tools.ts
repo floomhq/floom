@@ -355,7 +355,7 @@ export async function runApp(
   const byokInput = isByokGated(app.slug)
     ? extractByokInputSecret(rawInputs)
     : { apiKey: null, inputs: rawInputs };
-  const byok = runByokGate(
+  const byok = await runByokGate(
     c,
     ctx,
     app.slug,

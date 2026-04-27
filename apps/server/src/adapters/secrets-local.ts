@@ -26,9 +26,27 @@ import {
   listMasked as userListMasked,
   loadForRun as userLoadForRun,
 } from '../services/user_secrets.js';
-import { loadCreatorSecretsForRun } from '../services/app_creator_secrets.js';
+import {
+  loadCreatorSecretsForRun,
+  setCreatorSecret,
+} from '../services/app_creator_secrets.js';
 
-export const localSecretsAdapter: SecretsAdapter = {
+type LocalSecretsAdapter = SecretsAdapter & {
+  setCreatorOverrideSecret(
+    app_id: string,
+    workspace_id: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void>;
+  __setCreatorOverrideForTests(
+    app_id: string,
+    workspace_id: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void>;
+};
+
+export const localSecretsAdapter: LocalSecretsAdapter = {
   get(ctx: SessionContext, key: string): Promise<string | null> {
     return Promise.resolve(userGet(ctx, key));
   },
@@ -183,5 +201,25 @@ export const localSecretsAdapter: SecretsAdapter = {
     keys: string[],
   ): Promise<Record<string, string>> {
     return Promise.resolve(loadCreatorSecretsForRun(app_id, workspace_id, keys));
+  },
+
+  setCreatorOverrideSecret(
+    app_id: string,
+    workspace_id: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void> {
+    setCreatorSecret(app_id, workspace_id, key, plaintext);
+    return Promise.resolve();
+  },
+
+  __setCreatorOverrideForTests(
+    app_id: string,
+    workspace_id: string,
+    key: string,
+    plaintext: string,
+  ): Promise<void> {
+    setCreatorSecret(app_id, workspace_id, key, plaintext);
+    return Promise.resolve();
   },
 };
