@@ -35,7 +35,7 @@ agentsRouter.get('/apps', async (c) => {
   const ctx = await resolveUserContext(c);
   try {
     return c.json(
-      discoverApps(c, ctx, {
+      await discoverApps(c, ctx, {
         category: c.req.query('category'),
         q: c.req.query('q'),
         limit: numericLimit(c.req.query('limit')),
@@ -110,7 +110,7 @@ agentsRouter.get('/runs/:run_id', async (c) => {
 agentsRouter.get('/apps/:slug/skill', async (c) => {
   const ctx = await resolveUserContext(c);
   try {
-    return c.json(getAppSkill(c, ctx, c.req.param('slug')));
+    return c.json(await getAppSkill(c, ctx, c.req.param('slug')));
   } catch (err) {
     const { status, body, headers } = agentToolErrorBody(err);
     return jsonError(body, status, headers);

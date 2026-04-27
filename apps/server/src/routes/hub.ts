@@ -794,7 +794,7 @@ const HIDDEN_SLUGS: Set<string> = new Set(
     .filter(Boolean),
 );
 
-hubRouter.get('/', (c) => {
+hubRouter.get('/', async (c) => {
   const category = c.req.query('category');
   const sort = c.req.query('sort') || 'default';
   // Issue #144: `?include_fixtures=true` bypasses the E2E/PRR fixture
@@ -819,12 +819,6 @@ hubRouter.get('/', (c) => {
   //   4. name asc        — deterministic tiebreak
   // `sort=name`, `sort=newest`, `sort=category` remain supported for
   // creator views that want a predictable lexical order.
-  let orderBy =
-    'apps.featured DESC, (apps.avg_run_ms IS NULL) ASC, apps.avg_run_ms ASC, apps.created_at DESC, apps.name ASC';
-  if (sort === 'name') orderBy = 'apps.name ASC';
-  if (sort === 'newest') orderBy = 'apps.created_at DESC';
-  if (sort === 'category') orderBy = 'apps.category, apps.name';
-
   // Public directory: only apps with visibility='public' (or NULL for
   // legacy rows). Private apps are surfaced exclusively via /api/hub/mine.
   // Manual publish-review gate (#362): only 'published' apps are listed.
@@ -836,34 +830,55 @@ hubRouter.get('/', (c) => {
   // no separate column. The 5-second /api/hub in-memory cache absorbs
   // the repeated cost in practice. `stars`, `hero`, `thumbnail_url` are
   // plain row columns (see db.ts migration 2026-04-23).
-  const sql = `SELECT apps.*,
-                      users.name AS author_name,
-                      users.email AS author_email,
-                      (
-                        SELECT COUNT(*) FROM runs
-                         WHERE runs.app_id = apps.id
-                           AND date(runs.started_at) >= date('now','-6 days')
-                      ) AS runs_7d
-                 FROM apps
-                 LEFT JOIN users ON apps.author = users.id
-                 WHERE apps.status = 'active'
-                   AND (
-                     apps.visibility = 'public_live'
-                     OR (apps.visibility = 'public' AND apps.publish_status = 'published')
-                     OR (apps.visibility IS NULL AND apps.publish_status = 'published')
-                   )
-                   ${category ? 'AND apps.category = ?' : ''}
-                 ORDER BY ${orderBy}`;
-  // Product-specific: public hub listing joins author metadata and rollup counts.
-  const rowsAll = (category
-    ? db.prepare(sql).all(category)
-    : db.prepare(sql).all()) as Array<
-    AppRecord & {
-      author_name: string | null;
-      author_email: string | null;
-      runs_7d: number;
-    }
-  >;
+  const allApps = await adapters.storage.listApps();
+  const allRuns = await adapters.storage.listRuns();
+  const cutoffDate = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const runs7dByApp = new Map<string, number>();
+  for (const run of allRuns) {
+    if (run.started_at.slice(0, 10) < cutoffDate) continue;
+    runs7dByApp.set(run.app_id, (runs7dByApp.get(run.app_id) || 0) + 1);
+  }
+  const authorIds = Array.from(new Set(allApps.map((app) => app.author).filter(Boolean))) as string[];
+  const authorRows = await Promise.all(authorIds.map((id) => adapters.storage.getUser(id)));
+  const authors = new Map<string, { id: string; name: string | null; email: string | null }>();
+  for (const user of authorRows) {
+    if (user) authors.set(user.id, user);
+  }
+  const rowsAll = allApps
+    .filter((app) => {
+      if (app.status !== 'active') return false;
+      if (category && app.category !== category) return false;
+      return (
+        app.visibility === 'public_live' ||
+        (app.visibility === 'public' && app.publish_status === 'published') ||
+        (app.visibility === null && app.publish_status === 'published')
+      );
+    })
+    .map((app) => {
+      const author = app.author ? authors.get(app.author) : undefined;
+      return {
+        ...app,
+        author_name: author?.name ?? null,
+        author_email: author?.email ?? null,
+        runs_7d: runs7dByApp.get(app.id) || 0,
+      };
+    })
+    .sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'newest') return Date.parse(b.created_at) - Date.parse(a.created_at);
+      if (sort === 'category') {
+        return (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name);
+      }
+      return (
+        Number(b.featured) - Number(a.featured) ||
+        Number(a.avg_run_ms === null) - Number(b.avg_run_ms === null) ||
+        (a.avg_run_ms ?? 0) - (b.avg_run_ms ?? 0) ||
+        Date.parse(b.created_at) - Date.parse(a.created_at) ||
+        a.name.localeCompare(b.name)
+      );
+    });
 
   // Apply FLOOM_STORE_HIDE_SLUGS server-side filter first. This is the
   // canonical place to hide apps from the public directory; the

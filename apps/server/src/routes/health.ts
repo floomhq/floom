@@ -6,12 +6,9 @@ import { adapters } from '../adapters/index.js';
 
 export const healthRouter = new Hono();
 
-healthRouter.get('/', (c) => {
+healthRouter.get('/', async (c) => {
   try {
-    // Ops-specific: health check reports local row counts, not protocol storage behavior.
-    const appCount = (db.prepare('SELECT COUNT(*) as c FROM apps').get() as {
-      c: number;
-    }).c;
+    const appCount = (await adapters.storage.listApps()).length;
     // Ops-specific: health check reports local row counts, not protocol storage behavior.
     const threadCount = (db.prepare('SELECT COUNT(*) as c FROM run_threads').get() as {
       c: number;

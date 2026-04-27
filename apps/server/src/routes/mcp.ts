@@ -12,7 +12,6 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { adapters } from '../adapters/index.js';
-import { db } from '../db.js';
 import { newRunId, newJobId } from '../lib/ids.js';
 import { validateInputs, ManifestError } from '../services/manifest.js';
 import { dispatchRun, getRun } from '../services/runner.js';
@@ -883,15 +882,22 @@ function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer
       // MCP list_apps exposes public apps plus the caller's own apps. This
       // keeps freshly-ingested private apps discoverable to the creator without
       // leaking another user's private slug.
-      let sql =
-        "SELECT * FROM apps WHERE status = 'active'" +
-        " AND (visibility = 'public_live' OR visibility = 'public' OR visibility IS NULL OR author = ?)" +
-        (category ? ' AND category = ?' : '') +
-        ' ORDER BY featured DESC, name ASC';
-      // Product-specific: MCP gallery mixes public discovery with caller-owned private apps.
-      const rows = (category
-        ? db.prepare(sql).all(ctx.user_id, category)
-        : db.prepare(sql).all(ctx.user_id)) as AppRecord[];
+      const rows = (await adapters.storage.listApps())
+        .filter((app) => {
+          if (app.status !== 'active') return false;
+          if (category && app.category !== category) return false;
+          return (
+            app.visibility === 'public_live' ||
+            app.visibility === 'public' ||
+            app.visibility === null ||
+            app.author === ctx.user_id
+          );
+        })
+        .sort(
+          (a, b) =>
+            Number(b.featured) - Number(a.featured) ||
+            a.name.localeCompare(b.name),
+        );
       // Issue #144: strip E2E / PRR / audit test fixtures from MCP gallery
       // listings so Claude Desktop + Cursor clients don't surface them in
       // discovery. Same regex as server /api/hub. Fixtures are still
@@ -1100,7 +1106,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ category, q, limit, cursor }) => {
       recordMcpToolCall('discover_apps');
       try {
-        return mcpJson(discoverApps(c, ctx, { category, q, limit, cursor }));
+        return mcpJson(await discoverApps(c, ctx, { category, q, limit, cursor }));
       } catch (err) {
         return mcpError(err);
       }
@@ -1120,7 +1126,7 @@ function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
     async ({ slug }) => {
       recordMcpToolCall('get_app_skill');
       try {
-        return mcpJson(getAppSkill(c, ctx, slug));
+        return mcpJson(await getAppSkill(c, ctx, slug));
       } catch (err) {
         return mcpError(err);
       }
