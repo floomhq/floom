@@ -1,21 +1,11 @@
-// MVP stub: /studio/overview and /studio/apps — replaced with ComingSoon for launch.
+// MVP stub: /studio/overview and /studio/apps → redirect for launch.
 
-import { WorkspacePageShell } from '../components/WorkspacePageShell';
-import { ComingSoon } from '../components/ComingSoon';
+import { Navigate } from 'react-router-dom';
 
-/** Legacy v25 home — kept at /studio/overview for back-compat. */
 export function StudioHomePage() {
-  return (
-    <WorkspacePageShell mode="studio" title="Studio · Floom">
-      <ComingSoon feature="Studio" />
-    </WorkspacePageShell>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 export function StudioAppsPage() {
-  return (
-    <WorkspacePageShell mode="studio" title="Studio apps · Floom">
-      <ComingSoon feature="Studio apps" />
-    </WorkspacePageShell>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
