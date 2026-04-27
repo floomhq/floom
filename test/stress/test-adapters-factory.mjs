@@ -44,6 +44,7 @@ function storageModuleSource({
   kind = 'storage',
   protocolVersion = '^0.2',
   missingMethods = [],
+  useAsyncCreate = false,
 } = {}) {
   return `
 const adapter = {
@@ -151,16 +152,25 @@ for (const method of ${JSON.stringify(missingMethods)}) {
   delete adapter[method];
 }
 
+async function create() {
+  await Promise.resolve();
+  return adapter;
+}
+
 export default {
   kind: ${JSON.stringify(kind)},
   name: 'tmp-storage',
   protocolVersion: ${JSON.stringify(protocolVersion)},
-  adapter,
+  ${useAsyncCreate ? 'create,' : 'adapter,'}
 };
 `;
 }
 
 writeFileSync(join(tmp, 'tmp-mock-storage.mjs'), storageModuleSource());
+writeFileSync(
+  join(tmp, 'tmp-mock-storage-async-create.mjs'),
+  storageModuleSource({ useAsyncCreate: true }),
+);
 writeFileSync(
   join(tmp, 'tmp-mock-bad-kind.mjs'),
   storageModuleSource({ kind: 'runtime' }),
@@ -342,6 +352,22 @@ log(
     dynamicBundle &&
     typeof dynamicBundle.storage.getApp === 'function',
   dynamicLoadError instanceof Error ? dynamicLoadError.message : String(dynamicLoadError),
+);
+
+process.env.FLOOM_STORAGE = './tmp-mock-storage-async-create.mjs';
+let asyncCreateBundle;
+let asyncCreateError;
+try {
+  asyncCreateBundle = await createAdapters();
+} catch (e) {
+  asyncCreateError = e;
+}
+log(
+  'dynamic storage adapter async create() loads via import()',
+  asyncCreateError === undefined &&
+    asyncCreateBundle &&
+    typeof asyncCreateBundle.storage.getApp === 'function',
+  asyncCreateError instanceof Error ? asyncCreateError.message : String(asyncCreateError),
 );
 
 process.env.FLOOM_STORAGE = './tmp-mock-missing-append-turn.mjs';
