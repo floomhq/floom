@@ -67,7 +67,7 @@ export function LoginPage() {
     rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//')
       ? rawNext
       : null;
-  const nextPath = safeNext || (mode === 'signup' ? '/studio/build' : '/run');
+  const nextPath = safeNext || '/me/agent-keys';
 
   // If the user is already logged in (cloud mode) redirect away.
   useEffect(() => {
