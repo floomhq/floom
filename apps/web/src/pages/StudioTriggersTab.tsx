@@ -1,18 +1,9 @@
-// MVP stub: /studio/:slug/triggers — replaced with ComingSoon for launch.
+// MVP stub: /studio/:slug/triggers → redirect for launch.
 
-import { useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
-import { StudioAppTabs } from './StudioAppPage';
-import { ComingSoon } from '../components/ComingSoon';
+import { Navigate } from 'react-router-dom';
 
 export function StudioAppTriggersPage() {
-  const { slug = '' } = useParams<{ slug: string }>();
-  return (
-    <StudioLayout title="Triggers · Studio · Floom" activeAppSlug={slug} activeSubsection="triggers">
-      <StudioAppTabs slug={slug} active="triggers" />
-      <ComingSoon feature="Triggers" />
-    </StudioLayout>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 export function StudioTriggersTab() {
