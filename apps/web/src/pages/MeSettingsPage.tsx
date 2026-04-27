@@ -1,14 +1,9 @@
-// MVP stub: /settings/general — replaced with ComingSoon for launch.
+// MVP stub: /settings/general → redirect for launch.
 
-import { WorkspacePageShell } from '../components/WorkspacePageShell';
-import { ComingSoon } from '../components/ComingSoon';
+import { Navigate } from 'react-router-dom';
 
 export function AccountSettingsPage() {
-  return (
-    <WorkspacePageShell mode="settings" title="Account settings · Floom">
-      <ComingSoon feature="Account settings" />
-    </WorkspacePageShell>
-  );
+  return <Navigate to="/me/agent-keys" replace />;
 }
 
 export function MeSettingsPage() {
