@@ -4,14 +4,12 @@ import { useLocation } from 'react-router-dom';
 
 // v26 "Copy for Claude" affordance. Globally visible button + tabbed popover.
 //
-// Federico v26 review: the stacked 3-row layout (MCP config + CLI + context)
-// was "a bit overwhelming". Fix: tabbed segmented control.
-//   - Default tab: Claude (most common).
-//   - Tabs: Claude / Cursor / Codex / CLI
-//   - One snippet per tab, one Copy button.
-//   - Mobile: horizontally-scrollable tab strip.
+// launch-mvp: collapsed to MCP + CLI tabs only.
+//   - MCP tab: single canonical JSON config block (works with all MCP clients).
+//   - CLI tab: install + auth login snippet.
+//   - Drop per-client variants (Claude/Cursor/Codex) — they were identical.
 
-type TabId = 'claude' | 'cursor' | 'codex' | 'cli';
+type TabId = 'mcp' | 'cli';
 
 interface TabSpec {
   id: TabId;
@@ -25,21 +23,9 @@ const CLI_SNIPPET = 'curl -fsSL https://floom.dev/install.sh | bash\nfloom auth 
 
 const TABS: TabSpec[] = [
   {
-    id: 'claude',
-    label: 'Claude',
-    description: 'Claude Desktop / Claude Code · claude_mcp_config.json',
-    snippet: MCP_JSON,
-  },
-  {
-    id: 'cursor',
-    label: 'Cursor',
-    description: 'Cursor · cursor_mcp_config.json',
-    snippet: MCP_JSON,
-  },
-  {
-    id: 'codex',
-    label: 'Codex',
-    description: 'OpenAI Codex CLI · .codex/mcp.json',
+    id: 'mcp',
+    label: 'MCP',
+    description: 'Works with Claude Desktop, Cursor, Codex, any MCP client',
     snippet: MCP_JSON,
   },
   {
@@ -56,7 +42,7 @@ interface Props {
 
 export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>('claude');
+  const [activeTab, setActiveTab] = useState<TabId>('mcp');
   const [copied, setCopied] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -214,9 +200,9 @@ export function CopyForClaudeButton({ variant = 'desktop' }: Props = {}) {
         </pre>
         {activeTab === 'cli' && (
           <p style={{ fontSize: 11, color: 'var(--muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
-            Get your agent token in{' '}
-            <a href="/settings/agent-tokens" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>
-              Settings &rarr; Agent tokens
+            Get your agent token on your{' '}
+            <a href="/home" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>
+              home page
             </a>
           </p>
         )}
