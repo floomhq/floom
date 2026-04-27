@@ -114,7 +114,7 @@ export function SettingsAgentTokensPage() {
                 <div>
                   <div style={monoStrongStyle}>{token.label}</div>
                   <div style={mutedSmallStyle}>
-                    <span>floom_agent_••••••</span> · {token.scope} · Issued by {token.issued_by_user_id || 'workspace member'}
+                    <span>{token.prefix ? `${token.prefix}••••••` : 'floom_agent_••••••'}</span> · {token.scope} · Issued by {token.issued_by_user_id || 'workspace member'}
                   </div>
                   <div style={mutedSmallStyle}>
                     Created {new Date(token.created_at).toLocaleString()}
