@@ -534,11 +534,6 @@ export function AppPermalinkPage() {
     return raw.length > 22 ? `${raw.slice(0, 20)}…` : raw;
   }, [app]);
 
-  const publishedRelative = useMemo(() => {
-    if (!app?.published_at) return null;
-    return formatRelativeTime(app.published_at);
-  }, [app]);
-
   /** Truthy manifest / hub fields as compact chips (Issue #284). */
   const capabilityChips = useMemo(() => {
     if (!app) return [] as Array<{ key: string; label: string }>;
@@ -816,65 +811,7 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-        {/* v17 frame: 18px-radius white card wrapping the whole app page
-            (browser chrome · compact app-header · content body · chip row).
-            Shadow is quiet so the frame reads as a chip, not a popover. */}
-        <div
-          className="app-page-frame"
-          style={{
-            background: 'var(--card)',
-            border: '1px solid var(--line)',
-            borderRadius: 18,
-            overflow: 'hidden',
-            boxShadow: '0 1px 3px rgba(22,21,18,.04), 0 4px 20px rgba(22,21,18,.06)',
-          }}
-        >
-          {/* Browser chrome (wireframe parity, 2026-04-24): 3 traffic-light
-              dots + URL pill showing the current host + /p/<slug>.
-              Decorative — no interactive behavior. Mirrors the wireframe's
-              .chrome block so the app page reads as "your app, hosted
-              here". We derive the host from window.location so preview
-              (preview.floom.dev), self-host installs, and custom domains
-              all render their real address instead of a hardcoded
-              floom.dev string. SSR / tests without a window fall back to
-              a slug-only path so React doesn't throw. */}
-          <div
-            data-testid="permalink-chrome"
-            aria-hidden="true"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '10px 14px',
-              borderBottom: '1px solid var(--line)',
-              background: 'var(--bg)',
-            }}
-          >
-            <span style={{ width: 10, height: 10, borderRadius: 999, background: '#d1d5db' }} />
-            <span style={{ width: 10, height: 10, borderRadius: 999, background: '#d1d5db' }} />
-            <span style={{ width: 10, height: 10, borderRadius: 999, background: '#d1d5db' }} />
-            <div
-              className="permalink-chrome-url"
-              style={{
-                flex: 1,
-                margin: '0 12px',
-                fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-                fontSize: 11,
-                color: 'var(--muted)',
-                background: 'var(--card)',
-                border: '1px solid var(--line)',
-                borderRadius: 6,
-                padding: '4px 10px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {(typeof window !== 'undefined' ? window.location.host : '')}/p/{app.slug}{runIdFromUrl ? `?run=${runIdFromUrl}` : ''}
-            </div>
-          </div>
-
-          {/* v17 compact app-header: 40px flat tile + 17px title + 13px
+          {/* v26 compact app-header: 64px flat tile + 28px title + 14px
               muted description + right-aligned CTA cluster (version
               meta, Schedule, Share). Replaces the prior 2026-04-21
               radial-gradient hero. Test-ids preserved so analytics +
@@ -885,17 +822,16 @@ export function AppPermalinkPage() {
             style={{
               display: 'flex',
               alignItems: 'flex-start',
-              gap: 14,
-              padding: '18px 24px 16px',
-              borderBottom: '1px solid var(--line)',
+              gap: 18,
+              padding: '28px 24px 24px',
               flexWrap: 'wrap',
             }}
           >
             <div
               style={{
-                width: 40,
-                height: 40,
-                borderRadius: 11,
+                width: 64,
+                height: 64,
+                borderRadius: 16,
                 background: 'var(--bg)',
                 border: '1px solid var(--line)',
                 display: 'flex',
@@ -905,20 +841,17 @@ export function AppPermalinkPage() {
                 flexShrink: 0,
               }}
             >
-              <AppIcon slug={app.slug} size={22} />
+              <AppIcon slug={app.slug} size={30} />
             </div>
             <div className="permalink-hero-title" style={{ flex: 1, minWidth: 0 }}>
               <h1
                 style={{
-                  fontSize: 17,
+                  fontSize: 28,
                   fontWeight: 700,
                   color: 'var(--ink)',
                   margin: 0,
-                  lineHeight: 1.25,
-                  letterSpacing: '-0.01em',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  lineHeight: 1.15,
+                  letterSpacing: '-0.02em',
                 }}
               >
                 {app.name}
@@ -928,100 +861,51 @@ export function AppPermalinkPage() {
                   data-testid="hero-description"
                   title={headerDescription}
                   style={{
-                    fontSize: 13,
+                    fontSize: 14.5,
                     color: 'var(--muted)',
-                    margin: '2px 0 0',
+                    margin: '6px 0 0',
                     lineHeight: 1.5,
-                    // v23 PR-D: allow up to 2 lines (was nowrap+ellipsis).
-                    // The launch-demo HERO_SUBHEAD copy is intentionally
-                    // sentence-shaped and would clip mid-word at narrow
-                    // widths under the old single-line ellipsis. Two-line
-                    // clamp keeps the hero compact without truncating the
-                    // sales-tone subhead.
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitBoxOrient: 'vertical',
-                    WebkitLineClamp: 2,
-                    maxWidth: '100%',
+                    maxWidth: 640,
                   }}
                 >
                   {headerDescription}
                 </p>
               )}
-              {/* v17 parity round 2 (2026-04-24, #644): meta row (version ·
-                  by @handle · age · rating) moved from the actions column
-                  into its own line under the description. Used to wrap
-                  onto 2+ rows when crammed next to the Share button on
-                  narrow widths. Now it sits on one line on desktop,
-                  wraps cleanly on mobile, and never fights the Share CTA
-                  for horizontal space. */}
+              {/* v26 pill-stats meta row */}
               <div
                 data-testid="hero-version-meta"
                 className="permalink-hero-version-meta"
                 style={{
-                  fontSize: 11,
-                  color: 'var(--muted)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 6,
                   flexWrap: 'wrap',
-                  marginTop: 8,
-                  rowGap: 4,
+                  marginTop: 10,
                 }}
               >
-                <span
-                  title="Published release of this app"
-                  data-testid="hero-version"
-                  style={{
-                    padding: '2px 7px',
-                    borderRadius: 6,
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    color: 'var(--ink)',
-                    background: 'var(--bg)',
-                    border: '1px solid var(--line)',
-                    fontFamily: 'JetBrains Mono, ui-monospace, monospace',
-                    letterSpacing: '0.02em',
-                  }}
-                >
-                  v{app.version ?? '0.1.0'}
-                </span>
-                <span
-                  data-testid="hero-version-status"
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                  }}
-                >
-                  {app.version_status ?? 'stable'}
-                </span>
-                {heroHandle && (
-                  <>
-                    <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
-                    <span data-testid="hero-handle" style={{ fontSize: 11 }}>
-                      by @{heroHandle}
-                    </span>
-                  </>
+                {app.runs_7d != null && app.runs_7d > 0 && (
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)' }}>
+                    {app.runs_7d.toLocaleString()} runs · 7d
+                  </span>
                 )}
-                {publishedRelative && (
-                  <>
-                    <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
-                    <span data-testid="hero-published" style={{ fontSize: 11 }}>
-                      {publishedRelative}
-                    </span>
-                  </>
+                {app.category && (
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)' }}>
+                    {app.category}
+                  </span>
                 )}
                 {summary && summary.count > 0 && (
-                  <>
-                    <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <StarsRow value={summary.avg} size={12} />
-                      {summary.avg.toFixed(1)} ({summary.count})
-                    </span>
-                  </>
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <StarsRow value={summary.avg} size={11} />
+                    {summary.avg.toFixed(1)}
+                  </span>
+                )}
+                <span data-testid="hero-version" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>
+                  v{app.version ?? '0.1.0'} · {app.version_status ?? 'stable'}
+                </span>
+                {heroHandle && (
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)' }}>
+                    by @{heroHandle}
+                  </span>
                 )}
               </div>
               {capabilityChips.length > 0 && (
@@ -1069,6 +953,49 @@ export function AppPermalinkPage() {
                 flexWrap: 'wrap',
               }}
             >
+              {/* v26 Install in workspace CTA */}
+              {session ? (
+                <button
+                  type="button"
+                  disabled
+                  title="Install coming soon"
+                  data-testid="cta-install-workspace"
+                  style={{
+                    padding: '8px 14px',
+                    border: '1px solid var(--ink)',
+                    borderRadius: 10,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: '#fff',
+                    background: 'var(--ink)',
+                    cursor: 'not-allowed',
+                    fontFamily: 'inherit',
+                    opacity: 0.5,
+                  }}
+                >
+                  + Install in workspace
+                </button>
+              ) : (
+                <a
+                  href="/login"
+                  data-testid="cta-install-anon"
+                  style={{
+                    padding: '8px 14px',
+                    border: '1px solid var(--ink)',
+                    borderRadius: 10,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: '#fff',
+                    background: 'var(--ink)',
+                    textDecoration: 'none',
+                    fontFamily: 'inherit',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  Sign in to install
+                </a>
+              )}
               {/* PR #761 front-door: "Install as Claude Skill" trigger
                   for the /p/:slug/skill.md backend route. Same chrome as
                   the Share button so the two CTAs read as a pair (no new
@@ -1182,8 +1109,8 @@ export function AppPermalinkPage() {
           >
             {([
               { id: 'run' as PTab, label: 'Run' },
-              { id: 'about' as PTab, label: 'About this app' },
-              { id: 'install' as PTab, label: 'Install in Claude' },
+              { id: 'about' as PTab, label: 'About' },
+              { id: 'install' as PTab, label: 'Install' },
               { id: 'source' as PTab, label: 'Source' },
             ]).map((t) => {
               const isOn = activeTab === t.id;
@@ -1321,6 +1248,49 @@ export function AppPermalinkPage() {
                   onResetInitialRun={handleResetInitialRun}
                   onResult={handleRunResult}
                 />
+                {/* v26 3-card footer */}
+                <div
+                  data-testid="ap-foot-grid"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 12,
+                    marginTop: 32,
+                    paddingTop: 24,
+                    borderTop: '1px solid var(--line)',
+                  }}
+                >
+                  {(['about', 'install', 'source'] as const).map((tabId) => (
+                    <button
+                      key={tabId}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(tabId);
+                        setSearchParams((prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.set('tab', tabId);
+                          return next;
+                        }, { replace: true });
+                      }}
+                      style={{
+                        background: 'var(--bg)',
+                        border: '1px solid var(--line)',
+                        borderRadius: 12,
+                        padding: '16px 18px',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>
+                        {tabId === 'about' ? 'About' : tabId === 'install' ? 'Install' : 'Source'}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
+                        {tabId === 'about' ? 'Learn how this app works' : tabId === 'install' ? 'Add to Claude Desktop' : 'View source & OpenAPI spec'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
                 {celebrate && (
                   <CelebrationCard
                     slug={app.slug}
@@ -1699,9 +1669,6 @@ export function AppPermalinkPage() {
           </section>
         )}
           </div>
-          {/* /frame body */}
-        </div>
-        {/* /frame */}
       </main>
       <Footer />
       <FeedbackButton />
@@ -1732,30 +1699,6 @@ export function AppPermalinkPage() {
 }
 
 /* ----------------- small components ----------------- */
-
-function formatRelativeTime(iso: string): string | null {
-  try {
-    const d = new Date(iso);
-    const t = d.getTime();
-    if (Number.isNaN(t)) return null;
-    // Clamp negative diffs (future timestamps / clock skew) to 0 so we
-    // never render `-Nm ago`. See lib/time.ts for the same guard.
-    const diff = Math.max(0, Date.now() - t);
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    const months = Math.floor(days / 30);
-    if (months < 12) return `${months}mo ago`;
-    const years = Math.floor(days / 365);
-    return `${years}y ago`;
-  } catch {
-    return null;
-  }
-}
 
 function ArrowRight() {
   return (
