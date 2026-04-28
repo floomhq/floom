@@ -47,6 +47,8 @@ export function LoginPage() {
   const oauthErrorParam = searchParams.get('error');
 
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
+  // Wireframe: ?from=draft shows a green saved-draft banner above the login card.
+  const fromDraft = searchParams.get('from') === 'draft';
 
   useEffect(() => {
     if (oauthErrorParam) {
@@ -257,6 +259,24 @@ export function LoginPage() {
         <p style={{ fontSize: 14, color: 'var(--muted)', margin: '0 0 24px', textAlign: 'center' }}>
           {mode === 'signup' ? '30 seconds. Free for launch.' : 'One account. Run apps, ship apps, all in one place.'}
         </p>
+
+        {fromDraft && (
+          <div
+            data-testid="auth-saved-draft-banner"
+            style={{
+              background: '#ecfdf5',
+              border: '1px solid #b7ebd3',
+              color: '#065f46',
+              borderRadius: 10,
+              padding: '12px 16px',
+              fontSize: 13,
+              marginBottom: 16,
+              lineHeight: 1.5,
+            }}
+          >
+            ✓ Your draft is saved. Sign in to deploy it.
+          </div>
+        )}
 
         {hasSavedDraft && (
           <div
