@@ -20,6 +20,12 @@ REPO_DIR="$INSTALL_ROOT/repo"
 BIN_DIR="${FLOOM_BIN_DIR:-$HOME/.local/bin}"
 TARGET="$BIN_DIR/floom"
 
+# Detect which host the user installed from. The server templates
+# FLOOM_INSTALL_HOST into this line at request time so installs from
+# mvp.floom.dev automatically point at mvp.floom.dev, not floom.dev.
+# Users can override by setting FLOOM_INSTALL_HOST before running this.
+INSTALL_HOST="${FLOOM_INSTALL_HOST:-https://floom.dev}"
+
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "install.sh: missing required tool: $1" >&2
@@ -31,6 +37,9 @@ need git
 need curl
 
 mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
+
+# Record the install host so `floom auth login` defaults to the right api_url.
+echo "$INSTALL_HOST" > "$INSTALL_ROOT/default-host"
 
 if [[ -d "$REPO_DIR/.git" ]]; then
   echo "updating existing clone at $REPO_DIR"
