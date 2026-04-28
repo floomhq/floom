@@ -847,8 +847,8 @@ export function AppPermalinkPage() {
           >
             <div
               style={{
-                width: 52,
-                height: 52,
+                width: 64,
+                height: 64,
                 borderRadius: 14,
                 background: 'var(--bg)',
                 border: '1px solid var(--line)',
@@ -864,7 +864,7 @@ export function AppPermalinkPage() {
             <div className="permalink-hero-title" style={{ flex: 1, minWidth: 0 }}>
               <h1
                 style={{
-                  fontSize: 24,
+                  fontSize: 28,
                   fontWeight: 700,
                   color: 'var(--ink)',
                   margin: 0,
