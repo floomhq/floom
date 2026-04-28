@@ -255,9 +255,19 @@ async def _assert_public_hostname(url: str) -> None:
 
 
 async def _fetch_url(url: str) -> tuple[str, str, bytes]:
+    # 2026-04-28 (R9 reliability fix): bot-shaped UA was 403'd by some
+    # marketing sites (openai.com, several Cloudflare-fronted SaaS). A
+    # conventional browser UA gets through. We still self-identify via
+    # X-Floom-App so server logs can pin the source.
     headers = {
-        "User-Agent": "floom-ai-readiness-audit/1.0",
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "X-Floom-App": "ai-readiness-audit/1.0 (+https://floom.dev)",
         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+        "Accept-Language": "en-US,en;q=0.9",
     }
     timeout = httpx.Timeout(FETCH_TIMEOUT_S)
     async with httpx.AsyncClient(

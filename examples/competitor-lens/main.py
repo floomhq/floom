@@ -316,11 +316,51 @@ def _load_sample_cache() -> dict[str, Any]:
     return entries or {}
 
 
+def _meta_blob(soup: BeautifulSoup) -> str:
+    """Stitch <meta description / og:* / twitter:*> together as a fallback for
+    JS-hydrated SPAs that ship empty bodies. Many landing pages put their
+    real positioning in og:title + og:description, which is the same signal
+    Gemini needs."""
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    def _push(value: str | None) -> None:
+        if not value:
+            return
+        cleaned = _clean_text(value)
+        if not cleaned:
+            return
+        key = cleaned.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        parts.append(cleaned)
+
+    for selector, attr in (
+        ('meta[name="description"]', "content"),
+        ('meta[name="twitter:title"]', "content"),
+        ('meta[name="twitter:description"]', "content"),
+        ('meta[property="og:title"]', "content"),
+        ('meta[property="og:description"]', "content"),
+        ('meta[property="og:site_name"]', "content"),
+    ):
+        for tag in soup.select(selector):
+            _push(tag.get(attr))
+
+    return "\n".join(parts)
+
+
 def _extract_main_text(html_bytes: bytes) -> tuple[str, str]:
     soup = BeautifulSoup(html_bytes, "html.parser")
     title = ""
     if soup.title:
         title = _clean_text(soup.title.get_text(" ", strip=True))
+
+    # Capture meta-description/og fallbacks BEFORE we decompose() drop-tags,
+    # otherwise <head> meta tags inside dropped containers (rare but possible)
+    # are lost. Meta-blob is a non-empty signal even when the SPA body is
+    # essentially empty pre-hydration.
+    meta_blob = _meta_blob(soup)
 
     for tag in DROP_TAGS:
         for node in soup.find_all(tag):
@@ -362,7 +402,18 @@ def _extract_main_text(html_bytes: bytes) -> tuple[str, str]:
         lines = fallback
 
     combined = "\n".join(lines).strip()[:MAX_TEXT_CHARS]
-    if len(combined) < 200:
+
+    # 2026-04-28 (R9 reliability fix): if the body extraction returned almost
+    # nothing — typical for JS-hydrated SPAs that defer real content to client
+    # rendering — fall back to the meta/OG description blob. Many landing
+    # pages encode their entire positioning pitch in <meta> tags for social
+    # previews. Combined with the title, that's enough signal for the
+    # comparison even when the rendered DOM is mostly skeleton.
+    if len(combined) < 200 and meta_blob:
+        prefix = combined + ("\n" if combined else "")
+        combined = (prefix + meta_blob)[:MAX_TEXT_CHARS]
+
+    if len(combined) < 120:
         raise AnalysisError(
             "Couldn't extract enough readable page text. Try a homepage or pricing page."
         )
@@ -763,9 +814,20 @@ async def _analyze_async(your_url: str, competitor_url: str) -> dict[str, Any]:
 
             inputs = await _validate_public_hosts(inputs)
 
+            # 2026-04-28 (R9 reliability fix): some marketing sites (openai.com,
+            # several Cloudflare-fronted SaaS) 403 the bot-shaped UA. A
+            # conventional browser UA gets through. We also identify
+            # ourselves via X-Floom-App so server logs/abuse triage can still
+            # pin the source.
             headers = {
-                "User-Agent": "floom-competitor-lens/1.0 (+https://floom.dev)",
-                "Accept": "text/html,application/xhtml+xml",
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0.0.0 Safari/537.36"
+                ),
+                "X-Floom-App": "competitor-lens/1.0 (+https://floom.dev)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
             }
             timeout = httpx.Timeout(connect=2.0, read=FETCH_TIMEOUT_S, write=2.0, pool=1.0)
             # HTTP/1.1 is fine for fetching 2 pages. Dropped http2=True to
