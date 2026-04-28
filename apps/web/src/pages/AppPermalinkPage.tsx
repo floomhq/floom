@@ -1005,7 +1005,7 @@ export function AppPermalinkPage() {
               <button
                 type="button"
                 data-testid="cta-install-claude-skill"
-                aria-label="Install as Claude Skill"
+                aria-label="Install as Skill"
                 onClick={() => setClaudeSkillModalOpen(true)}
                 style={{
                   padding: '8px 12px',
@@ -1022,7 +1022,7 @@ export function AppPermalinkPage() {
                   gap: 6,
                 }}
               >
-                <ClaudeSkillIcon /> Install as Claude Skill
+                <ClaudeSkillIcon /> Install as Skill
               </button>
               <button
                 type="button"
