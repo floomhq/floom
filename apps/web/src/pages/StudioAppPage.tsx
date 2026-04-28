@@ -6,7 +6,8 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
+import { StudioAppTabs } from '../components/StudioAppTabs';
 import { AppHeader } from './MeAppPage';
 import * as api from '../api/client';
 import { refreshMyApps } from '../hooks/useMyApps';
@@ -137,11 +138,11 @@ export function StudioAppPage() {
   }, [slug, nav]);
 
   return (
-    <StudioLayout
+    <WorkspacePageShell
+      mode="studio"
       title={app ? `${app.name} · Studio` : 'App · Studio'}
-      activeAppSlug={slug}
-      activeSubsection="overview"
     >
+      <StudioAppTabs slug={slug ?? ''} activeTab="overview" />
       {error && (
         <div
           data-testid="studio-app-error"
@@ -521,7 +522,7 @@ export function StudioAppPage() {
           </div>
         </div>
       )}
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 
