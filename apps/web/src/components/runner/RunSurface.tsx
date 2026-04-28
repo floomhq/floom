@@ -1216,7 +1216,6 @@ export function RunSurface({
           title" — we do it INSIDE the run-card so it scopes to this
           surface and doesn't fight the page-level breadcrumb hero. */}
       <RunStatusHeader
-        appName={app.name}
         phase={state.phase}
         runStartedAt={runStartedAt}
         run={state.run}
@@ -1522,7 +1521,6 @@ function RunStatusPill({
 }
 
 function RunStatusHeader({
-  appName: _appName,
   phase,
   runStartedAt,
   run,
@@ -1531,7 +1529,6 @@ function RunStatusHeader({
   onRun,
   runLabel,
 }: {
-  appName: string;
   phase: Phase;
   runStartedAt: number | null;
   run: RunRecord | undefined;
