@@ -192,24 +192,17 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
 /**
  * R7.7 — true if the cascade returned a multi-section composite that
  * owns its own Done badge inside the master sticky toolbar (so the
- * outer run-header should be suppressed). We inspect the React element's
- * data-multi prop rather than threading a flag back through the cascade.
+ * outer run-header should be suppressed). CompositeOutputCard tags
+ * itself with a static `__floomCompositeCard` property so this check
+ * survives bundle minification (which strips Function#name).
  */
 function cascadeIsMultiComposite(element: unknown): boolean {
   if (!element || typeof element !== 'object') return false;
-  // ReactElement has a stable .props shape; CompositeOutputCard renders
-  // the outermost node with data-multi="true". When the cascade returns
-  // any other component (e.g. CompetitorTiles, ScoredRowsTable), they
-  // don't carry that attribute and the legacy run-header keeps rendering.
-  // CompositeOutputCard itself sets data-multi via its outer div, but
-  // the React element here IS CompositeOutputCard — the data attribute
-  // lives on the rendered DOM, not the component. Detect by component
-  // displayName instead.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const el = element as any;
   const t = el.type;
   if (typeof t === 'function') {
-    return t.name === 'CompositeOutputCard' || t.displayName === 'CompositeOutputCard';
+    return t.__floomCompositeCard === true;
   }
   return false;
 }

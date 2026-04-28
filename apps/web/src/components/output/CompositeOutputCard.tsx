@@ -61,6 +61,10 @@ export function CompositeOutputCard({
   runId,
 }: CompositeOutputCardProps) {
   const [fullscreen, setFullscreen] = useState(false);
+  // R7.7: stable identifier for cascadeIsMultiComposite() — minified
+  // bundle drops Function#name, so we attach a literal flag the caller
+  // can read off the React element type.
+  // (set after declaration, see end of file)
 
   // Walk runOutput once: collect every (key, rows) pair that looks like
   // a table for the master Download-all-CSVs action. Memoised because
@@ -213,3 +217,10 @@ function triggerDownload(csv: string, fileName: string) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// Stable marker so OutputPanel can detect "the cascade returned the
+// composite card with its own Done badge" and suppress the outer
+// run-header. Minified bundle drops Function#name so we attach a
+// literal flag instead.
+(CompositeOutputCard as unknown as { __floomCompositeCard: true }).__floomCompositeCard = true;
+CompositeOutputCard.displayName = 'CompositeOutputCard';
