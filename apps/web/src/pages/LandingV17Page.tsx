@@ -748,8 +748,8 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               }}
             >
               {totalAppsCount > 0
-                ? `${totalAppsCount} apps live on Floom. All MIT-licensed, all self-hostable.`
-                : 'All MIT-licensed, all self-hostable.'}
+                ? `${totalAppsCount} AI apps. Free to run on Floom's Gemini key.`
+                : "Free to run on Floom's Gemini key."}
             </p>
             <div
               className="mvp-directory-grid"

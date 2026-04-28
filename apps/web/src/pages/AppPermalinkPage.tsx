@@ -1704,7 +1704,7 @@ export function AppPermalinkPage() {
               </div>
               <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px' }}>Run this app on your own infra.</h3>
               <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 12px', lineHeight: 1.55 }}>
-                MIT-licensed. One Docker command, free forever. Bring your own API key.
+                One Docker command. Bring your own API key. Yours forever.
               </p>
               <SourceSnippet
                 value={`docker run -e GEMINI_BYOK=$KEY -p 3000:3000 ghcr.io/floomhq/${app.slug}:latest`}
