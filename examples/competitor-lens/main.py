@@ -34,7 +34,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
-FETCH_TIMEOUT_S = 5.0
+# 2026-04-28 (R9): bumped 5s → 8s. Modern Next.js / Webflow marketing
+# sites are 1-2.5MB with the meta tags we need past byte 500KB. With the
+# new 1.5MB cap, slow tail fetches need a bit more headroom.
+FETCH_TIMEOUT_S = 8.0
 # Benchmarked 2026-04-25: 2.5-flash-lite + JSON schema returns in 1-3s.
 # Re-benchmarked 2026-04-28 (R9 launch): observed 6-9s tail latency on
 # generativelanguage.googleapis.com under load. Bumped total budget so a
@@ -525,7 +528,7 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> FetchedPage:
                     )
     except asyncio.TimeoutError as exc:
         raise FriendlyTimeoutError(
-            "One of the URLs took longer than 5 seconds to load. Try lighter pages and retry."
+            "One of the URLs took longer than 8 seconds to load. Try lighter pages and retry."
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise AnalysisError(
@@ -844,13 +847,20 @@ async def _analyze_async(your_url: str, competitor_url: str) -> dict[str, Any]:
                 timeout=timeout,
             ) as client:
                 _log("fetching URLs")
-                your_page, competitor_page = await asyncio.gather(
-                    _fetch_page(client, inputs.your_url),
-                    _fetch_page(client, inputs.competitor_url),
-                )
+                try:
+                    your_page, competitor_page = await asyncio.gather(
+                        _fetch_page(client, inputs.your_url),
+                        _fetch_page(client, inputs.competitor_url),
+                    )
+                except AppError as exc:
+                    # 2026-04-28 (R9 diag): make the failing URL visible in
+                    # logs so we can tell which side of the diff died.
+                    _log(f"fetch failed: {type(exc).__name__}: {exc.message}")
+                    raise
                 _log(
                     "fetched "
-                    f"{your_page.byte_count} bytes / {competitor_page.byte_count} bytes"
+                    f"{your_page.byte_count} bytes ({your_page.final_url}) / "
+                    f"{competitor_page.byte_count} bytes ({competitor_page.final_url})"
                 )
 
                 model = _resolve_model()
