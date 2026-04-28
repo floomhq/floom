@@ -7,6 +7,12 @@
 }
 
 @media (max-width: 640px) {
+  .public-footer-columns {
+    grid-template-columns: 1fr !important;
+    gap: 20px !important;
+    max-width: 320px !important;
+  }
+
   .about-triad { grid-template-columns: 1fr !important; gap: 6px !important; }
 }
 

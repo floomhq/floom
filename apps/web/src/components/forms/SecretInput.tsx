@@ -9,7 +9,7 @@ import { Eye, EyeOff } from 'lucide-react';
 export type SecretInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
 /**
- * Password-style input with an optional reveal toggle. Used for API keys,
+ * Password-style input with an optional reveal toggle. Used for BYOK keys,
  * bearer tokens, client secrets, and other credentials.
  */
 export const SecretInput = forwardRef<HTMLInputElement, SecretInputProps>(

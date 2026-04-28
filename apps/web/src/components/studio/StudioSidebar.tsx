@@ -211,7 +211,7 @@ export function StudioSidebar({
           {signedOutPreview ? (
             <RailHint>Sign in to see your Studio apps.</RailHint>
           ) : apps === null && !loadError ? (
-            <RailHint>Loading your workspace…</RailHint>
+            <RailHint>Loading workspace…</RailHint>
           ) : loadError ? (
             <RailHint>{loadError}</RailHint>
           ) : visibleApps.length === 0 ? (
@@ -281,14 +281,14 @@ export function StudioSidebar({
 
         <section style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <SectionLabel>Workspace</SectionLabel>
-          <Link to="/me/settings" style={workspaceLinkStyle}>
+          <Link to="/account/settings" style={workspaceLinkStyle}>
             <span>Team</span>
             <span style={workspaceMetaStyle}>{teamCount ?? '—'}</span>
           </Link>
-          <Link to="/me/settings?tab=studio#settings-card-studio-billing" style={workspaceLinkStyle}>
+          <Link to="/account/settings?tab=studio#settings-card-studio-billing" style={workspaceLinkStyle}>
             <span>Billing</span>
           </Link>
-          <Link to="/me/settings?tab=studio" style={workspaceLinkStyle}>
+          <Link to="/account/settings?tab=studio" style={workspaceLinkStyle}>
             <span>Settings</span>
           </Link>
         </section>
@@ -438,7 +438,7 @@ function SubNav({
     { id: 'overview', label: 'Overview', to: `/studio/${slug}` },
     { id: 'runs', label: 'Runs', to: `/studio/${slug}/runs` },
     { id: 'triggers', label: 'Triggers', to: `/studio/${slug}/triggers` },
-    { id: 'secrets', label: 'Secrets', to: `/studio/${slug}/secrets` },
+    { id: 'secrets', label: 'App creator secrets', to: `/studio/${slug}/secrets` },
     { id: 'access', label: 'Access', to: `/studio/${slug}/access` },
     { id: 'renderer', label: 'Renderer', to: `/studio/${slug}/renderer` },
     { id: 'analytics', label: 'Analytics', to: `/studio/${slug}/analytics` },

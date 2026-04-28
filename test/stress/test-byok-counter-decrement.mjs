@@ -88,14 +88,15 @@ async function getQuota(slug, headers = {}) {
   return { status: res.status, json };
 }
 
-insertApp('lead-scorer');
+const gatedSlug = 'competitor-lens';
+insertApp(gatedSlug);
 
 console.log('Issue #618: free-runs counter decrements after each run');
 
 // 1. Fresh bucket — expect 5 of 5 remaining.
 byokGate.__resetByokGateForTests();
 {
-  const r = await getQuota('lead-scorer');
+  const r = await getQuota(gatedSlug);
   log('fresh bucket → remaining: 5', r.json && r.json.remaining === 5);
   log('fresh bucket → usage: 0', r.json && r.json.usage === 0);
 }
@@ -107,8 +108,8 @@ byokGate.__resetByokGateForTests();
 {
   const ip = 'unknown';
   const uaHash = byokGate.hashUserAgent(undefined);
-  byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
-  const r = await getQuota('lead-scorer');
+  byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
+  const r = await getQuota(gatedSlug);
   log('after 1 run → usage: 1', r.json && r.json.usage === 1);
   log('after 1 run → remaining: 4', r.json && r.json.remaining === 4);
 }
@@ -123,8 +124,8 @@ byokGate.__resetByokGateForTests();
   const uaHash = byokGate.hashUserAgent(undefined);
   const expected = [4, 3, 2, 1, 0];
   for (let i = 0; i < 5; i++) {
-    byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
-    const r = await getQuota('lead-scorer');
+    byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
+    const r = await getQuota(gatedSlug);
     log(
       `run ${i + 1}/5 → remaining: ${expected[i]}`,
       r.json && r.json.remaining === expected[i],
@@ -142,9 +143,9 @@ byokGate.__resetByokGateForTests();
 {
   const ip = 'unknown';
   const uaHash = byokGate.hashUserAgent(undefined);
-  byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
-  byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
-  const r = await getQuota('lead-scorer');
+  byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
+  byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
+  const r = await getQuota(gatedSlug);
   const clientSide = r.json
     ? r.json.remaining ?? Math.max(0, (r.json.limit ?? 5) - (r.json.usage ?? 0))
     : null;
@@ -162,11 +163,11 @@ byokGate.__resetByokGateForTests();
   const ip = 'unknown';
   const uaHash = byokGate.hashUserAgent(undefined);
   for (let i = 0; i < 5; i++) {
-    byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
+    byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
   }
-  const r1 = await getQuota('lead-scorer');
-  const r2 = await getQuota('lead-scorer');
-  const r3 = await getQuota('lead-scorer');
+  const r1 = await getQuota(gatedSlug);
+  const r2 = await getQuota(gatedSlug);
+  const r3 = await getQuota(gatedSlug);
   log('exhausted → remaining: 0 (first poll)', r1.json && r1.json.remaining === 0);
   log('exhausted → remaining: 0 (second poll, no drift)', r2.json && r2.json.remaining === 0);
   log('exhausted → remaining: 0 (third poll, no drift)', r3.json && r3.json.remaining === 0);

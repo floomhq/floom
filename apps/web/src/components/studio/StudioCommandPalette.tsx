@@ -21,16 +21,16 @@ const COMMANDS = [
     to: '/studio/runs',
   },
   {
-    id: 'api-keys',
-    label: 'API keys',
-    hint: 'Manage account-wide keys',
-    to: '/me/api-keys',
+    id: 'agent-tokens',
+    label: 'Agent tokens',
+    hint: 'Manage workspace credentials',
+    to: '/settings/agent-tokens',
   },
   {
     id: 'settings',
-    label: 'Settings',
-    hint: 'Open account and studio settings',
-    to: '/me/settings?tab=studio',
+    label: 'Studio settings',
+    hint: 'Open Studio-local settings',
+    to: '/settings/studio',
   },
 ];
 

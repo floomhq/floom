@@ -74,7 +74,7 @@ const CODE_MAP: Record<string, AuthErrorCopy> = {
     message: 'Password is too long.',
   },
   FAILED_TO_CREATE_USER: {
-    message: 'We could not create your account. Try again in a moment.',
+    message: 'We could not create the account. Try again in a moment.',
   },
   FAILED_TO_CREATE_SESSION: {
     message: 'We could not sign you in. Try again in a moment.',

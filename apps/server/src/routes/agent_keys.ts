@@ -54,7 +54,7 @@ function assertWorkspaceAccess(
   workspace_id: string,
 ): Response | null {
   try {
-    workspaces.getById(ctx, workspace_id);
+    workspaces.assertRole(ctx, workspace_id, 'editor');
     return null;
   } catch {
     return c.json(
@@ -74,13 +74,14 @@ function publicAgentToken(row: AgentTokenRecord): Record<string, unknown> {
     label: row.label,
     scope: row.scope,
     workspace_id: row.workspace_id,
+    issued_by_user_id: row.issued_by_user_id || row.user_id,
     created_at: row.created_at,
     last_used_at: row.last_used_at,
     revoked: row.revoked_at !== null,
   };
 }
 
-agentKeysRouter.post('/', async (c) => {
+export async function createAgentKey(c: Context, explicitWorkspaceId?: string) {
   const ctx = await resolveUserContext(c);
   const gate = requireUserSessionForAgentKeyMutation(c, ctx);
   if (gate) return gate;
@@ -108,12 +109,13 @@ agentKeysRouter.post('/', async (c) => {
     return c.json({ error: 'Invalid scope', code: 'invalid_scope' }, 400);
   }
 
-  const workspace_id = parsed.data.workspace_id || ctx.workspace_id;
+  const workspace_id = explicitWorkspaceId || parsed.data.workspace_id || ctx.workspace_id;
   const workspaceGate = assertWorkspaceAccess(c, ctx, workspace_id);
   if (workspaceGate) return workspaceGate;
 
   const rawToken = generateAgentToken();
   const createdAt = new Date().toISOString();
+  const issued_by_user_id = ctx.user_id;
   const row: AgentTokenRecord = {
     id: newAgentTokenId(),
     prefix: extractAgentTokenPrefix(rawToken),
@@ -121,7 +123,8 @@ agentKeysRouter.post('/', async (c) => {
     label: parsed.data.label,
     scope,
     workspace_id,
-    user_id: ctx.user_id,
+    user_id: issued_by_user_id,
+    issued_by_user_id,
     created_at: createdAt,
     last_used_at: null,
     revoked_at: null,
@@ -155,6 +158,7 @@ agentKeysRouter.post('/', async (c) => {
       label: row.label,
       scope: row.scope,
       workspace_id: row.workspace_id,
+      issued_by_user_id,
       revoked: false,
       rate_limit_per_minute: row.rate_limit_per_minute,
     },
@@ -168,46 +172,54 @@ agentKeysRouter.post('/', async (c) => {
       label: row.label,
       scope: row.scope,
       workspace_id: row.workspace_id,
+      issued_by_user_id,
       raw_token: rawToken,
     },
     201,
   );
-});
+}
 
-agentKeysRouter.get('/', async (c) => {
+export async function listAgentKeys(c: Context, explicitWorkspaceId?: string) {
   const ctx = await resolveUserContext(c);
   const gate = requireUserSessionForAgentKeyMutation(c, ctx);
   if (gate) return gate;
+
+  const workspace_id = explicitWorkspaceId || ctx.workspace_id;
+  const workspaceGate = assertWorkspaceAccess(c, ctx, workspace_id);
+  if (workspaceGate) return workspaceGate;
 
   const rows = db
     .prepare(
       `SELECT * FROM agent_tokens
-        WHERE user_id = ?
+        WHERE workspace_id = ?
         ORDER BY created_at DESC`,
     )
-    .all(ctx.user_id) as AgentTokenRecord[];
+    .all(workspace_id) as AgentTokenRecord[];
   return c.json(rows.map(publicAgentToken));
-});
+}
 
-agentKeysRouter.post('/:id/revoke', async (c) => {
+export async function revokeAgentKey(c: Context, id: string, explicitWorkspaceId?: string) {
   const ctx = await resolveUserContext(c);
   const gate = requireUserSessionForAgentKeyMutation(c, ctx);
   if (gate) return gate;
 
-  const id = c.req.param('id');
+  const workspace_id = explicitWorkspaceId || ctx.workspace_id;
+  const workspaceGate = assertWorkspaceAccess(c, ctx, workspace_id);
+  if (workspaceGate) return workspaceGate;
+
   const before = db
-    .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
-    .get(id, ctx.user_id) as AgentTokenRecord | undefined;
+    .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND workspace_id = ?`)
+    .get(id, workspace_id) as AgentTokenRecord | undefined;
   db.prepare(
     `UPDATE agent_tokens
        SET revoked_at = COALESCE(revoked_at, ?)
     WHERE id = ?
-       AND user_id = ?`,
-  ).run(new Date().toISOString(), id, ctx.user_id);
+       AND workspace_id = ?`,
+  ).run(new Date().toISOString(), id, workspace_id);
   if (before) {
     const after = db
-      .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND user_id = ?`)
-      .get(id, ctx.user_id) as AgentTokenRecord | undefined;
+      .prepare(`SELECT * FROM agent_tokens WHERE id = ? AND workspace_id = ?`)
+      .get(id, workspace_id) as AgentTokenRecord | undefined;
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'agent_token.revoked',
@@ -228,4 +240,16 @@ agentKeysRouter.post('/:id/revoke', async (c) => {
     });
   }
   return new Response(null, { status: 204 });
+}
+
+agentKeysRouter.post('/', async (c) => {
+  return createAgentKey(c);
+});
+
+agentKeysRouter.get('/', async (c) => {
+  return listAgentKeys(c);
+});
+
+agentKeysRouter.post('/:id/revoke', async (c) => {
+  return revokeAgentKey(c, c.req.param('id'));
 });

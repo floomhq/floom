@@ -8,7 +8,31 @@
 
 set -euo pipefail
 
-LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+LIB_DIR="$(cd "$(dirname "$_SCRIPT_PATH")" && pwd)"
+CONFIG="${FLOOM_CONFIG:-$HOME/.floom/config.json}"
+DEFAULT_HOST_FILE="${HOME}/.floom/default-host"
+
+resolve_api_url() {
+  if [[ -n "${FLOOM_API_URL:-}" ]]; then
+    echo "$FLOOM_API_URL"
+  elif [[ -f "$CONFIG" ]]; then
+    CONFIG_PATH="$CONFIG" python3 - <<'PY'
+import json
+import os
+
+try:
+    c = json.load(open(os.environ["CONFIG_PATH"]))
+    print(c.get("api_url") or "https://floom.dev")
+except Exception:
+    print("https://floom.dev")
+PY
+  elif [[ -f "$DEFAULT_HOST_FILE" ]]; then
+    cat "$DEFAULT_HOST_FILE"
+  else
+    echo "https://floom.dev"
+  fi
+}
 
 DRY_RUN=0
 while [[ $# -gt 0 ]]; do
@@ -81,18 +105,34 @@ print(json.dumps(body))")
     export FLOOM_DRY_RUN=1
   fi
 
-  bash "$LIB_DIR/floom-api.sh" POST /api/hub/ingest "$BODY"
+  RESPONSE=$(bash "$LIB_DIR/floom-api.sh" POST /api/hub/ingest "$BODY")
+  printf '%s\n' "$RESPONSE"
 
   if [[ "$DRY_RUN" != "1" ]]; then
+    API_URL="$(resolve_api_url)"
+    DEPLOYED_SLUG=$(printf '%s' "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    print(json.load(sys.stdin).get('slug') or '$SLUG')
+except Exception:
+    print('$SLUG')
+")
+    DEPLOYED_NAME=$(printf '%s' "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    print(json.load(sys.stdin).get('name') or '$NAME')
+except Exception:
+    print('$NAME')
+")
     cat <<EOF
 
-Published: $NAME
-  App page:    https://floom.dev/p/$SLUG
-  MCP URL:     https://floom.dev/mcp/app/$SLUG
-  Owner view:  https://floom.dev/me/apps/$SLUG
+Published: $DEPLOYED_NAME
+  App page:    ${API_URL%/}/p/$DEPLOYED_SLUG
+  MCP URL:     ${API_URL%/}/mcp/app/$DEPLOYED_SLUG
+  Owner view:  ${API_URL%/}/studio/$DEPLOYED_SLUG
 
 Add to Claude Desktop config:
-  {"mcpServers":{"floom-$SLUG":{"command":"npx","args":["-y","mcp-remote","https://floom.dev/mcp/app/$SLUG"]}}}
+  {"mcpServers":{"floom-$DEPLOYED_SLUG":{"url":"${API_URL%/}/mcp/app/$DEPLOYED_SLUG"}}}
 EOF
   fi
 else

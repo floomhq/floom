@@ -311,7 +311,7 @@ export function AboutPage() {
           ) : (
             <>
               Point Floom at an OpenAPI spec or a GitHub repo to publish when
-              your account has access on floom.dev, or run without limits on
+              the workspace has access on floom.dev, or run without limits on
               your own hardware. Until publish opens for you here, run catalog
               apps, use MCP, and self-host your own.
             </>

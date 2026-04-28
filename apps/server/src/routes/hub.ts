@@ -41,11 +41,28 @@ import {
   setHubCache,
 } from '../lib/hub-cache.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
-import { canonicalVisibility, getAppAccessDecision } from '../services/sharing.js';
+import { canonicalVisibility, getAppAccessDecision, transitionVisibility } from '../services/sharing.js';
+import {
+  AppLibraryError,
+  claimApp,
+  forkApp,
+  installApp,
+  isInstalled,
+  listInstalledApps,
+  uninstallApp,
+} from '../services/app_library.js';
+import { buildAppSourceInfo } from '../lib/app-source.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
 export const hubRouter = new Hono();
+
+function appLibraryError(c: Context, err: unknown): Response {
+  if (err instanceof AppLibraryError) {
+    return c.json({ error: err.message, code: err.code }, err.status as 400 | 401 | 404 | 409);
+  }
+  return c.json({ error: (err as Error).message, code: 'app_library_failed' }, 500);
+}
 
 /**
  * Pull just the host out of a proxied app's base_url, for the
@@ -369,10 +386,7 @@ hubRouter.post('/ingest', async (c) => {
   }
 });
 
-// GET /api/hub/mine — apps authored by the caller. In OSS mode the
-// caller is the synthetic local user, and we return apps authored by
-// 'local' OR with workspace_id='local'. In Cloud mode we filter on
-// author = user_id.
+// GET /api/hub/mine — apps owned by the caller's active workspace.
 hubRouter.get('/mine', async (c) => {
   const ctx = await resolveUserContext(c);
   const rows = db
@@ -384,11 +398,10 @@ hubRouter.get('/mine', async (c) => {
          SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
        ) AS last_run_at
          FROM apps
-        WHERE (apps.workspace_id = ? AND apps.author = ?)
-           OR apps.author = ?
+        WHERE apps.workspace_id = ?
         ORDER BY apps.updated_at DESC`,
     )
-    .all(ctx.workspace_id, ctx.user_id, ctx.user_id) as Array<
+    .all(ctx.workspace_id) as Array<
     AppRecord & { run_count: number; last_run_at: string | null }
   >;
 
@@ -412,11 +425,116 @@ hubRouter.get('/mine', async (c) => {
       // fetch per list item. Additive — older clients ignore these fields.
       visibility: row.visibility,
       is_async: row.is_async === 1,
+      run_rate_limit_per_hour: row.run_rate_limit_per_hour ?? null,
       // Manual publish-review gate (#362): surface the status so Studio
       // can render "Pending review" pills next to freshly-ingested apps.
       publish_status: row.publish_status,
     })),
   });
+});
+
+hubRouter.get('/installed', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const apps = listInstalledApps(ctx);
+  return c.json({
+    apps: apps.map((row) => ({
+      slug: row.slug,
+      name: row.name,
+      description: row.description,
+      category: row.category,
+      icon: row.icon,
+      author: row.author,
+      visibility: canonicalVisibility(row.visibility),
+      publish_status: row.publish_status,
+      installed: true,
+    })),
+  });
+});
+
+hubRouter.post('/:slug/fork', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  let body: unknown = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    body = {};
+  }
+  const parsed = z
+    .object({
+      slug: z.string().min(1).max(48).optional(),
+      name: z.string().min(1).max(160).optional(),
+    })
+    .safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() }, 400);
+  }
+  try {
+    const result = forkApp(ctx, c.req.param('slug'), {
+      ...parsed.data,
+      linkToken: c.req.query('key') || null,
+    });
+    invalidateHubCache();
+    return c.json(
+      {
+        ok: true,
+        created: true,
+        slug: result.app.slug,
+        source_slug: result.source.slug,
+        visibility: canonicalVisibility(result.app.visibility),
+        publish_status: result.app.publish_status,
+      },
+      201,
+    );
+  } catch (err) {
+    return appLibraryError(c, err);
+  }
+});
+
+hubRouter.post('/:slug/claim', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  try {
+    const result = claimApp(ctx, c.req.param('slug'));
+    invalidateHubCache();
+    return c.json({
+      ok: true,
+      claimed: true,
+      slug: result.app.slug,
+      visibility: canonicalVisibility(result.app.visibility),
+      workspace_id: result.app.workspace_id,
+    });
+  } catch (err) {
+    return appLibraryError(c, err);
+  }
+});
+
+hubRouter.post('/:slug/install', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  try {
+    const result = installApp(ctx, c.req.param('slug'));
+    return c.json({ ok: true, installed: true, created: result.installed, slug: result.app.slug }, result.installed ? 201 : 200);
+  } catch (err) {
+    return appLibraryError(c, err);
+  }
+});
+
+hubRouter.delete('/:slug/install', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  try {
+    const result = uninstallApp(ctx, c.req.param('slug'));
+    return c.json({ ok: true, removed: result.removed, slug: result.app.slug });
+  } catch (err) {
+    return appLibraryError(c, err);
+  }
 });
 
 // GET /api/hub/:slug/runs — creator activity feed for a single app. Returns
@@ -646,6 +764,8 @@ const PatchBody = z.object({
   visibility: z.enum(['public', 'private']).optional(),
   // null clears; a string pins; omitted means "don't touch".
   primary_action: z.union([z.string().min(1).max(128), z.null()]).optional(),
+  // null clears to the global default; number sets this app's per-hour cap.
+  run_rate_limit_per_hour: z.union([z.number().int().min(1).max(100_000), z.null()]).optional(),
 });
 
 hubRouter.patch('/:slug', async (c) => {
@@ -682,8 +802,34 @@ hubRouter.patch('/:slug', async (c) => {
   const updates: string[] = [];
   const values: unknown[] = [];
   if (parsed.data.visibility) {
-    updates.push('visibility = ?');
-    values.push(parsed.data.visibility);
+    if (parsed.data.visibility === 'public') {
+      return c.json(
+        {
+          error: 'Public Store exposure requires review; use the sharing review flow.',
+          code: 'review_required',
+        },
+        409,
+      );
+    }
+    const current = canonicalVisibility(app.visibility);
+    if (current !== 'private') {
+      try {
+        transitionVisibility(app, 'private', {
+          actorUserId: ctx.user_id,
+          actorTokenId: ctx.agent_token_id,
+          actorIp: getAuditActor(c, ctx).ip,
+          reason:
+            current === 'pending_review'
+              ? 'owner_withdraw_review'
+              : current === 'public_live'
+                ? 'owner_unlist'
+                : 'owner_set_private',
+          metadata: { slug, via: 'hub_patch' },
+        });
+      } catch {
+        return c.json({ error: 'Illegal visibility transition', code: 'illegal_transition' }, 409);
+      }
+    }
   }
 
   // primary_action lives in the JSON manifest, not in its own column.
@@ -720,22 +866,18 @@ hubRouter.patch('/:slug', async (c) => {
     values.push(JSON.stringify(manifest));
   }
 
-  if (updates.length === 0) {
+  if (parsed.data.run_rate_limit_per_hour !== undefined) {
+    updates.push('run_rate_limit_per_hour = ?');
+    values.push(parsed.data.run_rate_limit_per_hour);
+  }
+
+  if (updates.length === 0 && parsed.data.visibility !== 'private') {
     return c.json({ error: 'No updatable fields in body', code: 'empty_patch' }, 400);
   }
-  updates.push("updated_at = datetime('now')");
-  values.push(app.id);
-
-  db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-  if (parsed.data.visibility && parsed.data.visibility !== app.visibility) {
-    auditLog({
-      actor: getAuditActor(c, ctx),
-      action: 'app.visibility_changed',
-      target: { type: 'app', id: app.id },
-      before: { visibility: app.visibility },
-      after: { visibility: parsed.data.visibility },
-      metadata: { slug },
-    });
+  if (updates.length > 0) {
+    updates.push("updated_at = datetime('now')");
+    values.push(app.id);
+    db.prepare(`UPDATE apps SET ${updates.join(', ')} WHERE id = ?`).run(...values);
   }
   if (parsed.data.primary_action !== undefined) {
     const previousManifest = safeManifest(app.manifest);
@@ -753,6 +895,16 @@ hubRouter.patch('/:slug', async (c) => {
       metadata: { slug, field: 'primary_action' },
     });
   }
+  if (parsed.data.run_rate_limit_per_hour !== undefined) {
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'app.updated',
+      target: { type: 'app', id: app.id },
+      before: { run_rate_limit_per_hour: app.run_rate_limit_per_hour ?? null },
+      after: { run_rate_limit_per_hour: parsed.data.run_rate_limit_per_hour },
+      metadata: { slug, field: 'run_rate_limit_per_hour' },
+    });
+  }
   // Perf fix (2026-04-20): bust the /api/hub 5s cache so visibility /
   // primary_action changes land in the public directory immediately.
   invalidateHubCache();
@@ -762,6 +914,10 @@ hubRouter.patch('/:slug', async (c) => {
     visibility: parsed.data.visibility ?? app.visibility,
     primary_action:
       parsed.data.primary_action !== undefined ? parsed.data.primary_action : undefined,
+    run_rate_limit_per_hour:
+      parsed.data.run_rate_limit_per_hour !== undefined
+        ? parsed.data.run_rate_limit_per_hour
+        : app.run_rate_limit_per_hour ?? null,
   });
 });
 
@@ -1006,6 +1162,10 @@ hubRouter.get('/:slug', async (c) => {
     async_mode: row.async_mode,
     timeout_ms: row.timeout_ms,
     max_run_retention_days: row.max_run_retention_days,
+    run_rate_limit_per_hour: row.run_rate_limit_per_hour ?? null,
+    forked_from_app_id: row.forked_from_app_id ?? null,
+    claimed_at: row.claimed_at ?? null,
+    installed: isInstalled(ctx, row.id),
     // W2.2: expose renderer metadata so /p/:slug knows whether to lazy-load
     // /renderer/:slug/bundle.js (creator-supplied) or fall back to the
     // default OutputPanel. Null when no custom renderer is compiled.
@@ -1017,8 +1177,48 @@ hubRouter.get('/:slug', async (c) => {
           compiled_at: bundle.compiledAt,
         }
       : null,
+    source: buildAppSourceInfo(row, manifest, resolveBaseUrlFromRequest(c)),
     created_at: row.created_at,
   });
+});
+
+hubRouter.get('/:slug/source', async (c) => {
+  const slug = c.req.param('slug');
+  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!row) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  const ctx = await resolveUserContext(c);
+  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  if (!access.ok) {
+    if (access.status === 401) {
+      return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+    }
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+  return c.json({
+    source: buildAppSourceInfo(row, safeManifest(row.manifest), resolveBaseUrlFromRequest(c)),
+  });
+});
+
+hubRouter.get('/:slug/openapi.json', async (c) => {
+  const slug = c.req.param('slug');
+  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!row) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  const ctx = await resolveUserContext(c);
+  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  if (!access.ok) {
+    if (access.status === 401) {
+      return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+    }
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+  if (!row.openapi_spec_cached) {
+    return c.json({ error: 'OpenAPI spec not available for this app', code: 'openapi_spec_not_found' }, 404);
+  }
+  try {
+    return c.json(JSON.parse(row.openapi_spec_cached));
+  } catch {
+    return c.json({ error: 'Stored OpenAPI spec is invalid JSON', code: 'openapi_spec_invalid' }, 500);
+  }
 });
 
 // ---------------------------------------------------------------------

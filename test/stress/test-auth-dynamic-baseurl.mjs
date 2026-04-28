@@ -17,6 +17,8 @@ process.env.BETTER_AUTH_SECRET =
 process.env.BETTER_AUTH_URL = 'https://preview.floom.dev';
 process.env.GOOGLE_OAUTH_CLIENT_ID = 'google-client-id';
 process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'google-client-secret';
+process.env.GITHUB_OAUTH_CLIENT_ID = 'github-client-id';
+process.env.GITHUB_OAUTH_CLIENT_SECRET = 'github-client-secret';
 
 const betterAuth = await import('../../apps/server/dist/lib/better-auth.js');
 const { db } = await import('../../apps/server/dist/db.js');
@@ -38,7 +40,7 @@ function log(label, ok, detail) {
   }
 }
 
-async function socialStart(host) {
+async function socialStart(host, provider = 'google') {
   const req = new Request(`https://${host}/auth/sign-in/social`, {
     method: 'POST',
     headers: {
@@ -46,7 +48,7 @@ async function socialStart(host) {
       host,
       origin: `https://${host}`,
     },
-    body: JSON.stringify({ provider: 'google', callbackURL: '/me' }),
+    body: JSON.stringify({ provider, callbackURL: '/me' }),
   });
   const res = await auth.handler(req);
   const text = await res.text();
@@ -83,7 +85,18 @@ try {
       (preview.json?.url || '').includes(
         'redirect_uri=https%3A%2F%2Fpreview.floom.dev%2Fauth%2Fcallback%2Fgoogle',
       ),
-    JSON.stringify(preview),
+      JSON.stringify(preview),
+  );
+
+  const github = await socialStart('floom.dev', 'github');
+  log('github start on floom.dev -> 200', github.status === 200, JSON.stringify(github));
+  log(
+    'github start on floom.dev uses floom.dev callback host',
+    github.location.includes('redirect_uri=https%3A%2F%2Ffloom.dev%2Fauth%2Fcallback%2Fgithub') ||
+      (github.json?.url || '').includes(
+        'redirect_uri=https%3A%2F%2Ffloom.dev%2Fauth%2Fcallback%2Fgithub',
+      ),
+    JSON.stringify(github),
   );
 } finally {
   db.close();

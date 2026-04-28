@@ -125,6 +125,9 @@ export function WhosBehind() {
             page is unclear, please write &mdash; the fastest way to reach
             me is email.
           </p>
+          <p style={{ ...BODY_STYLE, marginTop: 12, fontSize: 13, color: 'var(--muted)' }}>
+            Backed by <a href="https://f.inc" target="_blank" rel="noreferrer" style={{ color: 'var(--ink)', fontWeight: 600, textDecoration: 'none', borderBottom: '1px solid var(--line)' }}>Founders Inc</a>.
+          </p>
           <div style={LINKS_ROW_STYLE}>
             <a
               href="https://www.linkedin.com/in/federicodeponte"

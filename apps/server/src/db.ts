@@ -100,6 +100,13 @@ if (!appCols.includes('review_decided_by')) {
 if (!appCols.includes('review_comment')) {
   db.exec(`ALTER TABLE apps ADD COLUMN review_comment TEXT`);
 }
+if (!appCols.includes('forked_from_app_id')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN forked_from_app_id TEXT REFERENCES apps(id) ON DELETE SET NULL`);
+}
+if (!appCols.includes('claimed_at')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN claimed_at TEXT`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_apps_forked_from ON apps(forked_from_app_id)`);
 
 export function migrateLegacyAuthRequiredColumn(): void {
   const columns = (db.prepare(`PRAGMA table_info(apps)`).all() as { name: string }[]).map(
@@ -199,6 +206,11 @@ if (!appCols.includes('retries')) {
 // acts on apps with an explicit positive day count.
 if (!appCols.includes('max_run_retention_days')) {
   db.exec(`ALTER TABLE apps ADD COLUMN max_run_retention_days INTEGER`);
+}
+// Creator-configurable per-app run cap. NULL means use the global
+// FLOOM_RATE_LIMIT_APP_PER_HOUR/defaultPerAppPerHour budget.
+if (!appCols.includes('run_rate_limit_per_hour')) {
+  db.exec(`ALTER TABLE apps ADD COLUMN run_rate_limit_per_hour INTEGER`);
 }
 // Client contract for async apps: 'poll' (default), 'webhook', or 'stream'.
 // Stored for the manifest advertisement; runtime behavior is the same today.
@@ -580,10 +592,18 @@ db.exec(`
     name TEXT NOT NULL,
     plan TEXT NOT NULL DEFAULT 'oss',
     wrapped_dek TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_workspaces_slug ON workspaces(slug);
 `);
+const workspaceCols = (db.prepare(`PRAGMA table_info(workspaces)`).all() as {
+  name: string;
+}[]).map((r) => r.name);
+if (!workspaceCols.includes('updated_at')) {
+  db.exec(`ALTER TABLE workspaces ADD COLUMN updated_at TEXT`);
+  db.exec(`UPDATE workspaces SET updated_at = COALESCE(updated_at, created_at, datetime('now'))`);
+}
 
 // ---------- users (global identity, shared across workspaces) ----------
 db.exec(`
@@ -699,6 +719,147 @@ db.exec(`
     PRIMARY KEY (workspace_id, user_id, key)
   );
 `);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workspace_secrets (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    ciphertext TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    auth_tag TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (workspace_id, key)
+  );
+  CREATE TABLE IF NOT EXISTS workspace_secret_backfill_conflicts (
+    workspace_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    user_ids_json TEXT NOT NULL,
+    detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (workspace_id, key)
+  );
+`);
+
+export type WorkspaceSecretsBackfillResult = {
+  dry_run: boolean;
+  groups_scanned: number;
+  secrets_inserted: number;
+  conflicts_recorded: number;
+  conflicts_cleared: number;
+  runtime_ms: number;
+};
+
+type WorkspaceSecretsBackfillOptions = {
+  dryRun?: boolean;
+  log?: boolean;
+};
+
+const runWorkspaceSecretsBackfillTransaction = db.transaction((dryRun: boolean) => {
+  const groups = db
+    .prepare(
+      `SELECT workspace_id, key,
+              COUNT(*) AS row_count,
+              COUNT(DISTINCT ciphertext || ':' || nonce || ':' || auth_tag) AS value_count
+         FROM user_secrets
+        GROUP BY workspace_id, key`,
+    )
+    .all() as Array<{
+    workspace_id: string;
+    key: string;
+    row_count: number;
+    value_count: number;
+  }>;
+  const result = {
+    dry_run: dryRun,
+    groups_scanned: groups.length,
+    secrets_inserted: 0,
+    conflicts_recorded: 0,
+    conflicts_cleared: 0,
+  };
+  const selectSecret = db.prepare(
+    `SELECT 1 FROM workspace_secrets
+      WHERE workspace_id = ?
+        AND key = ?
+      LIMIT 1`,
+  );
+  const selectConflict = db.prepare(
+    `SELECT 1 FROM workspace_secret_backfill_conflicts
+      WHERE workspace_id = ?
+        AND key = ?
+      LIMIT 1`,
+  );
+  const insertSecret = db.prepare(
+    `INSERT INTO workspace_secrets
+       (workspace_id, key, ciphertext, nonce, auth_tag, created_at, updated_at)
+     SELECT workspace_id, key, ciphertext, nonce, auth_tag, MIN(created_at), MAX(updated_at)
+       FROM user_secrets
+      WHERE workspace_id = ?
+        AND key = ?
+      GROUP BY workspace_id, key, ciphertext, nonce, auth_tag
+     ON CONFLICT (workspace_id, key) DO NOTHING`,
+  );
+  const selectUsers = db.prepare(
+    `SELECT user_id FROM user_secrets WHERE workspace_id = ? AND key = ? ORDER BY user_id`,
+  );
+  const insertConflict = db.prepare(
+    `INSERT INTO workspace_secret_backfill_conflicts
+       (workspace_id, key, user_ids_json, detected_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT (workspace_id, key) DO UPDATE SET
+       user_ids_json = excluded.user_ids_json,
+       detected_at = excluded.detected_at`,
+  );
+  const clearConflict = db.prepare(
+    `DELETE FROM workspace_secret_backfill_conflicts
+      WHERE workspace_id = ?
+        AND key = ?`,
+  );
+
+  for (const group of groups) {
+    if (group.value_count === 1) {
+      if (!selectSecret.get(group.workspace_id, group.key)) {
+        result.secrets_inserted += 1;
+        if (!dryRun) {
+          insertSecret.run(group.workspace_id, group.key);
+        }
+      }
+      if (selectConflict.get(group.workspace_id, group.key)) {
+        result.conflicts_cleared += 1;
+        if (!dryRun) {
+          clearConflict.run(group.workspace_id, group.key);
+        }
+      }
+      continue;
+    }
+    const users = (selectUsers.all(group.workspace_id, group.key) as Array<{ user_id: string }>).map(
+      (row) => row.user_id,
+    );
+    result.conflicts_recorded += 1;
+    if (!dryRun) {
+      insertConflict.run(group.workspace_id, group.key, JSON.stringify(users));
+    }
+  }
+  return result;
+});
+
+export function runWorkspaceSecretsBackfill(
+  options: WorkspaceSecretsBackfillOptions = {},
+): WorkspaceSecretsBackfillResult {
+  const startedAt = Date.now();
+  const result = runWorkspaceSecretsBackfillTransaction(options.dryRun === true);
+  const withRuntime = { ...result, runtime_ms: Date.now() - startedAt };
+  if (options.log) {
+    const mode = withRuntime.dry_run ? 'dry-run ' : '';
+    console.info(
+      `[db] workspace_secrets backfill ${mode}completed in ${withRuntime.runtime_ms}ms ` +
+        `(groups=${withRuntime.groups_scanned}, inserted=${withRuntime.secrets_inserted}, ` +
+        `conflicts=${withRuntime.conflicts_recorded}, cleared=${withRuntime.conflicts_cleared})`,
+    );
+  }
+  return withRuntime;
+}
+
+runWorkspaceSecretsBackfill({ log: true });
 
 // ---------- agent_tokens: scoped machine credentials for agents ----------
 // Token plaintext is shown exactly once by the mint endpoint. The database
@@ -1045,6 +1206,21 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_app_reviews_slug ON app_reviews(app_slug);
   CREATE INDEX IF NOT EXISTS idx_app_reviews_user ON app_reviews(user_id);
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_installs (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(app_id, workspace_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_app_installs_workspace
+    ON app_installs(workspace_id, user_id, installed_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_app_installs_app
+    ON app_installs(app_id);
 `);
 
 // ---------- W4-minimal: product feedback ----------

@@ -9,6 +9,9 @@
 // The welcome content is intentionally not markdown — it's the one docs
 // page with its own layout blocks (surface-card grid, spec table,
 // footer CTA) that don't map cleanly to react-markdown.
+//
+// v26 V17: shell migrated to DocsPageShell (flex row, fixed sidebar width)
+// so the sidebar never shifts on navigation — mirrors WorkspacePageShell.
 
 import { Link, useLocation } from 'react-router-dom';
 import type { CSSProperties } from 'react';
@@ -20,18 +23,10 @@ import { PageHead } from '../components/PageHead';
 import { DocsSidebar, DOCS_SIDEBAR_GROUPS } from '../components/docs/DocsSidebar';
 import { DocsPublishWaitlistBanner } from '../components/docs/DocsPublishWaitlistBanner';
 import { DocsHeroCards } from '../components/docs/DocsHeroCards';
+import { DocsPageShell } from '../components/docs/DocsPageShell';
 import { readDeployEnabled } from '../lib/flags';
 
 // ── Styles ────────────────────────────────────────────────────────────────
-
-const shellStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '260px minmax(0, 1fr)',
-  gap: 0,
-  maxWidth: 1260,
-  margin: '0 auto',
-  minHeight: 720,
-};
 
 const mainStyle: CSSProperties = {
   // Audit 2026-04-24 (S2): /docs was dense above the fold. Dropped top padding
@@ -113,13 +108,11 @@ const codeBlockStyle: CSSProperties = {
   whiteSpace: 'pre',
 };
 
-// Hero terminal: warm dark neutral (#1b1a17) NOT pure black. Matches the
-// brand's terminal look on landing. Only used for the canonical "install
-// in 60 seconds" snippet right under the H1, to give the docs landing
-// the same polished hero moment you get from Stripe / Vercel docs.
+// F7 (2026-04-28): light tinted bg on hero copy box (was warm dark).
+// Federico-locked global rule — copy/snippet boxes never use dark bg.
 const heroCodeBlockStyle: CSSProperties = {
-  background: '#1b1a17',
-  color: '#f5f4ef',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   fontSize: 13,
   lineHeight: 1.75,
@@ -128,9 +121,9 @@ const heroCodeBlockStyle: CSSProperties = {
   margin: '0 0 18px',
   maxWidth: 760,
   overflowX: 'auto',
-  border: '1px solid #2a2824',
+  border: '1px solid var(--line)',
   whiteSpace: 'pre',
-  boxShadow: '0 12px 28px -18px rgba(0, 0, 0, 0.35)',
+  boxShadow: '0 12px 28px -18px rgba(15, 23, 42, 0.08)',
 };
 
 const heroCodeCommentStyle: CSSProperties = {
@@ -329,17 +322,11 @@ export function DocsLandingPage() {
         description="Everything you need to ship an AI app on Floom: quickstart, protocol, operations, billing, and self-hosting."
       />
       <TopBar />
-      <DocsPublishWaitlistBanner />
 
-      <main className="docs-shell" style={shellStyle}>
-        <style>{`
-          @media (max-width: 900px) {
-            .docs-shell { grid-template-columns: 1fr !important; }
-            .docs-shell > article { padding: 20px 18px 48px !important; }
-          }
-        `}</style>
-        <DocsSidebar groups={DOCS_SIDEBAR_GROUPS} currentPath={pathname} />
-
+      <DocsPageShell
+        banner={<DocsPublishWaitlistBanner />}
+        sidebar={<DocsSidebar groups={DOCS_SIDEBAR_GROUPS} currentPath={pathname} />}
+      >
         <article style={mainStyle}>
           <nav style={crumbsStyle} aria-label="Breadcrumb">
             <Link to="/docs" style={{ color: 'var(--muted)', textDecoration: 'none' }}>
@@ -368,7 +355,7 @@ export function DocsLandingPage() {
               <>
                 The protocol, the runtime, and the patterns that make Floom work.
                 Run apps today via MCP, CLI, or web. Ship to the floom.dev cloud
-                when publishing opens for your account — or self-host, no waitlist.
+                when publishing opens for the workspace — or self-host, no waitlist.
               </>
             )}
           </p>
@@ -390,7 +377,7 @@ export function DocsLandingPage() {
               <span style={pillKeyStyle}>→</span>
             </Link>
             <Link to="/docs/mcp-install" style={pillStyle}>
-              Install in Claude / Cursor
+              Install in your AI tool
             </Link>
           </div>
 
@@ -413,7 +400,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
           <div style={mostReadStyle}>
             <Link to="/docs/mcp-install" style={mrCardStyle}>
               <div style={mrKicker}>Getting started</div>
-              <div style={mrTitle}>Install in Claude / Cursor</div>
+              <div style={mrTitle}>Install in your AI tool</div>
               <div style={mrSubtitle}>Three JSON snippets, one per MCP client.</div>
             </Link>
             <Link to="/docs/runtime-specs" style={mrCardStyle}>
@@ -456,7 +443,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
 
           {/* MCP install */}
           <h2 id="mcp-surfaces" style={h2Style}>
-            Install in Claude, Cursor, Codex — via MCP
+            Install in your AI tool — via MCP
           </h2>
           <p style={pStyle}>
             Every Floom app is a ready-to-use MCP tool at{' '}
@@ -491,10 +478,10 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
               <div style={surfaceTitleStyle}>Your apps</div>
               <p style={{ ...pStyle, fontSize: 12.5, margin: 0 }}>
                 {deployEnabled ? (
-                  <>Create, update, rotate secrets. Web UI, not an MCP endpoint.</>
+                  <>Create, update, rotate app creator secrets. Web UI, not an MCP endpoint.</>
                 ) : (
                   <>
-                    Create, update, rotate secrets when your account can publish on
+                    Create, update, rotate app creator secrets when the workspace can publish on
                     floom.dev (waitlist during launch). Self-host has no such gate.
                     Web UI, not an MCP endpoint.
                   </>
@@ -505,7 +492,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
           </div>
 
           <p style={pStyle}>
-            Full per-client config (Claude Desktop, Claude Code, Cursor, Codex CLI)
+            Full per-client config (Claude Desktop, Cursor, Codex CLI)
             lives at{' '}
             <Link to="/docs/mcp-install" style={{ color: 'var(--accent)' }}>
               MCP install
@@ -610,7 +597,7 @@ docker run -d -p 3000:3000 \\
           </table>
 
           <p style={pStyle}>
-            Full lifecycle of a run (validation → container boot → secrets →
+            Full lifecycle of a run (validation → container boot → app creator secrets →
             `__FLOOM_RESULT__` marker) lives at{' '}
             <Link to="/docs/runtime-specs" style={{ color: 'var(--accent)' }}>
               Runtime specs
@@ -656,7 +643,7 @@ docker run -d -p 3000:3000 \\
             </a>
           </div>
         </article>
-      </main>
+      </DocsPageShell>
 
       <Footer />
       <FeedbackButton />

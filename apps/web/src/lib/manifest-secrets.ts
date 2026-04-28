@@ -1,7 +1,7 @@
 // Shared helper for "what secrets does this app actually need?".
 //
 // Pre-fix (2026-04-20), the run preflight (MeAppRunPage) and the
-// Secrets page (MeAppSecretsPage / StudioAppSecretsPage) both read
+// App creator secrets page (MeAppSecretsPage / StudioAppSecretsPage) both read
 // `manifest.secrets_needed` and nothing else. For OpenAPI-ingested
 // apps the ingest pipeline can populate **per-action** `secrets_needed`
 // (via the operation's effective `security` block) while leaving the
@@ -13,7 +13,7 @@
 //   docs/ux-audit/LAUNCH-UX-AUDIT-2026-04-20.md   (C1, M1)
 //
 // Symptom: the runner returns `auth_error` with copy pointing the
-// owner at Studio → Secrets, but the Secrets page sees an empty
+// owner at Studio → App creator secrets, but the page sees an empty
 // `secrets_needed` and says "this app doesn't declare any secrets."
 // Owner is stuck between two screens contradicting each other.
 //

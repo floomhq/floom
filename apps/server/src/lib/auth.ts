@@ -27,7 +27,7 @@ import { getAppAccessDecision } from '../services/sharing.js';
 // able to act on the hint without knowing anything about the server.
 export const AUTH_DOCS_URL = 'https://floom.dev/docs/auth';
 export const AUTH_HINT_CLOUD =
-  'Run `floom auth --device` or set FLOOM_API_KEY, then retry.';
+  'Run `floom auth login --token=<your_agent_token>` or set FLOOM_API_KEY, then retry. Get a token at https://floom.dev/home';
 export const AUTH_HINT_SELFHOST =
   'Set FLOOM_AUTH_TOKEN on the server and present it via Authorization: Bearer <token>.';
 export const AUTH_HINT_SIGNATURE =
@@ -94,6 +94,7 @@ export const globalAuthMiddleware: MiddlewareHandler = async (c, next) => {
   // global token.
   const path = new URL(c.req.url).pathname;
   if (path === '/api/health' || path === '/api/health/') return next();
+  if (path === '/api/healthz' || path === '/api/healthz/') return next();
   if (path === '/api/metrics' || path === '/api/metrics/') return next();
   // Public read-only badge endpoint — used by the marketing TopBar for a
   // floomhq/floom star count. No credentials, no side effects; a self-

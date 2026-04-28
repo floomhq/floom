@@ -19,7 +19,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { BaseLayout } from '../BaseLayout';
-import { StudioSidebar } from './StudioSidebar';
+import { StudioRail } from '../StudioRail';
 import { useSession, clearSession } from '../../hooks/useSession';
 import { colors } from '../../lib/design-tokens';
 import * as api from '../../api/client';
@@ -36,18 +36,13 @@ interface Props {
 export function StudioLayout({
   children,
   title,
-  activeAppSlug,
-  activeSubsection,
   contentStyle,
   allowSignedOutShell = false,
 }: Props) {
-  const { data, isAuthenticated, refresh } = useSession();
+  const { isAuthenticated, refresh } = useSession();
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
-
-  const signedOutCloud = !!data && data.cloud_mode && data.user.is_local;
-  const showSignedOutPreview = signedOutCloud && allowSignedOutShell;
 
   // Close mobile drawer on route change
   useEffect(() => {
@@ -77,15 +72,7 @@ export function StudioLayout({
       // of search results (robots.txt already disallows /studio/; this is
       // belt-and-suspenders for crawlers that ignore robots.txt).
       noIndex
-      sidebar={
-        <div className="studio-sidebar-wrap" style={{ display: 'contents' }}>
-          <StudioSidebar
-            activeAppSlug={activeAppSlug}
-            activeSubsection={activeSubsection}
-            signedOutPreview={showSignedOutPreview}
-          />
-        </div>
-      }
+      sidebar={<StudioRail />}
       mainStyle={{
         flex: 1,
         padding: '28px 40px 120px',
@@ -116,11 +103,7 @@ export function StudioLayout({
             className="studio-mobile-drawer-panel"
             onClick={(e) => e.stopPropagation()}
           >
-            <StudioSidebar
-              activeAppSlug={activeAppSlug}
-              activeSubsection={activeSubsection}
-              signedOutPreview={showSignedOutPreview}
-            />
+            <StudioRail />
             <nav
               aria-label="Global navigation"
               data-testid="studio-mobile-global-nav"

@@ -9,8 +9,8 @@ const ANSWERS = [
     cta: 'See runtime limits',
   },
   {
-    title: 'Secrets and BYOK',
-    body: 'Saved secrets are encrypted at rest. Bring-your-own keys stay in your browser unless you choose to save one.',
+    title: 'App creator secrets and BYOK',
+    body: 'Saved app creator secrets are encrypted at rest. BYOK keys stay in your browser unless you choose to save one.',
     to: '/docs/security',
     cta: 'See security details',
   },

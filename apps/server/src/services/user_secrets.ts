@@ -178,7 +178,7 @@ function loadWorkspaceDek(workspace_id: string): Buffer {
   // First use — mint a fresh DEK, wrap it, persist, cache.
   const fresh = randomBytes(32);
   const wrapped = wrapDek(fresh);
-  db.prepare('UPDATE workspaces SET wrapped_dek = ? WHERE id = ?').run(
+  db.prepare("UPDATE workspaces SET wrapped_dek = ?, updated_at = datetime('now') WHERE id = ?").run(
     wrapped,
     workspace_id,
   );
@@ -235,6 +235,104 @@ export function decryptValue(
       `secret decrypt failed: ${(err as Error).message}`,
     );
   }
+}
+
+/**
+ * Get a workspace-level BYOK secret by key. Returns plaintext, or null when
+ * the workspace has no value for that key.
+ */
+export function getWorkspaceSecret(workspace_id: string, key: string): string | null {
+  const row = db
+    .prepare(
+      `SELECT ciphertext, nonce, auth_tag FROM workspace_secrets
+         WHERE workspace_id = ?
+           AND key = ?`,
+    )
+    .get(workspace_id, key) as
+    | { ciphertext: string; nonce: string; auth_tag: string }
+    | undefined;
+  if (!row) return null;
+  return decryptValue(workspace_id, row.ciphertext, row.nonce, row.auth_tag);
+}
+
+/**
+ * Set (upsert) a workspace-level BYOK secret. The plaintext is encrypted
+ * under the workspace DEK and never echoed back.
+ */
+export function setWorkspaceSecret(
+  workspace_id: string,
+  key: string,
+  plaintext: string,
+): void {
+  const { ciphertext, nonce, auth_tag } = encryptValue(workspace_id, plaintext);
+  db.prepare(
+    `INSERT INTO workspace_secrets
+       (workspace_id, key, ciphertext, nonce, auth_tag, updated_at)
+     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT (workspace_id, key)
+       DO UPDATE SET ciphertext = excluded.ciphertext,
+                     nonce = excluded.nonce,
+                     auth_tag = excluded.auth_tag,
+                     updated_at = datetime('now')`,
+  ).run(workspace_id, key, ciphertext, nonce, auth_tag);
+  db.prepare(`UPDATE workspaces SET updated_at = datetime('now') WHERE id = ?`).run(
+    workspace_id,
+  );
+}
+
+/**
+ * Delete a workspace-level BYOK secret. Legacy user-level rows remain intact
+ * as the launch fallback path.
+ */
+export function delWorkspaceSecret(workspace_id: string, key: string): boolean {
+  const res = db
+    .prepare(`DELETE FROM workspace_secrets WHERE workspace_id = ? AND key = ?`)
+    .run(workspace_id, key);
+  if (res.changes > 0) {
+    db.prepare(`UPDATE workspaces SET updated_at = datetime('now') WHERE id = ?`).run(
+      workspace_id,
+    );
+  }
+  return res.changes > 0;
+}
+
+/**
+ * List workspace-level keys, with current-user legacy keys filling gaps when
+ * no workspace-level value exists yet.
+ */
+export function listWorkspaceMasked(
+  ctx: SessionContext,
+): { key: string; updated_at: string; source: 'workspace' | 'legacy_user' }[] {
+  const workspaceRows = db
+    .prepare(
+      `SELECT key, updated_at FROM workspace_secrets
+         WHERE workspace_id = ?
+         ORDER BY key`,
+    )
+    .all(ctx.workspace_id) as { key: string; updated_at: string }[];
+  const byKey = new Map<
+    string,
+    { key: string; updated_at: string; source: 'workspace' | 'legacy_user' }
+  >();
+  for (const row of workspaceRows) {
+    byKey.set(row.key, { ...row, source: 'workspace' });
+  }
+
+  const legacyRows = db
+    .prepare(
+      `SELECT key, updated_at FROM user_secrets
+         WHERE workspace_id = ?
+           AND user_id = ?
+         ORDER BY key`,
+    )
+    .all(ctx.workspace_id, ctx.user_id) as { key: string; updated_at: string }[];
+  for (const row of legacyRows) {
+    if (!byKey.has(row.key)) {
+      byKey.set(row.key, { ...row, source: 'legacy_user' });
+    }
+  }
+
+  return Array.from(byKey.values()).sort((a, b) => a.key.localeCompare(b.key));
 }
 
 /**
@@ -316,20 +414,49 @@ export function loadForRun(
 ): Record<string, string> {
   if (keys.length === 0) return {};
   const placeholders = keys.map(() => '?').join(', ');
-  const rows = db
+  const workspaceRows = db
     .prepare(
-      `SELECT key, ciphertext, nonce, auth_tag FROM user_secrets
+      `SELECT key, ciphertext, nonce, auth_tag FROM workspace_secrets
          WHERE workspace_id = ?
-           AND user_id = ?
            AND key IN (${placeholders})`,
     )
-    .all(ctx.workspace_id, ctx.user_id, ...keys) as {
+    .all(ctx.workspace_id, ...keys) as {
     key: string;
     ciphertext: string;
     nonce: string;
     auth_tag: string;
   }[];
   const out: Record<string, string> = {};
+  for (const row of workspaceRows) {
+    try {
+      out[row.key] = decryptValue(
+        ctx.workspace_id,
+        row.ciphertext,
+        row.nonce,
+        row.auth_tag,
+      );
+    } catch {
+      // Keep legacy fallback available for this key when a workspace row
+      // cannot be decrypted after an operator key mistake.
+    }
+  }
+
+  const missingKeys = keys.filter((key) => !out[key]);
+  if (missingKeys.length === 0) return out;
+  const legacyPlaceholders = missingKeys.map(() => '?').join(', ');
+  const rows = db
+    .prepare(
+      `SELECT key, ciphertext, nonce, auth_tag FROM user_secrets
+         WHERE workspace_id = ?
+           AND user_id = ?
+           AND key IN (${legacyPlaceholders})`,
+    )
+    .all(ctx.workspace_id, ctx.user_id, ...missingKeys) as {
+    key: string;
+    ciphertext: string;
+    nonce: string;
+    auth_tag: string;
+  }[];
   for (const row of rows) {
     try {
       out[row.key] = decryptValue(

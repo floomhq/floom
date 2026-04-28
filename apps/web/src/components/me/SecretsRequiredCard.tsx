@@ -175,7 +175,7 @@ export function SecretsRequiredCard({ app, missingKeys, onSaved }: Props) {
           lineHeight: 1.55,
         }}
       >
-        Paste them once. We’ll remember them for every run.
+        Paste workspace BYOK keys once. Floom remembers them for every Workspace Run.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

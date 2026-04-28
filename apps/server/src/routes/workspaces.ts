@@ -39,6 +39,13 @@ import {
 import { isCloudMode } from '../lib/better-auth.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
 import { deleteWorkspaceRuns } from '../services/run-retention-sweeper.js';
+import * as userSecrets from '../services/user_secrets.js';
+import { SecretDecryptError } from '../services/user_secrets.js';
+import {
+  createAgentKey,
+  listAgentKeys,
+  revokeAgentKey,
+} from './agent_keys.js';
 import type { WorkspaceMemberRole, WorkspaceRecord } from '../types.js';
 
 export const workspacesRouter = new Hono();
@@ -101,6 +108,11 @@ const AcceptInviteBody = z.object({
 
 const SwitchWorkspaceBody = z.object({
   workspace_id: z.string().min(1).max(64),
+});
+
+const SecretSetBody = z.object({
+  key: z.string().min(1).max(128),
+  value: z.string().min(1).max(65536),
 });
 
 // --------------------------------------------------------------------
@@ -284,6 +296,104 @@ workspacesRouter.delete('/:id/runs', async (c) => {
     const m = mapError(err);
     return c.json(m.body, m.status);
   }
+});
+
+// --------------------------------------------------------------------
+// Workspace-scoped secrets and agent tokens
+// --------------------------------------------------------------------
+
+workspacesRouter.get('/:id/secrets', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id') || '';
+  try {
+    ws.assertRole(ctx, id, 'editor');
+    const entries = userSecrets.listWorkspaceMasked({ ...ctx, workspace_id: id });
+    return c.json({ entries });
+  } catch (err) {
+    const m = mapError(err);
+    return c.json(m.body, m.status);
+  }
+});
+
+workspacesRouter.post('/:id/secrets', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id') || '';
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = SecretSetBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: 'Invalid body shape',
+        code: 'invalid_body',
+        details: parsed.error.flatten(),
+      },
+      400,
+    );
+  }
+  try {
+    ws.assertRole(ctx, id, 'editor');
+    userSecrets.setWorkspaceSecret(id, parsed.data.key, parsed.data.value);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.updated',
+      target: { type: 'secret', id: `${id}:${parsed.data.key}` },
+      before: null,
+      after: { exists: true },
+      metadata: { workspace_id: id, key: parsed.data.key, scope: 'workspace_vault' },
+    });
+    return c.json({ ok: true, key: parsed.data.key });
+  } catch (err) {
+    if (err instanceof SecretDecryptError) {
+      return c.json({ error: err.message, code: 'secret_encrypt_failed' }, 500);
+    }
+    const m = mapError(err);
+    return c.json(m.body, m.status);
+  }
+});
+
+workspacesRouter.delete('/:id/secrets/:key', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const id = c.req.param('id') || '';
+  const key = c.req.param('key') || '';
+  try {
+    ws.assertRole(ctx, id, 'editor');
+    const removed = userSecrets.delWorkspaceSecret(id, key);
+    auditLog({
+      actor: getAuditActor(c, ctx),
+      action: 'secret.deleted',
+      target: { type: 'secret', id: `${id}:${key}` },
+      before: { exists: removed },
+      after: { exists: false },
+      metadata: { workspace_id: id, key, scope: 'workspace_vault', removed },
+    });
+    return c.json({ ok: true, removed });
+  } catch (err) {
+    const m = mapError(err);
+    return c.json(m.body, m.status);
+  }
+});
+
+workspacesRouter.get('/:id/agent-tokens', async (c) => {
+  return listAgentKeys(c, c.req.param('id') || '');
+});
+
+workspacesRouter.post('/:id/agent-tokens', async (c) => {
+  return createAgentKey(c, c.req.param('id') || '');
+});
+
+workspacesRouter.post('/:id/agent-tokens/:token_id/revoke', async (c) => {
+  return revokeAgentKey(c, c.req.param('token_id') || '', c.req.param('id') || '');
 });
 
 // --------------------------------------------------------------------

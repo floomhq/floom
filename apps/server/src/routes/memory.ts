@@ -3,7 +3,7 @@
 // Exposes two surfaces:
 //
 //   /api/memory/:app_slug         — per-user app memory (key/value JSON store)
-//   /api/secrets                  — per-user secrets vault (AES-256-GCM)
+//   /api/secrets                  — workspace BYOK vault (AES-256-GCM)
 //
 // Both routers resolve a SessionContext in middleware so every query carries
 // a `workspace_id`. In OSS mode the context is always
@@ -21,6 +21,7 @@ import * as userSecrets from '../services/user_secrets.js';
 import { MemoryKeyNotAllowedError } from '../services/app_memory.js';
 import { SecretDecryptError } from '../services/user_secrets.js';
 import { requireAuthenticatedInCloud } from '../lib/auth.js';
+import type { SessionContext } from '../types.js';
 
 export const memoryRouter = new Hono();
 
@@ -127,6 +128,29 @@ const SecretSetBody = z.object({
   value: z.string().min(1).max(65536),
 });
 
+export function listWorkspaceSecrets(ctx: SessionContext): {
+  key: string;
+  updated_at: string;
+  source: 'workspace' | 'legacy_user';
+}[] {
+  return userSecrets.listWorkspaceMasked(ctx);
+}
+
+export function setWorkspaceSecretForContext(
+  ctx: SessionContext,
+  key: string,
+  value: string,
+): void {
+  userSecrets.setWorkspaceSecret(ctx.workspace_id, key, value);
+}
+
+export function deleteWorkspaceSecretForContext(
+  ctx: SessionContext,
+  key: string,
+): boolean {
+  return userSecrets.delWorkspaceSecret(ctx.workspace_id, key);
+}
+
 /**
  * GET /api/secrets — list masked secret keys (never returns plaintext).
  */
@@ -135,7 +159,7 @@ secretsRouter.get('/', async (c) => {
   const gate = requireAuthenticatedInCloud(c, ctx);
   if (gate) return gate;
   try {
-    const entries = userSecrets.listMasked(ctx);
+    const entries = listWorkspaceSecrets(ctx);
     return c.json({ entries });
   } catch (err) {
     return c.json(
@@ -172,19 +196,19 @@ secretsRouter.post('/', async (c) => {
   }
   try {
     const existed = userSecrets
-      .listMasked(ctx)
+      .listWorkspaceMasked(ctx)
       .some((entry) => entry.key === parsed.data.key);
-    userSecrets.set(ctx, parsed.data.key, parsed.data.value);
+    setWorkspaceSecretForContext(ctx, parsed.data.key, parsed.data.value);
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.updated',
-      target: { type: 'secret', id: `${ctx.workspace_id}:${ctx.user_id}:${parsed.data.key}` },
+      target: { type: 'secret', id: `${ctx.workspace_id}:${parsed.data.key}` },
       before: { exists: existed },
       after: { exists: true },
       metadata: {
         workspace_id: ctx.workspace_id,
         key: parsed.data.key,
-        scope: 'user_vault',
+        scope: 'workspace_vault',
       },
     });
     return c.json({ ok: true, key: parsed.data.key });
@@ -212,19 +236,19 @@ secretsRouter.delete('/:key', async (c) => {
   const key = c.req.param('key') || '';
   try {
     const existed = userSecrets
-      .listMasked(ctx)
+      .listWorkspaceMasked(ctx)
       .some((entry) => entry.key === key);
-    const removed = userSecrets.del(ctx, key);
+    const removed = deleteWorkspaceSecretForContext(ctx, key);
     auditLog({
       actor: getAuditActor(c, ctx),
       action: 'secret.deleted',
-      target: { type: 'secret', id: `${ctx.workspace_id}:${ctx.user_id}:${key}` },
+      target: { type: 'secret', id: `${ctx.workspace_id}:${key}` },
       before: { exists: existed },
       after: { exists: !removed && existed },
       metadata: {
         workspace_id: ctx.workspace_id,
         key,
-        scope: 'user_vault',
+        scope: 'workspace_vault',
         removed,
       },
     });

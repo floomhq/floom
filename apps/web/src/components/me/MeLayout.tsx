@@ -1,14 +1,8 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { PageShell } from '../PageShell';
+import { WorkspacePageShell } from '../WorkspacePageShell';
 import { useSession } from '../../hooks/useSession';
 
-export type MeTabId =
-  | 'overview'
-  | 'apps'
-  | 'runs'
-  | 'secrets'
-  | 'agent-keys'
-  | 'settings';
+export type MeTabId = 'overview' | 'apps' | 'runs' | 'secrets' | 'settings';
 
 interface MeLayoutProps {
   activeTab?: MeTabId;
@@ -18,33 +12,15 @@ interface MeLayoutProps {
   heading?: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
-  /**
-   * `default` — full greeting card with avatar + eyebrow + heading.
-   * `inline` — single-line greeting heading only.
-   * `none`   — render no header at all. The page is responsible for
-   *            its own greeting markup. Used by /me v23 (apps-led IA),
-   *            which renders a `.me-greet` block inside the page so
-   *            the heading sits *above* the primary nav strip in the
-   *            same visual rhythm as the wireframe.
-   */
-  headerVariant?: 'default' | 'inline' | 'none';
-  /**
-   * Per-page max-width override. Defaults to MeLayout's wider 1080
-   * shell. Keys pages (BYOK + Agent tokens) pin to 880 to match the v23
-   * wireframe — list-form layouts read better at narrower widths.
-   */
-  maxWidth?: number;
+  headerVariant?: 'default' | 'inline';
   children: ReactNode;
 }
 
 const s: Record<string, CSSProperties> = {
   shell: {
-    // v23 /me: bumped 1080 → 1180 to match wireframe `.me-wrap{max-width:1180px}`.
-    // All /me sub-routes inherit; verified on /me/apps, /me/runs, /me/secrets,
-    // /me/agent-keys, /me/settings — none of them content-clamp at <1180.
-    maxWidth: 1180,
+    maxWidth: 1080,
     margin: '0 auto',
-    padding: '36px 32px 64px',
+    padding: '28px 24px 96px',
     width: '100%',
     boxSizing: 'border-box',
   },
@@ -155,6 +131,7 @@ const s: Record<string, CSSProperties> = {
 };
 
 export function MeLayout({
+  activeTab,
   title,
   allowSignedOutShell = false,
   eyebrow,
@@ -162,7 +139,6 @@ export function MeLayout({
   subtitle,
   actions,
   headerVariant = 'default',
-  maxWidth,
   children,
 }: MeLayoutProps) {
   const { data: session } = useSession();
@@ -170,20 +146,15 @@ export function MeLayout({
   const greeting = deriveGreeting(session?.user);
   const resolvedEyebrow = eyebrow === undefined ? greeting.eyebrow : eyebrow;
   const resolvedHeading = heading || greeting.heading;
-  const shellStyle: CSSProperties = maxWidth
-    ? { ...s.shell, maxWidth }
-    : s.shell;
 
   return (
-    <PageShell
-      requireAuth="cloud"
-      title={title || 'Me · Floom'}
-      contentStyle={{ padding: 0, maxWidth: 'none', minHeight: 'auto' }}
+    <WorkspacePageShell
+      mode={activeTab === 'secrets' || activeTab === 'settings' ? 'settings' : 'run'}
+      title={title || 'Workspace Run · Floom'}
       allowSignedOutShell={allowSignedOutShell || signedOutPreview}
-      noIndex
     >
-      <div data-testid="me-layout" style={shellStyle}>
-        {headerVariant === 'none' ? null : headerVariant === 'inline' ? (
+      <div data-testid="me-layout" style={{ ...s.shell, padding: 0, maxWidth: 'none' }}>
+        {headerVariant === 'inline' ? (
           <header style={s.inlineHeader}>
             <h1 data-testid="me-greeting-name" style={s.inlineHeading}>
               {resolvedHeading}
@@ -212,7 +183,7 @@ export function MeLayout({
 
         <div data-testid="me-tab-panel">{children}</div>
       </div>
-    </PageShell>
+    </WorkspacePageShell>
   );
 }
 
@@ -230,25 +201,13 @@ function deriveGreeting(user: {
   const email = (user?.email ?? '').trim();
   const emailLocal = email.includes('@') ? email.split('@')[0] : email;
   const displayName = nameRaw || emailLocal || '';
-  const firstName = firstNameFromName(nameRaw) || capitalize(emailLocal);
 
   return {
-    eyebrow: firstName ? 'Welcome back' : 'Account',
-    heading: firstName ? `Hey, ${firstName}.` : 'Welcome back.',
+    eyebrow: 'Workspace',
+    heading: 'Workspace Run',
     initials: initialsFrom(displayName || 'there'),
     image: user?.image ?? null,
   };
-}
-
-function firstNameFromName(input: string): string {
-  const clean = input.trim();
-  if (!clean) return '';
-  return clean.split(/\s+/)[0] || '';
-}
-
-function capitalize(input: string): string {
-  if (!input) return input;
-  return `${input.charAt(0).toUpperCase()}${input.slice(1)}`;
 }
 
 function initialsFrom(input: string): string {

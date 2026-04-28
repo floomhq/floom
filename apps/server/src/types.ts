@@ -208,6 +208,8 @@ export interface AppRecord {
   review_decided_at: string | null;
   review_decided_by: string | null;
   review_comment: string | null;
+  forked_from_app_id: string | null;
+  claimed_at: string | null;
   // Async job queue fields (v0.3.0). is_async comes back from SQLite as 0/1.
   is_async: 0 | 1;
   webhook_url: string | null;
@@ -216,6 +218,8 @@ export interface AppRecord {
   async_mode: AsyncMode | null;
   // ADR-011. NULL means runs are retained indefinitely.
   max_run_retention_days: number | null;
+  // Creator-configured per-app run budget. NULL means global default.
+  run_rate_limit_per_hour: number | null;
   // Multi-tenant fields (v0.3.1 / W2.1). workspace_id defaults to 'local' in
   // OSS mode. `memory_keys` is a JSON array declared in the app manifest that
   // lists which keys this app is allowed to persist in `app_memory`.
@@ -244,6 +248,14 @@ export interface AppRecord {
   hero: 0 | 1;
   created_at: string;
   updated_at: string;
+}
+
+export interface AppInstallRecord {
+  id: string;
+  app_id: string;
+  workspace_id: string;
+  user_id: string;
+  installed_at: string;
 }
 
 // ---------- jobs (v0.3.0) ----------
@@ -389,6 +401,7 @@ export interface WorkspaceRecord {
   plan: string;
   wrapped_dek: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface UserRecord {
@@ -444,6 +457,8 @@ export interface AgentTokenRecord {
   label: string;
   scope: AgentTokenScope;
   workspace_id: string;
+  /** Launch compatibility: backed by agent_tokens.user_id until v1.1 column rename. */
+  issued_by_user_id?: string;
   user_id: string;
   created_at: string;
   last_used_at: string | null;

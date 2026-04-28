@@ -89,7 +89,7 @@ export function BYOKModal({
     e.preventDefault();
     const trimmed = value.trim();
     if (trimmed.length < 20) {
-      setError('That does not look like a valid Gemini API key.');
+      setError('That does not look like a valid Gemini BYOK key.');
       return;
     }
     writeUserGeminiKey(trimmed);
@@ -101,7 +101,7 @@ export function BYOKModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Add your Gemini API key"
+      aria-label="Add your Gemini BYOK key"
       data-testid="byok-modal"
       style={{
         position: 'fixed',
@@ -171,7 +171,7 @@ export function BYOKModal({
         >
           {mode === 'proactive' ? (
             <>
-              Bring your own Gemini API key to run <code>{slug}</code>{' '}
+              Bring your own Gemini BYOK key to run <code>{slug}</code>{' '}
               without the {limit}-runs-per-day free cap. The key stays in
               your browser — we never log or store it, and it's only sent
               with your next run on this app.
@@ -179,7 +179,7 @@ export function BYOKModal({
           ) : (
             <>
               You used all {limit} free runs of <code>{slug}</code> today.
-              Paste your own Gemini API key to keep going — it stays in
+              Paste your own Gemini BYOK key to keep going — it stays in
               your browser, we never log or store it.
             </>
           )}
@@ -195,7 +195,7 @@ export function BYOKModal({
               marginBottom: 6,
             }}
           >
-            Gemini API key
+            Gemini BYOK key
           </label>
           <SecretInput
             value={value}

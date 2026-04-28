@@ -591,7 +591,7 @@ slugRunRouter.post('/', async (c) => {
   const body = parsed.value as {
     action?: unknown;
     inputs?: unknown;
-  };
+  } & Record<string, unknown>;
 
   const actionNames = Object.keys(manifest.actions);
   const actionName =
@@ -604,9 +604,16 @@ slugRunRouter.post('/', async (c) => {
 
   let validated: Record<string, unknown>;
   try {
+    const topLevelInputs = Object.fromEntries(
+      Object.entries(body).filter(([key]) => key !== 'action' && key !== 'inputs'),
+    );
+    const inputPayload =
+      body.inputs && typeof body.inputs === 'object' && !Array.isArray(body.inputs)
+        ? (body.inputs as Record<string, unknown>)
+        : topLevelInputs;
     validated = validateInputs(
       actionSpec,
-      (body.inputs as Record<string, unknown>) ?? {},
+      inputPayload,
     );
   } catch (err) {
     const e = err as ManifestError;
@@ -728,10 +735,9 @@ slugQuotaRouter.get('/', async (c) => {
   });
 });
 
-// ---------- /api/me/runs : per-user run history ----------
-// Returns the caller's run history scoped by (workspace_id, user_id) in
-// cloud mode and by (workspace_id, device_id) in OSS mode. Joins `apps`
-// so the UI can render the app name + icon without a second fetch.
+// ---------- /api/me/runs : scoped run history ----------
+// Browser/device callers keep the legacy owner filter for compatibility.
+// Agent-token callers are workspace principals, so they list workspace runs.
 export const meRouter = new Hono();
 
 meRouter.get('/invites', async (c) => {
@@ -1017,13 +1023,14 @@ meRouter.get('/runs', async (c) => {
   const ctx = await resolveUserContext(c);
   const limit = Math.max(1, Math.min(200, Number(c.req.query('limit') || 50)));
 
-  // Two filters: authenticated caller scopes by user_id; anonymous caller
-  // scopes by device_id. Both also check workspace_id so cross-workspace
-  // leaks are impossible.
-  const scopeClause = ctx.is_authenticated
-    ? 'runs.workspace_id = ? AND runs.user_id = ?'
-    : 'runs.workspace_id = ? AND runs.device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+  const scopeClause = ctx.agent_token_id
+    ? 'runs.workspace_id = ?'
+    : ctx.is_authenticated
+      ? 'runs.workspace_id = ? AND runs.user_id = ?'
+      : 'runs.workspace_id = ? AND runs.device_id = ?';
+  const scopeParams = ctx.agent_token_id
+    ? [ctx.workspace_id]
+    : [ctx.workspace_id, ctx.is_authenticated ? ctx.user_id : ctx.device_id];
 
   const rows = db
     .prepare(
@@ -1037,7 +1044,7 @@ meRouter.get('/runs', async (c) => {
         ORDER BY runs.started_at DESC
         LIMIT ?`,
     )
-    .all(ctx.workspace_id, scopeParam, limit) as Array<{
+    .all(...scopeParams, limit) as Array<{
     id: string;
     action: string;
     status: string;
@@ -1154,10 +1161,14 @@ meRouter.get('/runs/:id', async (c) => {
   const ctx = await resolveUserContext(c);
   const id = c.req.param('id');
 
-  const scopeClause = ctx.is_authenticated
-    ? 'runs.workspace_id = ? AND runs.user_id = ?'
-    : 'runs.workspace_id = ? AND runs.device_id = ?';
-  const scopeParam = ctx.is_authenticated ? ctx.user_id : ctx.device_id;
+  const scopeClause = ctx.agent_token_id
+    ? 'runs.workspace_id = ?'
+    : ctx.is_authenticated
+      ? 'runs.workspace_id = ? AND runs.user_id = ?'
+      : 'runs.workspace_id = ? AND runs.device_id = ?';
+  const scopeParams = ctx.agent_token_id
+    ? [ctx.workspace_id]
+    : [ctx.workspace_id, ctx.is_authenticated ? ctx.user_id : ctx.device_id];
 
   const row = db
     .prepare(
@@ -1166,7 +1177,7 @@ meRouter.get('/runs/:id', async (c) => {
         WHERE runs.id = ? AND ${scopeClause}
         LIMIT 1`,
     )
-    .get(id, ctx.workspace_id, scopeParam) as
+    .get(id, ...scopeParams) as
     | {
         id: string;
         app_id: string;

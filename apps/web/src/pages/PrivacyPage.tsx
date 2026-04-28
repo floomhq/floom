@@ -144,7 +144,7 @@ export function PrivacyPage() {
               <p>Operating Floom involves processing the following categories of personal data:</p>
               <ul>
                 <li>Account data: email address and password hash (for authentication).</li>
-                <li>Usage data: app run history (run logs, inputs, outputs) and API keys you add to your account.</li>
+                <li>Usage data: app run history (run logs, inputs, outputs) and BYOK keys added in Workspace settings.</li>
                 <li>Technical data: IP address (for rate limiting and abuse prevention), user agent, timestamps, and a device-ID cookie for anonymous sessions.</li>
                 <li>Communications: the content of any support request you send us.</li>
                 <li>Payment data (future): handled by a third-party payment processor for paid plans.</li>
@@ -162,9 +162,9 @@ export function PrivacyPage() {
 
             <LegalSection id="retention" title="4. Retention">
               <p>
-                Account data is retained as long as your account exists. Run logs are kept for 90 days by
+                Account data is retained while the account exists. Run logs are kept for 90 days by
                 default. Session cookies expire after 30 days at the latest. You can delete individual
-                runs at any time or remove your account entirely from settings.
+                runs at any time or remove the account entirely from Account settings.
               </p>
             </LegalSection>
 
@@ -207,7 +207,7 @@ export function PrivacyPage() {
               </ul>
               <p>
                 For any request, contact <a href="mailto:team@floom.dev">team@floom.dev</a>. Account
-                deletion is also available directly from your account settings.
+                deletion is also available directly from Account settings.
               </p>
             </LegalSection>
 

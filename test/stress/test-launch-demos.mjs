@@ -43,7 +43,7 @@ writeFileSync(join(contextDir, 'Dockerfile'), 'FROM python:3.12-slim\n');
 writeFileSync(join(contextDir, 'main.py'), 'print("hello")\n');
 
 const baseFingerprint = fingerprintDemoContext(contextDir);
-const baseTag = imageTagForDemo({ slug: 'lead-scorer' }, contextDir);
+const baseTag = imageTagForDemo({ slug: 'competitor-lens' }, contextDir);
 
 log(
   'fingerprintDemoContext: deterministic',
@@ -51,7 +51,7 @@ log(
 );
 log(
   'imageTagForDemo: prefixes with slug + ctx- hash',
-  /^floom-demo-lead-scorer:ctx-[0-9a-f]{16}$/.test(baseTag),
+  /^floom-demo-competitor-lens:ctx-[0-9a-f]{16}$/.test(baseTag),
 );
 
 mkdirSync(join(contextDir, '__pycache__'), { recursive: true });
@@ -63,7 +63,7 @@ log(
 
 writeFileSync(join(contextDir, 'main.py'), 'print("hello v2")\n');
 const changedFingerprint = fingerprintDemoContext(contextDir);
-const changedTag = imageTagForDemo({ slug: 'lead-scorer' }, contextDir);
+const changedTag = imageTagForDemo({ slug: 'competitor-lens' }, contextDir);
 log(
   'fingerprintDemoContext: content changes update fingerprint',
   changedFingerprint !== baseFingerprint,
@@ -100,6 +100,13 @@ for (const slug of BYOK_GATED) {
     `secrets_needed = ${JSON.stringify(secrets)}`,
   );
 }
+
+const linkedinRoaster = DEMOS.find((d) => d.slug === 'linkedin-roaster');
+log(
+  'launch demo linkedin-roaster is present in seeder',
+  linkedinRoaster !== undefined,
+  linkedinRoaster ? undefined : 'DEMOS missing the slug entry',
+);
 
 console.log(`\npassed=${passed} failed=${failed}`);
 if (failed > 0) process.exit(1);

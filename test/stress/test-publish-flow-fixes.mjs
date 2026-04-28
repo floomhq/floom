@@ -277,6 +277,23 @@ db.prepare(
   log('manifest.primary_action cleared', m.primary_action === undefined);
 }
 
+// Public exposure must go through the review flow, not owner PATCH.
+{
+  const r = await fetchRoute(hubRouter, 'PATCH', '/oss-demo', {
+    visibility: 'public',
+  });
+  log('PATCH visibility public rejected with review_required', r.status === 409 && r.json?.code === 'review_required', `got ${r.status}: ${r.text}`);
+}
+
+// Owner unlist/private remains available and uses the sharing state machine.
+{
+  const r = await fetchRoute(hubRouter, 'PATCH', '/oss-demo', {
+    visibility: 'private',
+  });
+  const row = db.prepare('SELECT visibility FROM apps WHERE slug = ?').get('oss-demo');
+  log('PATCH visibility private succeeds', r.status === 200 && row?.visibility === 'private', `got ${r.status}: ${r.text}`);
+}
+
 // ----- Cleanup -----
 try { rmSync(tmp, { recursive: true, force: true }); } catch {}
 

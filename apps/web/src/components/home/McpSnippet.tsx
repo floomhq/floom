@@ -135,7 +135,7 @@ export function McpSnippet() {
               margin: '0 auto',
             }}
           >
-            Paste into Claude Desktop&apos;s{' '}
+            Paste into your MCP client&apos;s{' '}
             <code
               style={{
                 fontFamily: "'JetBrains Mono', ui-monospace, monospace",

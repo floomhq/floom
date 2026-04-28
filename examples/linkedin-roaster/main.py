@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Status: prepared, not yet registered in seedLaunchDemos. Add to DEMOS array there to publish.
+# Status: registered in seedLaunchDemos for the launch demo roster.
 """
 LinkedIn Profile Roaster -- Floom demo app.
 
@@ -7,6 +7,8 @@ Reads one JSON payload from argv[1]:
   {
     "action": "roast",
     "inputs": {
+      "url": "https://www.linkedin.com/in/example"
+      // or
       "profile_text": "..."
     }
   }
@@ -16,7 +18,7 @@ Emits one JSON object on stdout with the Floom runner contract:
 
 Uses one Gemini 2.5 Flash Lite call with response_json_schema enforcement.
 If GEMINI_API_KEY is missing, falls back to a deterministic dry-run output.
-Exact sample inputs are served from sample-cache.json.
+Exact sample inputs and the launch demo URL are served from sample-cache.json.
 """
 
 from __future__ import annotations
@@ -39,6 +41,10 @@ MAX_PROFILE_CHARS = 5000
 MAX_EXCERPT_CHARS = 180
 REWRITE_SECTIONS = ("headline", "about_intro", "experience_bullet")
 SAMPLE_CACHE_PATH = Path(__file__).parent / "sample-cache.json"
+FEDERICO_LINKEDIN_URLS = {
+    "https://linkedin.com/in/federicodeponte",
+    "https://www.linkedin.com/in/federicodeponte",
+}
 
 SYSTEM_PROMPT = (
     "You are a brutally honest LinkedIn coach in the style of an A+ recruiter. "
@@ -147,6 +153,22 @@ def _validate_profile_text(profile_text: Any) -> str:
     return normalized
 
 
+def _normalize_linkedin_url(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("url must be a string")
+    url = value.strip()
+    if not url:
+        raise ValueError("url must be non-empty")
+    if not url.startswith(("https://linkedin.com/", "https://www.linkedin.com/")):
+        raise ValueError("url must be an HTTPS LinkedIn profile URL")
+    if url.startswith("https://linkedin.com/"):
+        url = "https://www." + url[len("https://") :]
+    url = url.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if "/in/" not in url:
+        raise ValueError("url must point to a linkedin.com/in/... profile")
+    return url
+
+
 def canonical_input(profile_text: str) -> str:
     payload = {"profile_text": _normalize_whitespace(profile_text)}
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -166,6 +188,19 @@ def _load_sample_cache() -> dict[str, Any]:
         _log(f"sample-cache.json unreadable ({exc}); ignoring")
         return {}
     entries = raw.get("entries") if isinstance(raw, dict) else None
+    return entries or {}
+
+
+def _load_url_cache() -> dict[str, Any]:
+    if not SAMPLE_CACHE_PATH.is_file():
+        return {}
+    try:
+        with open(SAMPLE_CACHE_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as exc:  # noqa: BLE001
+        _log(f"sample-cache.json unreadable ({exc}); ignoring URL cache")
+        return {}
+    entries = raw.get("url_entries") if isinstance(raw, dict) else None
     return entries or {}
 
 
@@ -403,7 +438,26 @@ def _roast_with_gemini(profile_text: str, client, model: str) -> dict[str, Any]:
     return _parse_json_answer(text)
 
 
-def roast_profile(profile_text: str) -> dict[str, Any]:
+def roast_profile(profile_text: str | None = None, url: str | None = None) -> dict[str, Any]:
+    normalized_url = _normalize_linkedin_url(url) if url else None
+    if normalized_url:
+        url_cache = _load_url_cache()
+        cached = url_cache.get(normalized_url)
+        if cached is None and normalized_url in FEDERICO_LINKEDIN_URLS:
+            cached = url_cache.get("https://www.linkedin.com/in/federicodeponte")
+        if cached is not None:
+            _log(f"URL cache hit for {normalized_url} (instant response)")
+            out = dict(cached)
+            out["cache_hit"] = True
+            out["dry_run"] = False
+            out.setdefault("model", "url-fixture (cached)")
+            return out
+        raise ValueError(
+            "This demo URL is not cached yet. Paste profile_text instead for uncached profiles."
+        )
+
+    if profile_text is None:
+        raise ValueError("url or profile_text is required")
     normalized_profile = _validate_profile_text(profile_text)
 
     cache = _load_sample_cache()
@@ -448,16 +502,22 @@ def _sanitize_inputs(inputs: Any) -> dict[str, Any]:
     if not isinstance(inputs, dict):
         raise ValueError("inputs must be an object")
     extras = sorted(
-        key for key in inputs.keys() if key != "profile_text" and not str(key).startswith("_")
+        key
+        for key in inputs.keys()
+        if key not in {"profile_text", "url", "linkedin_url"} and not str(key).startswith("_")
     )
     if extras:
         raise ValueError(
-            "Only 'profile_text' is supported "
+            "Only 'url', 'linkedin_url', or 'profile_text' is supported "
             f"(got: {', '.join(str(item) for item in extras)})"
         )
-    if "profile_text" not in inputs:
-        raise ValueError("profile_text is required")
-    return {"profile_text": inputs.get("profile_text")}
+    url = inputs.get("url", inputs.get("linkedin_url"))
+    profile_text = inputs.get("profile_text")
+    if url:
+        return {"url": url}
+    if profile_text:
+        return {"profile_text": profile_text}
+    raise ValueError("url or profile_text is required")
 
 
 def _cli() -> int:

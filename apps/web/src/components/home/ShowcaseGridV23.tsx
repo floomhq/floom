@@ -80,7 +80,7 @@ const SHOWCASE_HEADER_ROW: CSSProperties = {
 
 const GRID_STYLE: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1.6fr 1fr 1fr',
+  gridTemplateColumns: 'repeat(3, 1fr)',
   gap: 18,
 };
 

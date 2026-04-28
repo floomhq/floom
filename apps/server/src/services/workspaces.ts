@@ -235,7 +235,7 @@ export function listMine(
 ): Array<{ workspace: WorkspaceRecord; role: WorkspaceRole }> {
   const rows = db
     .prepare(
-      `SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, m.role
+      `SELECT w.id, w.slug, w.name, w.plan, w.wrapped_dek, w.created_at, w.updated_at, m.role
          FROM workspace_members m
          JOIN workspaces w ON w.id = m.workspace_id
         WHERE m.user_id = ?
@@ -250,6 +250,7 @@ export function listMine(
       plan: r.plan,
       wrapped_dek: r.wrapped_dek,
       created_at: r.created_at,
+      updated_at: r.updated_at,
     },
     role: isValidRole(r.role) ? r.role : 'viewer',
   }));
@@ -293,6 +294,7 @@ export function update(
     params.push(newSlug);
   }
   if (sets.length === 0) return getById(ctx, workspace_id);
+  sets.push("updated_at = datetime('now')");
   params.push(workspace_id);
   db.prepare(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   return db

@@ -157,6 +157,12 @@ log(
   generated,
 );
 log(
+  'legacy floom_<base64> token is not a valid new mint format',
+  agentTokens.isAgentTokenString(
+    'floom_MzgFsjGVEHTPjyWVnrdQSSmTSYuohjyjGWXNTZOzCFUIwXgNuFNuZBEEAcoGBDuY',
+  ) === false,
+);
+log(
   'hashAgentToken returns sha256 hex',
   /^[0-9a-f]{64}$/.test(agentTokens.hashAgentToken(generated)),
 );
@@ -213,6 +219,36 @@ try {
   log('bearer token authenticates a request', authed.res.status === 200, authed.text);
   const usedRow = db.prepare('SELECT last_used_at FROM agent_tokens WHERE id = ?').get(tokenId);
   log('bearer use updates last_used_at', typeof usedRow?.last_used_at === 'string');
+
+  const legacyRawToken =
+    'floom_MzgFsjGVEHTPjyWVnrdQSSmTSYuohjyjGWXNTZOzCFUIwXgNuFNuZBEEAcoGBDuY';
+  const legacyTokenId = 'agtok_legacy_wrong_format';
+  db.prepare(
+    `INSERT INTO agent_tokens
+       (id, prefix, hash, label, scope, workspace_id, user_id, created_at,
+        last_used_at, revoked_at, rate_limit_per_minute)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    legacyTokenId,
+    'floom_agent_floom_Mz',
+    agentTokens.hashAgentToken(legacyRawToken),
+    'legacy-wrong-format',
+    'read-write',
+    'local',
+    'local',
+    new Date().toISOString(),
+    null,
+    null,
+    60,
+  );
+  const legacyAuthed = await jsonFetch(server.port, '/api/session/me', {
+    token: legacyRawToken,
+  });
+  log(
+    'legacy floom_<base64> token remains accepted by lookup',
+    legacyAuthed.res.status === 200,
+    legacyAuthed.text,
+  );
 
   const publishMint = await jsonFetch(server.port, '/api/me/agent-keys', {
     method: 'POST',

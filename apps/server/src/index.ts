@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import { adminRouter } from './routes/admin.js';
 import { accountDeleteRouter } from './routes/account_delete.js';
-import { healthRouter } from './routes/health.js';
+import { healthRouter, healthzRouter } from './routes/health.js';
 import { hubRouter } from './routes/hub.js';
 import { parseRouter } from './routes/parse.js';
 import { pickRouter } from './routes/pick.js';
@@ -182,6 +182,7 @@ app.use('/api/admin/*', restrictedCors);
 app.use('/api/hub/*', openCors);
 app.use('/api/hub', openCors);
 app.use('/api/health/*', openCors);
+app.use('/api/healthz', openCors);
 // GH stars proxy — public read-only, no credentials.
 app.use('/api/gh-stars', openCors);
 app.use('/api/gh-stars/*', openCors);
@@ -287,6 +288,8 @@ app.use('/api/*', writeRateLimit);
 
 // API routes
 app.route('/api/health', healthRouter);
+// GH #852: /api/healthz — lightweight probe for watchdogs + uptime monitors.
+app.route('/api/healthz', healthzRouter);
 // Server-side proxy for the floomhq/floom GitHub star count. Browser
 // fetches from api.github.com were getting 403-rate-limited on every
 // page load (anonymous budget is 60/hour/IP). See routes/gh-stars.ts.
@@ -469,6 +472,46 @@ if (isCloudMode()) {
         let reqForAuth = c.req.raw;
         let signinEmailForDelay: string | null = null;
         let pendingDeleteSignin = null as ReturnType<typeof getUserDeletionStateByEmail> | null;
+        if (method === 'POST' && pathname === '/auth/sign-in/social') {
+          const bodyText = await c.req.raw.clone().text();
+          try {
+            const body = JSON.parse(bodyText) as { provider?: unknown };
+            const provider = typeof body.provider === 'string' ? body.provider : null;
+            if (
+              provider === 'github' &&
+              (!process.env.GITHUB_OAUTH_CLIENT_ID || !process.env.GITHUB_OAUTH_CLIENT_SECRET)
+            ) {
+              return c.json(
+                {
+                  error: 'GitHub auth not configured',
+                  code: 'provider_not_configured',
+                  provider: 'github',
+                },
+                503,
+              );
+            }
+            if (
+              provider === 'google' &&
+              (!process.env.GOOGLE_OAUTH_CLIENT_ID || !process.env.GOOGLE_OAUTH_CLIENT_SECRET)
+            ) {
+              return c.json(
+                {
+                  error: 'Google auth not configured',
+                  code: 'provider_not_configured',
+                  provider: 'google',
+                },
+                503,
+              );
+            }
+          } catch {
+            // Let Better Auth own malformed social sign-in payload errors.
+          }
+          reqForAuth = new Request(c.req.raw.url, {
+            method: c.req.raw.method,
+            headers: c.req.raw.headers,
+            body: bodyText,
+          });
+        }
         if (method === 'POST' && pathname === '/auth/sign-in/email') {
           const bodyText = await c.req.raw.clone().text();
           const parsedEmail = parseEmailForSigninProgressiveDelay(bodyText);
@@ -992,6 +1035,8 @@ if (webDist) {
     '/store',
     '/about',
     '/pricing',
+    '/ia',
+    '/architecture',
     '/protocol',
     '/install',
     '/install-in-claude',
@@ -1000,6 +1045,16 @@ if (webDist) {
     '/signup',
     '/forgot-password',
     '/reset-password',
+    '/run',
+    '/run/apps',
+    '/run/runs',
+    '/run/install',
+    '/settings',
+    '/settings/general',
+    '/settings/byok-keys',
+    '/settings/agent-tokens',
+    '/settings/studio',
+    '/account/settings',
     '/me',
     '/me/install',
     '/me/runs',
@@ -1020,6 +1075,9 @@ if (webDist) {
     '/onboarding',
     '/changelog',
     '/waitlist',
+    '/home',
+    '/help',
+    '/marketing',
     '/legal',
     '/legal/imprint',
     '/legal/privacy',
@@ -1029,6 +1087,7 @@ if (webDist) {
     '/impressum',
     '/privacy',
     '/terms',
+    '/status',
     '/cookies',
     '/spec',
     '/_creator-legacy',
@@ -1046,11 +1105,16 @@ if (webDist) {
   const knownDynamicPatterns: RegExp[] = [
     new RegExp(`^/p/${SLUG}/?$`),
     new RegExp(`^/p/${SLUG}/dashboard/?$`),
+    new RegExp(`^/embed/${SLUG}/?$`),
     new RegExp(`^/r/${RUN_ID}/?$`),
     new RegExp(`^/apps/${SLUG}/?$`),
     new RegExp(`^/store/${SLUG}/?$`),
     new RegExp(`^/install/${SLUG}/?$`),
     new RegExp(`^/docs/${SLUG}/?$`),
+    new RegExp(`^/run/runs/${RUN_ID}/?$`),
+    new RegExp(`^/run/apps/${SLUG}/?$`),
+    new RegExp(`^/run/apps/${SLUG}/(run|triggers)/?$`),
+    new RegExp(`^/run/apps/${SLUG}/triggers/(schedule|webhook)/?$`),
     new RegExp(`^/me/runs/${RUN_ID}/?$`),
     new RegExp(`^/me/apps/${SLUG}/?$`),
     new RegExp(`^/me/apps/${SLUG}/(secrets|run)/?$`),
@@ -1074,6 +1138,32 @@ if (webDist) {
       : pathname;
     if (knownExactPaths.has(stripped)) return true;
     return knownDynamicPatterns.some((rx) => rx.test(pathname));
+  }
+
+  function legacyWorkspaceUiTarget(pathname: string): string | null {
+    const normalized =
+      pathname.length > 1 && pathname.endsWith('/')
+        ? pathname.slice(0, -1)
+        : pathname;
+    if (normalized === '/me') return '/run';
+    if (normalized === '/me/install') return '/run/install';
+    if (normalized === '/me/secrets') return '/settings/byok-keys';
+    if (normalized === '/me/agent-keys' || normalized === '/me/api-keys') {
+      return '/settings/agent-tokens';
+    }
+    if (normalized === '/me/settings' || normalized === '/me/settings/tokens') {
+      return '/account/settings';
+    }
+    if (normalized === '/studio/settings') return '/settings/studio';
+    if (normalized === '/me/apps') return '/run/apps';
+    if (normalized.startsWith('/me/apps/')) {
+      return normalized.replace(/^\/me\/apps/, '/run/apps');
+    }
+    if (normalized === '/me/runs') return '/run/runs';
+    if (normalized.startsWith('/me/runs/')) {
+      return normalized.replace(/^\/me\/runs/, '/run/runs');
+    }
+    return null;
   }
 
   // Crawlers don't run JS, so client-side meta updates in AppPermalinkPage
@@ -1161,9 +1251,16 @@ if (webDist) {
     // free forever, paid plans TBD). SSR title so outbound-comparison
     // crawlers see "Pricing", not the landing title.
     if (pathname === '/pricing' || pathname === '/pricing/') return 'Pricing · Floom';
+    if (pathname === '/ia' || pathname === '/ia/') return 'Information architecture · Floom';
+    if (pathname === '/architecture' || pathname === '/architecture/') return 'Architecture · Floom';
     // /onboarding is a redirect to /me?welcome=1 but the title the server
     // returns before the 302 hops still matters for preview bots.
     if (pathname === '/onboarding' || pathname === '/onboarding/') return 'Welcome to Floom · Floom';
+    if (pathname === '/run' || pathname.startsWith('/run/')) return 'Run · Floom';
+    if (pathname.startsWith('/settings/')) return 'Workspace settings · Floom';
+    if (pathname === '/account/settings' || pathname === '/account/settings/') {
+      return 'Account settings · Floom';
+    }
     if (pathname === '/me' || pathname.startsWith('/me/')) return 'Me · Floom';
     if (pathname.startsWith('/studio')) return 'Studio · Floom';
     if (pathname.startsWith('/docs')) return 'Docs · Floom';
@@ -1175,6 +1272,7 @@ if (webDist) {
     if (pathname === '/imprint') return 'Imprint · Floom';
     if (pathname === '/privacy') return 'Privacy · Floom';
     if (pathname === '/terms') return 'Terms · Floom';
+    if (pathname === '/status' || pathname === '/status/') return 'Status · Floom';
     if (pathname === '/cookies') return 'Cookies · Floom';
     return null;
   }
@@ -1205,6 +1303,20 @@ if (webDist) {
         ogTitle: 'Pricing · Floom',
         description:
           'Free during beta. Self-host free forever. Paid cloud plans coming soon.',
+      };
+    }
+    if (pathname === '/ia' || pathname === '/ia/') {
+      return {
+        ogTitle: 'Information architecture · Floom',
+        description:
+          'The v24 sitemap for public, Workspace Run, and Studio surfaces.',
+      };
+    }
+    if (pathname === '/architecture' || pathname === '/architecture/') {
+      return {
+        ogTitle: 'Architecture · Floom',
+        description:
+          'How Floom maps web, MCP, REST, and CLI onto one protocol and runtime.',
       };
     }
     if (pathname === '/install' || pathname === '/install/') {
@@ -1250,6 +1362,12 @@ if (webDist) {
       return {
         ogTitle: 'Create account · Floom',
         description: 'Create a free Floom account to publish and run AI apps.',
+      };
+    }
+    if (pathname === '/status' || pathname === '/status/') {
+      return {
+        ogTitle: 'Status · Floom',
+        description: 'Current launch-week status for Floom public pages, runtime API, workspace data, and transactional email.',
       };
     }
     return null;
@@ -1436,6 +1554,50 @@ if (webDist) {
     });
   });
 
+  // install.sh — served dynamically so FLOOM_INSTALL_HOST is baked in per
+  // request origin. This lets `curl https://mvp.floom.dev/install.sh | bash`
+  // produce a script that writes `https://mvp.floom.dev` as the default
+  // api_url instead of the hardcoded `https://floom.dev` fallback in the repo.
+  //
+  // Resolution order for the baked-in host:
+  //   1. FLOOM_INSTALL_HOST env var (set by the operator at deploy time)
+  //   2. PUBLIC_URL env var (already set for each deployment)
+  //   3. The Host/X-Forwarded-Host header of the incoming request
+  // The templated value replaces the line `INSTALL_HOST="${FLOOM_INSTALL_HOST:-https://floom.dev}"`.
+  app.get('/install.sh', async (c) => {
+    const installShPath = join(webDist, 'install.sh');
+    let script: string;
+    try {
+      script = readFileSync(installShPath, 'utf-8');
+    } catch {
+      return new Response('install.sh not found', { status: 404 });
+    }
+    // Determine the canonical origin for this deployment.
+    const deployOrigin =
+      process.env.FLOOM_INSTALL_HOST ||
+      PUBLIC_URL ||
+      (() => {
+        const host = c.req.header('x-forwarded-host') || c.req.header('host') || '';
+        const proto = c.req.header('x-forwarded-proto') || 'https';
+        return host ? `${proto}://${host}` : 'https://floom.dev';
+      })();
+    // Rewrite the fallback in the INSTALL_HOST variable declaration so the
+    // cloned script knows which host to default to. The line looks like:
+    //   INSTALL_HOST="${FLOOM_INSTALL_HOST:-https://floom.dev}"
+    const templated = script.replace(
+      /^(INSTALL_HOST="\$\{FLOOM_INSTALL_HOST:-)[^}"]*(}")/m,
+      `$1${deployOrigin}$2`,
+    );
+    return new Response(templated, {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-cache',
+        'x-floom-install-host': deployOrigin,
+      },
+    });
+  });
+
   app.use('/*', async (c, next) => {
     const url = new URL(c.req.url);
     const pathname = url.pathname;
@@ -1459,6 +1621,19 @@ if (webDist) {
       });
     }
 
+    function permanentRedirect(targetPath: string) {
+      const target = `${targetPath}${url.search}`;
+      return new Response(null, {
+        status: 301,
+        headers: { location: target, 'cache-control': 'public, max-age=3600' },
+      });
+    }
+
+    const meRedirectTarget = legacyWorkspaceUiTarget(pathname);
+    if (meRedirectTarget) {
+      return permanentRedirect(meRedirectTarget);
+    }
+
     // 2026-04-24 (SEO #348): /apps/<slug> and /store/<slug> are legacy
     // patterns that funnel into /p/<slug> client-side. On the server we
     // return a real 301 so crawlers don't index both URLs and users who
@@ -1472,6 +1647,20 @@ if (webDist) {
       return new Response(null, {
         status: 301,
         headers: { location: target, 'cache-control': 'public, max-age=3600' },
+      });
+    }
+
+    // Launch-blocker audit 2026-04-27: embed surfaces are deferred to v1.1.
+    // Keep old/bookmarked `/embed/:slug` URLs useful by routing them to the
+    // public run surface instead of a bare 404.
+    const embedMatch = pathname.match(/^\/embed\/([a-z0-9][a-z0-9-]*)\/?$/);
+    if (embedMatch && embedMatch[1]) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: `/p/${embedMatch[1]}`,
+          'cache-control': 'no-cache',
+        },
       });
     }
 

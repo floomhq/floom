@@ -1,5 +1,110 @@
 # Floom rollback runbook
 
+## Tuesday 2026-04-28 launch P0 rollback
+
+Use this section if launch traffic exposes a P0 on `floom.dev`.
+
+### 1. Freeze writes and capture evidence
+
+```bash
+ssh ax41
+cd /opt/floom-chat-deploy
+docker compose ps
+docker logs --since 20m floom-chat > /tmp/floom-p0-$(date +%Y%m%d-%H%M%S).log
+bash /root/floom/scripts/ops/db-backup.sh
+```
+
+Record the failing URL, run id, app slug, current image tag, and DB backup path
+in the incident note before changing code.
+
+### 2. Code rollback
+
+```bash
+ssh ax41
+cd /opt/floom-chat-deploy
+docker inspect floom-chat | jq -r '.[0].Config.Image'
+cp docker-compose.yml docker-compose.yml.pre-p0-$(date +%Y%m%d-%H%M%S).bak
+
+# Replace this tag with the previous launch tag Federico approved.
+sed -i 's|ghcr.io/floomhq/floom.*|ghcr.io/floomhq/floom-monorepo:<previous-launch-tag>|' docker-compose.yml
+docker compose pull floom-chat
+docker compose up -d --no-deps floom-chat
+
+curl -fsS https://floom.dev/api/health | jq .
+curl -fsS -o /dev/null -w '%{http_code}\n' https://floom.dev/p/competitor-lens
+```
+
+If the deploy uses a Git checkout instead of an image tag, pin the previous
+launch tag in the repo and rebuild from that exact tag:
+
+```bash
+git fetch --tags
+git switch --detach <previous-launch-tag>
+bash scripts/ops/floom-deploy-prod.sh
+```
+
+### 3. Schema rollback
+
+`workspace_secrets` is a forward-only copy from `user_secrets`.
+
+If the migration fails before any successful production run depends on
+workspace-level BYOK rows, restore the pre-migration DB backup:
+
+```bash
+ssh ax41
+cd /opt/floom-chat-deploy
+docker compose stop floom-chat
+bash /root/floom/scripts/ops/db-restore.sh <backup-file>
+docker compose up -d floom-chat
+curl -fsS https://floom.dev/api/health | jq .
+```
+
+If restore is not acceptable and only the new table is broken:
+
+```sql
+DROP TABLE IF EXISTS workspace_secret_backfill_conflicts;
+DROP TABLE IF EXISTS workspace_secrets;
+```
+
+Then restart the rolled-back code. Dropping `workspace_secrets` removes any
+BYOK values written only to that table after migration. Legacy `user_secrets`
+rows remain intact, but new workspace-only keys are gone unless restored from
+backup.
+
+### 4. DNS cutover
+
+Use DNS only when the production host itself is unhealthy after code rollback.
+
+```bash
+# Verify the fallback origin first.
+curl -fsS https://preview.floom.dev/api/health | jq .
+
+# Then switch the floom.dev A/AAAA/CNAME records in IONOS to the fallback host.
+# Keep TTL at 60 seconds during the incident window.
+```
+
+After DNS changes, verify:
+
+```bash
+dig +short floom.dev
+curl -I https://floom.dev/
+curl -fsS https://floom.dev/api/health | jq .
+```
+
+### 5. Recovery checks
+
+```bash
+for path in / /apps /docs /pricing /terms /privacy /status /p/competitor-lens; do
+  curl -fsS -o /dev/null -w "$path %{http_code}\n" "https://floom.dev$path"
+done
+
+curl -fsS https://floom.dev/api/hub | jq 'map(.slug)'
+```
+
+Run one browser smoke for `competitor-lens`, `ai-readiness-audit`, and
+`pitch-coach`, then post the incident state and rollback tag in
+`/root/floom-internal/launch/`.
+
 This runbook documents how to roll Floom on `preview.floom.dev` (and any
 self-hosted deployment using the same `/opt/floom-chat-deploy/` layout) back
 to an earlier published tag, and how to verify the roll-forward after a

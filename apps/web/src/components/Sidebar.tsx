@@ -95,9 +95,9 @@ export function Sidebar({ app, open, onClose }: Props) {
 
           <div className="divider" />
 
-          {/* Secrets */}
+          {/* App creator secrets */}
           <div className="sidebar-section">
-            <p className="sidebar-section-label">Secrets</p>
+            <p className="sidebar-section-label">App creator secrets</p>
             {secrets.length === 0 ? (
               <p className="sidebar-note">No secrets required.</p>
             ) : (
@@ -139,7 +139,7 @@ export function Sidebar({ app, open, onClose }: Props) {
             <IntegrationRow
               label="MCP server"
               value={`${publicUrl}/mcp/app/${app.slug}`}
-              hint="Paste into Claude Desktop or Cursor."
+              hint="Paste into Claude Desktop, Cursor, or any MCP client."
               copyable
             />
             <IntegrationRow

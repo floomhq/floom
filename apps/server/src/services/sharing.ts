@@ -200,7 +200,7 @@ export function assertLegalTransition(
 
   const allowed: Record<AppVisibilityState, AppVisibilityState[]> = {
     private: ['link', 'invited', 'pending_review'],
-    link: ['private'],
+    link: ['private', 'link'],
     invited: ['private'],
     pending_review: ['public_live', 'changes_requested'],
     public_live: ['private'],

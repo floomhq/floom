@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PR #789 P1 regression: agent-token runs through MCP run_app must preserve
-// the launch BYOK gate for lead-scorer / competitor-analyzer / resume-screener.
+// the launch BYOK gate for competitor-lens / ai-readiness-audit / pitch-coach.
 
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -130,23 +130,23 @@ function createToken() {
   return raw;
 }
 
-function insertLeadScorer(baseUrl) {
+function insertCompetitorLens(baseUrl) {
   const spec = {
     openapi: '3.0.0',
-    info: { title: 'Lead Scorer', version: '1.0.0' },
+    info: { title: 'Competitor Lens', version: '1.0.0' },
     servers: [{ url: baseUrl }],
     paths: {
-      '/score': {
+      '/analyze': {
         get: {
-          operationId: 'score',
-          parameters: [{ name: 'company', in: 'query', schema: { type: 'string' } }],
+          operationId: 'analyze',
+          parameters: [{ name: 'target', in: 'query', schema: { type: 'string' } }],
           responses: { 200: { description: 'ok' } },
         },
       },
     },
   };
   const manifest = {
-    name: 'Lead Scorer',
+    name: 'Competitor Lens',
     description: 'BYOK gated fixture',
     runtime: 'python',
     manifest_version: '2.0',
@@ -154,9 +154,9 @@ function insertLeadScorer(baseUrl) {
     node_dependencies: {},
     secrets_needed: ['GEMINI_API_KEY'],
     actions: {
-      score: {
-        label: 'Score',
-        inputs: [{ name: 'company', type: 'text', label: 'Company', required: true }],
+      analyze: {
+        label: 'Analyze',
+        inputs: [{ name: 'target', type: 'text', label: 'Target', required: true }],
         outputs: [{ name: 'response', type: 'json', label: 'Response' }],
         secrets_needed: ['GEMINI_API_KEY'],
       },
@@ -168,7 +168,7 @@ function insertLeadScorer(baseUrl) {
         category, author, icon, app_type, base_url, auth_type, auth_config,
         openapi_spec_url, openapi_spec_cached, visibility, is_async, webhook_url,
         timeout_ms, retries, async_mode, workspace_id, publish_status)
-     VALUES ('app_lead_scorer_byok', 'lead-scorer', 'Lead Scorer',
+     VALUES ('app_competitor_lens_byok', 'competitor-lens', 'Competitor Lens',
         'BYOK gated fixture', ?, 'active', NULL, '', 'testing', 'local', NULL,
         'proxied', ?, NULL, NULL, NULL, ?, 'public', 0, NULL, NULL, 0, NULL,
         'local', 'published')`,
@@ -208,9 +208,9 @@ async function callMcp(port, token, name, args) {
 
 const upstream = http.createServer((req, res) => {
   const url = new URL(req.url || '/', 'http://127.0.0.1');
-  if (url.pathname === '/score') {
+  if (url.pathname === '/analyze') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, company: url.searchParams.get('company') }));
+    res.end(JSON.stringify({ ok: true, target: url.searchParams.get('target') }));
     return;
   }
   res.writeHead(404);
@@ -220,7 +220,7 @@ const upstream = http.createServer((req, res) => {
 console.log('MCP run_app BYOK gate');
 
 const upstreamPort = await listen(upstream);
-insertLeadScorer(`http://127.0.0.1:${upstreamPort}`);
+insertCompetitorLens(`http://127.0.0.1:${upstreamPort}`);
 const token = createToken();
 db.pragma('wal_checkpoint(TRUNCATE)');
 
@@ -230,22 +230,22 @@ try {
   for (let i = 0; i < 5; i++) {
     freeRuns.push(
       await callMcp(server.port, token, 'run_app', {
-        slug: 'lead-scorer',
-        action: 'score',
-        inputs: { company: `Acme ${i + 1}` },
+        slug: 'competitor-lens',
+        action: 'analyze',
+        inputs: { target: `Acme ${i + 1}` },
       }),
     );
   }
   log(
-    'first five lead-scorer MCP runs use free quota successfully',
+    'first five competitor-lens MCP runs use free quota successfully',
     freeRuns.every((run) => run.payload?.status === 'success'),
     JSON.stringify(freeRuns.map((run) => run.payload)),
   );
 
   const exhausted = await callMcp(server.port, token, 'run_app', {
-    slug: 'lead-scorer',
-    action: 'score',
-    inputs: { company: 'Acme exhausted' },
+    slug: 'competitor-lens',
+    action: 'analyze',
+    inputs: { target: 'Acme exhausted' },
   });
   log('sixth run without BYOK returns MCP tool error', exhausted.json?.result?.isError === true, exhausted.text);
   log(
@@ -257,15 +257,15 @@ try {
   );
 
   const withByok = await callMcp(server.port, token, 'run_app', {
-    slug: 'lead-scorer',
-    action: 'score',
+    slug: 'competitor-lens',
+    action: 'analyze',
     inputs: {
-      company: 'Acme BYOK',
+      target: 'Acme BYOK',
       gemini_api_key: 'AIzaSyTestKeyForMcpByokGating123456789',
     },
   });
   log('run with gemini_api_key succeeds after free quota exhaustion', withByok.payload?.status === 'success', withByok.text);
-  log('BYOK run returns upstream output', withByok.payload?.output?.company === 'Acme BYOK', withByok.text);
+  log('BYOK run returns upstream output', withByok.payload?.output?.target === 'Acme BYOK', withByok.text);
 } finally {
   await stopServer(server);
   upstream.close();

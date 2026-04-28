@@ -4,12 +4,11 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Logo } from './Logo';
 import { useSession, clearSession } from '../hooks/useSession';
 import { useMyApps } from '../hooks/useMyApps';
-import { useSecrets } from '../hooks/useSecrets';
 import * as api from '../api/client';
 import { useDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
-import { GitHubStarsBadge } from './GitHubStarsBadge';
 import { CopyForClaudeButton } from './CopyForClaudeButton';
+import { MobileDrawer } from './MobileDrawer';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface Props {
@@ -126,38 +125,31 @@ const menuItemStyle: CSSProperties = {
   borderRadius: 6,
 };
 
-// v17 TopBar — auth-branched chrome 2026-04-25 (project_floom_nav_ia.md).
+// v26 TopBar — auth-branched chrome (V26-IA-SPEC §10 + §12.5, locked 2026-04-27).
 //   Anonymous (waitlist visitor / signed-out):
 //     Centre: Apps · Docs · Pricing                                  (3 items)
 //     Right (preview):  GH stars · Publish (CTA) · Sign in · Sign up
 //     Right (waitlist): GH stars · Publish (CTA) · Join waitlist
 //
 //   Authenticated (deploy mode):
-//     Centre: Studio · My account                                    (2 items)
+//     Centre: Studio · My runs
 //     Right:  GH stars · Copy for Claude · + New app · avatar dropdown
-//     Avatar dropdown: header (name + email) · Apps store · BYOK keys ·
-//                      Agent tokens · Settings · — · Pricing · Docs ·
-//                      — · Sign out
+//     Avatar dropdown: Account settings · Docs · Help · Sign out
+//     Logo: route-aware → /run/apps when authenticated
 //
-// Why the split: Federico 2026-04-25 — "Pricing, Docs etc don't matter
-// so much when I am already logged in, so the nav and the priorities of
-// what to click next change." Discovery items demote to the dropdown for
-// authed users; the centre nav surfaces only their day-to-day work
-// surfaces. MECE labelling: /me = "My account" (consumer, v23 rename
-// 2026-04-26), /studio = "Studio" (creator). URL slugs stay; only the
-// visible label changes.
+// V26-IA-SPEC consumer-mode label: /run and /me surfaces render as "My runs".
+// Docs moved to avatar dropdown (§12.5).
 //
 // Two clean states only — never a 3rd. Preview vs prod differ in the
 // CTA wording (Publish vs Join waitlist), not the nav structure.
 //
 // Changelog stays in the footer (#572 nav declutter, original 04-23 pass).
-// Mobile: hamburger collapses everything to a vertical column menu, with
-// the same anon-vs-authed split.
+// Mobile: hamburger → MobileDrawer (v26 workspace identity + mode toggle + items).
 export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropOpen, setDropOpen] = useState(false);
   const { data, isAuthenticated, refresh } = useSession();
-  const { apps: myApps } = useMyApps();
+  useMyApps(); // prefetch apps cache for downstream components (mobile drawer)
   // 2026-04-24 prod/preview split: read the flag from the live session
   // payload so prod (DEPLOY_ENABLED=false) hides Sign in / Sign up even
   // when the Vite build had VITE_DEPLOY_ENABLED=true baked in. Same
@@ -170,10 +162,6 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
   // we're on preview (deploy_enabled=true).
   const deployEnabled = deployEnabledFlag === true;
   const waitlistMode = deployEnabledFlag === false;
-  const studioNavLabel =
-    isAuthenticated && myApps && myApps.length > 0
-      ? `Studio (${myApps.length})`
-      : 'Studio';
   // Auth-branched chrome: only flip to the work-focused layout when the
   // session is authenticated AND we know we're on a deploy-enabled
   // environment. Both must be true. While the deploy flag is loading
@@ -240,12 +228,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
     location.pathname.startsWith('/apps/') ||
     location.pathname.startsWith('/store/') ||
     location.pathname.startsWith('/p/');
-  const isPricing = location.pathname === '/pricing';
   const isDocs =
     location.pathname.startsWith('/protocol') ||
     location.pathname.startsWith('/docs');
   const isStudio = location.pathname.startsWith('/studio');
-  const isMe = location.pathname.startsWith('/me');
   const isPublishNav =
     location.pathname === '/studio/build' || location.pathname === '/deploy';
 
@@ -264,16 +250,20 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
       <div
         className="topbar-inner"
         style={{
-          maxWidth: 1180,
+          /* F9 (2026-04-28): consistent topbar width. The CSS class
+             sets max-width:1200 + padding:0 32px; we leave padding to
+             CSS (was nullified inline only when compact) so the logo
+             + avatar pin to the same x across every page. */
           gap: compact ? 10 : 16,
           padding: compact ? '0 20px' : undefined,
         }}
       >
         {/* Logo lockup (#632): mark from <Logo /> + wordmark rendered
             directly here so we can bump font-size past Logo.tsx's baked-in
-            14px. Gap 8px keeps mark and wordmark optically balanced. */}
+            14px. Gap 8px keeps mark and wordmark optically balanced.
+            v26 spec: route-aware — landing if logged-out, /run/apps if logged-in. */}
         <Link
-          to="/"
+          to={showAuthedChrome ? '/run/apps' : '/'}
           className="brand"
           style={{
             display: 'inline-flex',
@@ -335,72 +325,49 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           </button>
         )}
 
-        {/* Centre nav — branches on auth state (project_floom_nav_ia.md).
-            Anonymous: Apps · Docs · Pricing (discovery surfaces).
-            Authenticated: Studio · My runs (work surfaces). Pricing/Docs
-            move to the avatar dropdown — 1 click away when needed. */}
-        <nav
-          className="topbar-links topbar-links-desktop topbar-centre-nav"
-          aria-label="Primary"
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            pointerEvents: 'auto',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 2,
-          }}
-        >
-          {showAuthedChrome ? (
-            <>
-              <Link
-                to="/studio"
-                data-testid="topbar-studio"
-                aria-current={isStudio ? 'page' : undefined}
-                style={navLinkStyle(isStudio)}
-              >
-                {studioNavLabel}
-              </Link>
-              <Link
-                to="/me"
-                data-testid="topbar-my-runs"
-                aria-current={isMe ? 'page' : undefined}
-                style={navLinkStyle(isMe)}
-              >
-                My account
-              </Link>
-            </>
-          ) : (
-            <>
-              <Link
-                to="/apps"
-                data-testid="topbar-apps"
-                aria-current={isApps ? 'page' : undefined}
-                style={navLinkStyle(isApps)}
-              >
-                Apps
-              </Link>
-              <Link
-                to="/docs"
-                data-testid="topbar-docs"
-                aria-current={isDocs ? 'page' : undefined}
-                style={navLinkStyle(isDocs)}
-              >
-                Docs
-              </Link>
-              <Link
-                to="/pricing"
-                data-testid="topbar-pricing"
-                aria-current={isPricing ? 'page' : undefined}
-                style={navLinkStyle(isPricing)}
-              >
-                Pricing
-              </Link>
-            </>
-          )}
-        </nav>
+        {/* Centre nav — v26-IA-SPEC §10 + §12.5:
+            Anonymous: Apps · Docs · Help (3 items max, no Pricing for launch-mvp).
+            Authenticated: no centre nav — slim TopBar = logo + avatar only. */}
+        {showAuthedChrome ? null : (
+          <nav
+            className="topbar-links topbar-links-desktop topbar-centre-nav"
+            aria-label="Primary"
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 2,
+            }}
+          >
+            <Link
+              to="/apps"
+              data-testid="topbar-apps"
+              aria-current={isApps ? 'page' : undefined}
+              style={navLinkStyle(isApps)}
+            >
+              Apps
+            </Link>
+            <Link
+              to="/docs"
+              data-testid="topbar-docs"
+              aria-current={isDocs ? 'page' : undefined}
+              style={navLinkStyle(isDocs)}
+            >
+              Docs
+            </Link>
+            <Link
+              to="/help"
+              data-testid="topbar-help"
+              style={navLinkStyle(false)}
+            >
+              Help
+            </Link>
+          </nav>
+        )}
 
         {/* Right side: Sign in + Sign up (anon) or avatar dropdown (authed) */}
         <div
@@ -411,36 +378,27 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             alignItems: 'center',
           }}
         >
-          {/* GitHub stars badge — always on so social proof is visible
-              whether or not the viewer is logged in. Placed before the
-              auth pills so the hierarchy stays Sign-up > GH on preview,
-              and GH becomes the single rightmost affordance on
-              waitlist-prod (where Sign in / Sign up are hidden). */}
-          {!isLoginPage && <GitHubStarsBadge compact dataTestId="topbar-gh-stars" />}
+          {/* GitHub stars badge — social proof for anonymous visitors only.
+              Hidden for authenticated users per §12.5: slim authenticated
+              TopBar = floom + Copy for Claude + + New app + avatar.
+              No badge clutter for signed-in users who know the product.
+              V11 fix 2026-04-27. */}
+          {/* GitHub badge: moved to footer per launch-mvp slim header spec.
+              Removed from primary nav to reduce noise. */}
 
-          {/* Copy-for-Claude — globally present (anon + authed). Sits
-              between centre nav and CTA/avatar cluster (Federico-locked
-              2026-04-26). Hidden only on auth pages so they stay focused.
-              The popover handles its own state, click-outside, and Esc.
-              Anon centre nav: Apps · Docs · Pricing → Copy-for-Claude →
-              Sign in / Sign up. Authed: Studio · My account →
-              Copy-for-Claude → + New app → avatar. */}
-          {!isLoginPage && <CopyForClaudeButton />}
+          {/* Get install snippet — anon only (authed users have the /home page).
+              Hidden on auth pages. */}
+          {!isLoginPage && !showAuthedChrome && <CopyForClaudeButton />}
 
-          {/* Primary CTA — brand-green pill. Authed users get "+ New app"
-              (work-focused: take me to the build flow). Anonymous users
-              get "Publish" (discovery-focused: learn what publishing
-              means). Both route to /studio/build in deploy mode; on
-              waitlist-prod the anon variant opens the waitlist instead.
-              Hidden on /login + /signup so auth pages stay focused.
-              While the deploy flag is loading we render nothing to avoid
-              the flash. */}
+          {/* Primary CTA — brand-green pill for anon only on launch-mvp.
+              Authed users use /home (token + install). Drop "+ New app" from
+              authed TopBar for launch-mvp simplicity. */}
           {!isLoginPage && showAuthedChrome && (
             <Link
               to="/studio/build"
               data-testid="topbar-new-app-cta"
               aria-current={isPublishNav ? 'page' : undefined}
-              style={publishCtaStyle}
+              style={{ ...publishCtaStyle, display: 'none' }}
             >
               + New app
             </Link>
@@ -606,94 +564,13 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     zIndex: 50,
                   }}
                 >
-                  {/* v23 dropdown shape (Federico-locked 2026-04-26):
-                      header (name + email) · Apps store · BYOK keys ·
-                      Agent tokens · Settings · — · Pricing · Docs · — ·
-                      Sign out. Counts after labels (Apps · 5 etc) when
-                      session caches are populated; omit gracefully
-                      otherwise. Vocabulary lock: NEVER write "API keys"
-                      in user-visible copy on this surface. */}
-                  <div
-                    style={{
-                      padding: '8px 12px 6px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2,
-                    }}
-                    aria-hidden="true"
-                  >
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: INK,
-                        lineHeight: 1.2,
-                      }}
-                      data-testid="topbar-user-header-name"
-                    >
-                      {userLabel}
-                    </span>
-                    {user?.email && (
-                      <span
-                        style={{
-                          fontSize: 11.5,
-                          color: MUTED,
-                          lineHeight: 1.2,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        data-testid="topbar-user-header-email"
-                      >
-                        {user.email}
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(14,14,12,0.08)',
-                      margin: '4px 0',
-                    }}
-                    aria-hidden="true"
-                  />
+                  {/* v26 avatar dropdown (ADR-29): Account settings · Docs · Help · Sign out. */}
                   <DropdownItem
-                    to="/apps"
-                    label="Apps store"
-                    count={myApps?.length}
-                    testId="topbar-user-apps-store"
-                    onSelect={() => setDropOpen(false)}
-                    active={isApps}
-                  />
-                  <ByokKeysDropdownItem
-                    onSelect={() => setDropOpen(false)}
-                  />
-                  <DropdownItem
-                    to="/me/agent-keys"
-                    label="Agent tokens"
-                    testId="topbar-user-agent-tokens"
-                    onSelect={() => setDropOpen(false)}
-                  />
-                  <DropdownItem
-                    to="/me/settings"
-                    label="Settings"
+                    to="/settings/general"
+                    label="Account settings"
                     testId="topbar-user-settings"
                     onSelect={() => setDropOpen(false)}
-                  />
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(14,14,12,0.08)',
-                      margin: '4px 0',
-                    }}
-                    aria-hidden="true"
-                  />
-                  <DropdownItem
-                    to="/pricing"
-                    label="Pricing"
-                    testId="topbar-user-pricing"
-                    onSelect={() => setDropOpen(false)}
-                    active={isPricing}
+                    active={location.pathname.startsWith('/settings')}
                   />
                   <DropdownItem
                     to="/docs"
@@ -702,13 +579,11 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
                     onSelect={() => setDropOpen(false)}
                     active={isDocs}
                   />
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(14,14,12,0.08)',
-                      margin: '4px 0',
-                    }}
-                    aria-hidden="true"
+                  <DropdownItem
+                    to="/help"
+                    label="Help"
+                    testId="topbar-user-help"
+                    onSelect={() => setDropOpen(false)}
                   />
                   <button
                     type="button"
@@ -758,312 +633,23 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
           /login + /signup so auth surfaces stay focused. Reuses the
           shared CopyForClaudeButton in mobile variant — same popover,
           same context-aware row 3 logic. */}
-      {!isLoginPage && (
+      {!isLoginPage && !showAuthedChrome && (
         <div className="topbar-mcp-mobile" data-testid="topbar-mcp-mobile">
           <CopyForClaudeButton variant="mobile" />
         </div>
       )}
 
-      {/* Mobile menu drawer */}
-      {menuOpen && (
-        <>
-          <div
-            className="topbar-mobile-scrim"
-            role="presentation"
-            aria-hidden="true"
-            onClick={() => setMenuOpen(false)}
-          />
-          <div
-            className="topbar-mobile-menu"
-            role="menu"
-            aria-label="Mobile navigation"
-            data-testid="topbar-mobile-menu"
-          >
-            <div className="topbar-mobile-menu-head">
-              <button
-                type="button"
-                className="topbar-mobile-close"
-                aria-label="Close menu"
-                onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-close"
-              >
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Mobile menu — branches on auth state, same split as desktop
-                (project_floom_nav_ia.md). Anonymous: Apps · Docs · Pricing
-                + Publish CTA. Authenticated: Studio · My runs · + New app
-                · Pricing · Docs · API keys · Settings · Sign out. */}
-            {showAuthedChrome ? (
-              <>
-                <Link
-                  to="/studio"
-                  className="topbar-mobile-link topbar-mobile-link-primary"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-studio"
-                  aria-current={isStudio ? 'page' : undefined}
-                >
-                  <MobileAppsIcon />
-                  <span>{studioNavLabel}</span>
-                </Link>
-                <Link
-                  to="/me"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-my-runs"
-                  aria-current={isMe ? 'page' : undefined}
-                >
-                  My account
-                </Link>
-                {!isLoginPage && (
-                  <Link
-                    to="/studio/build"
-                    className="topbar-mobile-cta"
-                    role="menuitem"
-                    onClick={() => setMenuOpen(false)}
-                    data-testid="topbar-mobile-new-app"
-                    aria-current={isPublishNav ? 'page' : undefined}
-                    style={{
-                      background: ACCENT,
-                      borderColor: ACCENT,
-                      color: '#fff',
-                    }}
-                  >
-                    + New app
-                  </Link>
-                )}
-                <Link
-                  to="/pricing"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-pricing"
-                  aria-current={isPricing ? 'page' : undefined}
-                >
-                  Pricing
-                </Link>
-                <Link
-                  to="/docs"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-docs"
-                  aria-current={isDocs ? 'page' : undefined}
-                >
-                  Docs
-                </Link>
-                <Link
-                  to="/apps"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-apps-store"
-                >
-                  Apps store
-                </Link>
-                <Link
-                  to="/me/secrets"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-byok-keys"
-                >
-                  BYOK keys
-                </Link>
-                <Link
-                  to="/me/agent-keys"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-agent-tokens"
-                >
-                  Agent tokens
-                </Link>
-                <Link
-                  to="/me/settings"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-settings"
-                >
-                  Settings
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link
-                  to="/apps"
-                  className="topbar-mobile-link topbar-mobile-link-primary"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-apps"
-                  aria-current={isApps ? 'page' : undefined}
-                >
-                  <MobileAppsIcon />
-                  <span>Apps</span>
-                </Link>
-
-                <Link
-                  to="/docs"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-docs"
-                  aria-current={isDocs ? 'page' : undefined}
-                >
-                  Docs
-                </Link>
-
-                <Link
-                  to="/pricing"
-                  className="topbar-mobile-link"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  data-testid="topbar-mobile-pricing"
-                  aria-current={isPricing ? 'page' : undefined}
-                >
-                  Pricing
-                </Link>
-
-                {/* Publish CTA — anon-only primary action on mobile. */}
-                {!isLoginPage && deployEnabled && (
-                  <Link
-                    to="/studio/build"
-                    className="topbar-mobile-cta"
-                    role="menuitem"
-                    onClick={() => setMenuOpen(false)}
-                    data-testid="topbar-mobile-publish"
-                    aria-current={isPublishNav ? 'page' : undefined}
-                    style={{
-                      background: ACCENT,
-                      borderColor: ACCENT,
-                      color: '#fff',
-                    }}
-                  >
-                    Publish
-                  </Link>
-                )}
-                {!isLoginPage && waitlistMode && (
-                  <button
-                    type="button"
-                    className="topbar-mobile-cta"
-                    role="menuitem"
-                    data-testid="topbar-mobile-publish-waitlist"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      goWaitlistPublish('topbar-publish-mobile');
-                    }}
-                    style={{
-                      background: ACCENT,
-                      borderColor: ACCENT,
-                      color: '#fff',
-                      cursor: 'pointer',
-                      font: 'inherit',
-                    }}
-                  >
-                    Publish
-                  </button>
-                )}
-              </>
-            )}
-
-            {!isAuthenticated && !isLoginPage && deployEnabled && (
-              <Link
-                to="/login"
-                className="topbar-mobile-link"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-signin"
-              >
-                Sign in
-              </Link>
-            )}
-
-            {!isAuthenticated && deployEnabled && (
-              <Link
-                to="/signup"
-                className="topbar-mobile-cta"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-signup"
-              >
-                Sign up
-              </Link>
-            )}
-
-            {!isAuthenticated && waitlistMode && (
-              <Link
-                to={waitlistHref('topbar-mobile-waitlist')}
-                className="topbar-mobile-cta"
-                role="menuitem"
-                onClick={() => setMenuOpen(false)}
-                data-testid="topbar-mobile-waitlist"
-                style={{
-                  // Ink pill so the green Publish CTA stays the single
-                  // primary action in the mobile menu — same hierarchy
-                  // the desktop right-rail already establishes.
-                  background: INK,
-                  borderColor: INK,
-                  color: '#fff',
-                  boxShadow: 'none',
-                }}
-              >
-                Join waitlist
-              </Link>
-            )}
-
-            {isAuthenticated && (
-              <button
-                type="button"
-                className="topbar-mobile-link topbar-mobile-link-signout"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  void handleLogout();
-                }}
-              >
-                Sign out
-              </button>
-            )}
-          </div>
-        </>
-      )}
+      <MobileDrawer
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onSignOut={() => {
+          void handleLogout();
+        }}
+      />
     </header>
   );
 }
 
-// BYOK keys dropdown row. Wrapped in its own component so `useSecrets()`
-// only fires `/api/secrets` when the dropdown actually mounts (i.e. the
-// authed avatar is rendered AND open) — anon users never trigger the
-// fetch. Count omitted gracefully while loading or when entries is null.
-function ByokKeysDropdownItem({ onSelect }: { onSelect: () => void }) {
-  const { entries } = useSecrets();
-  return (
-    <DropdownItem
-      to="/me/secrets"
-      label="BYOK keys"
-      count={entries?.length}
-      testId="topbar-user-byok-keys"
-      onSelect={onSelect}
-    />
-  );
-}
 
 // Avatar dropdown row with optional `count` tag rendered as a monospace
 // suffix per v23 spec ("Apps · 5", "BYOK keys · 3"). Counts are sourced
@@ -1118,28 +704,5 @@ function DropdownItem({
         </span>
       )}
     </Link>
-  );
-}
-
-// Grid-of-squares glyph leading the primary Apps row in the mobile menu.
-function MobileAppsIcon() {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
   );
 }

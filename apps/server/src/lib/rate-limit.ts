@@ -10,6 +10,7 @@
 
 import type { Context, MiddlewareHandler } from 'hono';
 import type { SessionContext } from '../types.js';
+import { db } from '../db.js';
 import { hasValidAdminBearer } from './auth.js';
 import { extractIp } from './client-ip.js';
 import { recordRateLimitHit } from './metrics-counters.js';
@@ -316,6 +317,15 @@ function checkAgentTokenLimit(
   };
 }
 
+function getAppRunLimitPerHour(slug: string): number {
+  const row = db
+    .prepare(`SELECT run_rate_limit_per_hour FROM apps WHERE slug = ?`)
+    .get(slug) as { run_rate_limit_per_hour: number | null } | undefined;
+  const configured = Number(row?.run_rate_limit_per_hour);
+  if (Number.isInteger(configured) && configured > 0) return configured;
+  return defaultPerAppPerHour();
+}
+
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const WRITE_RATE_LIMIT_SKIP_PATHS = new Set([
   '/api/run',
@@ -389,7 +399,7 @@ export function checkRunRateLimit(
   // Per-(IP, app) cap applies in both auth states.
   const slug = slugOverride ?? c.req.param('slug');
   if (slug) {
-    const appCap = defaultPerAppPerHour();
+    const appCap = getAppRunLimitPerHour(slug);
     const r = incrementAndCheck(`app:${ip}:${slug}`, appCap, windowMs, now);
     if (!r.allowed) return buildRateLimitBlock(c, 'app', r, appCap);
     // Advertise the *tightest* remaining budget so a well-behaved client

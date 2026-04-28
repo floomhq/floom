@@ -1,8 +1,8 @@
 // Rate-limit-then-BYOK gate for the 3 launch demo apps.
 //
 // Launch-week product rule (2026-04-21):
-//   First 5 anonymous runs per IP per 24h on lead-scorer / competitor-analyzer
-//   / resume-screener → Floom pays. After that, the caller must supply their
+//   First 5 anonymous runs per IP per 24h on competitor-lens /
+//   ai-readiness-audit / pitch-coach -> Floom pays. After that, the caller must supply their
 //   own Gemini API key (bring-your-own-key) via X-User-Api-Key. The server
 //   injects it for that one run only; we never log or persist user keys.
 //
@@ -42,9 +42,9 @@ import { createHash } from 'node:crypto';
 
 /** Slugs that are free for 5 anon runs per IP per 24h, then require BYOK. */
 export const BYOK_GATED_SLUGS: readonly string[] = [
-  'lead-scorer',
-  'competitor-analyzer',
-  'resume-screener',
+  'competitor-lens',
+  'ai-readiness-audit',
+  'pitch-coach',
 ];
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;

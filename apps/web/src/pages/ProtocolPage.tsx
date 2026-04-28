@@ -188,7 +188,7 @@ function FlowDiagram() {
           flexShrink: 0,
         }}>
           <p style={{ margin: '0 0 6px', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Plumbing</p>
-          {['Secrets vault', 'Rate limits', 'Streaming', 'Run history'].map((item) => (
+          {['App creator secrets vault', 'Rate limits', 'Streaming', 'Run history'].map((item) => (
             <p key={item} style={{ margin: '2px 0', fontSize: 11, color: 'var(--muted)' }}>{item}</p>
           ))}
         </div>
@@ -484,7 +484,7 @@ export function ProtocolPage() {
     <div className="page-root" data-testid="protocol-page">
       <PageHead
         title="The Floom Protocol · Floom"
-        description="How Floom turns one OpenAPI spec into an MCP server, a web UI, an HTTP API, and typed client SDKs — with secrets, rate limits, and audit logs wired in."
+        description="How Floom turns one OpenAPI spec into an MCP server, a web UI, an HTTP API, and typed client SDKs, with app creator secrets, rate limits, and audit logs wired in."
       />
       <TopBar />
 

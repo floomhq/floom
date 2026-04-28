@@ -16,6 +16,7 @@ export const newJobId = makeId('job');
 export const newBuildId = makeId('bld');
 export const newConnectionId = makeId('con');
 export const newAppInviteId = makeId('ainv');
+export const newAppInstallId = makeId('ains');
 export const newVisibilityAuditId = makeId('vaud');
 export const newAuditLogId = () => `audit_${randomUUID()}`;
 // W3.3: Stripe Connect partner app

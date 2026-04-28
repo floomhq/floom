@@ -12,6 +12,7 @@ import {
 } from '../components/docs/markdown';
 import { DocsSidebar, DOCS_SIDEBAR_GROUPS } from '../components/docs/DocsSidebar';
 import { DocsPublishWaitlistBanner } from '../components/docs/DocsPublishWaitlistBanner';
+import { DocsPageShell } from '../components/docs/DocsPageShell';
 import limitsMd from '../assets/docs/limits.md?raw';
 import securityMd from '../assets/docs/security.md?raw';
 import observabilityMd from '../assets/docs/observability.md?raw';
@@ -107,29 +108,13 @@ export function DocsPage() {
         description={description}
       />
       <TopBar />
-      <DocsPublishWaitlistBanner />
 
-      <main
-        className="docs-shell"
-        style={{
-          maxWidth: 1260,
-          margin: '0 auto',
-          padding: '0',
-          display: 'grid',
-          gridTemplateColumns: '260px minmax(0, 1fr)',
-          gap: 0,
-          alignItems: 'start',
-        }}
+      {/* v26 V17: DocsPageShell uses flex + fixed sidebar width so the
+          sidebar never shifts on navigation. Mirror of WorkspacePageShell. */}
+      <DocsPageShell
+        banner={<DocsPublishWaitlistBanner />}
+        sidebar={<DocsSidebar groups={DOCS_SIDEBAR_GROUPS} currentPath={pathname} />}
       >
-        <style>{`
-          @media (max-width: 900px) {
-            .docs-shell { grid-template-columns: 1fr !important; }
-            .docs-shell > article { padding: 20px 18px 60px !important; }
-          }
-        `}</style>
-        {/* Shared v17 sidebar. Same groups on /docs and every /docs/:slug. */}
-        <DocsSidebar groups={DOCS_SIDEBAR_GROUPS} currentPath={pathname} />
-
         <article style={{ padding: '44px 48px 80px', minWidth: 0 }}>
           {toc.length > 0 ? (
             <nav style={{ marginBottom: 24 }} aria-label="On-page contents">
@@ -310,7 +295,7 @@ export function DocsPage() {
             </div>
           </div>
         </article>
-      </main>
+      </DocsPageShell>
       <Footer />
       <FeedbackButton />
     </div>

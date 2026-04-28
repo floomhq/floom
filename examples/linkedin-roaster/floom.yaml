@@ -1,20 +1,20 @@
 name: LinkedIn Profile Roaster
 slug: linkedin-roaster
-description: Paste your LinkedIn profile text and get a brutally honest roast with specific rewrites for headline, about intro, and one experience bullet.
+description: Paste a LinkedIn profile URL or profile text and get a brutally honest roast with specific rewrites for headline, about intro, and one experience bullet.
 creator: floom
 category: writing
 icon: flame
 actions:
   roast:
     label: Roast Profile
-    description: One Gemini 2.5 Flash Lite call that returns 3-5 specific roasts, 3 rewrites, and one top tip.
+    description: Cached demo URL path plus one Gemini 2.5 Flash Lite call for pasted profile text.
     inputs:
-      - name: profile_text
-        label: Profile Text
-        type: textarea
+      - name: url
+        label: LinkedIn URL
+        type: url
         required: true
-        placeholder: Paste your LinkedIn headline, About section, and 1-2 key experience entries
-        description: Paste 200-5000 characters from your profile. Keep it focused on About plus your most relevant roles.
+        placeholder: https://linkedin.com/in/federicodeponte
+        description: LinkedIn profile URL. The launch demo URL is cached for sub-10s cold runs.
     outputs:
       - name: roast
         label: Roast

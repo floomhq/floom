@@ -27,7 +27,7 @@ export function TermsPage() {
           <p>
             Some features require an account. You agree to provide accurate
             information and keep your password confidential. Actions performed
-            through your account are attributed to you.
+            through the signed-in account are attributed to you.
           </p>
         </LegalSection>
 
@@ -55,8 +55,8 @@ export function TermsPage() {
 
         <LegalSection id="content" title="5. Your content">
           <p>
-            Inputs, run outputs, API keys, and other content you add to your
-            account remain your property. You grant Floom a worldwide,
+            Inputs, run outputs, BYOK keys, and other content added to the
+            signed-in account remain your property. You grant Floom a worldwide,
             non-exclusive, royalty-free license to host, store, transmit, and
             process that content solely to operate the service on your behalf
             (including running, displaying, and caching it as needed to deliver
@@ -98,10 +98,10 @@ export function TermsPage() {
 
         <LegalSection id="suspension" title="9. Suspension and termination">
           <p>
-            We may suspend or terminate your account with reasonable notice or,
+            We may suspend or terminate the account with reasonable notice or,
             in case of serious violations (abuse of the platform, unlawful
             content, risk to other users), immediately. You may delete your
-            account at any time from the account settings; deletion removes
+            account at any time from Account settings; deletion removes
             your data subject to standard retention windows described in the
             Privacy Policy.
           </p>

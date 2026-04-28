@@ -317,7 +317,7 @@ export function AppsDirectoryPage() {
     >
       <PageHead
         title="Apps · Floom"
-        description="Browse AI apps on Floom. Each one runs as a Claude tool, a shareable page, a command-line, and a clean HTTP endpoint."
+        description="Browse AI apps on Floom. Each one runs as an MCP tool, a shareable page, a command-line, and a clean HTTP endpoint."
       />
       <TopBar />
 
@@ -373,8 +373,8 @@ export function AppsDirectoryPage() {
               }}
             >
               Real AI doing real work. Compare to competitors, score AI
-              readiness, roast a pitch. Install in Claude, Cursor,
-              ChatGPT, or run from your browser.
+              readiness, roast a pitch. Install in any MCP client
+              or run from your browser.
             </p>
           </div>
         </section>

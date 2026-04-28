@@ -16,6 +16,7 @@ import { validateInputs, ManifestError } from '../services/manifest.js';
 import { checkAppVisibility } from '../lib/auth.js';
 import { resolveUserContext } from '../services/session.js';
 import { parseJsonBody, bodyParseError } from '../lib/body.js';
+import { runGate } from '../lib/run-gate.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 
 export const jobsRouter = new Hono<{ Variables: { slug: string } }>();
@@ -41,6 +42,8 @@ jobsRouter.post('/', async (c) => {
     return c.json({ error: `App is ${row.status}, cannot run` }, 409);
   }
   const ctx = await resolveUserContext(c);
+  const gate = runGate(c, ctx, { slug });
+  if (!gate.ok) return c.json(gate.body, gate.status, gate.headers);
   const blocked = checkAppVisibility(c, row.visibility || 'public', {
     app_id: row.id,
     slug: row.slug,

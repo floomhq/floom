@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# floom-api.sh — thin wrapper around curl that resolves api_url + api_key and
+# floom-api.sh — thin wrapper around curl that resolves api_url + Agent token and
 # attaches the auth header. Used by the floom CLI subcommands.
 #
 # Auth resolution order:
 #   1. FLOOM_API_KEY env var (+ FLOOM_API_URL env var, default https://floom.dev)
-#   2. ~/.floom/config.json with {"api_key": "...", "api_url": "..."}
+#   2. ~/.floom/config.json with an Agent token and api_url
 #   3. Legacy ~/.claude/floom-skill-config.json with {"base_url", "token", "token_type"}
 #
 # Usage:
@@ -13,7 +13,7 @@
 #   floom-api.sh POST /api/hub/ingest '{"openapi_url":"..."}'
 #
 # Env overrides:
-#   FLOOM_API_KEY         API key (overrides config file)
+#   FLOOM_API_KEY         Agent token (overrides config file)
 #   FLOOM_API_URL         base URL (overrides config file, default https://floom.dev)
 #   FLOOM_CONFIG          path to config json (default ~/.floom/config.json)
 #   FLOOM_DRY_RUN=1       print the request instead of sending
@@ -74,11 +74,15 @@ if [[ -z "$API_KEY" ]]; then
   cat >&2 <<EOF
 floom: not authenticated.
 
-Create an API key at https://floom.dev/me/api-keys, then:
+Create an Agent token in Workspace settings:
 
-  floom auth <your-api-key>
+  https://floom.dev/settings/agent-tokens
 
-Or set the FLOOM_API_KEY env var directly.
+Then run:
+
+  floom auth floom_agent_...
+
+Or set FLOOM_API_KEY to an Agent token directly.
 EOF
   exit 1
 fi

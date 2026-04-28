@@ -21,11 +21,14 @@
  * The existing CreatorHeroPage.tsx is kept in the tree for reference;
  * main.tsx wires "/" to this page.
  */
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowRight, Code2, Rocket, Share2 } from 'lucide-react';
 
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
+import { AppStripe } from '../components/public/AppStripe';
+import { AppShowcaseCard } from '../components/public/AppShowcaseCard';
 import { FeedbackButton } from '../components/FeedbackButton';
 
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
@@ -40,13 +43,111 @@ import { ThreeSurfacesDiagram } from '../components/home/ThreeSurfacesDiagram';
 import { FitBand } from '../components/home/FitBand';
 import { WhosBehind } from '../components/home/WhosBehind';
 import { DiscordCta } from '../components/home/DiscordCta';
-import { ShowcaseGridV23 } from '../components/home/ShowcaseGridV23';
 
 import * as api from '../api/client';
 import type { HubApp } from '../lib/types';
 import { publicHubApps } from '../lib/hub-filter';
 import { readDeployEnabled, useDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
+import { useSession } from '../hooks/useSession';
+
+// MVP hero install snippet — generic MCP config, no per-app slug.
+// IMPORTANT: use the current origin so tokens minted on mvp.floom.dev /
+// v26.floom.dev / floom.dev (post-flip) point at the SAME host they were
+// minted on. Hardcoding floom.dev breaks the 401-on-cross-host case.
+const MCP_HOST = typeof window !== 'undefined' ? window.location.origin : 'https://floom.dev';
+const MVP_MCP_SNIPPET = `{
+  "mcpServers": {
+    "floom": {
+      "url": "${MCP_HOST}/mcp",
+      "headers": {
+        "Authorization": "Bearer floom_agent_<your_token>"
+      }
+    }
+  }
+}`;
+
+function MvpHeroInstall() {
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(MVP_MCP_SNIPPET);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = MVP_MCP_SNIPPET;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch { /* silent */ }
+  }
+  return (
+    <div style={{ maxWidth: 480, margin: '20px auto 0', textAlign: 'left' }}>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 8px', textAlign: 'center' }}>
+        Paste in your MCP client config:
+      </p>
+      <div style={{ position: 'relative' }}>
+        {/* F7 (2026-04-28): copy boxes use light tinted bg (var(--studio)),
+            not dark. Federico-locked global rule. */}
+        <pre
+          data-testid="hero-mcp-snippet"
+          style={{
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            fontSize: 11,
+            background: 'var(--studio, #f5f4f0)',
+            color: 'var(--ink)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            padding: '10px 12px',
+            paddingRight: 64,
+            overflowX: 'auto',
+            whiteSpace: 'pre',
+            lineHeight: 1.5,
+            margin: 0,
+          }}
+        >
+          {MVP_MCP_SNIPPET}
+        </pre>
+        <button
+          type="button"
+          data-testid="install-copy-btn"
+          onClick={() => void handleCopy()}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            fontSize: 11,
+            fontWeight: 600,
+            color: copied ? 'var(--muted)' : 'var(--accent)',
+            background: 'var(--card)',
+            border: `1px solid ${copied ? 'var(--line)' : 'rgba(4,120,87,0.35)'}`,
+            borderRadius: 6,
+            padding: '3px 10px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            letterSpacing: '0.03em',
+          }}
+          aria-label={copied ? 'Copied' : 'Copy MCP config'}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '10px 0 0', textAlign: 'center' }}>
+        Need a token?{' '}
+        <Link to="/signup" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
+          Sign up to get one
+        </Link>
+        {' '}→
+      </p>
+    </div>
+  );
+}
 
 interface Stripe {
   slug: string;
@@ -94,10 +195,18 @@ function pickStripes(apps: HubApp[]): Stripe[] {
   return picked.length >= 3 ? picked : FALLBACK_STRIPES;
 }
 
-export function LandingV17Page() {
+interface LandingV17PageProps {
+  variant?: 'full' | 'mvp';
+}
+
+export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
+  const isMvp = variant === 'mvp';
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
   const deployEnabledFlag = useDeployEnabled();
   const deployEnabled = deployEnabledFlag ?? readDeployEnabled();
+  // v26 §3 option C: logged-in-aware landing.
+  // When authenticated user hits "/", show a "Resume in {workspaceName} →" banner.
+  const { data: session, isAuthenticated } = useSession();
   const waitlistHeroHref = useMemo(() => waitlistHref('landing-hero'), []);
   // Route both modes to /install-in-claude (the 4-tab Claude install flow).
   // /install is self-host Docker docs, /install/lead-scorer 404s when the
@@ -127,6 +236,46 @@ export function LandingV17Page() {
     >
       <TopBar />
 
+      {/* v26 §3 option C: resume banner for authenticated users.
+          G1 (2026-04-28): slimmed to a 1-line stripe so it doesn't
+          compete with the hero. Federico: "the composition still is
+          a bit overwhelming". */}
+      {isAuthenticated && session && (
+        <div
+          data-testid="landing-resume-banner"
+          style={{
+            background: 'var(--studio, #f5f4f0)',
+            borderBottom: '1px solid var(--line)',
+            padding: '6px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            fontSize: 12.5,
+            lineHeight: 1.4,
+          }}
+        >
+          <span style={{ color: 'var(--muted)' }}>
+            You're signed in.
+          </span>
+          <Link
+            to="/run/apps"
+            data-testid="landing-resume-cta"
+            style={{
+              fontWeight: 600,
+              color: 'var(--accent)',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            Resume in{' '}
+            {session.active_workspace?.name?.trim() || 'your workspace'} →
+          </Link>
+        </div>
+      )}
+
       <main id="main" style={{ display: 'block' }}>
         {/* HERO — wireframe: .hero-shell > .hero
             Cursor-style layout (Federico 2026-04-23 — "the visual demo
@@ -140,7 +289,7 @@ export function LandingV17Page() {
           data-testid="hero"
           style={{
             position: 'relative',
-            padding: '24px 24px 40px',
+            padding: isMvp ? '64px 24px 56px' : '24px 24px 40px',
             borderBottom: '1px solid var(--line)',
             background:
               'linear-gradient(180deg, var(--card) 0%, var(--bg) 100%)',
@@ -153,68 +302,138 @@ export function LandingV17Page() {
               textAlign: 'center',
             }}
           >
-            {/* Launch week pill removed from landing (#669) — remains on
-                /waitlist where it's route-scoped to the beta banner.
-                Landing keeps the hero calm with just the works-with belt
-                eyebrow + H1 + sub. The marginTop below restores the
-                vertical breathing room the pill wrapper used to provide
-                (Federico 2026-04-24 — "above ship ai apps fast we need
-                margin again"). */}
-            <div style={{ marginTop: 24 }}>
-              <WorksWithBelt />
-            </div>
+            {/* G1 (2026-04-28): hero composition. Federico said the hero
+                still felt overwhelming. Solution:
+                - Lift "Backed by Founders Inc" ABOVE H1 as a quiet eyebrow
+                  (positions the product, doesn't compete with the H1)
+                - Add vertical breathing room around H1 + sub
+                - Demote WorksWithBelt to a soft caption under the snippet
+                - Resume banner slimmed to a 1-line stripe (above) */}
+            {isMvp && (
+              <p
+                data-testid="hero-backed-by"
+                style={{
+                  margin: '0 auto 28px',
+                  fontSize: 11.5,
+                  color: 'var(--muted)',
+                  letterSpacing: '0.10em',
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                  textAlign: 'center',
+                }}
+              >
+                Backed by{' '}
+                <a
+                  href="https://f.inc"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    color: 'var(--ink)',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Founders Inc
+                </a>
+              </p>
+            )}
+            {!isMvp && (
+              <div style={{ marginTop: 24 }}>
+                <WorksWithBelt />
+              </div>
+            )}
 
-            {/* H1 — locked copy. v23 ships clamp(44, 7vw, 72) desktop, balance wrap. */}
+            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap.
+                F10 (2026-04-28): "fast" coloured with brand green for emphasis. */}
             <h1
               className="hero-headline"
               style={{
                 fontFamily: 'var(--font-display)',
                 fontWeight: 800,
-                fontSize: 'clamp(44px, 7vw, 72px)',
+                fontSize: 64,
                 lineHeight: 1.02,
                 letterSpacing: '-0.025em',
                 color: 'var(--ink)',
-                margin: '0 0 16px',
+                margin: isMvp ? '0 0 20px' : '0 0 16px',
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
-              Ship AI apps <span style={{ color: 'var(--accent)' }}>fast.</span>
+              Ship AI apps <span style={{ color: 'var(--accent)' }}>fast</span>.
             </h1>
 
-            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22).
-                v23 lock: "+" not "and" (matches positioning memory). */}
+            {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22). */}
             <p
               className="hero-sub"
               data-testid="hero-sub-positioning"
               style={{
                 fontFamily: "'Inter', system-ui, sans-serif",
                 fontSize: 19,
-                lineHeight: 1.45,
+                lineHeight: 1.5,
                 fontWeight: 400,
                 color: 'var(--muted)',
                 maxWidth: 640,
-                margin: '0 auto 28px',
+                margin: isMvp ? '0 auto 36px' : '0 auto 28px',
               }}
             >
               The protocol + runtime for agentic work.
             </p>
+            {!isMvp && (
+              <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)', margin: '-14px 0 28px' }}>
+                Vibe-coding speed. Production-grade safety.
+              </p>
+            )}
 
-            {/* CTA — v23 lock: accent "Run in Claude" leads, ink secondary
-                follows. Same hierarchy in both deploy + waitlist mode
-                (try-the-product first, signup second). Matches the
-                "free for launch, rate-limited not paywalled" positioning. */}
+            {/* CTA — MVP variant: inline MCP setup snippet.
+                Full variant: runtime-gated by DEPLOY_ENABLED. */}
+            {isMvp ? (
+              <>
+                <MvpHeroInstall />
+                {/* G1 (2026-04-28): WorksWithBelt as a soft caption under
+                    the snippet — visually subdued (small + reduced
+                    opacity) so it reads as "and works with these
+                    clients" rather than another heavy element competing
+                    with H1+snippet. */}
+                <div style={{ marginTop: 28, opacity: 0.85 }}>
+                  <WorksWithBelt />
+                </div>
+              </>
+            ) : (
             <div
               className="hero-ctas"
               style={{
                 display: 'flex',
-                flexDirection: 'row',
+                flexDirection: deployEnabled ? 'column' : 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexWrap: 'wrap',
-                gap: 12,
+                gap: deployEnabled ? 10 : 12,
                 marginBottom: 4,
               }}
             >
+              {!deployEnabled && (
+                <Link
+                  to={waitlistHeroHref}
+                  data-testid="hero-cta-deploy"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    background: 'var(--ink)',
+                    color: '#fff',
+                    border: '1px solid var(--ink)',
+                    borderRadius: 999,
+                    padding: '14px 26px',
+                    fontSize: 15,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  Join the waitlist
+                </Link>
+              )}
               <Link
                 to={runInClaudeHref}
                 data-testid="hero-cta-run-in-claude"
@@ -223,353 +442,335 @@ export function LandingV17Page() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 8,
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: '1px solid var(--accent)',
+                  background: deployEnabled ? 'var(--ink)' : 'var(--card)',
+                  color: deployEnabled ? '#fff' : 'var(--ink)',
+                  border: `1px solid ${deployEnabled ? 'var(--ink)' : 'var(--line)'}`,
                   borderRadius: 999,
-                  padding: '14px 26px',
+                  padding: deployEnabled ? '14px 24px' : '13px 18px',
                   fontSize: 15,
                   fontWeight: 600,
                   textDecoration: 'none',
                   whiteSpace: 'nowrap',
                 }}
               >
-                Run in Claude
+                {'Run in your AI tool'}
               </Link>
-              <Link
-                to={deployEnabled ? '/signup' : waitlistHeroHref}
-                data-testid="hero-cta-deploy"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  background: 'var(--ink)',
-                  color: '#fff',
-                  border: '1px solid var(--ink)',
-                  borderRadius: 999,
-                  padding: '14px 24px',
-                  fontSize: 15,
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {deployEnabled ? 'Deploy your own' : 'Join waitlist'}
-              </Link>
-            </div>
-
-            {/* Hero meta strip (v23) — three-fact mono row under CTAs.
-                Live dot before "3 live apps" cues credibility without
-                pulling focus from the H1. */}
-            <div
-              data-testid="hero-meta-strip"
-              style={{
-                marginTop: 18,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 14,
-                flexWrap: 'wrap',
-                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                fontSize: 11.5,
-                color: 'var(--muted)',
-                letterSpacing: '0.02em',
-              }}
-            >
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  aria-hidden="true"
+              {deployEnabled && (
+                <Link
+                  to="/signup"
+                  data-testid="hero-cta-deploy"
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: 'var(--accent)',
-                    boxShadow: '0 0 0 3px rgba(4, 120, 87, 0.18)',
+                    fontSize: 13,
+                    color: 'var(--muted)',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
                   }}
-                />
-                3 live apps
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>MIT-licensed core</span>
-              <span aria-hidden="true">&middot;</span>
-              <span>Self-host in 1 command</span>
+                >
+                  Deploy your own
+                  <ArrowRight size={13} aria-hidden="true" />
+                </Link>
+              )}
             </div>
+            )}
           </div>
 
           {/* Hero demo — interactive 3-state build/deploy/use loop.
               Sits directly under the CTAs. Sized to 580px (Cursor-style,
               Federico 2026-04-23): top ~120-150px is visible above the fold
               at 1440x900, rest scrolls into view. Bigger canvas = more
-              cinematic, no squishing to fit the viewport. */}
+              cinematic, no squishing to fit the viewport.
+              MVP variant: KEEP (Federico 2026-04-28 — visual hero asset
+              is essential, install snippet sits below it not instead). */}
           <HeroDemo />
         </section>
 
         {/* Compact CLI reference strip below the hero — smaller than the
             original hero-inline version (Federico 2026-04-23 — moved out of
-            hero, kept below as a smaller block). */}
-        <section
-          data-testid="cli-reference-section"
-          style={{ padding: '32px 24px 8px' }}
-        >
-          <CliReference />
-        </section>
+            hero, kept below as a smaller block).
+            MVP variant: dropped (technical → /docs). */}
+        {!isMvp && (
+          <section
+            data-testid="cli-reference-section"
+            style={{ padding: '32px 24px 8px' }}
+          >
+            <CliReference />
+          </section>
+        )}
 
-        {/* SHOWCASE — v23 editorial 1-hero + 2-compact grid with neutral
-            run-result banner thumbs (Federico-locked: NO category tints).
-            Replaces the prior <AppStripe variant="landing"/> × 3 pattern. */}
-        <ShowcaseGridV23 stripes={stripes} />
-
-        {/* HOW IT WORKS — v23 styled band: warm studio bg + top/bottom
-            borders + 3-node numbered timeline above the cards (Delta 11.1).
-            Full-bleed background; inner content stays at the 1180 grid. */}
+        {/* HOW IT WORKS — 3 steps */}
         <section
           data-testid="how-it-works"
-          style={{
-            background: 'var(--studio, #f5f4f0)',
-            borderTop: '1px solid var(--line)',
-            borderBottom: '1px solid var(--line)',
-            padding: '64px 28px',
-          }}
+          style={{ padding: '72px 28px', maxWidth: 1240, margin: '0 auto' }}
         >
-          <div style={{ maxWidth: 1180, margin: '0 auto' }}>
-            <div style={{ textAlign: 'center' }}>
-              <SectionEyebrow>How it works</SectionEyebrow>
-            </div>
-            <h2
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontWeight: 800,
-                fontSize: 32,
-                lineHeight: 1.1,
-                letterSpacing: '-0.025em',
-                textAlign: 'center',
-                margin: '0 auto 20px',
-                maxWidth: 560,
-              }}
-            >
-              From idea to shipped app in 3 steps.
-            </h2>
-
-            {/* 3-node timeline above cards (v23 Delta 11.1) */}
-            <div
-              className="step-timeline"
-              data-testid="how-it-works-timeline"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0,
-                maxWidth: 520,
-                margin: '0 auto 28px',
-                padding: '8px 0',
-              }}
-            >
-              {[1, 2, 3].map((n, idx) => (
-                <Fragment key={n}>
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 34,
-                      height: 34,
-                      borderRadius: 999,
-                      background: 'var(--accent-soft, #ecfdf5)',
-                      border: '1.5px solid var(--accent-border, #d1fae5)',
-                      color: 'var(--accent)',
-                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {n}
-                  </span>
-                  {idx < 2 && (
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        flex: 1,
-                        height: 2,
-                        background: 'var(--line)',
-                        margin: '0 6px',
-                      }}
-                    />
-                  )}
-                </Fragment>
-              ))}
-            </div>
-
-            <div
-              className="steps"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 18,
-                maxWidth: 1180,
-                margin: '0 auto',
-              }}
-            >
-              {STEPS.map((s) => (
-                <div
-                  key={s.num}
-                  className="step"
-                  style={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--line)',
-                    borderRadius: 12,
-                    padding: '24px 22px',
-                    position: 'relative',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                      fontSize: 11,
-                      color: 'var(--muted)',
-                      letterSpacing: '0.08em',
-                      fontWeight: 600,
-                      marginBottom: 12,
-                    }}
-                  >
-                    {s.num} &middot; {s.kicker}
-                  </div>
-                  <h3
-                    style={{
-                      fontSize: 16,
-                      fontWeight: 600,
-                      margin: '0 0 8px',
-                      lineHeight: 1.3,
-                    }}
-                  >
-                    {s.title}
-                  </h3>
-                  <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55, margin: 0 }}>
-                    {s.body}
-                  </p>
-                  <div
-                    style={{
-                      marginTop: 14,
-                      paddingTop: 14,
-                      borderTop: '1px solid var(--line)',
-                      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                      fontSize: 11.5,
-                      color: 'var(--muted)',
-                    }}
-                  >
-                    {s.mono}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* WORKED EXAMPLE — one concrete run (#541, Federico 2026-04-23).
-            Dedicated mid-page band that shows the Lead Scorer output in
-            full (87/100 "Strong fit" on stripe.com). Separate from the
-            HeroDemo USE tab so a scroller who skipped the demo still
-            lands on a complete example before they leave. */}
-        <WorkedExample />
-
-        {/* THREE SURFACES DIAGRAM — non-tech visual (#542). Inline SVG,
-            "paste app -> web page + MCP + API". Scales cleanly, single
-            brand accent for connectors, no bespoke PNG. */}
-        <ThreeSurfacesDiagram />
-
-        {/* FIT BAND — who it's for / who it's not for (#543). Honest
-            about the shape before the visitor signs up. */}
-        <FitBand />
-
-        {/* PUBLISH-CTA BOX — v23 anchor target for `#waitlist` topbar/footer
-            links. Section id stays attached to the wrapper so the section
-            jumps land at the correct scroll offset under sticky chrome. */}
-        <section id="waitlist" style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
-          <PublishCtaBox />
-        </section>
-
-        {/* DUAL AUDIENCES — makers + teams */}
-        <DualAudiences />
-
-        {/* PRICING TEASER — single $0 card */}
-        <PricingTeaser />
-
-        {/* BUILD CTA */}
-        <section
-          style={{
-            padding: '72px 28px',
-            maxWidth: 760,
-            margin: '0 auto',
-            textAlign: 'center',
-          }}
-        >
+          <SectionEyebrow>How it works</SectionEyebrow>
           <h2
             style={{
               fontFamily: 'var(--font-display)',
               fontWeight: 800,
-              fontSize: 26,
+              fontSize: 34,
               lineHeight: 1.1,
               letterSpacing: '-0.025em',
-              margin: '0 0 8px',
+              textAlign: 'center',
+              margin: '0 auto 28px',
+              maxWidth: 760,
             }}
           >
-            Want to build yours?
+            From idea to shipped app in 3 steps.
           </h2>
-          <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
-            The protocol is 40 lines of JSON. The docs walk you through your
-            first deploy in under 10 minutes.
-          </p>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <Link
-              to="/docs"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                background: 'var(--accent)',
-                color: '#fff',
-                border: '1px solid var(--accent)',
-                borderRadius: 10,
-                padding: '11px 17px',
-                fontSize: 13.5,
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Open the docs
-            </Link>
-            <a
-              href="https://github.com/floomhq/floom"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                background: 'var(--card)',
-                color: 'var(--ink)',
-                border: '1px solid var(--line)',
-                borderRadius: 10,
-                padding: '11px 17px',
-                fontSize: 13.5,
-                fontWeight: 600,
-                textDecoration: 'none',
-              }}
-            >
-              Star on GitHub
-            </a>
+          <div
+            className="steps"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 18,
+              maxWidth: 1180,
+              margin: '0 auto',
+            }}
+          >
+            {STEPS.map((s, idx) => {
+              const Icon = idx === 0 ? Code2 : idx === 1 ? Rocket : Share2;
+              return (
+              <div
+                key={s.num}
+                className="step"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 12,
+                  padding: '24px 22px',
+                  position: 'relative',
+                }}
+              >
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 10,
+                    background: 'rgba(4,120,87,0.08)',
+                    border: '1px solid rgba(4,120,87,0.18)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#047857',
+                    marginBottom: 16,
+                  }}
+                >
+                  <Icon size={22} strokeWidth={1.6} />
+                </div>
+                <div
+                  style={{
+                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                    fontSize: 11,
+                    color: 'var(--muted)',
+                    letterSpacing: '0.08em',
+                    fontWeight: 600,
+                    marginBottom: 12,
+                  }}
+                >
+                  {s.num} &middot; {s.kicker}
+                </div>
+                <h3
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    margin: '0 0 8px',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {s.title}
+                </h3>
+                <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55, margin: 0 }}>
+                  {s.body}
+                </p>
+                <div
+                  style={{
+                    marginTop: 14,
+                    paddingTop: 14,
+                    borderTop: '1px solid var(--line)',
+                    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                    fontSize: 11.5,
+                    color: 'var(--muted)',
+                  }}
+                >
+                  {s.mono}
+                </div>
+              </div>
+            );
+            })}
           </div>
         </section>
-        {/* WHO'S BEHIND IT — single-founder context + direct contact
-            (#589, Federico 2026-04-23). Sits near the bottom so a
-            visitor has already seen the product by the time they ask
-            "who's building this?". Photo is served from
-            /team/fede.jpg — a placeholder ships in the repo for
-            day-one parity; Federico overwrites the file locally when
-            he has a photo he likes. */}
-        <WhosBehind />
+
+        {/* WORKED EXAMPLE — MVP variant: dropped (heavy). */}
+        {!isMvp && <WorkedExample />}
+
+        {/* THREE SURFACES DIAGRAM — MVP variant: dropped (technical → /docs). */}
+        {!isMvp && <ThreeSurfacesDiagram />}
+
+        {/* FIT BAND — MVP variant: dropped (qualifying). */}
+        {!isMvp && <FitBand />}
+
+        {/* SHOWCASE — 3 apps */}
+        <section
+          data-testid="showcase"
+          style={{
+            padding: '72px 28px',
+            maxWidth: 1240,
+            margin: '0 auto',
+            borderTop: '1px solid var(--line)',
+          }}
+        >
+          <SectionEyebrow>Showcase</SectionEyebrow>
+          <h2
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontWeight: 800,
+              fontSize: 34,
+              lineHeight: 1.1,
+              letterSpacing: '-0.025em',
+              textAlign: 'center',
+              margin: '0 auto 10px',
+              maxWidth: 760,
+            }}
+          >
+            Three apps Floom already runs in production.
+          </h2>
+          <p
+            style={{
+              fontSize: 15.5,
+              color: 'var(--muted)',
+              textAlign: 'center',
+              maxWidth: 620,
+              margin: '0 auto 40px',
+            }}
+          >
+            Real AI doing real work. All three deploy from a single GitHub repo.
+          </p>
+          {/* G3 (2026-04-28): app-store-style cards. Federico: "the apps
+              on the landing page should be cards, like on the app store.
+              Right now they are just small boxes." Replaces horizontal
+              AppStripe (icon-text-arrow row) with vertical AppShowcaseCard
+              for the MVP showcase: prominent icon tile, bold name, tagline,
+              category pill + Try CTA. 3-up desktop, 2-up tablet, 1-up mobile. */}
+          <div className="mvp-showcase-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, maxWidth: 1100, margin: '0 auto' }}>
+            {isMvp
+              ? stripes.map((s) => (
+                  <AppShowcaseCard
+                    key={s.slug}
+                    slug={s.slug}
+                    name={s.name}
+                    description={s.description}
+                    category={s.category}
+                  />
+                ))
+              : stripes.map((s) => (
+                  <AppStripe
+                    key={s.slug}
+                    slug={s.slug}
+                    name={s.name}
+                    description={s.description}
+                    category={s.category}
+                    variant="landing"
+                  />
+                ))}
+          </div>
+          <style>{`
+            @media (max-width: 880px) {
+              .mvp-showcase-grid { grid-template-columns: repeat(2, 1fr) !important; }
+            }
+            @media (max-width: 640px) {
+              .mvp-showcase-grid { grid-template-columns: 1fr !important; }
+            }
+          `}</style>
+        </section>
+
+        {/* PUBLISH-CTA BOX — MVP variant: dropped (creator-focused, MVP is consumer-first). */}
+        {!isMvp && (
+          <section style={{ padding: '24px 28px', maxWidth: 1240, margin: '0 auto' }}>
+            <PublishCtaBox />
+          </section>
+        )}
+
+        {/* DUAL AUDIENCES — MVP variant: dropped (heavy split). */}
+        {!isMvp && <DualAudiences />}
+
+        {/* PRICING TEASER — MVP variant: dropped (no pricing). */}
+        {!isMvp && <PricingTeaser />}
+
+        {/* BUILD CTA — MVP variant: dropped (creator-focused). */}
+        {!isMvp && (
+          <section
+            style={{
+              padding: '72px 28px',
+              maxWidth: 760,
+              margin: '0 auto',
+              textAlign: 'center',
+            }}
+          >
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontWeight: 800,
+                fontSize: 26,
+                lineHeight: 1.1,
+                letterSpacing: '-0.025em',
+                margin: '0 0 8px',
+              }}
+            >
+              Want to build yours?
+            </h2>
+            <p style={{ fontSize: 15.5, color: 'var(--muted)', margin: '0 0 24px', lineHeight: 1.55 }}>
+              The protocol is 40 lines of JSON. The docs walk you through your
+              first deploy in under 10 minutes.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link
+                to="/docs"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 10,
+                  padding: '11px 17px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Open the docs
+              </Link>
+              <a
+                href="https://github.com/floomhq/floom"
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  background: 'var(--card)',
+                  color: 'var(--ink)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 10,
+                  padding: '11px 17px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                Star on GitHub
+              </a>
+            </div>
+          </section>
+        )}
+
+        {/* WHO'S BEHIND IT — MVP variant: dropped (→ /about). */}
+        {!isMvp && <WhosBehind />}
 
         {/* DISCORD CTA — quiet chip above the footer (#613,
             Federico 2026-04-23). Invite lives in MEMORY
@@ -589,23 +790,23 @@ export function LandingV17Page() {
 const STEPS = [
   {
     num: '01',
-    kicker: 'WRITE',
-    title: 'Write one JSON spec',
-    body: 'Describe inputs, outputs, and the model call. No framework. No server code.',
-    mono: 'spec.floom.json',
+    kicker: 'BRING YOUR APP',
+    title: 'Got an idea or a GitHub link?',
+    body: 'Paste it. Floom takes care of the rest.',
+    mono: 'paste anything',
   },
   {
     num: '02',
-    kicker: 'DEPLOY',
-    title: 'Paste your GitHub URL',
-    body: 'Floom builds, tests, and ships it to a public page, an MCP server, and a JSON API.',
-    mono: 'git push \u2192 live in ~60s',
+    kicker: 'GO LIVE',
+    title: '60 seconds later, your app is live',
+    body: 'You get a public URL, an AI-tool plugin, and an API. No setup.',
+    mono: 'live in ~60s',
   },
   {
     num: '03',
-    kicker: 'SHARE',
-    title: 'Share a link. Install anywhere.',
-    body: 'Runs in Claude, Cursor, ChatGPT, a browser, or behind an API key.',
-    mono: 'floom.dev/p/your-app',
+    kicker: 'SHARE ANYWHERE',
+    title: 'Send the link.',
+    body: 'People run your app from any MCP client, browser, or with curl.',
+    mono: 'one link, every tool',
   },
 ];

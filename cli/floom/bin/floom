@@ -4,29 +4,36 @@
 # Subcommands:
 #   init      scaffold floom.yaml in the current directory
 #   deploy    validate + publish the current app
+#   account   manage workspace secrets and agent tokens
 #   status    list your apps and recent runs
-#   auth      save an API key to ~/.floom/config.json
+#   auth      save an Agent token to ~/.floom/config.json
 #   --help    show this help
 #   --version print version
 
 set -euo pipefail
 
-BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || readlink "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+BIN_DIR="$SCRIPT_DIR"
 ROOT_DIR="$(cd "$BIN_DIR/.." && pwd)"
 LIB_DIR="$ROOT_DIR/lib"
 
 print_help() {
   cat <<'EOF'
-floom — deploy AI apps to Floom from any shell or agent.
+floom — run and deploy AI apps from any shell or agent.
 
 usage:
   floom <command> [options]
 
 commands:
-  init              scaffold a floom.yaml in the current directory
-  deploy            validate + publish the current app (use --dry-run to preview)
-  status            list your apps and recent runs
-  auth <api-key>    save an API key to ~/.floom/config.json
+  auth <agent-token>  save an Agent token to ~/.floom/config.json
+  account             manage workspace secrets and agent tokens
+  apps list           list your workspace apps
+  apps update         update, share, or delete workspace apps
+  run <slug> [json]   run a Floom app by slug
+  init                scaffold a floom.yaml in the current directory
+  deploy              validate + publish the current app (use --dry-run to preview)
+  status              list your apps and recent runs
 
 options:
   --help, -h        show this help
@@ -34,7 +41,7 @@ options:
 
 docs:     https://floom.dev/docs
 examples: https://github.com/floomhq/floom/tree/main/examples
-api key:  https://floom.dev/me/api-keys
+agent tokens: https://floom.dev/home
 EOF
 }
 
@@ -65,6 +72,12 @@ case "$CMD" in
     exec bash "$LIB_DIR/floom-status.sh" "$@" ;;
   auth)
     exec bash "$LIB_DIR/floom-auth.sh" "$@" ;;
+  account)
+    exec bash "$LIB_DIR/floom-account.sh" "$@" ;;
+  apps)
+    exec bash "$LIB_DIR/floom-apps.sh" "$@" ;;
+  run)
+    exec bash "$LIB_DIR/floom-run.sh" "$@" ;;
   validate)
     exec bash "$LIB_DIR/floom-validate.sh" "$@" ;;
   api)

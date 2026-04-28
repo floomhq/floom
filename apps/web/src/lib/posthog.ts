@@ -81,7 +81,7 @@ let enabled = false;
 
 /**
  * Pure predicate: true iff PostHog SHOULD be initialized given the user's
- * consent choice and whether an API key is configured. Exported for tests
+ * consent choice and whether a PostHog key is configured. Exported for tests
  * so the gating contract is unit-checkable without touching the SDK.
  *
  * PostHog is a third-party processor (events leave the EU to PostHog's

@@ -132,7 +132,7 @@ export function CreatorAppPage() {
               </p>
             )}
             <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>
-              You are not the owner of this app, so the editor, secrets, and
+              You are not the owner of this app, so the editor, app creator secrets, and
               activity feed are hidden. Open the public app page to run it.
             </p>
             <Link
@@ -189,15 +189,15 @@ export function CreatorAppPage() {
               </Link>
               {/* Bridge creator dashboard -> per-app management surface.
                   Before this fix, the v15 /me/apps/:slug shape (Overview /
-                  Secrets / Access / Settings tabs) was orphaned: a
+                  App creator secrets / Access / Settings tabs) was orphaned: a
                   creator could publish an app and never discover the
-                  secrets policy, runs, or renderer controls hiding under
+                  app creator secret policy, runs, or renderer controls hiding under
                   /me/apps/:slug. */}
               <Link to={`/me/apps/${slug}`} style={secondaryBtn} data-testid="creator-app-manage">
                 Manage
               </Link>
               <Link to={`/me/apps/${slug}/secrets`} style={secondaryBtn} data-testid="creator-app-secrets">
-                Secrets
+                App creator secrets
               </Link>
               <Link to={`/p/${slug}`} style={secondaryBtn}>
                 View store

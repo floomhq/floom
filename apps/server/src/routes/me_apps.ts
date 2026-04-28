@@ -116,6 +116,10 @@ const SharingPatchBody = z.object({
   link_token_rotate: z.boolean().optional(),
 });
 
+const RateLimitPatchBody = z.object({
+  rate_limit_per_hour: z.union([z.number().int().min(1).max(100_000), z.null()]),
+});
+
 meAppsRouter.get('/:slug/sharing', async (c) => {
   const ctx = await resolveUserContext(c);
   const gate = requireAuthenticatedInCloud(c, ctx);
@@ -348,6 +352,60 @@ meAppsRouter.post('/:slug/sharing/withdraw-review', async (c) => {
   } catch {
     return c.json({ error: 'Illegal visibility transition', code: 'illegal_transition' }, 409);
   }
+});
+
+meAppsRouter.get('/:slug/rate-limit', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app || !isOwner(app, ctx)) {
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+  return c.json({
+    slug: app.slug,
+    rate_limit_per_hour: app.run_rate_limit_per_hour ?? null,
+  });
+});
+
+meAppsRouter.patch('/:slug/rate-limit', async (c) => {
+  const ctx = await resolveUserContext(c);
+  const gate = requireAuthenticatedInCloud(c, ctx);
+  if (gate) return gate;
+  const app = loadApp(c.req.param('slug') || '');
+  if (!app || !isOwner(app, ctx)) {
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Body must be JSON', code: 'invalid_body' }, 400);
+  }
+  const parsed = RateLimitPatchBody.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid body shape', code: 'invalid_body', details: parsed.error.flatten() }, 400);
+  }
+  db.prepare(
+    `UPDATE apps
+        SET run_rate_limit_per_hour = ?,
+            updated_at = datetime('now')
+      WHERE id = ?`,
+  ).run(parsed.data.rate_limit_per_hour, app.id);
+  auditLog({
+    actor: getAuditActor(c, ctx),
+    action: 'app.rate_limit_updated',
+    target: { type: 'app', id: app.id },
+    before: { rate_limit_per_hour: app.run_rate_limit_per_hour ?? null },
+    after: { rate_limit_per_hour: parsed.data.rate_limit_per_hour },
+    metadata: { slug: app.slug },
+  });
+  invalidateHubCache();
+  return c.json({
+    ok: true,
+    slug: app.slug,
+    rate_limit_per_hour: parsed.data.rate_limit_per_hour,
+  });
 });
 
 /**

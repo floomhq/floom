@@ -63,6 +63,12 @@ export interface ShareModalProps {
    * existing creator-visibility PATCH (or ignores it on public pages).
    */
   onVisibilityChange?: (next: AppVisibility) => void;
+  /**
+   * Whether the current session user owns this app. Controls visibility
+   * of the invite form, visibility radios, and the header pill label.
+   * Non-owners only see the public URL + copy button.
+   */
+  isOwner?: boolean;
 }
 
 export interface AccessRow {
@@ -129,6 +135,7 @@ export function ShareModal({
   privateSignedUrl,
   accessList,
   onVisibilityChange,
+  isOwner = false,
 }: ShareModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
@@ -273,7 +280,12 @@ export function ShareModal({
     setRows((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  const pill = useMemo(() => visibilityPill(visibility), [visibility]);
+  // Non-owners viewing a public app always see "PUBLIC" — that's the only
+  // state they can reach (private/invite-only apps are 404 upstream).
+  const pill = useMemo(
+    () => (isOwner ? visibilityPill(visibility) : { label: 'PUBLIC', tone: 'accent' as const }),
+    [isOwner, visibility],
+  );
   const privateLink = privateSignedUrl || shareUrl;
 
   if (!open) return null;
@@ -367,8 +379,8 @@ export function ShareModal({
           </button>
         </header>
 
-        {/* ───────── Invite by email ───────── */}
-        <section style={{ padding: '16px 20px 12px' }}>
+        {/* ───────── Invite by email (owner only) ───────── */}
+        {isOwner && <section style={{ padding: '16px 20px 12px' }}>
           <div
             style={{
               display: 'flex',
@@ -502,13 +514,13 @@ export function ShareModal({
               {sendError}
             </p>
           )}
-        </section>
+        </section>}
 
         {/* ───────── People with access ─────────
             Only render when there are actual rows — otherwise the
             "Only you, for now" copy is redundant with the email
             input above. */}
-        {rows.length > 0 && (
+        {isOwner && rows.length > 0 && (
           <section style={{ padding: '4px 20px 16px' }}>
             <div
               style={{
@@ -583,122 +595,189 @@ export function ShareModal({
           </section>
         )}
 
-        {/* ───────── Link sharing ───────── */}
+        {/* ───────── Link sharing (owner: full controls; non-owner: URL + copy only) ───────── */}
         <section
           style={{
             padding: '12px 20px 16px',
             borderTop: '1px solid var(--line, rgba(27,26,23,0.08))',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 11.5,
-              fontWeight: 600,
-              color: 'var(--muted, #6c6a66)',
-              letterSpacing: 0.4,
-              textTransform: 'uppercase',
-              margin: '0 0 10px',
-            }}
-          >
-            <LinkIcon size={12} aria-hidden="true" /> Link sharing
-          </div>
+          {isOwner ? (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: 'var(--muted, #6c6a66)',
+                  letterSpacing: 0.4,
+                  textTransform: 'uppercase',
+                  margin: '0 0 10px',
+                }}
+              >
+                <LinkIcon size={12} aria-hidden="true" /> Link sharing
+              </div>
 
-          {/* Public toggle */}
-          <label
-            data-testid="share-modal-public-toggle"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '8px 0',
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={publicToggle}
-              onChange={(e) => {
-                const next = e.target.checked;
-                setPublicToggle(next);
-                onVisibilityChange?.(next ? 'public' : 'invite-only');
-              }}
-              style={{ accentColor: 'var(--accent, #047857)' }}
-            />
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>Public link</span>
-              <span style={{ fontSize: 11.5, color: 'var(--muted, #6c6a66)' }}>
-                Subject to a ~1h review before it appears in the Floom store.
-              </span>
-            </span>
-          </label>
+              {/* Public toggle */}
+              <label
+                data-testid="share-modal-public-toggle"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 0',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={publicToggle}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setPublicToggle(next);
+                    onVisibilityChange?.(next ? 'public' : 'invite-only');
+                  }}
+                  style={{ accentColor: 'var(--accent, #047857)' }}
+                />
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Public link</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--muted, #6c6a66)' }}>
+                    Subject to a ~1h review before it appears in the Floom store.
+                  </span>
+                </span>
+              </label>
 
-          {/* Private signed link */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 12px',
-              border: '1px solid var(--line, rgba(27,26,23,0.12))',
-              borderRadius: 10,
-              background: 'var(--card, #ffffff)',
-              marginTop: 8,
-            }}
-          >
-            <LinkIcon size={14} aria-hidden="true" style={{ color: 'var(--muted, #6c6a66)', flexShrink: 0 }} />
-            <input
-              readOnly
-              value={privateLink}
-              aria-label="Private signed link"
-              data-testid="share-modal-private-url"
-              onFocus={(e) => e.currentTarget.select()}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontSize: 12.5,
-                fontFamily:
-                  'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace',
-                color: 'var(--ink, #1b1a17)',
-                padding: 0,
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => handleCopy(privateLink, 'private')}
-              data-testid="share-modal-copy-private"
-              aria-label="Copy private link"
-              style={{
-                border: '1px solid var(--line, rgba(27,26,23,0.16))',
-                background: 'var(--card, #ffffff)',
-                color: 'var(--ink, #1b1a17)',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: 600,
-                padding: '6px 10px',
-                borderRadius: 8,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                fontFamily: 'inherit',
-              }}
-            >
-              {copied === 'private' ? <Check size={12} /> : <Copy size={12} />}
-              {copied === 'private' ? 'Copied' : 'Copy'}
-            </button>
-          </div>
+              {/* Private signed link */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  border: '1px solid var(--line, rgba(27,26,23,0.12))',
+                  borderRadius: 10,
+                  background: 'var(--card, #ffffff)',
+                  marginTop: 8,
+                }}
+              >
+                <LinkIcon size={14} aria-hidden="true" style={{ color: 'var(--muted, #6c6a66)', flexShrink: 0 }} />
+                <input
+                  readOnly
+                  value={privateLink}
+                  aria-label="Private signed link"
+                  data-testid="share-modal-private-url"
+                  onFocus={(e) => e.currentTarget.select()}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: 'none',
+                    outline: 'none',
+                    background: 'transparent',
+                    fontSize: 12.5,
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace',
+                    color: 'var(--ink, #1b1a17)',
+                    padding: 0,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopy(privateLink, 'private')}
+                  data-testid="share-modal-copy-private"
+                  aria-label="Copy private link"
+                  style={{
+                    border: '1px solid var(--line, rgba(27,26,23,0.16))',
+                    background: 'var(--card, #ffffff)',
+                    color: 'var(--ink, #1b1a17)',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {copied === 'private' ? <Check size={12} /> : <Copy size={12} />}
+                  {copied === 'private' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
 
-          <p style={{ fontSize: 11, color: 'var(--muted, #6c6a66)', margin: '6px 0 0' }}>
-            Signed links stay active until revoked.
-          </p>
+              <p style={{ fontSize: 11, color: 'var(--muted, #6c6a66)', margin: '6px 0 0' }}>
+                Signed links stay active until revoked.
+              </p>
+            </>
+          ) : (
+            /* Non-owner: just the public URL + copy + note */
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  border: '1px solid var(--line, rgba(27,26,23,0.12))',
+                  borderRadius: 10,
+                  background: 'var(--card, #ffffff)',
+                }}
+              >
+                <LinkIcon size={14} aria-hidden="true" style={{ color: 'var(--muted, #6c6a66)', flexShrink: 0 }} />
+                <input
+                  readOnly
+                  value={shareUrl}
+                  aria-label="App URL"
+                  data-testid="share-modal-public-url"
+                  onFocus={(e) => e.currentTarget.select()}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: 'none',
+                    outline: 'none',
+                    background: 'transparent',
+                    fontSize: 12.5,
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace',
+                    color: 'var(--ink, #1b1a17)',
+                    padding: 0,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopy(shareUrl, 'public')}
+                  data-testid="share-modal-copy-public"
+                  aria-label="Copy link"
+                  style={{
+                    border: '1px solid var(--line, rgba(27,26,23,0.16))',
+                    background: 'var(--card, #ffffff)',
+                    color: 'var(--ink, #1b1a17)',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {copied === 'public' ? <Check size={12} /> : <Copy size={12} />}
+                  {copied === 'public' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--muted, #6c6a66)', margin: '6px 0 0' }}>
+                Anyone with this link can run it. Free runs limited per IP.
+              </p>
+            </>
+          )}
         </section>
 
-        {/* ───────── Visibility radio ───────── */}
+        {/* ───────── Visibility radio (owner only) ───────── */}
+        {isOwner && (
         <section
           style={{
             padding: '10px 20px 16px',
@@ -762,6 +841,7 @@ export function ShareModal({
             })}
           </div>
         </section>
+        )}
       </div>
 
       {/* Responsive polish: full-screen bottom-sheet on mobile. */}

@@ -90,7 +90,8 @@ async function getViaMount(slug, headers = {}) {
 }
 
 // Seed: a gated slug (matches BYOK_GATED_SLUGS) and an ungated one.
-insertApp('lead-scorer');
+const gatedSlug = 'competitor-lens';
+insertApp(gatedSlug);
 insertApp('uuid');
 
 console.log('GET /api/:slug/quota');
@@ -116,7 +117,7 @@ byokGate.__resetByokGateForTests();
 // 3. Gated slug, fresh IP → 200 with usage=0 / remaining=5.
 byokGate.__resetByokGateForTests();
 {
-  const r = await getViaMount('lead-scorer');
+  const r = await getViaMount(gatedSlug);
   log('gated slug fresh → 200', r.status === 200);
   log('gated slug → gated:true', r.json && r.json.gated === true);
   log('gated slug → usage:0', r.json && r.json.usage === 0);
@@ -138,10 +139,10 @@ byokGate.__resetByokGateForTests();
 byokGate.__resetByokGateForTests();
 {
   for (let i = 0; i < 20; i++) {
-    await getViaMount('lead-scorer');
+    await getViaMount(gatedSlug);
   }
   const uaHash = byokGate.hashUserAgent(undefined);
-  const usage = byokGate.peekUsage('unknown', 'lead-scorer', undefined, uaHash);
+  const usage = byokGate.peekUsage('unknown', gatedSlug, undefined, uaHash);
   log('polling quota does not record runs (usage stays 0)', usage === 0);
 }
 
@@ -154,9 +155,9 @@ byokGate.__resetByokGateForTests();
 {
   const ip = 'unknown';
   const uaHash = byokGate.hashUserAgent(undefined);
-  byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
-  byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
-  const r = await getViaMount('lead-scorer');
+  byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
+  byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
+  const r = await getViaMount(gatedSlug);
   log('after 2 recorded runs → usage:2', r.json && r.json.usage === 2);
   log('after 2 recorded runs → remaining:3', r.json && r.json.remaining === 3);
 }
@@ -165,14 +166,14 @@ byokGate.__resetByokGateForTests();
 // persisted, never returned). Extraction rejects short/blank keys.
 byokGate.__resetByokGateForTests();
 {
-  const withShort = await getViaMount('lead-scorer', {
+  const withShort = await getViaMount(gatedSlug, {
     'x-user-api-key': 'AIza',
   });
   log(
     'short key → has_user_key_hint:false',
     withShort.json && withShort.json.has_user_key_hint === false,
   );
-  const withReal = await getViaMount('lead-scorer', {
+  const withReal = await getViaMount(gatedSlug, {
     'x-user-api-key': 'AIza' + 'X'.repeat(30),
   });
   log(
@@ -197,9 +198,9 @@ byokGate.__resetByokGateForTests();
   const ip = 'unknown';
   const uaHash = byokGate.hashUserAgent(undefined);
   for (let i = 0; i < 5; i++) {
-    byokGate.recordFreeRun(ip, 'lead-scorer', undefined, uaHash);
+    byokGate.recordFreeRun(ip, gatedSlug, undefined, uaHash);
   }
-  const r = await getViaMount('lead-scorer');
+  const r = await getViaMount(gatedSlug);
   log('exhausted budget → 200 (not 429)', r.status === 200);
   log('exhausted budget → remaining:0', r.json && r.json.remaining === 0);
   log('exhausted budget → usage:5', r.json && r.json.usage === 5);

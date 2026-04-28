@@ -1131,7 +1131,7 @@ const SIDEBAR_ITEM: CSSProperties = {
 
 const SIDEBAR_ITEM_ACTIVE: CSSProperties = {
   background: '#ece8de',
-  color: '#0e0e0c',
+  color: '#1b1a17',
 };
 
 const MAIN_PANE: CSSProperties = {
@@ -1165,7 +1165,7 @@ const TAB_STYLE: CSSProperties = {
 
 const TAB_ACTIVE: CSSProperties = {
   background: '#faf8f3',
-  color: '#0e0e0c',
+  color: '#1b1a17',
 };
 
 const GUTTER_WRAP: CSSProperties = {
@@ -1212,7 +1212,7 @@ const CARET_STYLE: CSSProperties = {
   display: 'inline-block',
   width: 7,
   height: 14,
-  background: '#0e0e0c',
+  background: '#1b1a17',
   verticalAlign: -2,
   animation: 'hd-blink 1s steps(2) infinite',
   marginLeft: 2,
@@ -1456,7 +1456,7 @@ const RUN_WRAP: CSSProperties = {
   // Panel backgrounds below provide the lighter product-UI surfaces inside
   // this cream frame.
   background: '#faf8f3',
-  color: '#0e0e0c',
+  color: '#1b1a17',
   fontFamily: "'Inter', system-ui, sans-serif",
   overflow: 'hidden',
 };
@@ -1572,7 +1572,7 @@ const RUN_TITLE: CSSProperties = {
   fontSize: 18,
   fontWeight: 700,
   letterSpacing: '-0.02em',
-  color: '#0e0e0c',
+  color: '#1b1a17',
   lineHeight: 1.15,
 };
 
@@ -1625,7 +1625,7 @@ const RUN_FIELD_INPUT_TEXT: CSSProperties = {
 };
 
 const RUN_BUTTON: CSSProperties = {
-  background: '#0e0e0c',
+  background: '#1b1a17',
   color: '#ffffff',
   border: 0,
   borderRadius: 8,
@@ -1705,7 +1705,7 @@ const DOT: CSSProperties = {
   width: 6,
   height: 6,
   borderRadius: '50%',
-  background: '#0e0e0c',
+  background: '#1b1a17',
   display: 'inline-block',
   animation: 'hd-dot-bounce 1.2s ease-in-out infinite',
 };
@@ -1728,7 +1728,7 @@ const SCORE_BIG: CSSProperties = {
   fontSize: 44,
   lineHeight: 1,
   fontWeight: 700,
-  color: '#0e0e0c',
+  color: '#1b1a17',
   fontVariantNumeric: 'tabular-nums',
   letterSpacing: '-0.02em',
 };

@@ -68,8 +68,8 @@ const sectionMap = [
     body: 'See every execution, who ran it, and timing.',
   },
   {
-    title: 'Secrets',
-    body: 'Store API keys once, scoped per app.',
+    title: 'App creator secrets',
+    body: 'Store app creator secrets once, scoped per app.',
   },
   {
     title: 'Analytics',
@@ -104,7 +104,7 @@ export function StudioSignedOutState() {
             color: 'var(--muted)',
           }}
         >
-          Publish apps from a repo or OpenAPI spec, manage secrets, and see
+          Publish apps from a repo or OpenAPI spec, manage app creator secrets, and see
           every run.
         </p>
 

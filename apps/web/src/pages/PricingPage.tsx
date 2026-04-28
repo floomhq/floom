@@ -75,7 +75,7 @@ const LIMITS = [
     v: 'Unlimited runs',
     s: (
       <>
-        Paste a Gemini, OpenAI, or Anthropic key in /me &rarr; Secrets.
+        Paste a Gemini, OpenAI, or Anthropic BYOK key in Workspace settings &rarr; BYOK keys.
         Encrypted, never returned. 3 concurrent runs.
       </>
     ),
@@ -112,7 +112,7 @@ interface FaqItem {
 const FAQS: FaqItem[] = [
   {
     q: 'What happens when I hit 5 runs/app/day?',
-    a: 'You see a modal asking for your Gemini API key. Paste it once and runs use your key from then on, unlimited. Your key is stored encrypted in Floom and never returned by the API.',
+    a: 'You see a modal asking for a Gemini BYOK key. Paste it once and runs use that key from then on, unlimited. The value is stored encrypted in Floom and never returned by the API.',
   },
   {
     q: 'Can I self-host Floom?',
@@ -193,15 +193,15 @@ function ownershipFaq(deployEnabled: boolean): FaqItem {
   if (deployEnabled) {
     return {
       q: 'Who owns the apps I publish?',
-      a: "You do. Apps stay under your account, exportable any time. Floom doesn't claim rights to your code or your runs.",
+      a: "You do. Apps stay under the publishing account, exportable any time. Floom doesn't claim rights to your code or run outputs.",
     };
   }
   return {
     q: 'Who owns the apps I publish?',
     a: (
       <>
-        You do. Apps stay under your account, exportable any time. Floom
-        doesn&apos;t claim rights to your code or your runs. Publishing new apps
+        You do. Apps stay under the publishing account, exportable any time. Floom
+        doesn&apos;t claim rights to your code or run outputs. Publishing new apps
         to the floom.dev cloud is waitlist-only during launch; self-host has no
         such gate.
       </>
@@ -523,7 +523,7 @@ export function PricingPage() {
                 border: `1px solid ${ACCENT}`,
               }}
             >
-              {deployEnabled ? 'Create your account' : 'Join the waitlist'}
+              {deployEnabled ? 'Create account' : 'Join the waitlist'}
             </Link>
             <Link
               to="/docs"

@@ -1,6 +1,48 @@
 {
   "_comment": "Pre-generated fixture for the /p/linkedin-roaster demo sample input. If the user submits the exact sample profile text, main.py returns this blob in under 500ms. Any other input falls through to Gemini or deterministic dry-run.",
   "generated_with": "sample-fixture",
+  "url_entries": {
+    "https://www.linkedin.com/in/federicodeponte": {
+      "roast": [
+        {
+          "observation": "The profile leads with building several AI products, but the clearest buyer promise is buried behind project names.",
+          "sting": "Strong operator signal, but the headline makes the reader do the positioning work."
+        },
+        {
+          "observation": "There is a lot of founder energy across OpenChat, OpenPaper, and Floom, yet the through-line is not immediately explicit.",
+          "sting": "The profile has proof; it just needs a sharper spine."
+        },
+        {
+          "observation": "The experience reads like a rapid shipping log, but the business outcomes need more numbers and before-after contrast.",
+          "sting": "Velocity is impressive; quantified impact is what makes it undeniable."
+        }
+      ],
+      "rewrites": [
+        {
+          "section": "headline",
+          "original_excerpt": "Founder building AI products across Floom, OpenChat, and OpenPaper.",
+          "rewritten": "Founder building AI-native workflow products that turn prototypes into production tools",
+          "why_better": "It keeps the founder signal while explaining the category and buyer value in one scan."
+        },
+        {
+          "section": "about_intro",
+          "original_excerpt": "I build and ship AI products quickly across chat, research, and deployment workflows.",
+          "rewritten": "I build AI products for operators who need working software, not demos: fast prototypes, production hosting, and agent-ready workflows.",
+          "why_better": "It names the customer, the pain, and the concrete product promise."
+        },
+        {
+          "section": "experience_bullet",
+          "original_excerpt": "Built multiple AI applications and launch systems from idea to production.",
+          "rewritten": "Built and launched multiple AI workflow products from prototype to production, covering app hosting, agent access, and repeatable launch operations.",
+          "why_better": "It turns activity into a fuller scope of ownership and shows why the work matters."
+        }
+      ],
+      "top_tip": "Make the headline say the market category and the buyer outcome before listing product names.",
+      "dry_run": false,
+      "cache_hit": false,
+      "model": "url-fixture"
+    }
+  },
   "entries": {
     "e34bc51f57f451cbb559b1cf253e02b7b782adc955d86e308ce5de04f98530f1": {
       "roast": [

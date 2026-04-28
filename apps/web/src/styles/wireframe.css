@@ -17,7 +17,9 @@
   --accent-soft: #ecfdf5;
   --accent-hover: #065f46;
   --accent-border: #d1fae5;
-  --terminal-bg: #0e0e0c;
+  /* v26 V16: warm dark neutral per Federico's locked rule — #1b1a17 not
+     pure black or near-black (#0e0e0c was too close to black). */
+  --terminal-bg: #1b1a17;
   --terminal-ink: #f1efe9;
   --success: #1a7f37;
   --warning: #c2791c;
@@ -4838,5 +4840,20 @@ input { font-family: inherit; }
   * {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* ── Workspace apps pages: responsive stat + grid breakpoints ── */
+@media (max-width: 900px) {
+  [data-testid^="workspace-apps-"] [data-testid="workspace-apps-stats"] {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+@media (max-width: 600px) {
+  [data-testid^="workspace-apps-"] [data-testid="workspace-apps-stats"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  [data-testid^="workspace-apps-"] [data-testid="workspace-apps-grid"] {
+    grid-template-columns: 1fr !important;
   }
 }

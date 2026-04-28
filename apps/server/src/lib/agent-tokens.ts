@@ -7,6 +7,7 @@ const TOKEN_PREFIX = 'floom_agent_';
 const TOKEN_RANDOM_LENGTH = 32;
 const PREFIX_RANDOM_LENGTH = 8;
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const LEGACY_TOKEN_RE = /^floom_(?!agent_)[0-9A-Za-z+/=]{32,128}$/;
 const LAST_USED_DEBOUNCE_MS = 60_000;
 
 export interface AgentTokenAuthContext {
@@ -25,11 +26,15 @@ export function getPresentedAgentToken(c: Context): string | null {
   const match = /^Bearer\s+(.+)$/.exec(header);
   if (!match) return null;
   const token = match[1].trim();
-  return token.startsWith(TOKEN_PREFIX) ? token : null;
+  return isAgentTokenString(token) || isLegacyAgentTokenString(token) ? token : null;
 }
 
 export function isAgentTokenString(value: string): boolean {
   return new RegExp(`^${TOKEN_PREFIX}[0-9A-Za-z]{${TOKEN_RANDOM_LENGTH}}$`).test(value);
+}
+
+function isLegacyAgentTokenString(value: string): boolean {
+  return LEGACY_TOKEN_RE.test(value);
 }
 
 export function isValidAgentTokenScope(value: unknown): value is AgentTokenScope {
@@ -91,7 +96,7 @@ export function agentContextToSessionContext(
 }
 
 export function lookupAgentToken(rawToken: string): AgentTokenRecord | null {
-  if (!isAgentTokenString(rawToken)) return null;
+  if (!isAgentTokenString(rawToken) && !isLegacyAgentTokenString(rawToken)) return null;
   const hash = hashAgentToken(rawToken);
   const row = db
     .prepare(
@@ -118,13 +123,53 @@ export function touchAgentTokenLastUsed(row: AgentTokenRecord, now = new Date())
   ).run(now.toISOString(), row.id, new Date(now.getTime() - LAST_USED_DEBOUNCE_MS).toISOString());
 }
 
+/**
+ * Returns true when an Authorization header is present and looks like a
+ * Floom agent token attempt (starts with `floom_agent_` or `floom_`).
+ * Used to detect mis-formatted tokens that should return 401 instead of
+ * silently routing to the admin/anon MCP server (item 7 fix).
+ */
+function looksLikeAgentTokenAttempt(c: Context): boolean {
+  const header = c.req.header('authorization') || c.req.header('Authorization');
+  if (!header) return false;
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (!match) return false;
+  // Any floom_agent_* bearer that doesn't pass the strict format check is a
+  // malformed/invalid token — return 401 rather than treating as anonymous.
+  return match[1].startsWith('floom_agent_') || match[1].startsWith('floom_');
+}
+
 export const agentTokenAuthMiddleware: MiddlewareHandler = async (c, next) => {
   const rawToken = getPresentedAgentToken(c);
-  if (!rawToken) return next();
+
+  // No Floom token presented — check if there's a mis-formatted floom_agent_*
+  // bearer (wrong length, bad chars, etc.). If so, return 401 explicitly so
+  // clients know their token is bad rather than silently routing to the admin
+  // MCP server (closes item 7 / checklist 7.5).
+  if (!rawToken) {
+    if (looksLikeAgentTokenAttempt(c)) {
+      return c.json(
+        {
+          error: 'invalid_token',
+          code: 'invalid_token',
+          hint: 'The token format is invalid. Agent tokens look like floom_agent_<32 alphanumeric chars>. Get a valid token at https://floom.dev/home',
+        },
+        401,
+      );
+    }
+    return next();
+  }
 
   const row = lookupAgentToken(rawToken);
   if (!row) {
-    return c.json({ error: 'invalid_agent_token' }, 401);
+    return c.json(
+      {
+        error: 'invalid_agent_token',
+        code: 'invalid_token',
+        hint: 'Token not found or revoked. Mint a new token at https://floom.dev/home',
+      },
+      401,
+    );
   }
 
   setAgentTokenContext(c, {

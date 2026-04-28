@@ -1,12 +1,12 @@
-// Launch-demo seeder: registers the 3 showcase demo apps (competitor-lens,
-// ai-readiness-audit, pitch-coach) in the runtime catalog at boot.
+// Launch-demo seeder: registers the showcase demo apps in the runtime catalog
+// at boot.
 //
 // Why this exists
 // ---------------
 // PRs #260/#261/#262 added the demo source under `examples/<slug>/` but did
 // not wire them into the catalog. The public hub allowlist in
 // apps/web/src/lib/hub-filter.ts (added in #263) already filters /apps and
-// landing to these three slugs, but the DB rows themselves were never
+// landing to the showcase slugs, but the DB rows themselves were never
 // inserted — so /apps rendered "0 APPS" and /p/<slug> hit 404. Issue #252.
 //
 // Design
@@ -85,7 +85,7 @@ interface LaunchDemo {
 // Launch showcase roster flipped 2026-04-25 (Federico P0 call):
 // previous 3 (lead-scorer, competitor-analyzer, resume-screener) can run
 // 30s-5min on real inputs, which times out in the demo UX. Replacement
-// roster below is bounded to <5s per run. Old 3 stay under examples/
+// roster below is bounded to demo-speed runs. Old 3 stay under examples/
 // and return to the showcase when the job queue (Phase 2 protocol)
 // ships — see project memory.
 export const DEMOS: LaunchDemo[] = [
@@ -240,6 +240,52 @@ export const DEMOS: LaunchDemo[] = [
             { name: 'rewrites', label: 'Rewrites', type: 'json' },
             { name: 'one_line_tldr', label: 'Biggest Issue', type: 'text' },
             { name: 'model', label: 'Model', type: 'text' },
+          ],
+        },
+      },
+    },
+  },
+  {
+    slug: 'linkedin-roaster',
+    name: 'LinkedIn Profile Roaster',
+    description:
+      'Paste a LinkedIn profile URL. Floom returns a cached, specific roast for the launch demo URL in under 10 seconds, with pasted profile text still supported by the app runtime.',
+    category: 'writing',
+    icon: 'flame',
+    author: 'floom',
+    contextDir: 'examples/linkedin-roaster',
+    manifest: {
+      name: 'LinkedIn Profile Roaster',
+      description:
+        'Roast a LinkedIn profile and rewrite the headline, about intro, and one experience bullet.',
+      runtime: 'python',
+      python_dependencies: ['google-genai>=1.64.0,<2'],
+      node_dependencies: {},
+      secrets_needed: ['GEMINI_API_KEY'],
+      manifest_version: '2.0',
+      actions: {
+        roast: {
+          label: 'Roast Profile',
+          description:
+            'Cached demo URL path plus one Gemini 2.5 Flash Lite call for pasted profile text.',
+          inputs: [
+            {
+              name: 'url',
+              label: 'LinkedIn URL',
+              type: 'url',
+              required: true,
+              placeholder: 'https://linkedin.com/in/federicodeponte',
+              description:
+                'LinkedIn profile URL. The launch demo URL is cached for sub-10s cold runs.',
+            },
+          ],
+          outputs: [
+            { name: 'roast', label: 'Roast', type: 'table' },
+            { name: 'rewrites', label: 'Rewrites', type: 'table' },
+            { name: 'top_tip', label: 'Top Tip', type: 'text' },
+            { name: 'model', label: 'Model', type: 'text' },
+            { name: 'dry_run', label: 'Dry Run', type: 'text' },
+            { name: 'cache_hit', label: 'Cache Hit', type: 'text' },
           ],
         },
       },

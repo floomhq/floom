@@ -337,7 +337,7 @@ function FlightCard({ flight }: { flight: Record<string, unknown> }) {
  *   user_input_error     — 4xx non-auth. App rejected inputs. Focus the
  *                          first input. No retry button (won't help).
  *   auth_error           — 401/403. Missing/invalid credentials. If the
- *                          caller owns the app, link to Secrets.
+ *                          caller owns the app, link to app creator secrets.
  *   upstream_outage      — 5xx or timeout. Show "Try again" so retrying
  *                          identical inputs is one click away.
  *   network_unreachable  — No response at all (DNS/TLS/TCP). If owner,
@@ -363,7 +363,7 @@ type ErrorClass =
   | 'repo_auth'
   | 'deprecated_model'
   // 2026-04-20 dead-end fix: upstream said 403 but the app doesn't declare
-  // any secret (old behaviour showed "Open Secrets" → empty panel).
+  // any secret (old behaviour showed "Open App creator secrets" → empty panel).
   // Also covers the missing-docker-image case for seed apps.
   | 'app_unavailable'
   | 'unknown';
@@ -388,8 +388,8 @@ interface ClassifyContext {
   upstreamHost: string | null;
   /**
    * Count of secrets the manifest declares. 0 means the app has no
-   * Secrets panel to route to, so routing a 401/403 to `auth_error`
-   * (which shows "Open Secrets") would land on "This app doesn't
+   * app creator secrets panel to route to, so routing a 401/403 to `auth_error`
+   * (which shows "Open App creator secrets") would land on "This app doesn't
    * declare any secrets. Nothing to configure here." — a direct
    * contradiction we saw on floom.dev 2026-04-20. When 0 we degrade
    * the class to `app_unavailable` so the error card shows a neutral
@@ -421,8 +421,8 @@ function ErrorCard({
       // backend" instead of leaking the literal string "null".
       upstreamHost: appDetail?.upstream_host ?? null,
       // Dead-end fix (2026-04-20): the classifier needs to know whether
-      // routing to the "auth_error + Open Secrets" message makes sense.
-      // If the manifest declares zero secrets, the Secrets panel is
+      // routing to the "auth_error + Open App creator secrets" message makes sense.
+      // If the manifest declares zero secrets, the app creator secrets panel is
       // empty and the remediation link leads nowhere — the classifier
       // downgrades the class to `app_unavailable` instead.
       declaredSecretsCount: appDetail?.manifest?.secrets_needed?.length ?? 0,
@@ -625,7 +625,7 @@ function ErrorActions({
     );
   }
 
-  // auth_error / missing_secret → link to Secrets (owner only).
+  // auth_error / missing_secret → link to app creator secrets (owner only).
   if (
     (copy.klass === 'auth_error' || copy.klass === 'missing_secret_prompt') &&
     secretsUrl
@@ -637,7 +637,7 @@ function ErrorActions({
         data-testid="run-error-action-secrets"
         style={actionLinkStyle(palette)}
       >
-        Open Secrets
+        Open BYOK keys
       </Link>,
     );
   }
@@ -862,7 +862,7 @@ export function classifyRunError(
   }
   if (type === 'auth_error') {
     // Dead-end fix (2026-04-20): if the app declares no secrets, the
-    // Secrets panel is empty and "Open Secrets" leads nowhere. Downgrade
+    // app creator secrets panel is empty and "Open App creator secrets" leads nowhere. Downgrade
     // to app_unavailable so we show an honest "temporarily broken" state.
     if (ctx.declaredSecretsCount === 0) {
       return buildAppUnavailable(appName);
@@ -906,7 +906,7 @@ export function classifyRunError(
       meta: 'missing_secret',
       severity: 'user',
       headline: 'This app needs a secret',
-      sub: `Add the missing API key under Settings → Secrets, then rerun ${appName}.`,
+      sub: `Add the missing BYOK key under Workspace settings → BYOK keys, then rerun ${appName}.`,
     };
   }
 
@@ -984,7 +984,7 @@ export function classifyRunError(
       severity: 'user',
       headline: 'Couldn’t access the app repository',
       sub:
-        'Floom couldn’t clone the repo. If it’s private, add a GITHUB_TOKEN under Settings → Secrets. Otherwise the repo URL may be wrong.',
+        'Floom couldn’t clone the repo. If it’s private, add GITHUB_TOKEN under App creator secrets. Otherwise the repo URL may be wrong.',
     };
   }
 
@@ -1069,7 +1069,7 @@ function buildAuthError(appName: string, upstream: number | null): ErrorCopy {
     meta: 'auth_error',
     severity: 'user',
     headline: 'This app needs authentication.',
-    sub: `Floom has no credentials set for ${appName}${statusNote}. If you own this app, add a secret in Studio → Secrets.`,
+    sub: `Floom has no credentials set for ${appName}${statusNote}. If you own this app, add an app creator secret in Studio → App creator secrets.`,
   };
 }
 
@@ -1116,10 +1116,10 @@ function buildNetworkUnreachable(
  *  1. Docker image referenced in seed.json isn't on the host (first-party
  *     apps that were never published).
  *  2. Upstream returned 401/403 but the app declares no secrets, so the
- *     Secrets panel would be empty — the old "Open Secrets" link led to
+ *     app creator secrets panel would be empty — the old "Open App creator secrets" link led to
  *     a dead-end "This app doesn't declare any secrets" page.
  *
- * No "Report" / "Open Secrets" buttons: the creator (not the user)
+ * No "Report" / "Open App creator secrets" buttons: the creator (not the user)
  * needs to fix it, and we don't have a creator-side inbox yet.
  */
 function buildAppUnavailable(appName: string): ErrorCopy {
