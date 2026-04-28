@@ -1230,11 +1230,14 @@ export function RunSurface({
         </>
       )}
 
+      {/* v26 R4-1: unified card wraps input + output as one container. */}
+      <div className="run-unified-card">
       <div className="run-surface-grid">
         <section
           className="run-surface-input"
           data-testid="run-surface-input"
           aria-label="Input"
+          style={{ padding: '24px 26px' }}
         >
           <InputCard
             app={appAsPickResult}
@@ -1289,6 +1292,7 @@ export function RunSurface({
           data-testid="run-surface-output"
           aria-label="Output"
           aria-live="polite"
+          style={{ padding: '24px 26px' }}
         >
           <OutputSlot
             app={app}
@@ -1321,6 +1325,7 @@ export function RunSurface({
           />
         </section>
       </div>
+      </div>{/* /run-unified-card */}
 
       <PastRunsDisclosure appSlug={app.slug} />
 

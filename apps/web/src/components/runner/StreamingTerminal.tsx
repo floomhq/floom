@@ -152,6 +152,21 @@ export function pickStepLabel(lines: string[]): string {
   return DEFAULT_STEP_LABEL;
 }
 
+/**
+ * Map the current step label to one of the 3 generic phase slots:
+ *   0 = Connecting  (Docker pull / image / setup / boot)
+ *   1 = Running     (default / handler / LLM calls)
+ *   2 = Finalizing  (format / parse / wrap / done)
+ */
+function deriveStepIndex(label: string): number {
+  const l = label.toLowerCase();
+  if (/setting up|starting your app|pulling|downloading|starting up/.test(l)) return 0;
+  if (/finaliz|format|pars|wrap/.test(l)) return 2;
+  return 1;
+}
+
+const GENERIC_STEPS = ['Connecting', 'Running', 'Finalizing'] as const;
+
 export function StreamingTerminal({ app, lines, onCancel }: Props) {
   const [startedAt] = useState(() => Date.now());
   const elapsedMs = useElapsed(startedAt);
@@ -161,6 +176,7 @@ export function StreamingTerminal({ app, lines, onCancel }: Props) {
   );
 
   const stepLabel = useMemo(() => pickStepLabel(lines), [lines]);
+  const activeStepIndex = useMemo(() => deriveStepIndex(stepLabel), [stepLabel]);
   const showSlowHint = elapsedMs > 5000;
 
   const toggleDetails = useCallback(() => {
@@ -195,7 +211,7 @@ export function StreamingTerminal({ app, lines, onCancel }: Props) {
           data-testid="stream-elapsed"
           aria-label={`Elapsed ${formatElapsed(elapsedMs)}`}
         >
-          {formatElapsed(elapsedMs)}
+          {formatElapsed(elapsedMs)} elapsed
         </div>
       </div>
 
@@ -215,16 +231,33 @@ export function StreamingTerminal({ app, lines, onCancel }: Props) {
         <div className="run-progress-bar-fill" aria-hidden="true" />
       </div>
 
-      {/* Current step label lives in its own polite live region so screen
-          readers announce the transition (Setting up runtime → Starting
-          your app → App is ready) without re-reading the whole card. */}
+      {/* v26 R4-2: 3-step list (Connecting / Running / Finalizing).
+          Active row shows the derived human-readable label from log lines.
+          Done rows show ✓; future rows show ·. Active glyph blinks. */}
       <div
-        className="run-progress-step"
-        data-testid="run-progress-step"
+        className="run-progress-steps"
+        data-testid="run-progress-steps"
         aria-live="polite"
         aria-atomic="true"
       >
-        {stepLabel}
+        {GENERIC_STEPS.map((label, i) => {
+          const done = i < activeStepIndex;
+          const active = i === activeStepIndex;
+          return (
+            <div
+              key={label}
+              className={`run-progress-step-row${done ? ' done' : active ? ' active' : ''}`}
+              data-testid={`run-progress-step-${i}`}
+            >
+              <span className="run-progress-step-glyph" aria-hidden="true">
+                {done ? '✓' : active ? '···' : '·'}
+              </span>
+              <span className="run-progress-step-label">
+                {active ? stepLabel : label}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       {showSlowHint && (
@@ -290,7 +323,7 @@ export function StreamingTerminal({ app, lines, onCancel }: Props) {
             data-testid="run-progress-cancel"
             onClick={onCancel}
           >
-            Cancel
+            Cancel run
           </button>
         )}
       </div>

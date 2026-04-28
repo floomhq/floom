@@ -554,42 +554,57 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
-/* ── RunSurface (v16): one-surface shell replacing chat-turn framing ────── */
-/* v17 wireframe alignment (2026-04-24): split-grid ratio is state-driven so
- * the page reads as "here's the form" at idle and "here's the result"
- * once a run is in-flight or complete. The two key selectors:
- *   - data-phase="ready" / "error"  → 1fr 1fr (50/50 idle split,
- *     per Federico's override on the v17 wireframe which used 3fr 1fr).
- *     Input and output-preview share the room so the user can see both
- *     the form they'll fill AND the shape of what comes back.
- *   - data-phase="streaming" / "job" / "done"  → 1fr 3fr (output owns
- *     the room) — matches wireframes.floom.dev/v17/app-page.html .split
- *     default ratio for running + complete states.
- * The base rule is the idle 50/50 so any unknown phase stays balanced
- * rather than collapsing to 2fr 3fr. Mobile + render_hint:'stacked'
- * overrides still win via later rules. */
+/* ── RunSurface (v26 R4-1): unified card — one border/shadow frame ────────
+ * The outer .run-unified-card provides the single visible border + shadow.
+ * Input col (380px fixed): background var(--bg), border-right separator.
+ * Output col (minmax(0,1fr)): background var(--card).
+ * No gap between columns. Mobile stacks with border-bottom separator.
+ * Phase-driven column changes from v17/v20 are removed — the 380px fixed
+ * input is always visible per Delta 3 / v26 spec. */
 .run-surface { display: flex; flex-direction: column; gap: 20px; }
+
+/* Outer unified card — ONE visible border/shadow frame */
+.run-unified-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(22,21,18,.04), 0 4px 16px rgba(22,21,18,.05);
+}
+
 .run-surface-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  align-items: start;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
+  min-height: 380px;
 }
-.run-surface[data-phase="streaming"] .run-surface-grid,
-.run-surface[data-phase="job"] .run-surface-grid,
-.run-surface[data-phase="done"] .run-surface-grid {
-  grid-template-columns: 1fr 3fr;
-}
-/* Stack on mobile or when the creator opts in via render_hint: 'stacked'. */
-@media (max-width: 1023px) {
-  .run-surface-grid,
-  .run-surface[data-phase="streaming"] .run-surface-grid,
-  .run-surface[data-phase="job"] .run-surface-grid,
-  .run-surface[data-phase="done"] .run-surface-grid { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .run-surface-grid { grid-template-columns: 1fr; }
 }
 .run-surface-stacked .run-surface-grid { grid-template-columns: 1fr; }
 
-.run-surface-input, .run-surface-output { min-width: 0; }
+.run-surface-input {
+  min-width: 0;
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+}
+.run-surface-output {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+}
+@media (max-width: 900px) {
+  .run-surface-input { border-right: none; border-bottom: 1px solid var(--line); }
+}
+
+/* Cards inside unified card: strip own border/radius/shadow */
+.run-unified-card .run-surface-card {
+  border: none; border-radius: 0; box-shadow: none; background: transparent;
+}
+.run-unified-card .run-surface-empty-output {
+  border: none; border-radius: 0; background: var(--card); flex: 1; min-height: 340px;
+}
 
 /* v26 About tab 2-column grid */
 @media (max-width: 900px) {
@@ -936,12 +951,52 @@ body:has(.topbar-mobile-menu) {
   .run-progress-bar-fill { animation: none; width: 100%; opacity: 0.35; }
 }
 
+/* v26 R4-2: step-list replaces single step label. Three rows:
+ * Connecting → Running → Finalizing. Active row shows derived label. */
 .run-progress-step {
   margin-top: 12px;
   font-size: 14px;
   color: var(--ink);
   font-weight: 500;
   letter-spacing: -0.005em;
+}
+.run-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.run-progress-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+}
+.run-progress-step-row.done { color: var(--ink); }
+.run-progress-step-row.active { color: var(--ink); font-weight: 600; }
+.run-progress-step-glyph {
+  width: 18px;
+  flex-shrink: 0;
+  text-align: center;
+  font-weight: 700;
+  color: var(--muted);
+}
+.run-progress-step-row.done .run-progress-step-glyph { color: var(--accent, #047857); }
+.run-progress-step-row.active .run-progress-step-glyph {
+  color: var(--accent, #047857);
+  animation: run-step-blink 1.2s steps(3, end) infinite;
+}
+@keyframes run-step-blink {
+  0%   { opacity: .4 }
+  33%  { opacity: .7 }
+  66%  { opacity: 1 }
+  100% { opacity: .4 }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-progress-step-row.active .run-progress-step-glyph { animation: none; }
 }
 .run-progress-hint {
   margin: 6px 0 0;
