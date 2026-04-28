@@ -1662,6 +1662,38 @@ body:has(.topbar-mobile-menu) {
   }
 }
 
+/* G7 (2026-04-28): flatten inner section chrome inside the unified
+   multi-section output card. Federico: "running is better, output is a
+   very nested table. I think what we have on the wireframes looked
+   better." When a RowTable / KeyValueTable / etc. lives inside the
+   composite-multi wrapper, strip its outer border + radius + bg + box-
+   shadow so it reads as ONE flat card with row dividers — not nested
+   cards inside cards. The composite-multi already provides the outer
+   border + radius + master Output header. */
+.floom-auto-composite-multi .floom-output-card,
+.floom-auto-composite-multi .app-expanded-card {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+/* Inside the composite, the per-section header reads as a small
+   uppercase eyebrow above each section's body, not a heavy bar. */
+.floom-auto-composite-multi .floom-output-section-header {
+  background: transparent !important;
+  border-bottom: none !important;
+  padding: 0 !important;
+  margin-bottom: 8px !important;
+}
+/* Tables inside the composite: drop the inner overflow scroll cap so
+   the table flows with the rest of the composite instead of becoming
+   another nested scrollable region. */
+.floom-auto-composite-multi [data-renderer="RowTable"] > div[style*="overflow"] {
+  max-height: none !important;
+}
+
 /* ── v23 PR-K: /me/runs + /me/runs/:id ────────────────────────────────────
    List + detail per the v23 wireframe (me-runs.html, me-runs-detail.html).
    Federico locks: NO category tints on row icon backgrounds (single
