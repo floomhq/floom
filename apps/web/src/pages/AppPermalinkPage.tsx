@@ -1706,6 +1706,7 @@ export function AppPermalinkPage() {
           appName={app.name}
           visibility={app.visibility}
           shareUrl={shareModalUrl || (typeof window !== 'undefined' ? window.location.href : '')}
+          isOwner={!!(app.author && sessionUserId && app.author === sessionUserId)}
         />
       )}
 
