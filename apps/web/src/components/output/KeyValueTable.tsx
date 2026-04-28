@@ -7,7 +7,7 @@
 // preview with a "Show" disclosure that expands to a pretty JSON block).
 // Plain scalars render inline.
 import { useState } from 'react';
-import { CopyButton } from './CopyButton';
+import { IconCopyButton } from './OutputActionBar';
 import { SectionHeader } from './SectionHeader';
 import { StringList } from './StringList';
 
@@ -67,7 +67,7 @@ export function KeyValueTable({ entries, label }: KeyValueTableProps) {
     >
       <SectionHeader
         label={label ?? 'Result'}
-        actions={<CopyButton value={allJson} label="Copy JSON" />}
+        actions={<IconCopyButton value={allJson} label="Copy section JSON" />}
       />
       <table
         style={{

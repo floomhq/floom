@@ -13,9 +13,13 @@
 //  - other nested objects/arrays collapse to a one-line JSON preview
 //    and expose a "Show raw" disclosure via JsonRaw elsewhere.
 import { useState } from 'react';
-import { CopyButton } from './CopyButton';
 import { SectionHeader } from './SectionHeader';
-import { FullscreenButton, TableFullscreenModal } from './OutputActionBar';
+import {
+  FullscreenButton,
+  IconCopyButton,
+  IconDownloadButton,
+  TableFullscreenModal,
+} from './OutputActionBar';
 
 export interface RowTableProps {
   rows: Array<Record<string, unknown>>;
@@ -290,23 +294,14 @@ export function RowTable({ rows, label, maxRows = 50, maxCols = 8, appSlug, runI
         bordered
         actions={
           <>
-            <button
-              type="button"
-              data-testid="row-table-download-csv"
-              className="output-copy-btn"
+            {/* R7.7 — icon buttons (clipboard / download / expand) so the
+                composite output card stays scannable. Tooltips on hover. */}
+            <IconCopyButton value={copyValue} label="Copy section JSON" />
+            <IconDownloadButton
               onClick={downloadCsv}
+              label="Download CSV"
               disabled={rows.length === 0}
-              style={{
-                cursor: rows.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: rows.length === 0 ? 0.5 : 1,
-              }}
-            >
-              Download CSV
-            </button>
-            <CopyButton value={copyValue} label="Copy JSON" />
-            {/* R7.5 (2026-04-28): per-table fullscreen affordance.
-                Visible by default — Federico called for "discoverable"
-                affordance, not a hover-only easter egg. */}
+            />
             <FullscreenButton
               onClick={() => setFullscreen(true)}
               label={`Expand ${label ?? 'table'} to fullscreen`}

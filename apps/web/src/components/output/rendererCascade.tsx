@@ -40,7 +40,7 @@ import type { ActionSpec, AppDetail, OutputSpec, RenderConfig } from '../../lib/
 export { React };
 import { CodeBlock } from './CodeBlock';
 import { CompetitorTiles, looksLikeCompetitorOutput } from './CompetitorTiles';
-import { CopyButton } from './CopyButton';
+import { CompositeOutputCard } from './CompositeOutputCard';
 import { FileDownload } from './FileDownload';
 import { HeadlineWithMeta } from './HeadlineWithMeta';
 import { ImageView } from './ImageView';
@@ -49,8 +49,6 @@ import { Markdown } from './Markdown';
 import { RowTable } from './RowTable';
 import { ScoredRowsTable } from './ScoredRowsTable';
 import { ScalarBig } from './ScalarBig';
-import { SectionHeader } from './SectionHeader';
-import { OutputActionBar } from './OutputActionBar';
 import { StringList } from './StringList';
 import { TextBig } from './TextBig';
 import { UrlLink } from './UrlLink';
@@ -148,6 +146,14 @@ interface CascadeArgs {
    * to a timestamped filename if either is missing.
    */
   runId?: string;
+  /**
+   * R7.7 (2026-04-28): app display name + duration string, lifted into
+   * the master sticky toolbar's "Done · App · 995ms" badge (replacing
+   * the inert "OUTPUT" eyebrow). Both optional — when absent the toolbar
+   * keeps its prior "OUTPUT" label.
+   */
+  appName?: string;
+  durationLabel?: string;
 }
 
 export interface CascadeResult {
@@ -251,6 +257,9 @@ interface AutoPickCtx {
    * spec first so the primary table wins over auxiliary row arrays.
    */
   rowsFieldHint?: string;
+  /** R7.7: passed to CompositeOutputCard for the "Done · App · 995ms" badge. */
+  appName?: string;
+  durationLabel?: string;
 }
 
 /**
@@ -476,44 +485,21 @@ function autoPick(
             />,
           );
         }
-        // F3 (2026-04-28): unified multi-section output. Federico:
-        // "running and output still not fixed, why is the output
-        // several tables?". Wrap the composite in ONE bordered card
-        // with ONE master header containing a single Copy JSON action
-        // operating on the full run output. Inner per-section action
-        // buttons are hidden via CSS rule (.floom-auto-composite-multi
-        // .output-copy-btn etc.) so the surface reads as one container.
+        // R7.7 (2026-04-28): unified multi-section output, with master
+        // sticky toolbar that surfaces (a) Done · App · 995ms badge,
+        // (b) Copy all JSON, (c) Download all CSVs, (d) Expand-all to
+        // fullscreen. Per-section icon buttons remain visible inside
+        // each SectionHeader for granular copy/download/expand.
         return (
-          <div
-            className="floom-auto-composite-output floom-auto-composite-multi"
-            data-renderer="composite"
-            data-multi="true"
-            style={{
-              border: '1px solid var(--line)',
-              borderRadius: 12,
-              background: 'var(--card)',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
+          <CompositeOutputCard
+            runOutput={runOutput}
+            appName={ctx?.appName}
+            durationLabel={ctx?.durationLabel}
+            appSlug={ctx?.appSlug}
+            runId={ctx?.runId}
           >
-            <OutputActionBar
-              label="Output"
-              actions={<CopyButton value={JSON.stringify(runOutput, null, 2)} label="Copy JSON" />}
-            />
-            {/* G7 (2026-04-28): tighten inner padding + gap.
-                Federico: "running is better, output is a very nested
-                table. I think what we have on the wireframes looked
-                better." Inner cards are flattened via CSS rule (see
-                .floom-auto-composite-multi .app-expanded-card in
-                globals.css). */}
-            <div
-              className="floom-auto-composite-body"
-              style={{ display: 'flex', flexDirection: 'column', gap: 22, padding: '20px 22px' }}
-            >
-              {children}
-            </div>
-          </div>
+            {children}
+          </CompositeOutputCard>
         );
       }
     }
@@ -592,35 +578,17 @@ function autoPick(
           />,
         );
       }
-      // F3 (2026-04-28): unified multi-section output (no-table path).
+      // R7.7: unified multi-section output (no-table path).
       return (
-        <div
-          className="floom-auto-composite-output floom-auto-composite-multi"
-          data-renderer="composite"
-          data-multi="true"
-          style={{
-            border: '1px solid var(--line)',
-            borderRadius: 12,
-            background: 'var(--card)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
+        <CompositeOutputCard
+          runOutput={runOutput}
+          appName={ctx?.appName}
+          durationLabel={ctx?.durationLabel}
+          appSlug={ctx?.appSlug}
+          runId={ctx?.runId}
         >
-          <SectionHeader
-            label="Output"
-            bordered
-            actions={<CopyButton value={JSON.stringify(runOutput, null, 2)} label="Copy JSON" />}
-          />
-          {/* G7 (2026-04-28): tighten inner padding + gap. Inner cards
-              flattened via CSS rule (see globals.css). */}
-          <div
-            className="floom-auto-composite-body"
-            style={{ display: 'flex', flexDirection: 'column', gap: 22, padding: '20px 22px' }}
-          >
-            {children}
-          </div>
-        </div>
+          {children}
+        </CompositeOutputCard>
       );
     }
   }
@@ -904,7 +872,14 @@ export function looksLikeRankedCandidates(runOutput: unknown): boolean {
  * element: null}` to signal the caller should render its JsonRaw
  * fallback.
  */
-export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): CascadeResult {
+export function pickRenderer({
+  app,
+  action,
+  runOutput,
+  runId,
+  appName,
+  durationLabel,
+}: CascadeArgs): CascadeResult {
   const appSlug = app.slug;
   const render = app.manifest?.render;
   if (render && typeof render.output_component === 'string') {
@@ -994,7 +969,13 @@ export function pickRenderer({ app, action, runOutput, runId }: CascadeArgs): Ca
     typeof (renderCfg as { rows_field?: unknown }).rows_field === 'string'
       ? (renderCfg as { rows_field: string }).rows_field
       : undefined;
-  const auto = autoPick(outputs, runOutput, { appSlug, runId, rowsFieldHint });
+  const auto = autoPick(outputs, runOutput, {
+    appSlug,
+    runId,
+    rowsFieldHint,
+    appName,
+    durationLabel,
+  });
   if (auto) {
     return { kind: 'auto', element: auto };
   }

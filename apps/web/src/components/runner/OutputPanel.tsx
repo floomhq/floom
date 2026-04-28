@@ -67,6 +67,8 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
   // is handled in RunSurface.tsx via CustomRendererHost. Layer 4 is the
   // legacy OutputRenderer below — we fall into it when the cascade
   // returns `{ kind: 'fallback' }`.
+  // R7.7: pass appName + durationLabel so the multi-section composite's
+  // master sticky toolbar can lift the "Done · App · 995ms" badge inline.
   const cascade =
     !isError && appDetail
       ? pickRenderer({
@@ -74,11 +76,23 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
           action: run.action,
           runOutput: run.outputs,
           runId: run.id,
+          appName: app.name,
+          durationLabel: duration,
         })
       : null;
+  // R7.7: when the multi-section composite renders, it OWNS the Done
+  // badge via OutputDoneBadge inside the sticky toolbar — so we hide
+  // the duplicate run-header above the card. Detect by inspecting the
+  // returned element's data-multi attribute (set on the composite root).
+  const compositeOwnsDoneBadge =
+    !isError &&
+    run.status === 'success' &&
+    cascade?.kind === 'auto' &&
+    cascadeIsMultiComposite(cascade.element);
 
   return (
     <div className="assistant-turn">
+      {!compositeOwnsDoneBadge && (
       <div
         className="run-header"
         style={{ display: 'flex', alignItems: 'center', gap: 10 }}
@@ -89,7 +103,10 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
             progress card into the result reads as a positive moment for
             non-devs. Kept out of the error path so "Done" never appears
             next to an error headline. Duration stays in the meta line
-            unchanged so existing dev users still see "4.2s". */}
+            unchanged so existing dev users still see "4.2s".
+            R7.7: when the multi-section composite owns its own Done
+            badge inside the sticky toolbar, this run-header is hidden
+            entirely so the success signal doesn't render twice. */}
         {!isError && run.status === 'success' && (
           <span
             data-testid="run-header-success"
@@ -150,6 +167,7 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
           </>
         )}
       </div>
+      )}
 
       {isError ? (
         <ErrorCard run={run} appDetail={appDetail} onRetry={onRetry} />
@@ -169,6 +187,31 @@ export function OutputPanel({ app, run, onIterate, onOpenDetails, onRetry, appDe
       )}
     </div>
   );
+}
+
+/**
+ * R7.7 — true if the cascade returned a multi-section composite that
+ * owns its own Done badge inside the master sticky toolbar (so the
+ * outer run-header should be suppressed). We inspect the React element's
+ * data-multi prop rather than threading a flag back through the cascade.
+ */
+function cascadeIsMultiComposite(element: unknown): boolean {
+  if (!element || typeof element !== 'object') return false;
+  // ReactElement has a stable .props shape; CompositeOutputCard renders
+  // the outermost node with data-multi="true". When the cascade returns
+  // any other component (e.g. CompetitorTiles, ScoredRowsTable), they
+  // don't carry that attribute and the legacy run-header keeps rendering.
+  // CompositeOutputCard itself sets data-multi via its outer div, but
+  // the React element here IS CompositeOutputCard — the data attribute
+  // lives on the rendered DOM, not the component. Detect by component
+  // displayName instead.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const el = element as any;
+  const t = el.type;
+  if (typeof t === 'function') {
+    return t.name === 'CompositeOutputCard' || t.displayName === 'CompositeOutputCard';
+  }
+  return false;
 }
 
 function OutputRenderer({ outputs }: { outputs: unknown }) {

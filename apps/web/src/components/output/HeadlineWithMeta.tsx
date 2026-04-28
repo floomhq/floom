@@ -5,6 +5,7 @@
 // numeric fields as muted chips. The alternative (2-col table or JSON
 // dump) buries the answer under the stats.
 import { CopyButton } from './CopyButton';
+import { IconCopyButton } from './OutputActionBar';
 import { SectionHeader } from './SectionHeader';
 
 export interface HeadlineWithMetaProps {
@@ -31,7 +32,7 @@ export function HeadlineWithMeta({ headline, headlineLabel, meta }: HeadlineWith
       {headlineLabel ? (
         <SectionHeader
           label={headlineLabel}
-          actions={<CopyButton value={headline} label="Copy" />}
+          actions={<IconCopyButton value={headline} label="Copy section" />}
         />
       ) : (
         <div style={{ position: 'absolute', top: 12, right: 12 }}>

@@ -521,26 +521,32 @@ function AmbientStatus({
   workspaceName: string | null;
   hasToken: boolean;
 }) {
-  const dot = (color: string) => (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-block',
-        width: 7,
-        height: 7,
-        borderRadius: '50%',
-        background: color,
-        flexShrink: 0,
-      }}
-    />
-  );
+  // R7.7 (2026-04-28): Federico's brief — the prior "workspace · federico
+  // de ponte's workspace" / "token · active" formatting was awkward (a
+  // colon would parse it cleanly, "·" doesn't read as label/value). We
+  // now render each cell as a labelled pill with a clear KEY: VALUE
+  // shape, plus a status dot only on the token pill (the most actionable
+  // signal). The api host is dimmed since it's reference info, not a
+  // per-user state.
   const cell: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 7,
+    gap: 8,
+    padding: '5px 12px',
+    background: '#fff',
+    border: `1px solid ${LINE}`,
+    borderRadius: 999,
     fontSize: 12,
-    color: MUTED,
+    color: INK,
     fontFamily: MONO,
+    fontWeight: 500,
+  };
+  const labelStyle: React.CSSProperties = {
+    color: MUTED,
+    fontWeight: 500,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    fontSize: 10,
   };
   return (
     <div
@@ -548,26 +554,41 @@ function AmbientStatus({
       style={{
         display: 'flex',
         flexWrap: 'wrap' as const,
-        gap: 18,
+        gap: 8,
         rowGap: 8,
-        padding: '10px 14px',
-        background: 'var(--studio, #f5f4f0)',
-        border: `1px solid ${LINE}`,
-        borderRadius: 10,
         marginBottom: 24,
       }}
     >
       <span style={cell}>
-        {dot(ACCENT)}
-        workspace · {workspaceName ?? 'loading'}
+        <span style={labelStyle}>Workspace</span>
+        <span>{workspaceName ?? 'loading'}</span>
       </span>
-      <span style={cell}>
-        {dot(hasToken ? ACCENT : '#e0a93b')}
-        token · {hasToken ? 'active' : 'not minted'}
+      <span
+        style={{
+          ...cell,
+          background: hasToken ? 'rgba(4,120,87,0.08)' : '#fdf6e3',
+          borderColor: hasToken ? 'rgba(4,120,87,0.3)' : '#e0a93b',
+          color: hasToken ? ACCENT : '#92400e',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'inline-block',
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: hasToken ? ACCENT : '#e0a93b',
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ fontWeight: 600 }}>
+          {hasToken ? 'Active token' : 'No token yet'}
+        </span>
       </span>
-      <span style={cell}>
-        {dot(ACCENT)}
-        api · {HOST_ORIGIN.replace(/^https?:\/\//, '')}
+      <span style={{ ...cell, color: MUTED }}>
+        <span style={labelStyle}>API</span>
+        <span>{HOST_ORIGIN.replace(/^https?:\/\//, '')}</span>
       </span>
     </div>
   );
@@ -614,58 +635,75 @@ export function MvpHomePage() {
     <div style={{ minHeight: '100vh', background: BG, display: 'flex', flexDirection: 'column', fontFamily: "'Inter', system-ui, sans-serif" }}>
       <TopBar />
       <main style={{ flex: 1 }}>
-      <div style={{ maxWidth: 720, margin: '0 auto', padding: '48px 24px 64px' }}>
+      {/* R7.7 (2026-04-28): Federico's brief — "having all of the
+          sections just below each other, basically having to scroll the
+          whole page left and right, with fully white space, is not nice
+          UX". The prior 720px stacked layout left huge L+R whitespace on
+          1280+ viewports. New layout:
+            - widen container to 1080px max-width
+            - hero+ambient-status span the full width on top
+            - below hero, 2-col grid at >=960px:
+                LEFT  = TokenCard + Install snippet
+                RIGHT = TestItSection
+            - <960px: collapse to single column, current order
+          The grid uses CSS class `.mvp-home-grid` with a media query in
+          globals.css so we don't have to thread a viewport hook. */}
+      <div className="mvp-home-shell" style={{ maxWidth: 1080, margin: '0 auto', padding: '48px 24px 64px' }}>
         <HomeHero name={greetingName} hasToken={hasToken || liveRawToken !== null} />
         <AmbientStatus
           workspaceName={workspace?.name ?? null}
           hasToken={hasToken || liveRawToken !== null}
         />
-        <div
-          style={{
-            // Ambient mint flash — green outer ring fades after 1.5s.
-            transition: 'box-shadow 0.6s ease-out',
-            boxShadow: mintFlash ? `0 0 0 4px rgba(4,120,87,0.18)` : '0 0 0 0 transparent',
-            borderRadius: 12,
-          }}
-        >
-          <TokenCard onTokenReady={(raw) => {
-            setLiveRawToken(raw);
-            setMintFlash(true);
-            window.setTimeout(() => setMintFlash(false), 1600);
-            // Ensure token list reflects the newly minted token
-            if (workspace) {
-              api.listWorkspaceAgentTokens(workspace.id)
-                .then(list => setTokens(list.filter(t => !t.revoked)))
-                .catch(() => {});
-            }
-          }} />
-        </div>
+        <div className="mvp-home-grid">
+          <div className="mvp-home-col-primary">
+            <div
+              style={{
+                // Ambient mint flash — green outer ring fades after 1.5s.
+                transition: 'box-shadow 0.6s ease-out',
+                boxShadow: mintFlash ? `0 0 0 4px rgba(4,120,87,0.18)` : '0 0 0 0 transparent',
+                borderRadius: 12,
+              }}
+            >
+              <TokenCard onTokenReady={(raw) => {
+                setLiveRawToken(raw);
+                setMintFlash(true);
+                window.setTimeout(() => setMintFlash(false), 1600);
+                // Ensure token list reflects the newly minted token
+                if (workspace) {
+                  api.listWorkspaceAgentTokens(workspace.id)
+                    .then(list => setTokens(list.filter(t => !t.revoked)))
+                    .catch(() => {});
+                }
+              }} />
+            </div>
 
-        <h2 style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: INK, margin: '36px 0 12px' }}>
-          Install
-        </h2>
-        {hasToken || liveRawToken ? (
-          <InstallTabs token={installToken} />
-        ) : (
-          <div
-            data-testid="install-no-token"
-            style={{
-              border: `1px solid ${LINE}`,
-              borderRadius: 12,
-              background: CARD,
-              padding: '28px 24px',
-              textAlign: 'center' as const,
-              opacity: 0.6,
-            }}
-          >
-            <p style={{ fontSize: 13, color: MUTED, margin: 0, lineHeight: 1.6 }}>
-              Mint your first token above to see the install snippet.
-            </p>
+            <h2 style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: INK, margin: '28px 0 12px' }}>
+              Install
+            </h2>
+            {hasToken || liveRawToken ? (
+              <InstallTabs token={installToken} />
+            ) : (
+              <div
+                data-testid="install-no-token"
+                style={{
+                  border: `1px solid ${LINE}`,
+                  borderRadius: 12,
+                  background: CARD,
+                  padding: '28px 24px',
+                  textAlign: 'center' as const,
+                  opacity: 0.6,
+                }}
+              >
+                <p style={{ fontSize: 13, color: MUTED, margin: 0, lineHeight: 1.6 }}>
+                  Mint your first token above to see the install snippet.
+                </p>
+              </div>
+            )}
           </div>
-        )}
 
-        <div style={{ marginTop: 24 }}>
-          <TestItSection />
+          <div className="mvp-home-col-secondary">
+            <TestItSection />
+          </div>
         </div>
       </div>
       </main>

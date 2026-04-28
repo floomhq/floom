@@ -628,17 +628,45 @@ body:has(.topbar-mobile-menu) {
   background: transparent !important;
   padding: 0 !important;
 }
+/* R7.7 (2026-04-28): Federico's brief — per-section action affordances
+ * (Copy / Download CSV / Expand) are visible inside the composite-multi
+ * card. The R7.6 rule that hid them was wrong: it left only a master
+ * "Copy JSON" with no way to download/expand individual sections. The
+ * master sticky toolbar still owns Copy-all + Download-all-CSVs +
+ * Expand-all; per-section icons live alongside row counts in each
+ * SectionHeader. */
 .floom-auto-composite-multi [data-testid="row-table-action-bar"],
-.floom-auto-composite-multi [data-testid="row-table-download-csv"],
 .floom-auto-composite-multi [data-testid="scored-rows-download-csv"],
 .floom-auto-composite-multi [data-testid="competitor-tiles-download-csv"] {
   display: none !important;
 }
-/* Per-section header keeps the label (so each table is identifiable),
- * but its right-aligned actions slot is hidden — the master Copy JSON
- * action at the top of the composite is the single export affordance. */
-.floom-auto-composite-multi .floom-output-section-header > div:last-child:not(:only-child) {
-  display: none !important;
+/* Style refinement for icon buttons inside per-section headers — make
+ * them slightly more compact so the header still reads as a label-led
+ * row. */
+.floom-auto-composite-multi .output-icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.output-icon-btn:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+/* R7.7 (2026-04-28): /home 2-col layout for >=960px viewports. Single
+ * column below. Federico's brief: "having all of the sections just
+ * below each other, basically having to scroll the whole page left and
+ * right, with fully white space, is not nice UX". */
+.mvp-home-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+@media (min-width: 960px) {
+  .mvp-home-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
 }
 
 /* v26 About tab 2-column grid */

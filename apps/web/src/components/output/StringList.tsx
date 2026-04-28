@@ -4,7 +4,7 @@
 // back to a bullet list for longer free text. Per-item copy button
 // because the whole reason you ran the app was probably to grab one
 // of these strings.
-import { CopyButton } from './CopyButton';
+import { IconCopyButton } from './OutputActionBar';
 import { SectionHeader } from './SectionHeader';
 
 export interface StringListProps {
@@ -36,7 +36,7 @@ export function StringList({ items, label, maxItems = 20 }: StringListProps) {
       <SectionHeader
         label={label ?? `${items.length} items`}
         hint={label && items.length > 1 ? `${items.length} items` : undefined}
-        actions={<CopyButton value={allText} label="Copy all" />}
+        actions={<IconCopyButton value={allText} label="Copy section" />}
       />
 
       {asChips ? (
