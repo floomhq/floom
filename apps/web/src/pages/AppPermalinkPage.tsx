@@ -895,7 +895,13 @@ export function AppPermalinkPage() {
                   rows (version-meta + capability-chips) stacked to 2-3
                   rows. Now ONE row, no-wrap, hides scrollbar; capability
                   chips merged inline so [research][v0.1.0 stable]
-                  [Runtime: python] all sit on one line. */}
+                  [Runtime: python] all sit on one line.
+                  R7 U2 (2026-04-28): switched from `nowrap + overflowX:
+                  auto` (which silently truncated the trailing
+                  GEMINI_API_KEY chip at 1280-1440px) to `wrap`. G5's
+                  one-row goal still holds for typical apps, but when an
+                  app has a long secret name + python runtime + multiple
+                  capabilities, allowing a 2nd line beats hiding content. */}
               <div
                 data-testid="hero-version-meta"
                 className="permalink-hero-version-meta"
@@ -903,10 +909,8 @@ export function AppPermalinkPage() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  flexWrap: 'nowrap',
+                  flexWrap: 'wrap',
                   marginTop: 10,
-                  overflowX: 'auto',
-                  scrollbarWidth: 'none',
                 }}
               >
                 {app.runs_7d != null && app.runs_7d > 0 && (
