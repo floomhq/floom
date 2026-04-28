@@ -6,6 +6,7 @@
 // Shell: WorkspacePageShell mode="run" (RunRail + ModeToggle per v26 §12).
 // Hero: COMPACT single-line stat strip (NOT 4-card grid — issue #913).
 // Grid: installed apps derived from /me/runs run history.
+// Filter chips: All / Recently used / Scheduled / Drafts (URL param ?filter=).
 // Recent runs: compact panel sourced from api.getMyRuns.
 // Bottom CTA: Browse the app store → /apps.
 //
@@ -14,7 +15,7 @@
 // will redirect here in a future PR.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { WorkspacePageShell } from '../components/WorkspacePageShell';
 import { useSession } from '../hooks/useSession';
 import { useMyApps } from '../hooks/useMyApps';
@@ -56,6 +57,89 @@ function deriveApps(runs: MeRunSummary[]): RunApp[] {
     });
   }
   return Array.from(seen.values());
+}
+
+// ------------------------------------------------------------------
+// Filter chips (wireframe run-apps.html lines 136–143)
+// ------------------------------------------------------------------
+
+type RunAppFilter = 'all' | 'recent' | 'scheduled' | 'drafts';
+
+const RUN_APP_FILTER_LABELS: Record<RunAppFilter, string> = {
+  all: 'All',
+  recent: 'Recently used',
+  scheduled: 'Scheduled',
+  drafts: 'Drafts',
+};
+
+function filterApps(apps: RunApp[], filter: RunAppFilter): RunApp[] {
+  if (filter === 'all') return apps;
+  if (filter === 'recent') {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return apps.filter((a) => {
+      if (!a.lastRunAt) return false;
+      const t = new Date(a.lastRunAt).getTime();
+      return Number.isFinite(t) && t >= cutoff;
+    });
+  }
+  // 'scheduled' and 'drafts' require backend fields not yet in RunApp.
+  // Graceful: show empty (per spec "show empty if data missing").
+  return [];
+}
+
+function FilterChipBar({
+  active,
+  counts,
+  onChange,
+}: {
+  active: RunAppFilter;
+  counts: Record<RunAppFilter, number>;
+  onChange: (f: RunAppFilter) => void;
+}) {
+  const filters: RunAppFilter[] = ['all', 'recent', 'scheduled', 'drafts'];
+  return (
+    <div
+      data-testid="run-apps-filter-chips"
+      style={{
+        display: 'flex',
+        gap: 8,
+        flexWrap: 'wrap',
+        marginBottom: 16,
+      }}
+    >
+      {filters.map((f) => {
+        const isActive = f === active;
+        return (
+          <button
+            key={f}
+            type="button"
+            data-testid={`run-apps-chip-${f}`}
+            onClick={() => onChange(f)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 12,
+              padding: '5px 11px',
+              borderRadius: 999,
+              background: isActive ? 'var(--accent-soft)' : 'var(--card)',
+              border: `1px solid ${isActive ? 'var(--accent-border, #a7f3d0)' : 'var(--line)'}`,
+              color: isActive ? 'var(--accent)' : 'var(--muted)',
+              fontWeight: isActive ? 600 : 500,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.12s ease',
+            }}
+          >
+            {RUN_APP_FILTER_LABELS[f]}
+            {f === 'all' && (
+              <span style={{ opacity: 0.7 }}>{counts.all}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------
@@ -415,9 +499,33 @@ export function RunAppsPage() {
   const { data: session, loading: sessionLoading, error: sessionError } = useSession();
   const { apps: myApps } = useMyApps();
   const [runs, setRuns] = useState<MeRunSummary[] | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const sessionPending =
     sessionLoading || (session === null && !sessionError);
+
+  // Read filter from URL param; default to 'all'
+  const rawFilter = searchParams.get('filter');
+  const activeFilter: RunAppFilter =
+    rawFilter === 'recent' || rawFilter === 'scheduled' || rawFilter === 'drafts'
+      ? rawFilter
+      : 'all';
+
+  function handleFilterChange(f: RunAppFilter) {
+    if (f === 'all') {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('filter');
+        return next;
+      }, { replace: true });
+    } else {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('filter', f);
+        return next;
+      }, { replace: true });
+    }
+  }
 
   useEffect(() => {
     if (sessionPending) return;
@@ -448,9 +556,24 @@ export function RunAppsPage() {
     }));
   }, [runs, myApps]);
 
+  const filteredApps = useMemo(
+    () => filterApps(apps, activeFilter),
+    [apps, activeFilter],
+  );
+
   const appCount = apps.length;
   // TODO: replace with real 7-day metric from /api/workspace/stats
   const runCount = runs?.length ?? 0;
+
+  const filterCounts: Record<RunAppFilter, number> = useMemo(
+    () => ({
+      all: apps.length,
+      recent: filterApps(apps, 'recent').length,
+      scheduled: 0,
+      drafts: 0,
+    }),
+    [apps],
+  );
 
   return (
     <WorkspacePageShell mode="run" title="Apps · Run · Floom">
@@ -509,6 +632,15 @@ export function RunAppsPage() {
           <CompactHeroStrip appCount={appCount} runCount={runCount} />
         )}
 
+        {/* Filter chip toolbar (wireframe run-apps.html lines 136–143) */}
+        {runs !== null && appCount > 0 && (
+          <FilterChipBar
+            active={activeFilter}
+            counts={filterCounts}
+            onChange={handleFilterChange}
+          />
+        )}
+
         {/* Apps grid */}
         {runs === null ? (
           <div
@@ -519,8 +651,23 @@ export function RunAppsPage() {
           </div>
         ) : apps.length === 0 ? (
           <EmptyState />
+        ) : filteredApps.length === 0 ? (
+          <>
+            <div
+              data-testid="run-apps-filter-empty"
+              style={{
+                fontSize: 13,
+                color: 'var(--muted)',
+                marginBottom: 12,
+                padding: '10px 0',
+              }}
+            >
+              No apps match this filter.
+            </div>
+            <AppsGrid apps={apps} />
+          </>
         ) : (
-          <AppsGrid apps={apps} />
+          <AppsGrid apps={filteredApps} />
         )}
 
         {/* Recent runs panel */}
