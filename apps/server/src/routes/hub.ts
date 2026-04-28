@@ -52,6 +52,7 @@ import {
   uninstallApp,
 } from '../services/app_library.js';
 import { buildAppSourceInfo } from '../lib/app-source.js';
+import { manifestToOpenApi } from '../lib/manifest-to-openapi.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -1199,6 +1200,23 @@ hubRouter.get('/:slug/source', async (c) => {
   });
 });
 
+// GET /api/hub/:slug/openapi.json — returns the OpenAPI 3.x spec for an app.
+//
+// Resolution order (R7.6 B1):
+//   1. `openapi_spec_cached` — set by /detect/ingest when the creator
+//      supplied an OpenAPI URL or inline spec. Round-tripped verbatim.
+//   2. Synthesized from `manifest.actions` — Docker-image apps and a few
+//      legacy proxied apps don't have a cached spec, but their manifests
+//      still carry the action contract Floom executes against. We
+//      reconstruct an OpenAPI 3.0 spec on the fly that mirrors what
+//      `studio_publish_app` would accept (round-trip safe). See
+//      `lib/manifest-to-openapi.ts`.
+//   3. `no_openapi_spec` 404 — only when the manifest has zero actions
+//      (corrupted or pre-action-contract apps).
+//
+// Visibility: same kill-list / access decision as the rest of /api/hub/:slug.
+// No auth required for public apps; private/link apps require the right
+// session or share key.
 hubRouter.get('/:slug/openapi.json', async (c) => {
   const slug = c.req.param('slug');
   const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
@@ -1211,14 +1229,39 @@ hubRouter.get('/:slug/openapi.json', async (c) => {
     }
     return c.json({ error: 'App not found', code: 'not_found' }, 404);
   }
-  if (!row.openapi_spec_cached) {
-    return c.json({ error: 'OpenAPI spec not available for this app', code: 'openapi_spec_not_found' }, 404);
+
+  // Step 1: cached spec wins — preserves the exact bytes the creator
+  // submitted, including any vendor extensions or non-Floom servers.
+  if (row.openapi_spec_cached) {
+    try {
+      return c.json(JSON.parse(row.openapi_spec_cached));
+    } catch {
+      // Stored spec is corrupt; fall through to manifest synthesis so
+      // the agent caller still gets a usable contract instead of a 500.
+    }
   }
-  try {
-    return c.json(JSON.parse(row.openapi_spec_cached));
-  } catch {
-    return c.json({ error: 'Stored OpenAPI spec is invalid JSON', code: 'openapi_spec_invalid' }, 500);
+
+  // Step 2: synthesize from manifest.actions. Works for Docker apps and
+  // legacy proxied apps that lost (or never cached) a spec.
+  const manifest = safeManifest(row.manifest);
+  if (manifest && manifest.actions && Object.keys(manifest.actions).length > 0) {
+    const synthesized = manifestToOpenApi(manifest, {
+      slug: row.slug,
+      serverBaseUrl: resolveBaseUrlFromRequest(c),
+    });
+    if (synthesized) return c.json(synthesized);
   }
+
+  // Step 3: nothing usable — almost always a Docker-published app whose
+  // manifest is missing or actionless. Surface the structured no-spec error
+  // the brief calls for so the agent caller can branch on `code`.
+  return c.json(
+    {
+      error: 'No OpenAPI spec available — this app was published via Docker image',
+      code: 'no_openapi_spec',
+    },
+    404,
+  );
 });
 
 // ---------------------------------------------------------------------

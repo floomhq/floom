@@ -152,10 +152,10 @@ skillRouter.get('/skill.md', async (c) => {
 
   const body = `---
 name: Floom
-description: Floom is a runtime for AI apps. Paste any /p/<slug> URL into Claude and the app becomes a tool.
+description: Floom is a runtime for AI apps. Paste any /p/<slug> URL into your agent and the app becomes a tool.
 ---
 
-Floom is a runtime for AI apps that exposes each app over web, MCP, and HTTP surfaces. Paste a public \`/p/<slug>\` URL into Claude and the app becomes callable as a tool in your workflow.
+Floom is a runtime for AI apps that exposes each app over web, MCP, and HTTP surfaces. Paste a public \`/p/<slug>\` URL into your agent (Claude, Codex, Cursor, or any MCP-aware client) and the app becomes callable as a tool in your workflow.
 
 Launch apps:
 ${appLines}
@@ -220,7 +220,7 @@ description: ${yamlQuoted(row.description)}
 ---
 
 ${appDescription}
-Use this skill when you want Claude to run ${row.name} through Floom's hosted MCP or HTTP runtime.
+Use this skill when you want your agent to run ${row.name} through Floom's hosted MCP or HTTP runtime.
 
 Action contract:
 - \`${slug}\`: \`action=${actionName}, inputs=${contract}\`
