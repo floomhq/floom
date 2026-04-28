@@ -37,10 +37,10 @@ const MePage = lazy(() => import('./pages/MePage').then(m => ({ default: m.MePag
 // were just redirects back to /me; they now render dedicated pages.
 const MeAppsPage = lazy(() => import('./pages/MeAppsPage').then(m => ({ default: m.MeAppsPage })));
 const MeRunsPage = lazy(() => import('./pages/MeRunsPage').then(m => ({ default: m.MeRunsPage })));
-const MeSecretsPage = lazy(() => import('./pages/MeSecretsPage').then(m => ({ default: m.MeSecretsPage })));
 const MeRunDetailPage = lazy(() => import('./pages/MeRunDetailPage').then(m => ({ default: m.MeRunDetailPage })));
-const MeSettingsPage = lazy(() => import('./pages/MeSettingsPage').then(m => ({ default: m.MeSettingsPage })));
-const MeSettingsTokensPage = lazy(() => import('./pages/MeSettingsTokensPage').then(m => ({ default: m.MeSettingsTokensPage })));
+// MeSecretsPage + MeSettingsPage + MeSettingsTokensPage stay on disk for v26
+// + post-MVP. On launch-mvp, all /settings/* routes Navigate to /home, so
+// these components aren't mounted from main.tsx.
 // MeAppPage + MeAppSecretsPage still live on disk for shared component
 // exports (AppHeader, TabBar) used by the Studio pages; the routes that
 // mounted them directly now redirect into /studio/*.
@@ -85,7 +85,7 @@ const StudioAppRendererPage = lazy(() => import('./pages/StudioAppRendererPage')
 const StudioAppAnalyticsPage = lazy(() => import('./pages/StudioAppAnalyticsPage').then(m => ({ default: m.StudioAppAnalyticsPage })));
 const StudioAppFeedbackPage = lazy(() => import('./pages/StudioAppFeedbackPage').then(m => ({ default: m.StudioAppFeedbackPage })));
 const StudioTriggersTab = lazy(() => import('./pages/StudioTriggersTab').then(m => ({ default: m.StudioTriggersTab })));
-const StudioSettingsPage = lazy(() => import('./pages/StudioSettingsPage').then(m => ({ default: m.StudioSettingsPage })));
+// StudioSettingsPage stays on disk for v26 + post-MVP. Not mounted on launch-mvp.
 const ImprintPage = lazy(() => import('./pages/ImprintPage').then(m => ({ default: m.ImprintPage })));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(m => ({ default: m.PrivacyPage })));
 const TermsPage = lazy(() => import('./pages/TermsPage').then(m => ({ default: m.TermsPage })));
@@ -327,13 +327,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         {/* v26: /settings is the tabbed workspace settings page (§4).
             /settings alone redirects to /settings/general (account settings).
             Deep-link tabs all exist as sub-routes. */}
-        <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
-        <Route path="/settings/general" element={<WaitlistGuard source="me"><MeSettingsPage /></WaitlistGuard>} />
-        <Route path="/settings/byok-keys" element={<WaitlistGuard source="me"><MeSecretsPage /></WaitlistGuard>} />
-        <Route path="/settings/agent-tokens" element={<WaitlistGuard source="me"><MeSettingsTokensPage /></WaitlistGuard>} />
-        <Route path="/settings/studio" element={<WaitlistGuard source="studio"><StudioSettingsPage /></WaitlistGuard>} />
-        {/* Legacy: /account/settings → /settings/general */}
-        <Route path="/account/settings" element={<Navigate to="/settings/general" replace />} />
+        {/* MVP simplification: all /settings/* routes redirect to /home (the
+            one-box agent-token page). MVP scope is "land → sign up → mint
+            token → use Floom from your AI tool". No tabbed settings page,
+            no rail. The full tabbed settings page returns post-MVP. */}
+        <Route path="/settings" element={<Navigate to="/home" replace />} />
+        <Route path="/settings/general" element={<Navigate to="/home" replace />} />
+        <Route path="/settings/byok-keys" element={<Navigate to="/home" replace />} />
+        <Route path="/settings/agent-tokens" element={<Navigate to="/home" replace />} />
+        <Route path="/settings/studio" element={<Navigate to="/home" replace />} />
+        <Route path="/account/settings" element={<Navigate to="/home" replace />} />
 
         {/* Legacy workspace UI URLs. Server returns 301 on direct loads; these
             redirects cover in-app navigation that never reaches the server. */}
