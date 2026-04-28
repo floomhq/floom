@@ -28,7 +28,7 @@ import { ArrowRight, Code2, Rocket, Share2 } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
-import { AppShowcaseCard } from '../components/public/AppShowcaseCard';
+import { AppGrid } from '../components/public/AppGrid';
 import { FeedbackButton } from '../components/FeedbackButton';
 
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
@@ -352,11 +352,16 @@ interface LandingV17PageProps {
 export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
   const isMvp = variant === 'mvp';
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
+  // R8 #25 (2026-04-28): full HubApp[] for the AppGrid card variant.
+  // AppShowcaseCard didn't render the sample-output preview chip;
+  // AppGrid does (matches floom.dev's richer card style).
+  const [showcaseHubApps, setShowcaseHubApps] = useState<HubApp[]>([]);
   // G9 (2026-04-28): inline directory grid on MVP landing. Next 6 apps
   // after the 3 curated showcase slugs, plus a "Browse all <N> apps" CTA.
   // Federico: "we should still, on the MVP Floom, have the app store
   // visible, right?"
   const [directoryApps, setDirectoryApps] = useState<Stripe[]>([]);
+  const [directoryHubApps, setDirectoryHubApps] = useState<HubApp[]>([]);
   const [totalAppsCount, setTotalAppsCount] = useState<number>(0);
   const deployEnabledFlag = useDeployEnabled();
   const deployEnabled = deployEnabledFlag ?? readDeployEnabled();
@@ -380,8 +385,17 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
         if (visible.length > 0) {
           setStripes(pickStripes(visible));
           setTotalAppsCount(visible.length);
-          // Pick the next 6 apps that aren't already in the curated showcase.
+          // R8 #25: keep full HubApp shape for AppGrid (sample-output
+          // preview chip needs thumbnail + manifest + sample data).
           const curatedSlugs = new Set<string>(PREFERRED_SLUGS as readonly string[]);
+          const showcaseFull = visible.filter((a) => curatedSlugs.has(a.slug));
+          setShowcaseHubApps(
+            // Order to match PREFERRED_SLUGS so the editorial pick stays stable.
+            PREFERRED_SLUGS.map((slug) => showcaseFull.find((a) => a.slug === slug)).filter(
+              (a): a is HubApp => Boolean(a),
+            ),
+          );
+          // Pick the next 6 apps that aren't already in the curated showcase.
           const rest = visible
             .filter((app) => !curatedSlugs.has(app.slug))
             .slice(0, 6)
@@ -392,6 +406,9 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               category: app.category ?? undefined,
             }));
           setDirectoryApps(rest);
+          setDirectoryHubApps(
+            visible.filter((app) => !curatedSlugs.has(app.slug)).slice(0, 6),
+          );
         }
       })
       .catch(() => {
@@ -796,40 +813,54 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
           >
             Real AI doing real work. All three deploy from a single GitHub repo.
           </p>
-          {/* G3 (2026-04-28): app-store-style cards. Federico: "the apps
-              on the landing page should be cards, like on the app store.
-              Right now they are just small boxes." Replaces horizontal
-              AppStripe (icon-text-arrow row) with vertical AppShowcaseCard
-              for the MVP showcase: prominent icon tile, bold name, tagline,
-              category pill + Try CTA. 3-up desktop, 2-up tablet, 1-up mobile. */}
-          <div className="mvp-showcase-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, maxWidth: 1100, margin: '0 auto' }}>
-            {isMvp
-              ? stripes.map((s) => (
-                  <AppShowcaseCard
-                    key={s.slug}
-                    slug={s.slug}
-                    name={s.name}
-                    description={s.description}
-                    category={s.category}
-                  />
-                ))
-              : stripes.map((s) => (
-                  <AppStripe
-                    key={s.slug}
-                    slug={s.slug}
-                    name={s.name}
-                    description={s.description}
-                    category={s.category}
-                    variant="landing"
-                  />
-                ))}
-          </div>
+          {/* R8 #25 (2026-04-28): switched MVP showcase to AppGrid (the
+              same component /apps + floom.dev use), so the cards render
+              the sample-output preview chip per app — matches floom.dev
+              visual style instead of the simpler icon+name+tagline cards. */}
+          {isMvp ? (
+            <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+              {showcaseHubApps.length > 0 ? (
+                <AppGrid apps={showcaseHubApps} variant="featured" />
+              ) : (
+                // Fallback while /api/hub is in-flight: render simpler
+                // stripe row from FALLBACK_STRIPES so the slot doesn't
+                // collapse on cold load.
+                <div className="mvp-showcase-grid-fallback" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+                  {stripes.map((s) => (
+                    <AppStripe
+                      key={s.slug}
+                      slug={s.slug}
+                      name={s.name}
+                      description={s.description}
+                      category={s.category}
+                      variant="landing"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mvp-showcase-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, maxWidth: 1100, margin: '0 auto' }}>
+              {stripes.map((s) => (
+                <AppStripe
+                  key={s.slug}
+                  slug={s.slug}
+                  name={s.name}
+                  description={s.description}
+                  category={s.category}
+                  variant="landing"
+                />
+              ))}
+            </div>
+          )}
           <style>{`
             @media (max-width: 880px) {
               .mvp-showcase-grid { grid-template-columns: repeat(2, 1fr) !important; }
+              .mvp-showcase-grid-fallback { grid-template-columns: repeat(2, 1fr) !important; }
             }
             @media (max-width: 640px) {
               .mvp-showcase-grid { grid-template-columns: 1fr !important; }
+              .mvp-showcase-grid-fallback { grid-template-columns: 1fr !important; }
             }
           `}</style>
         </section>
@@ -875,25 +906,30 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
                 : "Free to run on Floom's Gemini key."}
             </p>
             <div
-              className="mvp-directory-grid"
               data-testid="mvp-directory-grid"
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 16,
-                maxWidth: 1100,
+                maxWidth: 1240,
                 margin: '0 auto 28px',
               }}
             >
-              {directoryApps.map((app) => (
-                <AppShowcaseCard
-                  key={app.slug}
-                  slug={app.slug}
-                  name={app.name}
-                  description={app.description}
-                  category={app.category}
-                />
-              ))}
+              {directoryHubApps.length > 0 ? (
+                <AppGrid apps={directoryHubApps} />
+              ) : (
+                directoryApps.length > 0 && (
+                  <div className="mvp-directory-grid-fallback" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                    {directoryApps.map((app) => (
+                      <AppStripe
+                        key={app.slug}
+                        slug={app.slug}
+                        name={app.name}
+                        description={app.description}
+                        category={app.category}
+                        variant="landing"
+                      />
+                    ))}
+                  </div>
+                )
+              )}
             </div>
             <div style={{ textAlign: 'center' }}>
               <Link
