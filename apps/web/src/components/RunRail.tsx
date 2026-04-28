@@ -12,6 +12,7 @@
  */
 
 import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Box, Play, Plus } from 'lucide-react';
 import { WorkspaceIdentityBlock } from './WorkspaceIdentityBlock';
@@ -22,9 +23,31 @@ import * as api from '../api/client';
 
 const RAIL_WIDTH = 240;
 
+// TODO: wire to real metric from /api/workspace/stats when that endpoint ships.
+// For now, fetch a bounded run list and use its length as a proxy count.
+function useRunsCount(): number | null {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMyRuns(200)
+      .then((res) => {
+        if (!cancelled) setCount(res.runs.length);
+      })
+      .catch(() => {
+        if (!cancelled) setCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return count;
+}
+
 export function RunRail() {
   const location = useLocation();
   const { apps } = useMyApps();
+  const runsCount = useRunsCount();
 
   return (
     <aside data-testid="run-rail" aria-label="Run navigation" style={railStyle}>
@@ -52,6 +75,7 @@ export function RunRail() {
             location.pathname.startsWith('/run/runs/')
           }
           icon={<Play size={15} />}
+          count={runsCount ?? undefined}
         >
           Runs
         </RailItem>
