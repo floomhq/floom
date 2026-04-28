@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import cronstrue from 'cronstrue';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
+import { StudioAppTabs } from '../components/StudioAppTabs';
 import * as api from '../api/client';
 import type { AppDetail } from '../lib/types';
 import type { TriggerPublic, CreateTriggerResponse } from '../api/client';
@@ -75,11 +76,11 @@ export function StudioTriggersTab() {
   }
 
   return (
-    <StudioLayout
+    <WorkspacePageShell
+      mode="studio"
       title={app ? `${app.name} · Triggers` : 'Triggers · Studio'}
-      activeAppSlug={slug}
-      activeSubsection="triggers"
     >
+      <StudioAppTabs slug={slug ?? ''} activeTab="triggers" />
       <div data-testid="studio-triggers-tab">
         <div
           style={{
@@ -202,7 +203,7 @@ export function StudioTriggersTab() {
           />
         )}
       </div>
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 
