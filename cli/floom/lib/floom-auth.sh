@@ -163,13 +163,4 @@ esac
 AGENT_TOKEN="$1"
 API_URL="${2:-$(default_host)}"
 
-mkdir -p "$(dirname "$CONFIG")"
-CONFIG_PATH="$CONFIG" AGENT_TOKEN="$AGENT_TOKEN" API_URL="$API_URL" python3 - <<'PY'
-import json
-import os
-
-with open(os.environ["CONFIG_PATH"], "w") as f:
-    json.dump({"api_key": os.environ["AGENT_TOKEN"], "api_url": os.environ["API_URL"]}, f)
-PY
-chmod 600 "$CONFIG"
-echo "saved $CONFIG (api_url: $API_URL)"
+exec bash "$0" login "--token=$AGENT_TOKEN" "--api-url=$API_URL"

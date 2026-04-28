@@ -112,7 +112,7 @@ function createToken(scope = 'read-write') {
         last_used_at, revoked_at, rate_limit_per_minute)
      VALUES (?, ?, ?, ?, ?, 'local', 'local', ?, NULL, NULL, 1000)`,
   ).run(
-    `agtok_${scope}_${Date.now()}`,
+    `agtok_${scope}_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     agentTokens.extractAgentTokenPrefix(raw),
     agentTokens.hashAgentToken(raw),
     `test-${scope}`,
@@ -143,41 +143,81 @@ async function callMcp(port, token, body) {
 
 console.log('MCP agent read server');
 
-const token = createToken('read-write');
+const readToken = createToken('read');
+const writeToken = createToken('read-write');
+const publishToken = createToken('publish-only');
 const server = await bootServer();
 
 try {
-  const list = await callMcp(server.port, token, {
+  const readList = await callMcp(server.port, readToken, {
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/list',
     params: {},
   });
-  const tools = list.json?.result?.tools || [];
-  const names = tools.map((tool) => tool.name).sort();
-  const expected = [
+  const readTools = readList.json?.result?.tools || [];
+  const readNames = readTools.map((tool) => tool.name).sort();
+  const readExpected = [
     'discover_apps',
     'get_app_skill',
     'get_run',
     'list_my_runs',
     'run_app',
   ];
-  log('tools/list returns HTTP 200', list.res.status === 200, list.text);
-  log('tools/list returns JSON-RPC 2.0', list.json?.jsonrpc === '2.0', list.text);
-  log('agent-token /mcp exposes exactly five read/run tools', JSON.stringify(names) === JSON.stringify(expected), JSON.stringify(names));
+  log('tools/list returns HTTP 200', readList.res.status === 200, readList.text);
+  log('tools/list returns JSON-RPC 2.0', readList.json?.jsonrpc === '2.0', readList.text);
+  log('read token /mcp exposes exactly five read/run tools', JSON.stringify(readNames) === JSON.stringify(readExpected), JSON.stringify(readNames));
 
+  const writeList = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 11,
+    method: 'tools/list',
+    params: {},
+  });
+  const writeNames = (writeList.json?.result?.tools || []).map((tool) => tool.name).sort();
+  const writeExpected = [
+    'discover_apps',
+    'get_app_skill',
+    'get_run',
+    'list_my_runs',
+    'run_app',
+    'studio_detect_app',
+    'studio_ingest_hint',
+    'studio_list_my_apps',
+    'studio_publish_app',
+  ];
+  log('read-write token exposes run + studio tools', JSON.stringify(writeNames) === JSON.stringify(writeExpected), JSON.stringify(writeNames));
+
+  const publishList = await callMcp(server.port, publishToken, {
+    jsonrpc: '2.0',
+    id: 12,
+    method: 'tools/list',
+    params: {},
+  });
+  const publishNames = (publishList.json?.result?.tools || []).map((tool) => tool.name).sort();
+  const publishExpected = [
+    'studio_detect_app',
+    'studio_ingest_hint',
+    'studio_list_my_apps',
+    'studio_publish_app',
+  ];
+  log('publish-only token exposes studio tools without run tools', JSON.stringify(publishNames) === JSON.stringify(publishExpected), JSON.stringify(publishNames));
+
+  const tools = writeList.json?.result?.tools || [];
   const discover = tools.find((tool) => tool.name === 'discover_apps');
   const skill = tools.find((tool) => tool.name === 'get_app_skill');
   const run = tools.find((tool) => tool.name === 'run_app');
   const getRun = tools.find((tool) => tool.name === 'get_run');
   const listRuns = tools.find((tool) => tool.name === 'list_my_runs');
+  const publish = tools.find((tool) => tool.name === 'studio_publish_app');
   log('discover_apps schema exposes q + category + limit + cursor', Boolean(discover?.inputSchema?.properties?.q) && Boolean(discover?.inputSchema?.properties?.category) && Boolean(discover?.inputSchema?.properties?.limit) && Boolean(discover?.inputSchema?.properties?.cursor));
   log('get_app_skill requires slug', Array.isArray(skill?.inputSchema?.required) && skill.inputSchema.required.includes('slug'));
   log('run_app schema exposes slug + action + inputs', Boolean(run?.inputSchema?.properties?.slug) && Boolean(run?.inputSchema?.properties?.action) && Boolean(run?.inputSchema?.properties?.inputs));
   log('get_run requires run_id', Array.isArray(getRun?.inputSchema?.required) && getRun.inputSchema.required.includes('run_id'));
   log('list_my_runs schema exposes pagination args', Boolean(listRuns?.inputSchema?.properties?.limit) && Boolean(listRuns?.inputSchema?.properties?.cursor));
+  log('studio_publish_app schema exposes OpenAPI publish args', Boolean(publish?.inputSchema?.properties?.openapi_url) && Boolean(publish?.inputSchema?.properties?.openapi_spec) && Boolean(publish?.inputSchema?.properties?.visibility));
 
-  const call = await callMcp(server.port, token, {
+  const call = await callMcp(server.port, writeToken, {
     jsonrpc: '2.0',
     id: 2,
     method: 'tools/call',
@@ -190,6 +230,64 @@ try {
   } catch {}
   log('tools/call returns a JSON-RPC envelope', call.json?.jsonrpc === '2.0', call.text);
   log('discover_apps tool result is JSON text content', payload && Array.isArray(payload.apps), rawPayload);
+
+  const publishCall = await callMcp(server.port, publishToken, {
+    jsonrpc: '2.0',
+    id: 20,
+    method: 'tools/call',
+    params: {
+      name: 'studio_publish_app',
+      arguments: {
+        slug: 'agent-studio-publish',
+        name: 'Agent Studio Publish',
+        description: 'Published from the agent MCP studio surface',
+        visibility: 'private',
+        openapi_spec: {
+          openapi: '3.0.0',
+          info: { title: 'Agent Studio Publish', version: '1.0.0' },
+          servers: [{ url: `http://localhost:${server.port}` }],
+          paths: {
+            '/echo': {
+              post: {
+                operationId: 'echo',
+                requestBody: {
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'object',
+                        properties: { message: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+                responses: { 200: { description: 'ok' } },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  let publishPayload = null;
+  try {
+    publishPayload = JSON.parse(publishCall.json?.result?.content?.[0]?.text);
+  } catch {}
+  const publishedRow = db.prepare('SELECT * FROM apps WHERE slug = ?').get('agent-studio-publish');
+  log('publish-only token can publish via studio_publish_app', publishPayload?.ok === true && publishPayload?.slug === 'agent-studio-publish', publishCall.text);
+  log('studio_publish_app persists owner-scoped app', Boolean(publishedRow) && publishedRow.workspace_id === 'local' && publishedRow.author === 'local', JSON.stringify(publishedRow));
+  log('studio_publish_app returns request-origin URLs', publishPayload?.permalink === `http://localhost:${server.port}/p/agent-studio-publish` && publishPayload?.mcp_url === `http://localhost:${server.port}/mcp/app/agent-studio-publish`, JSON.stringify(publishPayload));
+
+  const studioList = await callMcp(server.port, publishToken, {
+    jsonrpc: '2.0',
+    id: 21,
+    method: 'tools/call',
+    params: { name: 'studio_list_my_apps', arguments: { limit: 10 } },
+  });
+  let studioListPayload = null;
+  try {
+    studioListPayload = JSON.parse(studioList.json?.result?.content?.[0]?.text);
+  } catch {}
+  log('studio_list_my_apps includes pending private app', Boolean((studioListPayload?.apps || []).find((app) => app.slug === 'agent-studio-publish' && app.visibility === 'private')), studioList.text);
 } finally {
   await stopServer(server);
   rmSync(tmp, { recursive: true, force: true });

@@ -42,12 +42,14 @@ import { filterTestFixtures } from '../lib/hub-filter.js';
 import { recordMcpToolCall } from '../lib/metrics-counters.js';
 import {
   agentToolErrorBody,
+  AgentToolError,
   discoverApps,
   getAgentRun,
   getAppSkill,
   listMyRuns,
   runApp,
 } from '../services/agent_read_tools.js';
+import { invalidateHubCache } from '../lib/hub-cache.js';
 import type {
   ActionSpec,
   AppRecord,
@@ -85,6 +87,24 @@ export function getPublicBaseUrl(c: Context): string {
   const override = process.env.FLOOM_PUBLIC_ORIGIN;
   if (typeof override === 'string' && override.length > 0) {
     return override.replace(/\/+$/, '');
+  }
+  const forwardedHost = c.req.header('x-forwarded-host');
+  const host = forwardedHost || c.req.header('host');
+  if (host) {
+    const forwardedProto = c.req.header('x-forwarded-proto');
+    let proto = forwardedProto || 'https';
+    if (!forwardedProto) {
+      try {
+        proto = new URL(c.req.url).protocol.replace(/:$/, '') || 'https';
+      } catch {
+        proto = 'https';
+      }
+    }
+    return `${proto}://${host}`.replace(/\/+$/, '');
+  }
+  const publicUrl = process.env.PUBLIC_URL;
+  if (typeof publicUrl === 'string' && publicUrl.length > 0) {
+    return publicUrl.replace(/\/+$/, '');
   }
   try {
     return new URL(c.req.url).origin;
@@ -1079,125 +1099,383 @@ function mcpError(err: unknown) {
   };
 }
 
-function createAgentReadMcpServer(c: Context, ctx: SessionContext): McpServer {
+function requireStudioScope(ctx: SessionContext): void {
+  if (!ctx.agent_token_id || !ctx.agent_token_scope) {
+    throw new AgentToolError(
+      'auth_required',
+      'Authorization: Bearer floom_agent_<token> is required.',
+      401,
+    );
+  }
+  if (ctx.agent_token_scope === 'read-write' || ctx.agent_token_scope === 'publish-only') {
+    return;
+  }
+  throw new AgentToolError(
+    'forbidden_scope',
+    'This tool requires read-write or publish-only agent-token scope.',
+    403,
+  );
+}
+
+function canUseRunTools(ctx: SessionContext): boolean {
+  return ctx.agent_token_scope === 'read' || ctx.agent_token_scope === 'read-write';
+}
+
+function canUseStudioTools(ctx: SessionContext): boolean {
+  return ctx.agent_token_scope === 'read-write' || ctx.agent_token_scope === 'publish-only';
+}
+
+function createAgentMcpServer(c: Context, ctx: SessionContext): McpServer {
   const server = new McpServer({
-    name: 'floom-agent-read',
-    version: '0.5.0',
+    name: 'floom-agent',
+    version: '0.6.0',
   });
 
-  server.registerTool(
-    'discover_apps',
-    {
-      title: 'Discover Floom apps',
-      description:
-        'List apps this agent token can discover. Returns public live apps plus apps owned by the token user.',
-      inputSchema: {
-        category: z.string().max(48).optional(),
-        q: z.string().max(120).optional(),
-        limit: z.number().int().min(1).max(200).optional(),
-        cursor: z.string().optional(),
+  if (canUseRunTools(ctx)) {
+    server.registerTool(
+      'discover_apps',
+      {
+        title: 'Discover Floom apps',
+        description:
+          'List apps this agent token can discover. Returns public live apps plus apps owned by the token user.',
+        inputSchema: {
+          category: z.string().max(48).optional(),
+          q: z.string().max(120).optional(),
+          limit: z.number().int().min(1).max(200).optional(),
+          cursor: z.string().optional(),
+        },
       },
-    },
-    async ({ category, q, limit, cursor }) => {
-      recordMcpToolCall('discover_apps');
-      try {
-        return mcpJson(discoverApps(c, ctx, { category, q, limit, cursor }));
-      } catch (err) {
-        return mcpError(err);
-      }
-    },
-  );
+      async ({ category, q, limit, cursor }) => {
+        recordMcpToolCall('discover_apps');
+        try {
+          return mcpJson(discoverApps(c, ctx, { category, q, limit, cursor }));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
 
-  server.registerTool(
-    'get_app_skill',
-    {
-      title: 'Get app skill',
-      description:
-        'Return the markdown skill text for one accessible app, wrapped in an MCP tool result.',
-      inputSchema: {
-        slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+    server.registerTool(
+      'get_app_skill',
+      {
+        title: 'Get app skill',
+        description:
+          'Return the markdown skill text for one accessible app, wrapped in an MCP tool result.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+        },
       },
-    },
-    async ({ slug }) => {
-      recordMcpToolCall('get_app_skill');
-      try {
-        return mcpJson(getAppSkill(c, ctx, slug));
-      } catch (err) {
-        return mcpError(err);
-      }
-    },
-  );
+      async ({ slug }) => {
+        recordMcpToolCall('get_app_skill');
+        try {
+          return mcpJson(getAppSkill(c, ctx, slug));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
 
-  server.registerTool(
-    'run_app',
-    {
-      title: 'Run app',
-      description:
-        'Run a Floom app through the same runner path as POST /api/run. read tokens can run public live apps; read-write tokens can also run owned private apps.',
-      inputSchema: {
-        slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
-        action: z.string().min(1).max(120).optional(),
-        inputs: z.record(z.unknown()).optional(),
+    server.registerTool(
+      'run_app',
+      {
+        title: 'Run app',
+        description:
+          'Run a Floom app through the same runner path as POST /api/run. read tokens can run public live apps; read-write tokens can also run owned private apps.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          action: z.string().min(1).max(120).optional(),
+          inputs: z.record(z.unknown()).optional(),
+        },
       },
-    },
-    async ({ slug, action, inputs }) => {
-      recordMcpToolCall('run_app');
-      try {
-        return mcpJson(
-          await runApp(c, ctx, {
-            slug,
-            action,
-            inputs: inputs as Record<string, unknown> | undefined,
-          }),
-        );
-      } catch (err) {
-        return mcpError(err);
-      }
-    },
-  );
+      async ({ slug, action, inputs }) => {
+        recordMcpToolCall('run_app');
+        try {
+          return mcpJson(
+            await runApp(c, ctx, {
+              slug,
+              action,
+              inputs: inputs as Record<string, unknown> | undefined,
+            }),
+          );
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
 
-  server.registerTool(
-    'get_run',
-    {
-      title: 'Get run',
-      description:
-        'Fetch a previous run by id when this token user owns it, or when the run has been explicitly shared from a public live app.',
-      inputSchema: {
-        run_id: z.string().min(1).max(128),
+    server.registerTool(
+      'get_run',
+      {
+        title: 'Get run',
+        description:
+          'Fetch a previous run by id when this token user owns it, or when the run has been explicitly shared from a public live app.',
+        inputSchema: {
+          run_id: z.string().min(1).max(128),
+        },
       },
-    },
-    async ({ run_id }) => {
-      recordMcpToolCall('get_run');
-      try {
-        return mcpJson(getAgentRun(ctx, run_id));
-      } catch (err) {
-        return mcpError(err);
-      }
-    },
-  );
+      async ({ run_id }) => {
+        recordMcpToolCall('get_run');
+        try {
+          return mcpJson(getAgentRun(ctx, run_id));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
 
-  server.registerTool(
-    'list_my_runs',
-    {
-      title: 'List my runs',
-      description:
-        'Paginated run history for runs performed by this token user.',
-      inputSchema: {
-        slug: z.string().min(1).max(48).optional(),
-        limit: z.number().int().min(1).max(200).optional(),
-        cursor: z.string().optional(),
-        since_ts: z.string().optional(),
+    server.registerTool(
+      'list_my_runs',
+      {
+        title: 'List my runs',
+        description:
+          'Paginated run history for runs performed by this token user.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).optional(),
+          limit: z.number().int().min(1).max(200).optional(),
+          cursor: z.string().optional(),
+          since_ts: z.string().optional(),
+        },
       },
-    },
-    async ({ slug, limit, cursor, since_ts }) => {
-      recordMcpToolCall('list_my_runs');
-      try {
-        return mcpJson(listMyRuns(ctx, { slug, limit, cursor, since_ts }));
-      } catch (err) {
-        return mcpError(err);
-      }
-    },
-  );
+      async ({ slug, limit, cursor, since_ts }) => {
+        recordMcpToolCall('list_my_runs');
+        try {
+          return mcpJson(listMyRuns(ctx, { slug, limit, cursor, since_ts }));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+  }
+
+  if (canUseStudioTools(ctx)) {
+    const ip = extractIp(c);
+    const baseUrl = getPublicBaseUrl(c);
+
+    server.registerTool(
+      'studio_publish_app',
+      {
+        title: 'Publish app',
+        description:
+          'Create or update a Floom app from an OpenAPI URL, inline OpenAPI spec, or gated Docker image reference. Returns the slug, public page, MCP URL, and review status.',
+        inputSchema: {
+          openapi_url: z.string().url().max(2048).optional(),
+          openapi_spec: z.record(z.unknown()).optional(),
+          docker_image_ref: z.string().min(1).max(512).optional(),
+          manifest: z.record(z.unknown()).optional(),
+          secret_bindings: z.record(z.string()).optional(),
+          name: z.string().min(1).max(120).optional(),
+          description: z.string().max(5000).optional(),
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/).optional(),
+          category: z.string().max(48).optional(),
+          visibility: z.enum(['public', 'private', 'link', 'auth-required']).optional(),
+          link_share_requires_auth: z.boolean().optional(),
+          auth_required: z.boolean().optional(),
+          max_run_retention_days: z.number().int().min(1).max(3650).optional(),
+        },
+      },
+      async (args) => {
+        recordMcpToolCall('studio_publish_app');
+        try {
+          requireStudioScope(ctx);
+          const limit = checkMcpIngestLimit(ctx, ip);
+          if (!limit.allowed) {
+            throw new AgentToolError(
+              'rate_limit_exceeded',
+              'studio_publish_app is limited to 10 calls per user per day. Retry after the window resets.',
+              429,
+              {
+                scope: 'mcp_ingest',
+                retry_after_seconds: limit.retryAfterSec,
+              },
+            );
+          }
+
+          const openapi_url = typeof args.openapi_url === 'string' ? args.openapi_url : undefined;
+          const openapi_spec = args.openapi_spec as Record<string, unknown> | undefined;
+          const docker_image_ref =
+            typeof args.docker_image_ref === 'string' ? args.docker_image_ref : undefined;
+          const modes = [openapi_url, openapi_spec, docker_image_ref].filter(Boolean).length;
+          if (modes === 0) {
+            throw new AgentToolError(
+              'invalid_input',
+              'Supply one of: openapi_url, openapi_spec, docker_image_ref.',
+              400,
+            );
+          }
+          if (modes > 1) {
+            throw new AgentToolError(
+              'invalid_input',
+              'Supply exactly one of: openapi_url, openapi_spec, docker_image_ref.',
+              400,
+            );
+          }
+          if (docker_image_ref && !isDockerPublishEnabled()) {
+            throw new AgentToolError(
+              'runtime_error',
+              `Docker-image ingest is disabled on this Floom instance. Set ${DOCKER_PUBLISH_FLAG}=true to enable.`,
+              403,
+              { error: 'docker_publish_disabled' },
+            );
+          }
+
+          const common = {
+            name: args.name as string | undefined,
+            description: args.description as string | undefined,
+            slug: args.slug as string | undefined,
+            category: args.category as string | undefined,
+            max_run_retention_days:
+              args.max_run_retention_days as number | undefined,
+            workspace_id: ctx.workspace_id,
+            author_user_id: ctx.user_id,
+            actor_token_id: ctx.agent_token_id,
+            actor_ip: ip,
+          };
+          let result: { slug: string; name: string; created: boolean };
+          if (docker_image_ref) {
+            result = await ingestAppFromDockerImage({
+              ...common,
+              docker_image_ref,
+              manifest: args.manifest,
+              secret_bindings: args.secret_bindings as Record<string, string> | undefined,
+              visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+              link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+              auth_required: args.auth_required as boolean | undefined,
+              ctx,
+            });
+          } else if (openapi_url) {
+            result = await ingestAppFromUrl({
+              ...common,
+              openapi_url,
+              visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+              link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+              auth_required: args.auth_required as boolean | undefined,
+              allowPrivateNetwork:
+                ctx.workspace_id === 'local' && ctx.user_id === 'local',
+            });
+          } else {
+            result = await ingestAppFromSpec({
+              ...common,
+              spec: openapi_spec as Parameters<typeof ingestAppFromSpec>[0]['spec'],
+              visibility: args.visibility as 'public' | 'private' | 'link' | 'auth-required' | undefined,
+              link_share_requires_auth: args.link_share_requires_auth as boolean | undefined,
+              auth_required: args.auth_required as boolean | undefined,
+            });
+          }
+          invalidateHubCache();
+          return mcpJson({
+            ok: true,
+            slug: result.slug,
+            name: result.name,
+            created: result.created,
+            publish_status: 'pending_review',
+            review_note:
+              'New user-published apps are visible to the owner immediately and enter manual review before public Store listing.',
+            permalink: `${baseUrl}/p/${result.slug}`,
+            mcp_url: `${baseUrl}/mcp/app/${result.slug}`,
+            owner_url: `${baseUrl}/studio/${result.slug}`,
+          });
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'studio_detect_app',
+      {
+        title: 'Detect app',
+        description:
+          'Preview the app Floom can create from an inline OpenAPI spec. Use before studio_publish_app when the agent has generated or edited a spec.',
+        inputSchema: {
+          openapi_spec: z.union([z.record(z.unknown()), z.string().min(1).max(2 * 1024 * 1024)]),
+          name: z.string().min(1).max(120).optional(),
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/).optional(),
+        },
+      },
+      async ({ openapi_spec, name, slug }) => {
+        recordMcpToolCall('studio_detect_app');
+        try {
+          requireStudioScope(ctx);
+          return mcpJson(await detectAppFromInlineSpec(openapi_spec as never, slug, name));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'studio_ingest_hint',
+      {
+        title: 'Ingest hint',
+        description:
+          'Return the filenames, minimal OpenAPI shape, recovery prompt, and upload URLs an agent needs when a repo lacks an obvious OpenAPI spec.',
+        inputSchema: {
+          input_url: z.string().min(1).max(2048),
+          attempted: z.array(z.string().max(2048)).max(40).optional(),
+        },
+      },
+      async ({ input_url, attempted }) => {
+        recordMcpToolCall('studio_ingest_hint');
+        try {
+          requireStudioScope(ctx);
+          return mcpJson(buildIngestHint({ input_url, attempted, baseUrl }));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'studio_list_my_apps',
+      {
+        title: 'List my studio apps',
+        description:
+          'List apps owned by this token workspace, including private and pending-review apps.',
+        inputSchema: {
+          limit: z.number().int().min(1).max(200).optional(),
+        },
+      },
+      async ({ limit }) => {
+        recordMcpToolCall('studio_list_my_apps');
+        try {
+          requireStudioScope(ctx);
+          const rows = db
+            .prepare(
+              `SELECT apps.*, (
+                 SELECT COUNT(*) FROM runs WHERE runs.app_id = apps.id
+               ) AS run_count,
+               (
+                 SELECT MAX(runs.started_at) FROM runs WHERE runs.app_id = apps.id
+               ) AS last_run_at
+                 FROM apps
+                WHERE apps.workspace_id = ?
+                ORDER BY apps.updated_at DESC
+                LIMIT ?`,
+            )
+            .all(ctx.workspace_id, Math.max(1, Math.min(200, Number(limit || 50)))) as Array<
+            AppRecord & { run_count: number; last_run_at: string | null }
+          >;
+          return mcpJson({
+            apps: rows.map((row) => ({
+              slug: row.slug,
+              name: row.name,
+              description: row.description,
+              status: row.status,
+              visibility: row.visibility,
+              publish_status: row.publish_status,
+              run_count: row.run_count || 0,
+              last_run_at: row.last_run_at,
+              permalink: `${baseUrl}/p/${row.slug}`,
+              mcp_url: `${baseUrl}/mcp/app/${row.slug}`,
+              owner_url: `${baseUrl}/studio/${row.slug}`,
+            })),
+          });
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+  }
 
   return server;
 }
@@ -1216,7 +1494,7 @@ async function handleMcp(server: McpServer, rawRequest: Request): Promise<Respon
 mcpRouter.all('/', async (c: Context) => {
   const ctx = await resolveUserContext(c);
   if (ctx.agent_token_id) {
-    return handleMcp(createAgentReadMcpServer(c, ctx), c.req.raw);
+    return handleMcp(createAgentMcpServer(c, ctx), c.req.raw);
   }
   const ip = extractIp(c);
   const baseUrl = getPublicBaseUrl(c);
