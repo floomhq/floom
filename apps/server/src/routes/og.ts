@@ -1,10 +1,11 @@
 // GET /og/:slug.svg — dynamic social preview image for /p/:slug.
 //
 // Produces a 1200x630 SVG with:
-//   - Floom wordmark + subtle green accent
-//   - App name (large)
-//   - App description (1 line, truncated)
-//   - Author handle if present ("by @federicodeponte")
+//   - Floom wordmark top-left
+//   - App name (large, bold)
+//   - App description (up to 2 lines)
+//   - Sample output card — curated per slug, or generic bullets
+//   - "run it on floom.dev/p/<slug>" footer
 //
 // Also exposes /og/main.svg — the Floom landing OG image.
 //
@@ -34,51 +35,159 @@ function escapeXml(s: string): string {
 function truncate(s: string, max: number): string {
   const t = s.trim();
   if (t.length <= max) return t;
-  return t.slice(0, Math.max(0, max - 1)).trimEnd() + '\u2026';
+  return t.slice(0, Math.max(0, max - 1)).trimEnd() + '…';
 }
+
+// Curated sample outputs per well-known app slug. Each entry has a
+// "score" label and up to 3 bullet lines that simulate real output,
+// giving previewers something concrete to intrigue the viewer.
+//
+// Falls back to generic bullets if slug not found.
+const CURATED_SAMPLES: Record<string, { score: string; bullets: string[] }> = {
+  'ai-readiness-audit': {
+    score: 'Score: 8/10',
+    bullets: [
+      'Clear positioning and concrete use-case',
+      'Missing customer proof points',
+      'Add one quantified case study to unlock 9/10',
+    ],
+  },
+  'lead-scorer': {
+    score: '3 leads ranked',
+    bullets: [
+      'Acme Corp — 92/100 (budget confirmed, timeline Q3)',
+      'BetaCo — 67/100 (interest high, decision slow)',
+      'GammaTech — 41/100 (no budget signal)',
+    ],
+  },
+  'resume-screener': {
+    score: '5 resumes screened',
+    bullets: [
+      'Alice M. — Strong match (Python, 4y exp, ML background)',
+      'Bob K. — Partial match (React focus, no backend)',
+      'Carol D. — Weak match (entry-level, no relevant projects)',
+    ],
+  },
+  'competitor-analyzer': {
+    score: '3 gaps found',
+    bullets: [
+      'Pricing: competitor A is 30% cheaper on starter tier',
+      'Feature gap: no mobile app (both rivals have one)',
+      'Opportunity: only you offer an API — highlight it',
+    ],
+  },
+};
 
 interface OgCopy {
   title: string;
   description: string;
   author: string | null;
+  slug: string;
+}
+
+// Wrap description text into lines of at most maxChars per line.
+function wrapText(text: string, maxChars: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current.length === 0) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxChars) {
+      current += ' ' + word;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines.slice(0, 2); // at most 2 description lines
 }
 
 function renderSvg(copy: OgCopy): string {
-  const title = escapeXml(truncate(copy.title, 48));
-  const description = escapeXml(truncate(copy.description || '', 110));
+  const title = escapeXml(truncate(copy.title, 44));
+  const rawDesc = truncate(copy.description || 'Run this AI app on Floom.', 160);
+  const descLines = wrapText(rawDesc, 68);
   const author = copy.author ? escapeXml(`by @${copy.author.replace(/^@/, '')}`) : '';
 
   // Color palette matches current Floom brand: deep ink on near-white,
-  // emerald accent pennant. Typography uses system stack so the SVG
-  // renders consistently across previewers that strip <font-face>.
-  const ink = '#0B0F0E';
-  const muted = '#5F6A6E';
+  // emerald accent. Typography uses system stack so the SVG renders
+  // consistently across previewers that strip <font-face>.
+  const ink = '#0e0e0c';
+  const muted = '#585550';
   const accent = '#047857';
   const bg = '#FAFAF7';
-  const line = '#E2E2DD';
+  const line = '#e8e6e0';
+  const cardBg = '#F0EFE9';
+
+  // Curated sample output, or a generic "Try it" card.
+  const sample = CURATED_SAMPLES[copy.slug];
+  const scoreLabel = sample ? escapeXml(sample.score) : escapeXml('Try it on Floom');
+  const bulletLines = sample
+    ? sample.bullets.slice(0, 3).map((b) => escapeXml(truncate(b, 60)))
+    : [
+        escapeXml(truncate(copy.description || 'Run AI tasks in seconds.', 60)),
+        escapeXml('Powered by Floom — the AI app runtime.'),
+        escapeXml('Free to run. No account required.'),
+      ];
+
+  // Vertical layout
+  const descY1 = 310;
+  const descY2 = descY1 + 38;
+  const cardTop = descLines.length > 1 ? 376 : 338;
+  const cardPad = 22;
+  const cardWidth = WIDTH - 160;
+  const cardHeight = bulletLines.length * 34 + cardPad * 2 + 26;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
   <defs>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="${accent}" stop-opacity="1"/>
-      <stop offset="100%" stop-color="${accent}" stop-opacity="0.55"/>
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${accent}"/>
+      <stop offset="100%" stop-color="#059669"/>
     </linearGradient>
   </defs>
+
+  <!-- Background -->
   <rect width="${WIDTH}" height="${HEIGHT}" fill="${bg}"/>
-  <g stroke="${line}" stroke-width="1" opacity="0.65">
-    <line x1="0" y1="180" x2="${WIDTH}" y2="180"/>
-    <line x1="0" y1="${HEIGHT - 120}" x2="${WIDTH}" y2="${HEIGHT - 120}"/>
+
+  <!-- Top accent bar -->
+  <rect x="0" y="0" width="${WIDTH}" height="5" fill="url(#accentGrad)"/>
+
+  <!-- Floom wordmark — two stacked bars + name -->
+  <g transform="translate(80, 48)">
+    <rect x="0" y="0" width="9" height="28" rx="2.5" fill="${accent}"/>
+    <rect x="14" y="0" width="9" height="20" rx="2.5" fill="${accent}" opacity="0.5"/>
+    <text x="36" y="22" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="22" fill="${ink}" letter-spacing="-0.5">floom</text>
   </g>
-  <g transform="translate(80,78)">
-    <path d="M0 0 L44 0 L44 46 L22 34 L0 46 Z" fill="url(#accent)"/>
-    <text x="64" y="32" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="30" fill="${ink}">Floom</text>
-  </g>
-  <text x="80" y="322" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="84" letter-spacing="-2.5" fill="${ink}">${title}</text>
-  <text x="80" y="400" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="28" fill="${muted}">${description}</text>
-  <g transform="translate(80, ${HEIGHT - 60})">
-    <text x="0" y="0" font-family="'JetBrains Mono', 'Menlo', monospace" font-size="20" fill="${ink}">${author}</text>
-    <text x="${WIDTH - 160}" y="0" font-family="'JetBrains Mono', 'Menlo', monospace" font-size="18" fill="${muted}" text-anchor="end">floom.dev</text>
+
+  <!-- Subtle divider below wordmark -->
+  <line x1="80" y1="94" x2="${WIDTH - 80}" y2="94" stroke="${line}" stroke-width="1"/>
+
+  <!-- App title -->
+  <text x="80" y="228" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="76" letter-spacing="-2" fill="${ink}">${title}</text>
+
+  <!-- Description lines -->
+  <text x="80" y="${descY1}" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="27" fill="${muted}">${escapeXml(descLines[0] ?? '')}</text>
+  ${descLines[1] ? `<text x="80" y="${descY2}" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="27" fill="${muted}">${escapeXml(descLines[1])}</text>` : ''}
+
+  <!-- Sample output card -->
+  <rect x="80" y="${cardTop}" width="${cardWidth}" height="${cardHeight}" rx="10" fill="${cardBg}" stroke="${line}" stroke-width="1.5"/>
+
+  <!-- Score / label in accent -->
+  <text x="${80 + cardPad}" y="${cardTop + cardPad + 14}" font-family="'JetBrains Mono', Menlo, monospace" font-size="16" font-weight="700" fill="${accent}">${scoreLabel}</text>
+
+  <!-- Divider inside card -->
+  <line x1="${80 + cardPad}" y1="${cardTop + cardPad + 24}" x2="${80 + cardWidth - cardPad}" y2="${cardTop + cardPad + 24}" stroke="${line}" stroke-width="1"/>
+
+  <!-- Bullet lines -->
+  ${bulletLines.map((b, i) => `<text x="${80 + cardPad}" y="${cardTop + cardPad + 52 + i * 34}" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="19" fill="${ink}">• ${b}</text>`).join('\n  ')}
+
+  <!-- Footer -->
+  <line x1="80" y1="${HEIGHT - 56}" x2="${WIDTH - 80}" y2="${HEIGHT - 56}" stroke="${line}" stroke-width="1"/>
+  <g transform="translate(80, ${HEIGHT - 32})">
+    ${author ? `<text x="0" y="0" font-family="'JetBrains Mono', Menlo, monospace" font-size="16" fill="${muted}">${author}</text>` : ''}
+    <text x="${WIDTH - 160}" y="0" font-family="'JetBrains Mono', Menlo, monospace" font-size="16" fill="${accent}" font-weight="600" text-anchor="end">run it on floom.dev/p/${escapeXml(copy.slug)}</text>
   </g>
 </svg>`;
 }
@@ -168,6 +277,7 @@ ogRouter.get('/:slugPng{[a-z0-9][a-z0-9-]*\\.svg}', (c) => {
       title: 'Floom',
       description: 'Ship AI apps fast.',
       author: null,
+      slug,
     };
   } else {
     const authorRaw = row.author_name && String(row.author_name).trim()
@@ -179,6 +289,7 @@ ogRouter.get('/:slugPng{[a-z0-9][a-z0-9-]*\\.svg}', (c) => {
       title: row.name || row.slug,
       description: row.description || '',
       author: authorRaw,
+      slug,
     };
   }
 
