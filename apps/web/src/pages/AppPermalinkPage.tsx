@@ -523,7 +523,11 @@ export function AppPermalinkPage() {
   // Fix 1 (2026-04-19): surface app release version to disambiguate from
   // the uuid-action "Version" selector (now "UUID format") and give users
   // a publish-date / stability signal.
-  const heroHandle = useMemo(() => {
+  // F2 (2026-04-28): by-handle pill removed from hero default view
+  // (already exposed in the About tab). Memo retained for parity if
+  // we re-introduce the pill later. Underscore prefix = intentional
+  // unused per TS6133.
+  const _heroHandle = useMemo(() => {
     if (!app) return null;
     const raw =
       (app.creator_handle && app.creator_handle.trim()) ||
@@ -533,6 +537,7 @@ export function AppPermalinkPage() {
     if (!raw) return null;
     return raw.length > 22 ? `${raw.slice(0, 20)}…` : raw;
   }, [app]);
+  void _heroHandle;
 
   /** Truthy manifest / hub fields as compact chips (Issue #284). */
   const capabilityChips = useMemo(() => {
@@ -757,7 +762,7 @@ export function AppPermalinkPage() {
 
       <main
         id="main"
-        style={{ padding: '24px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
+        style={{ padding: '14px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
         data-testid="permalink-page"
       >
         {/* v17 breadcrumb: quiet Apps / app-name. Lives OUTSIDE the
@@ -773,8 +778,8 @@ export function AppPermalinkPage() {
             justifyContent: 'space-between',
             gap: 12,
             flexWrap: 'wrap',
-            marginBottom: 14,
-            fontSize: 13,
+            marginBottom: 4,
+            fontSize: 12.5,
             color: 'var(--muted)',
           }}
         >
@@ -782,7 +787,7 @@ export function AppPermalinkPage() {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
+              gap: 6,
               flexWrap: 'wrap',
             }}
           >
@@ -811,27 +816,28 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-          {/* v26 compact app-header: 64px flat tile + 28px title + 14px
-              muted description + right-aligned CTA cluster (version
-              meta, Schedule, Share). Replaces the prior 2026-04-21
-              radial-gradient hero. Test-ids preserved so analytics +
-              smoke stay green. */}
+          {/* F2 (2026-04-28): /p/:slug top chrome cleanup — tighten
+              vertical padding (28→16 top, 24→16 bot), tighten icon tile
+              (64→52), drop the secondary by-handle pill from default
+              view, keep hero compact so the unified Run card sits closer
+              to the fold. Federico: "too much going on at top, the
+              white container übergang is not clean". */}
           <section
             data-testid="permalink-hero"
             className="permalink-hero-row"
             style={{
               display: 'flex',
               alignItems: 'flex-start',
-              gap: 18,
-              padding: '28px 24px 24px',
+              gap: 14,
+              padding: '12px 4px 18px',
               flexWrap: 'wrap',
             }}
           >
             <div
               style={{
-                width: 64,
-                height: 64,
-                borderRadius: 16,
+                width: 52,
+                height: 52,
+                borderRadius: 14,
                 background: 'var(--bg)',
                 border: '1px solid var(--line)',
                 display: 'flex',
@@ -841,16 +847,16 @@ export function AppPermalinkPage() {
                 flexShrink: 0,
               }}
             >
-              <AppIcon slug={app.slug} size={30} />
+              <AppIcon slug={app.slug} size={26} />
             </div>
             <div className="permalink-hero-title" style={{ flex: 1, minWidth: 0 }}>
               <h1
                 style={{
-                  fontSize: 28,
+                  fontSize: 24,
                   fontWeight: 700,
                   color: 'var(--ink)',
                   margin: 0,
-                  lineHeight: 1.15,
+                  lineHeight: 1.18,
                   letterSpacing: '-0.02em',
                 }}
               >
@@ -861,10 +867,10 @@ export function AppPermalinkPage() {
                   data-testid="hero-description"
                   title={headerDescription}
                   style={{
-                    fontSize: 14.5,
+                    fontSize: 13.5,
                     color: 'var(--muted)',
-                    margin: '6px 0 0',
-                    lineHeight: 1.5,
+                    margin: '4px 0 0',
+                    lineHeight: 1.45,
                     maxWidth: 640,
                   }}
                 >
@@ -902,11 +908,9 @@ export function AppPermalinkPage() {
                 <span data-testid="hero-version" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>
                   v{app.version ?? '0.1.0'} · {app.version_status ?? 'stable'}
                 </span>
-                {heroHandle && (
-                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)' }}>
-                    by @{heroHandle}
-                  </span>
-                )}
+                {/* F2 (2026-04-28): by-handle pill dropped from default
+                    hero — already redundant with the credit in the
+                    About tab. Keeps hero meta-row compact. */}
               </div>
               {capabilityChips.length > 0 && (
                 <div

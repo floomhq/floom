@@ -40,6 +40,7 @@ import type { ActionSpec, AppDetail, OutputSpec, RenderConfig } from '../../lib/
 export { React };
 import { CodeBlock } from './CodeBlock';
 import { CompetitorTiles, looksLikeCompetitorOutput } from './CompetitorTiles';
+import { CopyButton } from './CopyButton';
 import { FileDownload } from './FileDownload';
 import { HeadlineWithMeta } from './HeadlineWithMeta';
 import { ImageView } from './ImageView';
@@ -48,6 +49,7 @@ import { Markdown } from './Markdown';
 import { RowTable } from './RowTable';
 import { ScoredRowsTable } from './ScoredRowsTable';
 import { ScalarBig } from './ScalarBig';
+import { SectionHeader } from './SectionHeader';
 import { StringList } from './StringList';
 import { TextBig } from './TextBig';
 import { UrlLink } from './UrlLink';
@@ -473,14 +475,35 @@ function autoPick(
             />,
           );
         }
+        // F3 (2026-04-28): unified multi-section output. Federico:
+        // "running and output still not fixed, why is the output
+        // several tables?". Wrap the composite in ONE bordered card
+        // with ONE master header containing a single Copy JSON action
+        // operating on the full run output. Inner per-section action
+        // buttons are hidden via CSS rule (.floom-auto-composite-multi
+        // .output-copy-btn etc.) so the surface reads as one container.
         return (
           <div
             className="floom-auto-composite-output floom-auto-composite-multi"
             data-renderer="composite"
             data-multi="true"
-            style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+            style={{
+              border: '1px solid var(--line)',
+              borderRadius: 12,
+              background: 'var(--card)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
           >
-            {children}
+            <SectionHeader
+              label="Output"
+              bordered
+              actions={<CopyButton value={JSON.stringify(runOutput, null, 2)} label="Copy JSON" />}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16 }}>
+              {children}
+            </div>
           </div>
         );
       }
@@ -560,14 +583,29 @@ function autoPick(
           />,
         );
       }
+      // F3 (2026-04-28): unified multi-section output (no-table path).
       return (
         <div
           className="floom-auto-composite-output floom-auto-composite-multi"
           data-renderer="composite"
           data-multi="true"
-          style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+          style={{
+            border: '1px solid var(--line)',
+            borderRadius: 12,
+            background: 'var(--card)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
         >
-          {children}
+          <SectionHeader
+            label="Output"
+            bordered
+            actions={<CopyButton value={JSON.stringify(runOutput, null, 2)} label="Copy JSON" />}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16 }}>
+            {children}
+          </div>
         </div>
       );
     }

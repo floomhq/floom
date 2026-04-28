@@ -583,7 +583,12 @@ export function RunSurface({
   // React's render loop. Both reset to null on reaching `done`/`ready`/
   // `error` so a shared-run permalink (phase=done) sees nothing.
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
-  const [elapsedMs, setElapsedMs] = useState<number>(0);
+  // F4 (2026-04-28): elapsedMs state retained — the setter is still
+  // called by the interval below to keep the timer hot for any future
+  // re-introduction of an inline timer chip, but no UI currently reads
+  // it. Underscore prefix marks intentional-unused for TS6133.
+  const [_elapsedMs, setElapsedMs] = useState<number>(0);
+  void _elapsedMs;
   // `isRunning` gates the banner + per-row feed. For async apps, the
   // `phase === 'job'` transition fires as soon as /api/:slug/jobs
   // returns (status=queued) — the worker hasn't started yet and
@@ -678,7 +683,12 @@ export function RunSurface({
       cancelled = true;
     };
   }, [isRunning]);
-  const estimatedRowCount = runRowCount;
+  // F4 (2026-04-28): estimatedRowCount no longer read by UI (the outer
+  // run-feed-row that displayed it has been removed). Keep the state
+  // pipeline (runRowCount) intact in case we re-introduce a row-count
+  // affordance in the inner progress card.
+  const _estimatedRowCount = runRowCount;
+  void _estimatedRowCount;
   // N (current row) is deliberately NOT computed client-side for this
   // launch: neither SSE log lines nor wall-clock ticks are reliable
   // signals. We'd rather show a row-less "Processing M rows..." label
@@ -1183,52 +1193,17 @@ export function RunSurface({
         </div>
       )}
 
-      {/* #626 v17 run banner + per-row stream feed — visible ONLY during
-          streaming / job phases, never on the shared-run `done` path
-          (PublicRunPermalinkPage always hydrates with phase=done). Guarded
-          by the explicit phase check so no banner/feed ever renders for
-          /r/:id permalinks. Styles live in globals.css (.run-banner,
-          .run-feed, .run-feed-row) and mirror the wireframe's
-          .run-banner + .stream-row blocks. */}
-      {isRunning && (
-        <>
-          {/* Plain non-live region: assistive tech already gets phase
-              changes from run-surface-output (aria-live="polite") and
-              the InputCard's `running` prop. Re-announcing the timer
-              every 1s would spam screen readers (codex [P3]
-              2026-04-24). */}
-          <div className="run-banner" data-testid="run-banner">
-            <span className="run-banner-dot" aria-hidden="true" />
-            <span className="run-banner-label">
-              Running: <strong>{state.actionSpec.label || state.action || 'run'}</strong>
-              ...
-            </span>
-            <span className="run-banner-meta mono">
-              {formatElapsed(elapsedMs)}
-            </span>
-          </div>
-          <div className="run-feed" data-testid="run-feed">
-            <div className="run-feed-row" data-testid="run-feed-row">
-              <span className="run-feed-idx mono" aria-hidden="true">
-                {estimatedRowCount != null
-                  ? `~${estimatedRowCount}`
-                  : '—'}
-              </span>
-              <span className="run-feed-glyph" aria-hidden="true">
-                <span className="run-feed-glyph-pulse" />
-              </span>
-              <span className="run-feed-name">
-                {estimatedRowCount != null
-                  ? `Processing ~${estimatedRowCount} ${estimatedRowCount === 1 ? 'row' : 'rows'}...`
-                  : 'Processing...'}
-              </span>
-              <span className="run-feed-elapsed mono">
-                {formatElapsed(elapsedMs)}
-              </span>
-            </div>
-          </div>
-        </>
-      )}
+      {/* F4 (2026-04-28): outer "Running: ... 0:00" pill + per-row
+          stream feed REMOVED (Federico: "the running state looks broken
+          with two competing state trackers"). The inner v26 progress
+          card in StreamingTerminal (.run-progress with the 3-step
+          Connecting/Running/Finalizing list and elapsed timer) is the
+          single source of truth for run state. The outer .run-banner +
+          .run-feed used to render in the page header above the unified
+          card and competed visually with the inner card.
+          Original styles in globals.css (.run-banner, .run-feed,
+          .run-feed-row) are now unused but kept in case we need a
+          variant later. */}
 
       {/* v26 R4-1: unified card wraps input + output as one container. */}
       <div className="run-unified-card">

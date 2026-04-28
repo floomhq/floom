@@ -293,11 +293,13 @@ const subStyle: React.CSSProperties = {
   margin: '14px auto 0',
 };
 
+// F7 (2026-04-28): light tinted bg on copy boxes (was dark).
 const heroCommandStyle: React.CSSProperties = {
   maxWidth: 560,
   margin: '24px auto 0',
-  background: '#1b1a17',
-  color: '#e7e3d7',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
+  border: '1px solid var(--line)',
   fontFamily: 'JetBrains Mono, monospace',
   fontSize: 13,
   padding: '14px 18px',
@@ -309,7 +311,7 @@ const heroCommandStyle: React.CSSProperties = {
   textAlign: 'left',
 };
 
-const codeMuteStyle: React.CSSProperties = { color: '#9ca3af' };
+const codeMuteStyle: React.CSSProperties = { color: 'var(--muted)' };
 
 const copyButtonStyle: React.CSSProperties = {
   background: 'var(--accent)',
@@ -429,9 +431,11 @@ const numStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
+// F7 (2026-04-28): light tinted bg on code blocks.
 const codeStyle: React.CSSProperties = {
-  background: '#1b1a17',
-  color: '#e7e3d7',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
+  border: '1px solid var(--line)',
   borderRadius: 8,
   padding: 14,
   fontFamily: 'JetBrains Mono, monospace',

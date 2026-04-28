@@ -264,7 +264,10 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
       <div
         className="topbar-inner"
         style={{
-          maxWidth: 1180,
+          /* F9 (2026-04-28): consistent topbar width. The CSS class
+             sets max-width:1200 + padding:0 32px; we leave padding to
+             CSS (was nullified inline only when compact) so the logo
+             + avatar pin to the same x across every page. */
           gap: compact ? 10 : 16,
           padding: compact ? '0 20px' : undefined,
         }}

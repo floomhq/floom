@@ -119,15 +119,19 @@ export function PublicFooter() {
         borderTop: '1px solid var(--line)',
       }}
     >
-      {/* 3-column link grid — centred block, left-aligned columns. */}
+      {/* F5 (2026-04-28): widen content area so footer doesn't cram
+          everything to centre with whitespace L+R. Match marketing
+          page width (1180px) to use horizontal real estate. Columns
+          spread out left-to-right with comfortable spacing. */}
       <div
         data-testid="footer-columns"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, minmax(120px, 1fr))',
-          gap: 20,
-          maxWidth: 560,
+          gridTemplateColumns: 'repeat(3, minmax(140px, 1fr))',
+          gap: 32,
+          maxWidth: 1180,
           margin: '0 auto 28px',
+          padding: '0 32px',
           textAlign: 'left',
         }}
         className="public-footer-columns"
