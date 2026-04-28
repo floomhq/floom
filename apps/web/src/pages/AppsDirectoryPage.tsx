@@ -320,6 +320,34 @@ export function AppsDirectoryPage() {
         description="Browse AI apps on Floom. Each one runs as an MCP tool, a shareable page, a command-line, and a clean HTTP endpoint."
       />
       <TopBar />
+      {/* R7 U4 (2026-04-28): mobile toolbar — drop sticky on phones (5
+          rows of category chips were sticking and eating ~40% of viewport
+          when scrolling the grid) and switch chips to single-row
+          horizontal scroll so the toolbar is one slim row. Sticky stays
+          on >=768px where the chip grid is naturally compact. */}
+      <style>{`
+        @media (max-width: 767px) {
+          .apps-toolbar {
+            position: static !important;
+            top: auto !important;
+            padding: 12px 16px !important;
+          }
+          .apps-toolbar [data-testid="apps-chips"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            width: 100%;
+            padding-bottom: 4px;
+          }
+          .apps-toolbar [data-testid="apps-chips"]::-webkit-scrollbar {
+            display: none;
+          }
+          .apps-toolbar [data-testid="apps-chips"] button {
+            flex-shrink: 0;
+          }
+        }
+      `}</style>
 
       <main>
         {/* HEADER · v17 store.html alignment (2026-04-25).
@@ -392,6 +420,11 @@ export function AppsDirectoryPage() {
             // chip + search controls stay accessible while scrolling
             // a long browse grid. z-index 5 sits below TopBar dropdowns
             // (which use z-index >=10) so menus don't get clipped.
+            // R7 U4 (2026-04-28): sticky disabled below 768px via
+            // .apps-toolbar mobile media query — on phone the wrapped
+            // 5-row chip grid was eating ~40% of viewport. CSS override
+            // is in <style> below so non-sticky on mobile + sticky on
+            // tablet/desktop.
             position: 'sticky',
             top: 65,
             zIndex: 5,
