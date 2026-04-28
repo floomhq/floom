@@ -12,7 +12,7 @@ export function RunEmptyStatePage() {
       />
       <section style={cardStyle}>
         <h2 style={h2Style}>No workspace runs yet</h2>
-        <p style={mutedStyle}>Run a public app, install it in Claude, or publish from Studio.</p>
+        <p style={mutedStyle}>Run a public app, install it in your AI tool, or publish from Studio.</p>
       </section>
     </WorkspacePageShell>
   );

@@ -96,7 +96,7 @@ export function IntegrationLogos({ variant = 'block' }: IntegrationLogosProps = 
       </div>
       {!inline && (
         <span style={{ color: 'var(--muted)', fontSize: 13 }}>
-          Works with Claude, ChatGPT, Cursor, and more.
+          Works with any MCP client.
         </span>
       )}
     </div>

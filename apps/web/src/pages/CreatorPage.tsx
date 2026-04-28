@@ -239,7 +239,7 @@ export function CreatorPage() {
                 lineHeight: 1.55,
               }}
             >
-              Paste your app's link. Floom gives you a Claude tool, a page to share, a CLI, and a URL your teammates can hit.
+              Paste your app's link. Floom gives you an MCP tool, a page to share, a CLI, and a URL your teammates can hit.
             </p>
             <Link
               to="/build"

@@ -139,7 +139,7 @@ export function Sidebar({ app, open, onClose }: Props) {
             <IntegrationRow
               label="MCP server"
               value={`${publicUrl}/mcp/app/${app.slug}`}
-              hint="Paste into Claude Desktop or Cursor."
+              hint="Paste into Claude Desktop, Cursor, or any MCP client."
               copyable
             />
             <IntegrationRow

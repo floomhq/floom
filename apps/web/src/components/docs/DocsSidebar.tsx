@@ -299,7 +299,7 @@ export const DOCS_SIDEBAR_GROUPS: DocsSidebarGroup[] = [
       { to: '/docs', label: 'Welcome' },
       { to: '/docs/quickstart', label: 'Quickstart', tag: 'NEW' },
       { to: '/docs/cli', label: 'Install the CLI' },
-      { to: '/docs/mcp-install', label: 'Install in Claude / Cursor' },
+      { to: '/docs/mcp-install', label: 'Install in your AI tool' },
     ],
   },
   // v17 Examples group (#549). Each link goes to a runnable app on

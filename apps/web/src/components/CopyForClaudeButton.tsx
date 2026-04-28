@@ -25,7 +25,7 @@ const TABS: TabSpec[] = [
   {
     id: 'mcp',
     label: 'MCP',
-    description: 'Works with Claude Desktop, Cursor, Codex, any MCP client',
+    description: 'Works with any MCP client (Claude Desktop, Cursor, Codex, and more)',
     snippet: MCP_JSON,
   },
   {

@@ -62,11 +62,11 @@ export function MeInstallPage() {
   }
 
   return (
-    <WorkspacePageShell mode="run" title="Install to Claude | Floom" mainMaxWidth={760}>
+    <WorkspacePageShell mode="run" title="Install Floom in your agent | Floom" mainMaxWidth={760}>
       <div data-testid="install-page">
         <WorkspaceHeader
           eyebrow="Workspace Run"
-          title="Install Floom in Claude"
+          title="Install Floom in your agent"
           scope={`MCP entry name: floom-${workspaceSlug}. Agent tokens live in Workspace settings.`}
           actions={<Link to="/settings/agent-tokens" style={settingsLinkStyle}>Agent tokens</Link>}
         />

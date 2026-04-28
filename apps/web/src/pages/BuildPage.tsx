@@ -766,7 +766,7 @@ function BuildHeader({
           We hit a <span className="warn">snag.</span>
         </h1>
         <p>
-          Paste the spec directly, point at a different URL, or generate one with Claude. We&rsquo;ll
+          Paste the spec directly, point at a different URL, or generate one with your AI tool. We&rsquo;ll
           pick up from there.
         </p>
       </div>

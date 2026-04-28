@@ -170,7 +170,7 @@ export function ClaudeSkillModal({
               margin: 0,
             }}
           >
-            Run this app from inside Claude Code with one prompt. Claude
+            Run this app from inside your AI tool with one prompt. Your agent
             reads the skill file and knows how to call your endpoint.
           </p>
         </section>
@@ -248,7 +248,7 @@ export function ClaudeSkillModal({
               margin: '6px 0 8px',
             }}
           >
-            Step 2 — use it in Claude Code
+            Step 2 — use it in your AI tool
           </div>
           <div
             data-testid="claude-skill-modal-example"
@@ -276,7 +276,7 @@ export function ClaudeSkillModal({
                   lineHeight: 1.5,
                 }}
               >
-                Open Claude Code and ask:
+                Open your AI tool and ask:
               </p>
               <p
                 style={{

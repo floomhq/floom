@@ -75,7 +75,7 @@ export function SettingsAgentTokensPage() {
           <div>
             <h2 style={h2Style}>Active Agent tokens</h2>
             <p style={mutedStyle}>
-              Workspace credentials for Claude, Cursor, Codex, CLI, CI, MCP, and HTTP.
+              Workspace credentials for MCP clients (Claude Desktop, Cursor, Codex), CLI, CI, and HTTP.
             </p>
           </div>
         </div>

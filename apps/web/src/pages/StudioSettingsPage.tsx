@@ -34,7 +34,7 @@ export function SettingsStudioPage() {
         </Link>
         <Link to="/settings/agent-tokens" style={linkCardStyle}>
           <h2 style={h2Style}>Agent tokens</h2>
-          <p style={mutedStyle}>Workspace credentials for Claude, CLI, MCP, HTTP, and CI.</p>
+          <p style={mutedStyle}>Workspace credentials for MCP clients, CLI, HTTP, and CI.</p>
         </Link>
       </section>
     </WorkspacePageShell>

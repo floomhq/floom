@@ -80,11 +80,11 @@ export function InstallPage() {
           npm i -g @floomhq/cli
         </pre>
 
-        <h2 style={{ fontSize: 18, margin: '24px 0 8px' }}>3. Link it to Claude</h2>
+        <h2 style={{ fontSize: 18, margin: '24px 0 8px' }}>3. Link it to your AI tool</h2>
         <p style={{ color: 'var(--muted)', margin: '0 0 6px', fontSize: 14 }}>
           The MCP endpoint is at <code>http://localhost:3000/mcp</code>. Add it
-          in Claude Desktop settings and every app on your instance becomes a
-          Claude tool.
+          in your MCP client settings and every app on your instance becomes a
+          tool.
         </p>
 
         <h2 style={{ fontSize: 18, margin: '24px 0 8px' }}>Full docs</h2>

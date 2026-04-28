@@ -1286,7 +1286,7 @@ export function AppPermalinkPage() {
                         {tabId === 'about' ? 'About' : tabId === 'install' ? 'Install' : 'Source'}
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-                        {tabId === 'about' ? 'Learn how this app works' : tabId === 'install' ? 'Add to Claude Desktop' : 'View source & OpenAPI spec'}
+                        {tabId === 'about' ? 'Learn how this app works' : tabId === 'install' ? 'Add to your AI tool' : 'View source & OpenAPI spec'}
                       </div>
                     </button>
                   ))}
@@ -1600,9 +1600,9 @@ export function AppPermalinkPage() {
             data-testid="connectors-grid"
           >
             <ConnectorCard
-              label="Claude"
-              title="Add to Claude Desktop"
-              desc="Use this app as a tool in Claude."
+              label="MCP"
+              title="Add to your AI tool"
+              desc="Use this app as an MCP tool in any agent."
               testId="connector-claude"
               href="https://docs.anthropic.com/en/docs/claude-desktop"
               badge="MCP"

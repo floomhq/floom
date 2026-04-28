@@ -379,7 +379,7 @@ export function DocsLandingPage() {
               <span style={pillKeyStyle}>→</span>
             </Link>
             <Link to="/docs/mcp-install" style={pillStyle}>
-              Install in Claude / Cursor
+              Install in your AI tool
             </Link>
           </div>
 
@@ -402,7 +402,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
           <div style={mostReadStyle}>
             <Link to="/docs/mcp-install" style={mrCardStyle}>
               <div style={mrKicker}>Getting started</div>
-              <div style={mrTitle}>Install in Claude / Cursor</div>
+              <div style={mrTitle}>Install in your AI tool</div>
               <div style={mrSubtitle}>Three JSON snippets, one per MCP client.</div>
             </Link>
             <Link to="/docs/runtime-specs" style={mrCardStyle}>
@@ -445,7 +445,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
 
           {/* MCP install */}
           <h2 id="mcp-surfaces" style={h2Style}>
-            Install in Claude, Cursor, Codex — via MCP
+            Install in your AI tool — via MCP
           </h2>
           <p style={pStyle}>
             Every Floom app is a ready-to-use MCP tool at{' '}
@@ -494,7 +494,7 @@ curl -X POST https://api.floom.dev/api/lead-scorer/run \\
           </div>
 
           <p style={pStyle}>
-            Full per-client config (Claude Desktop, Claude Code, Cursor, Codex CLI)
+            Full per-client config (Claude Desktop, Cursor, Codex CLI)
             lives at{' '}
             <Link to="/docs/mcp-install" style={{ color: 'var(--accent)' }}>
               MCP install
