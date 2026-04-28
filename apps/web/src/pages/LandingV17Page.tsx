@@ -202,6 +202,12 @@ interface LandingV17PageProps {
 export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
   const isMvp = variant === 'mvp';
   const [stripes, setStripes] = useState<Stripe[]>(FALLBACK_STRIPES);
+  // G9 (2026-04-28): inline directory grid on MVP landing. Next 6 apps
+  // after the 3 curated showcase slugs, plus a "Browse all <N> apps" CTA.
+  // Federico: "we should still, on the MVP Floom, have the app store
+  // visible, right?"
+  const [directoryApps, setDirectoryApps] = useState<Stripe[]>([]);
+  const [totalAppsCount, setTotalAppsCount] = useState<number>(0);
   const deployEnabledFlag = useDeployEnabled();
   const deployEnabled = deployEnabledFlag ?? readDeployEnabled();
   // v26 §3 option C: logged-in-aware landing.
@@ -221,7 +227,22 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
       .getHub()
       .then((apps) => {
         const visible = publicHubApps(apps);
-        if (visible.length > 0) setStripes(pickStripes(visible));
+        if (visible.length > 0) {
+          setStripes(pickStripes(visible));
+          setTotalAppsCount(visible.length);
+          // Pick the next 6 apps that aren't already in the curated showcase.
+          const curatedSlugs = new Set<string>(PREFERRED_SLUGS as readonly string[]);
+          const rest = visible
+            .filter((app) => !curatedSlugs.has(app.slug))
+            .slice(0, 6)
+            .map((app) => ({
+              slug: app.slug,
+              name: app.name,
+              description: app.description,
+              category: app.category ?? undefined,
+            }));
+          setDirectoryApps(rest);
+        }
       })
       .catch(() => {
         // Keep static roster on failure.
@@ -684,6 +705,100 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
             }
           `}</style>
         </section>
+
+        {/* G9 (2026-04-28): inline app-directory grid on MVP landing.
+            Curated showcase above is the editorial pick (3 demo-ready
+            apps). This section surfaces the rest of the directory inline
+            so visitors see the full breadth without leaving the page,
+            then a prominent CTA links to `/apps` for the full directory.
+            Federico: "we should still, on the MVP Floom, have the app
+            store visible, right? What speaks against it? Already works." */}
+        {isMvp && directoryApps.length > 0 && (
+          <section
+            data-testid="mvp-directory-section"
+            style={{ padding: '24px 28px 64px', maxWidth: 1240, margin: '0 auto' }}
+          >
+            <h2
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontWeight: 800,
+                fontSize: 24,
+                lineHeight: 1.15,
+                letterSpacing: '-0.025em',
+                textAlign: 'center',
+                margin: '0 auto 8px',
+                maxWidth: 760,
+              }}
+            >
+              Or browse the full directory.
+            </h2>
+            <p
+              style={{
+                fontSize: 14.5,
+                color: 'var(--muted)',
+                textAlign: 'center',
+                maxWidth: 620,
+                margin: '0 auto 32px',
+                lineHeight: 1.55,
+              }}
+            >
+              {totalAppsCount > 0
+                ? `${totalAppsCount} apps live on Floom. All MIT-licensed, all self-hostable.`
+                : 'All MIT-licensed, all self-hostable.'}
+            </p>
+            <div
+              className="mvp-directory-grid"
+              data-testid="mvp-directory-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 16,
+                maxWidth: 1100,
+                margin: '0 auto 28px',
+              }}
+            >
+              {directoryApps.map((app) => (
+                <AppShowcaseCard
+                  key={app.slug}
+                  slug={app.slug}
+                  name={app.name}
+                  description={app.description}
+                  category={app.category}
+                />
+              ))}
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <Link
+                to="/apps"
+                data-testid="mvp-directory-cta"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  border: '1px solid var(--accent)',
+                  borderRadius: 10,
+                  padding: '11px 18px',
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                {totalAppsCount > 0 ? `Browse all ${totalAppsCount} apps` : 'Browse all apps'}
+                <span aria-hidden="true">→</span>
+              </Link>
+            </div>
+            <style>{`
+              @media (max-width: 880px) {
+                .mvp-directory-grid { grid-template-columns: repeat(2, 1fr) !important; }
+              }
+              @media (max-width: 640px) {
+                .mvp-directory-grid { grid-template-columns: 1fr !important; }
+              }
+            `}</style>
+          </section>
+        )}
 
         {/* PUBLISH-CTA BOX — MVP variant: dropped (creator-focused, MVP is consumer-first). */}
         {!isMvp && (

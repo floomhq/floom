@@ -1571,78 +1571,80 @@ export function AppPermalinkPage() {
         </section>
         )}
 
-        {/* Source tab. v26 parity: repo card + spec card (2-col grid) + self-host card. */}
+        {/* Source tab. v26 parity: repo card + spec card (2-col grid) + self-host card.
+            G10 (2026-04-28): when no source_url, hide the Repository card
+            entirely (no blank-box chrome, no slug echo). Grid collapses to
+            single column so the Spec card spans full width. A concise inline
+            note above the grid carries the "source not linked" context. */}
         {activeTab === 'source' && (
           <section data-testid="tab-content-source">
-            {/* 2-column grid: repo + spec */}
+            {!githubRepo && (
+              <p
+                data-testid="source-no-repo-note"
+                style={{
+                  fontSize: 12.5,
+                  color: 'var(--muted)',
+                  margin: '0 0 14px',
+                  lineHeight: 1.55,
+                }}
+              >
+                Source not publicly linked. Check with the app creator.
+              </p>
+            )}
+            {/* 2-column grid: repo + spec (or single-column when no repo) */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                gridTemplateColumns: githubRepo ? '1fr 1fr' : '1fr',
                 gap: 14,
                 marginBottom: 14,
               }}
               className="source-cards-grid"
             >
-              {/* Repo card */}
-              <div
-                data-testid="source-repo-card"
-                style={{
-                  background: 'var(--card)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 12,
-                  padding: '18px 20px',
-                }}
-              >
-                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>
-                  Repository
-                </div>
-                {githubRepo ? (
-                  <>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <GithubIcon /> {githubRepo.replace('https://github.com/', '')}
-                    </h3>
-                    {app.manifest?.license && (
-                      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-                        {app.manifest.license} licensed
-                        {app.version ? ` · v${app.version}` : ''}
-                      </p>
-                    )}
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <a
-                        href={githubRepo}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          fontSize: 12.5,
-                          fontWeight: 600,
-                          padding: '6px 12px',
-                          border: '1px solid var(--line)',
-                          borderRadius: 8,
-                          color: 'var(--ink)',
-                          textDecoration: 'none',
-                          background: 'var(--bg)',
-                        }}
-                      >
-                        View on GitHub &rarr;
-                      </a>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px' }}>{app.slug}</h3>
-                    {app.manifest?.license && (
-                      <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-                        {app.manifest.license} licensed
-                        {app.version ? ` · v${app.version}` : ''}
-                      </p>
-                    )}
-                    <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0, lineHeight: 1.55 }}>
-                      Source not publicly linked. Check with the app creator.
+              {/* Repo card — hidden when no github source linked (G10). */}
+              {githubRepo && (
+                <div
+                  data-testid="source-repo-card"
+                  style={{
+                    background: 'var(--card)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 12,
+                    padding: '18px 20px',
+                  }}
+                >
+                  <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10.5, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>
+                    Repository
+                  </div>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <GithubIcon /> {githubRepo.replace('https://github.com/', '')}
+                  </h3>
+                  {app.manifest?.license && (
+                    <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
+                      {app.manifest.license} licensed
+                      {app.version ? ` · v${app.version}` : ''}
                     </p>
-                  </>
-                )}
-              </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <a
+                      href={githubRepo}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        padding: '6px 12px',
+                        border: '1px solid var(--line)',
+                        borderRadius: 8,
+                        color: 'var(--ink)',
+                        textDecoration: 'none',
+                        background: 'var(--bg)',
+                      }}
+                    >
+                      View on GitHub &rarr;
+                    </a>
+                  </div>
+                </div>
+              )}
 
               {/* Spec card */}
               <div
@@ -1822,7 +1824,11 @@ function InstallCard({
 }
 
 /**
- * SourceSnippet — warm-dark code block with a copy button for the Source tab.
+ * SourceSnippet — light tinted code block with a copy button for the Source tab.
+ *
+ * G8 (2026-04-28): converted from warm-dark to light tinted bg
+ * (`var(--studio)`) to match the F7 global "no black copy boxes" rule.
+ * Mirrors MvpHeroInstall in LandingV17Page.tsx (~line 100).
  */
 function SourceSnippet({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -1840,7 +1846,8 @@ function SourceSnippet({ value }: { value: string }) {
         display: 'flex',
         alignItems: 'flex-start',
         gap: 8,
-        background: 'var(--code, #1b1a17)',
+        background: 'var(--studio, #f5f4f0)',
+        border: '1px solid var(--line)',
         borderRadius: 8,
         padding: '8px 10px',
         marginTop: 8,
@@ -1851,7 +1858,7 @@ function SourceSnippet({ value }: { value: string }) {
           flex: 1,
           fontFamily: 'JetBrains Mono, ui-monospace, monospace',
           fontSize: 11.5,
-          color: 'var(--code-text, #e2e0d9)',
+          color: 'var(--ink)',
           margin: 0,
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-all',
@@ -1864,9 +1871,9 @@ function SourceSnippet({ value }: { value: string }) {
         type="button"
         onClick={handleCopy}
         style={{
-          background: 'rgba(255,255,255,0.08)',
-          color: copied ? '#a7f3d0' : 'var(--code-text, #e2e0d9)',
-          border: '1px solid rgba(255,255,255,0.15)',
+          background: 'var(--card)',
+          color: copied ? 'var(--muted)' : 'var(--accent)',
+          border: `1px solid ${copied ? 'var(--line)' : 'rgba(4,120,87,0.35)'}`,
           borderRadius: 6,
           padding: '5px 10px',
           fontSize: 11,

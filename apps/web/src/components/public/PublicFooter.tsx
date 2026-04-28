@@ -257,7 +257,7 @@ export function PublicFooter() {
             data-testid="footer-copyright"
             style={{ fontSize: 12, color: 'var(--muted)' }}
           >
-            © 2026 Floom · Open source, MIT
+            © 2026 Floom
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
