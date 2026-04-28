@@ -492,13 +492,14 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
             )}
           </div>
 
-          {/* R7.6 (2026-04-28): HeroDemo moved out of hero section.
-              Federico's brief: hero is too overwhelming with 7 elements
-              pre-fold. HeroDemo now plays as a "show me" element after
-              the 3-step explanation (see below "From idea to shipped app
-              in 3 steps"). First viewport = eyebrow + H1 + sub + npx.
-              Full variant keeps the demo here; MVP variant moves it. */}
-          {!isMvp && <HeroDemo />}
+          {/* R7.6 followup (2026-04-28): HeroDemo lives directly under
+              the hero install snippet (above "From idea to shipped app
+              in 3 steps"). Earlier R7.6 pushed it BELOW that section
+              to calm the hero, but Federico flagged it as "too low" —
+              hero box stays clean (no demo INSIDE it) but the demo
+              should still anchor near hero so it reads as proof, not
+              filler. Full variant kept its placement here. */}
+          <HeroDemo />
         </section>
 
         {/* Compact CLI reference strip below the hero — smaller than the
@@ -617,18 +618,9 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
           </div>
         </section>
 
-        {/* R7.6 (2026-04-28): HeroDemo moved here for MVP variant.
-            Federico's brief: hero pre-fold composition was overwhelming.
-            HeroDemo now plays as a "show me" element AFTER the 3-step
-            explanation reads it aloud. */}
-        {isMvp && (
-          <section
-            data-testid="mvp-hero-demo-section"
-            style={{ padding: '0 28px 64px', maxWidth: 1240, margin: '0 auto' }}
-          >
-            <HeroDemo />
-          </section>
-        )}
+        {/* HeroDemo moved back to right under the hero install snippet
+            (R7.6 followup) — was pushed here in R7.6 first pass; Federico
+            flagged "too low". */}
 
         {/* WORKED EXAMPLE — MVP variant: dropped (heavy). */}
         {!isMvp && <WorkedExample />}
