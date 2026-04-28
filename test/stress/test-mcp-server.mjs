@@ -169,14 +169,18 @@ try {
   const readNames = readTools.map((tool) => tool.name).sort();
   const readExpected = [
     'discover_apps',
+    'get_app_about',
+    'get_app_details',
     'get_app_skill',
+    'get_app_source',
     'get_run',
+    'list_app_reviews',
     'list_my_runs',
     'run_app',
-  ];
+  ].sort();
   log('tools/list returns HTTP 200', readList.res.status === 200, readList.text);
   log('tools/list returns JSON-RPC 2.0', readList.json?.jsonrpc === '2.0', readList.text);
-  log('read token /mcp exposes exactly five read/run tools', JSON.stringify(readNames) === JSON.stringify(readExpected), JSON.stringify(readNames));
+  log('read token /mcp exposes read/run/app-page tools', JSON.stringify(readNames) === JSON.stringify(readExpected), JSON.stringify(readNames));
 
   const writeList = await callMcp(server.port, writeToken, {
     jsonrpc: '2.0',
@@ -194,10 +198,16 @@ try {
     'account_revoke_agent_token',
     'account_set_secret',
     'discover_apps',
+    'get_app_about',
+    'get_app_details',
     'get_app_skill',
+    'get_app_source',
     'get_run',
+    'list_app_reviews',
     'list_my_runs',
+    'leave_app_review',
     'run_app',
+    'submit_app_review',
     'studio_claim_app',
     'studio_delete_app',
     'studio_delete_creator_secret',
@@ -218,7 +228,7 @@ try {
     'studio_uninstall_app',
     'studio_update_app',
     'studio_withdraw_app_review',
-  ];
+  ].sort();
   log('read-write token exposes run + studio + account tools', JSON.stringify(writeNames) === JSON.stringify(writeExpected), JSON.stringify(writeNames));
 
   const publishList = await callMcp(server.port, publishToken, {
@@ -249,18 +259,24 @@ try {
     'studio_uninstall_app',
     'studio_update_app',
     'studio_withdraw_app_review',
-  ];
+  ].sort();
   log('publish-only token exposes studio tools without run tools', JSON.stringify(publishNames) === JSON.stringify(publishExpected), JSON.stringify(publishNames));
 
   const tools = writeList.json?.result?.tools || [];
   const discover = tools.find((tool) => tool.name === 'discover_apps');
   const skill = tools.find((tool) => tool.name === 'get_app_skill');
+  const detail = tools.find((tool) => tool.name === 'get_app_details');
+  const source = tools.find((tool) => tool.name === 'get_app_source');
+  const reviews = tools.find((tool) => tool.name === 'list_app_reviews');
   const run = tools.find((tool) => tool.name === 'run_app');
   const getRun = tools.find((tool) => tool.name === 'get_run');
   const listRuns = tools.find((tool) => tool.name === 'list_my_runs');
   const publish = tools.find((tool) => tool.name === 'studio_publish_app');
   log('discover_apps schema exposes q + category + limit + cursor', Boolean(discover?.inputSchema?.properties?.q) && Boolean(discover?.inputSchema?.properties?.category) && Boolean(discover?.inputSchema?.properties?.limit) && Boolean(discover?.inputSchema?.properties?.cursor));
   log('get_app_skill requires slug', Array.isArray(skill?.inputSchema?.required) && skill.inputSchema.required.includes('slug'));
+  log('get_app_details requires slug', Array.isArray(detail?.inputSchema?.required) && detail.inputSchema.required.includes('slug'));
+  log('get_app_source exposes include_openapi_spec', Boolean(source?.inputSchema?.properties?.include_openapi_spec));
+  log('list_app_reviews exposes limit', Boolean(reviews?.inputSchema?.properties?.limit));
   log('run_app schema exposes slug + action + inputs', Boolean(run?.inputSchema?.properties?.slug) && Boolean(run?.inputSchema?.properties?.action) && Boolean(run?.inputSchema?.properties?.inputs));
   log('get_run requires run_id', Array.isArray(getRun?.inputSchema?.required) && getRun.inputSchema.required.includes('run_id'));
   log('list_my_runs schema exposes pagination args', Boolean(listRuns?.inputSchema?.properties?.limit) && Boolean(listRuns?.inputSchema?.properties?.cursor));
@@ -331,6 +347,60 @@ try {
   log('publish-only token can publish via studio_publish_app', publishPayload?.ok === true && publishPayload?.slug === 'agent-studio-publish', publishCall.text);
   log('studio_publish_app persists owner-scoped app', Boolean(publishedRow) && publishedRow.workspace_id === 'local' && publishedRow.author === 'local', JSON.stringify(publishedRow));
   log('studio_publish_app returns request-origin URLs', publishPayload?.permalink === `http://localhost:${server.port}/p/agent-studio-publish` && publishPayload?.mcp_url === `http://localhost:${server.port}/mcp/app/agent-studio-publish`, JSON.stringify(publishPayload));
+
+  const detailsCall = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 121,
+    method: 'tools/call',
+    params: { name: 'get_app_details', arguments: { slug: 'agent-studio-publish' } },
+  });
+  const detailsPayload = parseToolText(detailsCall);
+  log('get_app_details returns about/install/source/reviews payload', detailsPayload?.about?.description && detailsPayload?.install?.mcp_url && detailsPayload?.source?.raw_openapi_url && detailsPayload?.reviews?.summary, detailsCall.text);
+
+  const sourceCall = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 122,
+    method: 'tools/call',
+    params: { name: 'get_app_source', arguments: { slug: 'agent-studio-publish', include_openapi_spec: true } },
+  });
+  const sourcePayload = parseToolText(sourceCall);
+  log('get_app_source can include cached OpenAPI spec', sourcePayload?.source?.openapi_spec_available === true && sourcePayload?.openapi_spec?.openapi === '3.0.0', sourceCall.text);
+
+  const reviewSubmitCall = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 123,
+    method: 'tools/call',
+    params: { name: 'submit_app_review', arguments: { slug: 'agent-studio-publish', rating: 5, title: 'Useful', body: 'Works headlessly.' } },
+  });
+  const reviewSubmitPayload = parseToolText(reviewSubmitCall);
+  log('submit_app_review upserts token user review', reviewSubmitPayload?.ok === true && reviewSubmitPayload?.review?.rating === 5, reviewSubmitCall.text);
+
+  const reviewsCall = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 124,
+    method: 'tools/call',
+    params: { name: 'list_app_reviews', arguments: { slug: 'agent-studio-publish', limit: 5 } },
+  });
+  const reviewsPayload = parseToolText(reviewsCall);
+  log('list_app_reviews returns review summary and rows', reviewsPayload?.summary?.count === 1 && reviewsPayload?.reviews?.[0]?.title === 'Useful', reviewsCall.text);
+
+  const aboutCall = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 125,
+    method: 'tools/call',
+    params: { name: 'get_app_about', arguments: { slug: 'agent-studio-publish' } },
+  });
+  const aboutPayload = parseToolText(aboutCall);
+  log('get_app_about returns slug + description + readme + permalink', aboutPayload?.slug === 'agent-studio-publish' && typeof aboutPayload?.description === 'string' && typeof aboutPayload?.permalink === 'string', aboutCall.text);
+
+  const leaveCall = await callMcp(server.port, writeToken, {
+    jsonrpc: '2.0',
+    id: 126,
+    method: 'tools/call',
+    params: { name: 'leave_app_review', arguments: { slug: 'agent-studio-publish', rating: 4, comment: 'leave_app_review path' } },
+  });
+  const leavePayload = parseToolText(leaveCall);
+  log('leave_app_review upserts via comment field and returns review_id', leavePayload?.ok === true && typeof leavePayload?.review_id === 'string' && leavePayload?.review?.rating === 4, leaveCall.text);
 
   const studioList = await callMcp(server.port, publishToken, {
     jsonrpc: '2.0',

@@ -175,6 +175,48 @@ console.log('CLI account/apps management dry-run routing');
 }
 
 {
+  const res = await run(['apps', 'get', 'app slug']);
+  log('apps get uses app detail endpoint', res.code === 0 && includes(res.stdout, `GET ${API_URL}/api/hub/app%20slug`), res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'source', 'get', 'app-slug']);
+  log('apps source get uses source endpoint', res.code === 0 && includes(res.stdout, `GET ${API_URL}/api/hub/app-slug/source`), res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'source', 'openapi', 'app-slug']);
+  log('apps source openapi uses raw OpenAPI endpoint', res.code === 0 && includes(res.stdout, `GET ${API_URL}/api/hub/app-slug/openapi.json`), res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'reviews', 'list', 'app-slug', '--limit', '7']);
+  log('apps reviews list uses review endpoint with limit', res.code === 0 && includes(res.stdout, `GET ${API_URL}/api/apps/app-slug/reviews?limit=7`), res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'reviews', 'submit', 'app-slug', '--rating', '5', '--title', 'Nice', '--body-stdin'], { input: 'body text' });
+  const body = bodyOf(res.stdout);
+  log('apps reviews submit posts typed review body', res.code === 0 && includes(res.stdout, `POST ${API_URL}/api/apps/app-slug/reviews`) && body?.rating === 5 && body?.title === 'Nice' && body?.body === 'body text', res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'renderer', 'get', 'app-slug']);
+  log('apps renderer get uses renderer metadata endpoint', res.code === 0 && includes(res.stdout, `GET ${API_URL}/renderer/app-slug/meta`), res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'renderer', 'upload', 'app-slug', '--source-stdin', '--output-shape', 'table'], { input: 'export default function Renderer() { return null }' });
+  const body = bodyOf(res.stdout);
+  log('apps renderer upload posts source body', res.code === 0 && includes(res.stdout, `POST ${API_URL}/api/hub/app-slug/renderer`) && body?.source.includes('Renderer') && body?.output_shape === 'table', res.stdout + res.stderr);
+}
+
+{
+  const res = await run(['apps', 'renderer', 'delete', 'app-slug']);
+  log('apps renderer delete uses renderer delete endpoint', res.code === 0 && includes(res.stdout, `DELETE ${API_URL}/api/hub/app-slug/renderer`), res.stdout + res.stderr);
+}
+
+{
   const res = await run(['apps', 'sharing', 'set', 'app-slug', '--state', 'link', '--comment', 'rotate', '--rotate-link-token']);
   const body = bodyOf(res.stdout);
   log('sharing set patches state body', res.code === 0 && includes(res.stdout, `PATCH ${API_URL}/api/me/apps/app-slug/sharing`) && body?.state === 'link' && body?.comment === 'rotate' && body?.link_token_rotate === true, res.stdout + res.stderr);

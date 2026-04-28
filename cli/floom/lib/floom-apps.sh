@@ -11,6 +11,8 @@ usage() {
 floom apps - manage your Floom apps.
 
 usage:
+  floom apps get <slug>
+  floom apps about <slug>
   floom apps list
   floom apps installed
   floom apps fork <slug> [--slug <new-slug>] [--name <name>]
@@ -37,6 +39,19 @@ usage:
 
   floom apps rate-limit get <slug>
   floom apps rate-limit set <slug> --per-hour <n|default>
+
+  floom apps reviews <slug> [--limit <n>]                                    (defaults to list)
+  floom apps reviews list <slug> [--limit <n>]
+  floom apps reviews submit <slug> --rating <1-5> [--title <text>] [--body <text>|--comment <text>|--body-stdin]
+  floom apps review <slug> --rating <1-5> [--comment <text>|--body <text>]    (singular alias for reviews submit)
+
+  floom apps source <slug>                                                   (defaults to source get)
+  floom apps source get <slug>
+  floom apps source openapi <slug>
+
+  floom apps renderer get <slug>
+  floom apps renderer upload <slug> (--source-file <path>|--source-stdin) [--output-shape <shape>]
+  floom apps renderer delete <slug>
 
 EOF
 }
@@ -121,6 +136,32 @@ print(json.dumps({"rate_limit_per_hour": rate}, separators=(",", ":")))
 PY
 }
 
+json_review_body() {
+  RATING="$1" TITLE="$2" BODY="$3" python3 - <<'PY'
+import json
+import os
+
+body = {"rating": int(os.environ["RATING"])}
+if os.environ["TITLE"]:
+    body["title"] = os.environ["TITLE"]
+if os.environ["BODY"]:
+    body["body"] = os.environ["BODY"]
+print(json.dumps(body, separators=(",", ":")))
+PY
+}
+
+json_renderer_body() {
+  SOURCE="$1" OUTPUT_SHAPE="$2" python3 - <<'PY'
+import json
+import os
+
+body = {"source": os.environ["SOURCE"]}
+if os.environ["OUTPUT_SHAPE"]:
+    body["output_shape"] = os.environ["OUTPUT_SHAPE"]
+print(json.dumps(body, separators=(",", ":")))
+PY
+}
+
 require_arg() {
   local value="$1"
   local label="$2"
@@ -130,6 +171,13 @@ require_arg() {
   fi
 }
 
+get_cmd() {
+  shift || true
+  local slug="${1:-}"
+  require_arg "$slug" "floom apps get: missing <slug>"
+  exec bash "$LIB_DIR/floom-api.sh" GET "/api/hub/$(urlencode "$slug")"
+}
+
 list_cmd() {
   shift || true
   if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
@@ -137,6 +185,154 @@ list_cmd() {
     exit 0
   fi
   exec bash "$LIB_DIR/floom-api.sh" GET /api/hub/mine
+}
+
+source_cmd() {
+  shift || true
+  local subcmd="${1:-get}"
+  # Federico's spec: `floom apps source <slug>` (no subcommand) should
+  # default to `get` so the CLI mirrors the MCP get_app_source tool 1:1.
+  # Detect a slug-shaped first arg and rewrite.
+  if [[ "$subcmd" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [[ "$subcmd" != "get" && "$subcmd" != "openapi" && "$subcmd" != "openapi-json" && "$subcmd" != "help" ]]; then
+    set -- get "$@"
+    subcmd="get"
+  fi
+  case "$subcmd" in
+    ""|-h|--help|help)
+      usage
+      exit 0
+      ;;
+    get)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps source get: missing <slug>"
+      exec bash "$LIB_DIR/floom-api.sh" GET "/api/hub/$(urlencode "$slug")/source"
+      ;;
+    openapi|openapi-json)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps source openapi: missing <slug>"
+      exec bash "$LIB_DIR/floom-api.sh" GET "/api/hub/$(urlencode "$slug")/openapi.json"
+      ;;
+    *)
+      echo "floom apps source: unknown subcommand '$subcmd'" >&2
+      echo "run 'floom apps --help' for usage." >&2
+      exit 1
+      ;;
+  esac
+}
+
+reviews_cmd() {
+  # Allow callers to invoke us as either `apps reviews ...` (Federico's
+  # original wording) or `apps review ...`. The dispatcher passes the
+  # original verb as $1; we capture it here so we can route the singular
+  # form `apps review <slug> --rating X --comment "..."` straight to the
+  # `submit` handler (mirrors the MCP `leave_app_review` tool 1:1).
+  local verb="${1:-reviews}"
+  shift || true
+  local subcmd="${1:-list}"
+  if [[ "$verb" == "review" ]]; then
+    # Singular form: `apps review <slug> ...` is always submit.
+    set -- submit "$@"
+    subcmd="submit"
+  elif [[ "$subcmd" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [[ "$subcmd" != "list" && "$subcmd" != "submit" && "$subcmd" != "add" && "$subcmd" != "post" && "$subcmd" != "help" ]]; then
+    # Plural form with a slug-shaped first arg: default to list.
+    set -- list "$@"
+    subcmd="list"
+  fi
+  case "$subcmd" in
+    ""|-h|--help|help)
+      usage
+      exit 0
+      ;;
+    list)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps reviews list: missing <slug>"
+      shift || true
+      local limit="20"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --limit)
+            limit="${2:-}"
+            shift 2
+            ;;
+          --limit=*)
+            limit="${1#--limit=}"
+            shift
+            ;;
+          *)
+            echo "floom apps reviews list: unknown option '$1'" >&2
+            exit 1
+            ;;
+        esac
+      done
+      if [[ ! "$limit" =~ ^[0-9]+$ ]]; then
+        echo "floom apps reviews list: --limit must be an integer" >&2
+        exit 1
+      fi
+      exec bash "$LIB_DIR/floom-api.sh" GET "/api/apps/$(urlencode "$slug")/reviews?limit=$limit"
+      ;;
+    submit|add|post)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps reviews submit: missing <slug>"
+      shift || true
+      local rating=""
+      local title=""
+      local body=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --rating)
+            rating="${2:-}"
+            shift 2
+            ;;
+          --rating=*)
+            rating="${1#--rating=}"
+            shift
+            ;;
+          --title)
+            title="${2:-}"
+            shift 2
+            ;;
+          --title=*)
+            title="${1#--title=}"
+            shift
+            ;;
+          --body|--comment)
+            body="${2:-}"
+            shift 2
+            ;;
+          --body=*)
+            body="${1#--body=}"
+            shift
+            ;;
+          --comment=*)
+            body="${1#--comment=}"
+            shift
+            ;;
+          --body-stdin|--comment-stdin)
+            body="$(cat)"
+            shift
+            ;;
+          *)
+            echo "floom apps reviews submit: unknown option '$1'" >&2
+            exit 1
+            ;;
+        esac
+      done
+      if [[ ! "$rating" =~ ^[1-5]$ ]]; then
+        echo "floom apps reviews submit: --rating must be an integer from 1 to 5" >&2
+        exit 1
+      fi
+      exec bash "$LIB_DIR/floom-api.sh" POST "/api/apps/$(urlencode "$slug")/reviews" "$(json_review_body "$rating" "$title" "$body")"
+      ;;
+    *)
+      echo "floom apps reviews: unknown subcommand '$subcmd'" >&2
+      echo "run 'floom apps --help' for usage." >&2
+      exit 1
+      ;;
+  esac
 }
 
 installed_cmd() {
@@ -572,11 +768,87 @@ rate_limit_cmd() {
   esac
 }
 
+renderer_cmd() {
+  shift || true
+  local subcmd="${1:-get}"
+  case "$subcmd" in
+    ""|-h|--help|help)
+      usage
+      exit 0
+      ;;
+    get|meta)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps renderer get: missing <slug>"
+      exec bash "$LIB_DIR/floom-api.sh" GET "/renderer/$(urlencode "$slug")/meta"
+      ;;
+    upload)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps renderer upload: missing <slug>"
+      shift || true
+      local source=""
+      local output_shape=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --source-file)
+            if [[ -z "${2:-}" ]]; then
+              echo "floom apps renderer upload: --source-file requires a path" >&2
+              exit 1
+            fi
+            source="$(<"$2")"
+            shift 2
+            ;;
+          --source-file=*)
+            source="$(<"${1#--source-file=}")"
+            shift
+            ;;
+          --source-stdin)
+            source="$(cat)"
+            shift
+            ;;
+          --output-shape)
+            output_shape="${2:-}"
+            shift 2
+            ;;
+          --output-shape=*)
+            output_shape="${1#--output-shape=}"
+            shift
+            ;;
+          *)
+            echo "floom apps renderer upload: unknown option '$1'" >&2
+            exit 1
+            ;;
+        esac
+      done
+      if [[ -z "$source" ]]; then
+        echo "floom apps renderer upload: provide --source-file or --source-stdin" >&2
+        exit 1
+      fi
+      exec bash "$LIB_DIR/floom-api.sh" POST "/api/hub/$(urlencode "$slug")/renderer" "$(json_renderer_body "$source" "$output_shape")"
+      ;;
+    delete|rm|remove)
+      shift || true
+      local slug="${1:-}"
+      require_arg "$slug" "floom apps renderer delete: missing <slug>"
+      exec bash "$LIB_DIR/floom-api.sh" DELETE "/api/hub/$(urlencode "$slug")/renderer"
+      ;;
+    *)
+      echo "floom apps renderer: unknown subcommand '$subcmd'" >&2
+      echo "run 'floom apps --help' for usage." >&2
+      exit 1
+      ;;
+  esac
+}
+
 SUBCMD="${1:-list}"
 case "$SUBCMD" in
   ""|-h|--help|help)
     usage
     exit 0
+    ;;
+  get|detail|details|about)
+    get_cmd "$@"
     ;;
   list)
     list_cmd "$@"
@@ -613,6 +885,17 @@ case "$SUBCMD" in
     ;;
   rate-limit|rate-limits)
     rate_limit_cmd "$@"
+    ;;
+  reviews|review)
+    # `$@` still contains $SUBCMD as $1 — reviews_cmd reads it via $verb so
+    # it can route singular `review <slug> ...` straight to submit.
+    reviews_cmd "$@"
+    ;;
+  source)
+    source_cmd "$@"
+    ;;
+  renderer)
+    renderer_cmd "$@"
     ;;
   *)
     echo "floom apps: unknown subcommand '$SUBCMD'" >&2

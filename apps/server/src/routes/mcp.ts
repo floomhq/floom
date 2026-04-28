@@ -8,6 +8,7 @@
 // `/app/:slug` below so Hono does not swallow the root path as a slug.
 import type { Context } from 'hono';
 import { Hono } from 'hono';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
@@ -38,6 +39,7 @@ import {
   AUTH_HINT_CLOUD,
   checkAppVisibility,
 } from '../lib/auth.js';
+import { buildAppSourceInfo } from '../lib/app-source.js';
 import {
   extractAgentTokenPrefix,
   generateAgentToken,
@@ -63,6 +65,7 @@ import { invalidateHubCache } from '../lib/hub-cache.js';
 import { deleteAppRecordById } from '../services/app_delete.js';
 import {
   canonicalVisibility,
+  getAppAccessDecision,
   isAppOwner,
   listInvites,
   transitionVisibility,
@@ -80,6 +83,7 @@ import type {
   AgentTokenRecord,
   AgentTokenScope,
   AppRecord,
+  AppReviewRecord,
   InputSpec,
   NormalizedManifest,
   RunRecord,
@@ -491,6 +495,125 @@ function safeParseManifest(raw: string): NormalizedManifest | null {
   } catch {
     return null;
   }
+}
+
+function serializeReviewForMcp(
+  review: AppReviewRecord & { author_name?: string | null; author_email?: string | null },
+): Record<string, unknown> {
+  return {
+    id: review.id,
+    app_slug: review.app_slug,
+    rating: review.rating,
+    title: review.title,
+    body: review.body,
+    author_name:
+      review.author_name || (review.author_email ? review.author_email.split('@')[0] : null) || 'anonymous',
+    created_at: review.created_at,
+    updated_at: review.updated_at,
+  };
+}
+
+function getReviewBundle(slug: string, limit = 20): Record<string, unknown> {
+  const lim = Math.max(1, Math.min(50, Math.floor(Number(limit || 20))));
+  const summary = db
+    .prepare(
+      `SELECT COUNT(*) AS count, COALESCE(AVG(rating), 0) AS avg
+         FROM app_reviews
+        WHERE app_slug = ?`,
+    )
+    .get(slug) as { count: number; avg: number };
+  const rows = db
+    .prepare(
+      `SELECT app_reviews.*, users.name AS author_name, users.email AS author_email
+         FROM app_reviews
+         LEFT JOIN users ON users.id = app_reviews.user_id
+        WHERE app_reviews.app_slug = ?
+        ORDER BY app_reviews.created_at DESC
+        LIMIT ?`,
+    )
+    .all(slug, lim) as Array<AppReviewRecord & { author_name: string | null; author_email: string | null }>;
+  return {
+    summary: {
+      count: summary.count || 0,
+      avg: Math.round(Number(summary.avg || 0) * 10) / 10,
+    },
+    reviews: rows.map(serializeReviewForMcp),
+  };
+}
+
+function loadAccessibleAgentApp(
+  ctx: SessionContext,
+  slug: string,
+  linkToken?: string,
+): AppRecord {
+  const app = db.prepare(`SELECT * FROM apps WHERE slug = ?`).get(slug) as AppRecord | undefined;
+  if (!app) {
+    throw new AgentToolError('not_found', `App not found: ${slug}`, 404);
+  }
+  const access = getAppAccessDecision(app, ctx, linkToken || null);
+  if (!access.ok) {
+    throw new AgentToolError(
+      access.status === 401 ? 'auth_required' : 'not_found',
+      access.status === 401 ? 'Authentication required for this app.' : `App not found: ${slug}`,
+      access.status,
+    );
+  }
+  return app;
+}
+
+function serializeAgentAppDetail(app: AppRecord, baseUrl: string): Record<string, unknown> {
+  const manifest = safeParseManifest(app.manifest);
+  const source = buildAppSourceInfo(app, manifest, baseUrl);
+  const actions = manifest
+    ? Object.entries(manifest.actions).map(([key, action]) => ({
+        key,
+        label: action.label,
+        description: action.description ?? null,
+        inputs: action.inputs,
+        outputs: action.outputs,
+        secrets_needed: action.secrets_needed ?? manifest.secrets_needed ?? [],
+      }))
+    : [];
+  return {
+    slug: app.slug,
+    name: app.name,
+    description: app.description,
+    category: app.category,
+    author: app.author,
+    icon: app.icon,
+    visibility: canonicalVisibility(app.visibility),
+    publish_status: app.publish_status,
+    status: app.status,
+    runtime: manifest?.runtime ?? 'python',
+    actions,
+    about: {
+      description: app.description,
+      how_it_works: actions.map((action, index) => ({
+        step: index + 1,
+        key: action.key,
+        label: action.label,
+        description: action.description,
+      })),
+      license: manifest?.license ?? null,
+      secrets_needed: manifest?.secrets_needed ?? [],
+      primary_action: manifest?.primary_action ?? null,
+    },
+    install: source.install,
+    source,
+    reviews: getReviewBundle(app.slug, 20),
+    limits: {
+      max_run_retention_days: app.max_run_retention_days ?? null,
+      run_rate_limit_per_hour: app.run_rate_limit_per_hour ?? null,
+      timeout_ms: app.timeout_ms ?? null,
+    },
+    links: {
+      permalink: `${baseUrl}/p/${app.slug}`,
+      mcp_url: `${baseUrl}/mcp/app/${app.slug}`,
+      owner_url: `${baseUrl}/studio/${app.slug}`,
+    },
+    created_at: app.created_at,
+    updated_at: app.updated_at,
+  };
 }
 
 function createAdminMcpServer({ ctx, ip, baseUrl }: AdminToolContext): McpServer {
@@ -1316,6 +1439,125 @@ function createAgentMcpServer(c: Context, ctx: SessionContext): McpServer {
     );
 
     server.registerTool(
+      'get_app_details',
+      {
+        title: 'Get app details',
+        description:
+          'Return app-page data for one accessible app: about metadata, actions, install endpoints, source/spec links, review summary, and limits.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          link_key: z.string().min(1).max(512).optional(),
+        },
+      },
+      async ({ slug, link_key }) => {
+        recordMcpToolCall('get_app_details');
+        try {
+          const app = loadAccessibleAgentApp(ctx, slug, link_key);
+          return mcpJson(serializeAgentAppDetail(app, getPublicBaseUrl(c)));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'get_app_about',
+      {
+        title: 'Get app About content',
+        description:
+          'Return the readme/About-tab content for an accessible app: long-form description (markdown), license, source URL, runtime, and manifest version. The same fields the public /p/:slug About tab renders.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          link_key: z.string().min(1).max(512).optional(),
+        },
+      },
+      async ({ slug, link_key }) => {
+        recordMcpToolCall('get_app_about');
+        try {
+          const app = loadAccessibleAgentApp(ctx, slug, link_key);
+          const manifest = safeParseManifest(app.manifest);
+          const baseUrl = getPublicBaseUrl(c);
+          const source = buildAppSourceInfo(app, manifest, baseUrl);
+          const readmeRaw = (app.description ?? '').trim();
+          const manifestReadme = manifest as unknown as { readme_md?: unknown } | null;
+          const readmeMd =
+            manifestReadme && typeof manifestReadme.readme_md === 'string' && manifestReadme.readme_md.trim()
+              ? manifestReadme.readme_md
+              : readmeRaw || null;
+          const payload: Record<string, unknown> = {
+            slug: app.slug,
+            name: app.name,
+            description: app.description,
+            readme_md: readmeMd,
+            license: manifest?.license ?? null,
+            repo_url: source.repository_url,
+            runtime: manifest?.runtime ?? null,
+            manifest_version: manifest?.manifest_version ?? null,
+            permalink: `${baseUrl}/p/${app.slug}`,
+          };
+          if (!readmeMd) {
+            payload.note = 'README not available — see repo_url for project docs.';
+          }
+          return mcpJson(payload);
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'get_app_source',
+      {
+        title: 'Get app source',
+        description:
+          'Return repository, manifest summary, raw OpenAPI URL, self-host command, and install endpoints for an accessible app.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          link_key: z.string().min(1).max(512).optional(),
+          include_openapi_spec: z.boolean().optional(),
+        },
+      },
+      async ({ slug, link_key, include_openapi_spec }) => {
+        recordMcpToolCall('get_app_source');
+        try {
+          const app = loadAccessibleAgentApp(ctx, slug, link_key);
+          const payload: Record<string, unknown> = {
+            source: buildAppSourceInfo(app, safeParseManifest(app.manifest), getPublicBaseUrl(c)),
+          };
+          if (include_openapi_spec) {
+            payload.openapi_spec = app.openapi_spec_cached ? JSON.parse(app.openapi_spec_cached) : null;
+          }
+          return mcpJson(payload);
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      'list_app_reviews',
+      {
+        title: 'List app reviews',
+        description:
+          'Return public review summary and recent reviews for an accessible app.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          link_key: z.string().min(1).max(512).optional(),
+          limit: z.number().int().min(1).max(50).optional(),
+        },
+      },
+      async ({ slug, link_key, limit }) => {
+        recordMcpToolCall('list_app_reviews');
+        try {
+          loadAccessibleAgentApp(ctx, slug, link_key);
+          return mcpJson(getReviewBundle(slug, limit ?? 20));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    server.registerTool(
       'run_app',
       {
         title: 'Run app',
@@ -1380,6 +1622,125 @@ function createAgentMcpServer(c: Context, ctx: SessionContext): McpServer {
         recordMcpToolCall('list_my_runs');
         try {
           return mcpJson(listMyRuns(ctx, { slug, limit, cursor, since_ts }));
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+  }
+
+  if (canUseAccountTools(ctx)) {
+    server.registerTool(
+      'submit_app_review',
+      {
+        title: 'Submit app review',
+        description:
+          'Create or update this token user\'s review for an accessible app. One review per user/workspace/app.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          rating: z.number().int().min(1).max(5),
+          title: z.string().max(120).optional(),
+          body: z.string().max(4000).optional(),
+          link_key: z.string().min(1).max(512).optional(),
+        },
+      },
+      async ({ slug, rating, title, body, link_key }) => {
+        recordMcpToolCall('submit_app_review');
+        try {
+          requireAccountScope(ctx);
+          loadAccessibleAgentApp(ctx, slug, link_key);
+          const now = new Date().toISOString();
+          const existing = db
+            .prepare(
+              `SELECT id FROM app_reviews
+                WHERE workspace_id = ? AND app_slug = ? AND user_id = ?`,
+            )
+            .get(ctx.workspace_id, slug, ctx.user_id) as { id: string } | undefined;
+          const id = existing?.id || `rev_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+          if (existing) {
+            db.prepare(
+              `UPDATE app_reviews
+                  SET rating = ?, title = ?, body = ?, updated_at = ?
+                WHERE id = ?`,
+            ).run(rating, title ?? null, body ?? null, now, id);
+          } else {
+            db.prepare(
+              `INSERT INTO app_reviews
+                (id, workspace_id, app_slug, user_id, rating, title, body, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(id, ctx.workspace_id, slug, ctx.user_id, rating, title ?? null, body ?? null, now, now);
+          }
+          const review = db.prepare(`SELECT * FROM app_reviews WHERE id = ?`).get(id) as AppReviewRecord;
+          return mcpJson({
+            ok: true,
+            created: !existing,
+            review: serializeReviewForMcp({
+              ...review,
+              author_email: ctx.email ?? null,
+              author_name: null,
+            }),
+          });
+        } catch (err) {
+          return mcpError(err);
+        }
+      },
+    );
+
+    // Spec-aligned wrapper around submit_app_review using the wording the
+    // public page uses ("leave a review") and a single `comment` field instead
+    // of separate title/body. Same persistence path: upsert one row per
+    // workspace/app/user. Returns the review id (or 409 conflict-equivalent
+    // shape if the underlying upsert reports an existing review).
+    server.registerTool(
+      'leave_app_review',
+      {
+        title: 'Leave app review',
+        description:
+          'Leave a review on an accessible app. One review per user/workspace/app — re-submitting overwrites and surfaces `created: false` so the caller can detect the conflict.',
+        inputSchema: {
+          slug: z.string().min(1).max(48).regex(/^[a-z0-9][a-z0-9-]*$/),
+          rating: z.number().int().min(1).max(5),
+          comment: z.string().max(2000).optional(),
+          link_key: z.string().min(1).max(512).optional(),
+        },
+      },
+      async ({ slug, rating, comment, link_key }) => {
+        recordMcpToolCall('leave_app_review');
+        try {
+          requireAccountScope(ctx);
+          loadAccessibleAgentApp(ctx, slug, link_key);
+          const now = new Date().toISOString();
+          const existing = db
+            .prepare(
+              `SELECT id FROM app_reviews
+                WHERE workspace_id = ? AND app_slug = ? AND user_id = ?`,
+            )
+            .get(ctx.workspace_id, slug, ctx.user_id) as { id: string } | undefined;
+          const id = existing?.id || `rev_${randomUUID().replace(/-/g, '').slice(0, 24)}`;
+          if (existing) {
+            db.prepare(
+              `UPDATE app_reviews
+                  SET rating = ?, body = ?, updated_at = ?
+                WHERE id = ?`,
+            ).run(rating, comment ?? null, now, id);
+          } else {
+            db.prepare(
+              `INSERT INTO app_reviews
+                (id, workspace_id, app_slug, user_id, rating, title, body, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(id, ctx.workspace_id, slug, ctx.user_id, rating, null, comment ?? null, now, now);
+          }
+          const review = db.prepare(`SELECT * FROM app_reviews WHERE id = ?`).get(id) as AppReviewRecord;
+          return mcpJson({
+            ok: true,
+            created: !existing,
+            review_id: id,
+            review: serializeReviewForMcp({
+              ...review,
+              author_email: ctx.email ?? null,
+              author_name: null,
+            }),
+          });
         } catch (err) {
           return mcpError(err);
         }

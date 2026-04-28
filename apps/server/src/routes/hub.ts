@@ -51,6 +51,7 @@ import {
   listInstalledApps,
   uninstallApp,
 } from '../services/app_library.js';
+import { buildAppSourceInfo } from '../lib/app-source.js';
 import type { AppRecord, NormalizedManifest } from '../types.js';
 import type { OutputShape } from '@floom/renderer/contract';
 
@@ -1176,8 +1177,48 @@ hubRouter.get('/:slug', async (c) => {
           compiled_at: bundle.compiledAt,
         }
       : null,
+    source: buildAppSourceInfo(row, manifest, resolveBaseUrlFromRequest(c)),
     created_at: row.created_at,
   });
+});
+
+hubRouter.get('/:slug/source', async (c) => {
+  const slug = c.req.param('slug');
+  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!row) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  const ctx = await resolveUserContext(c);
+  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  if (!access.ok) {
+    if (access.status === 401) {
+      return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+    }
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+  return c.json({
+    source: buildAppSourceInfo(row, safeManifest(row.manifest), resolveBaseUrlFromRequest(c)),
+  });
+});
+
+hubRouter.get('/:slug/openapi.json', async (c) => {
+  const slug = c.req.param('slug');
+  const row = db.prepare('SELECT * FROM apps WHERE slug = ?').get(slug) as AppRecord | undefined;
+  if (!row) return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  const ctx = await resolveUserContext(c);
+  const access = getAppAccessDecision(row, ctx, c.req.query('key') || null);
+  if (!access.ok) {
+    if (access.status === 401) {
+      return c.json({ error: 'Authentication required. Sign in and retry.', code: 'auth_required' }, 401);
+    }
+    return c.json({ error: 'App not found', code: 'not_found' }, 404);
+  }
+  if (!row.openapi_spec_cached) {
+    return c.json({ error: 'OpenAPI spec not available for this app', code: 'openapi_spec_not_found' }, 404);
+  }
+  try {
+    return c.json(JSON.parse(row.openapi_spec_cached));
+  } catch {
+    return c.json({ error: 'Stored OpenAPI spec is invalid JSON', code: 'openapi_spec_invalid' }, 500);
+  }
 });
 
 // ---------------------------------------------------------------------
