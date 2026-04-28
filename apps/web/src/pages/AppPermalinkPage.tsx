@@ -1013,7 +1013,13 @@ export function AppPermalinkPage() {
                     onClose={() => setInstallPopoverOpen(false)}
                     slug={app.slug}
                     appName={app.name}
-                    isAuthenticated={!!session}
+                    // R7.6: `session` is non-null even in local-mode (the
+                    // server returns a synthetic `is_local: true` user).
+                    // Treat is_local as anonymous for the install
+                    // popover — it's the link to /login that should
+                    // appear, not a "Mint a token →" CTA pointing at
+                    // /home (which would 401 in local mode).
+                    isAuthenticated={!!session && session.user?.is_local !== true}
                     hasToken={false}
                     firstInputName={claudeSkillFirstInput}
                   />
