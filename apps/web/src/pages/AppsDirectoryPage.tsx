@@ -324,30 +324,10 @@ export function AppsDirectoryPage() {
           rows of category chips were sticking and eating ~40% of viewport
           when scrolling the grid) and switch chips to single-row
           horizontal scroll so the toolbar is one slim row. Sticky stays
-          on >=768px where the chip grid is naturally compact. */}
-      <style>{`
-        @media (max-width: 767px) {
-          .apps-toolbar {
-            position: static !important;
-            top: auto !important;
-            padding: 12px 16px !important;
-          }
-          .apps-toolbar [data-testid="apps-chips"] {
-            flex-wrap: nowrap !important;
-            overflow-x: auto;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-            width: 100%;
-            padding-bottom: 4px;
-          }
-          .apps-toolbar [data-testid="apps-chips"]::-webkit-scrollbar {
-            display: none;
-          }
-          .apps-toolbar [data-testid="apps-chips"] button {
-            flex-shrink: 0;
-          }
-        }
-      `}</style>
+          on >=768px where the chip grid is naturally compact. The actual
+          @media rules live in styles/csp-inline-style-migrations.css —
+          inline <style> elements are blocked by the CSP style-src-elem
+          directive (PR #781). */}
 
       <main>
         {/* HEADER · v17 store.html alignment (2026-04-25).
