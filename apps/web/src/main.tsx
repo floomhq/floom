@@ -65,6 +65,11 @@ const CreatorAppPage = lazy(() => import('./pages/CreatorAppPage').then(m => ({ 
 // auth-gate through StudioLayout (cloud-only).
 const StudioHomePage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioHomePage })));
 const StudioAppsPage = lazy(() => import('./pages/StudioHomePage').then(m => ({ default: m.StudioAppsPage })));
+// v26 dashboards (#928): compact-strip pages served at /run/apps and /studio/apps.
+// v23 /me/apps (MeAppsPage) and /studio (StudioHomePage) are preserved untouched.
+// Per spec §9, /me/apps → /run/apps redirect comes in a future PR.
+const RunAppsPage = lazy(() => import('./pages/RunAppsPage').then(m => ({ default: m.RunAppsPage })));
+const StudioAppsV26Page = lazy(() => import('./pages/StudioAppsV26Page').then(m => ({ default: m.StudioAppsV26Page })));
 const StudioBuildPage = lazy(() => import('./pages/StudioBuildPage').then(m => ({ default: m.StudioBuildPage })));
 const StudioAppPage = lazy(() => import('./pages/StudioAppPage').then(m => ({ default: m.StudioAppPage })));
 const StudioRunsPage = lazy(() => import('./pages/StudioRunsPage').then(m => ({ default: m.StudioRunsPage })));
@@ -318,10 +323,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/settings/agent-tokens" element={<WaitlistGuard source="me"><SettingsAgentTokensPage /></WaitlistGuard>} />
         <Route path="/settings/studio" element={<WaitlistGuard source="me"><SettingsStudioPage /></WaitlistGuard>} />
         <Route path="/account/settings" element={<Navigate to="/settings" replace />} />
-        {/* Studio context: /studio is the creator home; /studio/apps is
-            the heavier app index. Still auth-gated and waitlist-gated. */}
+        {/* v26 §9: /run/apps — new canonical consumer apps dashboard (compact strip, issue #913).
+            v23 /me/apps (MeAppsPage with staggered grid + sparklines) is preserved above.
+            Per spec, /me/apps will redirect here in a future PR. */}
+        <Route path="/run/apps" element={<WaitlistGuard source="me"><RunAppsPage /></WaitlistGuard>} />
+        {/* Studio context: /studio is the creator home (v23 StudioHomePage preserved).
+            /studio/apps is now the v26 compact-strip dashboard (issue #913).
+            v23 StudioAppsPage accessible at /studio/apps-v23 for back-compat during transition. */}
         <Route path="/studio" element={<WaitlistGuard source="studio"><StudioHomePage /></WaitlistGuard>} />
-        <Route path="/studio/apps" element={<WaitlistGuard source="studio"><StudioAppsPage /></WaitlistGuard>} />
+        <Route path="/studio/apps" element={<WaitlistGuard source="studio"><StudioAppsV26Page /></WaitlistGuard>} />
+        <Route path="/studio/apps-v23" element={<WaitlistGuard source="studio"><StudioAppsPage /></WaitlistGuard>} />
         <Route path="/studio/runs" element={<WaitlistGuard source="studio"><StudioRunsPage /></WaitlistGuard>} />
         <Route path="/studio/build" element={<WaitlistGuard source="studio"><StudioBuildPage /></WaitlistGuard>} />
         {/* Design-audit fix 2026-04-22: /studio/new is the create-new-app
