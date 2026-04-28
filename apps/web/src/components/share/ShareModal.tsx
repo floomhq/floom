@@ -379,6 +379,70 @@ export function ShareModal({
           </button>
         </header>
 
+        {/* ───────── OG card preview (R7.6 2026-04-28) ─────────
+            Shows what the share will look like when pasted into Twitter,
+            Slack, LinkedIn, iMessage, etc. Lazy: only loads when the
+            modal is actually open (img has no `src` outside open state).
+            Aspect ratio is locked to 1200x630 (the standard OG size). */}
+        <section
+          data-testid="share-modal-og-preview"
+          style={{
+            padding: '14px 20px 0',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: 'var(--muted, #6c6a66)',
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
+              margin: '0 0 8px',
+            }}
+          >
+            Preview
+          </div>
+          <div
+            style={{
+              position: 'relative',
+              width: '100%',
+              aspectRatio: '1200 / 630',
+              borderRadius: 10,
+              overflow: 'hidden',
+              border: '1px solid var(--line, rgba(27,26,23,0.12))',
+              background: 'var(--studio, #f5f4f0)',
+            }}
+          >
+            <img
+              src={`/api/og?slug=${encodeURIComponent(slug)}`}
+              alt={`Social preview for ${appName}`}
+              data-testid="share-modal-og-image"
+              loading="lazy"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block',
+              }}
+              onError={(e) => {
+                // If /api/og isn't available (e.g. local dev without the
+                // route), hide the preview rather than show a broken
+                // image. The rest of the modal still works.
+                const target = e.currentTarget;
+                target.style.display = 'none';
+                const wrapper = target.parentElement;
+                if (wrapper) {
+                  wrapper.style.display = 'none';
+                  const section = wrapper.parentElement;
+                  if (section) section.style.display = 'none';
+                }
+              }}
+            />
+          </div>
+        </section>
+
         {/* ───────── Invite by email (owner only) ───────── */}
         {isOwner && <section style={{ padding: '16px 20px 12px' }}>
           <div

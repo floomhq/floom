@@ -890,7 +890,11 @@ export function getAppReviews(slug: string, limit = 20): Promise<{
 
 export function postReview(
   slug: string,
-  body: { rating: number; title?: string; body?: string },
+  // R7.6 (2026-04-28) — `display_anonymous` flag wired from review form.
+  // UI is ready; backend support pending — backend will start honoring
+  // this when the column lands. Until then the field is silently ignored
+  // server-side.
+  body: { rating: number; title?: string; body?: string; display_anonymous?: boolean },
 ): Promise<{ review: Review }> {
   return request(`/api/apps/${slug}/reviews`, {
     method: 'POST',

@@ -21,7 +21,7 @@
  * The existing CreatorHeroPage.tsx is kept in the tree for reference;
  * main.tsx wires "/" to this page.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Code2, Rocket, Share2 } from 'lucide-react';
 
@@ -51,30 +51,11 @@ import { readDeployEnabled, useDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 import { useSession } from '../hooks/useSession';
 
-// MVP hero install — R7.5 (2026-04-28): single npx command is the primary
-// affordance, MCP/CLI snippets demoted into a popover behind a secondary
-// link. Federico's brief: "Replace MCP JSON snippet block in hero with
-// ONE primary command: npx @floomhq/cli@latest setup". The npx setup flow
-// handles token auth interactively, so the "Need a token? Sign up" line
-// is dropped.
-//
-// IMPORTANT: secondary snippets still use the current origin so tokens
-// minted on mvp.floom.dev / floom.dev point at the host they were minted
-// on. Hardcoding floom.dev breaks the 401-on-cross-host case.
+// MVP hero install — R7.6 (2026-04-28): hero composition cut to 4 elements
+// (eyebrow, H1, sub, npx command). Caption + MCP/CLI popover removed —
+// Federico's "the landing page hero header still looks a bit overwhelming".
+// Advanced install paths (MCP config, CLI snippet) live on /home and /docs.
 const NPX_SETUP_COMMAND = 'npx @floomhq/cli@latest setup';
-const MCP_HOST = typeof window !== 'undefined' ? window.location.origin : 'https://floom.dev';
-const MVP_MCP_SNIPPET = `{
-  "mcpServers": {
-    "floom": {
-      "url": "${MCP_HOST}/mcp",
-      "headers": {
-        "Authorization": "Bearer floom_agent_<your_token>"
-      }
-    }
-  }
-}`;
-const MVP_CLI_SNIPPET = `curl -fsSL ${MCP_HOST}/install.sh | bash
-floom auth login`;
 
 async function copyText(text: string) {
   try {
@@ -95,10 +76,6 @@ async function copyText(text: string) {
 
 function MvpHeroInstall() {
   const [copied, setCopied] = useState(false);
-  const [popoverOpen, setPopoverOpen] = useState(false);
-  const [popoverTab, setPopoverTab] = useState<'mcp' | 'cli'>('mcp');
-  const [popoverCopied, setPopoverCopied] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
 
   async function handleCopy() {
     await copyText(NPX_SETUP_COMMAND);
@@ -106,38 +83,16 @@ function MvpHeroInstall() {
     window.setTimeout(() => setCopied(false), 1500);
   }
 
-  async function handlePopoverCopy(snippet: string) {
-    await copyText(snippet);
-    setPopoverCopied(true);
-    window.setTimeout(() => setPopoverCopied(false), 1500);
-  }
-
-  // Click-outside + escape handlers for popover.
-  useEffect(() => {
-    if (!popoverOpen) return;
-    function onClick(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setPopoverOpen(false);
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setPopoverOpen(false);
-    }
-    document.addEventListener('mousedown', onClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [popoverOpen]);
-
-  const activeSnippet = popoverTab === 'mcp' ? MVP_MCP_SNIPPET : MVP_CLI_SNIPPET;
+  // R7.6 (2026-04-28): MCP/CLI snippet popover removed from hero.
+  // Federico's brief: cut hero to 4 elements. Advanced install paths
+  // (MCP config, CLI snippet) live on /home and /docs — not in the
+  // first viewport.
 
   return (
     <div style={{ maxWidth: 540, margin: '20px auto 0', textAlign: 'left' }}>
-      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px', textAlign: 'center' }}>
-        One command. Sets up MCP, mints a token, and you&rsquo;re live.
-      </p>
+      {/* R7.6 (2026-04-28): caption "One command. Sets up MCP, mints a token,
+          you're live." removed — redundant with the npx command beneath it.
+          Federico's brief: cut hero to 4 elements (eyebrow, H1, sub, command). */}
       <div style={{ position: 'relative' }}>
         <pre
           data-testid="hero-npx-command"
@@ -184,116 +139,6 @@ function MvpHeroInstall() {
         >
           {copied ? 'Copied' : 'Copy'}
         </button>
-      </div>
-      {/* Secondary affordance: MCP/CLI snippet popover for advanced users.
-          Drops the old "Need a token? Sign up" line — npx setup handles auth. */}
-      <div style={{ position: 'relative', textAlign: 'center', marginTop: 12 }} ref={popoverRef}>
-        <button
-          type="button"
-          data-testid="hero-snippet-popover-trigger"
-          onClick={() => setPopoverOpen((o) => !o)}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            color: 'var(--muted)',
-            fontSize: 12.5,
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            textDecoration: 'underline',
-            textDecorationColor: 'var(--line)',
-            textUnderlineOffset: 3,
-          }}
-          aria-expanded={popoverOpen}
-          aria-haspopup="dialog"
-        >
-          Prefer MCP config or CLI snippet? →
-        </button>
-        {popoverOpen && (
-          <div
-            role="dialog"
-            data-testid="hero-snippet-popover"
-            style={{
-              position: 'absolute',
-              top: 'calc(100% + 8px)',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 'min(520px, calc(100vw - 48px))',
-              background: 'var(--card)',
-              border: '1px solid var(--line)',
-              borderRadius: 10,
-              boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
-              padding: 14,
-              textAlign: 'left',
-              zIndex: 50,
-            }}
-          >
-            <div style={{ display: 'flex', gap: 4, marginBottom: 10, borderBottom: '1px solid var(--line)' }}>
-              {(['mcp', 'cli'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setPopoverTab(tab)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    padding: '6px 12px',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    fontFamily: 'inherit',
-                    color: popoverTab === tab ? 'var(--ink)' : 'var(--muted)',
-                    borderBottom: popoverTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
-                    cursor: 'pointer',
-                    marginBottom: -1,
-                  }}
-                >
-                  {tab.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div style={{ position: 'relative' }}>
-              <pre
-                style={{
-                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                  fontSize: 11,
-                  background: 'var(--studio, #f5f4f0)',
-                  color: 'var(--ink)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 8,
-                  padding: '10px 64px 10px 12px',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre',
-                  lineHeight: 1.5,
-                  margin: 0,
-                  maxHeight: 220,
-                }}
-              >
-                {activeSnippet}
-              </pre>
-              <button
-                type="button"
-                onClick={() => void handlePopoverCopy(activeSnippet)}
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: popoverCopied ? 'var(--muted)' : 'var(--accent)',
-                  background: 'var(--card)',
-                  border: `1px solid ${popoverCopied ? 'var(--line)' : 'rgba(4,120,87,0.35)'}`,
-                  borderRadius: 6,
-                  padding: '3px 10px',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                }}
-                aria-label={popoverCopied ? 'Copied' : `Copy ${popoverTab.toUpperCase()} snippet`}
-              >
-                {popoverCopied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -642,14 +487,13 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
             )}
           </div>
 
-          {/* Hero demo — interactive 3-state build/deploy/use loop.
-              Sits directly under the CTAs. Sized to 580px (Cursor-style,
-              Federico 2026-04-23): top ~120-150px is visible above the fold
-              at 1440x900, rest scrolls into view. Bigger canvas = more
-              cinematic, no squishing to fit the viewport.
-              MVP variant: KEEP (Federico 2026-04-28 — visual hero asset
-              is essential, install snippet sits below it not instead). */}
-          <HeroDemo />
+          {/* R7.6 (2026-04-28): HeroDemo moved out of hero section.
+              Federico's brief: hero is too overwhelming with 7 elements
+              pre-fold. HeroDemo now plays as a "show me" element after
+              the 3-step explanation (see below "From idea to shipped app
+              in 3 steps"). First viewport = eyebrow + H1 + sub + npx.
+              Full variant keeps the demo here; MVP variant moves it. */}
+          {!isMvp && <HeroDemo />}
         </section>
 
         {/* Compact CLI reference strip below the hero — smaller than the
@@ -767,6 +611,19 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
             })}
           </div>
         </section>
+
+        {/* R7.6 (2026-04-28): HeroDemo moved here for MVP variant.
+            Federico's brief: hero pre-fold composition was overwhelming.
+            HeroDemo now plays as a "show me" element AFTER the 3-step
+            explanation reads it aloud. */}
+        {isMvp && (
+          <section
+            data-testid="mvp-hero-demo-section"
+            style={{ padding: '0 28px 64px', maxWidth: 1240, margin: '0 auto' }}
+          >
+            <HeroDemo />
+          </section>
+        )}
 
         {/* WORKED EXAMPLE — MVP variant: dropped (heavy). */}
         {!isMvp && <WorkedExample />}

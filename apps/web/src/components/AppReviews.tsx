@@ -209,6 +209,7 @@ function ReviewModal({
   const [hover, setHover] = useState(0);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [displayAnonymous, setDisplayAnonymous] = useState(false);
   const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -217,7 +218,16 @@ function ReviewModal({
     setState('saving');
     setError(null);
     try {
-      await api.postReview(slug, { rating, title: title || undefined, body: body || undefined });
+      // Display-anonymous flag — UI ready, backend support pending.
+      // R7.6 (2026-04-28): wires the checkbox to the POST body so the
+      // server can honor it once the column lands. Until then the field
+      // is ignored server-side; the checkbox is purely declarative.
+      await api.postReview(slug, {
+        rating,
+        title: title || undefined,
+        body: body || undefined,
+        display_anonymous: displayAnonymous || undefined,
+      });
       onSaved();
     } catch (err) {
       setState('error');
@@ -307,6 +317,32 @@ function ReviewModal({
           data-testid="review-body"
           style={{ ...inputStyle, resize: 'vertical' }}
         />
+
+        {/* R7.6 (2026-04-28): display-anonymous checkbox.
+            UI ready, backend support pending — wired to POST body but
+            silently ignored server-side until the column lands. */}
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 12,
+            fontSize: 13,
+            color: 'var(--ink)',
+            cursor: 'pointer',
+          }}
+          data-testid="review-anonymous-label"
+        >
+          <input
+            type="checkbox"
+            id="display-anonymous"
+            checked={displayAnonymous}
+            onChange={(e) => setDisplayAnonymous(e.target.checked)}
+            data-testid="review-display-anonymous"
+            style={{ accentColor: 'var(--accent)', cursor: 'pointer' }}
+          />
+          Display anonymously
+        </label>
 
         {error && (
           <p

@@ -1,11 +1,16 @@
 /**
- * ClaudeSkillModal — "Install as Claude Skill" dialog for /p/:slug.
+ * SkillModal — agent-agnostic "Install as Skill" dialog for /p/:slug.
+ *
+ * R7.6 (2026-04-28) — renamed from ClaudeSkillModal. Federico's brief:
+ * the install affordance is agent-agnostic (Claude Code, Cursor, Codex,
+ * any agent that supports markdown skills). Modal copy + paste paths
+ * reflect that — no longer Claude-specific.
  *
  * Front-door for the backend route shipped in PR #761
- * (apps/server/src/routes/skill.ts). The route serves a Claude Skill
- * markdown file at GET /p/:slug/skill.md; this modal teaches a user how
- * to wire that file into Claude Code so the app becomes callable as a
- * skill from inside their session.
+ * (apps/server/src/routes/skill.ts). The route serves a markdown skill
+ * file at GET /p/:slug/skill.md; this modal teaches a user how to wire
+ * that file into their agent of choice so the app becomes callable as
+ * a skill from inside their session.
  *
  * Modal scaffolding mirrors BYOKModal — same backdrop, --card surface,
  * single accent button, Escape-to-close. No new modal primitive.
@@ -14,11 +19,11 @@
  * sanitised at ingest (lowercase, hyphenated, alphanumeric) so no
  * encoding hacks are needed in the curl block.
  */
-import { useEffect } from 'react';
-import { Sparkles, Terminal, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Sparkles, Terminal, X, Download } from 'lucide-react';
 import { CopyButton } from '../output/CopyButton';
 
-export interface ClaudeSkillModalProps {
+export interface SkillModalProps {
   open: boolean;
   onClose: () => void;
   /** App slug — used to build the skill.md URL and the install path. */
@@ -40,18 +45,44 @@ export interface ClaudeSkillModalProps {
   origin?: string;
 }
 
-export function ClaudeSkillModal({
+type AgentId = 'claude-code' | 'cursor' | 'codex';
+
+const AGENTS: Array<{
+  id: AgentId;
+  label: string;
+  pastePath: (slug: string) => string;
+}> = [
+  {
+    id: 'claude-code',
+    label: 'Claude Code',
+    pastePath: (slug) => `~/.claude/skills/${slug}/SKILL.md`,
+  },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    pastePath: (slug) => `~/.cursor/skills/${slug}/SKILL.md`,
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    pastePath: (slug) => `~/.codex/skills/${slug}/SKILL.md`,
+  },
+];
+
+export function SkillModal({
   open,
   onClose,
   slug,
   appName,
   firstInputName,
   origin,
-}: ClaudeSkillModalProps) {
+}: SkillModalProps) {
+  const [activeAgent, setActiveAgent] = useState<AgentId>('claude-code');
+
   // Close on Escape. Mirrors ShareModal's keyboard handling at a smaller
-  // surface — no focus trap needed: the modal has at most three
-  // interactive elements (close, two copy buttons) and tab-cycling
-  // through them naturally stays inside the dialog.
+  // surface — no focus trap needed: the modal has at most a handful of
+  // interactive elements (close, tab buttons, copy buttons, download)
+  // and tab-cycling through them naturally stays inside the dialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -70,10 +101,16 @@ export function ClaudeSkillModal({
     origin ||
     (typeof window !== 'undefined' ? window.location.origin : 'https://floom.dev');
 
+  const skillUrl = `${baseOrigin}/p/${slug}/skill.md`;
+
+  const agent = AGENTS.find((a) => a.id === activeAgent) ?? AGENTS[0];
+  const pastePath = agent.pastePath(slug);
+  // Strip the trailing /SKILL.md so `mkdir -p` lines up under the
+  // path the user actually sees in the paste-path label.
   const installCommand = [
-    `mkdir -p ~/.claude/skills/${slug}`,
-    `curl -fsSL ${baseOrigin}/p/${slug}/skill.md \\`,
-    `  -o ~/.claude/skills/${slug}/SKILL.md`,
+    `mkdir -p ${pastePath.replace(/\/SKILL\.md$/, '')}`,
+    `curl -fsSL ${skillUrl} \\`,
+    `  -o ${pastePath}`,
   ].join('\n');
 
   const examplePrompt = firstInputName
@@ -84,8 +121,8 @@ export function ClaudeSkillModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="claude-skill-modal-title"
-      data-testid="claude-skill-modal"
+      aria-labelledby="skill-modal-title"
+      data-testid="skill-modal"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -100,14 +137,14 @@ export function ClaudeSkillModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="claude-skill-modal-surface"
+        className="skill-modal-surface"
         style={{
           background: 'var(--card)',
           color: 'var(--ink)',
           border: '1px solid var(--line)',
           borderRadius: 14,
           width: '100%',
-          maxWidth: 520,
+          maxWidth: 540,
           maxHeight: 'calc(100vh - 32px)',
           overflow: 'auto',
           boxShadow: '0 20px 60px rgba(27,26,23,0.25)',
@@ -127,7 +164,7 @@ export function ClaudeSkillModal({
           }}
         >
           <h2
-            id="claude-skill-modal-title"
+            id="skill-modal-title"
             style={{
               fontSize: 15.5,
               fontWeight: 600,
@@ -138,7 +175,7 @@ export function ClaudeSkillModal({
               whiteSpace: 'nowrap',
             }}
           >
-            Install {appName} as a Claude Skill
+            Install {appName} as a Skill
           </h2>
           <button
             type="button"
@@ -162,7 +199,7 @@ export function ClaudeSkillModal({
         {/* What this is */}
         <section style={{ padding: '14px 20px 6px' }}>
           <p
-            data-testid="claude-skill-modal-blurb"
+            data-testid="skill-modal-blurb"
             style={{
               fontSize: 13.5,
               color: 'var(--muted)',
@@ -170,9 +207,52 @@ export function ClaudeSkillModal({
               margin: 0,
             }}
           >
-            Run this app from inside your AI tool with one prompt. Your agent
-            reads the skill file and knows how to call your endpoint.
+            Save this skill file to your agent. Works in Claude Code, Cursor,
+            Codex, and any agent that supports markdown skills.
           </p>
+        </section>
+
+        {/* Agent tab bar */}
+        <section style={{ padding: '12px 20px 0' }}>
+          <div
+            role="tablist"
+            aria-label="Agent"
+            data-testid="skill-modal-agent-tabs"
+            style={{
+              display: 'flex',
+              gap: 2,
+              borderBottom: '1px solid var(--line)',
+            }}
+          >
+            {AGENTS.map((a) => {
+              const active = a.id === activeAgent;
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`skill-modal-tab-${a.id}`}
+                  onClick={() => setActiveAgent(a.id)}
+                  style={{
+                    padding: '8px 14px',
+                    fontSize: 12.5,
+                    fontWeight: active ? 700 : 500,
+                    border: 'none',
+                    background: 'transparent',
+                    color: active ? 'var(--ink)' : 'var(--muted)',
+                    borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+                    marginBottom: -1,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {a.label}
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         {/* Step 1 — save the skill file */}
@@ -190,14 +270,14 @@ export function ClaudeSkillModal({
               margin: '0 0 8px',
             }}
           >
-            Step 1 — save the skill file
+            Step 1 — save to {agent.label}
           </div>
           <div
-            data-testid="claude-skill-modal-install-block"
+            data-testid="skill-modal-install-block"
             style={{
               border: '1px solid var(--line)',
               borderRadius: 10,
-              background: 'var(--bg)',
+              background: 'var(--studio, #f5f4f0)',
               padding: '10px 12px',
               position: 'relative',
             }}
@@ -231,6 +311,34 @@ export function ClaudeSkillModal({
               />
             </div>
           </div>
+          {/* Direct download fallback for users who prefer not to curl. */}
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <a
+              href={skillUrl}
+              data-testid="skill-modal-download"
+              download={`${slug}.skill.md`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: 'var(--accent)',
+                textDecoration: 'none',
+                fontFamily: 'inherit',
+              }}
+            >
+              <Download size={13} aria-hidden="true" /> Download skill.md
+            </a>
+            <span
+              style={{
+                fontSize: 11.5,
+                color: 'var(--muted)',
+              }}
+            >
+              Save to <code style={{ fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11.5 }}>{pastePath}</code>
+            </span>
+          </div>
         </section>
 
         {/* Step 2 — use it */}
@@ -248,10 +356,10 @@ export function ClaudeSkillModal({
               margin: '6px 0 8px',
             }}
           >
-            Step 2 — use it in your AI tool
+            Step 2 — use it in {agent.label}
           </div>
           <div
-            data-testid="claude-skill-modal-example"
+            data-testid="skill-modal-example"
             style={{
               display: 'flex',
               alignItems: 'flex-start',
@@ -259,7 +367,7 @@ export function ClaudeSkillModal({
               border: '1px solid var(--line)',
               borderRadius: 10,
               padding: '10px 12px',
-              background: 'var(--bg)',
+              background: 'var(--studio, #f5f4f0)',
             }}
           >
             <Terminal
@@ -276,7 +384,7 @@ export function ClaudeSkillModal({
                   lineHeight: 1.5,
                 }}
               >
-                Open your AI tool and ask:
+                Open {agent.label} and ask:
               </p>
               <p
                 style={{
@@ -299,11 +407,11 @@ export function ClaudeSkillModal({
       {/* Mobile bottom-sheet polish — same pattern as ShareModal. */}
       <style>{`
         @media (max-width: 640px) {
-          [data-testid="claude-skill-modal"] {
+          [data-testid="skill-modal"] {
             align-items: flex-end !important;
             padding: 0 !important;
           }
-          [data-testid="claude-skill-modal"] .claude-skill-modal-surface {
+          [data-testid="skill-modal"] .skill-modal-surface {
             max-width: 100% !important;
             width: 100% !important;
             max-height: 92vh !important;
@@ -315,12 +423,19 @@ export function ClaudeSkillModal({
   );
 }
 
-export default ClaudeSkillModal;
+export default SkillModal;
 
 // Marker icon export so the trigger button on /p/:slug uses the same
 // Sparkles glyph as the modal header. Keeps a single visual identity
-// for the "Claude Skill" affordance without forcing the page to import
+// for the "Skill" affordance without forcing the page to import
 // lucide directly for one icon.
-export function ClaudeSkillIcon({ size = 14 }: { size?: number }) {
+export function SkillIcon({ size = 14 }: { size?: number }) {
   return <Sparkles size={size} aria-hidden="true" />;
 }
+
+// R7.6 (2026-04-28): backwards-compat aliases. Earlier callers imported
+// `ClaudeSkillModal` / `ClaudeSkillIcon` from this file under the old
+// name — keep the symbols exported so a stale import on another branch
+// does not break the build. Remove once all callers are migrated.
+export const ClaudeSkillModal = SkillModal;
+export const ClaudeSkillIcon = SkillIcon;

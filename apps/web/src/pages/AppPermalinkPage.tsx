@@ -29,10 +29,13 @@ import { FeedbackButton } from '../components/FeedbackButton';
 import { DescriptionMarkdown } from '../components/DescriptionMarkdown';
 import { Confetti } from '../components/Confetti';
 import { ShareModal } from '../components/share/ShareModal';
-import {
-  ClaudeSkillModal,
-  ClaudeSkillIcon,
-} from '../components/share/ClaudeSkillModal';
+// R7.6 (2026-04-28): renamed file ClaudeSkillModal → SkillModal.
+// SkillModal still re-exports the old `ClaudeSkillModal` / `ClaudeSkillIcon`
+// names for backwards compat, but new code should use `SkillModal` /
+// `SkillIcon`. See components/share/SkillModal.tsx.
+import { SkillModal } from '../components/share/SkillModal';
+import { InstallPopover } from '../components/share/InstallPopover';
+import { Download as DownloadIcon } from 'lucide-react';
 import { getApp, getAppReviews, getRun, shareRun, ApiError } from '../api/client';
 import { useSession } from '../hooks/useSession';
 import type { ActionSpec, AppDetail, ReviewSummary, RunRecord } from '../lib/types';
@@ -107,9 +110,14 @@ export function AppPermalinkPage() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareModalUrl, setShareModalUrl] = useState<string>('');
   // PR #761 follow-up: front-door for the /p/:slug/skill.md backend
-  // route. The hero CTA "Install as Claude Skill" opens this modal,
-  // which shows the curl one-liner + an example Claude Code prompt.
+  // route. The hero CTA "Install as Skill" opens this modal,
+  // which shows the curl one-liner + an example agent prompt.
+  // R7.6 (2026-04-28): SkillModal still exists for backwards-compat
+  // with the previous "Install as Skill" button + deep links, but the
+  // primary install affordance is now the unified InstallPopover that
+  // covers MCP / CLI / Skill in one surface.
   const [claudeSkillModalOpen, setClaudeSkillModalOpen] = useState(false);
+  const [installPopoverOpen, setInstallPopoverOpen] = useState(false);
 
   // v16 restructure: /p/:slug is tabbed now (Run / About / Install / Source).
   // Run is the default — the previous product-page layout made users scroll
@@ -968,13 +976,20 @@ export function AppPermalinkPage() {
                 flexWrap: 'wrap',
               }}
             >
-              {/* v26 Install in workspace CTA */}
-              {session ? (
+              {/* R7.6 (2026-04-28): unified Install button. Replaces the
+                  previous two-button cluster ("+ Install in workspace"
+                  disabled stub + "Install as Skill" modal). Federico's
+                  brief: ONE primary Install button that opens a popover
+                  with MCP / CLI / Skill tabs. The disabled stub was a
+                  dead end; the popover always returns a working snippet. */}
+              <div style={{ position: 'relative' }}>
                 <button
                   type="button"
-                  disabled
-                  title="Install coming soon"
-                  data-testid="cta-install-workspace"
+                  data-testid="cta-install"
+                  aria-label="Install"
+                  aria-haspopup="dialog"
+                  aria-expanded={installPopoverOpen}
+                  onClick={() => setInstallPopoverOpen((o) => !o)}
                   style={{
                     padding: '8px 14px',
                     border: '1px solid var(--ink)',
@@ -983,62 +998,27 @@ export function AppPermalinkPage() {
                     fontWeight: 600,
                     color: '#fff',
                     background: 'var(--ink)',
-                    cursor: 'not-allowed',
-                    fontFamily: 'inherit',
-                    opacity: 0.5,
-                  }}
-                >
-                  + Install in workspace
-                </button>
-              ) : (
-                <a
-                  href="/login"
-                  data-testid="cta-install-anon"
-                  style={{
-                    padding: '8px 14px',
-                    border: '1px solid var(--ink)',
-                    borderRadius: 10,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: '#fff',
-                    background: 'var(--ink)',
-                    textDecoration: 'none',
+                    cursor: 'pointer',
                     fontFamily: 'inherit',
                     display: 'inline-flex',
                     alignItems: 'center',
+                    gap: 6,
                   }}
                 >
-                  Sign in to install
-                </a>
-              )}
-              {/* PR #761 front-door: "Install as Claude Skill" trigger
-                  for the /p/:slug/skill.md backend route. Same chrome as
-                  the Share button so the two CTAs read as a pair (no new
-                  colours, no gradients). Sits to the LEFT of Share so
-                  the primary social affordance (Share) keeps its
-                  rightmost position in the hero action cluster. */}
-              <button
-                type="button"
-                data-testid="cta-install-claude-skill"
-                aria-label="Install as Skill"
-                onClick={() => setClaudeSkillModalOpen(true)}
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 10,
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  color: 'var(--ink)',
-                  background: 'var(--card)',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <ClaudeSkillIcon /> Install as Skill
-              </button>
+                  <DownloadIcon size={14} aria-hidden="true" /> Install
+                </button>
+                {app && (
+                  <InstallPopover
+                    open={installPopoverOpen}
+                    onClose={() => setInstallPopoverOpen(false)}
+                    slug={app.slug}
+                    appName={app.name}
+                    isAuthenticated={!!session}
+                    hasToken={false}
+                    firstInputName={claudeSkillFirstInput}
+                  />
+                )}
+              </div>
               <button
                 type="button"
                 data-testid="cta-share"
@@ -1733,7 +1713,7 @@ export function AppPermalinkPage() {
       )}
 
       {app && (
-        <ClaudeSkillModal
+        <SkillModal
           open={claudeSkillModalOpen}
           onClose={() => setClaudeSkillModalOpen(false)}
           slug={app.slug}
