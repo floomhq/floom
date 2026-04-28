@@ -1251,6 +1251,52 @@ export function AppPermalinkPage() {
                   onResetInitialRun={handleResetInitialRun}
                   onResult={handleRunResult}
                 />
+                {/* R7.8 (2026-04-28): inline privacy/data-handling note.
+                    Gemini audit P0: trust signals were missing on /p/:slug.
+                    A single mono-monospace line below the run surface tells
+                    the visitor what happens to their inputs without taking
+                    visual real estate from the run flow itself. Links to
+                    /privacy for the full policy. */}
+                <div
+                  data-testid="ap-privacy-note"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginTop: 20,
+                    padding: '10px 14px',
+                    border: '1px solid var(--line)',
+                    borderRadius: 10,
+                    background: 'var(--bg)',
+                    fontSize: 12,
+                    color: 'var(--muted)',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    style={{ flexShrink: 0, color: 'var(--accent)' }}
+                  >
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                  <span>
+                    Your inputs are sent to {app.manifest?.name ?? app.name} to produce a result. Floom doesn't sell or share run data.{' '}
+                    <a
+                      href="/privacy"
+                      style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+                    >
+                      Privacy →
+                    </a>
+                  </span>
+                </div>
                 {/* v26 3-card footer */}
                 <div
                   data-testid="ap-foot-grid"
