@@ -541,14 +541,14 @@ export function AppPermalinkPage() {
 
   /** Truthy manifest / hub fields as compact chips (Issue #284). */
   const capabilityChips = useMemo(() => {
-    if (!app) return [] as Array<{ key: string; label: string }>;
-    const out: Array<{ key: string; label: string }> = [];
+    if (!app) return [] as Array<{ key: string; label: string; mono?: boolean }>;
+    const out: Array<{ key: string; label: string; mono?: boolean }> = [];
     const seen = new Set<string>();
-    const add = (key: string, label: string) => {
+    const add = (key: string, label: string, opts?: { mono?: boolean }) => {
       const t = label.trim();
       if (!t || seen.has(t)) return;
       seen.add(t);
-      out.push({ key, label: t });
+      out.push({ key, label: t, mono: opts?.mono });
     };
     const titleCaseWords = (s: string) =>
       s
@@ -580,7 +580,9 @@ export function AppPermalinkPage() {
     }
     for (const s of app.manifest.secrets_needed ?? []) {
       if (typeof s === 'string' && s.trim()) {
-        add(`sec-${s}`, `App creator secrets: ${s.trim()}`);
+        // R7 U2: dropped "App creator secrets: " prefix — was truncating to
+        // "GEMI..." at 1280-1440px. Just render the key name as a mono pill.
+        add(`sec-${s}`, s.trim(), { mono: true });
       }
     }
     if (app.is_async) add('async', 'Async jobs');
@@ -938,10 +940,13 @@ export function AppPermalinkPage() {
                       borderRadius: 999,
                       border: '1px solid var(--line)',
                       color: 'var(--muted)',
-                      background: 'var(--bg)',
-                      letterSpacing: '0.02em',
+                      background: c.mono ? 'var(--studio, #f5f4f0)' : 'var(--bg)',
+                      letterSpacing: c.mono ? 0 : '0.02em',
                       whiteSpace: 'nowrap',
                       flexShrink: 0,
+                      fontFamily: c.mono
+                        ? "'JetBrains Mono', ui-monospace, monospace"
+                        : undefined,
                     }}
                   >
                     {c.label}
@@ -1779,12 +1784,18 @@ function InstallCard({
     >
       <h3 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 4px', color: 'var(--ink)' }}>{title}</h3>
       <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 12px', lineHeight: 1.55 }}>{desc}</p>
+      {/* R7 U5 (2026-04-28): converted from warm-dark `--code` bg to light
+          tinted `--studio` bg, mirroring SourceSnippet (G8) and the global
+          "no black copy boxes" rule. The Install tab snippets were reading
+          as pure-black on screen — Federico's terminal-never-black rule
+          applies. */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          background: 'var(--code, #1b1a17)',
+          background: 'var(--studio, #f5f4f0)',
+          border: '1px solid var(--line)',
           borderRadius: 8,
           padding: '8px 10px',
         }}
@@ -1794,7 +1805,7 @@ function InstallCard({
             flex: 1,
             fontFamily: 'JetBrains Mono, ui-monospace, monospace',
             fontSize: 12,
-            color: 'var(--code-text, #e2e0d9)',
+            color: 'var(--ink)',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',
           }}
@@ -1804,9 +1815,9 @@ function InstallCard({
           type="button"
           onClick={handleCopy}
           style={{
-            background: 'rgba(255,255,255,0.08)',
-            color: copied ? '#a7f3d0' : 'var(--code-text, #e2e0d9)',
-            border: '1px solid rgba(255,255,255,0.15)',
+            background: 'var(--card)',
+            color: copied ? 'var(--muted)' : 'var(--accent)',
+            border: `1px solid ${copied ? 'var(--line)' : 'rgba(4,120,87,0.35)'}`,
             borderRadius: 6,
             padding: '5px 10px',
             fontSize: 11,

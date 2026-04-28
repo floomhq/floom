@@ -334,7 +334,10 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               <p
                 data-testid="hero-backed-by"
                 style={{
-                  margin: '0 auto 28px',
+                  // R7 U3: gap from BACKED-BY → H1 widened 28 → 32 for more
+                  // vertical breathing room. Hero is calmer with the H1
+                  // sitting on its own line of breath.
+                  margin: '0 auto 32px',
                   fontSize: 11.5,
                   color: 'var(--muted)',
                   letterSpacing: '0.10em',
@@ -390,7 +393,8 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               style={{
                 fontFamily: "'Inter', system-ui, sans-serif",
                 fontSize: 19,
-                lineHeight: 1.5,
+                // R7 U3: tightened from 1.5 to 1.45 — sub was reading airy.
+                lineHeight: 1.45,
                 fontWeight: 400,
                 color: 'var(--muted)',
                 maxWidth: 640,
@@ -411,11 +415,12 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               <>
                 <MvpHeroInstall />
                 {/* G1 (2026-04-28): WorksWithBelt as a soft caption under
-                    the snippet — visually subdued (small + reduced
-                    opacity) so it reads as "and works with these
-                    clients" rather than another heavy element competing
-                    with H1+snippet. */}
-                <div style={{ marginTop: 28, opacity: 0.85 }}>
+                    the snippet — visually subdued.
+                    R7 U3 (2026-04-28): pushed further into the background
+                    (opacity 0.85 → 0.7, marginTop 28 → 32) so the lead
+                    promise reads as a quiet caption, not a second hero
+                    element competing with H1+snippet. */}
+                <div style={{ marginTop: 32, opacity: 0.7 }}>
                   <WorksWithBelt />
                 </div>
               </>
