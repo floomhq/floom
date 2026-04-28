@@ -70,6 +70,11 @@ const StudioAppsPage = lazy(() => import('./pages/StudioHomePage').then(m => ({ 
 // Per spec §9, /me/apps → /run/apps redirect comes in a future PR.
 const RunAppsPage = lazy(() => import('./pages/RunAppsPage').then(m => ({ default: m.RunAppsPage })));
 const StudioAppsV26Page = lazy(() => import('./pages/StudioAppsV26Page').then(m => ({ default: m.StudioAppsV26Page })));
+// v26 /run/runs + /run/runs/:runId — consumer workspace runs list + detail.
+// Mirrors MeRunsPage/MeRunDetailPage data but uses WorkspacePageShell mode="run".
+// MeRunsPage at /me/runs is preserved untouched (COEXIST strategy).
+const RunRunsPage = lazy(() => import('./pages/RunRunsPage').then(m => ({ default: m.RunRunsPage })));
+const RunRunDetailPage = lazy(() => import('./pages/RunRunDetailPage').then(m => ({ default: m.RunRunDetailPage })));
 const StudioBuildPage = lazy(() => import('./pages/StudioBuildPage').then(m => ({ default: m.StudioBuildPage })));
 const StudioAppPage = lazy(() => import('./pages/StudioAppPage').then(m => ({ default: m.StudioAppPage })));
 const StudioRunsPage = lazy(() => import('./pages/StudioRunsPage').then(m => ({ default: m.StudioRunsPage })));
@@ -329,6 +334,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             v23 /me/apps (MeAppsPage with staggered grid + sparklines) is preserved above.
             Per spec, /me/apps will redirect here in a future PR. */}
         <Route path="/run/apps" element={<WaitlistGuard source="me"><RunAppsPage /></WaitlistGuard>} />
+        {/* v26 /run/runs + /run/runs/:runId — workspace runs list + detail (WorkspaceShell).
+            v23 /me/runs (MeRunsPage) is preserved untouched (COEXIST strategy). */}
+        <Route path="/run/runs" element={<WaitlistGuard source="me"><RunRunsPage /></WaitlistGuard>} />
+        <Route path="/run/runs/:runId" element={<WaitlistGuard source="me"><RunRunDetailPage /></WaitlistGuard>} />
         {/* Studio context: /studio is the creator home (v23 StudioHomePage preserved).
             /studio/apps is now the v26 compact-strip dashboard (issue #913).
             v23 StudioAppsPage accessible at /studio/apps-v23 for back-compat during transition. */}
