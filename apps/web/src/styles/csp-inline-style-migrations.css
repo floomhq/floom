@@ -361,3 +361,19 @@
   70%  { box-shadow: 0 0 0 14px rgba(16, 185, 129, 0); }
   100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
+
+/* R8 #25 (2026-04-28): MVP landing showcase + directory responsive
+   breakpoints. Originally inline <style> in LandingV17Page.tsx but CSP
+   style-src-elem blocks inline style elements. Moved here so the rules
+   actually apply at narrow viewports — without this, the showcase
+   stayed at 3 columns even on mobile. */
+@media (max-width: 880px) {
+  .mvp-showcase-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .mvp-showcase-grid-fallback { grid-template-columns: repeat(2, 1fr) !important; }
+  .mvp-directory-grid-fallback { grid-template-columns: repeat(2, 1fr) !important; }
+}
+@media (max-width: 640px) {
+  .mvp-showcase-grid { grid-template-columns: 1fr !important; }
+  .mvp-showcase-grid-fallback { grid-template-columns: 1fr !important; }
+  .mvp-directory-grid-fallback { grid-template-columns: 1fr !important; }
+}
