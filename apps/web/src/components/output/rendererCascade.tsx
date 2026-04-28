@@ -501,7 +501,16 @@ function autoPick(
               bordered
               actions={<CopyButton value={JSON.stringify(runOutput, null, 2)} label="Copy JSON" />}
             />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16 }}>
+            {/* G7 (2026-04-28): tighten inner padding + gap.
+                Federico: "running is better, output is a very nested
+                table. I think what we have on the wireframes looked
+                better." Inner cards are flattened via CSS rule (see
+                .floom-auto-composite-multi .app-expanded-card in
+                globals.css). */}
+            <div
+              className="floom-auto-composite-body"
+              style={{ display: 'flex', flexDirection: 'column', gap: 22, padding: '20px 22px' }}
+            >
               {children}
             </div>
           </div>
@@ -603,7 +612,12 @@ function autoPick(
             bordered
             actions={<CopyButton value={JSON.stringify(runOutput, null, 2)} label="Copy JSON" />}
           />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16 }}>
+          {/* G7 (2026-04-28): tighten inner padding + gap. Inner cards
+              flattened via CSS rule (see globals.css). */}
+          <div
+            className="floom-auto-composite-body"
+            style={{ display: 'flex', flexDirection: 'column', gap: 22, padding: '20px 22px' }}
+          >
             {children}
           </div>
         </div>

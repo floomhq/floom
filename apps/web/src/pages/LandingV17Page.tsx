@@ -28,6 +28,7 @@ import { ArrowRight, Code2, Rocket, Share2 } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { PublicFooter } from '../components/public/PublicFooter';
 import { AppStripe } from '../components/public/AppStripe';
+import { AppShowcaseCard } from '../components/public/AppShowcaseCard';
 import { FeedbackButton } from '../components/FeedbackButton';
 
 import { WorksWithBelt } from '../components/home/WorksWithBelt';
@@ -236,35 +237,37 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
       <TopBar />
 
       {/* v26 §3 option C: resume banner for authenticated users.
-          Only shown when session is confirmed authenticated (not while loading).
-          Logged-out users never see this. */}
+          G1 (2026-04-28): slimmed to a 1-line stripe so it doesn't
+          compete with the hero. Federico: "the composition still is
+          a bit overwhelming". */}
       {isAuthenticated && session && (
         <div
           data-testid="landing-resume-banner"
           style={{
-            background: 'var(--card)',
+            background: 'var(--studio, #f5f4f0)',
             borderBottom: '1px solid var(--line)',
-            padding: '10px 24px',
+            padding: '6px 24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 12,
+            gap: 8,
+            fontSize: 12.5,
+            lineHeight: 1.4,
           }}
         >
-          <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+          <span style={{ color: 'var(--muted)' }}>
             You're signed in.
           </span>
           <Link
             to="/run/apps"
             data-testid="landing-resume-cta"
             style={{
-              fontSize: 13,
-              fontWeight: 700,
+              fontWeight: 600,
               color: 'var(--accent)',
               textDecoration: 'none',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 5,
+              gap: 4,
             }}
           >
             Resume in{' '}
@@ -286,7 +289,7 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
           data-testid="hero"
           style={{
             position: 'relative',
-            padding: '24px 24px 40px',
+            padding: isMvp ? '64px 24px 56px' : '24px 24px 40px',
             borderBottom: '1px solid var(--line)',
             background:
               'linear-gradient(180deg, var(--card) 0%, var(--bg) 100%)',
@@ -299,13 +302,42 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               textAlign: 'center',
             }}
           >
-            {/* F8 (2026-04-28): hero composition cleanup. Federico:
-                "how to make the hero header cleaner? so much going on...
-                the composition is overwhelming". WorksWithBelt moved
-                from ABOVE H1 to UNDER the install snippet (full variant
-                only — the MVP variant moves it inline below MvpHeroInstall
-                so the H1 is the single focal point). Tighter vertical
-                spacing on the H1 too. */}
+            {/* G1 (2026-04-28): hero composition. Federico said the hero
+                still felt overwhelming. Solution:
+                - Lift "Backed by Founders Inc" ABOVE H1 as a quiet eyebrow
+                  (positions the product, doesn't compete with the H1)
+                - Add vertical breathing room around H1 + sub
+                - Demote WorksWithBelt to a soft caption under the snippet
+                - Resume banner slimmed to a 1-line stripe (above) */}
+            {isMvp && (
+              <p
+                data-testid="hero-backed-by"
+                style={{
+                  margin: '0 auto 28px',
+                  fontSize: 11.5,
+                  color: 'var(--muted)',
+                  letterSpacing: '0.10em',
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                  textAlign: 'center',
+                }}
+              >
+                Backed by{' '}
+                <a
+                  href="https://f.inc"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    color: 'var(--ink)',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                  }}
+                >
+                  Founders Inc
+                </a>
+              </p>
+            )}
             {!isMvp && (
               <div style={{ marginTop: 24 }}>
                 <WorksWithBelt />
@@ -323,7 +355,7 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
                 lineHeight: 1.02,
                 letterSpacing: '-0.025em',
                 color: 'var(--ink)',
-                margin: '0 0 16px',
+                margin: isMvp ? '0 0 20px' : '0 0 16px',
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
@@ -337,11 +369,11 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               style={{
                 fontFamily: "'Inter', system-ui, sans-serif",
                 fontSize: 19,
-                lineHeight: 1.45,
+                lineHeight: 1.5,
                 fontWeight: 400,
                 color: 'var(--muted)',
                 maxWidth: 640,
-                margin: '0 auto 28px',
+                margin: isMvp ? '0 auto 36px' : '0 auto 28px',
               }}
             >
               The protocol + runtime for agentic work.
@@ -357,41 +389,14 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
             {isMvp ? (
               <>
                 <MvpHeroInstall />
-                {/* F8 (2026-04-28): WorksWithBelt moved here — UNDER the
-                    snippet as compatibility caption (was above H1).
-                    Reads as "this is what you paste — and it works with
-                    these clients" — natural reading order. */}
-                <div style={{ marginTop: 18 }}>
+                {/* G1 (2026-04-28): WorksWithBelt as a soft caption under
+                    the snippet — visually subdued (small + reduced
+                    opacity) so it reads as "and works with these
+                    clients" rather than another heavy element competing
+                    with H1+snippet. */}
+                <div style={{ marginTop: 28, opacity: 0.85 }}>
                   <WorksWithBelt />
                 </div>
-                {/* F6 (2026-04-28): "Backed by Founders Inc" social-proof
-                    line under hero, more prominent than the WhosBehind
-                    band's small print or the footer tagline. */}
-                <p
-                  data-testid="hero-backed-by"
-                  style={{
-                    margin: '10px auto 0',
-                    fontSize: 12.5,
-                    color: 'var(--muted)',
-                    letterSpacing: '0.02em',
-                    textAlign: 'center',
-                  }}
-                >
-                  Backed by{' '}
-                  <a
-                    href="https://f.inc"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      color: 'var(--ink)',
-                      fontWeight: 600,
-                      textDecoration: 'none',
-                      borderBottom: '1px solid var(--line)',
-                    }}
-                  >
-                    Founders Inc
-                  </a>
-                </p>
               </>
             ) : (
             <div
@@ -642,22 +647,33 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
           >
             Real AI doing real work. All three deploy from a single GitHub repo.
           </p>
-          {/* F1 (2026-04-28): 3-up cards on desktop, stack only on narrow.
-              Federico: "told you these should be cards left to right not
-              top to bottom". MVP showcase used to render AppStripes in a
-              single-column list (gap:12, maxWidth:820, no columns). Move
-              to 3-up grid that mirrors the v17 wireframe's app-row. */}
-          <div className="mvp-showcase-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, maxWidth: 1100, margin: '0 auto' }}>
-            {stripes.map((s) => (
-              <AppStripe
-                key={s.slug}
-                slug={s.slug}
-                name={s.name}
-                description={s.description}
-                category={s.category}
-                variant="landing"
-              />
-            ))}
+          {/* G3 (2026-04-28): app-store-style cards. Federico: "the apps
+              on the landing page should be cards, like on the app store.
+              Right now they are just small boxes." Replaces horizontal
+              AppStripe (icon-text-arrow row) with vertical AppShowcaseCard
+              for the MVP showcase: prominent icon tile, bold name, tagline,
+              category pill + Try CTA. 3-up desktop, 2-up tablet, 1-up mobile. */}
+          <div className="mvp-showcase-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18, maxWidth: 1100, margin: '0 auto' }}>
+            {isMvp
+              ? stripes.map((s) => (
+                  <AppShowcaseCard
+                    key={s.slug}
+                    slug={s.slug}
+                    name={s.name}
+                    description={s.description}
+                    category={s.category}
+                  />
+                ))
+              : stripes.map((s) => (
+                  <AppStripe
+                    key={s.slug}
+                    slug={s.slug}
+                    name={s.name}
+                    description={s.description}
+                    category={s.category}
+                    variant="landing"
+                  />
+                ))}
           </div>
           <style>{`
             @media (max-width: 880px) {

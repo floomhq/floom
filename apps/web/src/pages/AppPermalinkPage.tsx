@@ -762,15 +762,11 @@ export function AppPermalinkPage() {
 
       <main
         id="main"
-        style={{ padding: '14px 24px 80px', maxWidth: 1200, margin: '0 auto' }}
+        style={{ padding: '20px 24px 80px', maxWidth: 1040, margin: '0 auto' }}
         data-testid="permalink-page"
       >
         {/* v17 breadcrumb: quiet Apps / app-name. Lives OUTSIDE the
-            frame, small + muted. "Open in Studio" affordance (owner only)
-            sits on the right. We renamed "Store" → "Apps" to match the
-            live route (/apps); the word "Store" never appears in the top
-            nav so it was a dead-end label for anyone trying to trace
-            their way back up. */}
+            frame card. */}
         <div
           style={{
             display: 'flex',
@@ -778,7 +774,7 @@ export function AppPermalinkPage() {
             justifyContent: 'space-between',
             gap: 12,
             flexWrap: 'wrap',
-            marginBottom: 4,
+            marginBottom: 14,
             fontSize: 12.5,
             color: 'var(--muted)',
           }}
@@ -816,12 +812,26 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-          {/* F2 (2026-04-28): /p/:slug top chrome cleanup — tighten
-              vertical padding (28→16 top, 24→16 bot), tighten icon tile
-              (64→52), drop the secondary by-handle pill from default
-              view, keep hero compact so the unified Run card sits closer
-              to the fold. Federico: "too much going on at top, the
-              white container übergang is not clean". */}
+        {/* G4 + G6 (2026-04-28): rounded white card wrapping hero+tabs+body
+            with proper padding, border-radius, soft shadow, and a LOCKED
+            width (1040px on <main> above) so EVERY tab body inherits the
+            same width. Federico: "the white background has no proper
+            padding; the background of the page should at least have a
+            radius on the white container" + "the white container should
+            stick to a certain width, and it does not matter whether I'm
+            on a certain tab; this is a bit confusing". */}
+        <div
+          data-testid="permalink-card"
+          style={{
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
+            borderRadius: 18,
+            overflow: 'hidden',
+            boxShadow: '0 1px 2px rgba(22,21,18,0.04), 0 4px 24px rgba(22,21,18,0.05)',
+          }}
+        >
+
+          {/* F2 (2026-04-28): /p/:slug top chrome cleanup. */}
           <section
             data-testid="permalink-hero"
             className="permalink-hero-row"
@@ -829,7 +839,7 @@ export function AppPermalinkPage() {
               display: 'flex',
               alignItems: 'flex-start',
               gap: 14,
-              padding: '12px 4px 18px',
+              padding: '24px 28px 20px',
               flexWrap: 'wrap',
             }}
           >
@@ -877,7 +887,13 @@ export function AppPermalinkPage() {
                   {headerDescription}
                 </p>
               )}
-              {/* v26 pill-stats meta row */}
+              {/* G5 (2026-04-28): unified single-row pills. Federico:
+                  "they should be next to each other and not in two rows,
+                  because this takes up much space". Previously TWO pill
+                  rows (version-meta + capability-chips) stacked to 2-3
+                  rows. Now ONE row, no-wrap, hides scrollbar; capability
+                  chips merged inline so [research][v0.1.0 stable]
+                  [Runtime: python] all sit on one line. */}
               <div
                 data-testid="hero-version-meta"
                 className="permalink-hero-version-meta"
@@ -885,67 +901,53 @@ export function AppPermalinkPage() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  flexWrap: 'wrap',
+                  flexWrap: 'nowrap',
                   marginTop: 10,
+                  overflowX: 'auto',
+                  scrollbarWidth: 'none',
                 }}
               >
                 {app.runs_7d != null && app.runs_7d > 0 && (
-                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)' }}>
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                     {app.runs_7d.toLocaleString()} runs · 7d
                   </span>
                 )}
                 {app.category && (
-                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)' }}>
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                     {app.category}
                   </span>
                 )}
                 {summary && summary.count > 0 && (
-                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', flexShrink: 0 }}>
                     <StarsRow value={summary.avg} size={11} />
                     {summary.avg.toFixed(1)}
                   </span>
                 )}
-                <span data-testid="hero-version" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>
+                <span data-testid="hero-version" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--line)', color: 'var(--muted)', background: 'var(--bg)', fontFamily: 'JetBrains Mono, ui-monospace, monospace', whiteSpace: 'nowrap', flexShrink: 0 }}>
                   v{app.version ?? '0.1.0'} · {app.version_status ?? 'stable'}
                 </span>
-                {/* F2 (2026-04-28): by-handle pill dropped from default
-                    hero — already redundant with the credit in the
-                    About tab. Keeps hero meta-row compact. */}
+                {/* G5: capability chips merged inline — same row, same
+                    pill style, no wrap. */}
+                {capabilityChips.map((c) => (
+                  <span
+                    key={c.key}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: '3px 9px',
+                      borderRadius: 999,
+                      border: '1px solid var(--line)',
+                      color: 'var(--muted)',
+                      background: 'var(--bg)',
+                      letterSpacing: '0.02em',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {c.label}
+                  </span>
+                ))}
               </div>
-              {capabilityChips.length > 0 && (
-                <div
-                  data-testid="permalink-capability-chips"
-                  style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 6,
-                    marginTop: 8,
-                    alignItems: 'center',
-                  }}
-                >
-                  {capabilityChips.map((c) => (
-                    <span
-                      key={c.key}
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 600,
-                        padding: '3px 9px',
-                        borderRadius: 999,
-                        border: '1px solid var(--line)',
-                        color: 'var(--muted)',
-                        background: 'var(--bg)',
-                        letterSpacing: '0.02em',
-                        maxWidth: '100%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {c.label}
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
             <div
               className="permalink-hero-actions"
@@ -1106,9 +1108,9 @@ export function AppPermalinkPage() {
               alignItems: 'stretch',
               flexWrap: 'wrap',
               gap: 0,
-              padding: '0 24px',
+              padding: '0 28px',
               borderBottom: '1px solid var(--line)',
-              background: 'var(--card)',
+              background: 'transparent',
             }}
           >
             {([
@@ -1158,12 +1160,14 @@ export function AppPermalinkPage() {
             })}
           </div>
 
-          {/* Frame body: swappable by ?tab= (Run / About / Install / Source). */}
+          {/* Frame body: swappable by ?tab= (Run / About / Install / Source).
+              G4: proper inner padding + transparent bg (the outer
+              permalink-card provides the white surface). */}
           <div
             className="app-page-body"
             style={{
-              padding: '24px',
-              background: 'var(--card)',
+              padding: '28px 32px 36px',
+              background: 'transparent',
             }}
           >
 
@@ -1698,6 +1702,9 @@ export function AppPermalinkPage() {
           </section>
         )}
           </div>
+          {/* /frame body */}
+        </div>
+        {/* /permalink-card (G4) */}
       </main>
       <Footer />
       <FeedbackButton />

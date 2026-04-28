@@ -114,161 +114,216 @@ export function PublicFooter() {
     <footer
       data-testid="public-footer"
       style={{
-        padding: '36px 24px 32px',
+        padding: '56px 24px 28px',
         background: 'var(--card)',
         borderTop: '1px solid var(--line)',
       }}
     >
-      {/* F5 (2026-04-28): widen content area so footer doesn't cram
-          everything to centre with whitespace L+R. Match marketing
-          page width (1180px) to use horizontal real estate. Columns
-          spread out left-to-right with comfortable spacing. */}
+      {/* G2 (2026-04-28): footer redesign. Federico: "the footer can
+          still be better". Modern OSS pattern (Vercel/Linear style):
+          - Brand mark column on the left (was a bare "PRODUCT" label)
+          - 3 link columns (Product / Company / Legal) on the right
+          - Tagline + Founders Inc visually integrated UNDER the brand
+          - Match 1180px content width
+          - Social icons + copyright on a divider row at the bottom */}
       <div
         data-testid="footer-columns"
+        className="public-footer-columns"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, minmax(140px, 1fr))',
-          gap: 32,
+          gridTemplateColumns: 'minmax(0, 1.4fr) repeat(3, minmax(140px, 1fr))',
+          gap: 40,
           maxWidth: 1180,
-          margin: '0 auto 28px',
+          margin: '0 auto 32px',
           padding: '0 32px',
           textAlign: 'left',
         }}
-        className="public-footer-columns"
       >
+        {/* Brand column: logo + integrated tagline + Founders Inc */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          <Link
+            to="/"
+            data-testid="footer-brand"
+            style={{
+              fontFamily: 'var(--font-display, Inter), system-ui, sans-serif',
+              fontWeight: 800,
+              fontSize: 19,
+              color: 'var(--ink)',
+              textDecoration: 'none',
+              letterSpacing: '-0.02em',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                background: 'var(--accent)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 800,
+              }}
+            >
+              F
+            </span>
+            Floom
+          </Link>
+          <p
+            data-testid="footer-tagline"
+            style={{
+              fontSize: 13,
+              color: 'var(--muted)',
+              lineHeight: 1.5,
+              margin: 0,
+              maxWidth: 280,
+            }}
+          >
+            The protocol + runtime for agentic work.
+          </p>
+          <p
+            style={{
+              fontSize: 12,
+              color: 'var(--muted)',
+              lineHeight: 1.5,
+              margin: 0,
+              maxWidth: 280,
+            }}
+          >
+            Built in Hamburg + SF. Backed by{' '}
+            <a
+              href="https://f.inc"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: 'var(--ink)', fontWeight: 600, textDecoration: 'none', borderBottom: '1px solid var(--line)' }}
+            >
+              Founders Inc
+            </a>
+            .
+          </p>
+        </div>
+
         <div style={COL_STYLE}>
           <div style={COL_LABEL_STYLE}>Product</div>
           <FootLink to="/apps">Apps</FootLink>
           <FootLink to="/docs">Docs</FootLink>
           <FootLink to="/pricing">Pricing</FootLink>
           <FootLink to="/changelog">Changelog</FootLink>
+          <FootLink to="/status">Status</FootLink>
         </div>
 
         <div style={COL_STYLE}>
           <div style={COL_LABEL_STYLE}>Company</div>
           <FootLink to="/about">About</FootLink>
           <FootLink href="https://github.com/floomhq/floom">GitHub</FootLink>
-          <FootLink to="/status">Status</FootLink>
+          <FootLink href="https://discord.gg/floom">Discord</FootLink>
+          <FootLink href="https://x.com/floomhq">X / Twitter</FootLink>
         </div>
 
         <div style={COL_STYLE}>
           <div style={COL_LABEL_STYLE}>Legal</div>
           <FootLink to="/terms">Terms</FootLink>
           <FootLink to="/privacy">Privacy</FootLink>
+          <FootLink to="/imprint">Imprint</FootLink>
         </div>
       </div>
 
-      {/* Bottom row: social icons + tagline + copyright */}
+      {/* Divider + bottom row: copyright (left) + social icons (right) */}
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 12,
+          maxWidth: 1180,
+          margin: '0 auto',
+          padding: '0 32px',
         }}
       >
-        {/* Tagline above icons */}
-        <div
-          data-testid="footer-tagline"
-          style={{
-            fontSize: 12.5,
-            color: 'var(--muted)',
-            letterSpacing: '0.02em',
-          }}
-        >
-          Building Floom in Hamburg + SF · Backed by{' '}
-          <a
-            href="https://f.inc"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: 'var(--ink)', fontWeight: 600, textDecoration: 'none', borderBottom: '1px solid var(--line)' }}
-          >
-            Founders Inc
-          </a>
-        </div>
-
-        {/* Social icons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <a
-            href="https://discord.gg/floom"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Discord"
-            style={SOCIAL_ICON_STYLE}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.color = '#5865F2';
-              el.style.borderColor = '#5865F2';
-              el.style.background = 'rgba(88,101,242,0.06)';
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.color = 'var(--muted)';
-              el.style.borderColor = 'var(--line)';
-              el.style.background = 'var(--bg)';
-            }}
-          >
-            <IconDiscordFooter />
-          </a>
-          <a
-            href="https://github.com/floomhq/floom"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="GitHub"
-            style={SOCIAL_ICON_STYLE}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.color = '#181717';
-              el.style.borderColor = '#181717';
-              el.style.background = 'rgba(24,23,23,0.06)';
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.color = 'var(--muted)';
-              el.style.borderColor = 'var(--line)';
-              el.style.background = 'var(--bg)';
-            }}
-          >
-            <IconGitHubFooter />
-          </a>
-          <a
-            href="https://x.com/floomhq"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="X / Twitter"
-            style={SOCIAL_ICON_STYLE}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.color = '#000000';
-              el.style.borderColor = '#000000';
-              el.style.background = 'rgba(0,0,0,0.06)';
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget as HTMLAnchorElement;
-              el.style.color = 'var(--muted)';
-              el.style.borderColor = 'var(--line)';
-              el.style.background = 'var(--bg)';
-            }}
-          >
-            <IconXFooter />
-          </a>
-        </div>
-
-        {/* Separator + copyright */}
         <div
           style={{
-            width: '100%',
-            maxWidth: 280,
             borderTop: '1px solid var(--line)',
-            paddingTop: 12,
-            textAlign: 'center',
+            paddingTop: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 16,
+            flexWrap: 'wrap',
           }}
         >
           <div
             data-testid="footer-copyright"
             style={{ fontSize: 12, color: 'var(--muted)' }}
           >
-            © 2026 Floom. Hamburg + SF.
+            © 2026 Floom · Open source, MIT
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <a
+              href="https://discord.gg/floom"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Discord"
+              style={SOCIAL_ICON_STYLE}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                el.style.color = '#5865F2';
+                el.style.borderColor = '#5865F2';
+                el.style.background = 'rgba(88,101,242,0.06)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                el.style.color = 'var(--muted)';
+                el.style.borderColor = 'var(--line)';
+                el.style.background = 'var(--bg)';
+              }}
+            >
+              <IconDiscordFooter />
+            </a>
+            <a
+              href="https://github.com/floomhq/floom"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="GitHub"
+              style={SOCIAL_ICON_STYLE}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                el.style.color = '#181717';
+                el.style.borderColor = '#181717';
+                el.style.background = 'rgba(24,23,23,0.06)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                el.style.color = 'var(--muted)';
+                el.style.borderColor = 'var(--line)';
+                el.style.background = 'var(--bg)';
+              }}
+            >
+              <IconGitHubFooter />
+            </a>
+            <a
+              href="https://x.com/floomhq"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="X / Twitter"
+              style={SOCIAL_ICON_STYLE}
+              onMouseEnter={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                el.style.color = '#000000';
+                el.style.borderColor = '#000000';
+                el.style.background = 'rgba(0,0,0,0.06)';
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLAnchorElement;
+                el.style.color = 'var(--muted)';
+                el.style.borderColor = 'var(--line)';
+                el.style.background = 'var(--bg)';
+              }}
+            >
+              <IconXFooter />
+            </a>
           </div>
         </div>
 
@@ -276,10 +331,11 @@ export function PublicFooter() {
           <div
             data-testid="footer-waitlist-strip"
             style={{
+              marginTop: 14,
               fontSize: 12,
               color: 'var(--muted)',
-              margin: '0',
               lineHeight: 1.5,
+              textAlign: 'center',
             }}
           >
             Publishing new apps on floom.dev is waitlist-only.{' '}
@@ -292,6 +348,21 @@ export function PublicFooter() {
           </div>
         )}
       </div>
+
+      {/* Mobile: collapse to single column */}
+      <style>{`
+        @media (max-width: 760px) {
+          [data-testid="footer-columns"] {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 28px !important;
+          }
+        }
+        @media (max-width: 480px) {
+          [data-testid="footer-columns"] {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </footer>
   );
 }
