@@ -4,7 +4,8 @@
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { StudioLayout } from '../components/studio/StudioLayout';
+import { WorkspacePageShell } from '../components/WorkspacePageShell';
+import { StudioAppTabs } from '../components/StudioAppTabs';
 import { AppHeader } from './MeAppPage';
 import * as api from '../api/client';
 import type { AppDetail } from '../lib/types';
@@ -34,11 +35,11 @@ export function StudioAppAnalyticsPage() {
   }, [slug, nav]);
 
   return (
-    <StudioLayout
+    <WorkspacePageShell
+      mode="studio"
       title={app ? `${app.name} · Analytics · Studio` : 'Analytics · Studio'}
-      activeAppSlug={slug}
-      activeSubsection="analytics"
     >
+      <StudioAppTabs slug={slug ?? ''} activeTab="analytics" />
       {error && (
         <div
           style={{
@@ -106,7 +107,7 @@ export function StudioAppAnalyticsPage() {
           </div>
         </>
       )}
-    </StudioLayout>
+    </WorkspacePageShell>
   );
 }
 
