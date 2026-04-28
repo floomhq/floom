@@ -134,11 +134,29 @@ export function WorksWithBelt() {
   return (
     <div data-testid="works-with-belt" style={WRAP_STYLE}>
       {/* LEAD — the real promise. Any MCP client is the primary claim. */}
-      <div className="works-with-lead" style={LEAD_STYLE}>
+      <div
+        className="works-with-lead"
+        style={LEAD_STYLE}
+        /* R10 (2026-04-28): plain-English tooltip for "MCP client".
+           Federico's brief: "MCP client" jargon — add a tooltip OR
+           a 1-line explainer. Native title is enough for the
+           hover-curious without bloating the eyebrow row. */
+        title="MCP = Model Context Protocol. The standard Claude, Cursor and ChatGPT use to call tools."
+      >
         <span aria-hidden="true" style={LEAD_MARK}>
           {McpMark}
         </span>
-        <span>Works with any MCP client</span>
+        <span>
+          Works with any{' '}
+          <span
+            style={{
+              borderBottom: '1px dotted currentColor',
+              cursor: 'help',
+            }}
+          >
+            MCP client
+          </span>
+        </span>
       </div>
 
       {/* EXAMPLES — small, clearly marked as examples, not the full list. */}

@@ -1207,6 +1207,26 @@ export function RunSurface({
 
       {/* v26 R4-1: unified card wraps input + output as one container. */}
       <div className="run-unified-card">
+      {/* R10 (2026-04-28): wireframe v17 status header. Shows live state
+          INSIDE the run card (not just in the page hero). Three states:
+            idle    — quiet "Ready" + Run button
+            running — green pulsing dot + "Running · 0:03" + Stop button
+            done    — green check + "Done · 1.2s" + Run again button
+          Federico R10 brief: "lift run state into the hero next to the
+          title" — we do it INSIDE the run-card so it scopes to this
+          surface and doesn't fight the page-level breadcrumb hero. */}
+      <RunStatusHeader
+        appName={app.name}
+        phase={state.phase}
+        runStartedAt={runStartedAt}
+        run={state.run}
+        running={isRunning}
+        onCancel={
+          state.phase === 'streaming' ? handleCancelStream : state.phase === 'job' ? handleCancelJob : undefined
+        }
+        onRun={handleRun}
+        runLabel={runLabel}
+      />
       <div className="run-surface-grid">
         <section
           className="run-surface-input"
@@ -1269,6 +1289,31 @@ export function RunSurface({
           aria-live="polite"
           style={{ padding: '24px 26px' }}
         >
+          {/* R10 (2026-04-28): wireframe v17 OUTPUT eyebrow. Mirrors the
+              INPUTS eyebrow on the left so the surface reads as paired
+              panels. Picks up "STREAMING OUTPUT" during a run so the
+              visitor knows the panel is live. */}
+          <div
+            data-testid="run-surface-output-eyebrow"
+            style={{
+              fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+              fontSize: 10.5,
+              color: state.phase === 'streaming' || state.phase === 'job' ? 'var(--accent, #047857)' : 'var(--muted)',
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              fontWeight: 600,
+              marginBottom: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            {state.phase === 'streaming' || state.phase === 'job'
+              ? 'STREAMING OUTPUT'
+              : state.phase === 'done'
+                ? `OUTPUT · ${state.actionSpec.label || state.action || 'result'}`
+                : 'OUTPUT · preview'}
+          </div>
           <OutputSlot
             app={app}
             appAsPickResult={appAsPickResult}
@@ -1302,7 +1347,9 @@ export function RunSurface({
       </div>
       </div>{/* /run-unified-card */}
 
-      <PastRunsDisclosure appSlug={app.slug} />
+      {/* R10 (2026-04-28): PastRunsDisclosure moved to a dedicated
+          "Earlier runs" tab on AppPermalinkPage. The inline below-fold
+          disclosure was easy to miss; tabs are the discoverable spot. */}
 
       <BYOKModal
         open={byokOpen}
@@ -1325,6 +1372,260 @@ export function RunSurface({
           }
         }}
       />
+    </div>
+  );
+}
+
+// ── Run status header (R10 — wireframe v17 hero status pill) ───────────────
+//
+// Renders inside the unified run-card, above the input/output grid.
+// Lifts the run state into the visible hero so visitors see live progress
+// next to the app name (not buried in the output column body). Three
+// states: idle (quiet "Ready"), running (green pulsing dot + elapsed
+// timer + Stop button), done (green check + final duration + Run again).
+//
+// Layout: [app name + status pill]    [Run / Stop / Run again button]
+// On <600px wraps to two lines.
+
+function RunStatusPill({
+  phase,
+  runStartedAt,
+  run,
+}: {
+  phase: Phase;
+  runStartedAt: number | null;
+  run: RunRecord | undefined;
+}) {
+  const [now, setNow] = useState<number>(() => Date.now());
+  const isRunning = phase === 'streaming' || phase === 'job';
+  useEffect(() => {
+    if (!isRunning) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [isRunning]);
+
+  if (phase === 'ready') {
+    return (
+      <span
+        data-testid="run-status-pill"
+        data-state="idle"
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--muted)',
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+        }}
+      >
+        Ready
+      </span>
+    );
+  }
+
+  if (isRunning) {
+    const elapsed = runStartedAt != null ? Math.max(0, now - runStartedAt) : 0;
+    return (
+      <span
+        data-testid="run-status-pill"
+        data-state="running"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '4px 10px',
+          borderRadius: 999,
+          background: 'var(--accent-soft, #ecfdf5)',
+          border: '1px solid var(--accent-border, #a7f3d0)',
+          color: 'var(--accent, #047857)',
+          fontSize: 11.5,
+          fontWeight: 700,
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          className="run-status-dot-pulse"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 999,
+            background: 'var(--accent, #10b981)',
+            display: 'inline-block',
+          }}
+        />
+        Running · {formatElapsed(elapsed)}
+      </span>
+    );
+  }
+
+  if (phase === 'done' && run) {
+    const ok = run.status === 'success';
+    const dur = run.duration_ms;
+    const durLabel = dur != null ? (dur < 1000 ? `${dur}ms` : `${(dur / 1000).toFixed(1)}s`) : '--';
+    return (
+      <span
+        data-testid="run-status-pill"
+        data-state="done"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 10px',
+          borderRadius: 999,
+          background: ok ? 'var(--accent-soft, #ecfdf5)' : 'rgba(196, 74, 43, 0.08)',
+          border: `1px solid ${ok ? 'var(--accent-border, #a7f3d0)' : 'rgba(196, 74, 43, 0.25)'}`,
+          color: ok ? 'var(--accent, #047857)' : '#c44a2b',
+          fontSize: 11.5,
+          fontWeight: 700,
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+        }}
+      >
+        {ok ? (
+          <svg viewBox="0 0 16 16" width={11} height={11} aria-hidden="true">
+            <circle cx="8" cy="8" r="7" fill="currentColor" opacity="0.18" />
+            <path d="M4.5 8.3l2.3 2.3 4.7-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ) : (
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: 'currentColor', display: 'inline-block' }} />
+        )}
+        {ok ? 'Done' : 'Error'} · {durLabel}
+      </span>
+    );
+  }
+
+  if (phase === 'error') {
+    return (
+      <span
+        data-testid="run-status-pill"
+        data-state="error"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 10px',
+          borderRadius: 999,
+          background: 'rgba(196, 74, 43, 0.08)',
+          border: '1px solid rgba(196, 74, 43, 0.25)',
+          color: '#c44a2b',
+          fontSize: 11.5,
+          fontWeight: 700,
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+        }}
+      >
+        Error
+      </span>
+    );
+  }
+
+  return null;
+}
+
+function RunStatusHeader({
+  appName: _appName,
+  phase,
+  runStartedAt,
+  run,
+  running,
+  onCancel,
+  onRun,
+  runLabel,
+}: {
+  appName: string;
+  phase: Phase;
+  runStartedAt: number | null;
+  run: RunRecord | undefined;
+  running: boolean;
+  onCancel?: () => void;
+  onRun: () => void;
+  runLabel: string;
+}) {
+  const showRunAgain = phase === 'done' || phase === 'error';
+  return (
+    <div
+      data-testid="run-status-header"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        padding: '14px 22px',
+        borderBottom: '1px solid var(--line)',
+        background: 'var(--card)',
+        flexWrap: 'wrap',
+      }}
+    >
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 10,
+          minWidth: 0,
+          flexShrink: 1,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--muted)',
+            fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+          }}
+        >
+          Run
+        </span>
+        <RunStatusPill phase={phase} runStartedAt={runStartedAt} run={run} />
+      </div>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {running && onCancel && (
+          <button
+            type="button"
+            data-testid="run-status-stop-btn"
+            onClick={onCancel}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 8,
+              border: '1px solid var(--line)',
+              background: 'var(--card)',
+              color: 'var(--ink)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Stop
+          </button>
+        )}
+        {!running && (
+          <button
+            type="button"
+            data-testid="run-status-run-btn"
+            onClick={onRun}
+            style={{
+              padding: '7px 18px',
+              borderRadius: 8,
+              border: '1px solid var(--accent, #047857)',
+              background: 'var(--accent, #047857)',
+              color: '#fff',
+              fontSize: 12.5,
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            {showRunAgain ? 'Run again' : runLabel}
+            <svg viewBox="0 0 16 16" width={11} height={11} aria-hidden="true">
+              <path d="M5 3l6 5-6 5V3z" fill="currentColor" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1412,8 +1713,20 @@ function InputCard({
   // INPUT eyebrow label per v23 wireframe — small mono uppercase token
   // above the form that names the column. In locked mode it gains a
   // "· SUBMITTED" suffix so the visitor sees what just happened.
+  // R10 (2026-04-28): wireframe v17 — eyebrow shows field count.
+  // "INPUTS · 3 fields" / "INPUTS · 1 field". Locked + disabled keep
+  // their existing suffix overrides so visitors see what just happened.
+  const fieldCount = actionSpec.inputs.length;
+  const fieldsSuffix =
+    fieldCount === 0
+      ? ''
+      : ` · ${fieldCount} field${fieldCount === 1 ? '' : 's'}`;
   const inputEyebrow =
-    lockedVisual ? 'INPUT · SUBMITTED' : disabledVisual ? 'INPUT · LIMIT REACHED' : 'INPUT';
+    lockedVisual
+      ? 'INPUTS · SUBMITTED'
+      : disabledVisual
+        ? 'INPUTS · LIMIT REACHED'
+        : `INPUTS${fieldsSuffix}`;
 
   // Recap-mode branch. After a successful run the input column flips to
   // a read-only summary of what produced the output below, plus twin
@@ -1998,10 +2311,14 @@ function EmptyOutputCard({
   const heroOutput = pickHeroOutput(actionSpec);
   const outputLabel = heroOutput?.label || 'Output';
   const hasSample = hasSampleForSlug(slug);
+  // R10 (2026-04-28): clearer pre-run copy. Federico R10 brief: idle
+  // state's skeleton bars confused visitors as "loading". When no sample
+  // exists we now lead with a direct instruction ("Fill the form and
+  // press Run to see your result here") instead of a fake table outline.
   const outputHint = hasSample
     ? 'This is what your real result will look like once you press Run.'
     : heroOutput?.description?.trim() ||
-      `Fill in the form and press Run to generate a result with ${appName}.`;
+      `Fill the form and press Run to see your result here.`;
   const title = hasSample
     ? 'Your result will look like this'
     : `${outputLabel} will appear here`;
@@ -2691,7 +3008,7 @@ function FriendlyStartupError({
 
 // ── Past runs disclosure ───────────────────────────────────────────────────
 
-function PastRunsDisclosure({ appSlug }: { appSlug: string }) {
+export function PastRunsDisclosure({ appSlug }: { appSlug: string }) {
   const { isAuthenticated } = useSession();
   const deployEnabled = useDeployEnabled();
   const location = useLocation();

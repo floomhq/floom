@@ -597,7 +597,7 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
                 >
                   {s.title}
                 </h3>
-                <p style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.55, margin: 0 }}>
+                <p style={{ fontSize: 15, color: 'var(--muted)', lineHeight: 1.6, margin: 0 }}>
                   {s.body}
                 </p>
                 <div

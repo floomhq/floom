@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Footer } from '../components/Footer';
-import { RunSurface, type RunSurfaceResult } from '../components/runner/RunSurface';
+import { RunSurface, PastRunsDisclosure, type RunSurfaceResult } from '../components/runner/RunSurface';
 import { AppIcon } from '../components/AppIcon';
 import { AppReviews } from '../components/AppReviews';
 import { FeedbackButton } from '../components/FeedbackButton';
@@ -123,10 +123,12 @@ export function AppPermalinkPage() {
   // Run is the default — the previous product-page layout made users scroll
   // past marketing copy to find the actual run surface. Shared-run URLs
   // (/p/:slug?run=<id>) auto-land on Run.
-  type PTab = 'run' | 'about' | 'install' | 'source';
+  // R10 (2026-04-28): added 5th tab "Earlier runs" (wireframe v17 parity).
+  // Replaces the below-fold <details> disclosure that was easy to miss.
+  type PTab = 'run' | 'about' | 'install' | 'source' | 'runs';
   const initialTab: PTab = searchParams.get('tab') as PTab | null ?? 'run';
   const [activeTab, setActiveTab] = useState<PTab>(
-    ['run', 'about', 'install', 'source'].includes(initialTab) ? initialTab : 'run',
+    ['run', 'about', 'install', 'source', 'runs'].includes(initialTab) ? initialTab : 'run',
   );
   // Run prefetched from /api/run/:id when the URL contains ?run=<id>. Lets
   // RunSurface hydrate directly into the `done` phase for shared links.
@@ -822,22 +824,17 @@ export function AppPermalinkPage() {
           )}
         </div>
 
-        {/* G4 + G6 (2026-04-28): rounded white card wrapping hero+tabs+body
-            with proper padding, border-radius, soft shadow, and a LOCKED
-            width (1040px on <main> above) so EVERY tab body inherits the
-            same width. Federico: "the white background has no proper
-            padding; the background of the page should at least have a
-            radius on the white container" + "the white container should
-            stick to a certain width, and it does not matter whether I'm
-            on a certain tab; this is a bit confusing". */}
+        {/* R10 (2026-04-28): wireframe v17 — outer wrapper card REMOVED.
+            Federico R10 brief: "drop outer wrapper white card. Hero+tabs
+            flatter on cream bg, run-card focal element keeps its card
+            chrome. Don't put EVERYTHING in one giant white box."
+            Hero + tabs now sit directly on the cream page bg; the
+            run-unified-card inside the Run tab is the only focal
+            container. Tab body keeps its width via `<main maxWidth=1040>`. */}
         <div
           data-testid="permalink-card"
           style={{
-            background: 'var(--card)',
-            border: '1px solid var(--line)',
-            borderRadius: 18,
-            overflow: 'hidden',
-            boxShadow: '0 1px 2px rgba(22,21,18,0.04), 0 4px 24px rgba(22,21,18,0.05)',
+            background: 'transparent',
           }}
         >
 
@@ -849,7 +846,7 @@ export function AppPermalinkPage() {
               display: 'flex',
               alignItems: 'flex-start',
               gap: 14,
-              padding: '24px 28px 20px',
+              padding: '8px 0 18px',
               flexWrap: 'wrap',
             }}
           >
@@ -991,13 +988,17 @@ export function AppPermalinkPage() {
                   aria-expanded={installPopoverOpen}
                   onClick={() => setInstallPopoverOpen((o) => !o)}
                   style={{
+                    /* R10 (2026-04-28): demoted from primary ink-filled
+                       to secondary outlined. Run is the primary green
+                       CTA inside the run-card status header now;
+                       Install is a secondary affordance per wireframe v17. */
                     padding: '8px 14px',
-                    border: '1px solid var(--ink)',
+                    border: '1px solid var(--line)',
                     borderRadius: 10,
                     fontSize: 12.5,
                     fontWeight: 600,
-                    color: '#fff',
-                    background: 'var(--ink)',
+                    color: 'var(--ink)',
+                    background: 'var(--card)',
                     cursor: 'pointer',
                     fontFamily: 'inherit',
                     display: 'inline-flex',
@@ -1103,7 +1104,7 @@ export function AppPermalinkPage() {
               alignItems: 'stretch',
               flexWrap: 'wrap',
               gap: 0,
-              padding: '0 28px',
+              padding: '0',
               borderBottom: '1px solid var(--line)',
               background: 'transparent',
             }}
@@ -1113,6 +1114,7 @@ export function AppPermalinkPage() {
               { id: 'about' as PTab, label: 'About' },
               { id: 'install' as PTab, label: 'Install' },
               { id: 'source' as PTab, label: 'Source' },
+              { id: 'runs' as PTab, label: 'Earlier runs' },
             ]).map((t) => {
               const isOn = activeTab === t.id;
               return (
@@ -1161,7 +1163,7 @@ export function AppPermalinkPage() {
           <div
             className="app-page-body"
             style={{
-              padding: '28px 32px 36px',
+              padding: '24px 0 36px',
               background: 'transparent',
             }}
           >
@@ -1676,6 +1678,29 @@ export function AppPermalinkPage() {
                 value={`docker run -e GEMINI_BYOK=$KEY -p 3000:3000 ghcr.io/floomhq/${app.slug}:latest`}
               />
             </div>
+          </section>
+        )}
+
+        {/* R10 (2026-04-28): Earlier runs tab. Replaces the
+            below-fold disclosure that lived inside RunSurface; tabs
+            are the discoverable spot. PastRunsDisclosure renders its
+            own load-on-expand list of recent runs scoped to this slug. */}
+        {activeTab === 'runs' && (
+          <section data-testid="tab-content-runs">
+            <div
+              style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 10.5,
+                color: 'var(--muted)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                fontWeight: 600,
+                marginBottom: 14,
+              }}
+            >
+              Earlier runs
+            </div>
+            <PastRunsDisclosure appSlug={app.slug} />
           </section>
         )}
           </div>

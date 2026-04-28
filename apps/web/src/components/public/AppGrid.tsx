@@ -281,7 +281,13 @@ function AppGridCard({
   // 2026-04-24 polish: hide the "0 stars" meta while the product has no
   // users — it reads as noise ("⭐ 0"). Show only when the count is > 0.
   // The "hot" accent still triggers at >= 100 through `isHot`.
+  // R10 (2026-04-28): wireframe v17 — when an app has reviews, render
+  // an avg-rating pill (e.g. "4.5★") alongside the GH-star count. We
+  // approximate it via `app.avg_rating` if the API surfaces it; falls
+  // back to `app.stars` (GH proxy) so featured apps still show signal.
   const showStars = stars > 0;
+  const avgRating = (app as { avg_rating?: number }).avg_rating;
+  const showRating = typeof avgRating === 'number' && avgRating > 0;
   // Per-slug banner-card content (PR-C, v23): if the slug has an entry
   // in BANNER_CONTENT, render a mini run-state preview inside the
   // thumb. Falls back to the icon-only band for unknown apps. NO fake
@@ -460,7 +466,26 @@ function AppGridCard({
           textOverflow: 'ellipsis',
         }}
       >
-        {showStars && (
+        {showRating && (
+          <>
+            <span
+              data-testid={`app-grid-rating-${app.slug}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                color: 'var(--accent, #047857)',
+                fontWeight: 600,
+              }}
+              aria-label={`${avgRating!.toFixed(1)} out of 5 stars`}
+            >
+              <Star size={11} fill="currentColor" strokeWidth={0} />
+              {avgRating!.toFixed(1)}
+            </span>
+            <span aria-hidden="true" style={{ color: 'var(--line)' }}>·</span>
+          </>
+        )}
+        {showStars && !showRating && (
           <>
             <span
               data-testid={`app-grid-stars-${app.slug}`}

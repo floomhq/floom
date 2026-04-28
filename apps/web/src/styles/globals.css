@@ -577,9 +577,22 @@ body:has(.topbar-mobile-menu) {
   box-shadow: 0 1px 3px rgba(22,21,18,.04), 0 4px 16px rgba(22,21,18,.05);
 }
 
+/* R10 (2026-04-28): pulsing green dot in run-status-header during runs. */
+@keyframes run-status-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+.run-status-dot-pulse {
+  animation: run-status-dot-pulse 1.2s ease-in-out infinite;
+}
+
+/* R10 (2026-04-28): wireframe v17 30/70 split. Was 380px fixed input.
+ * Now Output gets ~70% of horizontal space so tables breathe; Input
+ * stays at ~30% with a 280px floor. Federico R10 brief: "currently
+ * 50/50 cramped. Make Output ~70% width". */
 .run-surface-grid {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 30fr) minmax(0, 70fr);
   gap: 0;
   align-items: stretch;
   min-height: 380px;

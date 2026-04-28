@@ -570,12 +570,14 @@ export function AppsDirectoryPage() {
             </button>
           </form>
 
-          {/* Sort control removed 2026-04-24 (#657): the "Trending [soon]"
-              button with an inert dropdown was promising a feature we
-              aren't ready to ship. Hiding the whole control is the honest
-              move for launch. Restore it (button + dropdown) when sort
-              really lands — the `SORT_OPTIONS` + `sortOpen` scaffolding
-              below is preserved for that. */}
+          {/* R10 (2026-04-28): wireframe v17 store.html — visible Sort
+              affordance. Clicking opens a dropdown with Trending / Most
+              recent / Most starred. Most recent + most starred are
+              labelled "soon" pending real data backfill, but Trending
+              IS the live default sort (runs_7d desc + hero-first
+              tiebreak in `sortedApps`). The control is here so users
+              can SEE the sort axis, even if only one option fires. */}
+          <SortDropdown />
           </div>
         </div>
 
@@ -858,6 +860,121 @@ function chipStyle(active: boolean): CSSProperties {
  * description + footer strip. Keeps the first-paint shape stable so the
  * real cards land without a layout shift.
  */
+/**
+ * R10 (2026-04-28): visible Sort dropdown matching wireframe v17
+ * store.html. Trending is the live default; the other options surface
+ * what's coming and click-disabled until a real index ships. The
+ * affordance addresses Federico's R10 brief: "Currently subtitle says
+ * 'sorted by trending' with no control."
+ */
+function SortDropdown() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        data-testid="apps-sort-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '7px 12px',
+          background: 'var(--card)',
+          border: '1px solid var(--line)',
+          borderRadius: 10,
+          fontSize: 12.5,
+          fontWeight: 500,
+          color: 'var(--ink)',
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}
+      >
+        <span style={{ color: 'var(--muted)' }}>Sort ·</span>
+        <span>Trending</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid="apps-sort-menu"
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 'calc(100% + 6px)',
+            minWidth: 220,
+            padding: 6,
+            background: 'var(--card)',
+            border: '1px solid var(--line)',
+            borderRadius: 12,
+            boxShadow: '0 10px 30px -8px rgba(15,23,42,0.18)',
+            zIndex: 6,
+          }}
+        >
+          {[
+            { key: 'trending', label: 'Trending', hint: 'runs · 7d', active: true },
+            { key: 'recent', label: 'Most recent', hint: 'soon', active: false },
+            { key: 'starred', label: 'Most starred', hint: 'soon', active: false },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              role="menuitem"
+              type="button"
+              disabled={!opt.active}
+              data-testid={`apps-sort-option-${opt.key}`}
+              onClick={() => setOpen(false)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                width: '100%',
+                padding: '8px 10px',
+                background: opt.active ? 'var(--accent-soft, #ecfdf5)' : 'transparent',
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 12.5,
+                fontWeight: opt.active ? 600 : 500,
+                color: opt.active ? 'var(--accent, #047857)' : 'var(--muted)',
+                cursor: opt.active ? 'default' : 'not-allowed',
+                fontFamily: 'inherit',
+                textAlign: 'left',
+              }}
+            >
+              <span>{opt.label}</span>
+              <span
+                style={{
+                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+                  fontSize: 10.5,
+                  color: opt.active ? 'var(--accent, #047857)' : 'var(--muted)',
+                  opacity: 0.75,
+                }}
+              >
+                {opt.hint}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppGridSkeleton() {
   const shimmer: CSSProperties = {
     background:

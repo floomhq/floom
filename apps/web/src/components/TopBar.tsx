@@ -360,6 +360,25 @@ export function TopBar({ compact = false, onStudioMenuOpen }: Props = {}) {
             >
               Docs
             </Link>
+            {/* R10 (2026-04-28): wireframe v17 store.html parity —
+                Pricing + Changelog are nav-level affordances, not just
+                footer links. Demoted Help to the avatar dropdown for
+                authed users (already covered by §12.5); anon visitors
+                still see Help via /help direct link if needed. */}
+            <Link
+              to="/pricing"
+              data-testid="topbar-pricing"
+              style={navLinkStyle(false)}
+            >
+              Pricing
+            </Link>
+            <Link
+              to="/changelog"
+              data-testid="topbar-changelog"
+              style={navLinkStyle(false)}
+            >
+              Changelog
+            </Link>
             <Link
               to="/help"
               data-testid="topbar-help"
