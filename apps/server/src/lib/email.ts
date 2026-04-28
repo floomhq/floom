@@ -161,11 +161,11 @@ const EMAIL_CARD = '#ffffff';
 const EMAIL_LINE = '#eceae3';
 const EMAIL_INK = '#1c1a14';
 const EMAIL_MUTED = '#6b6659';
-// EMAIL_ACCENT (#0a9d63) lives baked into the logo SVG/PNG — we no
+// EMAIL_ACCENT (#047857, emerald-700) lives baked into the logo SVG/PNG — we no
 // longer render a CSS green dot here, so no runtime constant is needed.
 const SERIF = "Georgia, 'Times New Roman', serif";
 const SANS =
-  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 /**
  * Origin for hosted brand assets. Kept separate from `publicUrl` on
