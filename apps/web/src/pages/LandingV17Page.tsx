@@ -50,6 +50,97 @@ import { readDeployEnabled, useDeployEnabled } from '../lib/flags';
 import { waitlistHref } from '../lib/waitlistCta';
 import { useSession } from '../hooks/useSession';
 
+// MVP hero install snippet — generic MCP config, no per-app slug.
+const MVP_MCP_SNIPPET = `{
+  "mcpServers": {
+    "floom": {
+      "url": "https://floom.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer floom_agent_<your_token>"
+      }
+    }
+  }
+}`;
+
+function MvpHeroInstall() {
+  const [copied, setCopied] = useState(false);
+  async function handleCopy() {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(MVP_MCP_SNIPPET);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = MVP_MCP_SNIPPET;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch { /* silent */ }
+  }
+  return (
+    <div style={{ maxWidth: 560, margin: '28px auto 0', textAlign: 'left' }}>
+      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 10px', textAlign: 'center' }}>
+        Paste this in your MCP client config:
+      </p>
+      <div style={{ position: 'relative' }}>
+        <pre
+          data-testid="hero-mcp-snippet"
+          style={{
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+            fontSize: 12,
+            background: '#1b1a17',
+            color: '#d4d4c8',
+            borderRadius: 10,
+            padding: '14px 16px',
+            paddingRight: 80,
+            overflowX: 'auto',
+            whiteSpace: 'pre',
+            lineHeight: 1.6,
+            margin: 0,
+          }}
+        >
+          {MVP_MCP_SNIPPET}
+        </pre>
+        <button
+          type="button"
+          data-testid="install-copy-btn"
+          onClick={() => void handleCopy()}
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            fontSize: 11,
+            fontWeight: 600,
+            color: copied ? '#d4d4c8' : 'var(--accent)',
+            background: 'rgba(255,255,255,0.07)',
+            border: `1px solid ${copied ? 'rgba(212,212,200,0.2)' : 'rgba(4,120,87,0.35)'}`,
+            borderRadius: 6,
+            padding: '3px 10px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            letterSpacing: '0.03em',
+          }}
+          aria-label={copied ? 'Copied' : 'Copy MCP config'}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '10px 0 0', textAlign: 'center' }}>
+        Need a token?{' '}
+        <Link to="/signup" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
+          Sign up to get one
+        </Link>
+        {' '}→
+      </p>
+    </div>
+  );
+}
+
 interface Stripe {
   slug: string;
   name: string;
@@ -251,11 +342,11 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               </p>
             )}
 
-            {/* CTA — runtime-gated by DEPLOY_ENABLED. Preview keeps the
-                original install-first branch; waitlist mode swaps the
-                builder CTA into the primary slot so floom.dev leads with
-                the waitlist while still exposing a "try one now" path in
-                Claude beside it. */}
+            {/* CTA — MVP variant: inline MCP setup snippet.
+                Full variant: runtime-gated by DEPLOY_ENABLED. */}
+            {isMvp ? (
+              <MvpHeroInstall />
+            ) : (
             <div
               className="hero-ctas"
               style={{
@@ -310,7 +401,7 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {deployEnabled ? 'Run this in Claude' : 'Run in Claude'}
+                {'Run in your AI tool'}
               </Link>
               {deployEnabled && (
                 <Link
@@ -330,14 +421,16 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
                 </Link>
               )}
             </div>
+            )}
           </div>
 
           {/* Hero demo — interactive 3-state build/deploy/use loop.
               Sits directly under the CTAs. Sized to 580px (Cursor-style,
               Federico 2026-04-23): top ~120-150px is visible above the fold
               at 1440x900, rest scrolls into view. Bigger canvas = more
-              cinematic, no squishing to fit the viewport. */}
-          <HeroDemo />
+              cinematic, no squishing to fit the viewport.
+              MVP variant: dropped (consumer-first, install snippet replaces it). */}
+          {!isMvp && <HeroDemo />}
         </section>
 
         {/* Compact CLI reference strip below the hero — smaller than the
@@ -617,7 +710,7 @@ const STEPS = [
     num: '03',
     kicker: 'SHARE ANYWHERE',
     title: 'Send the link.',
-    body: 'People run your app in Claude, Cursor, ChatGPT, a browser, or with curl.',
+    body: 'People run your app from any MCP client, browser, or with curl.',
     mono: 'one link, every tool',
   },
 ];
