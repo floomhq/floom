@@ -423,9 +423,20 @@ def _extract_main_text(html_bytes: bytes) -> tuple[str, str]:
         prefix = combined + ("\n" if combined else "")
         combined = (prefix + meta_blob)[:MAX_TEXT_CHARS]
 
-    if len(combined) < 120:
+    # 2026-04-28 (R9 last-resort): if even meta is thin (sites where the
+    # SSR shell only carries the title + brand), pull whatever raw text the
+    # body still has. Better to give Gemini a thin signal than to surface
+    # an opaque error to the user.
+    if len(combined) < 120 and soup.body is not None:
+        raw = _clean_text(soup.body.get_text(" ", strip=True))[:MAX_TEXT_CHARS]
+        if len(raw) >= 40:
+            combined = (combined + "\n" + raw).strip()[:MAX_TEXT_CHARS]
+
+    if len(combined) < 60:
+        body_len = max(0, len(combined) - len(meta_blob))
         raise AnalysisError(
-            "Couldn't extract enough readable page text. Try a homepage or pricing page."
+            "Couldn't extract enough readable page text. Try a homepage or pricing page. "
+            f"(body={body_len}, meta={len(meta_blob)}, total={len(combined)})"
         )
     return title, combined
 
