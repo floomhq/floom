@@ -121,9 +121,11 @@ const textareaStyle: React.CSSProperties = {
   fontFamily: 'JetBrains Mono, monospace',
 };
 
+// F7 (2026-04-28): light tinted bg on code copy boxes.
 const codeStyle: React.CSSProperties = {
-  background: '#1b1a17',
-  color: '#d4d4c8',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
+  border: '1px solid var(--line)',
   borderRadius: 8,
   padding: 14,
   fontFamily: 'JetBrains Mono, monospace',

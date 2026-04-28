@@ -279,11 +279,12 @@ const stepBodyStyle: React.CSSProperties = {
   lineHeight: 1.5,
   margin: '4px 0 0',
 };
+// F7 (2026-04-28): light tinted bg on copy/snippet panels.
 const codePanelStyle: React.CSSProperties = {
-  border: '1px solid #2a2925',
+  border: '1px solid var(--line)',
   borderRadius: 8,
-  background: '#1b1a17',
-  color: '#e7e3d7',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
   padding: 18,
 };
 const codeTitleStyle: React.CSSProperties = {

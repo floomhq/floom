@@ -92,13 +92,16 @@ function MvpHeroInstall() {
         Paste in your MCP client config:
       </p>
       <div style={{ position: 'relative' }}>
+        {/* F7 (2026-04-28): copy boxes use light tinted bg (var(--studio)),
+            not dark. Federico-locked global rule. */}
         <pre
           data-testid="hero-mcp-snippet"
           style={{
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             fontSize: 11,
-            background: '#1b1a17',
-            color: '#d4d4c8',
+            background: 'var(--studio, #f5f4f0)',
+            color: 'var(--ink)',
+            border: '1px solid var(--line)',
             borderRadius: 8,
             padding: '10px 12px',
             paddingRight: 64,
@@ -120,9 +123,9 @@ function MvpHeroInstall() {
             right: 10,
             fontSize: 11,
             fontWeight: 600,
-            color: copied ? '#d4d4c8' : 'var(--accent)',
-            background: 'rgba(255,255,255,0.07)',
-            border: `1px solid ${copied ? 'rgba(212,212,200,0.2)' : 'rgba(4,120,87,0.35)'}`,
+            color: copied ? 'var(--muted)' : 'var(--accent)',
+            background: 'var(--card)',
+            border: `1px solid ${copied ? 'var(--line)' : 'rgba(4,120,87,0.35)'}`,
             borderRadius: 6,
             padding: '3px 10px',
             cursor: 'pointer',
@@ -296,18 +299,21 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               textAlign: 'center',
             }}
           >
-            {/* Launch week pill removed from landing (#669) — remains on
-                /waitlist where it's route-scoped to the beta banner.
-                Landing keeps the hero calm with just the works-with belt
-                eyebrow + H1 + sub. The marginTop below restores the
-                vertical breathing room the pill wrapper used to provide
-                (Federico 2026-04-24 — "above ship ai apps fast we need
-                margin again"). */}
-            <div style={{ marginTop: 24 }}>
-              <WorksWithBelt />
-            </div>
+            {/* F8 (2026-04-28): hero composition cleanup. Federico:
+                "how to make the hero header cleaner? so much going on...
+                the composition is overwhelming". WorksWithBelt moved
+                from ABOVE H1 to UNDER the install snippet (full variant
+                only — the MVP variant moves it inline below MvpHeroInstall
+                so the H1 is the single focal point). Tighter vertical
+                spacing on the H1 too. */}
+            {!isMvp && (
+              <div style={{ marginTop: 24 }}>
+                <WorksWithBelt />
+              </div>
+            )}
 
-            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap. */}
+            {/* H1 — locked copy. Wireframe ships 64px desktop, balance wrap.
+                F10 (2026-04-28): "fast" coloured with brand green for emphasis. */}
             <h1
               className="hero-headline"
               style={{
@@ -321,7 +327,7 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
                 textWrap: 'balance' as unknown as 'balance',
               }}
             >
-              Ship AI apps fast.
+              Ship AI apps <span style={{ color: 'var(--accent)' }}>fast</span>.
             </h1>
 
             {/* Sub-positioning — locked copy. NO KICKER (dropped 2026-04-22). */}
@@ -349,7 +355,44 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
             {/* CTA — MVP variant: inline MCP setup snippet.
                 Full variant: runtime-gated by DEPLOY_ENABLED. */}
             {isMvp ? (
-              <MvpHeroInstall />
+              <>
+                <MvpHeroInstall />
+                {/* F8 (2026-04-28): WorksWithBelt moved here — UNDER the
+                    snippet as compatibility caption (was above H1).
+                    Reads as "this is what you paste — and it works with
+                    these clients" — natural reading order. */}
+                <div style={{ marginTop: 18 }}>
+                  <WorksWithBelt />
+                </div>
+                {/* F6 (2026-04-28): "Backed by Founders Inc" social-proof
+                    line under hero, more prominent than the WhosBehind
+                    band's small print or the footer tagline. */}
+                <p
+                  data-testid="hero-backed-by"
+                  style={{
+                    margin: '10px auto 0',
+                    fontSize: 12.5,
+                    color: 'var(--muted)',
+                    letterSpacing: '0.02em',
+                    textAlign: 'center',
+                  }}
+                >
+                  Backed by{' '}
+                  <a
+                    href="https://f.inc"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      color: 'var(--ink)',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      borderBottom: '1px solid var(--line)',
+                    }}
+                  >
+                    Founders Inc
+                  </a>
+                </p>
+              </>
             ) : (
             <div
               className="hero-ctas"
@@ -599,7 +642,12 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
           >
             Real AI doing real work. All three deploy from a single GitHub repo.
           </p>
-          <div style={{ display: 'grid', gap: 12, maxWidth: 820, margin: '0 auto' }}>
+          {/* F1 (2026-04-28): 3-up cards on desktop, stack only on narrow.
+              Federico: "told you these should be cards left to right not
+              top to bottom". MVP showcase used to render AppStripes in a
+              single-column list (gap:12, maxWidth:820, no columns). Move
+              to 3-up grid that mirrors the v17 wireframe's app-row. */}
+          <div className="mvp-showcase-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, maxWidth: 1100, margin: '0 auto' }}>
             {stripes.map((s) => (
               <AppStripe
                 key={s.slug}
@@ -611,6 +659,14 @@ export function LandingV17Page({ variant = 'full' }: LandingV17PageProps = {}) {
               />
             ))}
           </div>
+          <style>{`
+            @media (max-width: 880px) {
+              .mvp-showcase-grid { grid-template-columns: repeat(2, 1fr) !important; }
+            }
+            @media (max-width: 640px) {
+              .mvp-showcase-grid { grid-template-columns: 1fr !important; }
+            }
+          `}</style>
         </section>
 
         {/* PUBLISH-CTA BOX — MVP variant: dropped (creator-focused, MVP is consumer-first). */}

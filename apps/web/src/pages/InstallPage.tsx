@@ -12,22 +12,20 @@ import { PageShell } from '../components/PageShell';
 
 // Code blocks use the brand warm-dark neutral so the install commands
 // are legible on both light and dark themes. Earlier iterations used
-// `#0d0f14` (near-black) — Federico's LOCKED rule bans pure black on
-// hero/landing terminal panels and code blocks (MEMORY "Terminal
-// Background Never Black", feedback_terminal_never_black.md). Use the
-// same `#1b1a17` token as the landing hero code panel + the
-// InstallInClaudePage snippets so every terminal surface on the site
-// reads as one consistent warm-dark palette.
+// F7 (2026-04-28): light tinted bg on copy boxes — Federico-locked
+// global rule: snippet/copy containers use light tinted bg, never dark.
+// Replaces the prior `#1b1a17` warm-dark shared token; design bands
+// (hero shadows, ManifestoBand) keep the warm-dark treatment.
 const codeBlockStyle: React.CSSProperties = {
-  background: '#1b1a17',
-  color: '#e8e6e0',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
   padding: '14px 16px',
   borderRadius: 10,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 13,
   lineHeight: 1.5,
   overflowX: 'auto',
-  border: '1px solid rgba(255,255,255,0.08)',
+  border: '1px solid var(--line)',
   margin: '8px 0 20px',
 };
 

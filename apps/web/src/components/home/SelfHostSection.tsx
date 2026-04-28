@@ -81,6 +81,7 @@ export function SelfHostSection() {
           Open source and Docker-ready. One command and it&rsquo;s yours.
         </p>
 
+        {/* F7 (2026-04-28): light tinted bg, no black on copy boxes. */}
         <div
           style={{
             display: 'flex',
@@ -88,8 +89,8 @@ export function SelfHostSection() {
             justifyContent: 'center',
             maxWidth: 520,
             margin: '0 auto 18px',
-            background: '#1b1a17',
-            border: '1px solid rgba(250,250,248,0.12)',
+            background: 'var(--studio, #f5f4f0)',
+            border: '1px solid var(--line)',
             borderRadius: 10,
             overflow: 'hidden',
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
@@ -100,7 +101,7 @@ export function SelfHostSection() {
             style={{
               flex: 1,
               padding: '14px 16px',
-              color: '#fafaf8',
+              color: 'var(--ink)',
               fontSize: 13.5,
               lineHeight: 1.3,
               textAlign: 'left',
@@ -118,9 +119,9 @@ export function SelfHostSection() {
             style={{
               padding: '0 16px',
               background: 'transparent',
-              color: '#fafaf8',
+              color: 'var(--accent)',
               border: 'none',
-              borderLeft: '1px solid rgba(250,250,248,0.12)',
+              borderLeft: '1px solid var(--line)',
               cursor: 'pointer',
               fontFamily: 'inherit',
               fontSize: 12,

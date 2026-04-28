@@ -108,13 +108,11 @@ const codeBlockStyle: CSSProperties = {
   whiteSpace: 'pre',
 };
 
-// Hero terminal: warm dark neutral (#1b1a17) NOT pure black. Matches the
-// brand's terminal look on landing. Only used for the canonical "install
-// in 60 seconds" snippet right under the H1, to give the docs landing
-// the same polished hero moment you get from Stripe / Vercel docs.
+// F7 (2026-04-28): light tinted bg on hero copy box (was warm dark).
+// Federico-locked global rule — copy/snippet boxes never use dark bg.
 const heroCodeBlockStyle: CSSProperties = {
-  background: '#1b1a17',
-  color: '#f5f4ef',
+  background: 'var(--studio, #f5f4f0)',
+  color: 'var(--ink)',
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   fontSize: 13,
   lineHeight: 1.75,
@@ -123,9 +121,9 @@ const heroCodeBlockStyle: CSSProperties = {
   margin: '0 0 18px',
   maxWidth: 760,
   overflowX: 'auto',
-  border: '1px solid #2a2824',
+  border: '1px solid var(--line)',
   whiteSpace: 'pre',
-  boxShadow: '0 12px 28px -18px rgba(0, 0, 0, 0.35)',
+  boxShadow: '0 12px 28px -18px rgba(15, 23, 42, 0.08)',
 };
 
 const heroCodeCommentStyle: CSSProperties = {

@@ -233,8 +233,9 @@ function InstallTabs({ token }: { token: string }) {
             Install the Floom CLI and authenticate with your token.
           </p>
         )}
+        {/* F7: light tinted bg on copy boxes (Federico-locked global rule). */}
         <div style={{ position: 'relative' }}>
-          <pre style={{ fontFamily: MONO, fontSize: 12, background: '#1b1a17', color: '#d4d4c8', borderRadius: 8, padding: '14px 16px', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0, paddingRight: 80 }}>
+          <pre style={{ fontFamily: MONO, fontSize: 12, background: 'var(--studio, #f5f4f0)', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '14px 16px', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0, paddingRight: 80 }}>
             {snippet}
           </pre>
           <button
@@ -247,9 +248,9 @@ function InstallTabs({ token }: { token: string }) {
               right: 10,
               fontSize: 11,
               fontWeight: 600,
-              color: copied ? '#d4d4c8' : ACCENT,
-              background: 'rgba(255,255,255,0.07)',
-              border: `1px solid ${copied ? 'rgba(212,212,200,0.2)' : 'rgba(4,120,87,0.35)'}`,
+              color: copied ? MUTED : ACCENT,
+              background: '#fff',
+              border: `1px solid ${copied ? LINE : 'rgba(4,120,87,0.35)'}`,
               borderRadius: 6,
               padding: '3px 10px',
               cursor: 'pointer',
@@ -375,7 +376,7 @@ function TokenCard({ onTokenReady }: { onTokenReady?: (rawToken: string) => void
             Copy this token now — it won't be shown again.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <code style={{ fontFamily: MONO, fontSize: 12.5, background: '#1b1a17', color: '#d4d4c8', padding: '8px 12px', borderRadius: 6, flex: 1, overflowX: 'auto', wordBreak: 'break-all' as const }}>
+            <code style={{ fontFamily: MONO, fontSize: 12.5, background: 'var(--studio, #f5f4f0)', color: INK, border: `1px solid ${LINE}`, padding: '8px 12px', borderRadius: 6, flex: 1, overflowX: 'auto', wordBreak: 'break-all' as const }}>
               {displayToken}
             </code>
             <button
@@ -483,7 +484,7 @@ function TestItSection() {
         <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8, width: '100%' }}>
           <code
             data-testid="test-prompt-text"
-            style={{ fontFamily: MONO, fontSize: 12, background: '#1b1a17', color: '#d4d4c8', padding: '8px 12px', borderRadius: 6, flex: 1 }}
+            style={{ fontFamily: MONO, fontSize: 12, background: 'var(--studio, #f5f4f0)', color: INK, border: `1px solid ${LINE}`, padding: '8px 12px', borderRadius: 6, flex: 1 }}
           >
             {TEST_PROMPT}
           </code>
@@ -546,7 +547,7 @@ function TestItSection() {
 
       <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid ${LINE}` }}>
         <p style={{ fontSize: 12, color: MUTED, margin: '0 0 10px', fontWeight: 600 }}>Alternative: use the HTTP API directly</p>
-        <pre style={{ fontFamily: MONO, fontSize: 11.5, background: '#1b1a17', color: '#d4d4c8', borderRadius: 8, padding: '12px 14px', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0 }}>
+        <pre style={{ fontFamily: MONO, fontSize: 11.5, background: 'var(--studio, #f5f4f0)', color: INK, border: `1px solid ${LINE}`, borderRadius: 8, padding: '12px 14px', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0 }}>
           {`curl -X POST https://floom.dev/api/uuid/run \\
   -H 'Authorization: Bearer floom_agent_<your_token>'`}
         </pre>
