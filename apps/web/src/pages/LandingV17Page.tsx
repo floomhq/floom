@@ -140,6 +140,38 @@ function MvpHeroInstall() {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
+      {/* R10 (2026-04-28): complementary "Try a live app" CTA. Gemini
+          baseline scored landing 6/10 partly because the only first-
+          step action was "copy this command and paste in your terminal".
+          Adding a 1-click path to a live app gives non-CLI visitors a
+          way to feel the product without installing anything. */}
+      <div
+        style={{
+          marginTop: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 13,
+          color: 'var(--muted)',
+        }}
+      >
+        <span>or</span>
+        <a
+          href="/p/competitor-lens"
+          data-testid="hero-try-live-app"
+          style={{
+            color: 'var(--accent)',
+            fontWeight: 600,
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          try a live app in your browser
+          <span aria-hidden="true">→</span>
+        </a>
+      </div>
     </div>
   );
 }

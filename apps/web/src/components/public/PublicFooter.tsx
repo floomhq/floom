@@ -215,7 +215,7 @@ export function PublicFooter() {
           <div style={COL_LABEL_STYLE}>Company</div>
           <FootLink to="/about">About</FootLink>
           <FootLink href="https://github.com/floomhq/floom">GitHub</FootLink>
-          <FootLink href="https://discord.gg/floom">Discord</FootLink>
+          <FootLink href="https://discord.gg/8fXGXjxcRz">Discord</FootLink>
           <FootLink href="https://x.com/floomhq">X / Twitter</FootLink>
         </div>
 
@@ -255,7 +255,7 @@ export function PublicFooter() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <a
-              href="https://discord.gg/floom"
+              href="https://discord.gg/8fXGXjxcRz"
               target="_blank"
               rel="noreferrer"
               aria-label="Discord"

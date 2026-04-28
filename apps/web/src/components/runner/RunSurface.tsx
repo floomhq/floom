@@ -2273,13 +2273,14 @@ function OutputSlot({
 
 function EmptyOutputCard({
   slug,
-  appName,
+  appName: _appName,
   actionSpec,
 }: {
   slug: string;
   appName: string;
   actionSpec: ActionSpec;
 }) {
+  void _appName;
   // Pre-run empty state. Federico audit 2026-04-24: the right-side
   // output panel used to read as dead space — title was the literal
   // first output label (e.g. "Total Rows will appear here" for Lead
