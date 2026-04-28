@@ -1297,77 +1297,11 @@ export function AppPermalinkPage() {
                     </a>
                   </span>
                 </div>
-                {/* v26 3-card footer */}
-                <div
-                  data-testid="ap-foot-grid"
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 14,
-                    marginTop: 32,
-                    paddingTop: 24,
-                    borderTop: '1px solid var(--line)',
-                  }}
-                  className="ap-foot-grid-responsive"
-                >
-                  {([
-                    {
-                      id: 'about' as const,
-                      title: 'About this app',
-                      desc: 'How it works, who built it, license, changelog. Read the full README.',
-                      cta: 'Read about',
-                    },
-                    {
-                      id: 'install' as const,
-                      title: 'Install in Claude / Cursor / API',
-                      desc: 'One command for Claude Desktop. A single endpoint for Cursor. Plain HTTP for everything else.',
-                      cta: 'Install',
-                    },
-                    {
-                      id: 'source' as const,
-                      title: 'Source on GitHub',
-                      desc: githubRepo
-                        ? `${githubRepo.replace('https://github.com/', '')} · ${app.manifest?.license?.trim() ?? 'MIT'}`
-                        : 'OpenAPI spec, floom manifest, and self-host instructions.',
-                      cta: 'View source',
-                    },
-                  ]).map((card) => (
-                    <button
-                      key={card.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveTab(card.id);
-                        setSearchParams((prev) => {
-                          const next = new URLSearchParams(prev);
-                          next.set('tab', card.id);
-                          return next;
-                        }, { replace: true });
-                      }}
-                      style={{
-                        background: 'var(--card)',
-                        border: '1px solid var(--line)',
-                        borderRadius: 12,
-                        padding: '18px 20px',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 6,
-                      }}
-                    >
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>
-                        {card.title}
-                      </div>
-                      <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5, flex: 1 }}>
-                        {card.desc}
-                      </div>
-                      <div style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600, marginTop: 4 }}>
-                        {card.cta} &rarr;
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                {/* 3-card footer (About / Install / Source) removed
+                    2026-04-28: pure redundancy with the Run/About/Install/Source
+                    TABS at the top of the page card. Clicking these just
+                    switched the active tab — same affordance the tabs already
+                    provide. Federico flagged. */}
                 {celebrate && (
                   <CelebrationCard
                     slug={app.slug}
