@@ -36,8 +36,11 @@ from pydantic import BaseModel, ConfigDict, Field
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
 FETCH_TIMEOUT_S = 5.0
 # Benchmarked 2026-04-25: 2.5-flash-lite + JSON schema returns in 1-3s.
-# Total budget is fetch(5s max × 2 in parallel) + Gemini(8s cap) + slack.
-TOTAL_BUDGET_S = 12.0
+# Re-benchmarked 2026-04-28 (R9 launch): observed 6-9s tail latency on
+# generativelanguage.googleapis.com under load. Bumped total budget so a
+# realistic worst-case fetch (5s) + slow Gemini (12s) doesn't time out.
+# Still well under the 30s manifest timeout.
+TOTAL_BUDGET_S = 22.0
 MAX_RESPONSE_BYTES = 500_000
 MAX_URL_LEN = 200
 MAX_TEXT_CHARS = 12_000
@@ -856,9 +859,11 @@ async def _analyze_async(your_url: str, competitor_url: str) -> dict[str, Any]:
 
                 _log("calling Gemini")
                 elapsed = time.monotonic() - started
-                # Raw httpx call bypasses the 10s SDK minimum; 8s cap is
-                # plenty for 2.5-flash-lite (typical 1-3s).
-                remaining_budget = max(4.0, min(8.0, TOTAL_BUDGET_S - elapsed - 0.25))
+                # Raw httpx call bypasses the 10s SDK minimum. Cap Gemini
+                # at 15s — typical 1-3s, observed tail 6-9s, so 15s gives
+                # comfortable headroom without blowing the 22s total budget
+                # or the 30s manifest timeout.
+                remaining_budget = max(4.0, min(15.0, TOTAL_BUDGET_S - elapsed - 0.25))
                 result = await _call_gemini(
                     client,
                     api_key=api_key,
@@ -870,7 +875,7 @@ async def _analyze_async(your_url: str, competitor_url: str) -> dict[str, Any]:
                 return result
     except asyncio.TimeoutError as exc:
         raise FriendlyTimeoutError(
-            "Competitor Lens hit its 10-second limit. Try lighter pages or retry."
+            "Competitor Lens hit its time budget. Try lighter pages or retry."
         ) from exc
 
 

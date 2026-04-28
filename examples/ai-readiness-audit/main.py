@@ -57,9 +57,12 @@ import httpx
 from bs4 import BeautifulSoup
 
 DEFAULT_MODEL_ID = "gemini-2.5-flash-lite"
-# Benchmarked 2026-04-25: 2.5-flash-lite + JSON schema returns in 1-2s,
-# well inside an 8s wall-clock. Page fetch adds 1-2s.
-HARD_TIMEOUT_S = 8.0
+# Benchmarked 2026-04-25: 2.5-flash-lite + JSON schema returns in 1-2s.
+# Re-benchmarked 2026-04-28 (R9 launch): 6-9s tail latency observed under
+# load. Bumped HARD_TIMEOUT_S from 8s → 20s so a realistic fetch (5s) +
+# slow Gemini (12s) finishes inside the budget. Still under the 30s
+# manifest timeout.
+HARD_TIMEOUT_S = 20.0
 FETCH_TIMEOUT_S = 5.0
 DNS_TIMEOUT_S = 1.5
 MAX_FETCH_BYTES = 500 * 1024
