@@ -172,7 +172,15 @@ export function PublicFooter() {
             letterSpacing: '0.02em',
           }}
         >
-          Building Floom in Hamburg + SF
+          Building Floom in Hamburg + SF · Backed by{' '}
+          <a
+            href="https://f.inc"
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: 'var(--ink)', fontWeight: 600, textDecoration: 'none', borderBottom: '1px solid var(--line)' }}
+          >
+            Founders Inc
+          </a>
         </div>
 
         {/* Social icons */}
