@@ -1554,6 +1554,50 @@ if (webDist) {
     });
   });
 
+  // install.sh — served dynamically so FLOOM_INSTALL_HOST is baked in per
+  // request origin. This lets `curl https://mvp.floom.dev/install.sh | bash`
+  // produce a script that writes `https://mvp.floom.dev` as the default
+  // api_url instead of the hardcoded `https://floom.dev` fallback in the repo.
+  //
+  // Resolution order for the baked-in host:
+  //   1. FLOOM_INSTALL_HOST env var (set by the operator at deploy time)
+  //   2. PUBLIC_URL env var (already set for each deployment)
+  //   3. The Host/X-Forwarded-Host header of the incoming request
+  // The templated value replaces the line `INSTALL_HOST="${FLOOM_INSTALL_HOST:-https://floom.dev}"`.
+  app.get('/install.sh', async (c) => {
+    const installShPath = join(webDist, 'install.sh');
+    let script: string;
+    try {
+      script = readFileSync(installShPath, 'utf-8');
+    } catch {
+      return new Response('install.sh not found', { status: 404 });
+    }
+    // Determine the canonical origin for this deployment.
+    const deployOrigin =
+      process.env.FLOOM_INSTALL_HOST ||
+      PUBLIC_URL ||
+      (() => {
+        const host = c.req.header('x-forwarded-host') || c.req.header('host') || '';
+        const proto = c.req.header('x-forwarded-proto') || 'https';
+        return host ? `${proto}://${host}` : 'https://floom.dev';
+      })();
+    // Rewrite the fallback in the INSTALL_HOST variable declaration so the
+    // cloned script knows which host to default to. The line looks like:
+    //   INSTALL_HOST="${FLOOM_INSTALL_HOST:-https://floom.dev}"
+    const templated = script.replace(
+      /^(INSTALL_HOST="\$\{FLOOM_INSTALL_HOST:-)[^}"]*(}")/m,
+      `$1${deployOrigin}$2`,
+    );
+    return new Response(templated, {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-cache',
+        'x-floom-install-host': deployOrigin,
+      },
+    });
+  });
+
   app.use('/*', async (c, next) => {
     const url = new URL(c.req.url);
     const pathname = url.pathname;

@@ -13,6 +13,19 @@
 set -euo pipefail
 
 CONFIG="${FLOOM_CONFIG:-$HOME/.floom/config.json}"
+DEFAULT_HOST_FILE="${HOME}/.floom/default-host"
+
+# Return the api_url to use when none is explicitly supplied.
+# Priority: FLOOM_API_URL env var > ~/.floom/default-host > hardcoded fallback.
+default_host() {
+  if [[ -n "${FLOOM_API_URL:-}" ]]; then
+    echo "$FLOOM_API_URL"
+  elif [[ -f "$DEFAULT_HOST_FILE" ]]; then
+    cat "$DEFAULT_HOST_FILE"
+  else
+    echo "https://floom.dev"
+  fi
+}
 
 case "${1:-}" in
   --show)
@@ -67,9 +80,9 @@ print(f"token:     {red}")
 PY
     exit $? ;;
   login)
-    # Support: floom auth login --token=<agent-token> [--url=<api-url>]
+    # Support: floom auth login --token=<agent-token> [--api-url=<url>] [--url=<url>]
     AGENT_TOKEN=""
-    API_URL="https://floom.dev"
+    API_URL="$(default_host)"
     shift
     for arg in "$@"; do
       case "$arg" in
@@ -78,17 +91,19 @@ PY
 floom auth login — save an Agent token.
 
 usage:
-  floom auth login --token=<agent_token> [--url=<api_url>]
+  floom auth login --token=<agent_token> [--api-url=<api_url>]
 
 options:
-  --token=<token>   Agent token (required). Get yours at https://floom.dev/home
-  --url=<url>       Override API base URL (default: https://floom.dev)
+  --token=<token>      Agent token (required). Get yours at <api_url>/home
+  --api-url=<url>      Override API base URL (default: install host or https://floom.dev)
+  --url=<url>          Alias for --api-url
 
 EOF
           exit 0 ;;
-        --token=*) AGENT_TOKEN="${arg#--token=}" ;;
-        --url=*)   API_URL="${arg#--url=}" ;;
-        *)         echo "floom auth login: unknown option: $arg" >&2; exit 1 ;;
+        --token=*)   AGENT_TOKEN="${arg#--token=}" ;;
+        --api-url=*) API_URL="${arg#--api-url=}" ;;
+        --url=*)     API_URL="${arg#--url=}" ;;
+        *)           echo "floom auth login: unknown option: $arg" >&2; exit 1 ;;
       esac
     done
     if [[ -z "$AGENT_TOKEN" ]]; then
@@ -102,7 +117,29 @@ with open(os.environ["CONFIG_PATH"], "w") as f:
     json.dump({"api_key": os.environ["AGENT_TOKEN"], "api_url": os.environ["API_URL"]}, f)
 PY
     chmod 600 "$CONFIG"
-    echo "saved $CONFIG (api_url: $API_URL)"
+    # Validate the token immediately — fail fast so the user knows right away.
+    VALIDATE_FILE=$(mktemp)
+    trap 'rm -f "$VALIDATE_FILE"' RETURN
+    HTTP_CODE=$(curl -sS -o "$VALIDATE_FILE" -w "%{http_code}" \
+      -H "Authorization: Bearer $AGENT_TOKEN" \
+      "${API_URL%/}/api/session/me" 2>/dev/null) || HTTP_CODE="000"
+    if [[ "$HTTP_CODE" != "200" ]]; then
+      rm -f "$CONFIG"
+      echo "ERROR: Token rejected by ${API_URL} (HTTP ${HTTP_CODE})." >&2
+      echo "Mint a fresh token at ${API_URL}/home and try again." >&2
+      exit 1
+    fi
+    # Extract user identity for a friendly confirmation message.
+    IDENTITY=$(python3 -c "
+import json, sys
+try:
+  d = json.load(open('$VALIDATE_FILE'))
+  u = d.get('user', {})
+  print(u.get('email') or u.get('id') or 'unknown')
+except Exception:
+  print('unknown')
+" 2>/dev/null || echo "unknown")
+    echo "Logged in as ${IDENTITY} at ${API_URL}"
     exit 0 ;;
   -h|--help|"")
     cat <<EOF
@@ -127,7 +164,7 @@ EOF
 esac
 
 AGENT_TOKEN="$1"
-API_URL="${2:-https://floom.dev}"
+API_URL="${2:-$(default_host)}"
 
 mkdir -p "$(dirname "$CONFIG")"
 CONFIG_PATH="$CONFIG" AGENT_TOKEN="$AGENT_TOKEN" API_URL="$API_URL" python3 - <<'PY'
