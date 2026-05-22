@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso
 from models import RunCreate, ApproveRequest, RejectRequest
-from worker_registry import discover_workers, get_worker, get_worker_config
+from worker_registry import discover_workers, get_worker, get_worker_config, invalidate_worker_cache
 from run_service import create_run, start_run, update_run_status, add_log
 from run_service import get_secrets_for_worker
 
@@ -51,7 +51,7 @@ def get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
 
 @app.get("/workers")
 def list_workers() -> List[Dict[str, Any]]:
-    workers = discover_workers()
+    workers = discover_workers(use_cache=True)
     conn = get_db()
     cursor = conn.cursor()
     for w in workers:
@@ -88,6 +88,7 @@ def get_worker_detail(worker_id: str) -> Dict[str, Any]:
 
 @app.post("/workers/reload")
 def reload_workers() -> Dict[str, Any]:
+    invalidate_worker_cache()
     workers = discover_workers()
     conn = get_db()
     cursor = conn.cursor()

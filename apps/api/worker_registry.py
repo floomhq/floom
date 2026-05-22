@@ -6,8 +6,13 @@ from models import WorkerConfig
 
 WORKERS_DIR = os.environ.get("FLOOM_WORKERS_DIR", "../../workers")
 
+_worker_cache: Optional[List[Dict[str, Any]]] = None
 
-def discover_workers() -> List[Dict[str, Any]]:
+def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
+    global _worker_cache
+    if use_cache and _worker_cache is not None:
+        return _worker_cache
+
     workers = []
     if not os.path.isdir(WORKERS_DIR):
         return workers
@@ -30,7 +35,8 @@ def discover_workers() -> List[Dict[str, Any]]:
                     "runner": config.runtime.runner,
                 })
             except Exception as e:
-                print(f"Failed to load worker {folder}: {e}")
+                import logging
+                logging.warning(f"Failed to load worker {folder}: {e}")
                 workers.append({
                     "id": folder,
                     "name": folder,
@@ -40,11 +46,17 @@ def discover_workers() -> List[Dict[str, Any]]:
                     "trigger_type": "manual",
                     "runner": "local",
                 })
+    _worker_cache = workers
     return workers
 
 
+def invalidate_worker_cache():
+    global _worker_cache
+    _worker_cache = None
+
+
 def get_worker(worker_id: str) -> Optional[Dict[str, Any]]:
-    for w in discover_workers():
+    for w in discover_workers(use_cache=True):
         if w["id"] == worker_id:
             return w
     return None
