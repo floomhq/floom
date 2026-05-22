@@ -43,6 +43,9 @@ def run_worker_local(worker_id: str, run_id: str, inputs: Dict[str, Any], secret
     # Build context
     context = make_context(run_id, worker_id, secrets, log_fn)
 
+    # SECURITY NOTE: This executes worker code in-process with exec().
+    # The local runner is intended for trusted code only.
+    # For untrusted code, use the E2B sandbox runner.
     # Execute in isolated way using exec with restricted globals
     try:
         log_fn("Loading worker module")

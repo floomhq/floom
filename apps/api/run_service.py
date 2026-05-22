@@ -10,6 +10,10 @@ from runner_local import run_worker_local
 
 def create_run(worker_id: str, inputs: Dict[str, Any], trigger_source: str = "manual") -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
+    config = get_worker_config(worker_id)
+    approval_status = "not_required"
+    if config and config.approvals.required:
+        approval_status = "pending"
     conn = get_db()
     cursor = conn.cursor()
     created_at = now_iso()
@@ -18,7 +22,7 @@ def create_run(worker_id: str, inputs: Dict[str, Any], trigger_source: str = "ma
         INSERT INTO runs (id, worker_id, status, trigger_source, runner, input_json, approval_status, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (run_id, worker_id, "queued", trigger_source, "local", json.dumps(inputs), "not_required", created_at)
+        (run_id, worker_id, "queued", trigger_source, "local", json.dumps(inputs), approval_status, created_at)
     )
     conn.commit()
     conn.close()
@@ -47,6 +51,9 @@ def update_run_status(run_id: str, status: str, output: Optional[Dict[str, Any]]
     if error is not None:
         updates.append("error = ?")
         params.append(error)
+    if status == "running":
+        updates.append("started_at = ?")
+        params.append(now_iso())
     if status in ("completed", "failed", "pending_approval", "approved", "rejected"):
         updates.append("completed_at = ?")
         params.append(now_iso())
@@ -127,9 +134,27 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]):
     artifacts = result.get("artifacts", [])
 
     # Store artifacts
+    from db import get_db
     for art in artifacts:
-        # Simple artifact storage - in a real app we'd copy files
-        pass
+        try:
+            art_id = f"art_{uuid.uuid4().hex[:12]}"
+            art_name = art.get("name", "artifact")
+            art_type = art.get("type", "file")
+            art_path = art.get("path", "")
+            art_size = art.get("size_bytes", 0)
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO artifacts (id, run_id, name, type, path, size_bytes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (art_id, run_id, art_name, art_type, art_path, art_size, now_iso())
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            log_fn(f"Failed to store artifact: {e}", level="error")
 
     update_run_status(run_id, "completed", output=outputs)
     log_fn("Output generated")
