@@ -1,0 +1,40 @@
+id: weekly_update
+name: Weekly Update
+description: Turns raw notes into a polished weekly company update using AI.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: notes
+    label: Raw notes
+    type: textarea
+    required: true
+    placeholder: Paste notes, bullets, metrics, updates...
+
+  - name: audience
+    label: Audience
+    type: select
+    required: true
+    options:
+      - internal
+      - investor
+      - customer
+    default: internal
+
+secrets:
+  - OPENAI_API_KEY
+
+outputs:
+  - name: update
+    label: Weekly update
+    type: markdown
+
+approvals:
+  required: true
+  label: Approve final update
