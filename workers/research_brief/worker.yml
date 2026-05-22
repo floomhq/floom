@@ -1,0 +1,50 @@
+id: research_brief
+name: Research Brief
+description: Generates a markdown research brief on any topic.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: topic
+    label: Research topic
+    type: text
+    required: true
+    placeholder: e.g. "Competitor analysis for AI CRM tools"
+
+  - name: audience
+    label: Audience
+    type: select
+    required: true
+    options:
+      - executive
+      - technical
+      - sales
+    default: executive
+
+  - name: depth
+    label: Depth
+    type: select
+    required: true
+    options:
+      - overview
+      - detailed
+      - deep_dive
+    default: overview
+
+secrets:
+  - OPENAI_API_KEY
+
+outputs:
+  - name: brief
+    label: Research brief
+    type: markdown
+
+approvals:
+  required: true
+  label: Approve research brief
