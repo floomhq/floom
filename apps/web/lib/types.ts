@@ -93,6 +93,13 @@ export interface ApprovalDetail {
   decided_at?: string;
 }
 
+export interface OutputField {
+  name: string;
+  type: string;  // "markdown" | "json" | "csv" | "text" | "file"
+  label: string;
+  value: any;
+}
+
 export interface RunDetail {
   id: string;
   worker_id: string;
@@ -102,6 +109,7 @@ export interface RunDetail {
   runner: string;
   input: Record<string, any>;
   output: Record<string, any>;
+  output_schema: OutputField[];
   logs: LogEntry[];
   artifacts: Artifact[];
   approval?: ApprovalDetail;
@@ -118,6 +126,7 @@ export interface WorkerSummary {
   name: string;
   description?: string;
   status: WorkerStatus;
+  paused?: boolean;
   trigger_type: string;
   runner: string;
   last_run?: RunSummary;
@@ -128,6 +137,7 @@ export interface WorkerDetail {
   name: string;
   description?: string;
   status: WorkerStatus;
+  paused?: boolean;
   trigger_type: string;
   runner: string;
   config: WorkerConfig;

@@ -2,11 +2,13 @@
 
 import sqlite3
 import os
+import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Generator
 
 DB_PATH = os.environ.get("FLOOM_DB", "../../data/floom.db")
+logger = logging.getLogger("floom.db")
 
 # ---------------------------------------------------------------------------
 # Connection management
@@ -151,6 +153,14 @@ MIGRATIONS = [
     """
     ALTER TABLE logs ADD COLUMN trace_id TEXT;
     """,
+    # -- migration 5: worker_state table for pause/unpause ----------------------
+    """
+    CREATE TABLE IF NOT EXISTS worker_state (
+        worker_id TEXT PRIMARY KEY,
+        paused INTEGER DEFAULT 0 NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -172,7 +182,16 @@ def apply_migrations():
     for i, sql in enumerate(MIGRATIONS, start=1):
         if i > current:
             with get_db() as conn:
-                conn.executescript(sql)
+                try:
+                    conn.executescript(sql)
+                except sqlite3.OperationalError as exc:
+                    if i not in {3, 4} or "duplicate column name" not in str(exc):
+                        raise
+                    logger.info(
+                        "Skipping already-applied column migration %s: %s",
+                        i,
+                        exc,
+                    )
                 conn.execute(
                     "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
                     (i, now_iso())

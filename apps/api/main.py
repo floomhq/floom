@@ -4,14 +4,16 @@ import os
 import json
 import sqlite3
 import logging
+import mimetypes
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
-from db import init_db, get_db, now_iso
+from db import init_db, get_db, now_iso, DB_PATH
 from models import (
     RunCreate,
     RejectRequest,
@@ -23,9 +25,11 @@ from models import (
     LogEntry,
     Artifact,
     ApprovalDetail,
+    OutputField,
     SecretItem,
     ReloadResponse,
     ActionResponse,
+    WorkerStateResponse,
     RunStatus,
     ApprovalStatus,
     SecretStatus,
@@ -56,7 +60,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3011"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,6 +91,14 @@ async def generic_error_handler(_request, exc: Exception):
 
 def row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def _get_paused_workers() -> set:
+    """Return set of worker_ids that are currently paused."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT worker_id FROM worker_state WHERE paused = 1")
+        return {r["worker_id"] for r in cursor.fetchall()}
 
 
 def _get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
@@ -129,6 +141,7 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
     workers = discover_workers(use_cache=True)
+    paused_workers = _get_paused_workers()
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"])
@@ -141,6 +154,17 @@ def list_workers() -> List[WorkerSummary]:
             missing = [s for s in config.secrets if s not in os.environ]
             if missing:
                 status = WorkerStatus.MISSING_SECRET
+        if (
+            status not in (WorkerStatus.MISSING_SECRET, WorkerStatus.ERROR)
+            and w["id"] in paused_workers
+        ):
+            status = WorkerStatus.PAUSED
+        elif (
+            status == WorkerStatus.HEALTHY
+            and last_run
+            and last_run.status in (RunStatus.FAILED, RunStatus.REJECTED)
+        ):
+            status = WorkerStatus.NEEDS_ATTENTION
 
         result.append(
             WorkerSummary(
@@ -148,12 +172,41 @@ def list_workers() -> List[WorkerSummary]:
                 name=w["name"],
                 description=w.get("description"),
                 status=status,
+                paused=w["id"] in paused_workers,
                 trigger_type=w["trigger_type"],
                 runner=w["runner"],
                 last_run=last_run,
             )
         )
     return result
+
+
+@app.post("/workers/{worker_id}/pause", response_model=WorkerStateResponse)
+def pause_worker(worker_id: str) -> WorkerStateResponse:
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO worker_state (worker_id, paused, updated_at) VALUES (?, 1, ?)
+               ON CONFLICT(worker_id) DO UPDATE SET paused=1, updated_at=excluded.updated_at""",
+            (worker_id, now_iso()),
+        )
+    return WorkerStateResponse(worker_id=worker_id, paused=True)
+
+
+@app.post("/workers/{worker_id}/unpause", response_model=WorkerStateResponse)
+def unpause_worker(worker_id: str) -> WorkerStateResponse:
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO worker_state (worker_id, paused, updated_at) VALUES (?, 0, ?)
+               ON CONFLICT(worker_id) DO UPDATE SET paused=0, updated_at=excluded.updated_at""",
+            (worker_id, now_iso()),
+        )
+    return WorkerStateResponse(worker_id=worker_id, paused=False)
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
@@ -173,6 +226,12 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
             (worker_id,),
         )
         recent_runs = [_make_run_summary(r) for r in cursor.fetchall()]
+        cursor.execute(
+            "SELECT paused FROM worker_state WHERE worker_id = ?",
+            (worker_id,),
+        )
+        state_row = cursor.fetchone()
+        paused = bool(state_row["paused"]) if state_row else False
 
     config_dict = worker.get("config", {})
     try:
@@ -185,11 +244,26 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
             runtime={"type": "python", "entrypoint": "run.py"},
         )
 
+    status = WorkerStatus(worker["status"])
+    if config and config.secrets:
+        missing = [s for s in config.secrets if s not in os.environ]
+        if missing:
+            status = WorkerStatus.MISSING_SECRET
+    if status not in (WorkerStatus.MISSING_SECRET, WorkerStatus.ERROR) and paused:
+        status = WorkerStatus.PAUSED
+    elif (
+        status == WorkerStatus.HEALTHY
+        and recent_runs
+        and recent_runs[0].status in (RunStatus.FAILED, RunStatus.REJECTED)
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
         description=worker.get("description"),
-        status=WorkerStatus(worker["status"]),
+        status=status,
+        paused=paused,
         trigger_type=worker["trigger_type"],
         runner=worker["runner"],
         config=config,
@@ -274,6 +348,70 @@ def list_runs(
     return [_make_run_summary(r) for r in rows]
 
 
+@app.post("/runs/clear")
+def clear_runs():
+    with get_db() as conn:
+        conn.execute("DELETE FROM artifacts")
+        conn.execute("DELETE FROM approvals")
+        conn.execute("DELETE FROM logs")
+        conn.execute("DELETE FROM runs")
+    logger.info("All run history cleared")
+    return {"status": "cleared"}
+
+
+@app.get("/runs/{run_id}/artifacts/{artifact_id}/download")
+def download_artifact(run_id: str, artifact_id: str):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM artifacts WHERE id = ? AND run_id = ?",
+            (artifact_id, run_id),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    art = row_to_dict(row)
+    path_str = art["path"]
+
+    from runner_local import ARTIFACTS_DIR
+    from pathlib import Path
+    try:
+        artifacts_dir = ARTIFACTS_DIR.resolve()
+        resolved = Path(path_str).resolve()
+    except Exception:
+        raise HTTPException(status_code=403, detail="Invalid path")
+
+    try:
+        resolved.relative_to(artifacts_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    content_type, _ = mimetypes.guess_type(art["name"])
+    content_type = content_type or "application/octet-stream"
+    filename = (
+        str(art["name"])
+        .replace("\\", "_")
+        .replace('"', "_")
+        .replace("\r", "_")
+        .replace("\n", "_")
+    )
+
+    def iter_file():
+        with open(resolved, "rb") as f:
+            while chunk := f.read(65536):
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/runs/{run_id}", response_model=RunDetail)
 def get_run(run_id: str) -> RunDetail:
     with get_db() as conn:
@@ -296,6 +434,18 @@ def get_run(run_id: str) -> RunDetail:
         run = row_to_dict(row)
         run["input"] = json.loads(run.get("input_json") or "{}")
         run["output"] = json.loads(run.get("output_json") or "{}")
+        # Build typed output schema from worker config
+        output_config = get_worker_config(run["worker_id"])
+        output_schema = []
+        if output_config:
+            raw_output = run["output"]
+            for out in output_config.outputs:
+                output_schema.append(OutputField(
+                    name=out.name,
+                    label=out.label,
+                    type=out.type,
+                    value=raw_output.get(out.name),
+                ))
 
         cursor.execute(
             """
@@ -349,6 +499,7 @@ def get_run(run_id: str) -> RunDetail:
         runner=run["runner"],
         input=run["input"],
         output=run["output"],
+        output_schema=output_schema,
         logs=logs,
         artifacts=artifacts,
         approval=approval,
@@ -497,6 +648,29 @@ def list_secrets() -> List[SecretItem]:
             )
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# System
+# ---------------------------------------------------------------------------
+
+@app.get("/system/info")
+def system_info():
+    workers = discover_workers(use_cache=True)
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM runs")
+        run_count = cursor.fetchone()["cnt"]
+    from runner_local import ARTIFACTS_DIR
+    from worker_registry import WORKERS_DIR
+    return {
+        "api_version": app.version,
+        "workers_dir": str(WORKERS_DIR),
+        "db_path": DB_PATH,
+        "artifacts_dir": str(ARTIFACTS_DIR),
+        "run_count": run_count,
+        "worker_count": len(workers),
+    }
 
 
 # ---------------------------------------------------------------------------
