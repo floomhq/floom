@@ -4,11 +4,13 @@ import os
 import json
 import sqlite3
 import logging
+import mimetypes
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso
@@ -273,6 +275,59 @@ def list_runs(
         cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
     return [_make_run_summary(r) for r in rows]
+
+
+@app.get("/runs/{run_id}/artifacts/{artifact_id}/download")
+def download_artifact(run_id: str, artifact_id: str):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM artifacts WHERE id = ? AND run_id = ?",
+            (artifact_id, run_id),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    art = row_to_dict(row)
+    path_str = art["path"]
+
+    from runner_local import ARTIFACTS_DIR
+    from pathlib import Path
+    try:
+        artifacts_dir = ARTIFACTS_DIR.resolve()
+        resolved = Path(path_str).resolve()
+    except Exception:
+        raise HTTPException(status_code=403, detail="Invalid path")
+
+    try:
+        resolved.relative_to(artifacts_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    content_type, _ = mimetypes.guess_type(art["name"])
+    content_type = content_type or "application/octet-stream"
+    filename = (
+        str(art["name"])
+        .replace("\\", "_")
+        .replace('"', "_")
+        .replace("\r", "_")
+        .replace("\n", "_")
+    )
+
+    def iter_file():
+        with open(resolved, "rb") as f:
+            while chunk := f.read(65536):
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/runs/{run_id}", response_model=RunDetail)

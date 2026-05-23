@@ -63,10 +63,30 @@ This is a placeholder research brief. Connect your OpenAI API key to generate re
 """
         context["log"]("Fell back to template output")
 
+    # Write artifact
+    artifact_path = ""
+    try:
+        import os
+        artifact_dir = context["artifact_dir"]
+        os.makedirs(artifact_dir, exist_ok=True)
+        artifact_path = os.path.join(artifact_dir, "research_brief.md")
+        with open(artifact_path, "w", encoding="utf-8") as f:
+            f.write(output)
+        context["log"]("Artifact written: research_brief.md")
+    except Exception as e:
+        context["log"](f"Failed to write artifact: {e}", level="warning")
+
     return {
         "status": "success",
         "outputs": {
             "brief": output
         },
-        "artifacts": []
+        "artifacts": [
+            {
+                "name": "research_brief.md",
+                "type": "markdown",
+                "path": artifact_path,
+                "size_bytes": len(output.encode("utf-8")) if artifact_path else 0
+            }
+        ] if artifact_path else []
     }
