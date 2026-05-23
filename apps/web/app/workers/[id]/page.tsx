@@ -14,12 +14,12 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ArrowLeft, Play, Box } from "lucide-react";
-import type { Worker, WorkerInput } from "@/lib/types";
+import type { WorkerDetail, WorkerInput } from "@/lib/types";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const [worker, setWorker] = useState<Worker | null>(null);
+  const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [inputs, setInputs] = useState<Record<string, any>>({});
   const [running, setRunning] = useState(false);
@@ -144,7 +144,7 @@ export default function WorkerDetailPage() {
                   <div key={r.id} className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5]">
                     <div>
                       <p className="text-sm font-medium">{r.id}</p>
-                      <p className="text-xs text-[#999]">{new Date(r.created_at).toLocaleString()}</p>
+                      <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</p>
                     </div>
                     <Badge variant="outline">{r.status}</Badge>
                   </div>
