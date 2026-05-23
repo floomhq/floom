@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 
-from db import init_db, get_db, now_iso
+from db import init_db, get_db, now_iso, DB_PATH
 from models import (
     RunCreate,
     RejectRequest,
@@ -275,6 +275,17 @@ def list_runs(
         cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
     return [_make_run_summary(r) for r in rows]
+
+
+@app.post("/runs/clear")
+def clear_runs():
+    with get_db() as conn:
+        conn.execute("DELETE FROM artifacts")
+        conn.execute("DELETE FROM approvals")
+        conn.execute("DELETE FROM logs")
+        conn.execute("DELETE FROM runs")
+    logger.info("All run history cleared")
+    return {"status": "cleared"}
 
 
 @app.get("/runs/{run_id}/artifacts/{artifact_id}/download")
@@ -566,6 +577,29 @@ def list_secrets() -> List[SecretItem]:
             )
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# System
+# ---------------------------------------------------------------------------
+
+@app.get("/system/info")
+def system_info():
+    workers = discover_workers(use_cache=True)
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM runs")
+        run_count = cursor.fetchone()["cnt"]
+    from runner_local import ARTIFACTS_DIR
+    from worker_registry import WORKERS_DIR
+    return {
+        "api_version": app.version,
+        "workers_dir": str(WORKERS_DIR),
+        "db_path": DB_PATH,
+        "artifacts_dir": str(ARTIFACTS_DIR),
+        "run_count": run_count,
+        "worker_count": len(workers),
+    }
 
 
 # ---------------------------------------------------------------------------
