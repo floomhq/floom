@@ -8,12 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Box, Clock, AlertTriangle, ShieldCheck } from "lucide-react";
-import type { Worker, RunSummary, Approval } from "@/lib/types";
+import type { WorkerSummary, RunSummary, ApprovalDetail } from "@/lib/types";
 
 export default function OverviewPage() {
-  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,6 +37,7 @@ export default function OverviewPage() {
   }, []);
 
   const runsToday = runs.filter((r) => {
+    if (!r.created_at) return false;
     const d = new Date(r.created_at);
     const now = new Date();
     return d.toDateString() === now.toDateString();
@@ -91,7 +92,7 @@ export default function OverviewPage() {
                 >
                   <div>
                     <p className="text-sm font-medium">{r.worker_name || r.worker_id}</p>
-                    <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {new Date(r.created_at).toLocaleString()}</p>
+                    <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</p>
                   </div>
                   <StatusBadge status={r.status} />
                 </Link>

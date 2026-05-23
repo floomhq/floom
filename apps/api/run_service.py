@@ -1,81 +1,165 @@
+"""Run orchestration service with structured logging, observability, and secret scrubbing."""
+
 import os
 import uuid
 import json
 import threading
+import re
+import logging
 from typing import Dict, Any, Callable, Optional
-from datetime import datetime, timezone
+from datetime import datetime
+
 from db import get_db, now_iso
 from worker_registry import get_worker_config
 from runner_local import run_worker_local
+from models import WorkerResult, LogLevel, ApprovalStatus, RunStatus
 
-def create_run(worker_id: str, inputs: Dict[str, Any], trigger_source: str = "manual") -> str:
+logger = logging.getLogger("floom.run_service")
+
+# ---------------------------------------------------------------------------
+# Secret scrubbing
+# ---------------------------------------------------------------------------
+
+SECRET_PATTERNS = [
+    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[=:]\s*[^\s'\"]+"),
+    re.compile(r"\b(?:sk|pk)_(?:live|test|proj|sec)_[a-zA-Z0-9_-]+\b"),
+]
+
+
+def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
+    """Replace secret values with redacted markers in log messages."""
+    if not text:
+        return text
+    for name, value in secrets.items():
+        if value and len(value) > 3:
+            text = text.replace(value, f"<REDACTED:{name}>")
+    for pattern in SECRET_PATTERNS:
+        text = pattern.sub("<REDACTED>", text)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Run lifecycle
+# ---------------------------------------------------------------------------
+
+def create_run(
+    worker_id: str,
+    inputs: Dict[str, Any],
+    trigger_source: str = "manual",
+) -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     config = get_worker_config(worker_id)
-    approval_status = "not_required"
-    if config and config.approvals.required:
-        approval_status = "pending"
-    conn = get_db()
-    cursor = conn.cursor()
-    created_at = now_iso()
-    cursor.execute(
-        """
-        INSERT INTO runs (id, worker_id, status, trigger_source, runner, input_json, approval_status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (run_id, worker_id, "queued", trigger_source, "local", json.dumps(inputs), approval_status, created_at)
+    approval_status = (
+        ApprovalStatus.PENDING
+        if config and config.approvals.required
+        else ApprovalStatus.NOT_REQUIRED
     )
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO runs
+                (id, worker_id, status, trigger_source, runner,
+                 input_json, approval_status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                worker_id,
+                RunStatus.QUEUED.value,
+                trigger_source,
+                "local",
+                json.dumps(inputs),
+                approval_status.value,
+                now_iso(),
+            ),
+        )
+    logger.info("Created run %s for worker %s", run_id, worker_id)
     return run_id
 
 
-def add_log(run_id: str, message: str, level: str = "info"):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO logs (run_id, level, message, timestamp) VALUES (?, ?, ?, ?)",
-        (run_id, level, message, now_iso())
-    )
-    conn.commit()
-    conn.close()
+def add_log(
+    run_id: str,
+    message: str,
+    level: str = "info",
+    trace_id: Optional[str] = None,
+    attributes: Optional[Dict[str, Any]] = None,
+) -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO logs
+                (run_id, level, message, timestamp, trace_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (run_id, level, message, now_iso(), trace_id),
+        )
 
 
-def update_run_status(run_id: str, status: str, output: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
-    conn = get_db()
-    cursor = conn.cursor()
-    updates = ["status = ?"]
-    params = [status]
-    if output is not None:
-        updates.append("output_json = ?")
-        params.append(json.dumps(output))
-    if error is not None:
-        updates.append("error = ?")
-        params.append(error)
-    if status == "running":
-        updates.append("started_at = ?")
-        params.append(now_iso())
-    if status in ("completed", "failed", "pending_approval", "approved", "rejected"):
-        updates.append("completed_at = ?")
-        params.append(now_iso())
-    params.append(run_id)
-    cursor.execute(f"UPDATE runs SET {', '.join(updates)} WHERE id = ?", tuple(params))
-    conn.commit()
-    conn.close()
+def update_run_status(
+    run_id: str,
+    status: str,
+    output: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+) -> None:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        updates = ["status = ?"]
+        params: list[Any] = [status]
+
+        if output is not None:
+            updates.append("output_json = ?")
+            params.append(json.dumps(output))
+        if error is not None:
+            updates.append("error = ?")
+            params.append(error)
+        if status == RunStatus.RUNNING.value:
+            updates.append("started_at = ?")
+            params.append(now_iso())
+        if status in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.PENDING_APPROVAL.value,
+            RunStatus.APPROVED.value,
+            RunStatus.REJECTED.value,
+        }:
+            updates.append("completed_at = ?")
+            params.append(now_iso())
+            # Compute duration if started_at exists
+            cursor.execute("SELECT started_at FROM runs WHERE id = ?", (run_id,))
+            row = cursor.fetchone()
+            if row and row["started_at"]:
+                try:
+                    started = datetime.fromisoformat(row["started_at"])
+                    completed = datetime.fromisoformat(now_iso())
+                    duration_ms = int((completed - started).total_seconds() * 1000)
+                    updates.append("duration_ms = ?")
+                    params.append(duration_ms)
+                except Exception:
+                    pass
+
+        params.append(run_id)
+        cursor.execute(
+            f"UPDATE runs SET {', '.join(updates)} WHERE id = ?",
+            tuple(params),
+        )
 
 
-def create_approval(run_id: str, worker_id: str, label: str, preview: str):
+def create_approval(
+    run_id: str,
+    worker_id: str,
+    label: str,
+    preview: str,
+) -> str:
     approval_id = f"approval_{uuid.uuid4().hex[:12]}"
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO approvals (id, run_id, worker_id, status, label, preview, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (approval_id, run_id, worker_id, "pending", label, preview, now_iso())
-    )
-    conn.commit()
-    conn.close()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO approvals
+                (id, run_id, worker_id, status, label, preview, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (approval_id, run_id, worker_id, ApprovalStatus.PENDING.value, label, preview, now_iso()),
+        )
     return approval_id
 
 
@@ -83,7 +167,7 @@ def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
     config = get_worker_config(worker_id)
     if not config:
         return {}
-    secrets = {}
+    secrets: Dict[str, str] = {}
     for name in config.secrets:
         value = os.environ.get(name)
         if value:
@@ -91,50 +175,65 @@ def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
     return secrets
 
 
-def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]):
-    def log_fn(msg: str, level: str = "info"):
-        add_log(run_id, msg, level)
+# ---------------------------------------------------------------------------
+# Execution orchestration
+# ---------------------------------------------------------------------------
 
-    update_run_status(run_id, "running")
-    log_fn("Run started")
-    log_fn("Validating inputs")
-
+def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
+    trace_id = f"trace_{uuid.uuid4().hex[:16]}"
     config = get_worker_config(worker_id)
+
+    def log_fn(msg: str, level: str = "info") -> None:
+        secrets = get_secrets_for_worker(worker_id)
+        safe_msg = scrub_secrets(msg, secrets)
+        add_log(run_id, safe_msg, level=level, trace_id=trace_id)
+
+    update_run_status(run_id, RunStatus.RUNNING.value)
+    log_fn("Run started")
+    log_fn("Validating inputs", level="debug")
+
     if not config:
-        update_run_status(run_id, "failed", error="Worker config not found")
-        log_fn("Worker config not found", level="error")
+        err = "Worker config not found"
+        update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        log_fn(err, level="error")
         return
 
     # Validate required inputs
     for inp in config.inputs:
         if inp.required and (inp.name not in inputs or inputs[inp.name] in (None, "")):
             err = f"Missing required input: {inp.name}"
-            update_run_status(run_id, "failed", error=err)
+            update_run_status(run_id, RunStatus.FAILED.value, error=err)
             log_fn(err, level="error")
             return
 
-    log_fn("Loading secrets")
+    log_fn("Loading secrets", level="debug")
     secrets = get_secrets_for_worker(worker_id)
     missing = [s for s in config.secrets if s not in secrets]
     if missing:
         err = f"Missing secrets: {', '.join(missing)}"
-        update_run_status(run_id, "failed", error=err)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err)
         log_fn(err, level="error")
         return
 
-    log_fn("Executing worker")
-    result = run_worker_local(worker_id, run_id, inputs, secrets, log_fn)
+    log_fn("Executing worker", level="debug")
+    result = run_worker_local(
+        worker_id=worker_id,
+        run_id=run_id,
+        inputs=inputs,
+        secrets=secrets,
+        log_fn=log_fn,
+        trace_id=trace_id,
+    )
 
-    if result.get("status") == "error":
-        update_run_status(run_id, "failed", error=result.get("error"))
-        log_fn(f"Run failed: {result.get('error')}", level="error")
+    if result.status == "error":
+        update_run_status(run_id, RunStatus.FAILED.value, error=result.error)
+        log_fn(f"Run failed: {result.error}", level="error")
         return
 
-    outputs = result.get("outputs", {})
-    artifacts = result.get("artifacts", [])
+    outputs = result.outputs
+    artifacts = result.artifacts
 
     # Store artifacts
-    from db import get_db
     for art in artifacts:
         try:
             art_id = f"art_{uuid.uuid4().hex[:12]}"
@@ -142,26 +241,24 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]):
             art_type = art.get("type", "file")
             art_path = art.get("path", "")
             art_size = art.get("size_bytes", 0)
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO artifacts (id, run_id, name, type, path, size_bytes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (art_id, run_id, art_name, art_type, art_path, art_size, now_iso())
-            )
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            log_fn(f"Failed to store artifact: {e}", level="error")
+            with get_db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO artifacts
+                        (id, run_id, name, type, path, size_bytes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (art_id, run_id, art_name, art_type, art_path, art_size, now_iso()),
+                )
+        except Exception as exc:
+            logger.exception("Failed to store artifact")
+            log_fn(f"Failed to store artifact: {exc}", level="warning")
 
-    update_run_status(run_id, "completed", output=outputs)
+    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
     log_fn("Output generated")
 
-    # Check if approval is required
     if config.approvals.required:
-        update_run_status(run_id, "pending_approval", output=outputs)
+        update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs)
         preview = ""
         if outputs:
             first_key = list(outputs.keys())[0]
@@ -173,6 +270,10 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]):
         log_fn("Run completed")
 
 
-def start_run(run_id: str, worker_id: str, inputs: Dict[str, Any]):
-    thread = threading.Thread(target=execute_run, args=(run_id, worker_id, inputs), daemon=True)
+def start_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
+    thread = threading.Thread(
+        target=execute_run,
+        args=(run_id, worker_id, inputs),
+        daemon=True,
+    )
     thread.start()

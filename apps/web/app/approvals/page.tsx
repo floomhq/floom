@@ -9,10 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { Check, X, ArrowRight } from "lucide-react";
-import type { Approval } from "@/lib/types";
+import type { ApprovalDetail } from "@/lib/types";
 
 export default function ApprovalsPage() {
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function load() {

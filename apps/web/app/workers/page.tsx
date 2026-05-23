@@ -8,10 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Box, Play } from "lucide-react";
-import type { Worker } from "@/lib/types";
+import type { WorkerSummary } from "@/lib/types";
 
 export default function WorkersPage() {
-  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export default function WorkersPage() {
   );
 }
 
-function WorkerCard({ worker }: { worker: Worker }) {
+function WorkerCard({ worker }: { worker: WorkerSummary }) {
   const statusColor: Record<string, string> = {
     healthy: "text-emerald-600 border-emerald-200 bg-emerald-50",
     missing_secret: "text-amber-600 border-amber-200 bg-amber-50",
@@ -70,7 +70,7 @@ function WorkerCard({ worker }: { worker: Worker }) {
         </div>
         {worker.last_run && (
           <p className="text-xs text-[#999]">
-            Last run: {new Date(worker.last_run.created_at).toLocaleString()} · {worker.last_run.status}
+            Last run: {worker.last_run.created_at ? new Date(worker.last_run.created_at).toLocaleString() : "—"} · {worker.last_run.status}
           </p>
         )}
         <div className="pt-1">
