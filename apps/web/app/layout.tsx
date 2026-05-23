@@ -29,10 +29,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex bg-[#fafafa] text-[#111]">
+      <body className="min-h-full flex flex-col md:flex-row bg-[#fafafa] text-[#111]">
         <Sidebar />
         <main className="flex-1 min-w-0">
-          <div className="max-w-6xl mx-auto px-6 py-8">{children}</div>
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
         </main>
         <Toaster position="bottom-right" />
       </body>

@@ -1,0 +1,51 @@
+id: input_types_test
+name: Input Types Test
+description: Exercises every input type to verify the form renderer.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: text_input
+    label: Text input
+    type: text
+    required: true
+    placeholder: Hello
+  - name: textarea_input
+    label: Textarea input
+    type: textarea
+    required: false
+  - name: number_input
+    label: Number input
+    type: number
+    required: false
+  - name: select_input
+    label: Select input
+    type: select
+    required: true
+    options: [alpha, beta, gamma]
+    default: beta
+  - name: boolean_input
+    label: Boolean (checkbox)
+    type: boolean
+    default: false
+  - name: file_input
+    label: File upload
+    type: file
+    required: false
+
+outputs:
+  - name: summary
+    label: Summary
+    type: markdown
+  - name: raw_inputs
+    label: Raw inputs
+    type: json
+
+approvals:
+  required: false

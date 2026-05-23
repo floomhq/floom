@@ -159,6 +159,7 @@ class ApprovalDetail(BaseModel):
     status: ApprovalStatus
     label: Optional[str] = None
     preview: Optional[str] = None
+    preview_type: Optional[str] = None  # "markdown" | "json" | "csv" | "text" | "file"
     created_at: str
     decided_at: Optional[str] = None
 
