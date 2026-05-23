@@ -6,10 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound } from "lucide-react";
-import type { Secret } from "@/lib/types";
+import type { SecretItem } from "@/lib/types";
 
 export default function SecretsPage() {
-  const [secrets, setSecrets] = useState<Secret[]>([]);
+  const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
