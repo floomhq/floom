@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { Check, X, ArrowRight } from "lucide-react";
 import type { ApprovalDetail } from "@/lib/types";
+import { OutputRenderer } from "@/components/output-renderer";
 
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<ApprovalDetail[]>([]);
@@ -81,8 +82,21 @@ export default function ApprovalsPage() {
                 </div>
 
                 {a.preview && (
-                  <div className="bg-[#f4f4f5] p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-auto">
-                    {a.preview}
+                  <div className="max-h-64 overflow-auto rounded-md border border-[#eaeaea] bg-white p-3">
+                    {a.preview_type && a.preview_type !== "text" && a.preview_type !== "file" ? (
+                      <OutputRenderer
+                        field={{
+                          name: "",
+                          label: "",
+                          type: a.preview_type,
+                          value: a.preview,
+                        }}
+                      />
+                    ) : (
+                      <div className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                        {a.preview}
+                      </div>
+                    )}
                   </div>
                 )}
 

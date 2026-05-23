@@ -89,6 +89,7 @@ export interface ApprovalDetail {
   status: ApprovalStatus;
   label?: string;
   preview?: string;
+  preview_type?: string;
   created_at: string;
   decided_at?: string;
 }
