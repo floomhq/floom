@@ -60,7 +60,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3011"],
+    allow_origins=["http://localhost:3000", "http://localhost:3011", "https://workers.floom.dev"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
