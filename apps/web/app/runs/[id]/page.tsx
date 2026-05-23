@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { ArrowLeft, Check, X } from "lucide-react";
 import type { RunDetail } from "@/lib/types";
+import { OutputRenderer } from "@/components/output-renderer";
 
 export default function RunDetailPage() {
   const { id } = useParams();
@@ -153,8 +154,14 @@ export default function RunDetailPage() {
               <CardTitle className="text-sm font-medium">Output</CardTitle>
             </CardHeader>
             <CardContent>
-              {Object.keys(run.output || {}).length === 0 ? (
+              {(!run.output_schema || run.output_schema.length === 0) && Object.keys(run.output || {}).length === 0 ? (
                 <p className="text-sm text-[#999]">No output yet.</p>
+              ) : run.output_schema && run.output_schema.length > 0 ? (
+                <div className="space-y-6">
+                  {run.output_schema.map((field) => (
+                    <OutputRenderer key={field.name} field={field} />
+                  ))}
+                </div>
               ) : (
                 <div className="space-y-4">
                   {Object.entries(run.output).map(([key, value]) => (
@@ -187,12 +194,30 @@ export default function RunDetailPage() {
                 <CardTitle className="text-sm font-medium">Artifacts</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {run.artifacts.map((a) => (
-                  <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                    <span className="text-sm">{a.name}</span>
-                    <span className="text-xs text-[#999]">{a.type}</span>
-                  </div>
-                ))}
+                {run.artifacts.map((a) => {
+                  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8011";
+                  const downloadUrl = `${apiBase}/runs/${run.id}/artifacts/${a.id}/download`;
+                  return (
+                    <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm truncate">{a.name}</span>
+                        {a.type && <span className="text-xs text-[#999] shrink-0">{a.type}</span>}
+                        {a.size_bytes != null && (
+                          <span className="text-xs text-[#999] shrink-0">{Math.round(a.size_bytes / 1024)}KB</span>
+                        )}
+                      </div>
+                      <a
+                        href={downloadUrl}
+                        download={a.name}
+                        className="text-xs text-blue-600 hover:underline ml-2 shrink-0"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}
