@@ -23,6 +23,7 @@ from models import (
     LogEntry,
     Artifact,
     ApprovalDetail,
+    OutputField,
     SecretItem,
     ReloadResponse,
     ActionResponse,
@@ -296,6 +297,18 @@ def get_run(run_id: str) -> RunDetail:
         run = row_to_dict(row)
         run["input"] = json.loads(run.get("input_json") or "{}")
         run["output"] = json.loads(run.get("output_json") or "{}")
+        # Build typed output schema from worker config
+        output_config = get_worker_config(run["worker_id"])
+        output_schema = []
+        if output_config:
+            raw_output = run["output"]
+            for out in output_config.outputs:
+                output_schema.append(OutputField(
+                    name=out.name,
+                    label=out.label,
+                    type=out.type,
+                    value=raw_output.get(out.name),
+                ))
 
         cursor.execute(
             """
@@ -349,6 +362,7 @@ def get_run(run_id: str) -> RunDetail:
         runner=run["runner"],
         input=run["input"],
         output=run["output"],
+        output_schema=output_schema,
         logs=logs,
         artifacts=artifacts,
         approval=approval,

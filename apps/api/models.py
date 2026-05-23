@@ -163,6 +163,13 @@ class ApprovalDetail(BaseModel):
     decided_at: Optional[str] = None
 
 
+class OutputField(BaseModel):
+    name: str
+    type: str  # "markdown", "json", "csv", "text", "file"
+    label: str
+    value: Any = None
+
+
 class RunDetail(BaseModel):
     id: str
     worker_id: str
@@ -172,6 +179,7 @@ class RunDetail(BaseModel):
     runner: str
     input: Dict[str, Any] = Field(default_factory=dict)
     output: Dict[str, Any] = Field(default_factory=dict)
+    output_schema: List["OutputField"] = Field(default_factory=list)
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
     approval: Optional[ApprovalDetail] = None
