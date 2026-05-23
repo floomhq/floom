@@ -550,19 +550,28 @@ def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
             (status,),
         )
         rows = cursor.fetchall()
-    return [
-        ApprovalDetail(
-            id=r["id"],
-            run_id=r["run_id"],
-            worker_id=r["worker_id"],
-            status=ApprovalStatus(r["status"]),
-            label=row_to_dict(r).get("label"),
-            preview=row_to_dict(r).get("preview"),
-            created_at=r["created_at"],
-            decided_at=row_to_dict(r).get("decided_at"),
+    result = []
+    for r in rows:
+        rd = row_to_dict(r)
+        preview_type: Optional[str] = None
+        config = get_worker_config(r["worker_id"])
+        if config and config.outputs:
+            preview_type = config.outputs[0].type
+        result.append(
+            ApprovalDetail(
+                id=r["id"],
+                run_id=r["run_id"],
+                worker_id=r["worker_id"],
+                worker_name=rd.get("worker_name"),
+                status=ApprovalStatus(r["status"]),
+                label=rd.get("label"),
+                preview=rd.get("preview"),
+                preview_type=preview_type,
+                created_at=r["created_at"],
+                decided_at=rd.get("decided_at"),
+            )
         )
-        for r in rows
-    ]
+    return result
 
 
 @app.post("/runs/{run_id}/approve", response_model=ActionResponse)
