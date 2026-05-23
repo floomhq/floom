@@ -29,6 +29,7 @@ from models import (
     SecretItem,
     ReloadResponse,
     ActionResponse,
+    WorkerStateResponse,
     RunStatus,
     ApprovalStatus,
     SecretStatus,
@@ -92,6 +93,14 @@ def row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
+def _get_paused_workers() -> set:
+    """Return set of worker_ids that are currently paused."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT worker_id FROM worker_state WHERE paused = 1")
+        return {r["worker_id"] for r in cursor.fetchall()}
+
+
 def _get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
@@ -132,6 +141,7 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
     workers = discover_workers(use_cache=True)
+    paused_workers = _get_paused_workers()
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"])
@@ -144,6 +154,17 @@ def list_workers() -> List[WorkerSummary]:
             missing = [s for s in config.secrets if s not in os.environ]
             if missing:
                 status = WorkerStatus.MISSING_SECRET
+        if (
+            status not in (WorkerStatus.MISSING_SECRET, WorkerStatus.ERROR)
+            and w["id"] in paused_workers
+        ):
+            status = WorkerStatus.PAUSED
+        elif (
+            status == WorkerStatus.HEALTHY
+            and last_run
+            and last_run.status in (RunStatus.FAILED, RunStatus.REJECTED)
+        ):
+            status = WorkerStatus.NEEDS_ATTENTION
 
         result.append(
             WorkerSummary(
@@ -151,12 +172,41 @@ def list_workers() -> List[WorkerSummary]:
                 name=w["name"],
                 description=w.get("description"),
                 status=status,
+                paused=w["id"] in paused_workers,
                 trigger_type=w["trigger_type"],
                 runner=w["runner"],
                 last_run=last_run,
             )
         )
     return result
+
+
+@app.post("/workers/{worker_id}/pause", response_model=WorkerStateResponse)
+def pause_worker(worker_id: str) -> WorkerStateResponse:
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO worker_state (worker_id, paused, updated_at) VALUES (?, 1, ?)
+               ON CONFLICT(worker_id) DO UPDATE SET paused=1, updated_at=excluded.updated_at""",
+            (worker_id, now_iso()),
+        )
+    return WorkerStateResponse(worker_id=worker_id, paused=True)
+
+
+@app.post("/workers/{worker_id}/unpause", response_model=WorkerStateResponse)
+def unpause_worker(worker_id: str) -> WorkerStateResponse:
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO worker_state (worker_id, paused, updated_at) VALUES (?, 0, ?)
+               ON CONFLICT(worker_id) DO UPDATE SET paused=0, updated_at=excluded.updated_at""",
+            (worker_id, now_iso()),
+        )
+    return WorkerStateResponse(worker_id=worker_id, paused=False)
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
@@ -176,6 +226,12 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
             (worker_id,),
         )
         recent_runs = [_make_run_summary(r) for r in cursor.fetchall()]
+        cursor.execute(
+            "SELECT paused FROM worker_state WHERE worker_id = ?",
+            (worker_id,),
+        )
+        state_row = cursor.fetchone()
+        paused = bool(state_row["paused"]) if state_row else False
 
     config_dict = worker.get("config", {})
     try:
@@ -188,11 +244,26 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
             runtime={"type": "python", "entrypoint": "run.py"},
         )
 
+    status = WorkerStatus(worker["status"])
+    if config and config.secrets:
+        missing = [s for s in config.secrets if s not in os.environ]
+        if missing:
+            status = WorkerStatus.MISSING_SECRET
+    if status not in (WorkerStatus.MISSING_SECRET, WorkerStatus.ERROR) and paused:
+        status = WorkerStatus.PAUSED
+    elif (
+        status == WorkerStatus.HEALTHY
+        and recent_runs
+        and recent_runs[0].status in (RunStatus.FAILED, RunStatus.REJECTED)
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
         description=worker.get("description"),
-        status=WorkerStatus(worker["status"]),
+        status=status,
+        paused=paused,
         trigger_type=worker["trigger_type"],
         runner=worker["runner"],
         config=config,

@@ -196,6 +196,7 @@ class WorkerSummary(BaseModel):
     name: str
     description: Optional[str] = None
     status: WorkerStatus
+    paused: bool = False
     trigger_type: str
     runner: str
     last_run: Optional[RunSummary] = None
@@ -206,6 +207,7 @@ class WorkerDetail(BaseModel):
     name: str
     description: Optional[str] = None
     status: WorkerStatus
+    paused: bool = False
     trigger_type: str
     runner: str
     config: WorkerConfig
@@ -227,6 +229,11 @@ class ReloadResponse(BaseModel):
 class ActionResponse(BaseModel):
     status: str
     run_id: Optional[str] = None
+
+
+class WorkerStateResponse(BaseModel):
+    worker_id: str
+    paused: bool
 
 
 # ---------------------------------------------------------------------------
