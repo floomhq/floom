@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ArrowLeft, Play, Box } from "lucide-react";
 import type { WorkerDetail, WorkerInput } from "@/lib/types";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8011";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
@@ -23,6 +24,7 @@ export default function WorkerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [inputs, setInputs] = useState<Record<string, any>>({});
   const [running, setRunning] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   useEffect(() => {
     api.workers.get(id as string).then((w) => {
@@ -30,11 +32,28 @@ export default function WorkerDetailPage() {
       const defaults: Record<string, any> = {};
       w.config.inputs.forEach((inp: WorkerInput) => {
         if (inp.default !== undefined) defaults[inp.name] = inp.default;
+        else if (inp.type === "boolean") defaults[inp.name] = false;
       });
       setInputs(defaults);
       setLoading(false);
     });
   }, [id]);
+
+  async function handlePauseToggle() {
+    if (!worker) return;
+    setToggling(true);
+    try {
+      const action = worker.paused ? "unpause" : "pause";
+      await fetch(`${API_BASE}/workers/${worker.id}/${action}`, { method: "POST" });
+      toast.success(worker.paused ? "Worker unpaused" : "Worker paused");
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to toggle pause");
+    } finally {
+      setToggling(false);
+    }
+  }
 
   async function handleRun() {
     if (!worker) return;
@@ -69,12 +88,26 @@ export default function WorkerDetailPage() {
         <Button variant="ghost" size="sm" onClick={() => router.push("/workers")}>
           <ArrowLeft className="w-4 h-4" />
         </Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Box className="w-5 h-5 text-[#999]" />
             {worker.name}
           </h1>
           <p className="text-[#666] text-sm">{worker.description}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {worker.paused && (
+            <Badge variant="outline" className="text-gray-500 border-gray-200 bg-gray-50">Paused</Badge>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePauseToggle}
+            disabled={toggling}
+            className={worker.paused ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-[#e4e4e7]"}
+          >
+            {toggling ? "..." : worker.paused ? "Unpause" : "Pause"}
+          </Button>
         </div>
       </div>
 
@@ -114,6 +147,44 @@ export default function WorkerDetailPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  ) : inp.type === "boolean" ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`inp-${inp.name}`}
+                        checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
+                        onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.checked }))}
+                        className="w-4 h-4 rounded border-[#e4e4e7] accent-black cursor-pointer"
+                      />
+                      <label htmlFor={`inp-${inp.name}`} className="text-sm text-[#666] cursor-pointer select-none">
+                        {inp.placeholder || inp.label}
+                      </label>
+                    </div>
+                  ) : inp.type === "file" ? (
+                    <div className="space-y-1">
+                      <input
+                        type="file"
+                        id={`inp-${inp.name}`}
+                        className="block w-full text-sm text-[#666] file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-[#e4e4e7] file:text-xs file:font-medium file:bg-white file:text-[#333] hover:file:bg-[#f4f4f5] cursor-pointer"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            const result = ev.target?.result;
+                            if (typeof result === "string") {
+                              setInputs((prev) => ({ ...prev, [inp.name]: result }));
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                      {inputs[inp.name] && (
+                        <p className="text-xs text-[#999]">
+                          File loaded ({Math.round((inputs[inp.name] as string).length / 1024)}KB as base64)
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <Input
                       type={inp.type === "number" ? "number" : "text"}
@@ -125,9 +196,9 @@ export default function WorkerDetailPage() {
                   )}
                 </div>
               ))}
-              <Button onClick={handleRun} disabled={running} className="w-full">
+              <Button onClick={handleRun} disabled={running || worker.paused} className="w-full">
                 <Play className="w-4 h-4 mr-1.5" />
-                {running ? "Starting..." : "Run worker"}
+                {running ? "Starting..." : worker.paused ? "Worker paused" : "Run worker"}
               </Button>
             </CardContent>
           </Card>
