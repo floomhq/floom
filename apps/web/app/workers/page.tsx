@@ -47,6 +47,8 @@ export default function WorkersPage() {
 function WorkerCard({ worker }: { worker: WorkerSummary }) {
   const statusColor: Record<string, string> = {
     healthy: "text-emerald-600 border-emerald-200 bg-emerald-50",
+    needs_attention: "text-amber-600 border-amber-200 bg-amber-50",
+    paused: "text-gray-500 border-gray-200 bg-gray-50",
     missing_secret: "text-amber-600 border-amber-200 bg-amber-50",
     error: "text-red-600 border-red-200 bg-red-50",
   };
@@ -75,9 +77,13 @@ function WorkerCard({ worker }: { worker: WorkerSummary }) {
         )}
         <div className="pt-1">
           <Link href={`/workers/${worker.id}`}>
-            <Button variant="secondary" size="sm" className="w-full">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full"
+            >
               <Play className="w-3.5 h-3.5 mr-1.5" />
-              Run worker
+              {worker.status === "paused" ? "View (paused)" : "Run worker"}
             </Button>
           </Link>
         </div>
