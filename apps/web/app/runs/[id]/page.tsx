@@ -6,10 +6,64 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft } from "lucide-react";
-import type { RunDetail } from "@/lib/types";
+import { ArrowLeft, ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import type { RunDetail, LogEntry } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
+
+// ---------------------------------------------------------------------------
+// Error pattern matching
+// ---------------------------------------------------------------------------
+
+function classifyError(err: string): { headline: string; raw: string } {
+  const e = err || "";
+  if (/OPENAI_API_KEY|api[_-]?key|AuthenticationError/i.test(e)) {
+    return { headline: "OpenAI authentication failed. Check OPENAI_API_KEY in Secrets.", raw: e };
+  }
+  if (/rate_limit|RateLimitError/i.test(e)) {
+    return { headline: "OpenAI rate limit hit. Wait a moment and retry.", raw: e };
+  }
+  if (/schema_violation/i.test(e)) {
+    return { headline: "Worker output didn't match its declared schema. Check the run.py output keys against worker.yml.", raw: e };
+  }
+  if (/timeout|TimeoutError/i.test(e)) {
+    return { headline: "Worker took too long. Consider breaking it into smaller steps.", raw: e };
+  }
+  if (/ModuleNotFoundError|ImportError/i.test(e)) {
+    return { headline: `Worker dependency missing. Add it to requirements.txt.`, raw: e };
+  }
+  return { headline: "Worker failed. See raw error below.", raw: e };
+}
+
+// ---------------------------------------------------------------------------
+// Step timing helper
+// ---------------------------------------------------------------------------
+
+function formatDelta(ms: number): string {
+  if (ms < 1000) return `+${ms}ms`;
+  if (ms < 60000) return `+${(ms / 1000).toFixed(1)}s`;
+  return `+${Math.round(ms / 1000)}s`;
+}
+
+function computeDeltas(logs: LogEntry[]): (string | null)[] {
+  return logs.map((log, i) => {
+    if (i === 0) return null;
+    try {
+      const prev = new Date(logs[i - 1].timestamp).getTime();
+      const curr = new Date(log.timestamp).getTime();
+      const delta = curr - prev;
+      if (isNaN(delta) || delta < 0) return null;
+      return formatDelta(delta);
+    } catch {
+      return null;
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
 
 export default function RunDetailPage() {
   const { id } = useParams();
@@ -17,6 +71,8 @@ export default function RunDetailPage() {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [logSearch, setLogSearch] = useState("");
+  const [rawErrorOpen, setRawErrorOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +110,24 @@ export default function RunDetailPage() {
     return <div className="text-sm text-[#999]">Run not found.</div>;
   }
 
+  // Log filtering
+  const filteredLogs = logSearch.trim()
+    ? run.logs.filter((l) => l.message.toLowerCase().includes(logSearch.toLowerCase()))
+    : run.logs;
+
+  // Step deltas (computed on full logs, indexed by original log idx)
+  const allDeltas = computeDeltas(run.logs);
+
+  // For filtered view we need the original index to get the right delta
+  const filteredWithIdx = logSearch.trim()
+    ? run.logs
+        .map((l, i) => ({ log: l, origIdx: i }))
+        .filter(({ log }) => log.message.toLowerCase().includes(logSearch.toLowerCase()))
+    : run.logs.map((l, i) => ({ log: l, origIdx: i }));
+
+  // Error classification
+  const errorInfo = run.error ? classifyError(run.error) : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -72,20 +146,52 @@ export default function RunDetailPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-6">
+          {/* Timeline with log search + step timings */}
           <Card className="border-[#eaeaea] shadow-none bg-white">
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Timeline</CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-sm font-medium">Timeline</CardTitle>
+                <div className="relative flex-1 max-w-[200px]">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#aaa]" />
+                  <Input
+                    placeholder="Filter logs..."
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                    className="h-7 pl-7 pr-6 text-xs border-[#e4e4e7]"
+                  />
+                  {logSearch && (
+                    <button
+                      onClick={() => setLogSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[#aaa] hover:text-[#555]"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {logSearch && (
+                <p className="text-xs text-[#999] mt-1">
+                  {filteredLogs.length} of {run.logs.length} entries
+                </p>
+              )}
             </CardHeader>
             <CardContent className="space-y-2">
               {run.logs.length === 0 ? (
                 <p className="text-sm text-[#999]">No logs yet.</p>
+              ) : filteredLogs.length === 0 ? (
+                <p className="text-sm text-[#999]">No entries match your filter.</p>
               ) : (
-                run.logs.map((log, i) => (
-                  <div key={i} className="flex items-start gap-3 text-sm">
-                    <span className="text-[#999] text-xs mt-0.5 min-w-[80px]">
+                filteredWithIdx.map(({ log, origIdx }) => (
+                  <div key={origIdx} className="flex items-start gap-3 text-sm">
+                    <span className="text-[#999] text-xs mt-0.5 min-w-[80px] shrink-0">
                       {new Date(log.timestamp).toLocaleTimeString()}
                     </span>
-                    <span className={log.level === "error" ? "text-red-600" : "text-[#333]"}>{log.message}</span>
+                    <span className={`flex-1 ${log.level === "error" ? "text-red-600" : "text-[#333]"}`}>
+                      {log.message}
+                    </span>
+                    {allDeltas[origIdx] && (
+                      <span className="text-[#bbb] text-xs shrink-0">{allDeltas[origIdx]}</span>
+                    )}
                   </div>
                 ))
               )}
@@ -133,7 +239,33 @@ export default function RunDetailPage() {
             </CardContent>
           </Card>
 
-          {run.error && (
+          {/* Structured error panel */}
+          {run.status === "failed" && errorInfo && (
+            <Card className="border-red-200 bg-red-50 shadow-none">
+              <CardContent className="p-5 space-y-3">
+                <p className="font-medium text-red-900">{errorInfo.headline}</p>
+                <button
+                  onClick={() => setRawErrorOpen((v) => !v)}
+                  className="flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
+                >
+                  {rawErrorOpen ? (
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  )}
+                  Raw error
+                </button>
+                {rawErrorOpen && (
+                  <pre className="text-xs text-red-700 whitespace-pre-wrap bg-red-100 p-3 rounded-md overflow-auto max-h-[200px]">
+                    {errorInfo.raw}
+                  </pre>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Non-failed errors */}
+          {run.error && run.status !== "failed" && (
             <Card className="border-red-200 bg-red-50 shadow-none">
               <CardHeader>
                 <CardTitle className="text-sm font-medium text-red-800">Error</CardTitle>
