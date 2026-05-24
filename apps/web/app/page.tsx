@@ -8,26 +8,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, Clock, AlertTriangle, ShieldCheck, Download } from "lucide-react";
-import type { WorkerSummary, RunSummary, ApprovalDetail } from "@/lib/types";
+import { Box, Clock, AlertTriangle, Download } from "lucide-react";
+import type { WorkerSummary, RunSummary } from "@/lib/types";
 
 export default function OverviewPage() {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [approvals, setApprovals] = useState<ApprovalDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [w, r, a] = await Promise.all([
+        const [w, r] = await Promise.all([
           api.workers.list(),
           api.runs.list({ limit: 5 }),
-          api.approvals.list("pending"),
         ]);
         setWorkers(w);
         setRuns(r);
-        setApprovals(a);
       } catch (e) {
         console.error(e);
       } finally {
@@ -41,7 +38,6 @@ export default function OverviewPage() {
 
   async function exportAllRuns() {
     try {
-      // Paginate through all runs
       let allRuns: typeof runs = [];
       let offset = 0;
       while (true) {
@@ -59,7 +55,6 @@ export default function OverviewPage() {
         started_at: r.started_at || "",
         completed_at: r.completed_at || "",
         duration_ms: r.duration_ms ?? "",
-        approval_status: r.approval_status,
       }));
       const csv = Papa.unparse(rows);
       const blob = new Blob([csv], { type: "text/csv" });
@@ -87,7 +82,6 @@ export default function OverviewPage() {
     { label: "Workers", value: workers.length, icon: Box },
     { label: "Runs today", value: runsToday, icon: Clock },
     { label: "Failed", value: failedRuns, icon: AlertTriangle },
-    { label: "Pending approvals", value: approvals.length, icon: ShieldCheck },
   ];
 
   return (
@@ -108,88 +102,50 @@ export default function OverviewPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((s) => {
-          const isPendingCard = s.label === "Pending approvals";
-          const hasApprovals = isPendingCard && approvals.length > 0;
-          return (
-            <Card
-              key={s.label}
-              className={`shadow-none ${hasApprovals ? "border-amber-300 bg-amber-50" : "border-[#eaeaea] bg-white"}`}
-            >
-              <CardContent className="p-5 flex items-center justify-between">
-                <div>
-                  <p className={`text-xs font-medium uppercase tracking-wide ${hasApprovals ? "text-amber-700" : "text-[#666]"}`}>
-                    {s.label}
-                  </p>
-                  <div className={`text-2xl font-semibold mt-1 ${hasApprovals ? "text-amber-900" : ""}`}>
-                    {loading ? <Skeleton className="h-8 w-12" /> : s.value}
-                  </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {stats.map((s) => (
+          <Card key={s.label} className="shadow-none border-[#eaeaea] bg-white">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-[#666]">
+                  {s.label}
+                </p>
+                <div className="text-2xl font-semibold mt-1">
+                  {loading ? <Skeleton className="h-8 w-12" /> : s.value}
                 </div>
-                <s.icon className={`w-5 h-5 ${hasApprovals ? "text-amber-500" : "text-[#999]"}`} />
-              </CardContent>
-            </Card>
-          );
-        })}
+              </div>
+              <s.icon className="w-5 h-5 text-[#999]" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-[#eaeaea] shadow-none bg-white">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {loading ? (
-              <Skeleton className="h-20 w-full" />
-            ) : runs.length === 0 ? (
-              <p className="text-sm text-[#999]">No runs yet.</p>
-            ) : (
-              runs.map((r) => (
-                <Link
-                  key={r.id}
-                  href={`/runs/${r.id}`}
-                  className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{r.worker_name || r.worker_id}</p>
-                    <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</p>
-                  </div>
-                  <StatusBadge status={r.status} />
-                </Link>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="border-[#eaeaea] shadow-none bg-white">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Pending approvals</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {loading ? (
-              <Skeleton className="h-20 w-full" />
-            ) : approvals.length === 0 ? (
-              <p className="text-sm text-[#999]">No pending approvals.</p>
-            ) : (
-              approvals.map((a) => (
-                <Link
-                  key={a.id}
-                  href={`/runs/${a.run_id}`}
-                  className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{a.worker_name || a.worker_id}</p>
-                    <p className="text-xs text-[#999] mt-0.5 truncate max-w-xs">{a.label}</p>
-                  </div>
-                  <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50">
-                    Pending
-                  </Badge>
-                </Link>
-              ))
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="border-[#eaeaea] shadow-none bg-white">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {loading ? (
+            <Skeleton className="h-20 w-full" />
+          ) : runs.length === 0 ? (
+            <p className="text-sm text-[#999]">No runs yet.</p>
+          ) : (
+            runs.map((r) => (
+              <Link
+                key={r.id}
+                href={`/runs/${r.id}`}
+                className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
+              >
+                <div>
+                  <p className="text-sm font-medium">{r.worker_name || r.worker_id}</p>
+                  <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</p>
+                </div>
+                <StatusBadge status={r.status} />
+              </Link>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -199,9 +155,6 @@ function StatusBadge({ status }: { status: string }) {
     running: "text-blue-600 border-blue-200 bg-blue-50",
     completed: "text-emerald-600 border-emerald-200 bg-emerald-50",
     failed: "text-red-600 border-red-200 bg-red-50",
-    pending_approval: "text-amber-600 border-amber-200 bg-amber-50",
-    approved: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    rejected: "text-red-600 border-red-200 bg-red-50",
     queued: "text-gray-600 border-gray-200 bg-gray-50",
   };
   return (

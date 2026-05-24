@@ -8,29 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Box, Play } from "lucide-react";
-import type { WorkerSummary, ApprovalDetail } from "@/lib/types";
+import type { WorkerSummary } from "@/lib/types";
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [approvals, setApprovals] = useState<ApprovalDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      api.workers.list(),
-      api.approvals.list("pending"),
-    ]).then(([w, a]) => {
+    api.workers.list().then((w) => {
       setWorkers(w);
-      setApprovals(a);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
-
-  // Count pending approvals per worker_id
-  const pendingByWorker: Record<string, number> = {};
-  for (const a of approvals) {
-    pendingByWorker[a.worker_id] = (pendingByWorker[a.worker_id] || 0) + 1;
-  }
 
   return (
     <div className="space-y-6">
@@ -50,14 +39,14 @@ export default function WorkersPage() {
               <Skeleton key={i} className="h-40 w-full" />
             ))
           : workers.map((w) => (
-              <WorkerCard key={w.id} worker={w} pendingCount={pendingByWorker[w.id] || 0} />
+              <WorkerCard key={w.id} worker={w} />
             ))}
       </div>
     </div>
   );
 }
 
-function WorkerCard({ worker, pendingCount }: { worker: WorkerSummary; pendingCount: number }) {
+function WorkerCard({ worker }: { worker: WorkerSummary }) {
   const statusColor: Record<string, string> = {
     healthy: "text-emerald-600 border-emerald-200 bg-emerald-50",
     needs_attention: "text-amber-600 border-amber-200 bg-amber-50",
@@ -74,16 +63,9 @@ function WorkerCard({ worker, pendingCount }: { worker: WorkerSummary; pendingCo
             <Box className="w-4 h-4 text-[#999]" />
             <h3 className="font-medium text-[15px]">{worker.name}</h3>
           </div>
-          <div className="flex items-center gap-1.5">
-            {pendingCount > 0 && (
-              <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50 text-xs">
-                {pendingCount} pending
-              </Badge>
-            )}
-            <Badge variant="outline" className={statusColor[worker.status] || statusColor.healthy}>
-              {worker.status.replace("_", " ")}
-            </Badge>
-          </div>
+          <Badge variant="outline" className={statusColor[worker.status] || statusColor.healthy}>
+            {worker.status.replace("_", " ")}
+          </Badge>
         </div>
         <p className="text-sm text-[#666] line-clamp-2">{worker.description || "No description."}</p>
         <div className="flex items-center gap-3 text-xs text-[#999]">

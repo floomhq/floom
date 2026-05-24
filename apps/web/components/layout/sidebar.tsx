@@ -3,14 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, ShieldCheck, KeyRound, Settings, Menu, X } from "lucide-react";
+import { Activity, Box, Clock, KeyRound, Settings, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/runs", label: "Runs", icon: Clock },
-  { href: "/approvals", label: "Approvals", icon: ShieldCheck },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
