@@ -208,14 +208,11 @@ def test_reverse_match_crm_frontend_lower():
 @test("dach_compliance: AÜG output does NOT mention Scheinselbständigkeit")
 def test_dach_compliance_no_scheinselbst():
     run_id = start_run("dach_compliance", {
-        "contractor_name": "Karl Bauer",
-        "client_name": "FinTech GmbH",
-        "role": "Senior Java Backend Engineer",
-        "daily_rate": 800,
-        "start_date": "2024-05-01",
-        "duration_months": 12,
+        "engagement_type": "AÜG",
+        "role_summary": "Senior Java Backend Engineer for FinTech GmbH Berlin, 12-month AÜG contract",
+        "proposed_daily_rate_eur": 800,
         "location": "Berlin",
-        "contract_type": "AÜG",
+        "experience_years": 8,
     })
     run = wait_for_run(run_id)
     assert run["status"] in ("completed", "pending_approval"), \
@@ -232,14 +229,11 @@ def test_dach_compliance_no_scheinselbst():
 @test("dach_compliance: AÜG report mentions 18-month maximum or equal-pay trigger")
 def test_dach_compliance_aüg_clauses():
     run_id = start_run("dach_compliance", {
-        "contractor_name": "Karl Bauer",
-        "client_name": "FinTech GmbH",
-        "role": "Senior Java Backend Engineer",
-        "daily_rate": 800,
-        "start_date": "2024-05-01",
-        "duration_months": 12,
+        "engagement_type": "AÜG",
+        "role_summary": "Senior Java Backend Engineer for FinTech GmbH Berlin, 12-month AÜG contract",
+        "proposed_daily_rate_eur": 800,
         "location": "Berlin",
-        "contract_type": "AÜG",
+        "experience_years": 8,
     })
     run = wait_for_run(run_id)
     output = run.get("output", {})
@@ -310,11 +304,11 @@ def test_csv_enricher_preserves_name():
 # ---------------------------------------------------------------------------
 
 def main():
+    global BASE
     parser = argparse.ArgumentParser(description="NovaSearch regression fixtures")
     parser.add_argument("--base", default=BASE, help="API base URL")
     args = parser.parse_args()
 
-    global BASE
     BASE = args.base
 
     print("=" * 60)
