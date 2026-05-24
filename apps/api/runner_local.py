@@ -34,12 +34,48 @@ def _safe_path(base: Path, *parts: str) -> Path:
     return target
 
 
+def _resolve_connections(worker_id: str, log_fn: Callable) -> tuple[Dict[str, str], Optional[str]]:
+    """Look up active Composio connections for the worker's declared apps.
+
+    Returns (connection_ids dict, error_string_or_None).
+    error_string is set if any declared connection is missing/inactive.
+    """
+    config = get_worker_config(worker_id)
+    if not config or not config.connections:
+        return {}, None
+
+    from db import get_db
+
+    missing = []
+    connection_ids: Dict[str, str] = {}
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        for app_name in config.connections:
+            cursor.execute(
+                "SELECT composio_connection_id, status FROM composio_connections WHERE app_name = ?",
+                (app_name.lower(),),
+            )
+            row = cursor.fetchone()
+            if row and row["status"] == "active":
+                connection_ids[app_name.lower()] = row["composio_connection_id"]
+            else:
+                missing.append(app_name)
+
+    if missing:
+        log_fn(f"Missing connections: {', '.join(missing)}", level="error")
+        return {}, f"missing_connection: {', '.join(missing)}"
+
+    return connection_ids, None
+
+
 def make_context(
     run_id: str,
     worker_id: str,
     secrets: Dict[str, str],
     log_fn: Callable,
     trace_id: str,
+    connection_ids: Optional[Dict[str, str]] = None,
 ) -> WorkerContext:
     artifact_dir = _safe_path(ARTIFACTS_DIR, run_id)
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -50,6 +86,7 @@ def make_context(
         artifact_dir=str(artifact_dir),
         trace_id=trace_id,
         log_fn=log_fn,
+        connection_ids=connection_ids or {},
     )
 
 
@@ -157,7 +194,16 @@ def run_worker_local(
             error_code="entrypoint_not_found",
         )
 
-    context = make_context(run_id, worker_id, secrets, log_fn, trace_id)
+    # Resolve Composio connections — fail fast if any required connection is missing
+    connection_ids, conn_error = _resolve_connections(worker_id, log_fn)
+    if conn_error:
+        return WorkerResult(
+            status="error",
+            error=conn_error,
+            error_code="missing_connection",
+        )
+
+    context = make_context(run_id, worker_id, secrets, log_fn, trace_id, connection_ids=connection_ids)
 
     # Compile and execute in a restricted namespace.
     # NOTE: ``exec()`` with restricted globals is *not* a security sandbox.
