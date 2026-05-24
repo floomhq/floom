@@ -122,9 +122,9 @@ export default function OverviewPage() {
                   <p className={`text-xs font-medium uppercase tracking-wide ${hasApprovals ? "text-amber-700" : "text-[#666]"}`}>
                     {s.label}
                   </p>
-                  <p className={`text-2xl font-semibold mt-1 ${hasApprovals ? "text-amber-900" : ""}`}>
+                  <div className={`text-2xl font-semibold mt-1 ${hasApprovals ? "text-amber-900" : ""}`}>
                     {loading ? <Skeleton className="h-8 w-12" /> : s.value}
-                  </p>
+                  </div>
                 </div>
                 <s.icon className={`w-5 h-5 ${hasApprovals ? "text-amber-500" : "text-[#999]"}`} />
               </CardContent>
