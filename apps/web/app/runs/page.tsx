@@ -5,25 +5,113 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { RunSummary } from "@/lib/types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { RunSummary, WorkerSummary } from "@/lib/types";
+
+const STATUS_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "running", label: "Running" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+  { value: "pending_approval", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+];
+
+const PAGE_SIZE = 20;
 
 export default function RunsPage() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [workerFilter, setWorkerFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
-    api.runs.list({ limit: 50 }).then((r) => {
-      setRuns(r);
-      setLoading(false);
-    });
+    api.workers.list().then(setWorkers).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setOffset(0);
+    setRuns([]);
+    fetchRuns(0, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workerFilter, statusFilter]);
+
+  async function fetchRuns(currentOffset: number, replace = false) {
+    if (currentOffset === 0) setLoading(true);
+    else setLoadingMore(true);
+    try {
+      const params: { worker_id?: string; status?: string; limit: number; offset: number } = {
+        limit: PAGE_SIZE,
+        offset: currentOffset,
+      };
+      if (workerFilter) params.worker_id = workerFilter;
+      if (statusFilter) params.status = statusFilter;
+      const result = await api.runs.list(params);
+      if (replace) setRuns(result);
+      else setRuns((prev) => [...prev, ...result]);
+      setHasMore(result.length === PAGE_SIZE);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }
+
+  function loadMore() {
+    const next = offset + PAGE_SIZE;
+    setOffset(next);
+    fetchRuns(next);
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
         <p className="text-[#666] text-sm mt-1">All worker executions.</p>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-3 flex-wrap items-center">
+        <Select value={workerFilter} onValueChange={(v) => setWorkerFilter(v ?? "")}>
+          <SelectTrigger className="w-[200px] text-sm h-8">
+            <SelectValue placeholder="All workers" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All workers</SelectItem>
+            {workers.map((w) => (
+              <SelectItem key={w.id} value={w.id}>
+                {w.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex gap-1.5 flex-wrap">
+          {STATUS_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setStatusFilter(opt.value)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                statusFilter === opt.value
+                  ? "bg-[#333] text-white border-[#333]"
+                  : "bg-white text-[#666] border-[#eaeaea] hover:border-[#999]"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <Card className="border-[#eaeaea] shadow-none bg-white">
@@ -34,23 +122,38 @@ export default function RunsPage() {
           {loading ? (
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : runs.length === 0 ? (
-            <p className="text-sm text-[#999]">No runs yet.</p>
+            <p className="text-sm text-[#999]">No runs found.</p>
           ) : (
-            runs.map((r) => (
-              <Link
-                key={r.id}
-                href={`/runs/${r.id}`}
-                className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
-                  <p className="text-xs text-[#999] mt-0.5">
-                    {r.id} · {r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
-                  </p>
+            <>
+              {runs.map((r) => (
+                <Link
+                  key={r.id}
+                  href={`/runs/${r.id}`}
+                  className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
+                    <p className="text-xs text-[#999] mt-0.5">
+                      {r.id} · {r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
+                    </p>
+                  </div>
+                  <StatusBadge status={r.status} />
+                </Link>
+              ))}
+              {hasMore && (
+                <div className="pt-2 text-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="text-xs"
+                  >
+                    {loadingMore ? "Loading..." : "Load more"}
+                  </Button>
                 </div>
-                <StatusBadge status={r.status} />
-              </Link>
-            ))
+              )}
+            </>
           )}
         </CardContent>
       </Card>
