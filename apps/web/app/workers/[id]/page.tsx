@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { ArrowLeft, Play, Box } from "lucide-react";
 import type { WorkerDetail, WorkerInput } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
@@ -226,58 +227,114 @@ export default function WorkerDetailPage() {
 
         <div className="space-y-6">
           <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Configuration</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-[#666]">Trigger</span>
-                <span className="font-medium">{worker.config.trigger.type}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#666]">Runtime</span>
-                <span className="font-medium">{worker.config.runtime.type}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#666]">Runner</span>
-                <span className="font-medium">{worker.config.runtime.runner}</span>
-              </div>
-              <Separator className="my-2" />
-              <div>
-                <span className="text-[#666]">Secrets</span>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {worker.config.secrets.length === 0 ? (
-                    <span className="text-xs text-[#999]">None</span>
-                  ) : (
-                    worker.config.secrets.map((s) => (
-                      <Badge key={s} variant="secondary" className="text-xs font-normal">
-                        {s}
-                      </Badge>
-                    ))
+            <Tabs defaultValue="config">
+              <CardHeader className="pb-0">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-medium">Configuration</CardTitle>
+                  <TabsList className="h-7 bg-[#f4f4f5]">
+                    <TabsTrigger value="config" className="h-5 text-xs px-2.5">Config</TabsTrigger>
+                    <TabsTrigger value="manifest" className="h-5 text-xs px-2.5">Manifest</TabsTrigger>
+                  </TabsList>
+                </div>
+              </CardHeader>
+              <TabsContent value="config">
+                <CardContent className="space-y-3 text-sm pt-4">
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Trigger</span>
+                    <span className="font-medium">{worker.config.trigger.type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Runtime</span>
+                    <span className="font-medium">{worker.config.runtime.type}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Runner</span>
+                    <span className="font-medium">{worker.config.runtime.runner}</span>
+                  </div>
+                  <Separator className="my-2" />
+                  <div>
+                    <span className="text-[#666]">Secrets</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {worker.config.secrets.length === 0 ? (
+                        <span className="text-xs text-[#999]">None</span>
+                      ) : (
+                        worker.config.secrets.map((s) => (
+                          <Badge key={s} variant="secondary" className="text-xs font-normal">
+                            {s}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[#666]">Outputs</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {worker.config.outputs.map((o) => (
+                        <Badge key={o.name} variant="outline" className="text-xs font-normal">
+                          {o.label}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  {worker.config.approvals.required && (
+                    <div className="flex justify-between">
+                      <span className="text-[#666]">Approval</span>
+                      <span className="font-medium text-amber-600">Required</span>
+                    </div>
                   )}
-                </div>
-              </div>
-              <div>
-                <span className="text-[#666]">Outputs</span>
-                <div className="flex flex-wrap gap-1.5 mt-1.5">
-                  {worker.config.outputs.map((o) => (
-                    <Badge key={o.name} variant="outline" className="text-xs font-normal">
-                      {o.label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-              {worker.config.approvals.required && (
-                <div className="flex justify-between">
-                  <span className="text-[#666]">Approval</span>
-                  <span className="font-medium text-amber-600">Required</span>
-                </div>
-              )}
-            </CardContent>
+                </CardContent>
+              </TabsContent>
+              <TabsContent value="manifest">
+                <CardContent className="pt-4">
+                  {worker.manifest_yaml ? (
+                    <ManifestViewer yaml={worker.manifest_yaml} />
+                  ) : (
+                    <p className="text-sm text-[#999]">Manifest not available.</p>
+                  )}
+                </CardContent>
+              </TabsContent>
+            </Tabs>
           </Card>
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ManifestViewer — syntax-highlighted YAML viewer
+// ---------------------------------------------------------------------------
+
+function ManifestViewer({ yaml }: { yaml: string }) {
+  const lines = yaml.split("\n");
+  return (
+    <pre className="text-xs leading-relaxed overflow-auto max-h-[400px] font-mono bg-[#f9f9f9] p-3 rounded-md">
+      {lines.map((line, i) => {
+        const keyMatch = line.match(/^(\s*)([\w_-]+):\s*(.*)$/);
+        if (keyMatch) {
+          const [, indent, key, value] = keyMatch;
+          return (
+            <div key={i}>
+              {indent}
+              <span style={{ color: "#555" }}>{key}</span>
+              <span style={{ color: "#888" }}>: </span>
+              <span style={{ color: "#222" }}>{value}</span>
+            </div>
+          );
+        }
+        const listMatch = line.match(/^(\s*-\s*)(.*)$/);
+        if (listMatch) {
+          const [, prefix, rest] = listMatch;
+          return (
+            <div key={i}>
+              <span style={{ color: "#aaa" }}>{prefix}</span>
+              <span style={{ color: "#222" }}>{rest}</span>
+            </div>
+          );
+        }
+        return <div key={i}>{line || " "}</div>;
+      })}
+    </pre>
   );
 }
 

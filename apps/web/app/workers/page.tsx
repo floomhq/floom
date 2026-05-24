@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, Play } from "lucide-react";
+import { Box, Play, Plus } from "lucide-react";
 import type { WorkerSummary } from "@/lib/types";
 
 export default function WorkersPage() {
@@ -28,9 +28,17 @@ export default function WorkersPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Workers</h1>
           <p className="text-[#666] text-sm mt-1">All available workers. Select one to run it.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => api.workers.reload().then(() => window.location.reload())}>
-          Reload workers
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => api.workers.reload().then(() => window.location.reload())}>
+            Reload workers
+          </Button>
+          <Link href="/workers/new">
+            <Button size="sm">
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              New worker
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

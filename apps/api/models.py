@@ -222,6 +222,7 @@ class WorkerDetail(BaseModel):
     runner: str
     config: WorkerConfig
     recent_runs: List[RunSummary] = Field(default_factory=list)
+    manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
 
 
 class SecretItem(BaseModel):

@@ -263,6 +263,16 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
+    # Read raw YAML for manifest viewer
+    manifest_yaml: Optional[str] = None
+    try:
+        from worker_registry import WORKERS_DIR
+        yml_path = WORKERS_DIR / worker_id / "worker.yml"
+        if yml_path.is_file():
+            manifest_yaml = yml_path.read_text()
+    except Exception:
+        pass
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -273,7 +283,85 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         runner=worker["runner"],
         config=config,
         recent_runs=recent_runs,
+        manifest_yaml=manifest_yaml,
     )
+
+
+# ---------------------------------------------------------------------------
+# Worker creation
+# ---------------------------------------------------------------------------
+
+class WorkerCreateRequest(BaseModel):
+    worker_yml: str
+    run_py: str
+
+
+@app.post("/workers", response_model=WorkerDetail)
+def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
+    """Create a new worker from YAML + Python source."""
+    import yaml as pyyaml
+    from worker_registry import WORKERS_DIR
+
+    # Parse and validate YAML
+    try:
+        raw = pyyaml.safe_load(payload.worker_yml)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+
+    try:
+        config = WorkerConfig(**raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Schema validation failed: {exc}")
+
+    # Check for collision
+    worker_id = config.id
+    if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
+        raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
+
+    target_dir = WORKERS_DIR / worker_id
+    if target_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+
+    # Write files
+    target_dir.mkdir(parents=True, exist_ok=False)
+    (target_dir / "worker.yml").write_text(payload.worker_yml)
+    (target_dir / "run.py").write_text(payload.run_py)
+    (target_dir / "requirements.txt").write_text("")
+
+    # Register
+    invalidate_worker_cache()
+    workers = discover_workers()
+
+    # Persist to DB
+    with get_db() as conn:
+        now = now_iso()
+        for w in workers:
+            conn.execute(
+                """
+                INSERT INTO workers
+                    (id, name, description, config_json, status,
+                     trigger_type, runner, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    description=excluded.description,
+                    config_json=excluded.config_json,
+                    status=excluded.status,
+                    trigger_type=excluded.trigger_type,
+                    runner=excluded.runner,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    w["id"], w["name"], w.get("description"),
+                    json.dumps(w["config"]), w["status"],
+                    w["trigger_type"], w["runner"], now, now,
+                ),
+            )
+
+    # Return the new worker detail
+    return get_worker_detail(worker_id)
 
 
 @app.post("/workers/reload", response_model=ReloadResponse)

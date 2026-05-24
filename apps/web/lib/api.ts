@@ -33,6 +33,11 @@ export const api = {
       fetchJson<import("./types").ActionResponse>(`/workers/${id}/pause`, { method: "POST" }),
     unpause: (id: string) =>
       fetchJson<import("./types").ActionResponse>(`/workers/${id}/unpause`, { method: "POST" }),
+    create: (worker_yml: string, run_py: string) =>
+      fetchJson<import("./types").WorkerDetail>("/workers", {
+        method: "POST",
+        body: JSON.stringify({ worker_yml, run_py }),
+      }),
   },
   runs: {
     list: (params?: { worker_id?: string; status?: string; limit?: number; offset?: number }) => {
