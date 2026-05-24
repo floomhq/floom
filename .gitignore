@@ -19,5 +19,8 @@ build/
 .vscode/
 .idea/
 
+# Secrets
+.deploy-secret
+
 # OS
 .DS_Store
