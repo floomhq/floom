@@ -3,18 +3,23 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Check, X, ArrowRight } from "lucide-react";
+import { Check, X, ArrowRight, Edit2 } from "lucide-react";
 import type { ApprovalDetail } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
 
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<ApprovalDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rejectModal, setRejectModal] = useState<{ runId: string; reason: string } | null>(null);
+  const [editModal, setEditModal] = useState<{ runId: string; content: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function load() {
     try {
@@ -31,23 +36,31 @@ export default function ApprovalsPage() {
     load();
   }, []);
 
-  async function approve(runId: string) {
+  async function approve(runId: string, editedOutput?: string) {
+    setSubmitting(true);
     try {
-      await api.runs.approve(runId);
+      await api.runs.approve(runId, editedOutput);
       toast.success("Approved");
+      setEditModal(null);
       load();
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  async function reject(runId: string) {
+  async function rejectWithReason(runId: string, reason: string) {
+    setSubmitting(true);
     try {
-      await api.runs.reject(runId, "Rejected by user");
+      await api.runs.reject(runId, reason.trim() || "Rejected by operator");
       toast.success("Rejected");
+      setRejectModal(null);
       load();
     } catch (e: any) {
       toast.error(e.message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -57,6 +70,71 @@ export default function ApprovalsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
         <p className="text-[#666] text-sm mt-1">Review worker outputs before they complete.</p>
       </div>
+
+      {/* Reject reason modal */}
+      {rejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md space-y-4">
+            <h2 className="text-base font-semibold">Reject run</h2>
+            <div className="space-y-1.5">
+              <Label className="text-sm">Reason (optional, max 280 chars)</Label>
+              <Textarea
+                value={rejectModal.reason}
+                onChange={(e) =>
+                  setRejectModal((m) => m ? { ...m, reason: e.target.value.slice(0, 280) } : m)
+                }
+                placeholder="e.g. Output contains hallucinated company facts, needs manual review"
+                className="min-h-[80px] border-[#e4e4e7]"
+              />
+              <p className="text-xs text-[#999] text-right">{rejectModal.reason.length}/280</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setRejectModal(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={submitting}
+                onClick={() => rejectWithReason(rejectModal.runId, rejectModal.reason)}
+                className="border-red-200 text-red-700 hover:bg-red-50"
+              >
+                <X className="w-4 h-4 mr-1" />
+                {submitting ? "Rejecting..." : "Confirm reject"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit-before-approve modal */}
+      {editModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-2xl space-y-4">
+            <h2 className="text-base font-semibold">Edit output before approving</h2>
+            <Textarea
+              value={editModal.content}
+              onChange={(e) => setEditModal((m) => m ? { ...m, content: e.target.value } : m)}
+              className="min-h-[300px] border-[#e4e4e7] font-mono text-sm"
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setEditModal(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                disabled={submitting}
+                onClick={() => approve(editModal.runId, editModal.content)}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Check className="w-4 h-4 mr-1" />
+                {submitting ? "Approving..." : "Approve with edits"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {loading ? (
@@ -100,6 +178,13 @@ export default function ApprovalsPage() {
                   </div>
                 )}
 
+                {a.decided_at && (
+                  <p className="text-xs text-[#999]">
+                    Decided {new Date(a.decided_at).toLocaleString()}
+                    {a.reason ? ` — ${a.reason}` : ""}
+                  </p>
+                )}
+
                 <div className="flex items-center justify-between">
                   <Link href={`/runs/${a.run_id}`} className="text-sm text-[#666] hover:text-[#111] flex items-center gap-1">
                     View run <ArrowRight className="w-3.5 h-3.5" />
@@ -108,11 +193,20 @@ export default function ApprovalsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => reject(a.run_id)}
+                      onClick={() => setRejectModal({ runId: a.run_id, reason: "" })}
                       className="border-red-200 text-red-700 hover:bg-red-50"
                     >
                       <X className="w-4 h-4 mr-1" />
                       Reject
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditModal({ runId: a.run_id, content: a.preview || "" })}
+                      className="border-[#e4e4e7]"
+                    >
+                      <Edit2 className="w-4 h-4 mr-1" />
+                      Edit
                     </Button>
                     <Button
                       variant="default"

@@ -1,0 +1,61 @@
+id: reverse_match_crm
+name: Reverse Match CRM
+description: Score your CRM contacts against a job brief and surface the top fits with DACH-specific signals.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: crm_csv
+    label: CRM export (CSV)
+    type: textarea
+    required: true
+    placeholder: "name,email,current_company,current_title,headline,last_active_iso,skills,notes\nAnna Keller,anna@example.com,Solaris,Senior Java Engineer,,2024-03-01,Java;Kafka;Spring Boot,Available May"
+
+  - name: job_brief
+    label: Job brief / JD
+    type: textarea
+    required: true
+    placeholder: "Senior Java Backend Engineer, FinTech client in Berlin, 6-12 month AÜG contract, SAP HCM integration experience preferred, €700-850/day..."
+
+  - name: required_modules
+    label: Required modules (optional, comma-separated)
+    type: textarea
+    required: false
+    placeholder: "SAP HCM, Personalwirtschaft"
+
+  - name: min_score
+    label: Minimum fit score (0–1)
+    type: number
+    required: false
+    default: 0.55
+
+  - name: top_n
+    label: Top N candidates to return
+    type: number
+    required: false
+    default: 10
+
+secrets:
+  - OPENAI_API_KEY
+
+outputs:
+  - name: top_candidates
+    label: Top Candidates (CSV)
+    type: csv
+
+  - name: all_above_threshold_count
+    label: Total above threshold
+    type: text
+
+  - name: analysis_summary
+    label: Analysis Summary
+    type: markdown
+
+approvals:
+  required: false

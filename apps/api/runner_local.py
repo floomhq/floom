@@ -5,17 +5,19 @@ local code**.  For untrusted or user-submitted code, use the E2B sandbox
 runner (future) or a subprocess-based runner.
 """
 
+import csv
+import io
 import os
 import sys
 import json
 import uuid
 import traceback
 import logging
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Any, Callable, List, Optional
 from pathlib import Path
 
 from models import WorkerContext, WorkerResult
-from worker_registry import get_worker_entrypoint
+from worker_registry import get_worker_entrypoint, get_worker_config
 
 logger = logging.getLogger("floom.runner_local")
 
@@ -49,6 +51,56 @@ def make_context(
         trace_id=trace_id,
         log_fn=log_fn,
     )
+
+
+def _validate_output_schema(worker_id: str, outputs: Dict[str, Any], log_fn: Callable) -> Optional[str]:
+    """Validate worker outputs against the declared schema in worker.yml.
+
+    Returns an error string if validation fails, or None if outputs are valid.
+    """
+    config = get_worker_config(worker_id)
+    if not config or not config.outputs:
+        return None  # No schema declared — skip validation
+
+    for declared in config.outputs:
+        name = declared.name
+        output_type = declared.type
+
+        if name not in outputs:
+            return f"Missing declared output '{name}'"
+
+        value = outputs[name]
+
+        # None is only allowed for optional outputs; treat as error if declared
+        if value is None:
+            return f"Declared output '{name}' is None"
+
+        # Type-specific validation
+        if output_type == "csv":
+            if not isinstance(value, str) or not value.strip():
+                return f"Output '{name}' (type: csv) must be a non-empty string"
+            try:
+                reader = csv.reader(io.StringIO(value))
+                rows = list(reader)
+                if len(rows) < 1:
+                    return f"Output '{name}' (type: csv) parsed as empty CSV"
+            except Exception as exc:
+                return f"Output '{name}' (type: csv) failed CSV parse: {exc}"
+
+        elif output_type == "json":
+            if isinstance(value, str):
+                try:
+                    json.loads(value)
+                except json.JSONDecodeError as exc:
+                    return f"Output '{name}' (type: json) is not valid JSON: {exc}"
+            elif not isinstance(value, (dict, list)):
+                return f"Output '{name}' (type: json) must be a JSON string or dict/list"
+
+        elif output_type in ("markdown", "text"):
+            if not isinstance(value, str) or not value.strip():
+                return f"Output '{name}' (type: {output_type}) must be a non-empty string"
+
+    return None
 
 
 def run_worker_local(
@@ -122,6 +174,18 @@ def run_worker_local(
                 error="Worker run() must return a dict",
                 error_code="invalid_return_type",
             )
+
+        # --- Schema enforcement ---
+        # Only validate on successful runs; error results skip validation.
+        if result.get("status") == "success":
+            schema_error = _validate_output_schema(worker_id, result.get("outputs", {}), log_fn)
+            if schema_error:
+                log_fn(f"Schema validation failed: {schema_error}", level="error")
+                return WorkerResult(
+                    status="failed",
+                    error=f"Output schema violation: {schema_error}",
+                    error_code="schema_violation",
+                )
 
         return WorkerResult(
             status=result.get("status", "error"),

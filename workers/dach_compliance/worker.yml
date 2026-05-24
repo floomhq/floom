@@ -1,0 +1,67 @@
+id: dach_compliance
+name: DACH Compliance + Rate Benchmark
+description: AÜG risk assessment, Scheinselbständigkeit check, and DACH market rate benchmark for contractor engagements.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: engagement_type
+    label: Engagement type
+    type: select
+    required: true
+    options:
+      - AÜG
+      - Werkvertrag
+      - Dienstvertrag
+      - Festanstellung
+    default: AÜG
+
+  - name: role_summary
+    label: Role summary + tech stack
+    type: textarea
+    required: true
+    placeholder: "Senior Java Backend Engineer, microservices, Spring Boot, Kafka. Working embedded in client's engineering team in Berlin. Expected 12 months."
+
+  - name: proposed_daily_rate_eur
+    label: Proposed daily rate (EUR, optional)
+    type: number
+    required: false
+    placeholder: "750"
+
+  - name: location
+    label: Location
+    type: text
+    required: false
+    default: Remote DACH
+    placeholder: "Berlin, Germany"
+
+  - name: experience_years
+    label: Years of experience
+    type: number
+    required: true
+    placeholder: "7"
+
+secrets:
+  - OPENAI_API_KEY
+
+outputs:
+  - name: compliance_report
+    label: Compliance Report
+    type: markdown
+
+  - name: rate_benchmark
+    label: Rate Benchmark
+    type: markdown
+
+  - name: red_flags
+    label: Red Flags (JSON)
+    type: json
+
+approvals:
+  required: false
