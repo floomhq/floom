@@ -141,8 +141,9 @@ export default function ApprovalsPage() {
           Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-48 w-full" />)
         ) : approvals.length === 0 ? (
           <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardContent className="p-8 text-center">
-              <p className="text-sm text-[#999]">No pending approvals.</p>
+            <CardContent className="p-8 text-center space-y-2">
+              <p className="text-sm font-medium text-[#666]">No pending approvals.</p>
+              <p className="text-xs text-[#999]">Runs that require human sign-off will appear here when they finish.</p>
             </CardContent>
           </Card>
         ) : (
