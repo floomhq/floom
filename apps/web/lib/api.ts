@@ -29,6 +29,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
       }),
+    pause: (id: string) =>
+      fetchJson<import("./types").ActionResponse>(`/workers/${id}/pause`, { method: "POST" }),
+    unpause: (id: string) =>
+      fetchJson<import("./types").ActionResponse>(`/workers/${id}/unpause`, { method: "POST" }),
   },
   runs: {
     list: (params?: { worker_id?: string; status?: string; limit?: number; offset?: number }) => {
@@ -41,8 +45,11 @@ export const api = {
     },
     get: (id: string) => fetchJson<import("./types").RunDetail>(`/runs/${id}`),
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
-    approve: (id: string) =>
-      fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, { method: "POST" }),
+    approve: (id: string, editedOutput?: string) =>
+      fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
+        method: "POST",
+        body: JSON.stringify(editedOutput != null ? { edited_output: editedOutput } : {}),
+      }),
     reject: (id: string, reason?: string) =>
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
         method: "POST",
@@ -55,5 +62,9 @@ export const api = {
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
+  },
+  system: {
+    info: () => fetchJson<Record<string, unknown>>("/system/info"),
+    clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
   },
 };

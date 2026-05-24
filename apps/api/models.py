@@ -111,6 +111,10 @@ class RejectRequest(BaseModel):
     reason: Optional[str] = None
 
 
+class ApproveRequest(BaseModel):
+    edited_output: Optional[str] = None  # If set, replaces the first output field value before approval
+
+
 class PaginationParams(BaseModel):
     limit: int = Field(50, ge=1, le=500)
     offset: int = Field(0, ge=0)
@@ -162,6 +166,7 @@ class ApprovalDetail(BaseModel):
     preview_type: Optional[str] = None  # "markdown" | "json" | "csv" | "text" | "file"
     created_at: str
     decided_at: Optional[str] = None
+    reason: Optional[str] = None  # Rejection reason or approval note
 
 
 class OutputField(BaseModel):
