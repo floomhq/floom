@@ -10,10 +10,21 @@ runtime:
   entrypoint: run.py
   runner: local
 
+csv_required_columns:
+  - name
+  - email
+  - current_company
+  - current_title
+  - headline
+  - last_active_iso
+  - skills
+  - notes
+
 inputs:
   - name: crm_csv
     label: CRM export (CSV)
-    type: textarea
+    type: file
+    accept_csv: true
     required: true
     placeholder: "name,email,current_company,current_title,headline,last_active_iso,skills,notes\nAnna Keller,anna@example.com,Solaris,Senior Java Engineer,,2024-03-01,Java;Kafka;Spring Boot,Available May"
 

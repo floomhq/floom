@@ -60,17 +60,28 @@ export default function OverviewPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((s) => (
-          <Card key={s.label} className="border-[#eaeaea] shadow-none bg-white">
-            <CardContent className="p-5 flex items-center justify-between">
-              <div>
-                <p className="text-[#666] text-xs font-medium uppercase tracking-wide">{s.label}</p>
-                <p className="text-2xl font-semibold mt-1">{loading ? <Skeleton className="h-8 w-12" /> : s.value}</p>
-              </div>
-              <s.icon className="w-5 h-5 text-[#999]" />
-            </CardContent>
-          </Card>
-        ))}
+        {stats.map((s) => {
+          const isPendingCard = s.label === "Pending approvals";
+          const hasApprovals = isPendingCard && approvals.length > 0;
+          return (
+            <Card
+              key={s.label}
+              className={`shadow-none ${hasApprovals ? "border-amber-300 bg-amber-50" : "border-[#eaeaea] bg-white"}`}
+            >
+              <CardContent className="p-5 flex items-center justify-between">
+                <div>
+                  <p className={`text-xs font-medium uppercase tracking-wide ${hasApprovals ? "text-amber-700" : "text-[#666]"}`}>
+                    {s.label}
+                  </p>
+                  <p className={`text-2xl font-semibold mt-1 ${hasApprovals ? "text-amber-900" : ""}`}>
+                    {loading ? <Skeleton className="h-8 w-12" /> : s.value}
+                  </p>
+                </div>
+                <s.icon className={`w-5 h-5 ${hasApprovals ? "text-amber-500" : "text-[#999]"}`} />
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
