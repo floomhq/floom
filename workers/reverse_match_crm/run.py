@@ -1,0 +1,187 @@
+from typing import Dict, Any
+import csv
+import io
+import json
+from datetime import datetime, timezone
+
+
+def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
+    context.log("Reverse Match CRM started")
+
+    crm_csv = inputs.get("crm_csv", "").strip()
+    job_brief = inputs.get("job_brief", "").strip()
+    required_modules_raw = inputs.get("required_modules", "").strip()
+    try:
+        min_score = float(inputs.get("min_score") or 0.55)
+    except (ValueError, TypeError):
+        min_score = 0.55
+    try:
+        top_n = int(inputs.get("top_n") or 10)
+    except (ValueError, TypeError):
+        top_n = 10
+
+    if not crm_csv:
+        return {"status": "error", "error": "Missing required input: crm_csv"}
+    if not job_brief:
+        return {"status": "error", "error": "Missing required input: job_brief"}
+
+    required_modules = [m.strip() for m in required_modules_raw.split(",") if m.strip()] if required_modules_raw else []
+
+    try:
+        reader = csv.DictReader(io.StringIO(crm_csv))
+        rows = list(reader)
+    except Exception as e:
+        return {"status": "error", "error": f"Invalid CSV: {str(e)}"}
+
+    if not rows:
+        return {"status": "error", "error": "CSV has no data rows"}
+
+    context.log(f"Loaded {len(rows)} CRM contacts")
+
+    # Build freshness warnings
+    now_utc = datetime.now(timezone.utc)
+    for row in rows:
+        last_active = row.get("last_active_iso", "").strip()
+        warning = ""
+        if last_active:
+            try:
+                dt = datetime.fromisoformat(last_active.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                days_inactive = (now_utc - dt).days
+                if days_inactive > 365:
+                    warning = f"Last active {days_inactive}d ago — stale"
+                elif days_inactive > 180:
+                    warning = f"Last active {days_inactive}d ago — warm up first"
+            except Exception:
+                warning = "Unknown last-active date"
+        row["_freshness_warning"] = warning
+
+    # Format rows for the LLM
+    rows_json = json.dumps(
+        [
+            {
+                "name": r.get("name", ""),
+                "email": r.get("email", ""),
+                "current_company": r.get("current_company", ""),
+                "current_title": r.get("current_title", ""),
+                "headline": r.get("headline", ""),
+                "skills": r.get("skills", ""),
+                "notes": r.get("notes", ""),
+                "freshness_warning": r.get("_freshness_warning", ""),
+            }
+            for r in rows
+        ],
+        ensure_ascii=False,
+    )
+
+    required_modules_text = (
+        f"\nRequired modules that MUST appear in skills or notes: {', '.join(required_modules)}"
+        if required_modules
+        else ""
+    )
+
+    system_prompt = f"""You are a DACH tech recruiting specialist at NovaSearch. You score CRM candidates against a job brief.
+
+For each candidate return a JSON array where every element has EXACTLY these keys (no others):
+  name, fit_score, reasoning, dach_fit, contractor_or_perm, freshness_warning
+
+Rules:
+- fit_score: float 0.000–1.000, 3 decimal places. Higher is better. Tie-break: prefer more years of experience.
+- reasoning: 1-2 sentences in English explaining the score, referencing specific skills/companies.
+- dach_fit: exactly one of "Yes", "No", "Maybe" — based on DACH location signals, language, DACH companies in history.
+- contractor_or_perm: exactly one of "Festanstellung", "Freiberufler", "Beides", "Unbekannt".
+- freshness_warning: use the provided freshness_warning string, or empty string "" if none.{required_modules_text}
+
+Return ONLY the raw JSON array. No markdown, no commentary, no code fences.
+"""
+
+    user_prompt = f"""Job brief:
+{job_brief}
+
+CRM candidates:
+{rows_json}
+
+Score all {len(rows)} candidates and return the JSON array."""
+
+    context.log("Scoring candidates with AI")
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=context.secrets.get("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=4000,
+        )
+        raw = response.choices[0].message.content.strip()
+        # Strip code fences if present
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            lines = [l for l in lines if not l.startswith("```")]
+            raw = "\n".join(lines).strip()
+        scored = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return {"status": "error", "error": f"LLM returned malformed JSON: {e}"}
+    except Exception as e:
+        return {"status": "error", "error": f"OpenAI call failed: {e}"}
+
+    if not isinstance(scored, list):
+        return {"status": "error", "error": "LLM did not return a JSON array"}
+
+    # Validate schema
+    required_keys = {"name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "freshness_warning"}
+    for idx, item in enumerate(scored):
+        missing = required_keys - set(item.keys())
+        if missing:
+            return {"status": "error", "error": f"Row {idx} missing keys: {missing}"}
+
+    # Filter and sort
+    above_threshold = [s for s in scored if float(s["fit_score"]) >= min_score]
+    above_threshold.sort(key=lambda x: float(x["fit_score"]), reverse=True)
+    top = above_threshold[:top_n]
+
+    context.log(f"Found {len(above_threshold)} candidates above threshold {min_score}, returning top {len(top)}")
+
+    # Build output CSV
+    out = io.StringIO()
+    fieldnames = ["name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "freshness_warning"]
+    writer = csv.DictWriter(out, fieldnames=fieldnames)
+    writer.writeheader()
+    for item in top:
+        writer.writerow({k: item.get(k, "") for k in fieldnames})
+    top_csv = out.getvalue().strip()
+
+    # Build summary
+    dach_yes = sum(1 for s in above_threshold if s.get("dach_fit") == "Yes")
+    freelancer_count = sum(1 for s in above_threshold if s.get("contractor_or_perm") in ("Freiberufler", "Beides"))
+    top_names = ", ".join(s["name"] for s in top[:3]) if top else "none"
+
+    analysis_summary = f"""## Reverse Match Summary
+
+**Job brief:** {job_brief[:200]}{'...' if len(job_brief) > 200 else ''}
+
+**Total CRM contacts scored:** {len(scored)}
+**Above threshold ({min_score}):** {len(above_threshold)}
+**Showing top {len(top)}**
+
+### Key signals
+- DACH-located candidates above threshold: **{dach_yes}**
+- Freelancer/contractor-eligible above threshold: **{freelancer_count}**
+- Top 3 candidates: **{top_names}**
+
+### Recommendation
+{"No candidates above threshold — consider lowering min_score or broadening the job brief." if not above_threshold else f"Prioritise outreach to {top_names}. Review freshness warnings before contact."}
+"""
+
+    return {
+        "status": "success",
+        "outputs": {
+            "top_candidates": top_csv,
+            "all_above_threshold_count": str(len(above_threshold)),
+            "analysis_summary": analysis_summary,
+        },
+    }

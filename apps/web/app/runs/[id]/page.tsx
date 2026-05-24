@@ -55,8 +55,9 @@ export default function RunDetailPage() {
   }
 
   async function reject() {
+    const reason = window.prompt("Rejection reason (optional, max 280 chars):", "") ?? "";
     try {
-      await api.runs.reject(id as string, "Rejected by user");
+      await api.runs.reject(id as string, reason.slice(0, 280) || "Rejected by operator");
       toast.success("Run rejected");
       load();
     } catch (e: any) {
@@ -195,8 +196,7 @@ export default function RunDetailPage() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {run.artifacts.map((a) => {
-                  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8011";
-                  const downloadUrl = `${apiBase}/runs/${run.id}/artifacts/${a.id}/download`;
+                  const downloadUrl = `/api/proxy/runs/${run.id}/artifacts/${a.id}/download`;
                   return (
                     <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
                       <div className="flex items-center gap-2 min-w-0">

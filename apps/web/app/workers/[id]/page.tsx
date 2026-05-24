@@ -15,7 +15,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ArrowLeft, Play, Box } from "lucide-react";
 import type { WorkerDetail, WorkerInput } from "@/lib/types";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8011";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
@@ -23,6 +22,7 @@ export default function WorkerDetailPage() {
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [inputs, setInputs] = useState<Record<string, any>>({});
+  const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [toggling, setToggling] = useState(false);
 
@@ -43,9 +43,13 @@ export default function WorkerDetailPage() {
     if (!worker) return;
     setToggling(true);
     try {
-      const action = worker.paused ? "unpause" : "pause";
-      await fetch(`${API_BASE}/workers/${worker.id}/${action}`, { method: "POST" });
-      toast.success(worker.paused ? "Worker unpaused" : "Worker paused");
+      if (worker.paused) {
+        await api.workers.unpause(worker.id);
+        toast.success("Worker unpaused");
+      } else {
+        await api.workers.pause(worker.id);
+        toast.success("Worker paused");
+      }
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
     } catch (e: any) {
@@ -161,30 +165,15 @@ export default function WorkerDetailPage() {
                       </label>
                     </div>
                   ) : inp.type === "file" ? (
-                    <div className="space-y-1">
-                      <input
-                        type="file"
-                        id={`inp-${inp.name}`}
-                        className="block w-full text-sm text-[#666] file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-[#e4e4e7] file:text-xs file:font-medium file:bg-white file:text-[#333] hover:file:bg-[#f4f4f5] cursor-pointer"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = (ev) => {
-                            const result = ev.target?.result;
-                            if (typeof result === "string") {
-                              setInputs((prev) => ({ ...prev, [inp.name]: result }));
-                            }
-                          };
-                          reader.readAsDataURL(file);
-                        }}
-                      />
-                      {inputs[inp.name] && (
-                        <p className="text-xs text-[#999]">
-                          File loaded ({Math.round((inputs[inp.name] as string).length / 1024)}KB as base64)
-                        </p>
-                      )}
-                    </div>
+                    <FileDropZone
+                      name={inp.name}
+                      value={inputs[inp.name]}
+                      fileName={fileNames[inp.name]}
+                      onFile={(dataUri, name) => {
+                        setInputs((prev) => ({ ...prev, [inp.name]: dataUri }));
+                        setFileNames((prev) => ({ ...prev, [inp.name]: name }));
+                      }}
+                    />
                   ) : (
                     <Input
                       type={inp.type === "number" ? "number" : "text"}
@@ -278,6 +267,76 @@ export default function WorkerDetailPage() {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FileDropZone — drag-and-drop file input with filename display
+// ---------------------------------------------------------------------------
+
+function FileDropZone({
+  name,
+  value,
+  fileName,
+  onFile,
+}: {
+  name: string;
+  value: string | undefined;
+  fileName: string | undefined;
+  onFile: (dataUri: string, name: string) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+
+  function loadFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result;
+      if (typeof result === "string") {
+        onFile(result, file.name);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div
+      className={`relative border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${
+        dragging ? "border-black bg-[#f4f4f5]" : "border-[#e4e4e7] hover:border-[#aaa]"
+      }`}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) loadFile(file);
+      }}
+      onClick={() => document.getElementById(`file-input-${name}`)?.click()}
+    >
+      <input
+        id={`file-input-${name}`}
+        type="file"
+        accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) loadFile(file);
+        }}
+      />
+      {value && fileName ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-[#333]">{fileName}</p>
+          <p className="text-xs text-[#999]">
+            {Math.round(value.length / 1024)}KB — click or drop to replace
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <p className="text-sm text-[#666]">Drop PDF, DOCX, or TXT here</p>
+          <p className="text-xs text-[#999]">or click to browse</p>
+        </div>
+      )}
     </div>
   );
 }
