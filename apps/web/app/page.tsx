@@ -37,9 +37,19 @@ export default function OverviewPage() {
     load();
   }, []);
 
+  const API_PAGE_MAX = 500;
+
   async function exportAllRuns() {
     try {
-      const allRuns = await api.runs.list({ limit: 10000, offset: 0 });
+      // Paginate through all runs
+      let allRuns: typeof runs = [];
+      let offset = 0;
+      while (true) {
+        const page = await api.runs.list({ limit: API_PAGE_MAX, offset });
+        allRuns = [...allRuns, ...page];
+        if (page.length < API_PAGE_MAX) break;
+        offset += API_PAGE_MAX;
+      }
       const rows = allRuns.map((r) => ({
         id: r.id,
         worker_id: r.worker_id,
