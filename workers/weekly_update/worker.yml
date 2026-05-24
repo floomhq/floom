@@ -36,5 +36,5 @@ outputs:
     type: markdown
 
 approvals:
-  required: true
+  required: false
   label: Approve final update
