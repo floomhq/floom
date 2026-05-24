@@ -115,6 +115,15 @@ export default function RunDetailPage() {
         </Card>
       )}
 
+      {run.status === "rejected" && run.approval?.reason && (
+        <Card className="border-red-200 bg-red-50 shadow-none">
+          <CardContent className="p-5">
+            <p className="font-medium text-red-900 mb-1">Rejected</p>
+            <p className="text-sm text-red-700">{run.approval.reason}</p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-6">
           <Card className="border-[#eaeaea] shadow-none bg-white">

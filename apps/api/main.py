@@ -490,6 +490,7 @@ def get_run(run_id: str) -> RunDetail:
                 preview=a.get("preview"),
                 created_at=a["created_at"],
                 decided_at=a.get("decided_at"),
+                reason=a.get("reason"),
             )
 
     return RunDetail(
@@ -585,11 +586,11 @@ def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> Action
     if payload and payload.edited_output is not None:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT output FROM runs WHERE id = ?", (run_id,))
+            cursor.execute("SELECT output_json FROM runs WHERE id = ?", (run_id,))
             row = cursor.fetchone()
-            if row and row["output"]:
+            if row and row["output_json"]:
                 try:
-                    existing_output = json.loads(row["output"])
+                    existing_output = json.loads(row["output_json"])
                     # Replace the value of the first output key with the edited content
                     if existing_output:
                         first_key = next(iter(existing_output))
@@ -598,7 +599,7 @@ def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> Action
                 except (json.JSONDecodeError, StopIteration):
                     patched_json = json.dumps({"output": payload.edited_output})
                 conn.execute(
-                    "UPDATE runs SET output = ? WHERE id = ?",
+                    "UPDATE runs SET output_json = ? WHERE id = ?",
                     (patched_json, run_id),
                 )
 

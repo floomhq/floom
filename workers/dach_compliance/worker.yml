@@ -62,6 +62,9 @@ outputs:
   - name: red_flags
     label: Red Flags (JSON)
     type: json
+    json_required_keys:
+      - risk_level
+      - items
 
 approvals:
   required: false
