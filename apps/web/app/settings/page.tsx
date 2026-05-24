@@ -9,8 +9,6 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { SecretItem } from "@/lib/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8011";
-
 interface SystemInfo {
   api_version: string;
   workers_dir: string;
@@ -30,10 +28,10 @@ export default function SettingsPage() {
   async function loadData() {
     try {
       const [infoRes, secretsRes] = await Promise.all([
-        fetch(`${API_BASE}/system/info`).then((r) => r.json()),
+        api.system.info(),
         api.secrets.list(),
       ]);
-      setInfo(infoRes);
+      setInfo(infoRes as unknown as SystemInfo);
       setSecrets(secretsRes);
     } catch (e) {
       console.error(e);
@@ -64,7 +62,7 @@ export default function SettingsPage() {
     }
     setClearing(true);
     try {
-      await fetch(`${API_BASE}/runs/clear`, { method: "POST" });
+      await api.system.clearRuns();
       toast.success("Run history cleared");
       setConfirmClear(false);
       loadData();

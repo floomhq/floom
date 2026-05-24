@@ -92,6 +92,7 @@ export interface ApprovalDetail {
   preview_type?: string;
   created_at: string;
   decided_at?: string;
+  reason?: string;
 }
 
 export interface OutputField {
