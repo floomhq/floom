@@ -161,6 +161,10 @@ MIGRATIONS = [
         updated_at TEXT NOT NULL
     );
     """,
+    # -- migration 6: add reason column to approvals for reject audit trail -----
+    """
+    ALTER TABLE approvals ADD COLUMN reason TEXT;
+    """,
 ]
 
 
@@ -185,7 +189,7 @@ def apply_migrations():
                 try:
                     conn.executescript(sql)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
