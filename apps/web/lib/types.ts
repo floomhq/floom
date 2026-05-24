@@ -12,6 +12,7 @@ export interface WorkerInput {
   placeholder?: string;
   options?: string[];
   default?: any;
+  accept_csv?: boolean;
 }
 
 export interface WorkerOutput {
@@ -48,6 +49,7 @@ export interface WorkerConfig {
   secrets: string[];
   outputs: WorkerOutput[];
   approvals: WorkerApprovalConfig;
+  csv_required_columns?: string[];
 }
 
 export interface RunSummary {

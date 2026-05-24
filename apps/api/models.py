@@ -60,6 +60,7 @@ class WorkerInput(BaseModel):
     placeholder: Optional[str] = None
     options: Optional[List[str]] = None
     default: Optional[Any] = None
+    accept_csv: bool = False  # When True, render the CSV column mapper in the UI
 
 
 class WorkerOutput(BaseModel):
@@ -98,6 +99,7 @@ class WorkerConfig(BaseModel):
     secrets: List[str] = []
     outputs: List[WorkerOutput] = []
     approvals: WorkerApprovalConfig = WorkerApprovalConfig()
+    csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
 
 
 # ---------------------------------------------------------------------------

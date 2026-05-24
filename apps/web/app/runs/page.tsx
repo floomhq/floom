@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Papa from "papaparse";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Download } from "lucide-react";
 import type { RunSummary, WorkerSummary } from "@/lib/types";
 
 const STATUS_OPTIONS = [
@@ -75,11 +77,45 @@ export default function RunsPage() {
     fetchRuns(next);
   }
 
+  function exportCSV() {
+    const rows = runs.map((r) => ({
+      id: r.id,
+      worker_id: r.worker_id,
+      status: r.status,
+      trigger_source: r.trigger_source,
+      created_at: r.created_at || "",
+      started_at: r.started_at || "",
+      completed_at: r.completed_at || "",
+      duration_ms: r.duration_ms ?? "",
+      approval_status: r.approval_status,
+    }));
+    const csv = Papa.unparse(rows);
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
-        <p className="text-[#666] text-sm mt-1">All worker executions.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
+          <p className="text-[#666] text-sm mt-1">All worker executions.</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={exportCSV}
+          disabled={runs.length === 0}
+          className="gap-1.5"
+        >
+          <Download className="w-4 h-4" />
+          Export CSV
+        </Button>
       </div>
 
       {/* Filters */}

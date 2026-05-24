@@ -5,12 +5,16 @@ import json
 import sqlite3
 import logging
 import mimetypes
+import fcntl
+import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso, DB_PATH
@@ -637,8 +641,143 @@ def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
 
 
 # ---------------------------------------------------------------------------
-# Secrets
+# Secrets — CRUD + test
 # ---------------------------------------------------------------------------
+
+# Path to the .env file used by the API
+_ENV_PATH = Path(__file__).parent / ".env"
+
+
+class SecretUpsertRequest(BaseModel):
+    value: str
+
+
+class SecretTestResult(BaseModel):
+    status: str  # "valid" | "invalid"
+    reason: Optional[str] = None
+
+
+def _read_env_lines() -> list[str]:
+    """Read .env lines; return [] if file does not exist."""
+    if not _ENV_PATH.exists():
+        return []
+    with open(_ENV_PATH, "r") as f:
+        return f.readlines()
+
+
+def _write_env_lines(lines: list[str]) -> None:
+    """Atomically write .env lines with fcntl lock."""
+    _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_ENV_PATH, "a+") as lock_fd:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        try:
+            with open(_ENV_PATH, "w") as f:
+                f.writelines(lines)
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
+
+def _upsert_env_var(name: str, value: str) -> None:
+    """Set or replace NAME=value in the .env file, then reload into os.environ."""
+    # Validate name is a legal env var identifier
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError(f"Invalid secret name: {name!r}")
+
+    lines = _read_env_lines()
+    new_line = f"{name}={value}\n"
+    replaced = False
+    new_lines: list[str] = []
+    for line in lines:
+        stripped = line.rstrip("\n")
+        if stripped.startswith(f"{name}=") or stripped == name:
+            new_lines.append(new_line)
+            replaced = True
+        else:
+            new_lines.append(line)
+    if not replaced:
+        # Ensure trailing newline before appending
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines[-1] += "\n"
+        new_lines.append(new_line)
+    _write_env_lines(new_lines)
+    # Reload in-process so workers immediately see the new value
+    os.environ[name] = value
+
+
+def _delete_env_var(name: str) -> bool:
+    """Remove NAME from .env and os.environ. Returns True if it was present."""
+    lines = _read_env_lines()
+    new_lines = [
+        line for line in lines
+        if not (line.rstrip("\n").startswith(f"{name}=") or line.rstrip("\n") == name)
+    ]
+    removed = len(new_lines) < len(lines)
+    if removed:
+        _write_env_lines(new_lines)
+    os.environ.pop(name, None)
+    return removed
+
+
+@app.post("/secrets/{name}", response_model=SecretTestResult)
+def upsert_secret(name: str, payload: SecretUpsertRequest) -> SecretTestResult:
+    """Create or update a secret. Value is write-only — never returned."""
+    try:
+        _upsert_env_var(name, payload.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    # Refresh DB record
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO secrets (name, status, created_at, updated_at)
+            VALUES (?, 'set', ?, ?)
+            ON CONFLICT(name) DO UPDATE SET status='set', updated_at=excluded.updated_at
+            """,
+            (name, now_iso(), now_iso()),
+        )
+    logger.info("Secret %s upserted", name)
+    return SecretTestResult(status="valid", reason=f"Secret {name!r} saved.")
+
+
+@app.delete("/secrets/{name}", response_model=SecretTestResult)
+def delete_secret(name: str) -> SecretTestResult:
+    """Delete a secret from .env and env."""
+    removed = _delete_env_var(name)
+    with get_db() as conn:
+        conn.execute("DELETE FROM secrets WHERE name = ?", (name,))
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
+    logger.info("Secret %s deleted", name)
+    return SecretTestResult(status="valid", reason=f"Secret {name!r} removed.")
+
+
+@app.post("/secrets/{name}/test", response_model=SecretTestResult)
+def test_secret(name: str) -> SecretTestResult:
+    """Test a secret. For OPENAI_API_KEY: does a 1-token completion. Others: confirms env var is set."""
+    value = os.environ.get(name)
+    if not value:
+        return SecretTestResult(status="invalid", reason=f"{name} is not set in the environment.")
+
+    if name == "OPENAI_API_KEY":
+        try:
+            import openai
+            client = openai.OpenAI(api_key=value)
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+            )
+            _ = resp.choices[0].message.content
+            return SecretTestResult(status="valid", reason="OpenAI API key is valid (1-token ping succeeded).")
+        except Exception as exc:
+            return SecretTestResult(status="invalid", reason=f"OpenAI API key test failed: {exc}")
+
+    # Generic: secret is set
+    return SecretTestResult(
+        status="valid",
+        reason=f"{name} is set ({len(value)} chars). No additional test available for this secret type.",
+    )
+
 
 @app.get("/secrets", response_model=List[SecretItem])
 def list_secrets() -> List[SecretItem]:
