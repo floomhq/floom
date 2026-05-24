@@ -70,23 +70,30 @@ def _extract_text_from_base64(data_uri: str) -> str:
 
 
 FORMAT_INSTRUCTIONS = {
-    "branded_markdown": """Write a professional NovaSearch-branded candidate writeup in Markdown. Structure:
+    "branded_markdown": """Write a professional NovaSearch-branded candidate writeup in Markdown for a recruiter to review and edit before sending.
+No marketing language. No "ideal candidate". No "accomplished". Write as a senior recruiter's internal assessment.
+Structure:
 # [Candidate Name] — [Current Title]
-## Why [Name] for [Client]
-2-3 compelling paragraphs positioning the candidate for this specific role. Reference the client context.
+## Profile
+2-3 factual paragraphs covering background, client fit, and key differentiators. Reference specific skills and the client context.
+## Strengths
+Bullet list of 4-6 concrete strengths relevant to the role (with evidence from CV where possible).
+## Risks / Open Questions
+Bullet list of 2-4 genuine caveats or gaps a client may raise (gaps, tenure, rate, availability, etc.).
+If none, write "No significant risks identified."
 ## Key Competencies
 Bullet list of 5-8 most relevant skills and experiences.
 ## Career Highlights
 3-5 bullet points of notable achievements/tenure.
 ## Logistics
-- Availability, location, employment type, languages
+- Location, availability, employment type preference, languages
 ---
 *Prepared by NovaSearch | DACH Tech Recruiting Specialists*""",
 
     "plain_summary": """Write a concise 1-page plain-English summary (no markdown headers, flowing prose).
-3 paragraphs: background, relevant skills, logistics. End with a recommendation sentence.""",
+3 paragraphs: background, relevant skills, logistics. End with a one-sentence assessment of fit and main caveat.""",
 
-    "two_pager": """Write a detailed two-page Markdown writeup. Structure:
+    "two_pager": """Write a detailed two-page Markdown writeup for client submission. Structure:
 # [Candidate Name] — Executive Summary
 ## Professional Overview (full career narrative, 3-4 paragraphs)
 ## Technical Competencies (detailed skill breakdown by category)
@@ -94,7 +101,7 @@ Bullet list of 5-8 most relevant skills and experiences.
 ## Education & Certifications
 ## Languages & Location
 ## NovaSearch Assessment
-(1 paragraph summarising fit, readiness, and any caveats)
+Strengths: bullet list. Risks: bullet list. Overall fit verdict (1 sentence).
 ---
 *NovaSearch GmbH · DACH Tech Recruiting · novasearch.de*""",
 }
@@ -172,7 +179,9 @@ Return ONLY the JSON. No commentary."""
     format_instruction = FORMAT_INSTRUCTIONS[target_format]
 
     writeup_system = f"""You are a senior recruiter at NovaSearch, a DACH tech recruiting boutique specialising in Java/Backend/FinTech.
-You write precise, client-ready candidate writeups. No fluff. No filler phrases.
+You write precise, client-ready candidate writeups. No fluff. No filler phrases. No marketing language.
+BANNED phrases: "ideal candidate", "accomplished", "exceptional talent", "uniquely positioned", "extensive expertise", "proven track record".
+Write like a colleague briefing a colleague — factual, specific, honest about gaps.
 {format_instruction}"""
 
     writeup_user = f"""Client context:
