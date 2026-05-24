@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Activity, Box, Clock, KeyRound, Settings, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeModeButton } from "@/components/ThemeModeButton";
 
 const nav = [
   { href: "/", label: "Overview", icon: Activity },
@@ -60,14 +61,17 @@ export function Sidebar() {
           </div>
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
         </Link>
-        <button
-          type="button"
-          aria-label="Open navigation"
-          onClick={() => setOpen(true)}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeModeButton className="theme-mode-button-compact" />
+          <button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
       <aside className="sticky top-0 hidden h-screen w-60 flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-xl md:flex">
@@ -80,7 +84,10 @@ export function Sidebar() {
           </Link>
         </div>
         <NavLinks pathname={pathname} />
-        <div className="border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">Floom v0</div>
+        <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
+          <span>Floom v0</span>
+          <ThemeModeButton />
+        </div>
       </aside>
 
       {open && (
@@ -110,7 +117,10 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
-            <div className="border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">Floom v0</div>
+            <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
+              <span>Floom v0</span>
+              <ThemeModeButton />
+            </div>
           </aside>
         </div>
       )}

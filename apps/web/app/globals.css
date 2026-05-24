@@ -350,3 +350,46 @@ html.dark {
     border-radius: var(--r-xl);
   }
 }
+
+.theme-mode-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--glass-bg);
+  color: var(--ink-soft);
+  padding: 5px 11px;
+  font: 500 12px/1 var(--font);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition:
+    color var(--t-fast),
+    background var(--t-fast),
+    border-color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+
+.theme-mode-button:hover {
+  background: var(--bg-2);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.theme-mode-button svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.theme-mode-button-compact {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0;
+}
+
+.theme-mode-button-compact span {
+  display: none;
+}
