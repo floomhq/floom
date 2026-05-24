@@ -164,11 +164,11 @@ def test_runs_filters() -> None:
 # ---------------------------------------------------------------------------
 
 def test_runs_export() -> None:
-    print("\n[Runs Export (high-limit fetch)]")
+    print("\n[Runs Export (paginated full-history fetch)]")
 
-    # Fetch with high limit — represents what Export CSV does
-    r = get("/runs", {"limit": 10000, "offset": 0})
-    check("GET /runs?limit=10000 returns 200", r.status_code == 200, r.text[:200])
+    # Fetch with API max limit (500) — represents what Export CSV does per page
+    r = get("/runs", {"limit": 500, "offset": 0})
+    check("GET /runs?limit=500 returns 200", r.status_code == 200, r.text[:200])
     if r.status_code == 200:
         runs = r.json()
         check("High-limit fetch returns a list", isinstance(runs, list), type(runs).__name__)
@@ -179,6 +179,17 @@ def test_runs_export() -> None:
             check("High-limit fetch returns >= default page fetch",
                   len(runs) >= len(default_runs),
                   f"high={len(runs)} default={len(default_runs)}")
+
+    # Also verify pagination works: offset=0 and offset=1 return different first runs
+    r1 = get("/runs", {"limit": 1, "offset": 0})
+    r2 = get("/runs", {"limit": 1, "offset": 1})
+    if r1.status_code == 200 and r2.status_code == 200:
+        runs1 = r1.json()
+        runs2 = r2.json()
+        if runs1 and runs2:
+            check("Pagination: offset=0 and offset=1 return different runs",
+                  runs1[0]["id"] != runs2[0]["id"],
+                  f"both returned {runs1[0]['id']}")
 
 
 # ---------------------------------------------------------------------------
