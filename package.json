@@ -6,6 +6,7 @@
     "dev:api": "cd apps/api && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     "dev:web": "cd apps/web && npm run dev",
     "dev": "echo 'Run dev:api and dev:web in separate terminals'",
-    "build:web": "cd apps/web && npm run build"
+    "build:web": "cd apps/web && npm run build",
+    "test:sample-search": "python3 tests/sample-search_regression.py"
   }
 }

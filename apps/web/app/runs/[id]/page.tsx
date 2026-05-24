@@ -95,13 +95,15 @@ export default function RunDetailPage() {
       </div>
 
       {run.status === "pending_approval" && (
-        <Card className="border-amber-200 bg-amber-50 shadow-none">
-          <CardContent className="p-5 flex items-center justify-between">
+        <Card className="border-amber-300 bg-amber-50 shadow-none">
+          <CardContent className="p-5 flex items-center justify-between gap-4">
             <div>
-              <p className="font-medium text-amber-900">Approval required</p>
-              <p className="text-sm text-amber-700 mt-0.5">{run.approval?.label}</p>
+              <p className="font-semibold text-amber-900">Waiting for your approval — review and approve or reject the output below</p>
+              {run.approval?.label && (
+                <p className="text-sm text-amber-700 mt-0.5">{run.approval.label}</p>
+              )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 shrink-0">
               <Button variant="outline" size="sm" onClick={reject} className="border-red-200 text-red-700 hover:bg-red-50">
                 <X className="w-4 h-4 mr-1" />
                 Reject
@@ -169,7 +171,7 @@ export default function RunDetailPage() {
               ) : run.output_schema && run.output_schema.length > 0 ? (
                 <div className="space-y-6">
                   {run.output_schema.map((field) => (
-                    <OutputRenderer key={field.name} field={field} />
+                    <OutputRenderer key={field.name} field={field} runId={run.id} />
                   ))}
                 </div>
               ) : (

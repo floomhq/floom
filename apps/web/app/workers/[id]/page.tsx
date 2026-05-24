@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ArrowLeft, Play, Box } from "lucide-react";
 import type { WorkerDetail, WorkerInput } from "@/lib/types";
+import { CsvColumnMapper } from "@/components/csv-column-mapper";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
@@ -164,6 +165,15 @@ export default function WorkerDetailPage() {
                         {inp.placeholder || inp.label}
                       </label>
                     </div>
+                  ) : inp.type === "file" && inp.accept_csv ? (
+                    <CsvColumnMapper
+                      requiredColumns={worker.config.csv_required_columns || []}
+                      label={undefined}
+                      onMapped={(csv) => {
+                        setInputs((prev) => ({ ...prev, [inp.name]: csv }));
+                        setFileNames((prev) => ({ ...prev, [inp.name]: "mapped.csv" }));
+                      }}
+                    />
                   ) : inp.type === "file" ? (
                     <FileDropZone
                       name={inp.name}

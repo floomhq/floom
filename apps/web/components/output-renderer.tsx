@@ -1,9 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import Papa from "papaparse";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Download } from "lucide-react";
 import type { OutputField } from "@/lib/types";
 
 function parseCSV(text: string): string[][] {
@@ -13,46 +16,90 @@ function parseCSV(text: string): string[][] {
   return result.data as string[][];
 }
 
-function OutputCSV({ value }: { value: string }) {
+function downloadBlob(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function DownloadButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2 text-xs text-[#666] hover:text-[#333] gap-1"
+      onClick={onClick}
+      title={`Download as ${label}`}
+    >
+      <Download className="w-3 h-3" />
+      {label}
+    </Button>
+  );
+}
+
+function OutputCSV({ value, filename }: { value: string; filename: string }) {
   const rows = parseCSV(String(value));
   if (rows.length === 0) return <p className="text-sm text-[#999]">Empty CSV</p>;
   const [header, ...body] = rows;
   return (
-    <div className="overflow-auto max-h-[400px] rounded border border-[#eaeaea]">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {header.map((h, i) => (
-              <TableHead key={i} className="text-xs font-medium">{h}</TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {body.map((row, ri) => (
-            <TableRow key={ri}>
-              {row.map((cell, ci) => (
-                <TableCell key={ci} className="text-xs">{cell}</TableCell>
+    <div className="space-y-2">
+      <div className="overflow-auto max-h-[400px] rounded border border-[#eaeaea]">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {header.map((h, i) => (
+                <TableHead key={i} className="text-xs font-medium">{h}</TableHead>
               ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {body.map((row, ri) => (
+              <TableRow key={ri}>
+                {row.map((cell, ci) => (
+                  <TableCell key={ci} className="text-xs">{cell}</TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <DownloadButton
+        label=".csv"
+        onClick={() => downloadBlob(String(value), filename, "text/csv")}
+      />
     </div>
   );
 }
 
-function OutputJSON({ value }: { value: any }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function OutputJSON({ value, filename }: { value: unknown; filename: string }) {
   let formatted: string;
   try {
     const parsed = typeof value === "string" ? JSON.parse(value) : value;
-    formatted = JSON.stringify(parsed, null, 2);
+    formatted = JSON.stringify(parsed as Record<string, unknown>, null, 2);
   } catch {
     formatted = String(value);
   }
   return (
-    <pre className="text-xs bg-[#f4f4f5] p-3 rounded-md overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
-      {formatted}
-    </pre>
+    <div className="space-y-2">
+      <pre className="text-xs bg-[#f4f4f5] p-3 rounded-md overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
+        {formatted}
+      </pre>
+      <DownloadButton
+        label=".json"
+        onClick={() => downloadBlob(formatted, filename, "application/json")}
+      />
+    </div>
   );
 }
 
@@ -81,10 +128,16 @@ const markdownComponents = {
   ),
 };
 
-export function OutputRenderer({ field }: {
+export function OutputRenderer({
+  field,
+  runId,
+}: {
   field: OutputField;
+  runId?: string;
 }) {
   const { type, value, label, name } = field;
+  const safeRunId = runId || "run";
+  const baseFilename = `${safeRunId}-${name}`;
 
   if (value == null || value === "") {
     return (
@@ -99,22 +152,34 @@ export function OutputRenderer({ field }: {
     <div>
       <p className="text-xs font-medium text-[#666] uppercase tracking-wide mb-2">{label || name}</p>
       {type === "markdown" ? (
-        <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea]">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
-            {String(value)}
-          </ReactMarkdown>
+        <div className="space-y-2">
+          <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
+              {String(value)}
+            </ReactMarkdown>
+          </div>
+          <DownloadButton
+            label=".md"
+            onClick={() => downloadBlob(String(value), `${baseFilename}.md`, "text/markdown")}
+          />
         </div>
       ) : type === "json" ? (
-        <OutputJSON value={value} />
+        <OutputJSON value={value} filename={`${baseFilename}.json`} />
       ) : type === "csv" ? (
-        <OutputCSV value={String(value)} />
+        <OutputCSV value={String(value)} filename={`${baseFilename}.csv`} />
       ) : type === "file" ? (
         <div className="bg-[#f4f4f5] p-3 rounded-md text-sm text-[#666]">
           <span className="font-mono text-xs">{String(value)}</span>
         </div>
       ) : (
-        <div className="bg-[#f4f4f5] p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
-          {String(value)}
+        <div className="space-y-2">
+          <div className="bg-[#f4f4f5] p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
+            {String(value)}
+          </div>
+          <DownloadButton
+            label=".txt"
+            onClick={() => downloadBlob(String(value), `${baseFilename}.txt`, "text/plain")}
+          />
         </div>
       )}
     </div>
