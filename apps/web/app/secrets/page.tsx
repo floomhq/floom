@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,20 +24,20 @@ export default function SecretsPage() {
   const [updatingValue, setUpdatingValue] = useState("");
   const [deletingName, setDeletingName] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     try {
       const s = await api.secrets.list();
       setSecrets(s);
-    } catch (e: any) {
+    } catch {
       toast.error("Failed to load secrets");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    void refresh();
+  }, [refresh]);
 
   async function handleAdd() {
     if (!addingName.trim() || !addingValue.trim()) {
@@ -51,9 +51,9 @@ export default function SecretsPage() {
       setAddingName("");
       setAddingValue("");
       setAddingOpen(false);
-      refresh();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to save secret");
+      void refresh();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save secret");
     } finally {
       setSaving(false);
     }
@@ -70,9 +70,9 @@ export default function SecretsPage() {
       toast.success(`Secret ${name} updated`);
       setUpdatingName(null);
       setUpdatingValue("");
-      refresh();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to update secret");
+      void refresh();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update secret");
     } finally {
       setSaving(false);
     }
@@ -84,9 +84,9 @@ export default function SecretsPage() {
       await api.secrets.delete(name);
       toast.success(`Secret ${name} removed`);
       setTestResults((prev) => { const n = { ...prev }; delete n[name]; return n; });
-      refresh();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to delete secret");
+      void refresh();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete secret");
     } finally {
       setDeletingName(null);
     }
@@ -102,8 +102,8 @@ export default function SecretsPage() {
       } else {
         toast.error(`${name}: invalid — ${result.reason}`);
       }
-    } catch (e: any) {
-      toast.error(e.message || "Test failed");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Test failed");
     } finally {
       setTestingName(null);
     }

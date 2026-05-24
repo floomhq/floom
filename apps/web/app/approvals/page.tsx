@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,7 +21,7 @@ export default function ApprovalsPage() {
   const [editModal, setEditModal] = useState<{ runId: string; content: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const a = await api.approvals.list("pending");
       setApprovals(a);
@@ -30,11 +30,11 @@ export default function ApprovalsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   async function approve(runId: string, editedOutput?: string) {
     setSubmitting(true);
@@ -42,9 +42,9 @@ export default function ApprovalsPage() {
       await api.runs.approve(runId, editedOutput);
       toast.success("Approved");
       setEditModal(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to approve");
     } finally {
       setSubmitting(false);
     }
@@ -56,9 +56,9 @@ export default function ApprovalsPage() {
       await api.runs.reject(runId, reason.trim() || "Rejected by operator");
       toast.success("Rejected");
       setRejectModal(null);
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to reject");
     } finally {
       setSubmitting(false);
     }

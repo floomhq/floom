@@ -1,6 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
+import type React from "react";
 import Papa from "papaparse";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -81,7 +81,6 @@ function OutputCSV({ value, filename }: { value: string; filename: string }) {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function OutputJSON({ value, filename }: { value: unknown; filename: string }) {
   let formatted: string;
   try {
@@ -103,15 +102,27 @@ function OutputJSON({ value, filename }: { value: unknown; filename: string }) {
   );
 }
 
+interface MarkdownChildProps {
+  children?: React.ReactNode;
+}
+
+interface MarkdownCodeProps extends MarkdownChildProps {
+  inline?: boolean;
+}
+
+interface MarkdownAnchorProps extends MarkdownChildProps {
+  href?: string;
+}
+
 const markdownComponents = {
-  h1: ({ children }: any) => <h1 className="text-xl font-semibold mt-4 mb-2">{children}</h1>,
-  h2: ({ children }: any) => <h2 className="text-lg font-semibold mt-3 mb-2">{children}</h2>,
-  h3: ({ children }: any) => <h3 className="text-base font-semibold mt-2 mb-1">{children}</h3>,
-  p: ({ children }: any) => <p className="text-sm mb-3 leading-relaxed">{children}</p>,
-  ul: ({ children }: any) => <ul className="list-disc pl-5 mb-3 space-y-1">{children}</ul>,
-  ol: ({ children }: any) => <ol className="list-decimal pl-5 mb-3 space-y-1">{children}</ol>,
-  li: ({ children }: any) => <li className="text-sm">{children}</li>,
-  code: ({ inline, children }: any) =>
+  h1: ({ children }: MarkdownChildProps) => <h1 className="text-xl font-semibold mt-4 mb-2">{children}</h1>,
+  h2: ({ children }: MarkdownChildProps) => <h2 className="text-lg font-semibold mt-3 mb-2">{children}</h2>,
+  h3: ({ children }: MarkdownChildProps) => <h3 className="text-base font-semibold mt-2 mb-1">{children}</h3>,
+  p: ({ children }: MarkdownChildProps) => <p className="text-sm mb-3 leading-relaxed">{children}</p>,
+  ul: ({ children }: MarkdownChildProps) => <ul className="list-disc pl-5 mb-3 space-y-1">{children}</ul>,
+  ol: ({ children }: MarkdownChildProps) => <ol className="list-decimal pl-5 mb-3 space-y-1">{children}</ol>,
+  li: ({ children }: MarkdownChildProps) => <li className="text-sm">{children}</li>,
+  code: ({ inline, children }: MarkdownCodeProps) =>
     inline ? (
       <code className="bg-[#f4f4f5] px-1 py-0.5 rounded text-xs font-mono">{children}</code>
     ) : (
@@ -119,11 +130,11 @@ const markdownComponents = {
         <code>{children}</code>
       </pre>
     ),
-  blockquote: ({ children }: any) => (
+  blockquote: ({ children }: MarkdownChildProps) => (
     <blockquote className="border-l-2 border-[#d4d4d8] pl-3 text-[#666] my-3">{children}</blockquote>
   ),
-  strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
-  a: ({ href, children }: any) => (
+  strong: ({ children }: MarkdownChildProps) => <strong className="font-semibold">{children}</strong>,
+  a: ({ href, children }: MarkdownAnchorProps) => (
     <a href={href} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">{children}</a>
   ),
 };
@@ -154,7 +165,7 @@ export function OutputRenderer({
       {type === "markdown" ? (
         <div className="space-y-2">
           <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea]">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as any}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as Parameters<typeof ReactMarkdown>[0]["components"]}>
               {String(value)}
             </ReactMarkdown>
           </div>
