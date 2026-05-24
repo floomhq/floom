@@ -247,6 +247,19 @@ html.dark {
 }
 
 @layer utilities {
+  .bg-white,
+  .bg-\[\#fafafa\] {
+    background-color: var(--bg);
+  }
+
+  .bg-\[\#f4f4f5\] {
+    background-color: var(--bg-2);
+  }
+
+  .bg-\[\#f9f9f9\] {
+    background-color: var(--paper-2);
+  }
+
   .bg-paper {
     background-color: var(--paper);
   }
@@ -261,6 +274,44 @@ html.dark {
 
   .border-line {
     border-color: var(--line);
+  }
+
+  .border-\[\#eaeaea\] {
+    border-color: var(--line);
+  }
+
+  .border-\[\#e4e4e7\] {
+    border-color: var(--line-strong);
+  }
+
+  .text-\[\#111\],
+  .text-\[\#333\] {
+    color: var(--ink);
+  }
+
+  .text-\[\#666\] {
+    color: var(--ink-soft);
+  }
+
+  .text-\[\#999\],
+  .text-\[\#aaa\],
+  .text-\[\#bbb\] {
+    color: var(--ink-mute);
+  }
+
+  .accent-black {
+    accent-color: var(--accent);
+  }
+
+  [data-slot="card"].bg-white:not(.bg-red-50) {
+    background-color: var(--card-glass);
+    border-color: var(--card-border);
+    box-shadow: var(--card-shadow);
+    backdrop-filter: blur(20px) saturate(150%);
+  }
+
+  [data-slot="card"].shadow-none:not(.bg-red-50) {
+    box-shadow: var(--card-shadow);
   }
 
   .shadow-sm {
