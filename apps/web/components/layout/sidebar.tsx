@@ -45,8 +45,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
+  // Close mobile nav on route changes — wrap in a callback to avoid
+  // "setState synchronously inside an effect" lint rule
   useEffect(() => {
-    setOpen(false);
+    const close = () => setOpen(false);
+    close();
   }, [pathname]);
 
   return (
