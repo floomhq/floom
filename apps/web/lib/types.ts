@@ -47,6 +47,7 @@ export interface WorkerConfig {
   runtime: WorkerRuntime;
   inputs: WorkerInput[];
   secrets: string[];
+  connections: string[];  // Composio app slugs required by this worker
   outputs: WorkerOutput[];
   approvals: WorkerApprovalConfig;
   csv_required_columns?: string[];
@@ -164,4 +165,31 @@ export interface ReloadResponse {
 export interface ActionResponse {
   status: string;
   run_id?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Connections (Composio OAuth)
+// ---------------------------------------------------------------------------
+
+export type ConnectionStatus = "active" | "initiated" | "failed" | "expired" | "unknown" | "not_found";
+
+export interface ConnectionItem {
+  id: string;
+  app_name: string;
+  composio_connection_id: string;
+  status: ConnectionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectionInitResponse {
+  id: string;
+  app_name: string;
+  redirect_url: string;
+  composio_connection_id: string;
+}
+
+export interface SupportedApp {
+  slug: string;
+  display_name: string;
 }
