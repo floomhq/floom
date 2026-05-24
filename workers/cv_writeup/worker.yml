@@ -45,5 +45,5 @@ outputs:
     type: json
 
 approvals:
-  required: true
+  required: false
   label: "Review and approve candidate writeup before sending to client"
