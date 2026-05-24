@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { ArrowLeft, Check, X } from "lucide-react";
 import type { RunDetail } from "@/lib/types";
@@ -21,7 +19,7 @@ export default function RunDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const r = await api.runs.get(id as string);
       setRun(r);
@@ -31,26 +29,26 @@ export default function RunDetailPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [id]);
 
   useEffect(() => {
-    load();
+    void load();
     const interval = setInterval(() => {
       if (run && (run.status === "running" || run.status === "queued" || run.status === "pending_approval")) {
         setRefreshing(true);
-        load();
+        void load();
       }
     }, 2000);
     return () => clearInterval(interval);
-  }, [id, run?.status]);
+  }, [id, run, load]);
 
   async function approve() {
     try {
       await api.runs.approve(id as string);
       toast.success("Run approved");
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to approve");
     }
   }
 
@@ -59,9 +57,9 @@ export default function RunDetailPage() {
     try {
       await api.runs.reject(id as string, reason.slice(0, 280) || "Rejected by operator");
       toast.success("Run rejected");
-      load();
-    } catch (e: any) {
-      toast.error(e.message);
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to reject");
     }
   }
 

@@ -21,34 +21,131 @@ interface CsvColumnMapperProps {
   label?: string;
 }
 
+/** Levenshtein distance for fuzzy fallback */
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Alias map: canonical field name → all known header variants
+ * Covers: English, German, Loxo CRM export defaults
+ */
+const FIELD_ALIASES: Record<string, string[]> = {
+  name: [
+    // English
+    "fullname", "full name", "contactname", "contact name", "person name",
+    "person", "personname",
+    // German
+    "kandidat", "kandidatenname", "vollstaendigername", "vollstaendiger name",
+    // Loxo
+    "applicantname", "candidatename",
+  ],
+  email: [
+    // English
+    "mail", "emailaddress", "email address", "emailid", "email id",
+    "e-mail address", "e-mail-adresse", "emailadresse",
+    // German
+    "email-adresse", "emai", "emailliste",
+    // Loxo
+    "primaryemail", "primary email",
+  ],
+  current_company: [
+    // English
+    "company", "companyname", "company name", "organization", "organisation",
+    "employer", "currentcompany", "current company",
+    // German
+    "firma", "aktuelle firma", "aktuellesfirma", "unternehmen", "arbeitgeber",
+    "aktuelles unternehmen",
+    // Loxo
+    "currentemployer", "current employer",
+  ],
+  current_title: [
+    // English
+    "jobtitle", "job title", "title", "position", "currentrole", "current role",
+    "currentjobtitle", "current job title", "currentposition", "current position",
+    // German
+    "titel", "berufsbezeichnung", "stelle", "rolle", "aktuelle stelle",
+    "aktuelle position", "aktueller titel",
+    // Loxo
+    "jobrole",
+  ],
+  headline: [
+    // English
+    "summary", "bio", "about", "tagline", "headline", "profile", "overview",
+    // German
+    "profil", "zusammenfassung", "kurzbeschreibung",
+  ],
+  last_active_iso: [
+    // English
+    "lastactive", "last active", "lastactivity", "last activity", "active",
+    "lastcontact", "last contact", "lastmodified", "last modified",
+    "lastseen", "last seen",
+    // German
+    "letzte aktivitat", "letzte aktivität", "letzte aktivitaet", "stand",
+    "zuletzt aktiv",
+    // Loxo
+    "lastactivitydate",
+  ],
+  skills: [
+    // English
+    "skill", "skills", "technologies", "tech", "techstack", "tech stack",
+    "expertise", "competencies",
+    // German
+    "technologien", "kompetenzen", "kenntnisse", "faehigkeiten", "fähigkeiten",
+    "fertigkeiten",
+  ],
+  notes: [
+    // English
+    "note", "notes", "comment", "comments", "remarks", "description",
+    // German
+    "notizen", "anmerkung", "anmerkungen", "bemerkung", "bemerkungen",
+    "beschreibung",
+    // Loxo
+    "internalnotes", "internal notes",
+  ],
+};
+
 function fuzzyMatch(csvHeader: string, required: string): number {
   const a = csvHeader.toLowerCase().replace(/[^a-z0-9]/g, "");
   const b = required.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.8;
-  // Check common aliases
-  const aliases: Record<string, string[]> = {
-    name: ["fullname", "contactname", "person", "kandidat", "kandidatenname"],
-    email: ["mail", "emailaddress", "e-mail", "kontakt"],
-    current_company: ["company", "firma", "unternehmen", "arbeitgeber", "organization"],
-    current_title: ["jobtitle", "position", "title", "titel", "stelle", "rolle"],
-    headline: ["summary", "bio", "about", "profil", "zusammenfassung"],
-    last_active_iso: ["lastactive", "lastactivity", "active", "aktiv", "lastcontact"],
-    skills: ["skill", "technologien", "technologies", "kompetenzen", "kenntnisse"],
-    notes: ["note", "comment", "bemerkung", "notizen", "anmerkung"],
-  };
-  const aliasList = aliases[b] || [];
+  if (a.includes(b) || b.includes(a)) return 0.85;
+
+  // Check alias map (normalized)
+  const aliasList = FIELD_ALIASES[required] || [];
   for (const alias of aliasList) {
-    if (a.includes(alias) || alias.includes(a)) return 0.6;
+    const normalizedAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (a === normalizedAlias) return 0.95;
+    if (a.includes(normalizedAlias) || normalizedAlias.includes(a)) return 0.7;
   }
+
+  // Levenshtein fallback: score based on similarity ratio
+  const dist = levenshtein(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen > 0) {
+    const similarity = 1 - dist / maxLen;
+    if (similarity >= 0.7) return similarity * 0.5; // scale down for fuzzy matches
+  }
+
   return 0;
 }
 
 function autoDetectMapping(
   csvHeaders: string[],
   requiredCols: string[]
-): Record<string, string> {
+): { mapping: Record<string, string>; autoMapped: number } {
   const mapping: Record<string, string> = {};
+  let autoMapped = 0;
   for (const req of requiredCols) {
     let bestHeader = "";
     let bestScore = 0;
@@ -59,20 +156,26 @@ function autoDetectMapping(
         bestHeader = h;
       }
     }
-    mapping[req] = bestScore > 0.5 ? bestHeader : "";
+    if (bestScore > 0.4) {
+      mapping[req] = bestHeader;
+      autoMapped++;
+    } else {
+      mapping[req] = "";
+    }
   }
-  return mapping;
+  return { mapping, autoMapped };
 }
 
 export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnMapperProps) {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvRows, setCsvRows] = useState<string[][]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [autoMappedCount, setAutoMappedCount] = useState(0);
   const [fileName, setFileName] = useState<string>("");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function loadFile(file: File) {
+  const loadFile = useCallback((file: File) => {
     setError(null);
     setFileName(file.name);
     Papa.parse<string[]>(file, {
@@ -86,20 +189,22 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         const headers = rows[0];
         setCsvHeaders(headers);
         setCsvRows(rows.slice(1));
-        setMapping(autoDetectMapping(headers, requiredColumns));
+        const { mapping: detected, autoMapped } = autoDetectMapping(headers, requiredColumns);
+        setMapping(detected);
+        setAutoMappedCount(autoMapped);
       },
       error: (err) => {
         setError(`Failed to parse CSV: ${err.message}`);
       },
     });
-  }
+  }, [requiredColumns]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) loadFile(file);
-  }, [requiredColumns]);
+  }, [loadFile]);
 
   function handleSubmit() {
     // Remap CSV: for each row, output values in the order of requiredColumns
@@ -163,11 +268,17 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         <span className="text-[#999]">— {csvRows.length} rows</span>
         <button
           className="ml-auto text-[#999] hover:text-[#333] underline"
-          onClick={() => { setCsvHeaders([]); setCsvRows([]); setMapping({}); setFileName(""); setError(null); }}
+          onClick={() => { setCsvHeaders([]); setCsvRows([]); setMapping({}); setAutoMappedCount(0); setFileName(""); setError(null); }}
         >
           Change
         </button>
       </div>
+      <p className="text-xs text-[#666]">
+        Auto-mapped <span className="font-medium">{autoMappedCount} of {requiredColumns.length}</span> columns
+        {autoMappedCount < requiredColumns.length && (
+          <span className="text-amber-600"> — {requiredColumns.length - autoMappedCount} need manual selection</span>
+        )}
+      </p>
 
       <div className="border border-[#eaeaea] rounded-lg overflow-hidden">
         <div className="grid grid-cols-2 gap-0 bg-[#f9f9f9] px-4 py-2 text-xs font-medium text-[#666] border-b border-[#eaeaea]">

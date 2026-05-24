@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import Papa from "papaparse";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, Clock, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Box, Clock, AlertTriangle, ShieldCheck, Download } from "lucide-react";
 import type { WorkerSummary, RunSummary, ApprovalDetail } from "@/lib/types";
 
 export default function OverviewPage() {
@@ -36,6 +37,33 @@ export default function OverviewPage() {
     load();
   }, []);
 
+  async function exportAllRuns() {
+    try {
+      const allRuns = await api.runs.list({ limit: 10000, offset: 0 });
+      const rows = allRuns.map((r) => ({
+        id: r.id,
+        worker_id: r.worker_id,
+        status: r.status,
+        trigger_source: r.trigger_source,
+        created_at: r.created_at || "",
+        started_at: r.started_at || "",
+        completed_at: r.completed_at || "",
+        duration_ms: r.duration_ms ?? "",
+        approval_status: r.approval_status,
+      }));
+      const csv = Papa.unparse(rows);
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `workeros-all-runs-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   const runsToday = runs.filter((r) => {
     if (!r.created_at) return false;
     const d = new Date(r.created_at);
@@ -54,9 +82,20 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="text-[#666] text-sm mt-1">What is running and what needs attention.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+          <p className="text-[#666] text-sm mt-1">What is running and what needs attention.</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={exportAllRuns}
+          className="gap-1.5"
+        >
+          <Download className="w-4 h-4" />
+          Export all runs
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
