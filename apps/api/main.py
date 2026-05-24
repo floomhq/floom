@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso, DB_PATH
 from models import (
+    ApproveRequest,
     RunCreate,
     RejectRequest,
     PaginationParams,
@@ -541,7 +542,8 @@ def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
         cursor.execute(
             """
             SELECT a.id, a.run_id, a.worker_id, w.name as worker_name,
-                   a.status, a.label, a.preview, a.created_at, a.decided_at
+                   a.status, a.label, a.preview, a.created_at, a.decided_at,
+                   a.reason
             FROM approvals a
             LEFT JOIN workers w ON a.worker_id = w.id
             WHERE a.status = ?
@@ -569,34 +571,60 @@ def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
                 preview_type=preview_type,
                 created_at=r["created_at"],
                 decided_at=rd.get("decided_at"),
+                reason=rd.get("reason"),
             )
         )
     return result
 
 
 @app.post("/runs/{run_id}/approve", response_model=ActionResponse)
-def approve_run(run_id: str) -> ActionResponse:
+def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> ActionResponse:
+    now = now_iso()
+
+    # If edited output provided, patch the run's output_json before marking approved
+    if payload and payload.edited_output is not None:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT output FROM runs WHERE id = ?", (run_id,))
+            row = cursor.fetchone()
+            if row and row["output"]:
+                try:
+                    existing_output = json.loads(row["output"])
+                    # Replace the value of the first output key with the edited content
+                    if existing_output:
+                        first_key = next(iter(existing_output))
+                        existing_output[first_key] = payload.edited_output
+                    patched_json = json.dumps(existing_output)
+                except (json.JSONDecodeError, StopIteration):
+                    patched_json = json.dumps({"output": payload.edited_output})
+                conn.execute(
+                    "UPDATE runs SET output = ? WHERE id = ?",
+                    (patched_json, run_id),
+                )
+
     with get_db() as conn:
         conn.execute(
             "UPDATE approvals SET status = ?, decided_at = ? WHERE run_id = ?",
-            (ApprovalStatus.APPROVED.value, now_iso(), run_id),
+            (ApprovalStatus.APPROVED.value, now, run_id),
         )
         conn.execute(
             "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
             (ApprovalStatus.APPROVED.value, RunStatus.APPROVED.value, run_id),
         )
-    add_log(run_id, "Run approved", level="info")
-    logger.info("Run %s approved", run_id)
+    edited_note = " (output edited before approval)" if payload and payload.edited_output else ""
+    add_log(run_id, f"Run approved{edited_note}", level="info")
+    logger.info("Run %s approved%s", run_id, edited_note)
     return ActionResponse(status="approved", run_id=run_id)
 
 
 @app.post("/runs/{run_id}/reject", response_model=ActionResponse)
 def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
     reason = payload.reason or "No reason provided"
+    now = now_iso()
     with get_db() as conn:
         conn.execute(
-            "UPDATE approvals SET status = ?, decided_at = ? WHERE run_id = ?",
-            (ApprovalStatus.REJECTED.value, now_iso(), run_id),
+            "UPDATE approvals SET status = ?, decided_at = ?, reason = ? WHERE run_id = ?",
+            (ApprovalStatus.REJECTED.value, now, reason, run_id),
         )
         conn.execute(
             "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
