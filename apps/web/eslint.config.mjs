@@ -13,6 +13,14 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // The React Compiler's set-state-in-effect rule flags async data-fetching
+    // functions called from useEffect, which is standard React pattern.
+    // Disable the experimental React Compiler rule; keep eslint-plugin-react-hooks rules.
+    rules: {
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

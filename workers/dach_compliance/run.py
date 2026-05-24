@@ -195,6 +195,16 @@ Proposed daily rate: {f"€{proposed_rate:.0f}" if proposed_rate else "not speci
 Format as Markdown with clear section headers.
 End with a one-line overall risk verdict: LOW / MEDIUM / HIGH.
 
+After the risk verdict, add a ## References section with links to the authoritative sources used.
+For AÜG engagements, always include:
+- https://www.bmas.de/DE/Arbeit/Arbeitnehmerrechte/Arbeitnehmerueberlassung/arbeitnehmerueberlassung.html
+For Werkvertrag/Dienstvertrag/Scheinselbständigkeit, always include:
+- https://www.bmas.de/DE/Soziale-Sicherung/Scheinselbstaendigkeit/scheinselbstaendigkeit.html
+For BetrVG references, include:
+- https://www.gesetze-im-internet.de/betrvg/
+Mark any rate figures as "(agency-estimate)" since they are based on market surveys rather than official sources.
+Do NOT invent URLs — only use the canonical bmas.de and gesetze-im-internet.de domains listed above.
+
 Also return a separate JSON object (after the markdown, separated by <<<JSON>>>) with:
 {{"risk_level": "LOW|MEDIUM|HIGH", "items": ["brief flag 1", "brief flag 2", ...]}}
 """
