@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Activity, Box, Clock, KeyRound, Settings, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeModeButton } from "@/components/ThemeModeButton";
 
 const nav = [
   { href: "/", label: "Overview", icon: Activity },
@@ -25,10 +26,10 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
             href={item.href}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors min-h-11",
+              "flex min-h-11 items-center gap-2.5 rounded-md border-l px-3 py-2 text-sm transition-all duration-150 ease-[var(--ease)]",
               active
-                ? "bg-[#f4f4f5] text-[#111] font-medium"
-                : "text-[#666] hover:bg-[#f4f4f5] hover:text-[#111]"
+                ? "border-[var(--accent-line)] bg-[var(--accent-soft)] font-medium text-ink shadow-sm"
+                : "border-transparent text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
             )}
           >
             <item.icon className="w-4 h-4" />
@@ -53,34 +54,40 @@ export function Sidebar() {
 
   return (
     <>
-      <header className="md:hidden sticky top-0 z-30 flex items-center justify-between bg-white border-b border-[#eaeaea] px-4 h-14">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-[var(--sidebar-glass)] px-4 shadow-sm backdrop-blur-xl md:hidden">
         <Link href="/" className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-[#111] text-white flex items-center justify-center text-sm font-bold">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
             F
           </div>
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
         </Link>
-        <button
-          type="button"
-          aria-label="Open navigation"
-          onClick={() => setOpen(true)}
-          className="h-11 w-11 inline-flex items-center justify-center rounded-md text-[#666] hover:bg-[#f4f4f5] hover:text-[#111]"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeModeButton className="theme-mode-button-compact" />
+          <button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setOpen(true)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
-      <aside className="hidden md:flex w-60 border-r border-[#eaeaea] bg-white sticky top-0 h-screen flex-col">
+      <aside className="sticky top-0 hidden h-screen w-60 flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-xl md:flex">
         <div className="px-5 py-6">
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-[#111] text-white flex items-center justify-center text-sm font-bold">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
               F
             </div>
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
           </Link>
         </div>
         <NavLinks pathname={pathname} />
-        <div className="px-5 py-4 text-xs text-[#999]">Workeros</div>
+        <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
+          <span>Workeros</span>
+          <ThemeModeButton />
+        </div>
       </aside>
 
       {open && (
@@ -90,10 +97,10 @@ export function Sidebar() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <aside className="relative z-50 w-64 max-w-[80vw] bg-white h-full flex flex-col border-r border-[#eaeaea] shadow-xl">
-            <div className="px-5 py-4 flex items-center justify-between border-b border-[#eaeaea]">
+          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-line bg-[var(--paper)] shadow-pop">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                <div className="w-7 h-7 rounded-md bg-[#111] text-white flex items-center justify-center text-sm font-bold">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
                   F
                 </div>
                 <span className="font-semibold text-[15px] tracking-tight">Floom</span>
@@ -102,7 +109,7 @@ export function Sidebar() {
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setOpen(false)}
-                className="h-11 w-11 inline-flex items-center justify-center rounded-md text-[#666] hover:bg-[#f4f4f5] hover:text-[#111]"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -110,7 +117,10 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
-            <div className="px-5 py-4 text-xs text-[#999] border-t border-[#eaeaea]">Workeros</div>
+            <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
+              <span>Workeros</span>
+              <ThemeModeButton />
+            </div>
           </aside>
         </div>
       )}

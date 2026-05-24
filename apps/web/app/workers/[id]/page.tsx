@@ -316,9 +316,9 @@ function ManifestViewer({ yaml }: { yaml: string }) {
           return (
             <div key={i}>
               {indent}
-              <span style={{ color: "#555" }}>{key}</span>
-              <span style={{ color: "#888" }}>: </span>
-              <span style={{ color: "#222" }}>{value}</span>
+              <span style={{ color: "var(--ink-soft)" }}>{key}</span>
+              <span style={{ color: "var(--ink-mute)" }}>: </span>
+              <span style={{ color: "var(--ink)" }}>{value}</span>
             </div>
           );
         }
@@ -327,8 +327,8 @@ function ManifestViewer({ yaml }: { yaml: string }) {
           const [, prefix, rest] = listMatch;
           return (
             <div key={i}>
-              <span style={{ color: "#aaa" }}>{prefix}</span>
-              <span style={{ color: "#222" }}>{rest}</span>
+              <span style={{ color: "var(--ink-mute)" }}>{prefix}</span>
+              <span style={{ color: "var(--ink)" }}>{rest}</span>
             </div>
           );
         }
