@@ -7,8 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "sonner";
-import { ArrowLeft, Check, X } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import type { RunDetail } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
 
@@ -42,27 +41,6 @@ export default function RunDetailPage() {
     return () => clearInterval(interval);
   }, [id, run, load]);
 
-  async function approve() {
-    try {
-      await api.runs.approve(id as string);
-      toast.success("Run approved");
-      void load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to approve");
-    }
-  }
-
-  async function reject() {
-    const reason = window.prompt("Rejection reason (optional, max 280 chars):", "") ?? "";
-    try {
-      await api.runs.reject(id as string, reason.slice(0, 280) || "Rejected by operator");
-      toast.success("Run rejected");
-      void load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to reject");
-    }
-  }
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -91,38 +69,6 @@ export default function RunDetailPage() {
         <StatusBadge status={run.status} />
         {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}
       </div>
-
-      {run.status === "pending_approval" && (
-        <Card className="border-amber-300 bg-amber-50 shadow-none">
-          <CardContent className="p-5 flex items-center justify-between gap-4">
-            <div>
-              <p className="font-semibold text-amber-900">Waiting for your approval — review and approve or reject the output below</p>
-              {run.approval?.label && (
-                <p className="text-sm text-amber-700 mt-0.5">{run.approval.label}</p>
-              )}
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <Button variant="outline" size="sm" onClick={reject} className="border-red-200 text-red-700 hover:bg-red-50">
-                <X className="w-4 h-4 mr-1" />
-                Reject
-              </Button>
-              <Button variant="default" size="sm" onClick={approve} className="bg-emerald-600 hover:bg-emerald-700">
-                <Check className="w-4 h-4 mr-1" />
-                Approve
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {run.status === "rejected" && run.approval?.reason && (
-        <Card className="border-red-200 bg-red-50 shadow-none">
-          <CardContent className="p-5">
-            <p className="font-medium text-red-900 mb-1">Rejected</p>
-            <p className="text-sm text-red-700">{run.approval.reason}</p>
-          </CardContent>
-        </Card>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-6">
