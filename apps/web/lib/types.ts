@@ -11,7 +11,7 @@ export interface WorkerInput {
   required?: boolean;
   placeholder?: string;
   options?: string[];
-  default?: any;
+  default?: string | number | boolean | string[] | null;
   accept_csv?: boolean;
 }
 
@@ -101,7 +101,7 @@ export interface OutputField {
   name: string;
   type: string;  // "markdown" | "json" | "csv" | "text" | "file"
   label: string;
-  value: any;
+  value: string | number | boolean | Record<string, unknown> | unknown[] | null;
 }
 
 export interface RunDetail {
@@ -111,8 +111,8 @@ export interface RunDetail {
   status: RunStatus;
   trigger_source: string;
   runner: string;
-  input: Record<string, any>;
-  output: Record<string, any>;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
   output_schema: OutputField[];
   logs: LogEntry[];
   artifacts: Artifact[];

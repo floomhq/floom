@@ -24,7 +24,7 @@ export const api = {
     get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
-    run: (id: string, inputs: Record<string, any>) =>
+    run: (id: string, inputs: Record<string, unknown>) =>
       fetchJson<import("./types").ActionResponse>(`/workers/${id}/runs`, {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),

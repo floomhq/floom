@@ -22,7 +22,7 @@ export default function WorkerDetailPage() {
   const router = useRouter();
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [inputs, setInputs] = useState<Record<string, any>>({});
+  const [inputs, setInputs] = useState<Record<string, unknown>>({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -30,7 +30,7 @@ export default function WorkerDetailPage() {
   useEffect(() => {
     api.workers.get(id as string).then((w) => {
       setWorker(w);
-      const defaults: Record<string, any> = {};
+      const defaults: Record<string, unknown> = {};
       w.config.inputs.forEach((inp: WorkerInput) => {
         if (inp.default !== undefined) defaults[inp.name] = inp.default;
         else if (inp.type === "boolean") defaults[inp.name] = false;
@@ -53,8 +53,8 @@ export default function WorkerDetailPage() {
       }
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
-    } catch (e: any) {
-      toast.error(e.message || "Failed to toggle pause");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to toggle pause");
     } finally {
       setToggling(false);
     }
@@ -67,8 +67,8 @@ export default function WorkerDetailPage() {
       const result = await api.workers.run(worker.id, inputs);
       toast.success("Run started");
       router.push(`/runs/${result.run_id}`);
-    } catch (e: any) {
-      toast.error(e.message || "Failed to start run");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to start run");
     } finally {
       setRunning(false);
     }
@@ -132,13 +132,13 @@ export default function WorkerDetailPage() {
                   {inp.type === "textarea" ? (
                     <Textarea
                       placeholder={inp.placeholder}
-                      value={inputs[inp.name] || ""}
+                      value={(inputs[inp.name] as string) || ""}
                       onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.value }))}
                       className="min-h-[100px] border-[#e4e4e7]"
                     />
                   ) : inp.type === "select" ? (
                     <Select
-                      value={inputs[inp.name] || inp.default || ""}
+                      value={(inputs[inp.name] as string) || (inp.default as string) || ""}
                       onValueChange={(val) => setInputs((prev) => ({ ...prev, [inp.name]: val }))}
                     >
                       <SelectTrigger className="border-[#e4e4e7]">
@@ -177,7 +177,7 @@ export default function WorkerDetailPage() {
                   ) : inp.type === "file" ? (
                     <FileDropZone
                       name={inp.name}
-                      value={inputs[inp.name]}
+                      value={inputs[inp.name] as string | undefined}
                       fileName={fileNames[inp.name]}
                       onFile={(dataUri, name) => {
                         setInputs((prev) => ({ ...prev, [inp.name]: dataUri }));
@@ -188,7 +188,7 @@ export default function WorkerDetailPage() {
                     <Input
                       type={inp.type === "number" ? "number" : "text"}
                       placeholder={inp.placeholder}
-                      value={inputs[inp.name] || ""}
+                      value={(inputs[inp.name] as string) || ""}
                       onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.value }))}
                       className="border-[#e4e4e7]"
                     />
