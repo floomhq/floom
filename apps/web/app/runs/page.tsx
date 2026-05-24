@@ -77,8 +77,27 @@ export default function RunsPage() {
     fetchRuns(next);
   }
 
-  function exportCSV() {
-    const rows = runs.map((r) => ({
+  const EXPORT_LIMIT = 10000;
+
+  async function exportCSV() {
+    // Fetch all rows matching the current filter (not just the paginated view)
+    const params: { worker_id?: string; status?: string; limit: number; offset: number } = {
+      limit: EXPORT_LIMIT,
+      offset: 0,
+    };
+    if (workerFilter) params.worker_id = workerFilter;
+    if (statusFilter) params.status = statusFilter;
+    let allRuns;
+    try {
+      allRuns = await api.runs.list(params);
+    } catch {
+      allRuns = runs; // fallback to loaded runs on error
+    }
+    if (allRuns.length >= EXPORT_LIMIT) {
+      // Warn but still export
+      console.warn(`Export capped at ${EXPORT_LIMIT} rows. There may be more runs not included.`);
+    }
+    const rows = allRuns.map((r) => ({
       id: r.id,
       worker_id: r.worker_id,
       status: r.status,

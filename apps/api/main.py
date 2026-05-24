@@ -787,11 +787,24 @@ def list_secrets() -> List[SecretItem]:
         db_secrets = {r["name"]: row_to_dict(r) for r in cursor.fetchall()}
 
     workers = discover_workers(use_cache=True)
-    all_secret_names: set[str] = set()
+
+    # (a) All secrets declared by any worker.yml
+    worker_secret_names: set[str] = set()
     for w in workers:
         config = get_worker_config(w["id"])
         if config:
-            all_secret_names.update(config.secrets)
+            worker_secret_names.update(config.secrets)
+
+    # (b) All keys present in the .env file (user-added secrets not yet referenced by a worker)
+    env_secret_names: set[str] = set()
+    for line in _read_env_lines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key:
+                env_secret_names.add(key)
+
+    all_secret_names = worker_secret_names | env_secret_names
 
     result: List[SecretItem] = []
     for name in sorted(all_secret_names):
