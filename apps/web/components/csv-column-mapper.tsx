@@ -72,7 +72,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function loadFile(file: File) {
+  const loadFile = useCallback((file: File) => {
     setError(null);
     setFileName(file.name);
     Papa.parse<string[]>(file, {
@@ -92,14 +92,14 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         setError(`Failed to parse CSV: ${err.message}`);
       },
     });
-  }
+  }, [requiredColumns]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) loadFile(file);
-  }, [requiredColumns]);
+  }, [loadFile]);
 
   function handleSubmit() {
     // Remap CSV: for each row, output values in the order of requiredColumns
