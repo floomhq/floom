@@ -146,6 +146,7 @@ export interface WorkerDetail {
   runner: string;
   config: WorkerConfig;
   recent_runs: RunSummary[];
+  manifest_yaml?: string;
 }
 
 export interface SecretItem {
