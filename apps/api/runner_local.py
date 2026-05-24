@@ -84,17 +84,37 @@ def _validate_output_schema(worker_id: str, outputs: Dict[str, Any], log_fn: Cal
                 rows = list(reader)
                 if len(rows) < 1:
                     return f"Output '{name}' (type: csv) parsed as empty CSV"
+                # Column contract enforcement: if worker.yml declares columns, validate header
+                if declared.columns:
+                    actual_header = [c.strip() for c in rows[0]]
+                    expected_header = list(declared.columns)
+                    if actual_header != expected_header:
+                        return (
+                            f"schema_violation_columns: Output '{name}' column mismatch. "
+                            f"Expected: {expected_header}, got: {actual_header}"
+                        )
             except Exception as exc:
                 return f"Output '{name}' (type: csv) failed CSV parse: {exc}"
 
         elif output_type == "json":
+            parsed_json = None
             if isinstance(value, str):
                 try:
-                    json.loads(value)
+                    parsed_json = json.loads(value)
                 except json.JSONDecodeError as exc:
                     return f"Output '{name}' (type: json) is not valid JSON: {exc}"
-            elif not isinstance(value, (dict, list)):
+            elif isinstance(value, (dict, list)):
+                parsed_json = value
+            else:
                 return f"Output '{name}' (type: json) must be a JSON string or dict/list"
+            # Required key contract enforcement
+            if declared.json_required_keys and isinstance(parsed_json, dict):
+                missing_keys = [k for k in declared.json_required_keys if k not in parsed_json]
+                if missing_keys:
+                    return (
+                        f"schema_violation_columns: Output '{name}' (type: json) missing required keys: "
+                        f"{missing_keys}"
+                    )
 
         elif output_type in ("markdown", "text"):
             if not isinstance(value, str) or not value.strip():

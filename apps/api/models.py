@@ -66,6 +66,8 @@ class WorkerOutput(BaseModel):
     name: str
     label: str
     type: str
+    columns: Optional[List[str]] = None  # For CSV: declared expected column headers in order
+    json_required_keys: Optional[List[str]] = None  # For JSON: declared required top-level keys
 
 
 class WorkerTrigger(BaseModel):

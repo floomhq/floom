@@ -1,14 +1,16 @@
 "use client";
 
+import Papa from "papaparse";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { OutputField } from "@/lib/types";
 
 function parseCSV(text: string): string[][] {
-  return text.trim().split("\n").map(line =>
-    line.split(",").map(cell => cell.trim().replace(/^"|"$/g, ""))
-  );
+  const result = Papa.parse<string[]>(text.trim(), {
+    skipEmptyLines: true,
+  });
+  return result.data as string[][];
 }
 
 function OutputCSV({ value }: { value: string }) {
