@@ -48,6 +48,16 @@ outputs:
   - name: top_candidates
     label: Top Candidates (CSV)
     type: csv
+    columns:
+      - name
+      - fit_score
+      - reasoning
+      - dach_fit
+      - contractor_or_perm
+      - profile_age_risk
+      - outreach_next_step
+      - source_row_index
+      - contact_email
 
   - name: all_above_threshold_count
     label: Total above threshold

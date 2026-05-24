@@ -38,9 +38,11 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
 
     context.log(f"Loaded {len(rows)} CRM contacts")
 
-    # Build freshness warnings
+    # Build freshness warnings and source row index lookup
     now_utc = datetime.now(timezone.utc)
-    for row in rows:
+    # Build email lookup by name for post-processing
+    email_by_name = {r.get("name", "").strip(): r.get("email", "").strip() for r in rows}
+    for idx, row in enumerate(rows):
         last_active = row.get("last_active_iso", "").strip()
         warning = ""
         if last_active:
@@ -55,12 +57,14 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
                     warning = f"Last active {days_inactive}d ago — warm up first"
             except Exception:
                 warning = "Unknown last-active date"
-        row["_freshness_warning"] = warning
+        row["_profile_age_risk"] = warning
+        row["_source_row_index"] = idx + 2  # 1-indexed + header row = row 2 for first data row
 
-    # Format rows for the LLM
+    # Format rows for the LLM (include row index so model can reference it)
     rows_json = json.dumps(
         [
             {
+                "row_index": r["_source_row_index"],
                 "name": r.get("name", ""),
                 "email": r.get("email", ""),
                 "current_company": r.get("current_company", ""),
@@ -68,7 +72,7 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
                 "headline": r.get("headline", ""),
                 "skills": r.get("skills", ""),
                 "notes": r.get("notes", ""),
-                "freshness_warning": r.get("_freshness_warning", ""),
+                "profile_age_risk": r.get("_profile_age_risk", ""),
             }
             for r in rows
         ],
@@ -84,14 +88,17 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
     system_prompt = f"""You are a DACH tech recruiting specialist at Search Assistant. You score CRM candidates against a job brief.
 
 For each candidate return a JSON array where every element has EXACTLY these keys (no others):
-  name, fit_score, reasoning, dach_fit, contractor_or_perm, freshness_warning
+  name, fit_score, reasoning, dach_fit, contractor_or_perm, profile_age_risk, outreach_next_step, source_row_index
 
 Rules:
 - fit_score: float 0.000–1.000, 3 decimal places. Higher is better. Tie-break: prefer more years of experience.
+  Calibrate scores: 1.0 means perfect match on every dimension — reserve it. Use 0.85–0.95 for strong fits.
 - reasoning: 1-2 sentences in English explaining the score, referencing specific skills/companies.
 - dach_fit: exactly one of "Yes", "No", "Maybe" — based on DACH location signals, language, DACH companies in history.
 - contractor_or_perm: exactly one of "Festanstellung", "Freiberufler", "Beides", "Unbekannt".
-- freshness_warning: use the provided freshness_warning string, or empty string "" if none.{required_modules_text}
+- profile_age_risk: use the provided profile_age_risk string, or empty string "" if none.
+- outreach_next_step: 1 actionable outreach suggestion for this candidate (e.g., "Send DM mentioning Kafka role at FinTech", "Follow up on last role transition to Freelancer", "Check availability before outreach — last active 14 months ago").
+- source_row_index: copy the row_index integer from the candidate data (for recruiter traceability).{required_modules_text}
 
 Return ONLY the raw JSON array. No markdown, no commentary, no code fences.
 """
@@ -133,7 +140,7 @@ Score all {len(rows)} candidates and return the JSON array."""
         return {"status": "error", "error": "LLM did not return a JSON array"}
 
     # Validate schema
-    required_keys = {"name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "freshness_warning"}
+    required_keys = {"name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "profile_age_risk", "outreach_next_step", "source_row_index"}
     for idx, item in enumerate(scored):
         missing = required_keys - set(item.keys())
         if missing:
@@ -146,13 +153,16 @@ Score all {len(rows)} candidates and return the JSON array."""
 
     context.log(f"Found {len(above_threshold)} candidates above threshold {min_score}, returning top {len(top)}")
 
-    # Build output CSV
+    # Build output CSV — add contact_email from source rows
     out = io.StringIO()
-    fieldnames = ["name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "freshness_warning"]
+    fieldnames = ["name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "profile_age_risk", "outreach_next_step", "source_row_index", "contact_email"]
     writer = csv.DictWriter(out, fieldnames=fieldnames)
     writer.writeheader()
     for item in top:
-        writer.writerow({k: item.get(k, "") for k in fieldnames})
+        row_out = {k: item.get(k, "") for k in fieldnames}
+        # Lookup email from original source CSV
+        row_out["contact_email"] = email_by_name.get(str(item.get("name", "")).strip(), "")
+        writer.writerow(row_out)
     top_csv = out.getvalue().strip()
 
     # Build summary

@@ -122,16 +122,65 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
 
     context.log("Rate benchmark computed, generating compliance analysis with AI")
 
-    # --- Compliance report (LLM) ---
+    # --- Compliance report (LLM) — branched by engagement type ---
+    # AÜG: leased employee by definition — NOT self-employed. Scheinselbständigkeit does NOT apply.
+    # Werkvertrag/Dienstvertrag: freelancer/self-employed context — Scheinselbständigkeit applies.
+    # Festanstellung: standard employment — compliance is routine, no AÜG/Scheinselbständigkeit.
     system_prompt = """You are a DACH employment law specialist with deep knowledge of:
 - AÜG (Arbeitnehmerüberlassungsgesetz) — the German temporary work agency act
-- Scheinselbständigkeit (false self-employment) criteria under German law
+- Scheinselbständigkeit (false self-employment) criteria under German law (applies to Freiberufler/Werkvertrag ONLY)
 - Equal-pay obligations under AÜG §8
 - Betriebsrat co-determination rights (BetrVG)
 - EU AI Act recruiting compliance obligations (high-risk system classification)
 
-Write concise, actionable compliance analysis. Flag risks clearly. No generic disclaimers.
+CRITICAL DISTINCTION:
+- AÜG engagement = the worker IS a leased employee. By legal definition they are NOT self-employed.
+  Do NOT mention Scheinselbständigkeit for AÜG engagements. It is legally incorrect and will confuse recruiters.
+  For AÜG: focus exclusively on 18-month cap (§ 1 Abs. 1b AÜG), equal-pay trigger (§8 AÜG after 9 months),
+  Betriebsrat notification rights, and written disclosure (§11 AÜG).
+- Werkvertrag/Dienstvertrag = the worker is a freelancer/contractor. Scheinselbständigkeit IS relevant here.
+  Apply the 5-criteria test: personal dependency, no own business risk, exclusively one client,
+  integrated into client operations, no freedom to delegate.
+- Festanstellung = standard employment. No AÜG or Scheinselbständigkeit concerns.
+
+Write concise, actionable analysis. No generic disclaimers. Reference: https://www.bmas.de/DE/Arbeit/Arbeitnehmerrechte/Arbeitnehmerueberlassung/arbeitnehmerueberlassung.html
 """
+
+    # Build engagement-specific prompt instructions
+    if engagement_type == "AÜG":
+        compliance_focus = """Produce a compliance report covering ONLY AÜG-specific topics:
+1. 18-month maximum deployment period (§ 1 Abs. 1b AÜG) — track from contract start
+2. Equal-pay trigger after 9 months (§8 AÜG) — compare agency rate vs. comparable permanent employee
+3. Written disclosure obligation (§11 AÜG) — is the leasing arrangement explicitly documented?
+4. Betriebsrat co-determination rights at client site (BetrVG §99 for >20 employees)
+5. Recommended mitigation steps
+
+DO NOT mention Scheinselbständigkeit or Werkvertrag concerns — they are legally inapplicable for AÜG.
+Reference: https://www.bmas.de/DE/Arbeit/Arbeitnehmerrechte/Arbeitnehmerueberlassung/arbeitnehmerueberlassung.html (agency-estimate interpretation)"""
+    elif engagement_type in ("Werkvertrag", "Dienstvertrag"):
+        compliance_focus = f"""Produce a compliance report covering {engagement_type}-specific topics:
+1. Scheinselbständigkeit risk assessment using the 5 German criteria:
+   - Personal dependency (weisungsgebunden)
+   - No own business risk (kein Unternehmerrisiko)
+   - Exclusively/primarily one client (Hauptauftraggeber)
+   - Integrated into client operations (eingegliedert)
+   - No freedom to delegate (persönliche Leistungspflicht)
+2. Contract documentation requirements (Leistungsgegenstand clearly defined, no "time-and-materials" billing)
+3. Social security reclassification risk (DRV audit triggers)
+4. Recommended mitigation steps
+
+AÜG-specific topics (18-month cap, equal-pay) do NOT apply to {engagement_type}.
+Reference: https://www.bmas.de/DE/Soziale-Sicherung/Scheinselbstaendigkeit/scheinselbstaendigkeit.html (agency-estimate interpretation)"""
+    elif engagement_type == "Festanstellung":
+        compliance_focus = """This is a standard employment engagement. Produce a brief compliance note:
+1. Confirm no AÜG or Scheinselbständigkeit concerns apply
+2. Note any relevant probationary period requirements (Probezeit, max 6 months)
+3. Note notice period obligations under KSchG
+4. Recommended documentation checklist for onboarding
+
+Keep this brief — Festanstellung is the lowest-risk engagement type."""
+    else:
+        compliance_focus = """Produce a general DACH compliance overview covering relevant engagement risks."""
 
     user_prompt = f"""Analyse this contractor engagement for DACH compliance risks:
 
@@ -141,12 +190,7 @@ Location: {location}
 Years of experience: {experience_years}
 Proposed daily rate: {f"€{proposed_rate:.0f}" if proposed_rate else "not specified"}
 
-Produce a compliance report covering:
-1. AÜG applicability and 18-month maximum deployment period risk
-2. Scheinselbständigkeit risk assessment (5 criteria: personal dependency, no own business risk, exclusively/primarily one client, integrated into client operations, no freedom to delegate)
-3. Equal-pay implications after 9 months (AÜG §8)
-4. Any Werkvertrag/Dienstvertrag-specific concerns if applicable
-5. Recommended mitigation steps
+{compliance_focus}
 
 Format as Markdown with clear section headers.
 End with a one-line overall risk verdict: LOW / MEDIUM / HIGH.
