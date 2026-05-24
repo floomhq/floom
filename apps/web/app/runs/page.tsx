@@ -180,7 +180,10 @@ export default function RunsPage() {
           {loading ? (
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : runs.length === 0 ? (
-            <p className="text-sm text-[#999]">No runs found.</p>
+            <div className="p-8 text-center space-y-2">
+              <p className="text-sm font-medium text-[#666]">No runs match these filters.</p>
+              <p className="text-xs text-[#999]">Try clearing filters, or trigger a worker from the Workers page to create a new run.</p>
+            </div>
           ) : (
             <>
               {runs.map((r) => (
