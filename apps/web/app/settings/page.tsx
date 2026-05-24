@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,7 @@ export default function SettingsPage() {
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       const [infoRes, secretsRes] = await Promise.all([
         api.system.info(),
@@ -36,20 +36,20 @@ export default function SettingsPage() {
     } catch (e) {
       console.error(e);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   async function handleReload() {
     setReloading(true);
     try {
       const res = await api.workers.reload();
       toast.success(`Loaded ${res.workers_loaded} workers`);
-      loadData();
-    } catch (e: any) {
-      toast.error(e.message);
+      void loadData();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to reload");
     } finally {
       setReloading(false);
     }
@@ -65,9 +65,9 @@ export default function SettingsPage() {
       await api.system.clearRuns();
       toast.success("Run history cleared");
       setConfirmClear(false);
-      loadData();
-    } catch (e: any) {
-      toast.error(e.message);
+      void loadData();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to clear runs");
     } finally {
       setClearing(false);
     }
