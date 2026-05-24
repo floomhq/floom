@@ -77,25 +77,28 @@ export default function RunsPage() {
     fetchRuns(next);
   }
 
-  const EXPORT_LIMIT = 10000;
+  const API_PAGE_MAX = 500; // API enforced maximum per page
 
   async function exportCSV() {
-    // Fetch all rows matching the current filter (not just the paginated view)
-    const params: { worker_id?: string; status?: string; limit: number; offset: number } = {
-      limit: EXPORT_LIMIT,
+    // Fetch ALL rows matching the current filter by paginating through the API
+    const baseParams: { worker_id?: string; status?: string; limit: number; offset: number } = {
+      limit: API_PAGE_MAX,
       offset: 0,
     };
-    if (workerFilter) params.worker_id = workerFilter;
-    if (statusFilter) params.status = statusFilter;
-    let allRuns;
+    if (workerFilter) baseParams.worker_id = workerFilter;
+    if (statusFilter) baseParams.status = statusFilter;
+
+    let allRuns: typeof runs = [];
+    let offset = 0;
     try {
-      allRuns = await api.runs.list(params);
+      while (true) {
+        const page = await api.runs.list({ ...baseParams, offset });
+        allRuns = [...allRuns, ...page];
+        if (page.length < API_PAGE_MAX) break; // last page
+        offset += API_PAGE_MAX;
+      }
     } catch {
       allRuns = runs; // fallback to loaded runs on error
-    }
-    if (allRuns.length >= EXPORT_LIMIT) {
-      // Warn but still export
-      console.warn(`Export capped at ${EXPORT_LIMIT} rows. There may be more runs not included.`);
     }
     const rows = allRuns.map((r) => ({
       id: r.id,
