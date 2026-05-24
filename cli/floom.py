@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""floom — minimal CLI for Workeros / Floom V0.
+
+Commands:
+  floom dev           Start API + web dev servers concurrently
+  floom reload        POST /workers/reload against FLOOM_API_BASE
+  floom run <id>      POST /workers/<id>/runs, poll, print output
+  floom worker create <id>  Scaffold a new worker directory
+
+Configuration (env vars):
+  FLOOM_API_BASE    Base URL (default: http://localhost:8000)
+  FLOOM_API_SECRET  x-floom-secret header value (optional)
+"""
+
+import json
+import os
+import sys
+import time
+import subprocess
+import threading
+from pathlib import Path
+
+try:
+    import click
+    import requests
+except ImportError:
+    # Bootstrap install if missing
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "click", "requests", "-q"])
+    import click
+    import requests
+
+API_BASE = os.environ.get("FLOOM_API_BASE", "http://localhost:8000")
+API_SECRET = os.environ.get("FLOOM_API_SECRET", "")
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _headers() -> dict:
+    h = {"Content-Type": "application/json"}
+    if API_SECRET:
+        h["x-floom-secret"] = API_SECRET
+    return h
+
+
+def _api(method: str, path: str, **kwargs) -> requests.Response:
+    url = f"{API_BASE}{path}"
+    kwargs.setdefault("headers", {}).update(_headers())
+    return getattr(requests, method)(url, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# CLI group
+# ---------------------------------------------------------------------------
+
+@click.group()
+def cli():
+    """floom — Workeros operator CLI."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# floom dev
+# ---------------------------------------------------------------------------
+
+@cli.command()
+def dev():
+    """Start API (uvicorn :8000) and web (next dev :3000) concurrently."""
+    api_dir = REPO_ROOT / "apps" / "api"
+    web_dir = REPO_ROOT / "apps" / "web"
+
+    venv_python = api_dir / "venv" / "bin" / "python"
+    python_exec = str(venv_python) if venv_python.exists() else sys.executable
+
+    api_cmd = [python_exec, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    web_cmd = ["npm", "run", "dev"]
+
+    click.echo(f"Starting API  : {' '.join(api_cmd[:3])} ... (in {api_dir})")
+    click.echo(f"Starting Web  : {' '.join(web_cmd)} (in {web_dir})")
+    click.echo("Press Ctrl+C to stop both.\n")
+
+    procs = []
+    try:
+        procs.append(subprocess.Popen(api_cmd, cwd=str(api_dir)))
+        procs.append(subprocess.Popen(web_cmd, cwd=str(web_dir)))
+        for p in procs:
+            p.wait()
+    except KeyboardInterrupt:
+        click.echo("\nStopping...")
+        for p in procs:
+            p.terminate()
+
+
+# ---------------------------------------------------------------------------
+# floom reload
+# ---------------------------------------------------------------------------
+
+@cli.command()
+def reload():
+    """POST /workers/reload — reload all workers from disk."""
+    try:
+        r = _api("post", "/workers/reload")
+        r.raise_for_status()
+        data = r.json()
+        click.echo(f"Reloaded: {data.get('workers_loaded', '?')} workers")
+    except requests.RequestException as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# floom run <worker_id>
+# ---------------------------------------------------------------------------
+
+@cli.command(name="run")
+@click.argument("worker_id")
+@click.option("--input", "input_file", default=None, help="Path to JSON input file")
+@click.option("--poll-interval", default=2, show_default=True, help="Seconds between polls")
+@click.option("--timeout", default=120, show_default=True, help="Max seconds to wait")
+def run_worker(worker_id: str, input_file: str | None, poll_interval: int, timeout: int):
+    """POST /workers/<worker_id>/runs, poll until done, print output."""
+    inputs: dict = {}
+    if input_file:
+        with open(input_file) as f:
+            inputs = json.load(f)
+
+    try:
+        r = _api("post", f"/workers/{worker_id}/runs", json={
+            "inputs": inputs,
+            "trigger_source": "cli",
+        })
+        r.raise_for_status()
+    except requests.RequestException as exc:
+        click.echo(f"Failed to start run: {exc}", err=True)
+        sys.exit(1)
+
+    run_id = r.json()["run_id"]
+    click.echo(f"Run started: {run_id}")
+
+    elapsed = 0
+    while elapsed < timeout:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+        try:
+            r2 = _api("get", f"/runs/{run_id}")
+            r2.raise_for_status()
+            run = r2.json()
+        except requests.RequestException as exc:
+            click.echo(f"Poll error: {exc}", err=True)
+            continue
+
+        status = run.get("status", "unknown")
+        click.echo(f"  [{elapsed:>3}s] status={status}")
+        if status in ("completed", "failed", "pending_approval", "approved", "rejected"):
+            click.echo()
+            if run.get("output"):
+                click.echo("Output:")
+                click.echo(json.dumps(run["output"], indent=2, ensure_ascii=False))
+            if run.get("error"):
+                click.echo(f"Error: {run['error']}", err=True)
+                sys.exit(1)
+            if status == "pending_approval":
+                click.echo("NOTE: Run is awaiting approval. Approve at " + f"{API_BASE}/approvals")
+            return
+
+    click.echo(f"Timeout: run {run_id} did not complete within {timeout}s", err=True)
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# floom worker create <id>
+# ---------------------------------------------------------------------------
+
+WORKER_YML_TEMPLATE = """\
+id: {id}
+name: {title}
+description: Describe what this worker does.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: input_text
+    label: Input text
+    type: textarea
+    required: true
+    placeholder: "Enter your input here..."
+
+secrets:
+  - OPENAI_API_KEY
+
+outputs:
+  - name: result
+    label: Result
+    type: markdown
+
+approvals:
+  required: false
+"""
+
+WORKER_RUN_TEMPLATE = '''\
+"""Worker: {id}
+
+Receives inputs dict and context, returns WorkerResult.
+"""
+from models import WorkerResult
+
+
+def run(inputs: dict, context) -> WorkerResult:
+    context.log("Starting {id}...")
+    input_text = inputs.get("input_text", "")
+
+    # TODO: implement your worker logic here
+    result = f"Processed: {{input_text}}"
+
+    return WorkerResult(
+        status="success",
+        outputs={{"result": result}},
+    )
+'''
+
+WORKER_REQUIREMENTS_TEMPLATE = """\
+openai>=1.0.0
+"""
+
+
+@cli.command(name="worker")
+@click.argument("action", type=click.Choice(["create"]))
+@click.argument("worker_id")
+def worker_cmd(action: str, worker_id: str):
+    """Scaffold a new worker directory.
+
+    Usage: floom worker create <id>
+    """
+    workers_dir = REPO_ROOT / "workers"
+    target = workers_dir / worker_id
+
+    if target.exists():
+        click.echo(f"Worker {worker_id!r} already exists at {target}", err=True)
+        sys.exit(1)
+
+    target.mkdir(parents=True)
+    title = worker_id.replace("_", " ").title()
+
+    (target / "worker.yml").write_text(WORKER_YML_TEMPLATE.format(id=worker_id, title=title))
+    (target / "run.py").write_text(WORKER_RUN_TEMPLATE.format(id=worker_id))
+    (target / "requirements.txt").write_text(WORKER_REQUIREMENTS_TEMPLATE)
+
+    click.echo(f"Worker scaffold created at: {target}")
+    click.echo(f"  {target}/worker.yml")
+    click.echo(f"  {target}/run.py")
+    click.echo(f"  {target}/requirements.txt")
+    click.echo(f"\nRun 'floom reload' to register the new worker.")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    cli()

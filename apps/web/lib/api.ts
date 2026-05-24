@@ -62,6 +62,19 @@ export const api = {
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
+    upsert: (name: string, value: string) =>
+      fetchJson<{ status: string; reason?: string }>(`/secrets/${name}`, {
+        method: "POST",
+        body: JSON.stringify({ value }),
+      }),
+    delete: (name: string) =>
+      fetchJson<{ status: string; reason?: string }>(`/secrets/${name}`, {
+        method: "DELETE",
+      }),
+    test: (name: string) =>
+      fetchJson<{ status: string; reason?: string }>(`/secrets/${name}/test`, {
+        method: "POST",
+      }),
   },
   system: {
     info: () => fetchJson<Record<string, unknown>>("/system/info"),
