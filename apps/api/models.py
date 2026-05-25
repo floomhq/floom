@@ -90,6 +90,7 @@ class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
     runner: str = "local"
+    command: Optional[str] = None
 
     @field_validator("runner")
     @classmethod
@@ -365,7 +366,12 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         entrypoint = command[-1]
 
     runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
-    runtime = WorkerRuntime(type="python", entrypoint=entrypoint, runner=runner)
+    runtime = WorkerRuntime(
+        type="python",
+        entrypoint=entrypoint,
+        runner=runner,
+        command=contract.exec.command,
+    )
 
     inputs = [
         WorkerInput(

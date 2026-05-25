@@ -94,6 +94,11 @@ def _get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
     return loaded[0] if loaded else None
 
 
+def get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
+    """Return the DB-resolved worker recipe used for run execution."""
+    return _get_worker_config_for_run(worker_id)
+
+
 def _merge_instance_inputs(instance: Optional[Dict[str, Any]], inputs: Dict[str, Any]) -> Dict[str, Any]:
     """Apply saved instance input defaults, with per-run inputs taking precedence."""
     if not instance:
@@ -307,6 +312,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         secrets=secrets,
         log_fn=log_fn,
         trace_id=trace_id,
+        config=config,
     )
 
     # Both "error" and "failed" terminal statuses map to a failed run
