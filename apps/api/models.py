@@ -112,6 +112,7 @@ class WorkerConfig(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    model: Optional[str] = None
     trigger: WorkerTrigger
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
@@ -218,7 +219,7 @@ class WorkerContractField(BaseModel):
 
 
 class WorkerContractExec(BaseModel):
-    command: str
+    command: Optional[str] = None
     runtime: str
     runner: str = "local"
     inputs: List[WorkerContractField] = Field(default_factory=list)
@@ -227,8 +228,8 @@ class WorkerContractExec(BaseModel):
 
     @field_validator("command", "runtime")
     @classmethod
-    def validate_nonempty(cls, value: str) -> str:
-        if not value.strip():
+    def validate_nonempty(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
             raise ValueError("value is required")
         return value
 
@@ -268,6 +269,7 @@ class WorkerContract(BaseModel):
     title: str
     description: str
     version: str
+    model: Optional[str] = None
     entrypoint: str = "SKILL.md"
     targets: List[str] = Field(default_factory=lambda: ["generic"])
     tags: List[str] = Field(default_factory=list)
@@ -362,14 +364,14 @@ def _contract_output_type(field: WorkerContractField) -> str:
 
 def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -> WorkerConfig:
     """Project WorkerContract into the existing response/runtime config shape."""
-    command = contract.exec.command.strip().split()
-    entrypoint = "run.py"
+    command = contract.exec.command.strip().split() if contract.exec.command else []
+    entrypoint = contract.entrypoint or "SKILL.md"
     if len(command) >= 2 and command[0].startswith("python"):
         entrypoint = command[-1]
 
     runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
     runtime = WorkerRuntime(
-        type="python",
+        type=contract.exec.runtime,
         entrypoint=entrypoint,
         runner=runner,
         command=contract.exec.command,
@@ -403,6 +405,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         id=worker_id,
         name=contract.title,
         description=contract.description,
+        model=contract.model,
         trigger=WorkerTrigger(
             type=contract.trigger.type,
             cron=contract.trigger.cron,
@@ -506,6 +509,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         title=config.name,
         description=config.description or config.name,
         version=version,
+        model=config.model,
         entrypoint="SKILL.md",
         targets=["generic"],
         exec=WorkerContractExec(
