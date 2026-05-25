@@ -220,7 +220,10 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
             VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico')
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
-                name=excluded.name
+                name=excluded.name,
+                trigger_type=excluded.trigger_type,
+                cron_expr=excluded.cron_expr,
+                cron_timezone=excluded.cron_timezone
             """,
             (
                 worker_id,
