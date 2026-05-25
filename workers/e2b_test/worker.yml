@@ -1,0 +1,16 @@
+id: e2b_test
+name: E2B Sandbox Test
+description: Tests E2B cloud sandbox execution with numpy dependency install.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: e2b
+
+outputs:
+  - name: result
+    label: Test Result
+    type: json

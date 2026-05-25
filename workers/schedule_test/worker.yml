@@ -1,0 +1,17 @@
+id: schedule_test
+name: Schedule Test Worker
+description: Fires every minute for testing the cron scheduler. Change cron expression to desired schedule after testing.
+
+trigger:
+  type: schedule
+  cron: "* * * * *"
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+outputs:
+  - name: message
+    label: Scheduled Message
+    type: text
