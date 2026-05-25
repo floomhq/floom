@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,8 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Play, Box } from "lucide-react";
-import type { WorkerDetail, WorkerInput } from "@/lib/types";
+import { ArrowLeft, Play, Box, Plug } from "lucide-react";
+import type { WorkerDetail, WorkerInput, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
@@ -27,10 +28,15 @@ export default function WorkerDetailPage() {
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [connections, setConnections] = useState<ConnectionItem[]>([]);
 
   useEffect(() => {
-    api.workers.get(id as string).then((w) => {
+    Promise.all([
+      api.workers.get(id as string),
+      api.connections.list(),
+    ]).then(([w, conns]) => {
       setWorker(w);
+      setConnections(conns);
       const defaults: Record<string, unknown> = {};
       w.config.inputs.forEach((inp: WorkerInput) => {
         if (inp.default !== undefined) defaults[inp.name] = inp.default;
@@ -87,6 +93,16 @@ export default function WorkerDetailPage() {
   if (!worker) {
     return <div className="text-sm text-[#999]">Worker not found.</div>;
   }
+
+  // Compute missing connections for this worker
+  const requiredConnections: string[] = worker.config.connections ?? [];
+  const activeConnectionSlugs = new Set(
+    connections.filter((c) => c.status === "active").map((c) => c.app_name.toLowerCase())
+  );
+  const missingConnections = requiredConnections.filter(
+    (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
+  );
+  const canRun = !running && !worker.paused && missingConnections.length === 0;
 
   return (
     <div className="space-y-6">
@@ -196,9 +212,37 @@ export default function WorkerDetailPage() {
                   )}
                 </div>
               ))}
-              <Button onClick={handleRun} disabled={running || worker.paused} className="w-full">
+              {missingConnections.length > 0 && (
+                <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                  <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-medium">Connection required</p>
+                    <p>
+                      Connect{" "}
+                      {missingConnections.map((s, i) => (
+                        <span key={s}>
+                          <span className="font-medium capitalize">{s}</span>
+                          {i < missingConnections.length - 1 ? ", " : ""}
+                        </span>
+                      ))}{" "}
+                      in{" "}
+                      <Link href="/connections" className="underline hover:text-amber-900">
+                        Connections
+                      </Link>{" "}
+                      before running.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <Button onClick={handleRun} disabled={!canRun} className="w-full">
                 <Play className="w-4 h-4 mr-1.5" />
-                {running ? "Starting..." : worker.paused ? "Worker paused" : "Run worker"}
+                {running
+                  ? "Starting..."
+                  : worker.paused
+                  ? "Worker paused"
+                  : missingConnections.length > 0
+                  ? `Connect ${missingConnections[0]} first`
+                  : "Run worker"}
               </Button>
             </CardContent>
           </Card>
@@ -276,6 +320,39 @@ export default function WorkerDetailPage() {
                       ))}
                     </div>
                   </div>
+                  {requiredConnections.length > 0 && (
+                    <>
+                      <Separator className="my-2" />
+                      <div>
+                        <span className="text-[#666]">Connections</span>
+                        <div className="flex flex-col gap-1.5 mt-1.5">
+                          {requiredConnections.map((slug) => {
+                            const isActive = activeConnectionSlugs.has(slug.toLowerCase());
+                            return (
+                              <div key={slug} className="flex items-center justify-between">
+                                <span className="text-xs capitalize">{slug}</span>
+                                {isActive ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs text-emerald-600 border-emerald-200 bg-emerald-50"
+                                  >
+                                    Active
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs text-amber-600 border-amber-200 bg-amber-50"
+                                  >
+                                    Missing
+                                  </Badge>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  )}
                   {worker.config.approvals.required && (
                     <div className="flex justify-between">
                       <span className="text-[#666]">Approval</span>

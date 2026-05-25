@@ -165,6 +165,21 @@ MIGRATIONS = [
     """
     ALTER TABLE approvals ADD COLUMN reason TEXT;
     """,
+    # -- migration 7: composio_connections table for OAuth integration ----------
+    """
+    CREATE TABLE IF NOT EXISTS composio_connections (
+        id TEXT PRIMARY KEY,
+        app_name TEXT NOT NULL,
+        composio_connection_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'initiated',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_composio_connections_app_name
+        ON composio_connections(app_name);
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_status
+        ON composio_connections(status);
+    """,
 ]
 
 
