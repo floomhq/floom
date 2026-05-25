@@ -29,7 +29,9 @@ DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("FLOOM_RUN_TIMEOUT", "300"))
 
 def _safe_path(base: Path, *parts: str) -> Path:
     target = base.joinpath(*parts).resolve()
-    if not str(target).startswith(str(base)):
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
 
