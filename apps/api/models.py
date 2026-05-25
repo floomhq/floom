@@ -1,7 +1,7 @@
 """Pydantic models for Floom V0 — request schemas, response schemas, and domain types."""
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 from datetime import datetime
 
@@ -72,7 +72,7 @@ class WorkerOutput(BaseModel):
 
 
 class WorkerWebhookConfig(BaseModel):
-    secret: bool = False
+    secret: bool = True
     allowed_methods: List[str] = ["POST"]
 
 
@@ -115,6 +115,19 @@ class WorkerConfig(BaseModel):
     outputs: List[WorkerOutput] = []
     approvals: WorkerApprovalConfig = WorkerApprovalConfig()
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
+
+    @model_validator(mode="after")
+    def validate_webhook_secret(self) -> "WorkerConfig":
+        if self.trigger.type == "webhook":
+            if not self.trigger.webhook:
+                raise ValueError(
+                    "webhook-triggered workers must declare trigger.webhook.secret: true"
+                )
+            if self.trigger.webhook.secret is not True:
+                raise ValueError(
+                    "webhook-triggered workers must declare trigger.webhook.secret: true"
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------

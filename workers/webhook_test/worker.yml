@@ -5,7 +5,7 @@ description: Triggered by incoming HTTP webhooks. Echoes the payload back.
 trigger:
   type: webhook
   webhook:
-    secret: false
+    secret: true
     allowed_methods:
       - POST
 

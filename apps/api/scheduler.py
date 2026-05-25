@@ -128,7 +128,8 @@ def _tick() -> None:
                 "SELECT COUNT(*) as cnt FROM runs WHERE worker_id = ? AND status = 'running'",
                 (w["id"],),
             )
-            running_count = (cursor.fetchone() or {}).get("cnt", 0)
+            running_row = cursor.fetchone()
+            running_count = running_row["cnt"] if running_row else 0
             if running_count:
                 # Still running — advance slot to avoid retrying on every tick
                 if new_next:
