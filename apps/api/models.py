@@ -91,6 +91,7 @@ class WorkerRuntime(BaseModel):
     entrypoint: str = "run.py"
     runner: str = "local"
     command: Optional[str] = None
+    bundle_path: Optional[str] = None
 
     @field_validator("runner")
     @classmethod
