@@ -5,15 +5,21 @@ import { cn } from "@/lib/utils"
 function Card({
   className,
   size = "default",
+  style,
   ...props
 }: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
   return (
     <div
       data-slot="card"
       data-size={size}
+      style={{
+        backdropFilter: "saturate(180%) blur(10px)",
+        WebkitBackdropFilter: "saturate(180%) blur(10px)",
+        ...style,
+      }}
       className={cn(
-        "group/card flex flex-col gap-4 overflow-hidden rounded-xl border border-[var(--card-border)] bg-[var(--card-glass)] py-4 text-sm text-card-foreground shadow-sm backdrop-blur-xl transition-[border-color,box-shadow,background-color] duration-200 ease-[var(--ease)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:py-3 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
-        className
+        className,
+        "group/card relative isolate flex flex-col gap-4 overflow-hidden rounded-xl border border-[var(--card-border)] bg-[var(--card-glass)] py-4 text-sm text-card-foreground shadow-[var(--card-shadow)] backdrop-blur-[10px] backdrop-saturate-[180%] transition-[transform,border-color,box-shadow,background-color] duration-200 ease-[var(--spring)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-px before:bg-white/70 hover:-translate-y-0.5 hover:border-[var(--accent-line)] hover:shadow-md has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:py-3 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl dark:before:bg-white/[0.055]"
       )}
       {...props}
     />
