@@ -596,3 +596,50 @@ AX41 Browser Broker was timing out on `browser_navigate` (both pool-a + pool-b) 
 - Verify height on all 10 call sites
 
 Queued for the round after F1/F2/F3 + WorkerContract migration. When broker is healthy, codex round: "Open https://workers.floom.dev in chrome-depontefede, screenshot every page with loading state, fix any skeleton visual mismatches."
+
+---
+
+## V1.5 — Connections page polish (logos + scopes)
+
+Federico 2026-05-25: "lets have their real logos and all? of the connection apps? and also show the scope that we connected for?"
+
+### Real app logos
+Composio publishes per-app logos at `https://logos.composio.dev/api/<toolkit_slug>` (verified — the toolkit response from `/api/v3/auth_configs` already includes `toolkit.logo` field with this URL).
+
+Current `/connections` page uses Lucide `Plug` icon for everything. Change:
+- Each connection row + each app in the "Connect an app" modal renders the actual logo via `<img src={toolkit.logo}>` with a square frame + fallback to Plug icon if image fails
+- Workers page: when a worker declares `connections: [gmail]`, show the Gmail logo next to the worker name (provenance signal)
+
+### OAuth scopes per connection
+Composio's `/api/v3/auth_configs/{id}` returns `credentials.scopes: [...]` — the full list of Google API scopes the OAuth flow asked for. Example for the current Gmail auth_config:
+```
+- googleapis.com/auth/userinfo.profile
+- googleapis.com/auth/userinfo.email
+- googleapis.com/auth/contacts.readonly
+- googleapis.com/auth/profile.language.read
+- mail.google.com/                       (read+modify+send)
+- etc.
+```
+
+Update:
+- `composio_client.py` — when listing connections, also fetch the auth_config + extract `scopes`
+- DB: add `scopes_json` column on `composio_connections` table (or fetch lazily on connection detail)
+- UI: connection row shows a "Scope" button (or auto-expanded section). Each scope rendered as a chip with a human-readable label ("Read your inbox", "Send email on your behalf", "Modify labels"). Hover for the raw scope URL.
+
+### Scope-to-human-label map
+Build a small dictionary of common scopes → friendly labels. e.g.:
+- `mail.google.com/` → "Full Gmail access (read, send, modify, delete)"
+- `auth/contacts.readonly` → "Read your contacts"
+- `auth/calendar` → "Manage your calendar"
+- LinkedIn `r_liteprofile` → "Read your LinkedIn profile basics"
+- Slack `chat:write` → "Send messages on your behalf"
+
+For unknown scopes: fall back to showing the raw URL.
+
+### Why this matters
+- **Trust signal:** a recruiter sees "Floom asked for: Read inbox, Modify labels" — knows what permissions they granted. Currently invisible.
+- **Audit trail:** if Floom asked for a scope a worker doesn't actually need, scope display surfaces the over-permissioning.
+- **Marketplace:** when skills.floom.dev shows a worker that requires `gmail`, the install page can preview which scopes will be requested before the user clicks Connect.
+
+### Sequencing
+After F1/F2/F3 + WorkerContract migration. Frontend-heavy round, ~2-3h codex.
