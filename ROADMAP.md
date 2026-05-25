@@ -780,3 +780,54 @@ Override the earlier codex recommendation that said tags-only. Adopt the **Gmail
 - No folder management UI in V1 (no drag-drop, no rename). Folder = whatever you typed in `worker.yml`. Operator can edit YAML.
 - No tag-management UI either. Same rule.
 - Both can grow management UIs in V2 if real users ask.
+
+---
+
+## Trust signal: example I/O + ASCII flow per worker (2026-05-26)
+
+Federico: "example input, example output and how it works ascii visuals or so would close the 'understand how it works' gap between workeros and n8n?"
+
+Yes. n8n's selling point is that the visual graph tells you what happens between input and output. Workeros agents are black boxes by default — same trust gap closes with three per-worker fields rendered on the detail page:
+
+```yaml
+# worker.yml additions (all optional)
+example_input:
+  csv_text: "name,company\nAnna,Solaris\nMehmet,N26"
+  instruction: "Infer Java seniority and DACH fit"
+
+example_output:
+  enriched_csv: |
+    name,company,fit_score,reason
+    Anna,Solaris,5,Senior Java in payments...
+
+how_it_works: |
+                ┌─────────────────┐
+   csv_text  ──▶│ parse CSV rows  │
+                └────────┬────────┘
+                         ▼
+                ┌─────────────────┐  ◀── instruction
+                │  OpenAI 4o-mini │
+                │  per row        │
+                └────────┬────────┘
+                         ▼
+                    enriched_csv  ──▶  output
+```
+
+### Rendering on `/workers/[id]`
+Above the run form, new section "What this does":
+1. **How it works** — `how_it_works` rendered in `<pre>` block (monospace, preserves alignment)
+2. **Example** — side-by-side: example_input on the left, example_output on the right
+3. **"Try with sample" button** — fills the run form with example_input on click
+
+### Auto-generation for markdown skills
+When a worker uses `runtime.type: skill` (markdown-only, T1b primitive), the LLM can AUTO-GENERATE the ASCII flow from the SKILL.md spec at registration time if `how_it_works` isn't manually provided. Optionally cache the generated flow in the worker record so we don't burn tokens every render.
+
+Bigger payoff: every skill in the skills.floom.dev marketplace shows a flow diagram without authors having to draw one. Closes the "is this worker safe / does it do what I think" gap before install.
+
+### Sequencing
+- T1a (in flight): add the 3 fields to WorkerContract Pydantic schema (cheap)
+- T1b (skill.md runtime): include auto-generation of `how_it_works` from SKILL.md
+- T2 entry round (Workers page): render the "What this does" section on every worker detail. "Try with sample" CTA on every form. Backfill example_input + example_output + how_it_works for the 12 stock workers.
+
+### Acceptance test (the conversion gate)
+A non-developer recruiter visits a worker detail page, reads the example + ASCII flow in under 30 seconds, understands what the worker does, clicks "Try with sample", and sees real output. No documentation needed.
