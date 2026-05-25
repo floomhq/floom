@@ -59,7 +59,7 @@ def _load_worker_recipe(worker_id: str) -> Optional[tuple[WorkerConfig, Optional
             row = conn.execute(
                 """
                 SELECT w.id, w.trigger_type, w.cron_expr, w.cron_timezone, w.grants_json,
-                       w.input_values_json, w.enabled, sv.manifest_json
+                       w.input_values_json, w.enabled, sv.manifest_json, sv.bundle_path
                 FROM workers w
                 JOIN skill_versions sv ON sv.id = w.skill_version_id
                 WHERE w.id = ?
@@ -77,6 +77,8 @@ def _load_worker_recipe(worker_id: str) -> Optional[tuple[WorkerConfig, Optional
                 config.trigger.type = row["trigger_type"]
             if row["cron_expr"]:
                 config.trigger.cron = row["cron_expr"]
+            if config.runtime:
+                config.runtime.bundle_path = row["bundle_path"]
             return config, {
                 "grants": json.loads(row["grants_json"] or "{}"),
                 "input_values": json.loads(row["input_values_json"] or "{}"),
