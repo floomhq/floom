@@ -1282,7 +1282,7 @@ async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    config = get_worker_config(worker_id)
+    config = get_worker_config_for_run(worker_id)
     if not config or config.trigger.type != "webhook":
         raise HTTPException(
             status_code=400,
@@ -1338,7 +1338,7 @@ def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    config = get_worker_config(worker_id)
+    config = get_worker_config_for_run(worker_id)
     if not config or config.trigger.type != "webhook":
         raise HTTPException(
             status_code=400,
