@@ -180,6 +180,25 @@ MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS idx_composio_connections_status
         ON composio_connections(status);
     """,
+    # -- migration 8: schedule columns for workers (F2 cron scheduler) ---------
+    """
+    ALTER TABLE workers ADD COLUMN next_run_at TEXT;
+    ALTER TABLE workers ADD COLUMN last_scheduled_run_at TEXT;
+    """,
+    # -- migration 9: webhook secrets table (F3 webhook trigger) ---------------
+    """
+    CREATE TABLE IF NOT EXISTS worker_webhook_secrets (
+        worker_id TEXT PRIMARY KEY,
+        secret_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        rotated_at TEXT,
+        FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+    );
+    """,
+    # -- migration 10: index on workers.next_run_at (F2 performance) -----------
+    """
+    CREATE INDEX IF NOT EXISTS idx_workers_next_run_at ON workers(next_run_at);
+    """,
 ]
 
 
@@ -204,7 +223,7 @@ def apply_migrations():
                 try:
                     conn.executescript(sql)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

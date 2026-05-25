@@ -12,6 +12,7 @@ from datetime import datetime
 from db import get_db, now_iso
 from worker_registry import get_worker_config
 from runner_local import run_worker_local
+from runner_sandbox import get_driver as get_sandbox_driver
 from models import WorkerResult, LogLevel, ApprovalStatus, RunStatus
 
 logger = logging.getLogger("floom.run_service")
@@ -54,6 +55,10 @@ def create_run(
         if config and config.approvals.required
         else ApprovalStatus.NOT_REQUIRED
     )
+    # Determine runner from config (default to "local" for backward compat)
+    runner = "local"
+    if config and config.runtime:
+        runner = config.runtime.runner or "local"
     with get_db() as conn:
         conn.execute(
             """
@@ -67,13 +72,13 @@ def create_run(
                 worker_id,
                 RunStatus.QUEUED.value,
                 trigger_source,
-                "local",
+                runner,
                 json.dumps(inputs),
                 approval_status.value,
                 now_iso(),
             ),
         )
-    logger.info("Created run %s for worker %s", run_id, worker_id)
+    logger.info("Created run %s for worker %s (runner=%s)", run_id, worker_id, runner)
     return run_id
 
 
@@ -215,8 +220,13 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(err, level="error")
         return
 
-    log_fn("Executing worker", level="debug")
-    result = run_worker_local(
+    # Dispatch to the appropriate sandbox driver based on worker config
+    runner = "local"
+    if config and config.runtime:
+        runner = config.runtime.runner or "local"
+    log_fn(f"Executing worker (runner={runner})", level="debug")
+    driver = get_sandbox_driver(runner)
+    result = driver.run(
         worker_id=worker_id,
         run_id=run_id,
         inputs=inputs,

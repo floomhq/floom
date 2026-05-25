@@ -1,0 +1,20 @@
+id: webhook_test
+name: Webhook Test Worker
+description: Triggered by incoming HTTP webhooks. Echoes the payload back.
+
+trigger:
+  type: webhook
+  webhook:
+    secret: true
+    allowed_methods:
+      - POST
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+outputs:
+  - name: echo
+    label: Echo Response
+    type: json
