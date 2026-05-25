@@ -732,3 +732,51 @@ T1a (in flight) already roadmapped `example_input: {...}` per worker as part of 
 - Acceptance test: a fresh visitor can run any stock worker in under 60 seconds via a single click
 
 This is THE conversion gate. Without it, no amount of design v2 polish will land for a non-dev persona.
+
+---
+
+## Stack reference (locked 2026-05-26)
+
+Federico explicit: "tech stack is shadcn + composio + e2b/local, right? no supabase or so?" — confirmed.
+
+| Layer | Choice | Why |
+|---|---|---|
+| Frontend | Next.js + Tailwind + shadcn/ui | V0 spec § 6.3 |
+| Backend | Python FastAPI + Pydantic | V0 spec § 6.3 |
+| Database | SQLite | V0 spec § 6.3, local-first. **No Supabase.** Skills-neo uses Supabase; workeros stays local. |
+| Connections | Composio (OAuth, tool execution via v3 API) | PR #11 |
+| Sandbox | E2B + local subprocess, per-worker selection | F1 shipped via PR #17 |
+| LLM | OpenAI (`OPENAI_API_KEY`); future: per-worker model declaration in WorkerContract | T1a in flight |
+| DNS + WAF + tunnel | Cloudflare (zone `dbad3455549f1eb7aeb8535af2f4a961`) | Set up earlier this session |
+| Hosting | Vercel (frontend), self-hosted server systemd (API) | Set up earlier this session |
+| Auth gate | Vercel SSO (frontend), CF WAF + per-webhook HMAC (API) | Set up earlier this session |
+| Artifacts storage | Local filesystem (`/root/workeros/data/artifacts`) | V0 spec § 6.3 |
+
+If skills-neo's pattern uses Supabase for a feature we want to port (e.g., file-input authz pattern), the PORT into workeros uses SQLite + local filesystem, NOT Supabase.
+
+---
+
+## Scope override (2026-05-26) — folders + tags, both
+
+Federico revised: "i think we also need folders next to tags. cannot be that complicated?"
+
+Override the earlier codex recommendation that said tags-only. Adopt the **Gmail/Notion model**: folders for primary hierarchy + tags for cross-cutting cross-cutting labels.
+
+### Implementation
+- `worker.yml` gains TWO new optional fields:
+  - `folder: "client-a/compliance"` — slash-separated path, single-parent
+  - `tags: [recruiting, urgent, email]` — flat array, multi-assign
+- Backfill defaults: `folder: "stock"` for the 12 existing workers; `tags: []` empty (operator adds later)
+- `/workers` page shows:
+  - **Tree on the left** (folders with worker counts: "Stock (12)" expandable, "Client A (3)" etc.)
+  - **Filter chips on the right** (tags: All / recruiting / email / compliance / ...)
+  - Worker cards in the main area, scoped to selected folder × selected tags
+
+### Migration
+- T1a (in flight) doesn't know about folders/tags yet — add to WorkerContract Pydantic models as optional fields. Cheap.
+- T2 first sub-round (Workers page) renders the tree + chips.
+
+### Scope discipline
+- No folder management UI in V1 (no drag-drop, no rename). Folder = whatever you typed in `worker.yml`. Operator can edit YAML.
+- No tag-management UI either. Same rule.
+- Both can grow management UIs in V2 if real users ask.
