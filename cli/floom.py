@@ -171,35 +171,46 @@ def run_worker(worker_id: str, input_file: str | None, poll_interval: int, timeo
 # ---------------------------------------------------------------------------
 
 WORKER_YML_TEMPLATE = """\
-id: {id}
-name: {title}
+schema_version: "0.3"
+name: {slug}
+title: {title}
 description: Describe what this worker does.
+version: "0.1.0"
+entrypoint: SKILL.md
+targets: [generic]
 
-trigger:
-  type: manual
-
-runtime:
-  type: python
-  entrypoint: run.py
+exec:
+  command: python run.py
+  runtime: python311
   runner: local
-
-inputs:
+  inputs:
   - name: input_text
-    label: Input text
-    type: textarea
+    kind: scalar
+    type: string
     required: true
+    label: Input text
     placeholder: "Enter your input here..."
-
-secrets:
+    description: Text to process.
+  secrets:
   - OPENAI_API_KEY
-
-outputs:
+  outputs:
   - name: result
+    kind: file
+    media_type: text/markdown
+    path: out/result.md
+    required: true
     label: Result
-    type: markdown
+
+capabilities:
+  secrets:
+  - OPENAI_API_KEY
+  network: {{ egress: true }}
 
 approvals:
   required: false
+
+trigger:
+  type: manual
 """
 
 WORKER_RUN_TEMPLATE = '''\
@@ -245,13 +256,19 @@ def worker_cmd(action: str, worker_id: str):
 
     target.mkdir(parents=True)
     title = worker_id.replace("_", " ").title()
+    slug = worker_id.replace("_", "-")
 
-    (target / "worker.yml").write_text(WORKER_YML_TEMPLATE.format(id=worker_id, title=title))
+    (target / "worker.yml").write_text(WORKER_YML_TEMPLATE.format(slug=slug, title=title))
     (target / "run.py").write_text(WORKER_RUN_TEMPLATE.format(id=worker_id))
     (target / "requirements.txt").write_text(WORKER_REQUIREMENTS_TEMPLATE)
+    (target / "SKILL.md").write_text(
+        f"# {title}\n\n"
+        "Placeholder WorkerContract entrypoint. Current execution uses `exec.command` from `worker.yml`.\n"
+    )
 
     click.echo(f"Worker scaffold created at: {target}")
     click.echo(f"  {target}/worker.yml")
+    click.echo(f"  {target}/SKILL.md")
     click.echo(f"  {target}/run.py")
     click.echo(f"  {target}/requirements.txt")
     click.echo(f"\nRun 'floom reload' to register the new worker.")

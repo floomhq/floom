@@ -1,10 +1,10 @@
 """Local in-process sandbox driver — wraps runner_local.run_worker_local."""
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from runner_local import run_worker_local
 from .base import SandboxDriver
-from models import WorkerResult
+from models import WorkerConfig, WorkerResult
 
 
 class LocalSandboxDriver(SandboxDriver):
@@ -19,6 +19,7 @@ class LocalSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         trace_id: str,
         timeout_seconds: int = 300,
+        config: Optional[WorkerConfig] = None,
     ) -> WorkerResult:
         return run_worker_local(
             worker_id=worker_id,
@@ -28,4 +29,5 @@ class LocalSandboxDriver(SandboxDriver):
             log_fn=log_fn,
             trace_id=trace_id,
             timeout_seconds=timeout_seconds,
+            config=config,
         )

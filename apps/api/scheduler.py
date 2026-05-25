@@ -14,7 +14,6 @@ from typing import Optional
 from croniter import croniter
 
 from db import get_db, now_iso
-from worker_registry import discover_workers, get_worker_config
 from run_service import create_run, start_run
 
 logger = logging.getLogger("floom.scheduler")
@@ -75,30 +74,35 @@ def _get_or_init_next_run_at(worker_id: str, cron_expr: str) -> Optional[str]:
     return next_at
 
 
+def _list_scheduled_worker_instances() -> list[dict[str, str]]:
+    """Return enabled scheduled worker instances from the database."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, cron_expr, next_run_at
+            FROM workers
+            WHERE enabled = 1 AND trigger_type = 'schedule'
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _tick() -> None:
     """One scheduler tick — fire any due scheduled workers."""
     now = datetime.now(timezone.utc)
     now_iso_str = now.isoformat()
 
-    workers = discover_workers(use_cache=False)
+    workers = _list_scheduled_worker_instances()
     for w in workers:
-        if w.get("status") == "error":
-            continue
-
-        config = get_worker_config(w["id"])
-        if not config:
-            continue
-        if config.trigger.type != "schedule":
-            continue
-
-        cron_expr = config.trigger.cron
+        worker_id = w["id"]
+        cron_expr = w.get("cron_expr")
         if not cron_expr:
             logger.warning(
-                "Worker %s has trigger.type=schedule but no cron expression", w["id"]
+                "Worker %s has trigger.type=schedule but no cron expression", worker_id
             )
             continue
 
-        next_at_str = _get_or_init_next_run_at(w["id"], cron_expr)
+        next_at_str = _get_or_init_next_run_at(worker_id, cron_expr)
         if not next_at_str:
             continue
 
@@ -109,7 +113,7 @@ def _tick() -> None:
                 next_at = next_at.replace(tzinfo=timezone.utc)
         except Exception:
             logger.warning(
-                "Invalid next_run_at for worker %s: %r", w["id"], next_at_str
+                "Invalid next_run_at for worker %s: %r", worker_id, next_at_str
             )
             continue
 
@@ -126,7 +130,7 @@ def _tick() -> None:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT COUNT(*) as cnt FROM runs WHERE worker_id = ? AND status = 'running'",
-                (w["id"],),
+                (worker_id,),
             )
             running_row = cursor.fetchone()
             running_count = running_row["cnt"] if running_row else 0
@@ -135,37 +139,37 @@ def _tick() -> None:
                 if new_next:
                     conn.execute(
                         "UPDATE workers SET next_run_at = ? WHERE id = ?",
-                        (new_next, w["id"]),
+                        (new_next, worker_id),
                     )
                 logger.info(
-                    "Skipping scheduled run for %s — previous run still running", w["id"]
+                    "Skipping scheduled run for %s — previous run still running", worker_id
                 )
                 continue
 
         # Fire the run
         logger.info(
-            "Firing scheduled run for worker %s (was due %s)", w["id"], next_at_str
+            "Firing scheduled run for worker %s (was due %s)", worker_id, next_at_str
         )
         try:
-            run_id = create_run(w["id"], {}, trigger_source="schedule")
-            start_run(run_id, w["id"], {})
+            run_id = create_run(worker_id, {}, trigger_source="schedule")
+            start_run(run_id, worker_id, {})
 
             # Update last_scheduled_run_at + next_run_at
             new_next = compute_next_run_at(cron_expr, now)
             with get_db() as conn:
                 conn.execute(
                     "UPDATE workers SET last_scheduled_run_at = ?, next_run_at = ? WHERE id = ?",
-                    (now_iso_str, new_next, w["id"]),
+                    (now_iso_str, new_next, worker_id),
                 )
             logger.info(
                 "Scheduled run %s started for worker %s, next at %s",
                 run_id,
-                w["id"],
+                worker_id,
                 new_next,
             )
         except Exception as exc:
             logger.exception(
-                "Failed to fire scheduled run for worker %s: %s", w["id"], exc
+                "Failed to fire scheduled run for worker %s: %s", worker_id, exc
             )
 
 
