@@ -302,7 +302,7 @@ def list_workers() -> List[WorkerSummary]:
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
         # Check secrets
-        config = get_worker_config(w["id"])
+        config = get_worker_config_for_run(w["id"])
         status = WorkerStatus(w["status"])
         if config and config.secrets:
             missing = [s for s in config.secrets if s not in os.environ]
@@ -768,7 +768,7 @@ def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
     for r in rows:
         rd = row_to_dict(r)
         preview_type: Optional[str] = None
-        config = get_worker_config(r["worker_id"])
+        config = get_worker_config_for_run(r["worker_id"])
         if config and config.outputs:
             preview_type = config.outputs[0].type
         result.append(
@@ -1009,12 +1009,12 @@ def list_secrets() -> List[SecretItem]:
         cursor.execute("SELECT * FROM secrets ORDER BY name")
         db_secrets = {r["name"]: row_to_dict(r) for r in cursor.fetchall()}
 
-    workers = discover_workers(use_cache=True)
+    workers = _list_db_workers() or discover_workers(use_cache=True)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
     for w in workers:
-        config = get_worker_config(w["id"])
+        config = get_worker_config_for_run(w["id"])
         if config:
             worker_secret_names.update(config.secrets)
 
@@ -1036,7 +1036,7 @@ def list_secrets() -> List[SecretItem]:
         status = SecretStatus.SET if value else SecretStatus.MISSING
         used_by = []
         for w in workers:
-            config = get_worker_config(w["id"])
+            config = get_worker_config_for_run(w["id"])
             if config and name in config.secrets:
                 used_by.append(w["name"])
 
