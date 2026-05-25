@@ -1,0 +1,20 @@
+id: webhook_secret_test
+name: Webhook Secret Test Worker
+description: Tests webhook HMAC signature verification.
+
+trigger:
+  type: webhook
+  webhook:
+    secret: true
+    allowed_methods:
+      - POST
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+outputs:
+  - name: echo
+    label: Echo Response
+    type: json
