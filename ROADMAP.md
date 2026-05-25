@@ -206,3 +206,77 @@ Library mode means Floom integrates with how people already run code (cron, Lamb
 - Open question: how does library-mode worker code show up in the UI for inspection? (No `worker.yml` on disk — just the decorator config registered remotely.)
 
 Parked V2. Worth revisiting after V1.5 lands.
+
+---
+
+## V1.5+ — Observability and Visibility expansion
+
+Federico 2026-05-25: "for observability: i feel like there could be more? like what is everything i know to know if all works smooth or not? and also for connections and secrets we should check them every day? and add to alerts if failed? and what else is important? maybe even a calendar view of all scheduled runs? like we need to make this more visual. and the workers itself with descriptions of what they do?"
+
+### System Health surface
+A single "is everything OK?" page (likely an upgraded Overview):
+- Worker fleet health (count by status: healthy / needs_attention / paused / missing_secret / error)
+- Recent failures grouped by worker (last 24h)
+- Connection liveness: every Composio Connection pinged daily, status badge (Active / Expired / Failing)
+- Secret health: every declared secret in any worker's `worker.yml` checked (OPENAI_API_KEY → tiny test call; generic key → just env presence) — daily
+- Run volume: 7-day sparkline of runs/day, faled-runs/day
+- Cost (FUTURE — spec § 18 currently excludes; revisit if needed)
+- Average run duration per worker (trend up = slowing down)
+
+### Daily health checks (cron-driven)
+- 6am daily background job iterates connections + secrets + recent runs
+- Writes a `system_health` snapshot row
+- Sends alert if any: connection expired, secret unreachable, > N% failed runs, worker missing a secret it needs
+
+### Alerts
+Channels to support, in order: in-UI banner (red bar at top when something's broken), email (via Resend), optional Slack webhook (per-team setting), optional WhatsApp via Federico's clawdbot stack.
+
+Trigger conditions:
+- Connection status flips from Active → anything else
+- Secret test fails (e.g., OpenAI 401)
+- Worker fails N times in a row
+- Scheduled run misses its window
+- Disk usage on artifact directory > 80%
+
+### Calendar view of scheduled runs
+- New `/calendar` page (between Runs and Approvals in nav, or as a Runs sub-tab)
+- Week/month view, each scheduled run plotted at its next-fire time
+- Past runs shown as completed/failed dots
+- Click a run → detail page
+- Lights up the moment Schedule trigger lands (currently V0.5 spec)
+
+### Worker descriptions richer than `description:`
+Current `worker.yml` has a single-line `description`. Federico wants more:
+- `description` (one-line, current)
+- `long_description` (markdown, multi-paragraph — shown on worker detail)
+- `tags` (e.g., `recruiting`, `email`, `compliance` — drives filtering on /workers)
+- `use_cases` (markdown bullet list — "When to use this worker")
+- `example_input` (sample inputs that auto-fill the run form for first-time users)
+- `last_used_by` / `runs_last_30d` (computed, not declared)
+
+### Visual upgrades across the UI
+- Workers page → visual catalog with logos, tags, "what this does" preview
+- Runs page → optional kanban view (by status) alongside list
+- Run detail → richer timeline with avatars/icons per step
+- Secrets/Connections → status icons + last-check timestamp
+- Dark/light density toggles for power users
+
+### Parking
+All of this is V1.5+ scope (not V0 spec). Build in priority order:
+1. Connection daily-ping + alert (biggest reliability win)
+2. Worker fleet health card on Overview
+3. Worker long_description / tags / use_cases
+4. Calendar view (depends on Schedule trigger landing)
+5. Alerts to email
+6. Slack/WhatsApp alerts
+7. Kanban/visual upgrades
+
+---
+
+## V2 library mode — BOTH shapes confirmed
+
+Federico 2026-05-25 update: "both directions interesting. pls capture."
+
+Shape A (decorator) and Shape B (observability SDK) both stay in V2 candidate scope. The decorator is the wedge for code-people; the SDK is the lighter lift for already-running cron jobs that just want observability.
+
+Order: A first (full worker semantics), then B as a stripped subset using the same SDK.
