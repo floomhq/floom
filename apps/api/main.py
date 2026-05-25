@@ -52,7 +52,7 @@ from worker_registry import (
     get_worker_contract,
     invalidate_worker_cache,
 )
-from run_service import create_run, start_run, update_run_status, add_log
+from run_service import create_run, get_worker_config_for_run, start_run, update_run_status, add_log
 from run_service import get_secrets_for_worker
 
 load_dotenv()
@@ -220,10 +220,7 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
             VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico')
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
-                name=excluded.name,
-                trigger_type=excluded.trigger_type,
-                cron_expr=excluded.cron_expr,
-                cron_timezone=excluded.cron_timezone
+                name=excluded.name
             """,
             (
                 worker_id,
@@ -435,6 +432,11 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     (target_dir / "worker.yml").write_text(payload.worker_yml)
     (target_dir / "run.py").write_text(payload.run_py)
     (target_dir / "requirements.txt").write_text("")
+    (target_dir / "SKILL.md").write_text(
+        f"# {config.name}\n\n"
+        "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+        "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+    )
 
     # Register
     invalidate_worker_cache()
@@ -590,7 +592,7 @@ def get_run(run_id: str) -> RunDetail:
         run["input"] = json.loads(run.get("input_json") or "{}")
         run["output"] = json.loads(run.get("output_json") or "{}")
         # Build typed output schema from worker config
-        output_config = get_worker_config(run["worker_id"])
+        output_config = get_worker_config_for_run(run["worker_id"])
         output_schema = []
         if output_config:
             raw_output = run["output"]

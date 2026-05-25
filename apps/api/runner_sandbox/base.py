@@ -1,9 +1,9 @@
 """Abstract sandbox driver interface for Workeros."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
-from models import WorkerResult
+from models import WorkerConfig, WorkerResult
 
 
 class SandboxDriver(ABC):
@@ -23,6 +23,7 @@ class SandboxDriver(ABC):
         log_fn: Callable[[str, str], None],
         trace_id: str,
         timeout_seconds: int = 300,
+        config: Optional[WorkerConfig] = None,
     ) -> WorkerResult:
         """Execute the worker and return a WorkerResult.
 
