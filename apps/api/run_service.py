@@ -77,6 +77,8 @@ def _load_worker_recipe(worker_id: str) -> Optional[tuple[WorkerConfig, Optional
                 config.trigger.type = row["trigger_type"]
             if row["cron_expr"]:
                 config.trigger.cron = row["cron_expr"]
+            if row["cron_timezone"]:
+                config.trigger.timezone = row["cron_timezone"]
             if config.runtime:
                 config.runtime.bundle_path = row["bundle_path"]
             return config, {
