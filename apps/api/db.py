@@ -501,6 +501,19 @@ MIGRATIONS: list[Migration] = [
     """,
     _migrate_worker_contract_split,
     _migrate_composio_trigger_columns,
+    # -- migration 13: content-addressed file input blobs ----------------------
+    """
+    CREATE TABLE IF NOT EXISTS files (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        uploaded_by TEXT,
+        uploaded_at TEXT NOT NULL,
+        ref_count INTEGER DEFAULT 0 NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON files(uploaded_at);
+    """,
 ]
 
 
