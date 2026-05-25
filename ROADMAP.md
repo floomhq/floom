@@ -568,4 +568,4 @@ After F1/F2/F3 codex round lands:
 3. Backfill: each existing worker.yml → 1 skill_version + 1 worker
 4. Update worker-create UI to generate WorkerContract shape
 5. Update worker-registry discovery to parse new shape (with one-release fallback for old shape)
-6. Open upstream PR to skills-neo with the 5 UX additions above
+6. Open upstream PR to skills-neo **on the `live-skills-v0x-schema` branch** (not main) with the 5 UX additions above. Federico 2026-05-25.
