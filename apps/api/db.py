@@ -1,11 +1,12 @@
 """Floom database layer with migrations, indexes, and context managers."""
 
+import json
 import sqlite3
 import os
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Generator
+from typing import Any, Callable, Generator
 
 DB_PATH = os.environ.get("FLOOM_DB", "../../data/floom.db")
 logger = logging.getLogger("floom.db")
@@ -37,10 +38,294 @@ def now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
+# WorkerContract migration helpers
+# ---------------------------------------------------------------------------
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    cursor = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (name,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _table_columns(conn: sqlite3.Connection, name: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({name})")}
+
+
+def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {key: row[key] for key in row.keys()}
+
+
+def _normalize_legacy_config(raw: dict[str, Any], worker_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    from models import WorkerConfig, WorkerContract, parse_worker_manifest
+    from models import worker_config_to_worker_contract, worker_contract_to_worker_config
+
+    parsed = parse_worker_manifest(raw)
+    if isinstance(parsed, WorkerContract):
+        contract = parsed
+        config = worker_contract_to_worker_config(contract, worker_id)
+    else:
+        config = parsed if isinstance(parsed, WorkerConfig) else WorkerConfig(**raw)
+        contract = worker_config_to_worker_contract(config)
+    return contract.model_dump(mode="json", exclude_none=True), config.model_dump(mode="json", exclude_none=True)
+
+
+def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
+    """One-shot migration from recipe/instance-conflated workers to WorkerContract split."""
+    if not _table_exists(conn, "workers"):
+        return
+    worker_columns = _table_columns(conn, "workers")
+    if "skill_version_id" in worker_columns and _table_exists(conn, "skill_versions"):
+        return
+
+    old_foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        if not _table_exists(conn, "workers_legacy"):
+            conn.execute("ALTER TABLE workers RENAME TO workers_legacy")
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS skill_versions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                manifest_json TEXT NOT NULL,
+                bundle_path TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(name, version)
+            );
+
+            CREATE TABLE IF NOT EXISTS workers (
+                id TEXT PRIMARY KEY,
+                skill_version_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                trigger_type TEXT NOT NULL DEFAULT 'manual',
+                cron_expr TEXT,
+                cron_timezone TEXT,
+                next_run_at TEXT,
+                last_scheduled_run_at TEXT,
+                webhook_secret_hash TEXT,
+                notify_email INTEGER DEFAULT 0 NOT NULL,
+                notify_webhook_url TEXT,
+                grants_json TEXT,
+                input_values_json TEXT,
+                enabled INTEGER DEFAULT 1 NOT NULL,
+                created_at TEXT NOT NULL,
+                owner_id TEXT NOT NULL DEFAULT 'federico',
+                FOREIGN KEY(skill_version_id) REFERENCES skill_versions(id)
+            );
+            """
+        )
+
+        legacy_columns = _table_columns(conn, "workers_legacy")
+        for row in conn.execute("SELECT * FROM workers_legacy ORDER BY id"):
+            legacy = _row_dict(row)
+            worker_id = legacy["id"]
+            raw_config = json.loads(legacy.get("config_json") or "{}")
+            manifest, config = _normalize_legacy_config(raw_config, worker_id)
+            skill_version_id = f"sv_{worker_id}_{manifest['version'].replace('.', '_').replace('-', '_')}"
+            created_at = legacy.get("created_at") or now_iso()
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO skill_versions
+                    (id, name, version, manifest_json, bundle_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    skill_version_id,
+                    manifest["name"],
+                    manifest["version"],
+                    json.dumps(manifest),
+                    f"workers/{worker_id}",
+                    created_at,
+                ),
+            )
+            webhook_secret_hash = None
+            if _table_exists(conn, "worker_webhook_secrets"):
+                secret_row = conn.execute(
+                    "SELECT secret_hash FROM worker_webhook_secrets WHERE worker_id = ?",
+                    (worker_id,),
+                ).fetchone()
+                webhook_secret_hash = secret_row["secret_hash"] if secret_row else None
+            conn.execute(
+                """
+                INSERT INTO workers
+                    (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
+                     next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
+                     notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    skill_version_id=excluded.skill_version_id,
+                    name=excluded.name,
+                    trigger_type=excluded.trigger_type,
+                    cron_expr=excluded.cron_expr,
+                    cron_timezone=excluded.cron_timezone,
+                    next_run_at=excluded.next_run_at,
+                    last_scheduled_run_at=excluded.last_scheduled_run_at,
+                    webhook_secret_hash=excluded.webhook_secret_hash
+                """,
+                (
+                    worker_id,
+                    skill_version_id,
+                    config["name"],
+                    config.get("trigger", {}).get("type") or legacy.get("trigger_type") or "manual",
+                    config.get("trigger", {}).get("cron"),
+                    None,
+                    legacy.get("next_run_at") if "next_run_at" in legacy_columns else None,
+                    legacy.get("last_scheduled_run_at") if "last_scheduled_run_at" in legacy_columns else None,
+                    webhook_secret_hash,
+                    0,
+                    None,
+                    json.dumps({}),
+                    json.dumps({}),
+                    1,
+                    created_at,
+                    "federico",
+                ),
+            )
+
+        approvals_source = "approvals"
+        approvals_preserved = False
+        if _table_exists(conn, "approvals"):
+            missing_approval_workers = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE w.id IS NULL
+                """
+            ).fetchone()["count"]
+            missing_approval_runs = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM approvals a
+                LEFT JOIN runs r ON r.id = a.run_id
+                WHERE r.id IS NULL
+                """
+            ).fetchone()["count"]
+            if missing_approval_workers or missing_approval_runs:
+                raise RuntimeError(
+                    "Cannot migrate approvals: "
+                    f"{missing_approval_workers} rows reference missing workers, "
+                    f"{missing_approval_runs} rows reference missing runs"
+                )
+            conn.execute("DROP TABLE IF EXISTS approvals_preserve")
+            conn.execute("CREATE TEMP TABLE approvals_preserve AS SELECT * FROM approvals")
+            approvals_source = "approvals_preserve"
+            approvals_preserved = True
+
+        if _table_exists(conn, "runs"):
+            missing_run_workers = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM runs r
+                LEFT JOIN workers w ON w.id = r.worker_id
+                WHERE w.id IS NULL
+                """
+            ).fetchone()["count"]
+            if missing_run_workers:
+                raise RuntimeError(
+                    f"Cannot migrate runs: {missing_run_workers} run rows reference missing workers"
+                )
+            conn.executescript(
+                """
+                CREATE TABLE runs_new (
+                    id TEXT PRIMARY KEY,
+                    worker_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    trigger_source TEXT NOT NULL,
+                    runner TEXT NOT NULL,
+                    input_json TEXT,
+                    output_json TEXT,
+                    approval_status TEXT DEFAULT 'not_required' NOT NULL,
+                    error TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    duration_ms INTEGER,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+                );
+                INSERT INTO runs_new
+                    (id, worker_id, status, trigger_source, runner, input_json,
+                     output_json, approval_status, error, started_at, completed_at,
+                     duration_ms, created_at)
+                SELECT id, worker_id, status, trigger_source, runner, input_json,
+                       output_json, approval_status, error, started_at, completed_at,
+                       duration_ms, created_at
+                FROM runs;
+                DROP TABLE runs;
+                ALTER TABLE runs_new RENAME TO runs;
+                """
+            )
+
+        if _table_exists(conn, "approvals"):
+            conn.execute(
+                """
+                CREATE TABLE approvals_new (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    worker_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    label TEXT,
+                    preview TEXT,
+                    created_at TEXT NOT NULL,
+                    decided_at TEXT,
+                    reason TEXT,
+                    FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                f"""
+                INSERT INTO approvals_new
+                    (id, run_id, worker_id, status, label, preview, created_at, decided_at, reason)
+                SELECT id, run_id, worker_id, status, label, preview, created_at, decided_at, reason
+                FROM {approvals_source}
+                """
+            )
+            conn.execute("DROP TABLE approvals")
+            conn.execute("ALTER TABLE approvals_new RENAME TO approvals")
+            if approvals_preserved:
+                conn.execute("DROP TABLE approvals_preserve")
+
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_skill_versions_name_version
+                ON skill_versions(name, version);
+            CREATE INDEX IF NOT EXISTS idx_workers_skill_version_id
+                ON workers(skill_version_id);
+            CREATE INDEX IF NOT EXISTS idx_workers_next_run_at
+                ON workers(next_run_at);
+            CREATE INDEX IF NOT EXISTS idx_runs_worker_id ON runs(worker_id);
+            CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+            CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at);
+            CREATE INDEX IF NOT EXISTS idx_runs_worker_status ON runs(worker_id, status);
+            CREATE INDEX IF NOT EXISTS idx_approvals_run_id ON approvals(run_id);
+            CREATE INDEX IF NOT EXISTS idx_approvals_worker_id ON approvals(worker_id);
+            CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
+            """
+        )
+
+        fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_errors:
+            raise RuntimeError(f"foreign_key_check failed after WorkerContract migration: {fk_errors}")
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute(f"PRAGMA foreign_keys = {int(old_foreign_keys)}")
+
+
+# ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
 
-MIGRATIONS = [
+Migration = str | Callable[[sqlite3.Connection], None]
+
+
+MIGRATIONS: list[Migration] = [
     # -- migration 1: base schema ------------------------------------------------
     """
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -199,6 +484,7 @@ MIGRATIONS = [
     """
     CREATE INDEX IF NOT EXISTS idx_workers_next_run_at ON workers(next_run_at);
     """,
+    _migrate_worker_contract_split,
 ]
 
 
@@ -217,11 +503,14 @@ def get_current_version(conn: sqlite3.Connection) -> int:
 def apply_migrations():
     with get_db() as conn:
         current = get_current_version(conn)
-    for i, sql in enumerate(MIGRATIONS, start=1):
+    for i, migration in enumerate(MIGRATIONS, start=1):
         if i > current:
             with get_db() as conn:
                 try:
-                    conn.executescript(sql)
+                    if isinstance(migration, str):
+                        conn.executescript(migration)
+                    else:
+                        migration(conn)
                 except sqlite3.OperationalError as exc:
                     if i not in {3, 4, 6, 8} or "duplicate column name" not in str(exc):
                         raise

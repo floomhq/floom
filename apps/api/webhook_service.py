@@ -36,6 +36,10 @@ def generate_webhook_secret(worker_id: str) -> str:
             """,
             (worker_id, hashed, now, now),
         )
+        conn.execute(
+            "UPDATE workers SET webhook_secret_hash = ? WHERE id = ?",
+            (hashed, worker_id),
+        )
     logger.info("Webhook secret generated/rotated for worker %s", worker_id)
     return raw  # returned once, never stored in plaintext
 
@@ -44,6 +48,13 @@ def get_webhook_secret_hash(worker_id: str) -> Optional[str]:
     """Return the stored hash for a worker's webhook secret, or None if not set."""
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute(
+            "SELECT webhook_secret_hash FROM workers WHERE id = ?",
+            (worker_id,),
+        )
+        worker_row = cursor.fetchone()
+        if worker_row and worker_row["webhook_secret_hash"]:
+            return worker_row["webhook_secret_hash"]
         cursor.execute(
             "SELECT secret_hash FROM worker_webhook_secrets WHERE worker_id = ?",
             (worker_id,),
@@ -78,4 +89,9 @@ def delete_webhook_secret(worker_id: str) -> bool:
             "DELETE FROM worker_webhook_secrets WHERE worker_id = ?",
             (worker_id,),
         )
-        return cursor.rowcount > 0
+        deleted = cursor.rowcount > 0
+        cursor.execute(
+            "UPDATE workers SET webhook_secret_hash = NULL WHERE id = ?",
+            (worker_id,),
+        )
+        return deleted

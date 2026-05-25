@@ -49,9 +49,10 @@ from worker_registry import (
     discover_workers,
     get_worker,
     get_worker_config,
+    get_worker_contract,
     invalidate_worker_cache,
 )
-from run_service import create_run, start_run, update_run_status, add_log
+from run_service import create_run, get_worker_config_for_run, start_run, update_run_status, add_log
 from run_service import get_secrets_for_worker
 
 load_dotenv()
@@ -178,13 +179,122 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
     )
 
 
+def _skill_version_id(worker_id: str, manifest: Dict[str, Any]) -> str:
+    version = str(manifest.get("version") or "0.1.0")
+    safe_version = version.replace(".", "_").replace("-", "_")
+    return f"sv_{worker_id}_{safe_version}"
+
+
+def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str, Any]]) -> None:
+    now = now_iso()
+    for w in workers:
+        manifest = w.get("manifest") or {}
+        config = w.get("config") or {}
+        trigger = config.get("trigger") or {}
+        worker_id = w["id"]
+        skill_version_id = _skill_version_id(worker_id, manifest)
+        conn.execute(
+            """
+            INSERT INTO skill_versions
+                (id, name, version, manifest_json, bundle_path, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name, version) DO UPDATE SET
+                manifest_json=excluded.manifest_json,
+                bundle_path=excluded.bundle_path
+            """,
+            (
+                skill_version_id,
+                manifest.get("name") or worker_id.replace("_", "-"),
+                manifest.get("version") or "0.1.0",
+                json.dumps(manifest),
+                f"workers/{worker_id}",
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO workers
+                (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
+                 next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
+                 notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico')
+            ON CONFLICT(id) DO UPDATE SET
+                skill_version_id=excluded.skill_version_id,
+                name=excluded.name,
+                trigger_type=excluded.trigger_type,
+                cron_expr=excluded.cron_expr,
+                cron_timezone=excluded.cron_timezone
+            """,
+            (
+                worker_id,
+                skill_version_id,
+                w["name"],
+                trigger.get("type") or w.get("trigger_type") or "manual",
+                trigger.get("cron"),
+                trigger.get("timezone"),
+                json.dumps({}),
+                json.dumps({}),
+                now,
+            ),
+        )
+
+
+def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
+    d = row_to_dict(row)
+    config = get_worker_config_for_run(d["id"])
+    manifest = json.loads(d.get("manifest_json") or "{}")
+    return {
+        "id": d["id"],
+        "name": d["name"],
+        "description": manifest.get("description") if isinstance(manifest, dict) else None,
+        "status": "healthy",
+        "trigger_type": d.get("trigger_type") or (config.trigger.type if config else "manual"),
+        "runner": config.runtime.runner if config and config.runtime else "local",
+        "config": config.model_dump(mode="json") if config else {},
+        "manifest": manifest,
+    }
+
+
+def _list_db_workers() -> List[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT w.id, w.name, w.trigger_type, sv.manifest_json
+                FROM workers w
+                JOIN skill_versions sv ON sv.id = w.skill_version_id
+                ORDER BY w.created_at, w.id
+                """
+            ).fetchall()
+        return [_db_worker_from_row(row) for row in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT w.id, w.name, w.trigger_type, sv.manifest_json
+                FROM workers w
+                JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.id = ?
+                """,
+                (worker_id,),
+            ).fetchone()
+        return _db_worker_from_row(row) if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Workers
 # ---------------------------------------------------------------------------
 
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
-    workers = discover_workers(use_cache=True)
+    workers = _list_db_workers() or discover_workers(use_cache=True)
     paused_workers = _get_paused_workers()
     result: List[WorkerSummary] = []
     for w in workers:
@@ -192,7 +302,7 @@ def list_workers() -> List[WorkerSummary]:
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
         # Check secrets
-        config = get_worker_config(w["id"])
+        config = get_worker_config_for_run(w["id"])
         status = WorkerStatus(w["status"])
         if config and config.secrets:
             missing = [s for s in config.secrets if s not in os.environ]
@@ -227,7 +337,7 @@ def list_workers() -> List[WorkerSummary]:
 
 @app.post("/workers/{worker_id}/pause", response_model=WorkerStateResponse)
 def pause_worker(worker_id: str) -> WorkerStateResponse:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     with get_db() as conn:
@@ -241,7 +351,7 @@ def pause_worker(worker_id: str) -> WorkerStateResponse:
 
 @app.post("/workers/{worker_id}/unpause", response_model=WorkerStateResponse)
 def unpause_worker(worker_id: str) -> WorkerStateResponse:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     with get_db() as conn:
@@ -255,7 +365,7 @@ def unpause_worker(worker_id: str) -> WorkerStateResponse:
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
 def get_worker_detail(worker_id: str) -> WorkerDetail:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -309,6 +419,9 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         yml_path = WORKERS_DIR / worker_id / "worker.yml"
         if yml_path.is_file():
             manifest_yaml = yml_path.read_text()
+        elif worker.get("manifest"):
+            import yaml as pyyaml
+            manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
     except Exception:
         pass
 
@@ -350,12 +463,18 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
         raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
 
     try:
-        config = WorkerConfig(**raw)
+        from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
+        parsed = parse_worker_manifest(raw)
+        if isinstance(parsed, WorkerContract):
+            worker_id = parsed.name
+            config = worker_contract_to_worker_config(parsed, worker_id)
+        else:
+            config = parsed
+            worker_id = config.id
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Schema validation failed: {exc}")
 
     # Check for collision
-    worker_id = config.id
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
 
@@ -368,6 +487,11 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     (target_dir / "worker.yml").write_text(payload.worker_yml)
     (target_dir / "run.py").write_text(payload.run_py)
     (target_dir / "requirements.txt").write_text("")
+    (target_dir / "SKILL.md").write_text(
+        f"# {config.name}\n\n"
+        "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+        "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+    )
 
     # Register
     invalidate_worker_cache()
@@ -375,29 +499,7 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
 
     # Persist to DB
     with get_db() as conn:
-        now = now_iso()
-        for w in workers:
-            conn.execute(
-                """
-                INSERT INTO workers
-                    (id, name, description, config_json, status,
-                     trigger_type, runner, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name=excluded.name,
-                    description=excluded.description,
-                    config_json=excluded.config_json,
-                    status=excluded.status,
-                    trigger_type=excluded.trigger_type,
-                    runner=excluded.runner,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    w["id"], w["name"], w.get("description"),
-                    json.dumps(w["config"]), w["status"],
-                    w["trigger_type"], w["runner"], now, now,
-                ),
-            )
+        _persist_discovered_workers(conn, workers)
 
     # Return the new worker detail
     return get_worker_detail(worker_id)
@@ -408,29 +510,7 @@ def reload_workers() -> ReloadResponse:
     invalidate_worker_cache()
     workers = discover_workers()
     with get_db() as conn:
-        now = now_iso()
-        for w in workers:
-            conn.execute(
-                """
-                INSERT INTO workers
-                    (id, name, description, config_json, status,
-                     trigger_type, runner, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    name=excluded.name,
-                    description=excluded.description,
-                    config_json=excluded.config_json,
-                    status=excluded.status,
-                    trigger_type=excluded.trigger_type,
-                    runner=excluded.runner,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    w["id"], w["name"], w.get("description"),
-                    json.dumps(w["config"]), w["status"],
-                    w["trigger_type"], w["runner"], now, now,
-                ),
-            )
+        _persist_discovered_workers(conn, workers)
     return ReloadResponse(status="success", workers_loaded=len(workers))
 
 
@@ -440,7 +520,7 @@ def reload_workers() -> ReloadResponse:
 
 @app.post("/workers/{worker_id}/runs", response_model=ActionResponse)
 def create_worker_run(worker_id: str, payload: RunCreate) -> ActionResponse:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -567,7 +647,7 @@ def get_run(run_id: str) -> RunDetail:
         run["input"] = json.loads(run.get("input_json") or "{}")
         run["output"] = json.loads(run.get("output_json") or "{}")
         # Build typed output schema from worker config
-        output_config = get_worker_config(run["worker_id"])
+        output_config = get_worker_config_for_run(run["worker_id"])
         output_schema = []
         if output_config:
             raw_output = run["output"]
@@ -688,7 +768,7 @@ def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
     for r in rows:
         rd = row_to_dict(r)
         preview_type: Optional[str] = None
-        config = get_worker_config(r["worker_id"])
+        config = get_worker_config_for_run(r["worker_id"])
         if config and config.outputs:
             preview_type = config.outputs[0].type
         result.append(
@@ -929,12 +1009,12 @@ def list_secrets() -> List[SecretItem]:
         cursor.execute("SELECT * FROM secrets ORDER BY name")
         db_secrets = {r["name"]: row_to_dict(r) for r in cursor.fetchall()}
 
-    workers = discover_workers(use_cache=True)
+    workers = _list_db_workers() or discover_workers(use_cache=True)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
     for w in workers:
-        config = get_worker_config(w["id"])
+        config = get_worker_config_for_run(w["id"])
         if config:
             worker_secret_names.update(config.secrets)
 
@@ -956,7 +1036,7 @@ def list_secrets() -> List[SecretItem]:
         status = SecretStatus.SET if value else SecretStatus.MISSING
         used_by = []
         for w in workers:
-            config = get_worker_config(w["id"])
+            config = get_worker_config_for_run(w["id"])
             if config and name in config.secrets:
                 used_by.append(w["name"])
 
@@ -1253,11 +1333,11 @@ async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
     if not _check_webhook_rate_limit(rl_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")
 
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    config = get_worker_config(worker_id)
+    config = get_worker_config_for_run(worker_id)
     if not config or config.trigger.type != "webhook":
         raise HTTPException(
             status_code=400,
@@ -1309,11 +1389,11 @@ def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
     """
     from webhook_service import generate_webhook_secret
 
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    config = get_worker_config(worker_id)
+    config = get_worker_config_for_run(worker_id)
     if not config or config.trigger.type != "webhook":
         raise HTTPException(
             status_code=400,
