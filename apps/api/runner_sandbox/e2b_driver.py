@@ -25,6 +25,21 @@ def _safe_path(base: Path, *parts: str) -> Path:
     return target
 
 
+def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+        resolved = target.resolve()
+        allowed_root = WORKERS_DIR.parent.resolve()
+        try:
+            resolved.relative_to(allowed_root)
+        except ValueError:
+            raise ValueError(f"Path traversal attempt: {resolved}")
+        return resolved
+    return _safe_path(WORKERS_DIR, worker_id)
+
+
 class E2BSandboxDriver(SandboxDriver):
     """Runs worker code in an E2B cloud sandbox (e2b SDK 2.x).
 
@@ -83,7 +98,7 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         try:
-            worker_dir = _safe_path(WORKERS_DIR, worker_id)
+            worker_dir = _worker_dir_for_run(worker_id, config)
         except ValueError as exc:
             return WorkerResult(
                 status="error", error=str(exc), error_code="invalid_worker"
