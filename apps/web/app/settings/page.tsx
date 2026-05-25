@@ -18,21 +18,29 @@ interface SystemInfo {
   worker_count: number;
 }
 
+interface PlatformSecret {
+  name: string;
+  status: string;
+}
+
 export default function SettingsPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [platformSecrets, setPlatformSecrets] = useState<PlatformSecret[]>([]);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [infoRes, secretsRes] = await Promise.all([
+      const [infoRes, secretsRes, platformRes] = await Promise.all([
         api.system.info(),
         api.secrets.list(),
+        api.system.platformConfig(),
       ]);
       setInfo(infoRes as unknown as SystemInfo);
       setSecrets(secretsRes);
+      setPlatformSecrets(platformRes.platform_secrets);
     } catch (e) {
       console.error(e);
     }
@@ -121,6 +129,36 @@ export default function SettingsPage() {
 
       <Card className="border-[#eaeaea] shadow-none bg-white">
         <CardHeader>
+          <CardTitle className="text-sm font-medium">Platform configuration</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-xs text-[#999] mb-3">
+            Infrastructure secrets managed outside the Secrets UI. Configure these on the server.
+          </p>
+          {platformSecrets.length === 0 ? (
+            <p className="text-sm text-[#999]">Loading...</p>
+          ) : (
+            platformSecrets.map((s) => (
+              <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                <span className="text-sm font-mono text-[#333]">{s.name}</span>
+                <Badge
+                  variant="outline"
+                  className={
+                    s.status === "set"
+                      ? "text-emerald-600 border-emerald-200 bg-emerald-50 shrink-0 ml-2"
+                      : "text-red-600 border-red-200 bg-red-50 shrink-0 ml-2"
+                  }
+                >
+                  {s.status}
+                </Badge>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-[#eaeaea] shadow-none bg-white">
+        <CardHeader>
           <CardTitle className="text-sm font-medium">Workers</CardTitle>
         </CardHeader>
         <CardContent>
@@ -135,11 +173,11 @@ export default function SettingsPage() {
 
       <Card className="border-[#eaeaea] shadow-none bg-white">
         <CardHeader>
-          <CardTitle className="text-sm font-medium">Secrets</CardTitle>
+          <CardTitle className="text-sm font-medium">Secrets summary</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {secrets.length === 0 ? (
-            <p className="text-sm text-[#999]">No secrets required by any worker.</p>
+            <p className="text-sm text-[#999]">No worker secrets configured.</p>
           ) : (
             secrets.map((s) => (
               <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">

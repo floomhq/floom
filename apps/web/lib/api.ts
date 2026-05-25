@@ -83,6 +83,7 @@ export const api = {
   },
   system: {
     info: () => fetchJson<Record<string, unknown>>("/system/info"),
+    platformConfig: () => fetchJson<{ platform_secrets: { name: string; status: string }[] }>("/system/platform-config"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
   },
   connections: {

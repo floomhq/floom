@@ -867,6 +867,21 @@ def test_secret(name: str) -> SecretTestResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# Platform secrets — infra vars that belong in Settings, NOT the secrets UI
+# ---------------------------------------------------------------------------
+
+PLATFORM_SECRETS: frozenset[str] = frozenset({
+    "COMPOSIO_API_KEY",
+    "WORKERS_FRONTEND_URL",
+    "FLOOM_DB",
+    "FLOOM_WORKERS_DIR",
+    "FLOOM_ARTIFACTS_DIR",
+    "FLOOM_RUN_TIMEOUT",
+    "FLOOM_SECRET",
+})
+
+
 @app.get("/secrets", response_model=List[SecretItem])
 def list_secrets() -> List[SecretItem]:
     with get_db() as conn:
@@ -892,7 +907,8 @@ def list_secrets() -> List[SecretItem]:
             if key:
                 env_secret_names.add(key)
 
-    all_secret_names = worker_secret_names | env_secret_names
+    # Filter out platform-managed secrets — they appear in Settings, not here
+    all_secret_names = (worker_secret_names | env_secret_names) - PLATFORM_SECRETS
 
     result: List[SecretItem] = []
     for name in sorted(all_secret_names):
@@ -1112,6 +1128,18 @@ def delete_connection(connection_id: str):
 # ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
+
+@app.get("/system/platform-config")
+def platform_config():
+    """Return platform-level configuration vars with set/missing status (values never returned)."""
+    items = []
+    for name in sorted(PLATFORM_SECRETS):
+        items.append({
+            "name": name,
+            "status": "set" if os.environ.get(name) else "missing",
+        })
+    return {"platform_secrets": items}
+
 
 @app.get("/system/info")
 def system_info():
