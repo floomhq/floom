@@ -85,4 +85,16 @@ export const api = {
     info: () => fetchJson<Record<string, unknown>>("/system/info"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
   },
+  connections: {
+    list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),
+    initiate: (app_name: string) =>
+      fetchJson<import("./types").ConnectionInitResponse>("/connections", {
+        method: "POST",
+        body: JSON.stringify({ app_name }),
+      }),
+    status: (id: string) =>
+      fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
+    delete: (id: string) =>
+      fetchJson<{ status: string }>(`/connections/${id}`, { method: "DELETE" }),
+  },
 };
