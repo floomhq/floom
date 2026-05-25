@@ -187,6 +187,36 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
                 ),
             )
 
+        approvals_source = "approvals"
+        approvals_preserved = False
+        if _table_exists(conn, "approvals"):
+            missing_approval_workers = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE w.id IS NULL
+                """
+            ).fetchone()["count"]
+            missing_approval_runs = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM approvals a
+                LEFT JOIN runs r ON r.id = a.run_id
+                WHERE r.id IS NULL
+                """
+            ).fetchone()["count"]
+            if missing_approval_workers or missing_approval_runs:
+                raise RuntimeError(
+                    "Cannot migrate approvals: "
+                    f"{missing_approval_workers} rows reference missing workers, "
+                    f"{missing_approval_runs} rows reference missing runs"
+                )
+            conn.execute("DROP TABLE IF EXISTS approvals_preserve")
+            conn.execute("CREATE TEMP TABLE approvals_preserve AS SELECT * FROM approvals")
+            approvals_source = "approvals_preserve"
+            approvals_preserved = True
+
         if _table_exists(conn, "runs"):
             missing_run_workers = conn.execute(
                 """
@@ -232,29 +262,7 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
             )
 
         if _table_exists(conn, "approvals"):
-            missing_approval_workers = conn.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM approvals a
-                LEFT JOIN workers w ON w.id = a.worker_id
-                WHERE w.id IS NULL
-                """
-            ).fetchone()["count"]
-            missing_approval_runs = conn.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM approvals a
-                LEFT JOIN runs r ON r.id = a.run_id
-                WHERE r.id IS NULL
-                """
-            ).fetchone()["count"]
-            if missing_approval_workers or missing_approval_runs:
-                raise RuntimeError(
-                    "Cannot migrate approvals: "
-                    f"{missing_approval_workers} rows reference missing workers, "
-                    f"{missing_approval_runs} rows reference missing runs"
-                )
-            conn.executescript(
+            conn.execute(
                 """
                 CREATE TABLE approvals_new (
                     id TEXT PRIMARY KEY,
@@ -268,15 +276,21 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
                     reason TEXT,
                     FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
                     FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
-                );
+                )
+                """
+            )
+            conn.execute(
+                f"""
                 INSERT INTO approvals_new
                     (id, run_id, worker_id, status, label, preview, created_at, decided_at, reason)
                 SELECT id, run_id, worker_id, status, label, preview, created_at, decided_at, reason
-                FROM approvals;
-                DROP TABLE approvals;
-                ALTER TABLE approvals_new RENAME TO approvals;
+                FROM {approvals_source}
                 """
             )
+            conn.execute("DROP TABLE approvals")
+            conn.execute("ALTER TABLE approvals_new RENAME TO approvals")
+            if approvals_preserved:
+                conn.execute("DROP TABLE approvals_preserve")
 
         conn.executescript(
             """
