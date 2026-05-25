@@ -1,6 +1,7 @@
 """Pydantic models for Floom V0 — request schemas, response schemas, and domain types."""
 
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 from datetime import datetime
@@ -128,6 +129,277 @@ class WorkerConfig(BaseModel):
                     "webhook-triggered workers must declare trigger.webhook.secret: true"
                 )
         return self
+
+
+# ---------------------------------------------------------------------------
+# WorkerContract schemas (schema_version: "0.3")
+# ---------------------------------------------------------------------------
+
+SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
+SEMVER_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$")
+
+
+class WorkerContractAuthor(BaseModel):
+    name: str
+    email: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("author name is required")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if "@" not in value:
+            raise ValueError("author email must be an email address")
+        return value
+
+
+class WorkerContractBounds(BaseModel):
+    minimum: Optional[float] = None
+    maximum: Optional[float] = None
+    min_length: Optional[int] = None
+    max_length: Optional[int] = None
+
+
+class WorkerContractField(BaseModel):
+    name: str
+    kind: Literal["scalar", "file"] = "scalar"
+    type: Optional[str] = None
+    media_type: Optional[str] = None
+    path: Optional[str] = None
+    required: bool = False
+    default: Optional[Any] = None
+    enum: Optional[List[Any]] = None
+    examples: Optional[List[Any]] = None
+    bounds: Optional[WorkerContractBounds] = None
+    format: Optional[str] = None
+    description: Optional[str] = None
+    label: Optional[str] = None
+    placeholder: Optional[str] = None
+    options: Optional[List[str]] = None
+    accept_csv: bool = False
+    columns: Optional[List[str]] = None
+    json_required_keys: Optional[List[str]] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_field_name(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise ValueError("field name must be identifier-like")
+        return value
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "WorkerContractField":
+        if self.kind == "scalar":
+            if not self.type:
+                raise ValueError(f"scalar field {self.name!r} must declare type")
+            if self.media_type:
+                raise ValueError(f"scalar field {self.name!r} cannot declare media_type")
+            if self.path:
+                raise ValueError(f"scalar field {self.name!r} cannot declare path")
+        if self.kind == "file":
+            if not self.media_type:
+                raise ValueError(f"file field {self.name!r} must declare media_type")
+            if self.type and self.type != "file":
+                raise ValueError(f"file field {self.name!r} cannot declare scalar type")
+        if self.type == "select" and not (self.options or self.enum):
+            raise ValueError(f"select field {self.name!r} must declare options or enum")
+        return self
+
+
+class WorkerContractExec(BaseModel):
+    command: str
+    runtime: str
+    inputs: List[WorkerContractField] = Field(default_factory=list)
+    secrets: List[str] = Field(default_factory=list)
+    outputs: List[WorkerContractField] = Field(default_factory=list)
+
+    @field_validator("command", "runtime")
+    @classmethod
+    def validate_nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value is required")
+        return value
+
+
+class WorkerContractNetworkCapabilities(BaseModel):
+    egress: bool = False
+
+
+class WorkerContractCapabilities(BaseModel):
+    secrets: List[str] = Field(default_factory=list)
+    network: WorkerContractNetworkCapabilities = Field(default_factory=WorkerContractNetworkCapabilities)
+
+
+class WorkerContractApprovals(BaseModel):
+    required: bool = False
+    label: Optional[str] = None
+
+
+class WorkerContractTrigger(BaseModel):
+    type: str = "manual"
+    cron: Optional[str] = None
+    timezone: Optional[str] = None
+    webhook: Optional[WorkerWebhookConfig] = None
+
+
+class WorkerContract(BaseModel):
+    schema_version: Literal["0.3"]
+    name: str
+    title: str
+    description: str
+    version: str
+    entrypoint: str = "SKILL.md"
+    targets: List[str] = Field(default_factory=lambda: ["generic"])
+    tags: List[str] = Field(default_factory=list)
+    authors: List[WorkerContractAuthor] = Field(default_factory=list)
+    license: Optional[str] = None
+    homepage: Optional[str] = None
+    repository: Optional[str] = None
+    exec: WorkerContractExec
+    capabilities: WorkerContractCapabilities = Field(default_factory=WorkerContractCapabilities)
+    approvals: WorkerContractApprovals = Field(default_factory=WorkerContractApprovals)
+    trigger: WorkerContractTrigger = Field(default_factory=WorkerContractTrigger)
+    connections: List[str] = Field(default_factory=list)
+    csv_required_columns: Optional[List[str]] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_slug(cls, value: str) -> str:
+        if not SLUG_PATTERN.fullmatch(value):
+            raise ValueError(
+                "name must be lowercase letters/digits/hyphens, 3-64 chars, start+end alphanumeric"
+            )
+        return value
+
+    @field_validator("version")
+    @classmethod
+    def validate_semver(cls, value: str) -> str:
+        if not SEMVER_PATTERN.fullmatch(value):
+            raise ValueError("version must be semver, e.g. 0.1.0")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("title is required")
+        if len(value) > 120:
+            raise ValueError("title must be 120 characters or fewer")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("description is required")
+        if len(value) > 500:
+            raise ValueError("description must be 500 characters or fewer")
+        return value
+
+
+WorkerManifest = WorkerConfig | WorkerContract
+
+
+def parse_worker_manifest(raw: Dict[str, Any]) -> WorkerManifest:
+    """Parse a worker manifest, using schema_version to select old vs new shape."""
+    if raw.get("schema_version") == "0.3":
+        return WorkerContract(**raw)
+    return WorkerConfig(**raw)
+
+
+def is_worker_contract(manifest: WorkerManifest) -> bool:
+    return isinstance(manifest, WorkerContract)
+
+
+def _contract_input_type(field: WorkerContractField) -> str:
+    if field.kind == "file":
+        return "file"
+    if field.type == "select" or field.options:
+        return "select"
+    if field.type == "string":
+        return "text"
+    if field.type in {"textarea", "text", "number", "boolean"}:
+        return field.type
+    return field.type or "text"
+
+
+def _contract_output_type(field: WorkerContractField) -> str:
+    if field.kind == "file":
+        media_type = field.media_type or ""
+        if media_type == "text/markdown":
+            return "markdown"
+        if media_type == "text/csv":
+            return "csv"
+        if media_type == "application/json":
+            return "json"
+        return "file"
+    if field.type in {"string", "text"}:
+        return "text"
+    if field.type == "select":
+        return "text"
+    return field.type or "text"
+
+
+def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -> WorkerConfig:
+    """Project WorkerContract into the existing response/runtime config shape."""
+    command = contract.exec.command.strip().split()
+    entrypoint = "run.py"
+    if len(command) >= 2 and command[0].startswith("python"):
+        entrypoint = command[-1]
+
+    runner = "e2b" if contract.exec.runtime.startswith("e2b") else "local"
+    runtime = WorkerRuntime(type="python", entrypoint=entrypoint, runner=runner)
+
+    inputs = [
+        WorkerInput(
+            name=field.name,
+            label=field.label or field.name.replace("_", " ").title(),
+            type=_contract_input_type(field),
+            required=field.required,
+            placeholder=field.placeholder,
+            options=field.options or field.enum,
+            default=field.default,
+            accept_csv=field.accept_csv,
+        )
+        for field in contract.exec.inputs
+    ]
+    outputs = [
+        WorkerOutput(
+            name=field.name,
+            label=field.label or field.name.replace("_", " ").title(),
+            type=_contract_output_type(field),
+            columns=field.columns,
+            json_required_keys=field.json_required_keys,
+        )
+        for field in contract.exec.outputs
+    ]
+    return WorkerConfig(
+        id=worker_id,
+        name=contract.title,
+        description=contract.description,
+        trigger=WorkerTrigger(
+            type=contract.trigger.type,
+            cron=contract.trigger.cron,
+            webhook=contract.trigger.webhook,
+        ),
+        runtime=runtime,
+        inputs=inputs,
+        secrets=contract.exec.secrets,
+        connections=contract.connections,
+        outputs=outputs,
+        approvals=WorkerApprovalConfig(
+            required=contract.approvals.required,
+            label=contract.approvals.label,
+        ),
+        csv_required_columns=contract.csv_required_columns,
+    )
 
 
 # ---------------------------------------------------------------------------
