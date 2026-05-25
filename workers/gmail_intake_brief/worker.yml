@@ -26,7 +26,6 @@ inputs:
 
 secrets:
   - OPENAI_API_KEY
-  - COMPOSIO_API_KEY
 
 connections:
   - gmail

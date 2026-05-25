@@ -225,7 +225,8 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         trace_id=trace_id,
     )
 
-    if result.status == "error":
+    # Both "error" and "failed" terminal statuses map to a failed run
+    if result.status in ("error", "failed"):
         update_run_status(run_id, RunStatus.FAILED.value, error=result.error)
         log_fn(f"Run failed: {result.error}", level="error")
         return
