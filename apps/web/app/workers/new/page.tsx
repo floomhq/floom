@@ -23,6 +23,8 @@ interface InputRow {
   type: string;
   required: boolean;
   placeholder: string;
+  description: string;
+  options: string;
 }
 
 interface OutputRow {
@@ -33,6 +35,10 @@ interface OutputRow {
 
 const INPUT_TYPES = ["text", "textarea", "number", "select", "file", "boolean"] as const;
 const OUTPUT_TYPES = ["markdown", "text", "json", "csv", "file"] as const;
+
+function yamlString(value: string): string {
+  return JSON.stringify(value);
+}
 
 const DEFAULT_RUN_PY = `from typing import Dict, Any
 
@@ -66,56 +72,96 @@ function buildYaml(
   secrets: string,
   approvalsRequired: boolean,
 ): string {
-  const lines: string[] = [];
-  lines.push(`id: ${workerId || "my_worker"}`);
-  lines.push(`name: ${name || "My Worker"}`);
-  if (description) lines.push(`description: ${description}`);
-  lines.push(``);
-  lines.push(`trigger:`);
-  lines.push(`  type: manual`);
-  lines.push(``);
-  lines.push(`runtime:`);
-  lines.push(`  type: python`);
-  lines.push(`  entrypoint: run.py`);
-  lines.push(`  runner: local`);
-
-  if (inputs.length > 0) {
-    lines.push(``);
-    lines.push(`inputs:`);
-    for (const inp of inputs) {
-      if (!inp.name) continue;
-      lines.push(`  - name: ${inp.name}`);
-      lines.push(`    label: ${inp.label || inp.name}`);
-      lines.push(`    type: ${inp.type}`);
-      lines.push(`    required: ${inp.required}`);
-      if (inp.placeholder) lines.push(`    placeholder: "${inp.placeholder}"`);
-    }
-  }
-
+  const slug = (workerId || "my-worker").replace(/_/g, "-");
+  const title = name || "My Worker";
   const secretNames = secrets
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (secretNames.length > 0) {
-    lines.push(``);
-    lines.push(`secrets:`);
-    for (const s of secretNames) lines.push(`  - ${s}`);
+  const lines: string[] = [];
+  lines.push(`schema_version: "0.3"`);
+  lines.push(`name: ${slug}`);
+  lines.push(`title: ${yamlString(title)}`);
+  lines.push(`description: ${yamlString(description || "Custom Workeros worker.")}`);
+  lines.push(`version: "0.1.0"`);
+  lines.push(`entrypoint: SKILL.md`);
+  lines.push(`targets: [generic]`);
+  lines.push(``);
+  lines.push(`exec:`);
+  lines.push(`  command: python run.py`);
+  lines.push(`  runtime: python311`);
+  lines.push(`  runner: local`);
+
+  if (inputs.length > 0) {
+    lines.push(`  inputs:`);
+    for (const inp of inputs) {
+      if (!inp.name) continue;
+      const isFile = inp.type === "file";
+      const scalarType = inp.type === "text" || inp.type === "textarea" ? "string" : inp.type;
+      lines.push(`  - name: ${inp.name}`);
+      lines.push(`    kind: ${isFile ? "file" : "scalar"}`);
+      if (isFile) {
+        lines.push(`    media_type: application/octet-stream`);
+        lines.push(`    path: inputs/${inp.name}`);
+      } else {
+        lines.push(`    type: ${scalarType}`);
+      }
+      lines.push(`    required: ${inp.required}`);
+      lines.push(`    label: ${yamlString(inp.label || inp.name)}`);
+      if (inp.placeholder) lines.push(`    placeholder: ${yamlString(inp.placeholder)}`);
+      if (inp.description) lines.push(`    description: ${yamlString(inp.description)}`);
+      if (inp.type === "select") {
+        const options = inp.options.split(",").map((o) => o.trim()).filter(Boolean);
+        if (options.length > 0) {
+          lines.push(`    enum: [${options.map(yamlString).join(", ")}]`);
+          lines.push(`    options: [${options.map(yamlString).join(", ")}]`);
+        }
+      }
+    }
+  } else {
+    lines.push(`  inputs: []`);
   }
 
+  lines.push(`  secrets: [${secretNames.join(", ")}]`);
+
   if (outputs.length > 0) {
-    lines.push(``);
-    lines.push(`outputs:`);
+    lines.push(`  outputs:`);
     for (const out of outputs) {
       if (!out.name) continue;
       lines.push(`  - name: ${out.name}`);
-      lines.push(`    label: ${out.label || out.name}`);
-      lines.push(`    type: ${out.type}`);
+      if (out.type === "text") {
+        lines.push(`    kind: scalar`);
+        lines.push(`    type: string`);
+      } else {
+        const mediaType = out.type === "markdown"
+          ? "text/markdown"
+          : out.type === "csv"
+          ? "text/csv"
+          : out.type === "json"
+          ? "application/json"
+          : "application/octet-stream";
+        const extension = out.type === "markdown" ? "md" : out.type === "file" ? "bin" : out.type;
+        lines.push(`    kind: file`);
+        lines.push(`    media_type: ${mediaType}`);
+        lines.push(`    path: out/${out.name}.${extension}`);
+      }
+      lines.push(`    required: true`);
+      lines.push(`    label: ${yamlString(out.label || out.name)}`);
     }
+  } else {
+    lines.push(`  outputs: []`);
   }
 
   lines.push(``);
+  lines.push(`capabilities:`);
+  lines.push(`  secrets: [${secretNames.join(", ")}]`);
+  lines.push(`  network: { egress: ${secretNames.length > 0} }`);
+  lines.push(``);
   lines.push(`approvals:`);
   lines.push(`  required: ${approvalsRequired}`);
+  lines.push(``);
+  lines.push(`trigger:`);
+  lines.push(`  type: manual`);
 
   return lines.join("\n");
 }
@@ -140,8 +186,8 @@ export default function NewWorkerPage() {
 
   // ID validation
   const idError =
-    workerId && !/^[a-z0-9_-]+$/.test(workerId)
-      ? "Must be lowercase letters, numbers, underscores or hyphens only."
+    workerId && !/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(workerId)
+      ? "Use lowercase letters, numbers, and hyphens. Start and end with a letter or number."
       : null;
 
   const yaml = buildYaml(workerId, name, description, inputs, outputs, secrets, approvalsRequired);
@@ -150,7 +196,7 @@ export default function NewWorkerPage() {
   const addInput = useCallback(() => {
     setInputs((prev) => [
       ...prev,
-      { name: "", label: "", type: "text", required: false, placeholder: "" },
+      { name: "", label: "", type: "text", required: false, placeholder: "", description: "", options: "" },
     ]);
   }, []);
 
@@ -227,13 +273,13 @@ export default function NewWorkerPage() {
                   Worker ID <span className="text-red-500">*</span>
                 </Label>
                 <Input
-                  placeholder="my_worker"
+                  placeholder="my-worker"
                   value={workerId}
-                  onChange={(e) => setWorkerId(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
+                  onChange={(e) => setWorkerId(e.target.value.toLowerCase().replace(/[\s_]+/g, "-"))}
                   className={`border-[#e4e4e7] font-mono ${idError ? "border-red-400" : ""}`}
                 />
                 {idError && <p className="text-xs text-red-500">{idError}</p>}
-                <p className="text-xs text-[#999]">Lowercase, no spaces. E.g. my_worker, lead-enricher</p>
+                <p className="text-xs text-[#999]">Lowercase slug. E.g. my-worker, lead-enricher</p>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm">
@@ -332,6 +378,26 @@ export default function NewWorkerPage() {
                         className="h-7 text-xs border-[#e4e4e7]"
                       />
                     </div>
+                  </div>
+                  {inp.type === "select" && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Options</Label>
+                      <Input
+                        placeholder="alpha, beta, gamma"
+                        value={inp.options}
+                        onChange={(e) => updateInput(idx, "options", e.target.value)}
+                        className="h-7 text-xs border-[#e4e4e7]"
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Help text</Label>
+                    <Input
+                      placeholder="Shown below the field label"
+                      value={inp.description}
+                      onChange={(e) => updateInput(idx, "description", e.target.value)}
+                      className="h-7 text-xs border-[#e4e4e7]"
+                    />
                   </div>
                   <div className="flex items-center gap-2">
                     <input
