@@ -569,3 +569,30 @@ After F1/F2/F3 codex round lands:
 4. Update worker-create UI to generate WorkerContract shape
 5. Update worker-registry discovery to parse new shape (with one-release fallback for old shape)
 6. Open upstream PR to skills-neo **on the `live-skills-v0x-schema` branch** (not main) with the 5 UX additions above. Federico 2026-05-25.
+
+---
+
+## Tangential bug — skeleton loaders look "a bit weird"
+
+Federico 2026-05-25: "skeletons a bit weird rn?"
+
+AX41 Browser Broker was timing out on `browser_navigate` (both pool-a + pool-b) — couldn't get a verification screenshot. Queued with code-level diagnosis.
+
+### Code-state observations
+`apps/web/components/ui/skeleton.tsx` uses `bg-muted` (`--bg-2`):
+- Light mode: `#ededec`
+- Dark mode: `#1c1c1c` (near body bg `#161616` — possibly near-invisible)
+
+### Likely culprits (rank by probability)
+1. **Radius mismatch** — Skeleton is `rounded-md` (7px). Design v2 cards are `rounded-xl` (11px). Skeleton inside `rounded-xl` looks misaligned at corners.
+2. **Dark-mode contrast** — `#1c1c1c` on `#161616` body = barely visible. Needs lighter shade in dark mode.
+3. **Glass card backdrop interaction** — `animate-pulse` over `backdrop-filter blur` may render oddly.
+4. **Stat-card height** — Overview KPI skeletons `h-8 w-12` inside `text-2xl` div. Off-by-1 against Inter line-height could look janky.
+
+### Proposed fix
+- `rounded-[inherit]` so skeleton picks up parent radius automatically
+- Lighter dark-mode shade (`bg-[var(--bg-3)]` for dark)
+- Optionally swap pulse → shimmer (more on-brand with glass material)
+- Verify height on all 10 call sites
+
+Queued for the round after F1/F2/F3 + WorkerContract migration. When broker is healthy, codex round: "Open https://workers.floom.dev in chrome-depontefede, screenshot every page with loading state, fix any skeleton visual mismatches."
