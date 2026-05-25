@@ -6,7 +6,13 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-from models import WorkerConfig
+from models import (
+    WorkerConfig,
+    WorkerContract,
+    parse_worker_manifest,
+    worker_config_to_worker_contract,
+    worker_contract_to_worker_config,
+)
 
 logger = logging.getLogger("floom.worker_registry")
 
@@ -22,6 +28,20 @@ def _safe_path(*parts: str) -> Path:
     if not str(target).startswith(str(WORKERS_DIR)):
         raise ValueError(f"Path traversal attempt: {target}")
     return target
+
+
+def _load_worker_manifest(folder: Path) -> tuple[WorkerConfig, WorkerContract]:
+    raw = yaml.safe_load((folder / "worker.yml").read_text())
+    if not isinstance(raw, dict):
+        raise ValueError("worker.yml must contain a YAML mapping")
+    parsed = parse_worker_manifest(raw)
+    if isinstance(parsed, WorkerContract):
+        contract = parsed
+        config = worker_contract_to_worker_config(contract, folder.name)
+    else:
+        config = parsed
+        contract = worker_config_to_worker_contract(config)
+    return config, contract
 
 
 def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
@@ -48,15 +68,13 @@ def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
             continue
 
         try:
-            raw = yaml.safe_load(config_path.read_text())
-            if not isinstance(raw, dict):
-                raise ValueError("worker.yml must contain a YAML mapping")
-            config = WorkerConfig(**raw)
+            config, contract = _load_worker_manifest(folder)
             workers.append({
-                "id": config.id,
+                "id": folder.name,
                 "name": config.name,
                 "description": config.description,
                 "config": config.model_dump(),
+                "manifest": contract.model_dump(mode="json", exclude_none=True),
                 "status": "healthy",
                 "trigger_type": config.trigger.type,
                 "runner": config.runtime.runner,
@@ -91,13 +109,26 @@ def get_worker(worker_id: str) -> Optional[Dict[str, Any]]:
 
 def get_worker_config(worker_id: str) -> Optional[WorkerConfig]:
     try:
-        config_path = _safe_path(worker_id, "worker.yml")
+        worker_dir = _safe_path(worker_id)
     except ValueError:
         return None
+    config_path = worker_dir / "worker.yml"
     if not config_path.is_file():
         return None
-    raw = yaml.safe_load(config_path.read_text())
-    return WorkerConfig(**raw)
+    config, _contract = _load_worker_manifest(worker_dir)
+    return config
+
+
+def get_worker_contract(worker_id: str) -> Optional[WorkerContract]:
+    try:
+        worker_dir = _safe_path(worker_id)
+    except ValueError:
+        return None
+    config_path = worker_dir / "worker.yml"
+    if not config_path.is_file():
+        return None
+    _config, contract = _load_worker_manifest(worker_dir)
+    return contract
 
 
 def get_worker_entrypoint(worker_id: str) -> str:
