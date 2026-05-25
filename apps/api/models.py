@@ -216,6 +216,7 @@ class WorkerContractField(BaseModel):
 class WorkerContractExec(BaseModel):
     command: str
     runtime: str
+    runner: str = "local"
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
@@ -225,6 +226,14 @@ class WorkerContractExec(BaseModel):
     def validate_nonempty(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("value is required")
+        return value
+
+    @field_validator("runner")
+    @classmethod
+    def validate_runner(cls, value: str) -> str:
+        allowed = {"local", "e2b"}
+        if value not in allowed:
+            raise ValueError(f"runner must be one of {sorted(allowed)}, got {value!r}")
         return value
 
 
@@ -354,7 +363,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
     if len(command) >= 2 and command[0].startswith("python"):
         entrypoint = command[-1]
 
-    runner = "e2b" if contract.exec.runtime.startswith("e2b") else "local"
+    runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
     runtime = WorkerRuntime(type="python", entrypoint=entrypoint, runner=runner)
 
     inputs = [
@@ -416,6 +425,7 @@ def _legacy_input_to_contract_field(field: WorkerInput) -> WorkerContractField:
             name=field.name,
             kind="file",
             media_type="text/csv" if field.accept_csv else "application/octet-stream",
+            path=f"inputs/{field.name}",
             required=field.required,
             label=field.label,
             placeholder=field.placeholder,
@@ -488,6 +498,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         exec=WorkerContractExec(
             command=f"python {config.runtime.entrypoint or 'run.py'}",
             runtime="python311",
+            runner=config.runtime.runner,
             inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],
             secrets=list(config.secrets),
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
