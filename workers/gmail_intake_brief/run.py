@@ -42,32 +42,40 @@ def run(inputs: dict, context) -> dict:
 
 
 def _fetch_emails(conn_id: str, api_key: str, query: str, max_results: int, context) -> list:
-    """Fetch emails via Composio GMAIL_FETCH_EMAILS action."""
-    try:
-        from composio import ComposioToolSet, Action  # type: ignore
+    """Fetch emails via Composio v3 tool execute endpoint (no SDK dependency)."""
+    import requests
 
-        toolset = ComposioToolSet(api_key=api_key, entity_id=conn_id)
-        result = toolset.execute_action(
-            action=Action.GMAIL_FETCH_EMAILS,
-            params={
-                "max_results": min(max_results, 50),
-                "query": query,
-                "include_attachments": False,
-            },
-        )
-        if not result.get("successful"):
-            context.log(f"Composio fetch error: {result.get('error')}", level="error")
-            return []
-        return result.get("data", {}).get("messages", []) or []
-    except ImportError:
-        context.log("composio package not installed — returning mock email", level="warning")
-        return [
-            {
-                "subject": "Test email",
-                "from": "test@example.com",
-                "snippet": "This is a test email because composio SDK is not installed.",
-            }
-        ]
+    url = "https://backend.composio.dev/api/v3/tools/execute/GMAIL_FETCH_EMAILS"
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    body = {
+        "user_id": "federico",
+        "arguments": {
+            "max_results": min(max_results, 50),
+            "query": query,
+            "include_attachments": False,
+        },
+    }
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=30)
+        r.raise_for_status()
+        messages = (r.json().get("data") or {}).get("messages") or []
+        normalized = []
+        for m in messages:
+            hdrs = (m.get("payload") or {}).get("headers") or []
+            subject = next((h["value"] for h in hdrs if h.get("name") == "Subject"), "(no subject)")
+            sender = next((h["value"] for h in hdrs if h.get("name") == "From"), "unknown")
+            snippet = (m.get("messageText") or "")[:400]
+            normalized.append({
+                "subject": subject,
+                "from": sender,
+                "snippet": snippet,
+                "message_id": m.get("messageId"),
+            })
+        return normalized
+    except requests.HTTPError as exc:
+        body_text = exc.response.text[:200] if exc.response is not None else ""
+        context.log(f"Composio fetch HTTP error: {body_text}", level="error")
+        return []
     except Exception as exc:
         context.log(f"Failed to fetch emails: {exc}", level="error")
         return []
