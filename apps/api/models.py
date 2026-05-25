@@ -364,7 +364,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             type=_contract_input_type(field),
             required=field.required,
             placeholder=field.placeholder,
-            options=field.options or field.enum,
+            options=field.options or ([str(value) for value in field.enum] if field.enum else None),
             default=field.default,
             accept_csv=field.accept_csv,
         )
@@ -399,6 +399,114 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             label=contract.approvals.label,
         ),
         csv_required_columns=contract.csv_required_columns,
+    )
+
+
+def _slug_from_worker_id(worker_id: str) -> str:
+    slug = re.sub(r"[^a-z0-9-]+", "-", worker_id.lower().replace("_", "-"))
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    if len(slug) < 3:
+        slug = f"{slug}-worker".strip("-")
+    return slug[:64].strip("-")
+
+
+def _legacy_input_to_contract_field(field: WorkerInput) -> WorkerContractField:
+    if field.type == "file":
+        return WorkerContractField(
+            name=field.name,
+            kind="file",
+            media_type="text/csv" if field.accept_csv else "application/octet-stream",
+            required=field.required,
+            label=field.label,
+            placeholder=field.placeholder,
+            accept_csv=field.accept_csv,
+        )
+    scalar_type = {
+        "text": "string",
+        "textarea": "string",
+        "number": "number",
+        "boolean": "boolean",
+        "select": "select",
+    }.get(field.type, field.type)
+    return WorkerContractField(
+        name=field.name,
+        kind="scalar",
+        type=scalar_type,
+        required=field.required,
+        default=field.default,
+        label=field.label,
+        placeholder=field.placeholder,
+        options=field.options,
+        enum=field.options if field.type == "select" else None,
+    )
+
+
+def _legacy_output_to_contract_field(field: WorkerOutput) -> WorkerContractField:
+    if field.type in {"markdown", "csv", "json", "file"}:
+        media_type = {
+            "markdown": "text/markdown",
+            "csv": "text/csv",
+            "json": "application/json",
+            "file": "application/octet-stream",
+        }[field.type]
+        extension = {
+            "markdown": "md",
+            "csv": "csv",
+            "json": "json",
+            "file": "bin",
+        }[field.type]
+        return WorkerContractField(
+            name=field.name,
+            kind="file",
+            media_type=media_type,
+            path=f"out/{field.name}.{extension}",
+            required=True,
+            label=field.label,
+            columns=field.columns,
+            json_required_keys=field.json_required_keys,
+        )
+    scalar_type = "string" if field.type == "text" else field.type
+    return WorkerContractField(
+        name=field.name,
+        kind="scalar",
+        type=scalar_type,
+        required=True,
+        label=field.label,
+    )
+
+
+def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0") -> WorkerContract:
+    """Convert a legacy Workeros worker.yml config into WorkerContract shape."""
+    return WorkerContract(
+        schema_version="0.3",
+        name=_slug_from_worker_id(config.id),
+        title=config.name,
+        description=config.description or config.name,
+        version=version,
+        entrypoint="SKILL.md",
+        targets=["generic"],
+        exec=WorkerContractExec(
+            command=f"python {config.runtime.entrypoint or 'run.py'}",
+            runtime="python311",
+            inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],
+            secrets=list(config.secrets),
+            outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
+        ),
+        capabilities=WorkerContractCapabilities(
+            secrets=list(config.secrets),
+            network=WorkerContractNetworkCapabilities(egress=bool(config.secrets or config.connections)),
+        ),
+        approvals=WorkerContractApprovals(
+            required=config.approvals.required,
+            label=config.approvals.label,
+        ),
+        trigger=WorkerContractTrigger(
+            type=config.trigger.type,
+            cron=config.trigger.cron,
+            webhook=config.trigger.webhook,
+        ),
+        connections=list(config.connections),
+        csv_required_columns=config.csv_required_columns,
     )
 
 
