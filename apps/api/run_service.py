@@ -93,13 +93,28 @@ def _get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
     loaded = _load_worker_recipe(worker_id)
     return loaded[0] if loaded else None
 
+
+def _merge_instance_inputs(instance: Optional[Dict[str, Any]], inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply saved instance input defaults, with per-run inputs taking precedence."""
+    if not instance:
+        return dict(inputs)
+    defaults = instance.get("input_values") or {}
+    if not isinstance(defaults, dict):
+        return dict(inputs)
+    return {**defaults, **inputs}
+
 def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
     trigger_source: str = "manual",
 ) -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    config = _get_worker_config_for_run(worker_id)
+    loaded = _load_worker_recipe(worker_id)
+    config = loaded[0] if loaded else None
+    instance = loaded[1] if loaded else None
+    if instance and not instance.get("enabled", True):
+        raise ValueError(f"Worker {worker_id} is disabled")
+    effective_inputs = _merge_instance_inputs(instance, inputs)
     approval_status = (
         ApprovalStatus.PENDING
         if config and config.approvals.required
@@ -123,7 +138,7 @@ def create_run(
                 RunStatus.QUEUED.value,
                 trigger_source,
                 runner,
-                json.dumps(inputs),
+                json.dumps(effective_inputs),
                 approval_status.value,
                 now_iso(),
             ),
@@ -236,7 +251,10 @@ def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
 
 def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-    config = _get_worker_config_for_run(worker_id)
+    loaded = _load_worker_recipe(worker_id)
+    config = loaded[0] if loaded else None
+    instance = loaded[1] if loaded else None
+    effective_inputs = _merge_instance_inputs(instance, inputs)
 
     def log_fn(msg: str, level: str = "info") -> None:
         secrets = get_secrets_for_worker(worker_id)
@@ -253,9 +271,15 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(err, level="error")
         return
 
+    if instance and not instance.get("enabled", True):
+        err = "Worker is disabled"
+        update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        log_fn(err, level="error")
+        return
+
     # Validate required inputs
     for inp in config.inputs:
-        if inp.required and (inp.name not in inputs or inputs[inp.name] in (None, "")):
+        if inp.required and (inp.name not in effective_inputs or effective_inputs[inp.name] in (None, "")):
             err = f"Missing required input: {inp.name}"
             update_run_status(run_id, RunStatus.FAILED.value, error=err)
             log_fn(err, level="error")
@@ -279,7 +303,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     result = driver.run(
         worker_id=worker_id,
         run_id=run_id,
-        inputs=inputs,
+        inputs=effective_inputs,
         secrets=secrets,
         log_fn=log_fn,
         trace_id=trace_id,
