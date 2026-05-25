@@ -280,3 +280,105 @@ Federico 2026-05-25 update: "both directions interesting. pls capture."
 Shape A (decorator) and Shape B (observability SDK) both stay in V2 candidate scope. The decorator is the wedge for code-people; the SDK is the lighter lift for already-running cron jobs that just want observability.
 
 Order: A first (full worker semantics), then B as a stripped subset using the same SDK.
+
+---
+
+## V1.5+ — User Experience (non-developer persona)
+
+Federico 2026-05-25: "think from a user perspective pls, how to make this extremely intuitive and easy to use?"
+
+The persona that matters: someone like Morten at NovaSearch. Not a developer. They get a Vercel SSO link, open the app, and need to feel "I understand what this is and what to do" in 30 seconds.
+
+### First-time onboarding
+- Welcome state on Overview when run_count = 0: "Try one of these →" with 3 suggested workers prefilled with example inputs
+- "What is Floom?" 1-tap explainer card, dismissible
+- Per-page contextual tour highlights ("?" icon → walks through what each section does)
+- Tour state persisted in user profile (don't re-tour after dismissed)
+
+### Worker creation accessibility
+Current `/workers/new` has a `run.py` textarea. Recruiters won't write Python. Add:
+- **Starter templates**: "CSV summarizer", "Email triager", "Web scraper", "Sheet enricher" — each pre-fills `run.py` with working code the user can edit minimally
+- **AI-assisted generation** (V2 stretch): "Describe what you want this worker to do" → LLM generates the run.py + worker.yml. Codex/Anthropic SDK call. Recruiter never sees raw Python unless they want to.
+- **Hide raw YAML by default** behind an "Advanced" toggle on the create page
+
+### Worker discovery
+- Tags + category filter on `/workers` (recruiting / email / compliance / research / etc.)
+- Each card shows: example output preview thumbnail, tags, "runs in last 30 days" count, "last used by [team member]" if multi-user
+- Sort: alphabetical / most-used / recently-created
+
+### "Try with sample input" CTA
+- Every worker has `example_input` declared in `worker.yml` (already in roadmap)
+- Worker detail run form has a "Use example" button that fills all fields
+- First-time users hit Run with the example to see what it does
+
+### Post-run actions (dead-end fix)
+After a run completes, surface:
+- **Copy to clipboard** per output (one button per artifact)
+- **Save to library** — pin this output for later
+- **Use as input for another worker** — opens worker picker with this output prefilled
+- **Schedule this** — "Run this same input every Monday at 9am" → creates schedule entry (depends on Schedule trigger landing)
+- **Share** — generates a read-only link (multi-user-gated)
+
+### Notifications
+- Browser Notification API opt-in: "Notify me when long runs finish?" → ping when run completes
+- Email-on-complete option per run (or default-on for runs > 30s)
+- Slack/WhatsApp via the alert channels in the observability roadmap section
+
+### Failure recovery surface
+Structured error panel shipped in V1 (pattern-matched friendly headline + raw collapsible). Add CTAs per error type:
+- `openai_auth` → "Update OPENAI_API_KEY in Secrets" (button → /secrets)
+- `openai_rate_limit` → "Retry in 60s" (button starts a timer)
+- `schema_violation` → "Edit worker code" (button → worker manifest tab)
+- `missing_connection` → "Connect [App]" (button → /connections)
+- `timeout` → "Retry with shorter input" (re-opens form with same input)
+
+Every failed run has a "Retry" button at minimum.
+
+### Secrets/Connections "used by" rendering
+- `/secrets` row shows badges of all workers declaring that secret
+- `/connections` row shows badges of all workers declaring that connection
+- Click badge → jumps to worker detail
+
+### Global ⌘K palette
+- Trigger with ⌘K (or Ctrl+K on Linux/Windows)
+- Searches: workers (by name + tags), runs (by ID + by input content), pages
+- Quick actions: "Run worker X", "Open connections", "Toggle theme"
+- Keyboard-first navigation — matches Linear/Vercel/Notion idiom
+
+### Empty-state CTAs everywhere
+- /runs empty: "Run your first worker →"
+- /approvals empty (when re-enabled): "Approvals appear when workers ask for them"
+- /secrets empty: "Add OPENAI_API_KEY to use AI workers"
+- /connections empty: "Connect an app to unlock integration workers"
+- Settings empty fields: helpful placeholder text, not silence
+
+### Help + Docs
+- `/docs` page in-app — short walkthrough articles ("How worker.yml works", "What is a Connection", "Approvals — coming soon")
+- "?" icon top-right of every page, opens contextual help drawer for THAT page
+- Inline tooltips on every uncommon term (worker.yml, trigger, artifact, secret)
+
+### Post-OAuth pointer
+After Gmail (or any) connection goes Active: show a banner on /connections — "You can now run: Gmail Intake Brief →" linking to the worker that uses it. Same for HubSpot, Apollo, etc.
+
+### "What's new" / changelog
+- In-app changelog drawer accessible from sidebar footer
+- Highlights new workers, new connections, breaking changes
+- Persists "last seen" so we can show a subtle dot for unread updates
+
+### Mobile = monitoring surface
+- Mobile drawer + responsive layout already works
+- BUT filling worker forms on mobile is bad UX
+- Position mobile as a "watch what's running" surface: runs feed, approvals queue, alerts
+- Discourage worker creation on mobile (or hide /workers/new behind "request desktop view")
+
+### Priority order
+1. Empty-state CTAs (cheapest, biggest first-impression lift)
+2. "Try with sample input" CTA + `example_input` in worker.yml
+3. Post-run actions (Copy, Use-as-input, Schedule, Retry)
+4. Secrets/Connections "used by" surface
+5. Per-error-type "what to do next" CTAs
+6. ⌘K palette
+7. Starter templates for worker creation
+8. Onboarding tour + welcome state
+9. Notifications (browser + email)
+10. `/docs` + contextual help
