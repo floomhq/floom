@@ -26,10 +26,10 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
             href={item.href}
             onClick={onNavigate}
             className={cn(
-              "flex min-h-11 items-center gap-2.5 rounded-md border-l px-3 py-2 text-sm transition-all duration-150 ease-[var(--ease)]",
+              "flex h-9 items-center gap-2.5 rounded-md border px-2.5 text-sm font-medium transition-[background,border-color,color] duration-150 ease-[var(--ease)]",
               active
-                ? "border-[var(--accent-line)] bg-[var(--accent-soft)] font-medium text-ink shadow-sm"
-                : "border-transparent text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+                ? "border-[color-mix(in_srgb,var(--accent)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-ink shadow-none [&_svg]:text-[var(--accent)] [&_svg]:opacity-100"
+                : "border-transparent text-[var(--ink-soft)] hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] hover:text-ink [&_svg]:opacity-65"
             )}
           >
             <item.icon className="w-4 h-4" />
@@ -54,7 +54,7 @@ export function Sidebar() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-[var(--sidebar-glass)] px-4 shadow-sm backdrop-blur-xl md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--accent-line)] bg-[var(--sidebar-glass)] px-4 shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:hidden">
         <Link href="/" className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
             F
@@ -74,7 +74,8 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="sticky top-0 hidden h-screen w-60 flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-xl md:flex">
+      <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--accent-line)] bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:flex">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/70 dark:bg-white/[0.055]" aria-hidden="true" />
         <div className="px-5 py-6">
           <Link href="/" className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
@@ -97,8 +98,9 @@ export function Sidebar() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-line bg-[var(--paper)] shadow-pop">
-            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--accent-line)] bg-[var(--sidebar-glass)] shadow-pop backdrop-blur-[14px] backdrop-saturate-[140%]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/70 dark:bg-white/[0.055]" aria-hidden="true" />
+            <div className="flex items-center justify-between border-b border-[var(--accent-line)] px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
                 <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
                   F
