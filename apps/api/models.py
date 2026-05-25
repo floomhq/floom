@@ -59,6 +59,7 @@ class WorkerInput(BaseModel):
     type: str
     required: bool = False
     placeholder: Optional[str] = None
+    description: Optional[str] = None
     options: Optional[List[str]] = None
     default: Optional[Any] = None
     accept_csv: bool = False  # When True, render the CSV column mapper in the UI
@@ -373,6 +374,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             type=_contract_input_type(field),
             required=field.required,
             placeholder=field.placeholder,
+            description=field.description,
             options=field.options or ([str(value) for value in field.enum] if field.enum else None),
             default=field.default,
             accept_csv=field.accept_csv,
@@ -428,6 +430,7 @@ def _legacy_input_to_contract_field(field: WorkerInput) -> WorkerContractField:
             path=f"inputs/{field.name}",
             required=field.required,
             label=field.label,
+            description=field.description,
             placeholder=field.placeholder,
             accept_csv=field.accept_csv,
         )
@@ -445,6 +448,7 @@ def _legacy_input_to_contract_field(field: WorkerInput) -> WorkerContractField:
         required=field.required,
         default=field.default,
         label=field.label,
+        description=field.description,
         placeholder=field.placeholder,
         options=field.options,
         enum=field.options if field.type == "select" else None,
