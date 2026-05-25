@@ -26,29 +26,30 @@ Federico 2026-05-26: "skills-based markdown workers should come much earlier tha
 
 1. **WorkerContract migration** — adopt skills-neo's `@floom/shared` manifest schema; split `skill_version` (recipe) vs `worker` (instance). Unlocks marketplace install path from skills.floom.dev.
 2. **Skill-based markdown workers (`runtime.type: skill`, entrypoint `SKILL.md`)** — the connection between skills.floom.dev (library) and workeros (runtime). Non-developers write a markdown spec; LLM executes. **NEW primitive for BOTH workeros and skills-neo** — both products need it built.
-3. **Capability grants (fail-closed)** — declared `secrets[]` + `network.egress: boolean`. Migrate 8 existing workers to declare what they need.
+3. **Capability grants (fail-closed)** — T1 scope = `secrets[]` + `network.egress: boolean` ONLY. Migrate 12 existing workers (= the live count) to declare. Broader grants (`connections`, `skills`, `workers`, `artifacts_from`) move to T1.5 follow-up — see historical capability declarations section for the full set.
 4. **Content-hashed file input bindings** — port `apps/web/lib/live-skills/file-inputs.ts` pattern from skills-neo. Per-worker + per-run authorization.
 5. **5 upstream PRs to skills-neo `live-skills-v0x-schema` branch** — `label`, `placeholder`, `description`, `select+options`, `approvals` block. Backward-compatible additions to `@floom/shared` Zod schema.
 
 ### Tier 2 — visibility + UX (after primitives align)
 6. **Connections page polish** — real Composio logos + OAuth scopes display
 7. **Skeleton visual fix** — radius mismatch, dark-mode contrast (broker-blocked diagnosis, queued)
-8. **Worker descriptions richer** — `long_description`, `tags`, `use_cases`, `example_input` in worker.yml
+8. **Worker descriptions richer** — `long_description`, `tags`, `folder`, `use_cases`, `example_input`, `example_output`, `how_it_works` in worker.yml
 9. **Empty-state CTAs** everywhere
 10. **Post-run actions** — copy, use-as-input, schedule, retry
 11. **Per-error-type CTAs** — "what to do next" wired to each error class
 12. **Outgoing HMAC notify URLs** (port `notify-url.ts` from live-skills)
 
 ### Tier 3 — automation + observability surfaces
-13. **Daily health checks + alerts** (connection liveness, secret tests)
-14. **Calendar view of scheduled runs**
-15. **⌘K palette + global search**
-16. **Notifications** (browser + email + Slack)
-17. **Help / docs / changelog in-app**
+13. **Worker composition** — `context.workers.invoke(id, inputs)` sync call from one worker into another. Federico 2026-05-25 approved; placed here because it depends on capability grants (T1c) being live so a worker's grant to invoke another is fail-closed-enforceable.
+14. **Daily health checks + alerts** (connection liveness, secret tests)
+15. **Calendar view of scheduled runs**
+16. **⌘K palette + global search**
+17. **Notifications** (browser + email + Slack)
+18. **Help / docs / changelog in-app**
 
 ### Tier 4 — distribution + scale
-18. **Library mode SDK** — `@floom.worker` decorator (Shape A) + observability SDK (Shape B)
-19. **Multi-user / team workspaces** — auth, per-user secrets, role separation
+19. **Library mode SDK** — `@floom.worker` decorator (Shape A) + observability SDK (Shape B)
+20. **Multi-user / team workspaces** — auth, per-user secrets, role separation
 
 ### Tier 5 — parked (revisit later)
 - Real pause-resume approvals (V2; resurfaces only when an action-taking worker needs it)
@@ -74,7 +75,9 @@ Federico 2026-05-26: "skills-based markdown workers should come much earlier tha
 
 ---
 
-## V1.5 (queued — Federico-approved, build when next round opens)
+## V1.5 (mixed status — F1/F2/F3 SHIPPED via PR #17 on 2026-05-25, others queued)
+
+**Status note:** Sandbox abstraction (F1), Schedule trigger (F2), Webhook trigger (F3) shipped via PR #17 squash-merged as `58e1fbb`. The historical content below describes the design intent; live behavior may differ. WorkerContract migration is the next active item (T1a codex running).
 
 ### Worker composition (cross-worker invocation)
 - `context.workers.invoke(id, inputs)` — sync call from one worker into another
@@ -208,8 +211,11 @@ When worker A invokes worker B via `context.workers.invoke()`:
 ### Q2: Multi-action worker file layout — already decided
 - Federico 2026-05-25: option A — multiple files per folder, declared in `worker.yml` `actions:`. ✅ locked.
 
-### Q3: E2B-default or per-worker selection — RESOLVED
-- Federico 2026-05-25: per-worker selection (`runner: local | e2b` in worker.yml). Both drivers ship. ✅ locked.
+### Q3: Sandbox policy — RESOLVED (canonical)
+- **Per-worker selection.** `runtime.runner: local | e2b` declared in `worker.yml`. No global default policy.
+- Worker.yml field validator accepts both values; failure mode = invalid value → worker won't register.
+- Backward-compat: workers without an explicit `runner:` value fall back to `local`.
+- Other sandbox mentions in this file (94-104, 748) describe this same policy.
 - Federico 2026-05-25: leaning "everything on E2B" but open to challenge. ✅ default = E2B; trusted-local stays as dev/debug only.
 
 ---
@@ -456,7 +462,9 @@ After Gmail (or any) connection goes Active: show a banner on /connections — "
 
 ---
 
-## V2 — Workers as Skills (markdown-first, code-optional)
+## V2 — Workers as Skills (markdown-first, code-optional) — [PROMOTED to Tier 1 on 2026-05-26]
+
+**Status note:** This section was originally V2 parked. Federico 2026-05-26 moved skill-based markdown workers to Tier 1 foundational (see top of file Priority Order). The historical content below explains the design + why; the Tier 1 line is the canonical sequencing.
 
 Federico 2026-05-25: "why do workers require python? huh? it can even just be an md file since we have LLM behind it, no? like we want to bring skills to live. skills can be pure md / a mix / pure python..."
 
@@ -555,7 +563,7 @@ Parked V2. The most strategically important item in this roadmap.
 
 Federico 2026-05-25: "agree! sounds good. compatibility with skills-neo is important. otherwise we diverge too much."
 
-Adopt skills-neo's `WorkerContract` shape (from `@floom/shared`) as workeros' canonical manifest. Migrate the 8 existing worker.yml files. Lock in marketplace compatibility with skills.floom.dev.
+Adopt skills-neo's `WorkerContract` shape (from `@floom/shared`) as workeros' canonical manifest. Migrate the 12 existing worker.yml files. Lock in marketplace compatibility with skills.floom.dev.
 
 ### What changes in workeros
 
@@ -593,7 +601,7 @@ capabilities:
    - Worker row has `trigger_type`, `cron_expr`, `next_run_at` etc.
    - Same skill can power a manual worker AND a scheduled worker AND a webhook worker
 
-4. **Migration of existing 8 workers:**
+4. **Migration of existing 12 workers:**
    - Each becomes a `skill_version` (recipe) + 1 `worker` (instance) — backward-compatible UX
    - Old `worker.yml` shape stays parseable for one release with a deprecation warning, but new workers must use WorkerContract
 
@@ -703,7 +711,7 @@ After F1/F2/F3 + WorkerContract migration. Frontend-heavy round, ~2-3h codex.
 
 After Federico's UI walkthrough, codex consulted on three open scope questions. Verdicts:
 
-**A. Tags, not folders.** Flat `tags: [...]` field in `worker.yml`. Render as chips on `/workers` with one-click filter. No folder hierarchy, no tag-management UI in first pass. 12 workers don't justify folders; NovaSearch needs quick recognition like `recruiting`, `email`, `compliance`, `client-a`.
+**A. [SUPERSEDED 2026-05-26]** ~~Tags, not folders.~~ See later "Scope override (2026-05-26) — folders + tags, both" section. Both folders (single-parent) + tags (multi-assign) are in scope. Original codex recommendation kept here for the why-it-was-considered context.
 
 **B. T2 entry round = Workers page.** Front door for non-devs. Fixing it compounds queued T2 items: logos (Connections polish), tags filter, richer descriptions (long_description/use_cases/example_input), empty-state CTAs all become visible in one high-traffic surface.
 
