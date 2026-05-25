@@ -81,6 +81,7 @@ class WorkerWebhookConfig(BaseModel):
 class WorkerTrigger(BaseModel):
     type: str
     cron: Optional[str] = None
+    timezone: Optional[str] = None
     every: Optional[str] = None
     at: Optional[str] = None
     webhook: Optional[WorkerWebhookConfig] = None
@@ -405,6 +406,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         trigger=WorkerTrigger(
             type=contract.trigger.type,
             cron=contract.trigger.cron,
+            timezone=contract.trigger.timezone,
             webhook=contract.trigger.webhook,
         ),
         runtime=runtime,
