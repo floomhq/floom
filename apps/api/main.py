@@ -236,13 +236,62 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
         )
 
 
+def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
+    d = row_to_dict(row)
+    config = get_worker_config_for_run(d["id"])
+    manifest = json.loads(d.get("manifest_json") or "{}")
+    return {
+        "id": d["id"],
+        "name": d["name"],
+        "description": manifest.get("description") if isinstance(manifest, dict) else None,
+        "status": "healthy",
+        "trigger_type": d.get("trigger_type") or (config.trigger.type if config else "manual"),
+        "runner": config.runtime.runner if config and config.runtime else "local",
+        "config": config.model_dump(mode="json") if config else {},
+        "manifest": manifest,
+    }
+
+
+def _list_db_workers() -> List[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT w.id, w.name, w.trigger_type, sv.manifest_json
+                FROM workers w
+                JOIN skill_versions sv ON sv.id = w.skill_version_id
+                ORDER BY w.created_at, w.id
+                """
+            ).fetchall()
+        return [_db_worker_from_row(row) for row in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT w.id, w.name, w.trigger_type, sv.manifest_json
+                FROM workers w
+                JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.id = ?
+                """,
+                (worker_id,),
+            ).fetchone()
+        return _db_worker_from_row(row) if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Workers
 # ---------------------------------------------------------------------------
 
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
-    workers = discover_workers(use_cache=True)
+    workers = _list_db_workers() or discover_workers(use_cache=True)
     paused_workers = _get_paused_workers()
     result: List[WorkerSummary] = []
     for w in workers:
@@ -285,7 +334,7 @@ def list_workers() -> List[WorkerSummary]:
 
 @app.post("/workers/{worker_id}/pause", response_model=WorkerStateResponse)
 def pause_worker(worker_id: str) -> WorkerStateResponse:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     with get_db() as conn:
@@ -299,7 +348,7 @@ def pause_worker(worker_id: str) -> WorkerStateResponse:
 
 @app.post("/workers/{worker_id}/unpause", response_model=WorkerStateResponse)
 def unpause_worker(worker_id: str) -> WorkerStateResponse:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     with get_db() as conn:
@@ -313,7 +362,7 @@ def unpause_worker(worker_id: str) -> WorkerStateResponse:
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
 def get_worker_detail(worker_id: str) -> WorkerDetail:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -367,6 +416,9 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         yml_path = WORKERS_DIR / worker_id / "worker.yml"
         if yml_path.is_file():
             manifest_yaml = yml_path.read_text()
+        elif worker.get("manifest"):
+            import yaml as pyyaml
+            manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
     except Exception:
         pass
 
@@ -465,7 +517,7 @@ def reload_workers() -> ReloadResponse:
 
 @app.post("/workers/{worker_id}/runs", response_model=ActionResponse)
 def create_worker_run(worker_id: str, payload: RunCreate) -> ActionResponse:
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -1278,7 +1330,7 @@ async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
     if not _check_webhook_rate_limit(rl_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")
 
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -1334,7 +1386,7 @@ def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
     """
     from webhook_service import generate_webhook_secret
 
-    worker = get_worker(worker_id)
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
