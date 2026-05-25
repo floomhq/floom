@@ -6,6 +6,59 @@ Last updated: 2026-05-25
 
 ---
 
+---
+
+## Priority order (corrected 2026-05-26)
+
+Federico 2026-05-26: "skills-based markdown workers should come much earlier than the calendar view." Reordering by strategic importance, not by build effort. The literal section order in this file is HISTORICAL (append-only as decisions landed); this priority list overrides it.
+
+### Tier 0 — done (shipped this session)
+- V0 spec § 25 MVP
+- F1 sandbox abstraction (local + e2b per-worker)
+- F2 cron scheduler
+- F3 webhook trigger with HMAC
+- Composio Connections
+- Design v2 (glass material, theme toggle, blue accent)
+- V1 UX (worker creation UI, manifest viewer, log search, structured errors, secrets CRUD, runs export)
+
+### Tier 1 — foundational primitives (DO NEXT; aligns workeros with skills-neo)
+**Strategic gate: every Tier-1 item should also exist on skills-neo's live-skills branch. Same primitive logic.**
+
+1. **WorkerContract migration** — adopt skills-neo's `@floom/shared` manifest schema; split `skill_version` (recipe) vs `worker` (instance). Unlocks marketplace install path from skills.floom.dev.
+2. **Skill-based markdown workers (`runtime.type: skill`, entrypoint `SKILL.md`)** — the connection between skills.floom.dev (library) and workeros (runtime). Non-developers write a markdown spec; LLM executes. **NEW primitive for BOTH workeros and skills-neo** — both products need it built.
+3. **Capability grants (fail-closed)** — declared `secrets[]` + `network.egress: boolean`. Migrate 8 existing workers to declare what they need.
+4. **Content-hashed file input bindings** — port `apps/web/lib/live-skills/file-inputs.ts` pattern from skills-neo. Per-worker + per-run authorization.
+5. **5 upstream PRs to skills-neo `live-skills-v0x-schema` branch** — `label`, `placeholder`, `description`, `select+options`, `approvals` block. Backward-compatible additions to `@floom/shared` Zod schema.
+
+### Tier 2 — visibility + UX (after primitives align)
+6. **Connections page polish** — real Composio logos + OAuth scopes display
+7. **Skeleton visual fix** — radius mismatch, dark-mode contrast (broker-blocked diagnosis, queued)
+8. **Worker descriptions richer** — `long_description`, `tags`, `use_cases`, `example_input` in worker.yml
+9. **Empty-state CTAs** everywhere
+10. **Post-run actions** — copy, use-as-input, schedule, retry
+11. **Per-error-type CTAs** — "what to do next" wired to each error class
+12. **Outgoing HMAC notify URLs** (port `notify-url.ts` from live-skills)
+
+### Tier 3 — automation + observability surfaces
+13. **Daily health checks + alerts** (connection liveness, secret tests)
+14. **Calendar view of scheduled runs**
+15. **⌘K palette + global search**
+16. **Notifications** (browser + email + Slack)
+17. **Help / docs / changelog in-app**
+
+### Tier 4 — distribution + scale
+18. **Library mode SDK** — `@floom.worker` decorator (Shape A) + observability SDK (Shape B)
+19. **Multi-user / team workspaces** — auth, per-user secrets, role separation
+
+### Tier 5 — parked (revisit later)
+- Real pause-resume approvals (V2; resurfaces only when an action-taking worker needs it)
+- Multi-agent PR review loop (concept only)
+- Mobile = monitoring-surface positioning
+
+---
+
+*Below this line: original append-only sections documenting individual decisions. Read for "why" + raw quotes. The Priority Order above is the canonical sequence.*
+
 ## V1 (shipping now / shipped)
 
 | Item | Status | Notes |
