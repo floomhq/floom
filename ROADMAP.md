@@ -696,3 +696,39 @@ For unknown scopes: fall back to showing the raw URL.
 
 ### Sequencing
 After F1/F2/F3 + WorkerContract migration. Frontend-heavy round, ~2-3h codex.
+
+---
+
+## Scope decisions (2026-05-26) — codex recommendation accepted
+
+After Federico's UI walkthrough, codex consulted on three open scope questions. Verdicts:
+
+**A. Tags, not folders.** Flat `tags: [...]` field in `worker.yml`. Render as chips on `/workers` with one-click filter. No folder hierarchy, no tag-management UI in first pass. 12 workers don't justify folders; NovaSearch needs quick recognition like `recruiting`, `email`, `compliance`, `client-a`.
+
+**B. T2 entry round = Workers page.** Front door for non-devs. Fixing it compounds queued T2 items: logos (Connections polish), tags filter, richer descriptions (long_description/use_cases/example_input), empty-state CTAs all become visible in one high-traffic surface.
+
+**C. Tier order unchanged.** Workers-as-skills + WorkerContract + capability grants + file inputs stay T1 (foundational primitives). Calendar / notifications / ⌘K stay T3 (organize usage AFTER there is enough valuable usage to organize).
+
+### Federico's substitution principle (locked)
+
+"Workspace switching CAN BE REPLACED with folders for now" — when a heavy feature has a lighter alternative, default to the lighter one. Examples already applied or queued:
+- Multi-workspace switcher → tags (workspace = client-a tag)
+- Roles inside workspace → single user for V1
+- Library view → punted; rely on workers list + connections + skills.floom.dev marketplace
+- Pause-resume approvals → review-after-output hidden until pause-resume lands
+- Multi-action workers → option A (multiple files per folder) instead of new sub-router
+
+### Calendar view (T3) — promote when cheap
+
+Federico: "i do like calendar view if its not too complicated". F2 cron scheduler is already shipped, so calendar = a frontend month/week grid reading `next_run_at` + recent runs from existing endpoints. Estimated 2-3h codex. Promotion rule: dispatch calendar whenever bandwidth opens during T2/T3; don't block T1.
+
+### The first-run moment (codex insight D)
+
+Critical observation: every worker today requires typing inputs from scratch on first run. workeros reads as a "developer console" until that's fixed.
+
+T1a (in flight) already roadmapped `example_input: {...}` per worker as part of the richer descriptions. Promote this:
+- T1a: add `example_input` to the WorkerContract Pydantic schema (cheap)
+- T2 first sub-round: backfill `example_input` for all 12 workers + add "Try with sample" button on worker detail
+- Acceptance test: a fresh visitor can run any stock worker in under 60 seconds via a single click
+
+This is THE conversion gate. Without it, no amount of design v2 polish will land for a non-dev persona.
