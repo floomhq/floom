@@ -929,6 +929,187 @@ def list_secrets() -> List[SecretItem]:
 
 
 # ---------------------------------------------------------------------------
+# Connections (Composio OAuth)
+# ---------------------------------------------------------------------------
+
+class ConnectionInitRequest(BaseModel):
+    app_name: str
+
+
+class ConnectionItem(BaseModel):
+    id: str
+    app_name: str
+    composio_connection_id: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class ConnectionInitResponse(BaseModel):
+    id: str
+    app_name: str
+    redirect_url: str
+    composio_connection_id: str
+
+
+def _get_callback_url() -> str:
+    """Build the OAuth callback URL for Composio to redirect to."""
+    base = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    return f"{base}/connections/callback"
+
+
+@app.get("/connections", response_model=List[ConnectionItem])
+def list_connections() -> List[ConnectionItem]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at "
+            "FROM composio_connections ORDER BY app_name"
+        )
+        rows = cursor.fetchall()
+    return [ConnectionItem(**row_to_dict(r)) for r in rows]
+
+
+@app.post("/connections", response_model=ConnectionInitResponse)
+def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitResponse:
+    from composio_client import initiate_connection as composio_initiate
+    app_name = payload.app_name.lower().strip()
+    if not app_name:
+        raise HTTPException(status_code=400, detail="app_name is required")
+
+    callback_url = _get_callback_url()
+    try:
+        result = composio_initiate(app_name, callback_url)
+    except Exception as exc:
+        logger.exception("Failed to initiate Composio connection for %s", app_name)
+        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+
+    composio_conn_id = result["composio_connection_id"]
+    redirect_url = result["redirect_url"]
+
+    # Upsert into local DB (replace any prior row for this app)
+    conn_id = str(__import__("uuid").uuid4())
+    now = now_iso()
+    with get_db() as conn:
+        # Check if row already exists for this app
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM composio_connections WHERE app_name = ?", (app_name,)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            conn_id = existing["id"]
+            conn.execute(
+                "UPDATE composio_connections SET composio_connection_id=?, status='initiated', updated_at=? WHERE id=?",
+                (composio_conn_id, now, conn_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO composio_connections (id, app_name, composio_connection_id, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'initiated', ?, ?)",
+                (conn_id, app_name, composio_conn_id, now, now),
+            )
+
+    return ConnectionInitResponse(
+        id=conn_id,
+        app_name=app_name,
+        redirect_url=redirect_url,
+        composio_connection_id=composio_conn_id,
+    )
+
+
+@app.get("/connections/callback")
+def connections_callback(connection_id: str = "", status: str = ""):
+    """OAuth callback landing — Composio redirects here after user authorizes.
+
+    Composio sends: ?connection_id=<composio_conn_id>&status=<status>
+    We update the local DB and redirect the user to /connections.
+    """
+    from fastapi.responses import RedirectResponse
+
+    if connection_id:
+        # Try to refresh from Composio first
+        try:
+            from composio_client import check_status
+            remote_status = check_status(connection_id)
+        except Exception:
+            remote_status = status or "active"
+
+        final_status = remote_status if remote_status else (status or "active")
+        now = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE composio_connections SET status=?, composio_connection_id=?, updated_at=? "
+                "WHERE composio_connection_id=?",
+                (final_status, connection_id, now, connection_id),
+            )
+
+    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+
+
+@app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
+def get_connection_status(connection_id: str) -> ConnectionItem:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at "
+            "FROM composio_connections WHERE id = ?",
+            (connection_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    item = row_to_dict(row)
+
+    # Refresh from Composio
+    try:
+        from composio_client import check_status
+        remote_status = check_status(item["composio_connection_id"])
+        if remote_status and remote_status != item["status"]:
+            now = now_iso()
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE composio_connections SET status=?, updated_at=? WHERE id=?",
+                    (remote_status, now, connection_id),
+                )
+            item["status"] = remote_status
+            item["updated_at"] = now
+    except Exception as exc:
+        logger.warning("Could not refresh Composio status for %s: %s", connection_id, exc)
+
+    return ConnectionItem(**item)
+
+
+@app.delete("/connections/{connection_id}")
+def delete_connection(connection_id: str):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT composio_connection_id FROM composio_connections WHERE id = ?",
+            (connection_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    composio_conn_id = row["composio_connection_id"]
+
+    # Attempt to revoke from Composio (best-effort)
+    try:
+        from composio_client import revoke_connection
+        revoke_connection(composio_conn_id)
+    except Exception as exc:
+        logger.warning("Could not revoke Composio connection %s: %s", composio_conn_id, exc)
+
+    with get_db() as conn:
+        conn.execute("DELETE FROM composio_connections WHERE id = ?", (connection_id,))
+
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
 

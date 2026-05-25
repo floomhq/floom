@@ -97,6 +97,7 @@ class WorkerConfig(BaseModel):
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
     secrets: List[str] = []
+    connections: List[str] = []  # Composio app slugs required by this worker
     outputs: List[WorkerOutput] = []
     approvals: WorkerApprovalConfig = WorkerApprovalConfig()
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
@@ -251,15 +252,45 @@ class WorkerStateResponse(BaseModel):
 # Domain types for worker execution
 # ---------------------------------------------------------------------------
 
+class ConnectionsNamespace:
+    """Provides attribute-style access to Composio connections.
+
+    Usage in worker: context.connections.gmail  → composio_connection_id str
+    Raises AttributeError with a helpful message for missing/inactive connections.
+    """
+
+    def __init__(self, connection_ids: Dict[str, str]):
+        # app_name → composio_connection_id
+        self._ids = connection_ids
+
+    def __getattr__(self, app_name: str) -> str:
+        if app_name.startswith("_"):
+            raise AttributeError(app_name)
+        conn_id = self._ids.get(app_name)
+        if not conn_id:
+            raise AttributeError(
+                f"Connection '{app_name}' is not active. "
+                f"Connect it at /connections first."
+            )
+        return conn_id
+
+    def get(self, app_name: str) -> Optional[str]:
+        return self._ids.get(app_name)
+
+    def __contains__(self, app_name: str) -> bool:
+        return app_name in self._ids
+
+
 class WorkerContext:
     """Typed context passed to worker run() functions.
 
     Provides:
-      - log(msg, level="info")  → structured logging
-      - secrets                 → dict of resolved secrets
-      - run_id, worker_id       → execution identifiers
-      - artifact_dir            → writable output directory
-      - trace_id                → observability trace ID
+      - log(msg, level="info")     → structured logging
+      - secrets                    → dict of resolved secrets
+      - connections.<app>          → Composio connection ID for app
+      - run_id, worker_id          → execution identifiers
+      - artifact_dir               → writable output directory
+      - trace_id                   → observability trace ID
 
     Backwards compatibility: supports dict-style access so existing
     workers using ``context["log"]`` continue to work.
@@ -273,6 +304,7 @@ class WorkerContext:
         artifact_dir: str,
         trace_id: str,
         log_fn,
+        connection_ids: Optional[Dict[str, str]] = None,
     ):
         self.run_id = run_id
         self.worker_id = worker_id
@@ -280,6 +312,7 @@ class WorkerContext:
         self.artifact_dir = artifact_dir
         self.trace_id = trace_id
         self._log_fn = log_fn
+        self.connections = ConnectionsNamespace(connection_ids or {})
 
     def log(self, message: str, level: str = "info"):
         self._log_fn(message, level=level)
@@ -305,10 +338,12 @@ class WorkerContext:
             return self.artifact_dir
         if key == "trace_id":
             return self.trace_id
+        if key == "connections":
+            return self.connections
         raise KeyError(key)
 
     def __contains__(self, key: str) -> bool:
-        return key in {"log", "secrets", "run_id", "worker_id", "artifact_dir", "trace_id"}
+        return key in {"log", "secrets", "run_id", "worker_id", "artifact_dir", "trace_id", "connections"}
 
 
 class WorkerResult(BaseModel):
