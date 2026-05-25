@@ -38,11 +38,30 @@ workers:     [research_brief]       # which other workers this one can invoke
 artifacts_from: [run_*]             # cross-run artifact reads
 ```
 
-### Move to E2B runner (drop trusted-local default)
-- Federico 2026-05-25: "I don't know if we really need trusted local. Isn't it much easier with E2B, because E2B is sandboxed and can install dependencies out of that. With the to-do so much engineering around how to run this, dependencies will not work. What about untrusted code? I'm not sure I would actually just have everything on E2B."
-- Decision: E2B becomes the default runner. Trusted-local stays as a dev/debug fallback only.
-- Spec § 10.2 already lists E2B as Phase 3, optional. This decision promotes it to default.
-- Open question for build day: dev-loop UX. Local debugging of E2B-running workers needs a story (logs forwarded, breakpoints, etc.).
+### Sandbox abstraction (per-worker: local | e2b)
+- Federico 2026-05-25: "we already discussed that i want sandbox logic? either local or e2b? since different workers might need different requirements/dependencies?"
+- **Decision: sandbox is per-worker, declared in `worker.yml`.** Worker A may need OpenAI only (runs `local` fine), Worker B may need heavy deps or untrusted code (`e2b`). User chooses.
+- Manifest shape:
+```yaml
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local   # or 'e2b'
+```
+- Implementation: port the `SandboxDriver` interface from skills-neo live-skills (apps/web/lib/live-skills/sandbox/). Two drivers ship at minimum: `local` (Python subprocess in workers venv) and `e2b` (sandbox API, installs requirements.txt per run, captures stdout/stderr/output.json).
+- E2B drivers in live-skills (TS): we port the logic to Python. Same logical contract, different language.
+
+### Schedule trigger (cron)
+- Spec § 11.2. Per-worker cron via `trigger.type: schedule` + `trigger.cron: "0 9 * * MON"`.
+- Implementation: FastAPI background task (asyncio loop) that polls workers every minute, picks workers with `next_run_at <= now`, creates a run. Same pattern as live-skills `scheduler.test.ts`.
+- New DB column `next_run_at` on workers OR new `schedules` table (spec § 13.7 already declares it). Port the existing scaffolded schedules table.
+- UI: nothing new required — schedule status visible on worker detail (and roadmap'd `/calendar` view later).
+
+### Webhook trigger (incoming)
+- Spec § 11.3. Each worker gets `POST /webhooks/{worker_id}`. Body becomes the run input.
+- Worker.yml: `trigger.type: webhook` + optional `webhook.secret` (HMAC-signed) + `webhook.allowed_origins`.
+- Implementation: new FastAPI route. Validate worker exists + (if secret declared) verify HMAC of request body. Create a run with `trigger_source: webhook` and the request body as inputs.
+- Same security model as live-skills `notify-url.ts` + `runner.ts` HMAC.
 
 ### Floom MCP as the unified tool surface
 Federico 2026-05-25: "Workers don't need much apart from whatever they already have in their SDK. OpenAI, Anthropic, Gemini already have search web and tools like that in their SDK, right? Just the MCP of Floom, with whatever guardrails and stuff, would be through the connections. The Composio connections. This MCP obviously also would include other skills."
@@ -110,10 +129,8 @@ Spec § 3.6 approvals are currently fake (review-after-output, no actual side-ef
 
 Build day: requires async-resumable runner (Python async generators or task continuations). E2B-based runners get this for free if the sandbox supports task resume.
 
-### Schedule + Webhook triggers (V0.5 per spec)
-- Spec § 11.2 schedule (cron-based)
-- Spec § 11.3 webhook (per-worker URL `POST /webhooks/{worker_id}`)
-- Not yet built. Build when first concrete use case (e.g., cron-driven CRM sync, Composio webhook arriving at a workeros worker).
+### Schedule + Webhook triggers — promoted to V1.5
+Federico 2026-05-25: "obv we need cron and webhook for workeros, wasnt this discussed?" Yes — moved to V1.5 (see above section).
 
 ### CLI maturity
 - `floom dev / reload / worker create / run` already shipped (PR #12)
@@ -138,7 +155,8 @@ When worker A invokes worker B via `context.workers.invoke()`:
 ### Q2: Multi-action worker file layout — already decided
 - Federico 2026-05-25: option A — multiple files per folder, declared in `worker.yml` `actions:`. ✅ locked.
 
-### Q3: E2B-only or E2B-default-with-local-fallback?
+### Q3: E2B-default or per-worker selection — RESOLVED
+- Federico 2026-05-25: per-worker selection (`runner: local | e2b` in worker.yml). Both drivers ship. ✅ locked.
 - Federico 2026-05-25: leaning "everything on E2B" but open to challenge. ✅ default = E2B; trusted-local stays as dev/debug only.
 
 ---
