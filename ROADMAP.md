@@ -149,3 +149,60 @@ When worker A invokes worker B via `context.workers.invoke()`:
 - **This file**: V1+ decisions and scope. Edit freely as decisions land.
 - **Decisions need a date + source** (e.g., "Federico 2026-05-25"). No anonymous "we decided".
 - **Roadmap is NOT a backlog**: only items Federico has approved go here. Backlog of "could-do" lives in chat / memory until promoted.
+
+---
+
+## V2 candidate — Library mode (workers-as-SDK, not folder-based)
+
+Federico 2026-05-25: "how people can use this like sentry/posthog/langfuse by simply adding import statements to their cron jobs or so? would make this even more flexible? this could maybe be a stripped down minimal version of this?"
+
+Two shapes:
+
+### Shape A — Decorator (workers-as-library)
+Existing functions become Floom workers via `@floom.worker(...)`. Full Floom semantics layered on top.
+
+```python
+from floom import worker
+
+@worker(id="enrich_leads", inputs=[{"name": "rows", "type": "json"}], outputs=[{"name": "enriched", "type": "csv"}])
+def enrich_leads(rows: list) -> dict:
+    # ... existing code ...
+    return {"status": "success", "outputs": {"enriched": "..."}}
+```
+
+Their existing cron / Docker / Lambda calls `enrich_leads(rows=...)` exactly the same. The decorator:
+- Registers the function with the Floom backend on first call
+- Wraps invocations as runs (creates run record, captures logs, stores output)
+- Surfaces in `workers.floom.dev` UI alongside folder-based workers
+- Honors `secrets:` / `connections:` declarations
+
+Distribution wedge: zero migration. Existing cron jobs adopt Floom by adding a decorator, not by restructuring the codebase.
+
+### Shape B — Observability SDK (Sentry/PostHog style)
+Lighter. Their function stays a plain function. They emit telemetry to Floom.
+
+```python
+import floom
+floom.init(api_key="ak_...")
+
+def my_cron():
+    with floom.run("daily_enrich"):
+        floom.log("starting")
+        # ... existing code ...
+        floom.capture_output({"enriched_count": 42})
+```
+
+Less invasive but also less powerful: no run form, no approvals, no auto-trigger.
+
+### Why this matters
+Today's workeros requires the user to restructure their existing code into `workers/<id>/worker.yml + run.py` and host it on the Floom backend. That's friction for anyone with an existing codebase.
+
+Library mode means Floom integrates with how people already run code (cron, Lambda, Docker, GitHub Actions) instead of demanding they migrate. Same trajectory Sentry/PostHog/Langfuse took.
+
+### Scope when this gets built
+- Shape A first (more value, more interesting). Shape B can come as a subset.
+- Backend changes minimal: the worker registry already takes config; library mode just sends config + invocations over HTTP instead of from disk.
+- New artifact: `pip install floom-sdk` published to PyPI.
+- Open question: how does library-mode worker code show up in the UI for inspection? (No `worker.yml` on disk — just the decorator config registered remotely.)
+
+Parked V2. Worth revisiting after V1.5 lands.
