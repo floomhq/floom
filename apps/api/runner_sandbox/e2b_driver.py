@@ -9,10 +9,10 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
-from models import WorkerResult
+from models import WorkerConfig, WorkerResult
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.e2b")
@@ -43,10 +43,11 @@ class E2BSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         trace_id: str,
         timeout_seconds: int = 300,
+        config: Optional[WorkerConfig] = None,
     ) -> WorkerResult:
         try:
             return self._run_in_sandbox(
-                worker_id, run_id, inputs, secrets, log_fn, trace_id, timeout_seconds
+                worker_id, run_id, inputs, secrets, log_fn, trace_id, timeout_seconds, config
             )
         except Exception as exc:
             logger.exception(
@@ -69,6 +70,7 @@ class E2BSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         trace_id: str,
         timeout_seconds: int,
+        config: Optional[WorkerConfig],
     ) -> WorkerResult:
         from e2b import Sandbox  # e2b 2.x
 
@@ -152,9 +154,12 @@ class E2BSandboxDriver(SandboxDriver):
                 log_fn("[e2b] Requirements installed", "info")
 
             # Run the worker — commands.run() is sync, returns CommandResult directly
-            log_fn("[e2b] Executing worker run.py", "info")
+            command = "python run.py"
+            if config and config.runtime and config.runtime.command:
+                command = config.runtime.command
+            log_fn(f"[e2b] Executing worker command: {command}", "info")
             proc = sandbox.commands.run(
-                "python run.py",
+                command,
                 cwd=workdir,
                 envs={
                     "FLOOM_RUN_ID": run_id,
