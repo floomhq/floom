@@ -56,6 +56,9 @@ from run_service import create_run, get_worker_config_for_run, start_run, update
 from run_service import get_secrets_for_worker
 
 load_dotenv()
+api_env_path = Path("/root/.config/workeros/api.env")
+if api_env_path.is_file():
+    load_dotenv(api_env_path, override=False)
 init_db()
 
 # ---------------------------------------------------------------------------
