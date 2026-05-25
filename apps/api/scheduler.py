@@ -116,20 +116,30 @@ def _tick() -> None:
         if now < next_at:
             continue  # not due yet
 
-        # Concurrency guard: skip if previous run still running
-        if _is_worker_running(w["id"]):
-            logger.info(
-                "Skipping scheduled run for %s — previous run still running", w["id"]
+        # Atomic concurrency guard: within a single write transaction, check
+        # whether this worker has a running run.  SQLite serialises writes so
+        # two concurrent callers (if any) cannot both pass the check.
+        # Note: the scheduler runs in a single daemon thread, so this is
+        # belt-and-suspenders for future multi-scheduler safety.
+        new_next = compute_next_run_at(cron_expr, now)
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) as cnt FROM runs WHERE worker_id = ? AND status = 'running'",
+                (w["id"],),
             )
-            # Advance next_run_at so we don't re-attempt this slot every tick
-            new_next = compute_next_run_at(cron_expr, now)
-            if new_next:
-                with get_db() as conn:
+            running_count = (cursor.fetchone() or {}).get("cnt", 0)
+            if running_count:
+                # Still running — advance slot to avoid retrying on every tick
+                if new_next:
                     conn.execute(
                         "UPDATE workers SET next_run_at = ? WHERE id = ?",
                         (new_next, w["id"]),
                     )
-            continue
+                logger.info(
+                    "Skipping scheduled run for %s — previous run still running", w["id"]
+                )
+                continue
 
         # Fire the run
         logger.info(
