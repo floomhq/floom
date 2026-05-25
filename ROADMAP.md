@@ -382,3 +382,98 @@ After Gmail (or any) connection goes Active: show a banner on /connections — "
 8. Onboarding tour + welcome state
 9. Notifications (browser + email)
 10. `/docs` + contextual help
+
+---
+
+## V2 — Workers as Skills (markdown-first, code-optional)
+
+Federico 2026-05-25: "why do workers require python? huh? it can even just be an md file since we have LLM behind it, no? like we want to bring skills to live. skills can be pure md / a mix / pure python..."
+
+**The fundamental rethink.** Today's worker = `worker.yml` + `run.py` (Python required). Federico's insight: with an LLM behind the runtime, the worker can be just a markdown spec. An LLM reads the spec + inputs + available connections/skills, does the work, returns output.
+
+### Three worker types under one primitive
+
+```
+workers/<id>/
+  worker.yml      # always: declares interface (inputs, outputs, connections, secrets, approvals)
+  ONE OF:
+    skill.md      # markdown-only: LLM reads + executes
+    run.py        # Python: classic worker (today's shape)
+    BOTH          # mixed: Python orchestrates, calls into prompts for fuzzy steps
+```
+
+### Markdown worker example
+
+```yaml
+# workers/competitive_research/worker.yml
+id: competitive_research
+name: Competitive Research
+description: Research competitors for a target market and summarize positioning.
+
+inputs:
+  - { name: market, type: text, required: true, label: Target market }
+  - { name: competitors, type: textarea, label: Known competitors (one per line) }
+
+outputs:
+  - { name: report, type: markdown }
+
+connections: []
+secrets: [OPENAI_API_KEY]
+runtime:
+  type: skill
+  entrypoint: skill.md
+```
+
+```markdown
+# workers/competitive_research/skill.md
+
+You are a market research analyst. Given a target market and a list of competitors,
+research each competitor and produce a structured markdown report.
+
+## What to do
+1. For each competitor in `inputs.competitors`, search for:
+   - Their public positioning
+   - Pricing model
+   - Distinct technical claims
+2. Synthesize across competitors to identify gaps in the market.
+3. Output a markdown report with sections: Competitor profiles, Market gaps, Recommended positioning.
+
+## Output requirements
+- Use H1 for the report title
+- One H2 per competitor
+- Cite URLs inline as `[source](url)`
+- Final section "Recommended positioning" must include 2-3 concrete suggestions
+```
+
+The runtime sees `runtime.type: skill`, loads `skill.md` as the system prompt, passes `inputs` as user message, lets the LLM call tools (connections + Floom MCP), captures output.
+
+### Why this matters
+
+1. **Non-developers can write workers.** A recruiter writes "research these candidates" in plain English; it executes.
+2. **Connects Floom Skills + workeros into one product.** A Skill on skills.floom.dev IS a worker on workers.floom.dev. The library publishes skills; the runtime runs them.
+3. **Same tool surface for code + skill workers.** Whether the worker is `run.py` or `skill.md`, it can declare `connections: [gmail]` and `skills: [...]` the same way. The runtime injects them either as a context dict (Python) or via MCP tools (markdown).
+4. **Distribution wedge.** Every Floom skill in the public library becomes runnable in workeros with one click. Library users say "I want to USE this skill, not just read it" → workers.floom.dev runs it.
+
+### What changes
+
+- New runtime type `skill` (alongside `python`)
+- New entrypoint resolution: if `skill.md` present, use skill runtime; if `run.py`, use python; if both, dispatcher Python can call into markdown via `context.skill.run(skill_name, inputs)`
+- LLM choice: declared per-worker (`runtime.model: gpt-4o-mini` or `claude-haiku-4-5` etc.)
+- Tool exposure: workeros's MCP layer auto-exposes the worker's `connections` + `skills` as tools to the LLM
+- Output validation: same schema enforcement (worker.yml declares output type, runtime validates)
+
+### Open questions
+
+1. **Deterministic vs LLM workers.** A "send Slack message at 9am" worker doesn't need an LLM — it's a deterministic action. Should workers support `runtime.type: action` for pure-tool-call workers (no LLM, just orchestrate a Connection call)?
+2. **Cost.** LLM-backed workers run per-invocation cost. Should `worker.yml` declare `cost_class: zero | llm | external_api` so the UI can warn users before triggering?
+3. **Streaming.** Markdown workers naturally stream LLM output. Should the runtime forward streaming to the UI? (Spec § 18 currently excludes — but if we have streaming for free from the LLM, it's nearly cosmetic to add.)
+4. **Multi-model selection.** Different workers might want different LLMs (cheap GPT-4o-mini for triage, Claude for research, Gemini for code). Should `worker.yml` declare default model + allow override per-run?
+
+### Sequencing
+
+1. Land the `runtime.type: skill` primitive (V2 milestone — significant work)
+2. Port one existing worker to skill-only (e.g., `research_brief` → `skill.md`-only)
+3. Build a skills→workers bridge: any skill from skills.floom.dev can be `Pull → Run` in workeros
+4. Library/marketplace integration with skills.floom.dev (subscription model — Federico's earlier "auto-update everyday" memory)
+
+Parked V2. The most strategically important item in this roadmap.
