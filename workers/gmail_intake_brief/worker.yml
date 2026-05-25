@@ -1,0 +1,40 @@
+id: gmail_intake_brief
+name: Gmail Intake Brief
+description: Fetches recent Gmail messages matching a query and returns a markdown summary.
+
+trigger:
+  type: manual
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: query
+    label: Gmail search query
+    type: text
+    required: false
+    placeholder: 'e.g. "is:unread label:intake"'
+    default: "is:unread"
+
+  - name: max_results
+    label: Max emails to fetch
+    type: number
+    required: false
+    default: 5
+
+secrets:
+  - OPENAI_API_KEY
+  - COMPOSIO_API_KEY
+
+connections:
+  - gmail
+
+outputs:
+  - name: summary
+    label: Email summary
+    type: markdown
+
+approvals:
+  required: false

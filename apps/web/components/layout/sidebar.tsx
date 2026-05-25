@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, KeyRound, Settings, Menu, X } from "lucide-react";
+import { Activity, Box, Clock, KeyRound, Settings, Menu, X, Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 
@@ -12,6 +12,7 @@ const nav = [
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
+  { href: "/connections", label: "Connections", icon: Plug },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
