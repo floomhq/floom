@@ -1,7 +1,7 @@
 """Pydantic models for Floom V0 — request schemas, response schemas, and domain types."""
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 from datetime import datetime
 
@@ -71,17 +71,31 @@ class WorkerOutput(BaseModel):
     json_required_keys: Optional[List[str]] = None  # For JSON: declared required top-level keys
 
 
+class WorkerWebhookConfig(BaseModel):
+    secret: bool = False
+    allowed_methods: List[str] = ["POST"]
+
+
 class WorkerTrigger(BaseModel):
     type: str
     cron: Optional[str] = None
     every: Optional[str] = None
     at: Optional[str] = None
+    webhook: Optional[WorkerWebhookConfig] = None
 
 
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
     runner: str = "local"
+
+    @field_validator("runner")
+    @classmethod
+    def validate_runner(cls, v: str) -> str:
+        allowed = {"local", "e2b"}
+        if v not in allowed:
+            raise ValueError(f"runner must be one of {sorted(allowed)}, got {v!r}")
+        return v
 
 
 class WorkerApprovalConfig(BaseModel):

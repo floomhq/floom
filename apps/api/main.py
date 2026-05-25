@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import fcntl
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -57,10 +58,25 @@ init_db()
 # App & middleware
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: startup + shutdown hooks."""
+    # Startup
+    reload_workers()
+    from scheduler import start_scheduler
+    start_scheduler()
+    yield
+    # Shutdown
+    from scheduler import stop_scheduler
+    stop_scheduler()
+
+
 app = FastAPI(
     title="Floom API",
     version="0.1.0",
     description="The OS for Background Workers",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -78,9 +94,14 @@ async def auth_middleware(request: Request, call_next):
 
     Skipped when FLOOM_SECRET env var is not configured (localhost dev).
     The connections/callback GET is also exempt (OAuth redirect landing).
+    Incoming webhooks (/webhooks/<worker_id>) are exempt — they use their own
+    per-worker HMAC signature verification instead.
     """
     secret = os.environ.get("FLOOM_SECRET", "")
     if secret and request.method not in ("GET", "HEAD", "OPTIONS"):
+        # Exempt incoming webhook calls from the internal secret
+        if request.url.path.startswith("/webhooks/"):
+            return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
         if header != secret:
             from fastapi.responses import JSONResponse as _JSONResponse
@@ -894,6 +915,7 @@ PLATFORM_SECRETS: frozenset[str] = frozenset({
     "FLOOM_ARTIFACTS_DIR",
     "FLOOM_RUN_TIMEOUT",
     "FLOOM_SECRET",
+    "E2B_API_KEY",
 })
 
 
@@ -1176,12 +1198,92 @@ def system_info():
 
 
 # ---------------------------------------------------------------------------
-# Startup
+# Webhooks
 # ---------------------------------------------------------------------------
 
-@app.on_event("startup")
-def startup():
-    reload_workers()
+class WebhookSecretResponse(BaseModel):
+    worker_id: str
+    secret: Optional[str] = None  # Only present on generation/rotation
+
+
+@app.post("/webhooks/{worker_id}", response_model=ActionResponse)
+async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
+    """Receive an incoming webhook and trigger a worker run.
+
+    If the worker declares webhook.secret=true, the X-Floom-Signature header
+    is verified. On success returns run_id immediately (non-blocking).
+    """
+    from webhook_service import get_webhook_secret_hash, verify_signature
+
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    config = get_worker_config(worker_id)
+    if not config or config.trigger.type != "webhook":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Worker {worker_id!r} does not have a webhook trigger",
+        )
+
+    body = await request.body()
+
+    # Signature verification (only when webhook.secret=true)
+    webhook_cfg = config.trigger.webhook
+    if webhook_cfg and webhook_cfg.secret:
+        secret_hash = get_webhook_secret_hash(worker_id)
+        if not secret_hash:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Webhook secret not configured — call POST "
+                    f"/workers/{worker_id}/webhook-secret/rotate first"
+                ),
+            )
+        sig_header = request.headers.get("X-Floom-Signature", "")
+        if not verify_signature(body, sig_header, secret_hash):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    # Parse body as JSON inputs (or empty dict)
+    inputs: Dict[str, Any] = {}
+    if body:
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                inputs = parsed
+            else:
+                inputs = {"payload": parsed}
+        except Exception:
+            inputs = {"raw": body.decode("utf-8", errors="replace")}
+
+    # Create and start run (non-blocking)
+    run_id = create_run(worker_id, inputs, trigger_source="webhook")
+    start_run(run_id, worker_id, inputs)
+
+    return ActionResponse(status="queued", run_id=run_id)
+
+
+@app.post("/workers/{worker_id}/webhook-secret/rotate", response_model=WebhookSecretResponse)
+def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
+    """Rotate the webhook HMAC secret for a worker.
+
+    Returns the new raw secret exactly once — it is never stored in plaintext.
+    """
+    from webhook_service import generate_webhook_secret
+
+    worker = get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    config = get_worker_config(worker_id)
+    if not config or config.trigger.type != "webhook":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Worker {worker_id!r} does not have a webhook trigger",
+        )
+
+    raw_secret = generate_webhook_secret(worker_id)
+    return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret)
 
 
 if __name__ == "__main__":
