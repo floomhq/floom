@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -71,8 +71,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logger = logging.getLogger("floom.api")
 
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Require x-floom-secret on all write (non-GET, non-OPTIONS) requests.
+
+    Skipped when FLOOM_SECRET env var is not configured (localhost dev).
+    The connections/callback GET is also exempt (OAuth redirect landing).
+    """
+    secret = os.environ.get("FLOOM_SECRET", "")
+    if secret and request.method not in ("GET", "HEAD", "OPTIONS"):
+        header = request.headers.get("x-floom-secret", "")
+        if header != secret:
+            from fastapi.responses import JSONResponse as _JSONResponse
+            return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
+logger = logging.getLogger("floom.api")
 
 # ---------------------------------------------------------------------------
 # Error handlers
