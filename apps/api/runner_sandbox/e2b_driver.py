@@ -20,7 +20,9 @@ logger = logging.getLogger("floom.runner_sandbox.e2b")
 
 def _safe_path(base: Path, *parts: str) -> Path:
     target = base.joinpath(*parts).resolve()
-    if not str(target).startswith(str(base)):
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
 
