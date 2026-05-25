@@ -13,7 +13,16 @@ from db import get_db, now_iso
 from worker_registry import get_worker_config
 from runner_local import run_worker_local
 from runner_sandbox import get_driver as get_sandbox_driver
-from models import WorkerResult, LogLevel, ApprovalStatus, RunStatus
+from models import (
+    WorkerConfig,
+    WorkerContract,
+    WorkerResult,
+    LogLevel,
+    ApprovalStatus,
+    RunStatus,
+    parse_worker_manifest,
+    worker_contract_to_worker_config,
+)
 
 logger = logging.getLogger("floom.run_service")
 
@@ -43,13 +52,54 @@ def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
 # Run lifecycle
 # ---------------------------------------------------------------------------
 
+def _load_worker_recipe(worker_id: str) -> Optional[tuple[WorkerConfig, Optional[Dict[str, Any]]]]:
+    """Load the executable recipe from skill_versions plus instance row."""
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT w.id, w.trigger_type, w.cron_expr, w.cron_timezone, w.grants_json,
+                       w.input_values_json, w.enabled, sv.manifest_json
+                FROM workers w
+                JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.id = ?
+                """,
+                (worker_id,),
+            ).fetchone()
+        if row:
+            manifest_raw = json.loads(row["manifest_json"] or "{}")
+            parsed = parse_worker_manifest(manifest_raw)
+            if isinstance(parsed, WorkerContract):
+                config = worker_contract_to_worker_config(parsed, worker_id)
+            else:
+                config = parsed
+            if row["trigger_type"]:
+                config.trigger.type = row["trigger_type"]
+            if row["cron_expr"]:
+                config.trigger.cron = row["cron_expr"]
+            return config, {
+                "grants": json.loads(row["grants_json"] or "{}"),
+                "input_values": json.loads(row["input_values_json"] or "{}"),
+                "enabled": bool(row["enabled"]),
+            }
+    except Exception:
+        logger.exception("Failed to load worker recipe from database for %s", worker_id)
+
+    config = get_worker_config(worker_id)
+    return (config, None) if config else None
+
+
+def _get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
+    loaded = _load_worker_recipe(worker_id)
+    return loaded[0] if loaded else None
+
 def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
     trigger_source: str = "manual",
 ) -> str:
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    config = get_worker_config(worker_id)
+    config = _get_worker_config_for_run(worker_id)
     approval_status = (
         ApprovalStatus.PENDING
         if config and config.approvals.required
@@ -169,7 +219,7 @@ def create_approval(
 
 
 def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
-    config = get_worker_config(worker_id)
+    config = _get_worker_config_for_run(worker_id)
     if not config:
         return {}
     secrets: Dict[str, str] = {}
@@ -186,7 +236,7 @@ def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
 
 def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-    config = get_worker_config(worker_id)
+    config = _get_worker_config_for_run(worker_id)
 
     def log_fn(msg: str, level: str = "info") -> None:
         secrets = get_secrets_for_worker(worker_id)
