@@ -188,6 +188,18 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
             )
 
         if _table_exists(conn, "runs"):
+            missing_run_workers = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM runs r
+                LEFT JOIN workers w ON w.id = r.worker_id
+                WHERE w.id IS NULL
+                """
+            ).fetchone()["count"]
+            if missing_run_workers:
+                raise RuntimeError(
+                    f"Cannot migrate runs: {missing_run_workers} run rows reference missing workers"
+                )
             conn.executescript(
                 """
                 CREATE TABLE runs_new (
@@ -220,6 +232,28 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
             )
 
         if _table_exists(conn, "approvals"):
+            missing_approval_workers = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE w.id IS NULL
+                """
+            ).fetchone()["count"]
+            missing_approval_runs = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM approvals a
+                LEFT JOIN runs r ON r.id = a.run_id
+                WHERE r.id IS NULL
+                """
+            ).fetchone()["count"]
+            if missing_approval_workers or missing_approval_runs:
+                raise RuntimeError(
+                    "Cannot migrate approvals: "
+                    f"{missing_approval_workers} rows reference missing workers, "
+                    f"{missing_approval_runs} rows reference missing runs"
+                )
             conn.executescript(
                 """
                 CREATE TABLE approvals_new (
