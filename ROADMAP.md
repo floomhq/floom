@@ -495,3 +495,77 @@ The runtime sees `runtime.type: skill`, loads `skill.md` as the system prompt, p
 4. Library/marketplace integration with skills.floom.dev (subscription model — Federico's earlier "auto-update everyday" memory)
 
 Parked V2. The most strategically important item in this roadmap.
+
+---
+
+## V1.5 — WorkerContract migration (after F1/F2/F3)
+
+Federico 2026-05-25: "agree! sounds good. compatibility with skills-neo is important. otherwise we diverge too much."
+
+Adopt skills-neo's `WorkerContract` shape (from `@floom/shared`) as workeros' canonical manifest. Migrate the 8 existing worker.yml files. Lock in marketplace compatibility with skills.floom.dev.
+
+### What changes in workeros
+
+1. **Pydantic models match `WorkerContract`** shape:
+```yaml
+schema_version: "0.3"
+name: research-brief        # slug
+title: Research Brief       # display
+description: "..."
+version: "0.1.0"            # semver per skill
+entrypoint: SKILL.md        # markdown spec (can be empty docstring for V1.5; matters in V2)
+targets: [generic]
+exec:
+  command: python run.py
+  runtime: python311
+  inputs:
+    - { name: topic, kind: scalar, type: string, label: Research topic, required: true }
+    - { name: depth, kind: scalar, type: string, enum: [overview, detailed, deep_dive], default: overview }
+  secrets: [OPENAI_API_KEY]
+  outputs:
+    - { name: brief, kind: file, media_type: text/markdown, path: out/brief.md }
+capabilities:
+  secrets: [OPENAI_API_KEY]
+  network: { egress: false }
+```
+
+2. **Skill ≠ worker separation:**
+   - `skill_version` (recipe — versioned, immutable, reusable across workers + across libraries)
+   - `worker` (instance — trigger config, grants, notify settings, enabled flag, owner)
+   - New DB tables `skill_versions`, `workers` (current `workers` table effectively becomes `skill_versions`; new `workers` table = instances)
+   - Multiple workers can reference the same skill version (e.g., "Daily research brief" + "Weekly research brief" share the recipe)
+
+3. **Triggers move from manifest to worker instance:**
+   - Manifest (skill) declares NOTHING about triggers
+   - Worker row has `trigger_type`, `cron_expr`, `next_run_at` etc.
+   - Same skill can power a manual worker AND a scheduled worker AND a webhook worker
+
+4. **Migration of existing 8 workers:**
+   - Each becomes a `skill_version` (recipe) + 1 `worker` (instance) — backward-compatible UX
+   - Old `worker.yml` shape stays parseable for one release with a deprecation warning, but new workers must use WorkerContract
+
+### Upstream to skills-neo — workeros does these better, skills-neo should adopt
+
+Federico 2026-05-25: "if skills-neo is inferior on some points also happy to adjust on their side, lmk!"
+
+Concrete items where workeros' worker.yml is more UX-friendly than skills-neo's WorkerContract — upstream as PRs to skills-neo:
+
+| Improvement | What | Why |
+|---|---|---|
+| **`inputs[].label`** | Display name for the input distinct from the slug `name`. Workeros: `label: "Raw notes"`. Live-skills: no label field. | Form-generation. "raw_notes" → "Raw notes" lookup is fragile. |
+| **`inputs[].placeholder`** | Field placeholder text. Workeros has it. | Onboards non-developers; recruiter sees "Paste notes, bullets..." vs empty textarea. |
+| **`inputs[].description`** | Per-input help text (rendered as small subtext). Workeros has it implicitly via comments. | Live-skills has only `examples: []`. Help text per field is materially better UX. |
+| **`inputs[].type: select` + `options: [...]`** | Workeros: `type: select, options: [internal, investor, customer]`. Live-skills: `type: string` + you'd need an external schema for enum. | Form renders a dropdown without a separate schema lookup. |
+| **`approvals: { required, label }`** block (on the worker INSTANCE, not the skill) | Workeros has it (currently lives in manifest but logically belongs on instance). | Quick declarative "this output needs human sign-off" without orchestrating an async runner. |
+
+These are all UX-additive — backward-compatible with the existing WorkerContract schema. Skills-neo PR would extend the Zod schema in `packages/shared/src/manifest.ts`.
+
+### Scope and order
+
+After F1/F2/F3 codex round lands:
+1. Port WorkerContract Pydantic models into workeros (`apps/api/models.py`)
+2. Split `workers` table into `skill_versions` + `workers` (migration)
+3. Backfill: each existing worker.yml → 1 skill_version + 1 worker
+4. Update worker-create UI to generate WorkerContract shape
+5. Update worker-registry discovery to parse new shape (with one-release fallback for old shape)
+6. Open upstream PR to skills-neo with the 5 UX additions above
