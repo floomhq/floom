@@ -234,6 +234,10 @@ export default function NewWorkerPage() {
     if (!workerId) { toast.error("Worker ID is required"); return; }
     if (idError) { toast.error(idError); return; }
     if (!name) { toast.error("Name is required"); return; }
+    if (inputs.some((inp) => inp.type === "select" && !inp.options.split(",").some((o) => o.trim()))) {
+      toast.error("Select inputs need at least one option");
+      return;
+    }
 
     setSubmitting(true);
     try {
