@@ -9,10 +9,10 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
-from models import WorkerResult
+from models import WorkerConfig, WorkerResult
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.e2b")
@@ -20,9 +20,26 @@ logger = logging.getLogger("floom.runner_sandbox.e2b")
 
 def _safe_path(base: Path, *parts: str) -> Path:
     target = base.joinpath(*parts).resolve()
-    if not str(target).startswith(str(base)):
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
+
+
+def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+        resolved = target.resolve()
+        allowed_root = WORKERS_DIR.parent.resolve()
+        try:
+            resolved.relative_to(allowed_root)
+        except ValueError:
+            raise ValueError(f"Path traversal attempt: {resolved}")
+        return resolved
+    return _safe_path(WORKERS_DIR, worker_id)
 
 
 class E2BSandboxDriver(SandboxDriver):
@@ -43,10 +60,11 @@ class E2BSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         trace_id: str,
         timeout_seconds: int = 300,
+        config: Optional[WorkerConfig] = None,
     ) -> WorkerResult:
         try:
             return self._run_in_sandbox(
-                worker_id, run_id, inputs, secrets, log_fn, trace_id, timeout_seconds
+                worker_id, run_id, inputs, secrets, log_fn, trace_id, timeout_seconds, config
             )
         except Exception as exc:
             logger.exception(
@@ -69,6 +87,7 @@ class E2BSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         trace_id: str,
         timeout_seconds: int,
+        config: Optional[WorkerConfig],
     ) -> WorkerResult:
         from e2b import Sandbox  # e2b 2.x
 
@@ -81,7 +100,7 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         try:
-            worker_dir = _safe_path(WORKERS_DIR, worker_id)
+            worker_dir = _worker_dir_for_run(worker_id, config)
         except ValueError as exc:
             return WorkerResult(
                 status="error", error=str(exc), error_code="invalid_worker"
@@ -152,9 +171,12 @@ class E2BSandboxDriver(SandboxDriver):
                 log_fn("[e2b] Requirements installed", "info")
 
             # Run the worker — commands.run() is sync, returns CommandResult directly
-            log_fn("[e2b] Executing worker run.py", "info")
+            command = "python run.py"
+            if config and config.runtime and config.runtime.command:
+                command = config.runtime.command
+            log_fn(f"[e2b] Executing worker command: {command}", "info")
             proc = sandbox.commands.run(
-                "python run.py",
+                command,
                 cwd=workdir,
                 envs={
                     "FLOOM_RUN_ID": run_id,

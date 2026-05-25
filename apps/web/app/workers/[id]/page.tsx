@@ -146,6 +146,9 @@ export default function WorkerDetailPage() {
                     {inp.label}
                     {inp.required && <span className="text-red-500 ml-0.5">*</span>}
                   </Label>
+                  {inp.description && (
+                    <p className="text-xs text-[#777]">{inp.description}</p>
+                  )}
                   {inp.type === "textarea" ? (
                     <Textarea
                       placeholder={inp.placeholder}
