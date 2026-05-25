@@ -224,17 +224,20 @@ html.dark {
     min-height: 100%;
     scrollbar-gutter: stable;
     background: var(--bg);
+    overflow-x: hidden;
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-transparent text-foreground antialiased;
     min-height: 100%;
     font-family: var(--font);
     font-feature-settings: var(--font-feat);
     font-size: 14px;
+    font-weight: 450;
     line-height: 1.55;
     letter-spacing: 0;
     text-rendering: optimizeLegibility;
+    overflow-x: hidden;
   }
 
   code,
@@ -243,7 +246,124 @@ html.dark {
   samp,
   .font-mono {
     font-family: var(--font-mono);
+    font-feature-settings: var(--font-feat);
   }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  .font-heading {
+    font-family: var(--font-sans);
+    font-feature-settings: var(--font-feat);
+    letter-spacing: 0;
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.12;
+    font-weight: 600;
+  }
+}
+
+.spacebg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.spacebg .c {
+  position: absolute;
+  border-radius: var(--r-pill);
+  filter: blur(64px);
+}
+
+.spacebg .c1 {
+  width: 760px;
+  height: 280px;
+  left: -130px;
+  top: 40px;
+  opacity: 0.48;
+  background: radial-gradient(ellipse at 40% 50%, color-mix(in srgb, var(--accent) 46%, transparent) 0%, color-mix(in srgb, var(--accent) 24%, transparent) 44%, color-mix(in srgb, var(--accent) 9%, transparent) 70%, transparent 100%);
+}
+
+.spacebg .c2 {
+  width: 560px;
+  height: 230px;
+  right: -110px;
+  top: 300px;
+  opacity: 0.38;
+  background: radial-gradient(ellipse at 60% 48%, color-mix(in srgb, var(--accent) 38%, transparent) 0%, color-mix(in srgb, var(--accent) 20%, transparent) 46%, color-mix(in srgb, var(--accent) 8%, transparent) 72%, transparent 100%);
+}
+
+.spacebg .c3 {
+  width: 600px;
+  height: 240px;
+  left: 34%;
+  top: 640px;
+  opacity: 0.34;
+  background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--accent) 34%, transparent) 0%, color-mix(in srgb, var(--accent) 18%, transparent) 48%, color-mix(in srgb, var(--accent) 7%, transparent) 74%, transparent 100%);
+}
+
+html.dark .spacebg .c {
+  mix-blend-mode: screen;
+  opacity: 0.22;
+}
+
+@media (max-width: 640px) {
+  .spacebg .c1 {
+    width: 90vw;
+    height: 200px;
+    left: -10vw;
+    top: 36px;
+  }
+
+  .spacebg .c2 {
+    width: 80vw;
+    height: 170px;
+    right: -12vw;
+    top: 280px;
+  }
+
+  .spacebg .c3 {
+    width: 84vw;
+    height: 170px;
+    left: 8vw;
+    top: 560px;
+  }
+}
+
+.ambient-filter-defs {
+  position: absolute;
+  pointer-events: none;
+}
+
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.grain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.11;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='280'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.42' numOctaves='3' seed='9' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='280' height='280' filter='url(%23g)'/%3E%3C/svg%3E");
+}
+
+html.dark .grain {
+  opacity: 0.07;
+  mix-blend-mode: soft-light;
 }
 
 @layer utilities {
@@ -348,6 +468,14 @@ html.dark {
 
   .rounded-xl {
     border-radius: var(--r-xl);
+  }
+
+  .tracking-tight,
+  .tracking-tighter,
+  .tracking-wide,
+  .tracking-wider,
+  .tracking-widest {
+    letter-spacing: 0;
   }
 }
 
