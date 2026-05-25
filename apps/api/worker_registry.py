@@ -25,7 +25,9 @@ def _safe_path(*parts: str) -> Path:
     """Resolve a path under WORKERS_DIR, rejecting traversal escapes."""
     target = WORKERS_DIR.joinpath(*parts).resolve()
     # Ensure the resolved path is still under WORKERS_DIR
-    if not str(target).startswith(str(WORKERS_DIR)):
+    try:
+        target.relative_to(WORKERS_DIR)
+    except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
 
