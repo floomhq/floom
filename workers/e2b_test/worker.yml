@@ -1,16 +1,29 @@
-id: e2b_test
-name: E2B Sandbox Test
+schema_version: '0.3'
+name: e2b-test
+title: E2B Sandbox Test
 description: Tests E2B cloud sandbox execution with numpy dependency install.
-
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs: []
+  secrets: []
+  outputs:
+  - name: result
+    kind: file
+    media_type: application/json
+    path: out/result.json
+    required: true
+    label: Test Result
+capabilities:
+  secrets: []
+  network:
+    egress: false
+approvals:
+  required: false
 trigger:
   type: manual
-
-runtime:
-  type: python
-  entrypoint: run.py
-  runner: e2b
-
-outputs:
-  - name: result
-    label: Test Result
-    type: json

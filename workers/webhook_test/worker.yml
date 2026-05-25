@@ -1,20 +1,33 @@
-id: webhook_test
-name: Webhook Test Worker
+schema_version: '0.3'
+name: webhook-test
+title: Webhook Test Worker
 description: Triggered by incoming HTTP webhooks. Echoes the payload back.
-
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
+  runner: local
+  inputs: []
+  secrets: []
+  outputs:
+  - name: echo
+    kind: file
+    media_type: application/json
+    path: out/echo.json
+    required: true
+    label: Echo Response
+capabilities:
+  secrets: []
+  network:
+    egress: false
+approvals:
+  required: false
 trigger:
   type: webhook
   webhook:
     secret: true
     allowed_methods:
-      - POST
-
-runtime:
-  type: python
-  entrypoint: run.py
-  runner: local
-
-outputs:
-  - name: echo
-    label: Echo Response
-    type: json
+    - POST
