@@ -1,17 +1,29 @@
-id: schedule_test
-name: Schedule Test Worker
+schema_version: '0.3'
+name: schedule-test
+title: Schedule Test Worker
 description: Fires every minute for testing the cron scheduler. Change cron expression to desired schedule after testing.
-
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
+  runner: local
+  inputs: []
+  secrets: []
+  outputs:
+  - name: message
+    kind: scalar
+    type: string
+    required: true
+    label: Scheduled Message
+capabilities:
+  secrets: []
+  network:
+    egress: false
+approvals:
+  required: false
 trigger:
   type: schedule
-  cron: "* * * * *"
-
-runtime:
-  type: python
-  entrypoint: run.py
-  runner: local
-
-outputs:
-  - name: message
-    label: Scheduled Message
-    type: text
+  cron: '* * * * *'

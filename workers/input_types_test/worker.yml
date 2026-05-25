@@ -1,51 +1,77 @@
-id: input_types_test
-name: Input Types Test
+schema_version: '0.3'
+name: input-types-test
+title: Input Types Test
 description: Exercises every input type to verify the form renderer.
-
-trigger:
-  type: manual
-
-runtime:
-  type: python
-  entrypoint: run.py
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
   runner: local
-
-inputs:
+  inputs:
   - name: text_input
-    label: Text input
-    type: text
+    kind: scalar
+    type: string
     required: true
+    label: Text input
     placeholder: Hello
   - name: textarea_input
-    label: Textarea input
-    type: textarea
+    kind: scalar
+    type: string
     required: false
+    label: Textarea input
   - name: number_input
-    label: Number input
+    kind: scalar
     type: number
     required: false
+    label: Number input
   - name: select_input
-    label: Select input
+    kind: scalar
     type: select
     required: true
-    options: [alpha, beta, gamma]
     default: beta
+    enum:
+    - alpha
+    - beta
+    - gamma
+    label: Select input
+    options:
+    - alpha
+    - beta
+    - gamma
   - name: boolean_input
-    label: Boolean (checkbox)
+    kind: scalar
     type: boolean
-    default: false
-  - name: file_input
-    label: File upload
-    type: file
     required: false
-
-outputs:
+    default: false
+    label: Boolean (checkbox)
+  - name: file_input
+    kind: file
+    media_type: application/octet-stream
+    path: inputs/file_input
+    required: false
+    label: File upload
+  secrets: []
+  outputs:
   - name: summary
+    kind: file
+    media_type: text/markdown
+    path: out/summary.md
+    required: true
     label: Summary
-    type: markdown
   - name: raw_inputs
+    kind: file
+    media_type: application/json
+    path: out/raw_inputs.json
+    required: true
     label: Raw inputs
-    type: json
-
+capabilities:
+  secrets: []
+  network:
+    egress: false
 approvals:
   required: false
+trigger:
+  type: manual

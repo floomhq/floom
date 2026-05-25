@@ -1,40 +1,52 @@
-id: weekly_update
-name: Weekly Update
+schema_version: '0.3'
+name: weekly-update
+title: Weekly Update
 description: Turns raw notes into a polished weekly company update using AI.
-
-trigger:
-  type: manual
-
-runtime:
-  type: python
-  entrypoint: run.py
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
   runner: local
-
-inputs:
+  inputs:
   - name: notes
-    label: Raw notes
-    type: textarea
+    kind: scalar
+    type: string
     required: true
+    label: Raw notes
     placeholder: Paste notes, bullets, metrics, updates...
-
   - name: audience
-    label: Audience
+    kind: scalar
     type: select
     required: true
-    options:
-      - internal
-      - investor
-      - customer
     default: internal
-
-secrets:
+    enum:
+    - internal
+    - investor
+    - customer
+    label: Audience
+    options:
+    - internal
+    - investor
+    - customer
+  secrets:
   - OPENAI_API_KEY
-
-outputs:
+  outputs:
   - name: update
+    kind: file
+    media_type: text/markdown
+    path: out/update.md
+    required: true
     label: Weekly update
-    type: markdown
-
+capabilities:
+  secrets:
+  - OPENAI_API_KEY
+  network:
+    egress: true
 approvals:
   required: false
   label: Approve final update
+trigger:
+  type: manual

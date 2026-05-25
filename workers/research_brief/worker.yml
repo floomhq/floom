@@ -1,50 +1,66 @@
-id: research_brief
-name: Research Brief
+schema_version: '0.3'
+name: research-brief
+title: Research Brief
 description: Generates a markdown research brief on any topic.
-
-trigger:
-  type: manual
-
-runtime:
-  type: python
-  entrypoint: run.py
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
   runner: local
-
-inputs:
+  inputs:
   - name: topic
+    kind: scalar
+    type: string
+    required: true
     label: Research topic
-    type: text
-    required: true
     placeholder: e.g. "Competitor analysis for AI CRM tools"
-
   - name: audience
-    label: Audience
+    kind: scalar
     type: select
     required: true
-    options:
-      - executive
-      - technical
-      - sales
     default: executive
-
+    enum:
+    - executive
+    - technical
+    - sales
+    label: Audience
+    options:
+    - executive
+    - technical
+    - sales
   - name: depth
-    label: Depth
+    kind: scalar
     type: select
     required: true
-    options:
-      - overview
-      - detailed
-      - deep_dive
     default: overview
-
-secrets:
+    enum:
+    - overview
+    - detailed
+    - deep_dive
+    label: Depth
+    options:
+    - overview
+    - detailed
+    - deep_dive
+  secrets:
   - OPENAI_API_KEY
-
-outputs:
+  outputs:
   - name: brief
+    kind: file
+    media_type: text/markdown
+    path: out/brief.md
+    required: true
     label: Research brief
-    type: markdown
-
+capabilities:
+  secrets:
+  - OPENAI_API_KEY
+  network:
+    egress: true
 approvals:
   required: false
   label: Approve research brief
+trigger:
+  type: manual
