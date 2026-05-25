@@ -1,35 +1,47 @@
-id: csv_enricher
-name: CSV Enricher
+schema_version: '0.3'
+name: csv-enricher
+title: CSV Enricher
 description: Enriches CSV rows using a custom instruction.
-
-trigger:
-  type: manual
-
-runtime:
-  type: python
-  entrypoint: run.py
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
   runner: local
-
-inputs:
+  inputs:
   - name: csv_text
+    kind: scalar
+    type: string
+    required: true
     label: CSV rows
-    type: textarea
-    required: true
-    placeholder: "name,company\nAlice,Acme\nBob,Stark"
+    placeholder: 'name,company
 
+      Alice,Acme
+
+      Bob,Stark'
   - name: instruction
-    label: Enrichment instruction
-    type: textarea
+    kind: scalar
+    type: string
     required: true
+    label: Enrichment instruction
     placeholder: For each company, infer ICP fit and add a reason.
-
-secrets:
+  secrets:
   - OPENAI_API_KEY
-
-outputs:
+  outputs:
   - name: enriched_csv
+    kind: file
+    media_type: text/csv
+    path: out/enriched_csv.csv
+    required: true
     label: Enriched CSV
-    type: csv
-
+capabilities:
+  secrets:
+  - OPENAI_API_KEY
+  network:
+    egress: true
 approvals:
   required: false
+trigger:
+  type: manual

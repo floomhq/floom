@@ -16,7 +16,7 @@ import logging
 from typing import Dict, Any, Callable, List, Optional
 from pathlib import Path
 
-from models import WorkerContext, WorkerResult
+from models import WorkerConfig, WorkerContext, WorkerResult
 from worker_registry import get_worker_entrypoint, get_worker_config
 
 logger = logging.getLogger("floom.runner_local")
@@ -29,18 +29,39 @@ DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("FLOOM_RUN_TIMEOUT", "300"))
 
 def _safe_path(base: Path, *parts: str) -> Path:
     target = base.joinpath(*parts).resolve()
-    if not str(target).startswith(str(base)):
+    try:
+        target.relative_to(base.resolve())
+    except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
 
 
-def _resolve_connections(worker_id: str, log_fn: Callable) -> tuple[Dict[str, str], Optional[str]]:
+def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+        resolved = target.resolve()
+        allowed_root = WORKERS_DIR.parent.resolve()
+        try:
+            resolved.relative_to(allowed_root)
+        except ValueError:
+            raise ValueError(f"Path traversal attempt: {resolved}")
+        return resolved
+    return _safe_path(WORKERS_DIR, worker_id)
+
+
+def _resolve_connections(
+    worker_id: str,
+    log_fn: Callable,
+    config: Optional[WorkerConfig] = None,
+) -> tuple[Dict[str, str], Optional[str]]:
     """Look up active Composio connections for the worker's declared apps.
 
     Returns (connection_ids dict, error_string_or_None).
     error_string is set if any declared connection is missing/inactive.
     """
-    config = get_worker_config(worker_id)
+    config = config or get_worker_config(worker_id)
     if not config or not config.connections:
         return {}, None
 
@@ -90,12 +111,17 @@ def make_context(
     )
 
 
-def _validate_output_schema(worker_id: str, outputs: Dict[str, Any], log_fn: Callable) -> Optional[str]:
+def _validate_output_schema(
+    worker_id: str,
+    outputs: Dict[str, Any],
+    log_fn: Callable,
+    config: Optional[WorkerConfig] = None,
+) -> Optional[str]:
     """Validate worker outputs against the declared schema in worker.yml.
 
     Returns an error string if validation fails, or None if outputs are valid.
     """
-    config = get_worker_config(worker_id)
+    config = config or get_worker_config(worker_id)
     if not config or not config.outputs:
         return None  # No schema declared — skip validation
 
@@ -168,6 +194,7 @@ def run_worker_local(
     log_fn: Callable,
     trace_id: str,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    config: Optional[WorkerConfig] = None,
 ) -> WorkerResult:
     """Execute a worker's ``run.py`` in-process.
 
@@ -175,12 +202,12 @@ def run_worker_local(
     caller can always persist a terminal state.
     """
     try:
-        worker_dir = _safe_path(WORKERS_DIR, worker_id)
+        worker_dir = _worker_dir_for_run(worker_id, config)
     except ValueError as exc:
         logger.error("Invalid worker_id: %s", exc)
         return WorkerResult(status="error", error=str(exc), error_code="invalid_worker")
 
-    entrypoint = get_worker_entrypoint(worker_id)
+    entrypoint = config.runtime.entrypoint if config and config.runtime else get_worker_entrypoint(worker_id)
     try:
         run_file = _safe_path(worker_dir, entrypoint)
     except ValueError as exc:
@@ -195,7 +222,7 @@ def run_worker_local(
         )
 
     # Resolve Composio connections — fail fast if any required connection is missing
-    connection_ids, conn_error = _resolve_connections(worker_id, log_fn)
+    connection_ids, conn_error = _resolve_connections(worker_id, log_fn, config=config)
     if conn_error:
         return WorkerResult(
             status="error",
@@ -244,7 +271,12 @@ def run_worker_local(
         # --- Schema enforcement ---
         # Only validate on successful runs; error results skip validation.
         if result.get("status") == "success":
-            schema_error = _validate_output_schema(worker_id, result.get("outputs", {}), log_fn)
+            schema_error = _validate_output_schema(
+                worker_id,
+                result.get("outputs", {}),
+                log_fn,
+                config=config,
+            )
             if schema_error:
                 log_fn(f"Schema validation failed: {schema_error}", level="error")
                 return WorkerResult(

@@ -10,6 +10,7 @@ export interface WorkerInput {
   type: string;
   required?: boolean;
   placeholder?: string;
+  description?: string;
   options?: string[];
   default?: string | number | boolean | string[] | null;
   accept_csv?: boolean;
