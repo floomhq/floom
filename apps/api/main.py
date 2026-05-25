@@ -7,6 +7,9 @@ import logging
 import mimetypes
 import fcntl
 import re
+import time
+import collections
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1198,6 +1201,35 @@ def system_info():
 
 
 # ---------------------------------------------------------------------------
+# Webhook rate limiter (in-memory sliding window)
+# ---------------------------------------------------------------------------
+
+_wh_rate_lock = threading.Lock()
+_wh_rate_store: Dict[str, collections.deque] = {}
+_WH_RATE_LIMIT = int(os.environ.get("FLOOM_WH_RATE_LIMIT", "60"))   # max calls
+_WH_RATE_WINDOW = int(os.environ.get("FLOOM_WH_RATE_WINDOW", "60")) # seconds
+
+
+def _check_webhook_rate_limit(key: str) -> bool:
+    """Return True if the request is within the rate limit, False if exceeded.
+
+    Uses a per-key sliding window (IP or worker_id) stored in memory.
+    Resets on process restart — acceptable for single-server MVP.
+    """
+    now = time.monotonic()
+    cutoff = now - _WH_RATE_WINDOW
+    with _wh_rate_lock:
+        dq = _wh_rate_store.setdefault(key, collections.deque())
+        # Evict timestamps older than the window
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+        if len(dq) >= _WH_RATE_LIMIT:
+            return False
+        dq.append(now)
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Webhooks
 # ---------------------------------------------------------------------------
 
@@ -1214,6 +1246,12 @@ async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
     is verified. On success returns run_id immediately (non-blocking).
     """
     from webhook_service import get_webhook_secret_hash, verify_signature
+
+    # Rate limit: 60 req/60s per (worker_id, client_ip) — in-memory sliding window
+    client_ip = (request.client.host if request.client else "unknown")
+    rl_key = f"{worker_id}:{client_ip}"
+    if not _check_webhook_rate_limit(rl_key):
+        raise HTTPException(status_code=429, detail="Too many webhook requests")
 
     worker = get_worker(worker_id)
     if not worker:

@@ -211,7 +211,10 @@ class E2BSandboxDriver(SandboxDriver):
 
         finally:
             try:
+                # e2b 2.x: kill() may raise if the sandbox already exited.
+                # We attempt gracefully; any exception is a warning, not a failure.
                 sandbox.kill()
                 log_fn("[e2b] Sandbox killed", "debug")
             except Exception as close_exc:
-                logger.warning("Failed to kill E2B sandbox: %s", close_exc)
+                # Sandbox may have self-terminated (timeout, OOM) — not an error.
+                logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
