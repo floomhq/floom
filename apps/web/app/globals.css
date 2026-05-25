@@ -233,6 +233,7 @@ html.dark {
     font-family: var(--font);
     font-feature-settings: var(--font-feat);
     font-size: 14px;
+    font-weight: 450;
     line-height: 1.55;
     letter-spacing: 0;
     text-rendering: optimizeLegibility;
@@ -245,6 +246,26 @@ html.dark {
   samp,
   .font-mono {
     font-family: var(--font-mono);
+    font-feature-settings: var(--font-feat);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  .font-heading {
+    font-family: var(--font-sans);
+    font-feature-settings: var(--font-feat);
+    letter-spacing: 0;
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.12;
+    font-weight: 600;
   }
 }
 
@@ -447,6 +468,14 @@ html.dark .grain {
 
   .rounded-xl {
     border-radius: var(--r-xl);
+  }
+
+  .tracking-tight,
+  .tracking-tighter,
+  .tracking-wide,
+  .tracking-wider,
+  .tracking-widest {
+    letter-spacing: 0;
   }
 }
 
