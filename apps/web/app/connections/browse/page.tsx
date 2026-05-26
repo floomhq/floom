@@ -149,6 +149,7 @@ function CatalogCard({
 export default function ConnectionsBrowsePage() {
   const [catalog, setCatalog] = useState<IntegrationCatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -165,6 +166,7 @@ export default function ConnectionsBrowsePage() {
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       if (category === "popular") {
         // Fetch all (unfiltered) and filter client-side to popular slugs.
@@ -196,7 +198,9 @@ export default function ConnectionsBrowsePage() {
         setCatalog(nextCatalog);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load integrations");
+      const msg = error instanceof Error ? error.message : "Failed to load integrations";
+      setLoadError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -207,11 +211,13 @@ export default function ConnectionsBrowsePage() {
   }, [loadCatalog]);
 
   const pageSummary = useMemo(() => {
-    if (!catalog) return "Loading integrations";
+    if (loading) return "Loading...";
+    if (loadError) return "Load failed";
+    if (!catalog) return "";
     const start = catalog.total_items === 0 ? 0 : (catalog.page - 1) * catalog.limit + 1;
     const end = Math.min(catalog.page * catalog.limit, catalog.total_items);
     return `${start}-${end} of ${catalog.total_items.toLocaleString()} integrations`;
-  }, [catalog]);
+  }, [catalog, loading, loadError]);
 
   async function handleConnect(slug: string) {
     setConnecting(slug);
@@ -301,6 +307,18 @@ export default function ConnectionsBrowsePage() {
       <section className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3">
         {loading ? (
           <CatalogSkeleton />
+        ) : loadError ? (
+          <div className="col-span-full rounded-lg border border-dashed border-line bg-[var(--paper)] px-4 py-12 text-center space-y-3">
+            <p className="text-sm font-medium text-ink">Could not load integrations</p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => void loadCatalog()}
+              className="text-xs underline text-[var(--ink-soft)] hover:text-ink transition-colors"
+            >
+              Try again
+            </button>
+          </div>
         ) : catalog?.items.length ? (
           catalog.items.map((item) => (
             <CatalogCard

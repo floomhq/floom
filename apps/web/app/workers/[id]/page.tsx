@@ -27,6 +27,7 @@ export default function WorkerDetailPage() {
   const router = useRouter();
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [inputs, setInputs] = useState<Record<string, unknown>>({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
@@ -34,24 +35,41 @@ export default function WorkerDetailPage() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      api.workers.get(id as string),
-      api.connections.list(),
-    ]).then(([w, conns]) => {
-      setWorker(w);
-      setConnections(conns);
-      const defaults: Record<string, unknown> = {};
-      w.config.inputs.forEach((inp: WorkerInput) => {
-        if (inp.default !== undefined) defaults[inp.name] = inp.default;
-        else if (inp.type === "boolean") defaults[inp.name] = false;
-      });
-      setInputs(defaults);
-      // Default Code tab selection: SKILL.md if present, else worker.yml
-      const files = w.files || [];
-      const defaultFile = files.find((f) => f.path === "SKILL.md") || files.find((f) => f.path === "worker.yml") || files[0];
-      if (defaultFile) setSelectedFile(defaultFile.path);
-      setLoading(false);
-    });
+    let cancelled = false;
+    async function load() {
+      try {
+        const [w, conns] = await Promise.all([
+          api.workers.get(id as string),
+          api.connections.list().catch(() => [] as ConnectionItem[]),
+        ]);
+        if (cancelled) return;
+        setWorker(w);
+        setConnections(conns);
+        const defaults: Record<string, unknown> = {};
+        w.config.inputs.forEach((inp: WorkerInput) => {
+          if (inp.default !== undefined) defaults[inp.name] = inp.default;
+          else if (inp.type === "boolean") defaults[inp.name] = false;
+        });
+        setInputs(defaults);
+        // Default Code tab selection: SKILL.md if present, else worker.yml
+        const files = w.files || [];
+        const defaultFile = files.find((f) => f.path === "SKILL.md") || files.find((f) => f.path === "worker.yml") || files[0];
+        if (defaultFile) setSelectedFile(defaultFile.path);
+      } catch (e: unknown) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        // 404 or "not found" from the API means the worker doesn't exist.
+        if (msg.toLowerCase().includes("not found") || msg.includes("404")) {
+          setNotFound(true);
+        } else {
+          toast.error(`Failed to load worker: ${msg}`);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => { cancelled = true; };
   }, [id]);
 
   async function handleRun() {
@@ -97,14 +115,40 @@ export default function WorkerDetailPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-8 w-8 rounded-full" />
+          <div className="space-y-2 flex-1">
+            <Skeleton className="h-7 w-64" />
+            <Skeleton className="h-4 w-48" />
+          </div>
+        </div>
+        <div className="flex gap-1 border border-[#eaeaea] rounded-md p-1 bg-white w-fit">
+          {[80, 60, 96, 56, 72].map((w) => (
+            <Skeleton key={w} className={`h-7 w-${w / 4} rounded-sm`} style={{ width: w }} />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Skeleton className="h-[320px] rounded-lg" />
+          <Skeleton className="h-[320px] rounded-lg" />
+        </div>
+        <p className="text-xs text-[#999] text-center animate-pulse">Loading worker...</p>
       </div>
     );
   }
 
-  if (!worker) {
-    return <div className="text-sm text-[#999]">Worker not found.</div>;
+  if (notFound || !worker) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+        <p className="text-sm font-medium text-[#333]">Worker not found</p>
+        <p className="text-xs text-[#999]">This worker may have been deleted or the ID is incorrect.</p>
+        <a
+          href="/workers"
+          className="text-xs underline text-[#555] hover:text-[#222] transition-colors"
+        >
+          Back to workers
+        </a>
+      </div>
+    );
   }
 
   const requiredConnections: string[] = worker.config.connections ?? [];
