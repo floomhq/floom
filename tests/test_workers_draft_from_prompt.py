@@ -90,23 +90,33 @@ trigger:
 """
 
 
-def _good_llm_json(name: str = "test-worker", connections: list | None = None) -> str:
+def _good_llm_json(
+    name: str = "test-worker",
+    connections: list | None = None,
+    requirements: list | None = None,
+    secrets: list | None = None,
+) -> str:
     if connections is None:
         connections = ["granola", "hubspot"]
-    return json.dumps({
+    if secrets is None:
+        secrets = ["OPENAI_API_KEY"]
+    payload: dict = {
         "worker_yml": _good_worker_yml(name),
         "skill_md": "# Test Worker\n\nFetch meetings from Granola and update HubSpot.",
         "suggested_name": name,
         "suggested_title": "Test Worker",
         "required_connections": connections,
-        "required_secrets": ["OPENAI_API_KEY"],
+        "required_secrets": secrets,
         "inputs": [
             {"name": "since_date", "type": "string", "label": "Look back from", "required": False, "default": "7 days ago"}
         ],
         "outputs": [
             {"name": "summary", "type": "markdown", "label": "Meeting summary"}
         ],
-    })
+    }
+    if requirements is not None:
+        payload["requirements"] = requirements
+    return json.dumps(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +157,25 @@ class TestConnectionDetection:
         result = _detect_connections("retrieve granola meeting notes and update hubspot crm")
         assert "granola" in result
         assert "hubspot" in result
+
+    def test_meeting_word_does_not_trigger_google_calendar(self):
+        """'meeting' alone must NOT imply google-calendar (Issue #4 tighter inference)."""
+        from main import _detect_connections
+        result = _detect_connections("summarise my granola meetings")
+        assert "google-calendar" not in result
+        assert "granola" in result
+
+    def test_generic_message_word_does_not_trigger_slack(self):
+        """'message' alone must not infer slack (was in old keyword list)."""
+        from main import _detect_connections
+        result = _detect_connections("send a message to the team")
+        assert "slack" not in result
+
+    def test_generic_file_word_does_not_trigger_dropbox(self):
+        """'file' alone must not infer dropbox."""
+        from main import _detect_connections
+        result = _detect_connections("process a file and return results")
+        assert "dropbox" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -501,3 +530,143 @@ trigger:
         data = resp.json()
         assert "skill_md" in data
         assert data["skill_md"] == mock_skill
+
+
+# ---------------------------------------------------------------------------
+# Tests: Requirements UX (Issue #4)
+# ---------------------------------------------------------------------------
+
+class TestRequirementsUX:
+    """Verify that the requirements array is returned correctly and without duplicates."""
+
+    @patch("openai.OpenAI")
+    def test_granola_slack_prompt_returns_two_requirements_no_calendar(self, mock_openai_cls, client):
+        """Prompt with Granola + Slack should return exactly 2 requirements, no google-calendar."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="granola-slack-sync",
+                connections=[],
+                requirements=[
+                    {"app": "granola", "method": "api_key", "reason": "Fetch meeting notes from Granola"},
+                    {"app": "slack", "method": "oauth", "reason": "Post action items to Slack"},
+                ],
+                secrets=["GRANOLA_API_KEY"],
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Summarise my Granola meetings and post action items to Slack"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+
+        requirements = data.get("requirements", [])
+        assert len(requirements) == 2, f"Expected 2 requirements, got {len(requirements)}: {requirements}"
+
+        apps = [r["app"] for r in requirements]
+        assert "granola" in apps
+        assert "slack" in apps
+        assert "google-calendar" not in apps, "google-calendar must not appear for a Granola meetings prompt"
+
+    @patch("openai.OpenAI")
+    def test_hubspot_prompt_returns_oauth_method(self, mock_openai_cls, client):
+        """Prompt for HubSpot CRM should return hubspot with method=oauth."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="hubspot-crm-sync",
+                connections=["hubspot"],
+                requirements=[
+                    {"app": "hubspot", "method": "oauth", "reason": "Access HubSpot CRM via OAuth"},
+                ],
+                secrets=[],
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Update my HubSpot CRM with new contacts"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+
+        requirements = data.get("requirements", [])
+        assert len(requirements) == 1, f"Expected 1 requirement, got {len(requirements)}"
+        assert requirements[0]["app"] == "hubspot"
+        assert requirements[0]["method"] == "oauth"
+
+        # Legacy fields must also be consistent
+        assert "hubspot" in data["required_connections"]
+        assert not any("HUBSPOT" in s for s in data["required_secrets"]), (
+            "HubSpot should not appear in required_secrets when method is oauth"
+        )
+
+    @patch("openai.OpenAI")
+    def test_no_duplicate_app_in_requirements(self, mock_openai_cls, client):
+        """Even if LLM returns duplicate entries, response must deduplicate."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        # LLM returns hubspot twice with different methods (the bad pattern we're fixing)
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="hubspot-dup-test",
+                connections=["hubspot"],
+                requirements=[
+                    {"app": "hubspot", "method": "oauth", "reason": "OAuth connection"},
+                    {"app": "hubspot", "method": "api_key", "reason": "API key fallback"},
+                ],
+                secrets=["HUBSPOT_API_KEY"],
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Sync data with HubSpot"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+
+        requirements = data.get("requirements", [])
+        apps = [r["app"] for r in requirements]
+        assert apps.count("hubspot") == 1, (
+            f"hubspot must appear exactly once in requirements, got: {requirements}"
+        )
+
+    @patch("openai.OpenAI")
+    def test_requirements_legacy_fallback_when_no_requirements_array(self, mock_openai_cls, client):
+        """When LLM omits requirements array, fall back to required_connections + required_secrets."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        # Old-style LLM response with no requirements field
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="legacy-test",
+                connections=["granola"],
+                secrets=["OPENAI_API_KEY"],
+                # No requirements field
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Summarise granola meetings"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+
+        # Should still return requirements derived from connections/secrets
+        requirements = data.get("requirements", [])
+        assert isinstance(requirements, list)
+        # granola from required_connections should become an oauth requirement
+        apps = [r["app"] for r in requirements]
+        assert "granola" in apps
+
+    def test_meeting_keyword_does_not_add_google_calendar_to_detected(self):
+        """Tightened _COMPOSIO_APP_KEYWORDS: 'meeting' alone does not match google-calendar."""
+        from main import _detect_connections
+        result = _detect_connections("summarise my granola meetings")
+        assert "google-calendar" not in result
