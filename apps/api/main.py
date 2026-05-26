@@ -3232,7 +3232,7 @@ def list_connections() -> List[ConnectionItem]:
 
 @app.post("/connections", response_model=ConnectionInitResponse)
 def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitResponse:
-    from composio_client import initiate_connection as composio_initiate
+    from composio_client import initiate_connection as composio_initiate, NoManagedAuthError
     app_name = payload.app_name.lower().strip()
     if not app_name:
         raise HTTPException(status_code=400, detail="app_name is required")
@@ -3240,6 +3240,14 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
     callback_url = _get_callback_url()
     try:
         result = composio_initiate(app_name, callback_url)
+    except NoManagedAuthError as exc:
+        # App does not support Composio-managed OAuth (e.g. API-key-only apps).
+        # Return 422 with a prefixed detail string so the frontend can detect it
+        # and offer an "Add API key" flow instead.
+        raise HTTPException(
+            status_code=422,
+            detail=f"api_key_only: {exc}",
+        ) from exc
     except Exception as exc:
         logger.exception("Failed to initiate Composio connection for %s", app_name)
         raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
