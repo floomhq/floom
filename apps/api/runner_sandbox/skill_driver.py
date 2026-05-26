@@ -185,11 +185,12 @@ class SkillRuntimeDriver(SandboxDriver):
         config: Optional[WorkerConfig],
     ) -> WorkerResult:
         worker_dir = _worker_dir_for_run(worker_id, config)
-        skill_path = _safe_path(worker_dir, "SKILL.md")
+        entrypoint = config.runtime.entrypoint if config and config.runtime else "SKILL.md"
+        skill_path = _safe_path(worker_dir, entrypoint or "SKILL.md")
         if not skill_path.is_file():
             return WorkerResult(
                 status="error",
-                error=f"SKILL.md not found: {skill_path}",
+                error=f"Skill entrypoint not found: {skill_path}",
                 error_code="skill_not_found",
             )
 
@@ -283,6 +284,18 @@ class SkillRuntimeDriver(SandboxDriver):
 
         transcript_artifact = self._write_transcript(run_id, artifact_dir, transcript, secrets)
         artifacts = output_artifacts + [transcript_artifact]
+
+        schema_error = self._validate_outputs(worker_id, outputs, log_fn, config)
+        if schema_error:
+            log_fn(f"Schema validation failed: {schema_error}", "error")
+            return WorkerResult(
+                status="failed",
+                outputs=outputs,
+                artifacts=artifacts,
+                error=f"Output schema violation: {schema_error}",
+                error_code="schema_violation",
+            )
+
         log_fn("[skill] Run completed", "info")
         return WorkerResult(
             status="success",
@@ -566,6 +579,17 @@ class SkillRuntimeDriver(SandboxDriver):
             if output.name == name:
                 return output
         return None
+
+    def _validate_outputs(
+        self,
+        worker_id: str,
+        outputs: Dict[str, Any],
+        log_fn: Callable[[str, str], None],
+        config: Optional[WorkerConfig],
+    ) -> Optional[str]:
+        from runner_local import _validate_output_schema
+
+        return _validate_output_schema(worker_id, outputs, log_fn, config=config)
 
     def _logical_tool_name(self, name: str, args: Dict[str, Any]) -> str:
         if name == "floom__skills__invoke":

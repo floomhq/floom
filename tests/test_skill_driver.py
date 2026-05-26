@@ -56,7 +56,7 @@ def tool_call(name, args, call_id="call_1"):
     )
 
 
-def config_for(worker_dir: Path, *, connections=None) -> WorkerConfig:
+def config_for(worker_dir: Path, *, connections=None, entrypoint="SKILL.md") -> WorkerConfig:
     return WorkerConfig(
         id="research_brief",
         name="Research Brief",
@@ -65,7 +65,7 @@ def config_for(worker_dir: Path, *, connections=None) -> WorkerConfig:
         trigger=WorkerTrigger(type="manual"),
         runtime=WorkerRuntime(
             type="skill",
-            entrypoint="SKILL.md",
+            entrypoint=entrypoint,
             runner="local",
             bundle_path=str(worker_dir),
         ),
@@ -198,6 +198,70 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             tool_result = next(row for row in rows if row["type"] == "tool_result")
             self.assertEqual(tool_result["name"], "floom.skills.invoke")
             self.assertEqual(tool_result["content"]["error"], "not yet")
+
+    def test_uses_configured_skill_entrypoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker_dir = base / "worker"
+            artifacts_dir = base / "artifacts"
+            worker_dir.mkdir()
+            (worker_dir / "CUSTOM_SKILL.md").write_text("Custom entrypoint.", encoding="utf-8")
+            skill_driver.ARTIFACTS_DIR = artifacts_dir
+
+            fake_client = FakeOpenAIClient([
+                assistant_message(content="# Brief\nFrom custom entrypoint"),
+            ])
+            driver = skill_driver.SkillRuntimeDriver(openai_client=fake_client)
+
+            result = driver.run(
+                worker_id="research_brief",
+                run_id="run_custom_entrypoint",
+                inputs={"topic": "AI agents"},
+                secrets={},
+                log_fn=lambda *_args, **_kwargs: None,
+                trace_id="trace_test",
+                config=config_for(worker_dir, entrypoint="CUSTOM_SKILL.md"),
+            )
+
+            self.assertEqual(result.status, "success")
+            self.assertEqual(result.outputs["brief"], "# Brief\nFrom custom entrypoint")
+            self.assertEqual(fake_client.calls[0]["messages"][0]["content"], "Custom entrypoint.")
+
+    def test_missing_declared_output_fails_after_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker_dir = base / "worker"
+            artifacts_dir = base / "artifacts"
+            worker_dir.mkdir()
+            (worker_dir / "SKILL.md").write_text("Write a brief.", encoding="utf-8")
+            skill_driver.ARTIFACTS_DIR = artifacts_dir
+
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call("write_output", {"name": "wrong_name", "content": "Wrong output"})
+                    ]
+                ),
+                assistant_message(content="Done."),
+            ])
+            driver = skill_driver.SkillRuntimeDriver(openai_client=fake_client)
+
+            result = driver.run(
+                worker_id="research_brief",
+                run_id="run_missing_output",
+                inputs={"topic": "AI agents"},
+                secrets={},
+                log_fn=lambda *_args, **_kwargs: None,
+                trace_id="trace_test",
+                config=config_for(worker_dir),
+            )
+
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(result.error_code, "schema_violation")
+            self.assertIn("brief", result.error or "")
+            artifact_names = {artifact["name"] for artifact in result.artifacts}
+            self.assertIn("wrong_name.txt", artifact_names)
+            self.assertIn("transcript.jsonl", artifact_names)
 
 
 if __name__ == "__main__":
