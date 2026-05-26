@@ -268,11 +268,7 @@ class WorkerLimits(BaseModel):
 
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
-<<<<<<< HEAD
-    runtime: Literal["python311", "node22", "bash", "none"]
-=======
-    runtime: str
->>>>>>> origin/main
+    runtime: Literal["python311", "node22", "bash", "skill", "none"]
     runner: str = "local"
     mode: Optional[Literal["agent", "pure-script"]] = None
     inputs: List[WorkerContractField] = Field(default_factory=list)
@@ -281,11 +277,7 @@ class WorkerContractExec(BaseModel):
 
     @field_validator("command")
     @classmethod
-<<<<<<< HEAD
     def validate_command(cls, value: Optional[str]) -> Optional[str]:
-=======
-    def validate_nonempty(cls, value: Optional[str]) -> Optional[str]:
->>>>>>> origin/main
         if value is not None and not value.strip():
             raise ValueError("value is required")
         return value
@@ -350,16 +342,11 @@ class WorkerContract(BaseModel):
     how_it_works: Optional[str] = None
     folder: Optional[str] = None
     version: str
-<<<<<<< HEAD
-    entrypoint: Optional[str] = None
+    entrypoint: Optional[str] = "SKILL.md"
     system_prompt: Optional[str] = None
     model: Optional[str] = "gpt-5-mini"
     entrypoints: Optional[List[WorkerEntrypoint]] = None
     limits: WorkerLimits = Field(default_factory=WorkerLimits)
-=======
-    model: Optional[str] = None
-    entrypoint: str = "SKILL.md"
->>>>>>> origin/main
     targets: List[str] = Field(default_factory=lambda: ["generic"])
     tags: Optional[List[str]] = None
     authors: List[WorkerContractAuthor] = Field(default_factory=list)
@@ -407,7 +394,6 @@ class WorkerContract(BaseModel):
             raise ValueError("description must be 500 characters or fewer")
         return value
 
-<<<<<<< HEAD
     @model_validator(mode="after")
     def resolve_exec_mode(self) -> "WorkerContract":
         if self.exec.mode is None:
@@ -421,7 +407,7 @@ class WorkerContract(BaseModel):
         if self.exec.mode == "pure-script" and not self.exec.command:
             raise ValueError("exec.command is required when exec.mode is pure-script")
         return self
-=======
+
     @field_validator("long_description")
     @classmethod
     def validate_long_description(cls, value: Optional[str]) -> Optional[str]:
@@ -465,7 +451,6 @@ class WorkerContract(BaseModel):
         if not all(part.strip() for part in value.split("/")):
             raise ValueError("folder path segments must be non-empty")
         return value
->>>>>>> origin/main
 
 
 WorkerManifest = WorkerConfig | WorkerContract
@@ -519,7 +504,6 @@ def _contract_output_type(field: WorkerContractField) -> str:
 
 def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -> WorkerConfig:
     """Project WorkerContract into the existing response/runtime config shape."""
-<<<<<<< HEAD
     command_parts = contract.exec.command.strip().split() if contract.exec.command else []
     entrypoint = contract.entrypoint or "SKILL.md"
     if contract.exec.mode == "pure-script":
@@ -530,12 +514,6 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             entrypoint = command_parts[-1]
     elif contract.entrypoints:
         entrypoint = contract.entrypoints[0].path
-=======
-    command = contract.exec.command.strip().split() if contract.exec.command else []
-    entrypoint = contract.entrypoint or "SKILL.md"
-    if len(command) >= 2 and command[0].startswith("python"):
-        entrypoint = command[-1]
->>>>>>> origin/main
 
     runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
     runtime = WorkerRuntime(
