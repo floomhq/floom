@@ -108,5 +108,15 @@ export const api = {
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
+    catalog: (params?: { page?: number; limit?: number; search?: string; category?: string }) => {
+      const qs = new URLSearchParams();
+      qs.set("page", String(params?.page ?? 1));
+      qs.set("limit", String(params?.limit ?? 30));
+      if (params?.search) qs.set("search", params.search);
+      if (params?.category) qs.set("category", params.category);
+      return fetchJson<import("./types").IntegrationCatalogResponse>(
+        `/integrations/catalog?${qs.toString()}`
+      );
+    },
   },
 };

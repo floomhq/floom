@@ -15,14 +15,23 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+import threading
+import base64
 from typing import Any, Dict, List, Optional
 
 import requests
+from dotenv import load_dotenv
 
 logger = logging.getLogger("floom.composio")
 
 _BASE = "https://backend.composio.dev/api/v3"
 _USER_ID = "federico"
+_CATALOG_TTL_SECONDS = 60 * 60
+_catalog_cache: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
+_catalog_cache_lock = threading.Lock()
+
+load_dotenv("/root/.config/workeros/api.env", override=False)
 
 SUPPORTED_APPS: Dict[str, str] = {
     "gmail": "Gmail",
@@ -50,7 +59,8 @@ def _headers() -> Dict[str, str]:
 
 
 def _get(path: str, **params: Any) -> Any:
-    r = requests.get(f"{_BASE}{path}", headers=_headers(), params=params, timeout=15)
+    clean_params = {k: v for k, v in params.items() if v not in (None, "")}
+    r = requests.get(f"{_BASE}{path}", headers=_headers(), params=clean_params, timeout=15)
     r.raise_for_status()
     return r.json()
 
@@ -77,6 +87,85 @@ def list_apps() -> List[Dict[str, str]]:
         {"slug": slug, "display_name": name}
         for slug, name in SUPPORTED_APPS.items()
     ]
+
+
+def _catalog_cursor(page: int, limit: int) -> Optional[str]:
+    if page <= 1:
+        return None
+    return base64.b64encode(f"{page}-{limit}".encode("utf-8")).decode("ascii")
+
+
+def _normalize_catalog_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    meta = item.get("meta") or {}
+    categories = []
+    for category in meta.get("categories") or item.get("categories") or []:
+        if isinstance(category, dict):
+            value = category.get("id") or category.get("name")
+        else:
+            value = category
+        if value:
+            categories.append(str(value))
+
+    return {
+        "slug": (item.get("slug") or "").lower(),
+        "name": item.get("name") or item.get("slug") or "",
+        "logo_url": meta.get("logo") or item.get("logo") or item.get("logo_url") or "",
+        "description": meta.get("description") or item.get("description") or "",
+        "categories": categories,
+        "tools_count": meta.get("tools_count") or 0,
+        "triggers_count": meta.get("triggers_count") or 0,
+    }
+
+
+def list_catalog_apps(
+    *,
+    page: int = 1,
+    limit: int = 30,
+    search: str = "",
+    category: str = "",
+) -> Dict[str, Any]:
+    """Return the Composio app/toolkit catalog, normalized for the web UI.
+
+    Composio v3 currently exposes the catalog at /toolkits. The older /apps
+    path returns 404, so this client uses the live v3 catalog endpoint.
+    """
+    page = max(1, page)
+    limit = max(1, min(100, limit))
+    normalized_search = search.strip()
+    normalized_category = category.strip()
+    cache_key = (page, limit, normalized_search.lower(), normalized_category.lower())
+    now = time.monotonic()
+
+    with _catalog_cache_lock:
+        cached = _catalog_cache.get(cache_key)
+        if cached and now - cached[0] < _CATALOG_TTL_SECONDS:
+            return cached[1]
+
+    data = _get(
+        "/toolkits",
+        limit=limit,
+        cursor=_catalog_cursor(page, limit),
+        search=normalized_search or None,
+        category=normalized_category or None,
+    )
+    items = [_normalize_catalog_item(item) for item in data.get("items") or []]
+    categories = sorted({category for item in items for category in item["categories"]})
+    total_items = int(data.get("total_items") or len(items))
+    total_pages = int(data.get("total_pages") or 1)
+
+    result = {
+        "items": items,
+        "page": int(data.get("current_page") or page),
+        "limit": limit,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "next_page": page + 1 if data.get("next_cursor") and page < total_pages else None,
+        "categories": categories,
+    }
+
+    with _catalog_cache_lock:
+        _catalog_cache[cache_key] = (now, result)
+    return result
 
 
 def list_connections() -> List[Dict[str, Any]]:
