@@ -780,6 +780,14 @@ class WorkerSummary(BaseModel):
     recent_stats: Optional[RecentStats] = None
 
 
+class WorkerFile(BaseModel):
+    path: str           # relative path from worker root, e.g. "SKILL.md", "lib/helpers.py"
+    language: str       # "markdown", "python", "yaml", "json", "text"
+    content: Optional[str] = None   # utf-8 string; None when binary=True
+    binary: bool = False
+    size: int = 0
+
+
 class WorkerDetail(BaseModel):
     id: str
     name: str
@@ -801,6 +809,7 @@ class WorkerDetail(BaseModel):
     skill_md_content: Optional[str] = None  # Raw SKILL.md content
     run_py_content: Optional[str] = None  # Alias for run_py, explicit for Code tab
     new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
+    files: List[WorkerFile] = Field(default_factory=list)  # All files in the worker dir
 
 
 class SecretItem(BaseModel):
