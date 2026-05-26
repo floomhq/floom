@@ -83,7 +83,11 @@ exec:
     label: Boolean (checkbox)
   - name: file_input
     kind: file
-    media_type: application/octet-stream
+    media_type: text/csv
+    accepts:
+    - text/csv
+    - application/octet-stream
+    max_size_mb: 1
     path: inputs/file_input
     required: false
     label: File upload
@@ -103,6 +107,8 @@ exec:
     label: Raw inputs
 capabilities:
   secrets: []
+  files:
+  - file_input
   network:
     egress: false
 approvals:

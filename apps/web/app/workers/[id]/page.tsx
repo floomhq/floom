@@ -20,6 +20,7 @@ import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck } from "lucide-react
 import type { WorkerDetail, WorkerInput, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { FileInputUpload } from "@/components/FileInputUpload";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
@@ -308,12 +309,14 @@ export default function WorkerDetailPage() {
                       }}
                     />
                   ) : inp.type === "file" ? (
-                    <FileDropZone
+                    <FileInputUpload
                       name={inp.name}
                       value={inputs[inp.name] as string | undefined}
                       fileName={fileNames[inp.name]}
-                      onFile={(dataUri, name) => {
-                        setInputs((prev) => ({ ...prev, [inp.name]: dataUri }));
+                      accepts={(inp as WorkerInput & { accepts?: string[] }).accepts}
+                      maxSizeMb={(inp as WorkerInput & { max_size_mb?: number }).max_size_mb}
+                      onUploaded={(sha256, name) => {
+                        setInputs((prev) => ({ ...prev, [inp.name]: sha256 }));
                         setFileNames((prev) => ({ ...prev, [inp.name]: name }));
                       }}
                     />
@@ -591,75 +594,5 @@ function ManifestViewer({ yaml }: { yaml: string }) {
         return <div key={i}>{line || " "}</div>;
       })}
     </pre>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// FileDropZone — drag-and-drop file input with filename display
-// ---------------------------------------------------------------------------
-
-function FileDropZone({
-  name,
-  value,
-  fileName,
-  onFile,
-}: {
-  name: string;
-  value: string | undefined;
-  fileName: string | undefined;
-  onFile: (dataUri: string, name: string) => void;
-}) {
-  const [dragging, setDragging] = useState(false);
-
-  function loadFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result;
-      if (typeof result === "string") {
-        onFile(result, file.name);
-      }
-    };
-    reader.readAsDataURL(file);
-  }
-
-  return (
-    <div
-      className={`relative border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${
-        dragging ? "border-black bg-[#f4f4f5]" : "border-[#e4e4e7] hover:border-[#aaa]"
-      }`}
-      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragging(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) loadFile(file);
-      }}
-      onClick={() => document.getElementById(`file-input-${name}`)?.click()}
-    >
-      <input
-        id={`file-input-${name}`}
-        type="file"
-        accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) loadFile(file);
-        }}
-      />
-      {value && fileName ? (
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-[#333]">{fileName}</p>
-          <p className="text-xs text-[#999]">
-            {Math.round(value.length / 1024)}KB — click or drop to replace
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-1">
-          <p className="text-sm text-[#666]">Drop PDF, DOCX, or TXT here</p>
-          <p className="text-xs text-[#999]">or click to browse</p>
-        </div>
-      )}
-    </div>
   );
 }
