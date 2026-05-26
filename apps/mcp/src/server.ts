@@ -10,7 +10,6 @@ const TERMINAL_RUN_STATUSES = new Set([
   "error",
   "completed",
   "failed",
-  "pending_approval",
   "approved",
   "rejected",
 ]);
@@ -43,7 +42,7 @@ function apiSecret(): string {
 function jsonResult(data: unknown, summary?: string): CallToolResult {
   const safeData = redactSecrets(data);
   const structuredContent =
-    safeData && typeof safeData === "object" && !Array.isArray(safeData) ? (safeData as JsonObject) : { data: safeData };
+    data && typeof data === "object" && !Array.isArray(data) ? (data as JsonObject) : { data };
   return {
     content: [
       {

@@ -18,7 +18,7 @@
     "prepack": "npm run build"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
   "engines": {
     "node": ">=20"
@@ -31,5 +31,5 @@
     "@types/node": "^20.19.25",
     "typescript": "^5.9.3"
   },
-  "license": "UNLICENSED"
+  "license": "MIT"
 }
