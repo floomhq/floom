@@ -177,6 +177,8 @@ export interface WorkerDetail {
   run_py?: string;
   skill_md_content?: string;
   run_py_content?: string;
+  new_webhook_secret?: string;
+  webhook_url?: string;
   files: WorkerFile[];
 }
 
