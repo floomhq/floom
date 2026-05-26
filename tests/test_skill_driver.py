@@ -322,6 +322,26 @@ class ComposioToolDispatchTest(unittest.TestCase):
         skill_driver.ARTIFACTS_DIR = artifacts_dir
         return base, worker_dir, artifacts_dir
 
+    def _run_tool_call(self, worker_dir, run_id, fake_client, mock_requests, *, connections):
+        driver = skill_driver.SkillRuntimeDriver(
+            openai_client=fake_client,
+            requests_session=mock_requests,
+        )
+        return driver.run(
+            worker_id="research_brief",
+            run_id=run_id,
+            inputs={"topic": "AI agents"},
+            secrets={"OPENAI_API_KEY": "k", "COMPOSIO_API_KEY": "ck"},
+            log_fn=lambda *a, **k: None,
+            trace_id="trace_test",
+            config=config_for(worker_dir, connections=connections),
+        )
+
+    def _tool_result_contents(self, artifacts_dir, run_id):
+        transcript = artifacts_dir / run_id / "transcript.jsonl"
+        rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
+        return [r["content"] for r in rows if r.get("type") == "tool_result"]
+
     def test_composio_tool_slug_outside_namespace_is_rejected_pre_http(self):
         """LLM picking a slug outside its declared app namespace must NOT hit the wire."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -363,6 +383,148 @@ class ComposioToolDispatchTest(unittest.TestCase):
                 r["content"].get("error_code") == "tool_slug_namespace_violation"
                 for r in tool_results
             ))
+
+    def test_dotted_composio_tool_for_undeclared_app_is_rejected_pre_http(self):
+        """Dotted composio.<app> tools must be limited to declared connections."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio.slack.SLACK_SEND_MESSAGE",
+                            {"arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nFallback"),
+            ])
+            mock_requests = MagicMock()
+
+            with patch.object(skill_driver.SkillRuntimeDriver, "_connection_id_for") as connection_lookup:
+                result = self._run_tool_call(
+                    worker_dir,
+                    "run_dotted_undeclared_app",
+                    fake_client,
+                    mock_requests,
+                    connections=["gmail"],
+                )
+
+            self.assertEqual(result.status, "success")
+            self.assertFalse(connection_lookup.called, "Undeclared app must not resolve a connection")
+            self.assertFalse(mock_requests.post.called, "Undeclared app must not call Composio HTTP")
+            tool_results = self._tool_result_contents(artifacts_dir, "run_dotted_undeclared_app")
+            self.assertTrue(any(
+                item.get("error_code") == "tool_outside_declared_connections"
+                and item.get("error") == "Worker did not declare connection to slack"
+                for item in tool_results
+            ))
+
+    def test_generated_composio_tool_for_undeclared_app_is_rejected_pre_http(self):
+        """Generated composio__<app>__execute tools use the same declared-app gate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio__slack__execute",
+                            {"tool_slug": "SLACK_SEND_MESSAGE", "arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nFallback"),
+            ])
+            mock_requests = MagicMock()
+
+            with patch.object(skill_driver.SkillRuntimeDriver, "_connection_id_for") as connection_lookup:
+                result = self._run_tool_call(
+                    worker_dir,
+                    "run_generated_undeclared_app",
+                    fake_client,
+                    mock_requests,
+                    connections=["gmail"],
+                )
+
+            self.assertEqual(result.status, "success")
+            self.assertFalse(connection_lookup.called, "Undeclared app must not resolve a connection")
+            self.assertFalse(mock_requests.post.called, "Undeclared app must not call Composio HTTP")
+            tool_results = self._tool_result_contents(artifacts_dir, "run_generated_undeclared_app")
+            self.assertTrue(any(
+                item.get("error_code") == "tool_outside_declared_connections"
+                and item.get("error") == "Worker did not declare connection to slack"
+                for item in tool_results
+            ))
+
+    def test_dotted_declared_app_with_wrong_slug_namespace_is_rejected_pre_http(self):
+        """Declared dotted app still rejects tool slugs from another app namespace."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio.gmail.SLACK_SEND_MESSAGE",
+                            {"arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nFallback"),
+            ])
+            mock_requests = MagicMock()
+
+            with patch.object(skill_driver.SkillRuntimeDriver, "_connection_id_for") as connection_lookup:
+                result = self._run_tool_call(
+                    worker_dir,
+                    "run_dotted_wrong_slug_namespace",
+                    fake_client,
+                    mock_requests,
+                    connections=["gmail"],
+                )
+
+            self.assertEqual(result.status, "success")
+            self.assertFalse(connection_lookup.called, "Namespace violation must not resolve a connection")
+            self.assertFalse(mock_requests.post.called, "Namespace violation must not call Composio HTTP")
+            tool_results = self._tool_result_contents(artifacts_dir, "run_dotted_wrong_slug_namespace")
+            self.assertTrue(any(
+                item.get("error_code") == "tool_slug_namespace_violation"
+                for item in tool_results
+            ))
+
+    def test_dotted_declared_app_with_matching_slug_reaches_http(self):
+        """Dotted composio.<declared-app>.<slug> proceeds through normal execution."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, _artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio.gmail.GMAIL_SEND_EMAIL",
+                            {"arguments": {"to": "person@example.com"}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nSent"),
+            ])
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"ok": True}
+            mock_requests = MagicMock()
+            mock_requests.post.return_value = mock_response
+
+            with patch.object(skill_driver.SkillRuntimeDriver, "_connection_id_for", return_value="ca_test"):
+                result = self._run_tool_call(
+                    worker_dir,
+                    "run_dotted_declared_app",
+                    fake_client,
+                    mock_requests,
+                    connections=["gmail"],
+                )
+
+            self.assertEqual(result.status, "success")
+            mock_requests.post.assert_called_once()
+            called_url = mock_requests.post.call_args.args[0]
+            self.assertTrue(called_url.endswith("/tools/execute/GMAIL_SEND_EMAIL"))
 
     def test_missing_composio_connection_fails_fast(self):
         """No active connection for the declared app -> missing_connection BEFORE HTTP."""

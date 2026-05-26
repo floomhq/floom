@@ -461,6 +461,13 @@ class SkillRuntimeDriver(SandboxDriver):
         if name in {"floom__workers__invoke", "floom.workers.invoke"}:
             return {"ok": False, "error": "not yet"}
         if name.startswith("composio__") or name.startswith("composio."):
+            app_name = self._app_from_composio_tool_name(name)
+            if app_name not in self._declared_connections(config):
+                return {
+                    "ok": False,
+                    "error": f"Worker did not declare connection to {app_name}",
+                    "error_code": "tool_outside_declared_connections",
+                }
             return self._execute_composio_tool(name, args, worker_id, config, log_fn)
         return {"ok": False, "error": f"Unknown tool: {name}"}
 
