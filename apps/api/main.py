@@ -1662,6 +1662,34 @@ def clear_runs():
     return {"status": "cleared"}
 
 
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
+
+
+@app.post("/runs/{run_id}/cancel", response_model=ActionResponse)
+def cancel_run(run_id: str) -> ActionResponse:
+    """Request cancellation of an in-flight run.
+
+    Sets cancel_requested=1 on the run row. The runner respects this between
+    iterations (AgentDriver) or on the next status write (other drivers).
+    Returns 404 if no such run, 409 if already terminal, 200 if cancellation
+    was recorded (idempotent).
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, cancel_requested FROM runs WHERE id = ?", (run_id,))
+        row = cursor.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if row["status"] in _TERMINAL_RUN_STATUSES:
+            raise HTTPException(status_code=409, detail=f"Run already {row['status']}")
+        conn.execute(
+            "UPDATE runs SET cancel_requested = 1, cancelled_at = ? WHERE id = ?",
+            (now_iso(), run_id),
+        )
+    logger.info("Cancel requested for run %s", run_id)
+    return ActionResponse(status="cancel_requested", run_id=run_id)
+
+
 @app.get("/runs/{run_id}/artifacts/{artifact_id}/download")
 def download_artifact(run_id: str, artifact_id: str):
     with get_db() as conn:
