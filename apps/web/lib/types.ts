@@ -124,6 +124,12 @@ export interface RunDetail {
   created_at?: string;
 }
 
+export interface RecentStats {
+  last_run_at?: string | null;
+  runs_7d: number;
+  success_rate_7d?: number | null;
+}
+
 export interface WorkerSummary {
   id: string;
   name: string;
@@ -139,6 +145,8 @@ export interface WorkerSummary {
   trigger_type: string;
   runner: string;
   last_run?: RunSummary;
+  triggers: string[];
+  recent_stats?: RecentStats | null;
 }
 
 export interface WorkerDetail {
