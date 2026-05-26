@@ -542,7 +542,13 @@ def _resolve_file_input_references(
                 # per-run dir so stale files from earlier runs are never visible.
                 continue
             if not is_sha256(value):
-                continue
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File input '{inp.name}': value must be a SHA-256 reference "
+                        f"from /uploads, got non-SHA value"
+                    ),
+                )
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
                 raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
 
