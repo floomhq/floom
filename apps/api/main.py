@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso, DB_PATH
+from files import ensure_blob_dir, normalize_media_type
 from models import (
     ApproveRequest,
     RunCreate,
@@ -470,6 +471,92 @@ def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Workers
 # ---------------------------------------------------------------------------
+
+
+def _parse_accepts(value: Optional[str]) -> set[str]:
+    if not value:
+        return set()
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return {normalize_media_type(str(item)) for item in parsed if str(item).strip()}
+    except json.JSONDecodeError:
+        pass
+    return {normalize_media_type(part) for part in value.split(",") if part.strip()}
+
+
+@app.post("/uploads")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    max_size_mb: Optional[float] = Form(None),
+    accepts: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    if max_size_mb is not None and max_size_mb <= 0:
+        raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
+
+    media_type = normalize_media_type(
+        file.content_type or mimetypes.guess_type(file.filename or "")[0]
+    )
+    accepted = _parse_accepts(accepts)
+    if accepted and media_type not in accepted:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not accepted",
+        )
+
+    max_bytes = int(max_size_mb * 1024 * 1024) if max_size_mb is not None else None
+    hasher = hashlib.sha256()
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        size += len(chunk)
+        if max_bytes is not None and size > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Uploaded file exceeds {max_size_mb:g} MB",
+            )
+        hasher.update(chunk)
+        chunks.append(chunk)
+
+    sha256 = hasher.hexdigest()
+    target = ensure_blob_dir(sha256)
+    if not target.exists():
+        tmp_path = target.parent / f".{sha256}.tmp.{os.getpid()}.{threading.get_ident()}"
+        with open(tmp_path, "wb") as out:
+            for chunk in chunks:
+                out.write(chunk)
+        try:
+            os.replace(tmp_path, target)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    uploaded_by = request.headers.get("x-floom-user") or "anonymous"
+    uploaded_at = now_iso()
+    filename = file.filename or sha256
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO files
+                (id, filename, media_type, size_bytes, uploaded_by, uploaded_at, ref_count)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                filename=files.filename,
+                media_type=files.media_type,
+                size_bytes=files.size_bytes,
+                uploaded_by=files.uploaded_by,
+                uploaded_at=files.uploaded_at,
+                ref_count=files.ref_count
+            """,
+            (sha256, filename, media_type, size, uploaded_by, uploaded_at),
+        )
+
+    return {"id": sha256, "sha256": sha256, "size": size, "media_type": media_type}
+
 
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
