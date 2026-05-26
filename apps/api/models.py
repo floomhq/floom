@@ -665,7 +665,6 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         title=config.name,
         description=config.description or config.name,
         version=version,
-        model=config.model,
         entrypoint="SKILL.md",
         targets=["generic"],
         exec=WorkerContractExec(
@@ -678,7 +677,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
         system_prompt=config.runtime.system_prompt,
-        model=config.runtime.model or "gpt-5-mini",
+        model=config.runtime.model or config.model or "gpt-5-mini",
         limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
