@@ -24,6 +24,11 @@ cp .env.example .env
 # Edit .env and add your OPENAI_API_KEY
 ```
 
+For Composio-triggered workers, also set:
+
+- `COMPOSIO_API_KEY` — Composio v3 API key used to enable/disable triggers.
+- `COMPOSIO_WEBHOOK_SIGNING_KEY` — HMAC key used to verify `POST /composio-events` (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The endpoint returns 503 when this is missing.
+
 ### 3. Start the backend
 
 ```bash
@@ -81,6 +86,8 @@ Base URL: `http://localhost:8000`
 | `/workers/{id}` | GET | Worker detail |
 | `/workers/reload` | POST | Reload workers from disk |
 | `/workers/{id}/runs` | POST | Create a run |
+| `/integrations/triggers` | GET | Cached Composio trigger catalog |
+| `/composio-events` | POST | Signed Composio trigger webhook receiver |
 | `/runs` | GET | List runs |
 | `/runs/{id}` | GET | Run detail |
 | `/runs/{id}/approve` | POST | Approve a run |

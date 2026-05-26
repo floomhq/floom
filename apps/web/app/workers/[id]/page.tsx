@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Play, Box, Plug } from "lucide-react";
+import { ArrowLeft, Play, Box, Plug, Pencil } from "lucide-react";
 import type { WorkerDetail, WorkerInput, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -118,6 +118,12 @@ export default function WorkerDetailPage() {
           <p className="text-[#666] text-sm">{worker.description}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href={`/workers/${worker.id}/edit`}>
+            <Button variant="outline" size="sm" className="border-[#e4e4e7]">
+              <Pencil className="w-4 h-4 mr-1.5" />
+              Edit
+            </Button>
+          </Link>
           {worker.paused && (
             <Badge variant="outline" className="text-gray-500 border-gray-200 bg-gray-50">Paused</Badge>
           )}

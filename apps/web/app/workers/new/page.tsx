@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import type { ComposioTriggerItem, ConnectionItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +36,7 @@ interface OutputRow {
 
 const INPUT_TYPES = ["text", "textarea", "number", "select", "file", "boolean"] as const;
 const OUTPUT_TYPES = ["markdown", "text", "json", "csv", "file"] as const;
+type TriggerType = "manual" | "schedule" | "webhook" | "composio";
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
@@ -71,6 +73,12 @@ function buildYaml(
   outputs: OutputRow[],
   secrets: string,
   approvalsRequired: boolean,
+  triggerType: TriggerType,
+  cronExpr: string,
+  cronTimezone: string,
+  composioEvent: string,
+  composioConnectionId: string,
+  composioFilters: string,
 ): string {
   const slug = (workerId || "my-worker").replace(/_/g, "-");
   const title = name || "My Worker";
@@ -161,9 +169,49 @@ function buildYaml(
   lines.push(`  required: ${approvalsRequired}`);
   lines.push(``);
   lines.push(`trigger:`);
-  lines.push(`  type: manual`);
+  lines.push(`  type: ${triggerType}`);
+  if (triggerType === "schedule") {
+    lines.push(`  cron: ${yamlString(cronExpr || "0 9 * * MON")}`);
+    lines.push(`  timezone: ${yamlString(cronTimezone || "Europe/Berlin")}`);
+  }
+  if (triggerType === "webhook") {
+    lines.push(`  webhook:`);
+    lines.push(`    secret: true`);
+    lines.push(`    allowed_methods: [POST]`);
+  }
+  if (triggerType === "composio") {
+    let filters: Record<string, unknown> = {};
+    try {
+      filters = composioFilters.trim() ? JSON.parse(composioFilters) : {};
+    } catch {
+      filters = {};
+    }
+    lines.push(`  composio:`);
+    lines.push(`    event: ${yamlString(composioEvent)}`);
+    lines.push(`    connection_id: ${yamlString(composioConnectionId)}`);
+    lines.push(`    filters: ${JSON.stringify(filters)}`);
+  }
 
   return lines.join("\n");
+}
+
+function triggerEventId(item: ComposioTriggerItem): string {
+  return item.event || item.slug || item.id || item.name || "";
+}
+
+function triggerLabel(item: ComposioTriggerItem): string {
+  return item.display_name || item.name || triggerEventId(item);
+}
+
+function triggerAppSlug(item?: ComposioTriggerItem): string {
+  if (!item) return "";
+  return (
+    item.toolkit?.slug ||
+    item.app?.slug ||
+    (item as unknown as { toolkit_slug?: string }).toolkit_slug ||
+    (item as unknown as { app_name?: string }).app_name ||
+    ""
+  ).toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +231,25 @@ export default function NewWorkerPage() {
   const [secrets, setSecrets] = useState("");
   const [approvalsRequired, setApprovalsRequired] = useState(false);
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
+  const [triggerType, setTriggerType] = useState<TriggerType>("manual");
+  const [cronExpr, setCronExpr] = useState("0 9 * * MON");
+  const [cronTimezone, setCronTimezone] = useState("Europe/Berlin");
+  const [composioTriggers, setComposioTriggers] = useState<ComposioTriggerItem[]>([]);
+  const [connections, setConnections] = useState<ConnectionItem[]>([]);
+  const [triggerSearch, setTriggerSearch] = useState("");
+  const [composioEvent, setComposioEvent] = useState("");
+  const [composioConnectionId, setComposioConnectionId] = useState("");
+  const [composioFilters, setComposioFilters] = useState("{}");
+
+  useEffect(() => {
+    Promise.all([
+      api.integrations.triggers().catch(() => ({ items: [] })),
+      api.connections.list().catch(() => []),
+    ]).then(([triggerCatalog, connectionItems]) => {
+      setComposioTriggers(triggerCatalog.items || []);
+      setConnections(connectionItems);
+    });
+  }, []);
 
   // ID validation
   const idError =
@@ -190,7 +257,35 @@ export default function NewWorkerPage() {
       ? "Use lowercase letters, numbers, and hyphens. Start and end with a letter or number."
       : null;
 
-  const yaml = buildYaml(workerId, name, description, inputs, outputs, secrets, approvalsRequired);
+  const selectedComposioTrigger = composioTriggers.find((item) => triggerEventId(item) === composioEvent);
+  const selectedAppSlug = triggerAppSlug(selectedComposioTrigger);
+  const matchingConnections = connections.filter((connection) => {
+    if (connection.status !== "active") return false;
+    if (!selectedAppSlug) return true;
+    return connection.app_name.toLowerCase() === selectedAppSlug;
+  });
+  const filteredComposioTriggers = composioTriggers
+    .filter((item) => {
+      const haystack = `${triggerEventId(item)} ${triggerLabel(item)} ${triggerAppSlug(item)}`.toLowerCase();
+      return haystack.includes(triggerSearch.toLowerCase());
+    })
+    .slice(0, 100);
+
+  const yaml = buildYaml(
+    workerId,
+    name,
+    description,
+    inputs,
+    outputs,
+    secrets,
+    approvalsRequired,
+    triggerType,
+    cronExpr,
+    cronTimezone,
+    composioEvent,
+    composioConnectionId,
+    composioFilters,
+  );
 
   // Input row helpers
   const addInput = useCallback(() => {
@@ -237,6 +332,26 @@ export default function NewWorkerPage() {
     if (inputs.some((inp) => inp.type === "select" && !inp.options.split(",").some((o) => o.trim()))) {
       toast.error("Select inputs need at least one option");
       return;
+    }
+    if (triggerType === "schedule" && !cronExpr.trim()) {
+      toast.error("Cron expression is required");
+      return;
+    }
+    if (triggerType === "composio") {
+      if (!composioEvent) {
+        toast.error("Composio event is required");
+        return;
+      }
+      if (!composioConnectionId) {
+        toast.error("Connection ID is required");
+        return;
+      }
+      try {
+        JSON.parse(composioFilters || "{}");
+      } catch {
+        toast.error("Filters must be valid JSON");
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -305,6 +420,138 @@ export default function NewWorkerPage() {
                   className="min-h-[60px] border-[#e4e4e7]"
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Trigger */}
+          <Card className="border-[#eaeaea] shadow-none bg-white">
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Trigger</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-sm">Type</Label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    ["manual", "Manual"],
+                    ["schedule", "Cron"],
+                    ["webhook", "Webhook"],
+                    ["composio", "Composio event"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setTriggerType(value)}
+                      className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
+                        triggerType === value
+                          ? "border-black bg-black text-white"
+                          : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {triggerType === "schedule" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Cron</Label>
+                    <Input
+                      value={cronExpr}
+                      onChange={(e) => setCronExpr(e.target.value)}
+                      className="border-[#e4e4e7] font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Timezone</Label>
+                    <Input
+                      value={cronTimezone}
+                      onChange={(e) => setCronTimezone(e.target.value)}
+                      className="border-[#e4e4e7] font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {triggerType === "webhook" && (
+                <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 text-sm text-[#555]">
+                  Webhook trigger with per-worker HMAC signing enabled.
+                </div>
+              )}
+
+              {triggerType === "composio" && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Search events</Label>
+                    <Input
+                      placeholder="GMAIL_NEW_EMAIL, SLACK_MESSAGE_POSTED..."
+                      value={triggerSearch}
+                      onChange={(e) => setTriggerSearch(e.target.value)}
+                      className="border-[#e4e4e7]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Event</Label>
+                    <Select
+                      value={composioEvent}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        setComposioEvent(value);
+                        setComposioConnectionId("");
+                      }}
+                    >
+                      <SelectTrigger className="border-[#e4e4e7]">
+                        <SelectValue placeholder="Select a Composio event" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredComposioTriggers.map((item) => {
+                          const eventId = triggerEventId(item);
+                          return (
+                            <SelectItem key={eventId} value={eventId}>
+                              {triggerLabel(item)} · {eventId}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Connection ID</Label>
+                    {matchingConnections.length > 0 ? (
+                      <Select value={composioConnectionId} onValueChange={(value) => value && setComposioConnectionId(value)}>
+                        <SelectTrigger className="border-[#e4e4e7]">
+                          <SelectValue placeholder="Select connected account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {matchingConnections.map((connection) => (
+                            <SelectItem key={connection.composio_connection_id} value={connection.composio_connection_id}>
+                              {connection.app_name} · {connection.composio_connection_id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        placeholder="ca_xxx"
+                        value={composioConnectionId}
+                        onChange={(e) => setComposioConnectionId(e.target.value)}
+                        className="border-[#e4e4e7] font-mono text-sm"
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Filters JSON</Label>
+                    <Textarea
+                      value={composioFilters}
+                      onChange={(e) => setComposioFilters(e.target.value)}
+                      className="min-h-[90px] border-[#e4e4e7] font-mono text-xs"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
