@@ -225,13 +225,16 @@ async def _log_runtime_architecture() -> None:
     """Make the execution architecture visible on every boot.
 
     Auditors and operators should not have to read the source to learn that
-    workers run in E2B sandboxes. This banner lands in journalctl on every
-    restart of `workeros-api.service`.
+    workers run in E2B sandboxes. Written to stderr so it appears in
+    journalctl alongside uvicorn's own startup lines (the floom.api logger
+    has no INFO-level handler configured).
     """
-    logger.info(
-        "[startup] Execution: E2B sandbox microVMs only (no in-process worker execution). "
-        "See ARCHITECTURE.md."
+    import sys
+    sys.stderr.write(
+        "[workeros] Execution: E2B sandbox microVMs only "
+        "(no in-process worker execution). See ARCHITECTURE.md.\n"
     )
+    sys.stderr.flush()
 
 
 # ---------------------------------------------------------------------------
