@@ -7,15 +7,25 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, Eye, Folder, Pencil, Play, Plus, Tags, X } from "lucide-react";
+import { Box, ChevronDown, ChevronUp, Eye, Folder, Pencil, Play, Plus, Tags, X } from "lucide-react";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
+
+const TAG_COLLAPSED_MAX = 8;
+const SESSION_KEY_TAGS_EXPANDED = "workeros:tags-expanded";
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [tagsExpanded, setTagsExpanded] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(SESSION_KEY_TAGS_EXPANDED) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     api.workers.list().then((w) => {
@@ -120,7 +130,7 @@ export default function WorkersPage() {
                 <p className="text-xs text-[#999] pt-1">No tags.</p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
-                  {allTags.map((tag) => (
+                  {(tagsExpanded ? allTags : allTags.slice(0, TAG_COLLAPSED_MAX)).map((tag) => (
                     <button
                       key={tag}
                       type="button"
@@ -138,6 +148,23 @@ export default function WorkersPage() {
                       </Badge>
                     </button>
                   ))}
+                  {allTags.length > TAG_COLLAPSED_MAX && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !tagsExpanded;
+                        setTagsExpanded(next);
+                        try { sessionStorage.setItem(SESSION_KEY_TAGS_EXPANDED, String(next)); } catch {}
+                      }}
+                      className="inline-flex items-center gap-0.5 text-xs text-[#666] hover:text-[#333] transition-colors"
+                    >
+                      {tagsExpanded ? (
+                        <><ChevronUp className="w-3 h-3" />Show fewer</>
+                      ) : (
+                        <><ChevronDown className="w-3 h-3" />Show all ({allTags.length})</>
+                      )}
+                    </button>
+                  )}
                 </div>
               )}
 
