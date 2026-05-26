@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, ChevronDown, ChevronRight, Search, X } from "lucide-react";
 import type { RunDetail, LogEntry, TranscriptRow } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Error pattern matching
