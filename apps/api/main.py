@@ -1416,6 +1416,71 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
                 (worker_id,),
             )
 
+    # N6 fix: persist trigger changes to worker.yml on disk so they survive
+    # a server restart / worker registry reload (which reads from disk).
+    trigger_changed = (
+        payload.trigger_type is not None
+        or new_cron_expr is not None
+        or payload.cron_timezone is not None
+    )
+    if trigger_changed:
+        from worker_registry import WORKERS_DIR
+        worker_yml_path = WORKERS_DIR / worker_id / "worker.yml"
+        if worker_yml_path.exists():
+            try:
+                existing_yml = worker_yml_path.read_text()
+                # Build the updated trigger block from DB state so the single
+                # source of truth (DB) is serialised back to disk.
+                effective_type = payload.trigger_type or (
+                    worker.get("config", {}).get("trigger", {}).get("type", "manual")
+                )
+                effective_cron = new_cron_expr or (
+                    worker.get("config", {}).get("trigger", {}).get("cron")
+                )
+                effective_tz = payload.cron_timezone or (
+                    worker.get("config", {}).get("trigger", {}).get("timezone", "UTC")
+                )
+                trigger_lines = [f"trigger:", f"  type: {effective_type}"]
+                if effective_type == "schedule":
+                    cron_val = effective_cron or "0 9 * * *"
+                    tz_val = effective_tz or "UTC"
+                    trigger_lines.append(f'  cron: "{cron_val}"')
+                    trigger_lines.append(f'  timezone: "{tz_val}"')
+                new_trigger_yaml = "\n".join(trigger_lines)
+
+                # Replace the trigger block inside the YAML string
+                lines = existing_yml.split("\n")
+                start = next(
+                    (i for i, ln in enumerate(lines) if re.match(r"^triggers?:\s*$", ln)),
+                    None,
+                )
+                if start is not None:
+                    end = len(lines)
+                    for i in range(start + 1, len(lines)):
+                        if re.match(r"^[A-Za-z_][\w_-]*:\s*", lines[i]):
+                            end = i
+                            break
+                    updated_yml = "\n".join(
+                        lines[:start] + new_trigger_yaml.split("\n") + lines[end:]
+                    )
+                else:
+                    # No trigger block found — append
+                    updated_yml = existing_yml.rstrip("\n") + "\n\n" + new_trigger_yaml + "\n"
+                worker_yml_path.write_text(updated_yml)
+                logger.info(
+                    "PATCH %s: wrote trigger changes to worker.yml on disk (type=%s, cron=%s)",
+                    worker_id,
+                    effective_type,
+                    effective_cron,
+                )
+            except Exception as exc:
+                # Non-fatal: DB is authoritative; log the disk-write failure
+                logger.warning(
+                    "PATCH %s: could not update worker.yml on disk: %s",
+                    worker_id,
+                    exc,
+                )
+
     detail = get_worker_detail(worker_id)
     if new_raw_secret is not None:
         detail.new_webhook_secret = new_raw_secret
@@ -1482,7 +1547,9 @@ def delete_worker(worker_id: str):
     with get_db() as conn:
         conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
 
-    # Check if skill_version is still referenced by other workers; preserve if so
+    # Check if skill_version is still referenced by other workers; preserve if so.
+    # If unreferenced, also delete the skill_versions row so name+version can
+    # be reused when the user recreates a worker with the same ID (N5 fix).
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -1490,6 +1557,12 @@ def delete_worker(worker_id: str):
             (skill_version_id,),
         )
         ref_count = cursor.fetchone()["cnt"]
+        if ref_count == 0 and skill_version_id:
+            conn.execute(
+                "DELETE FROM skill_versions WHERE id = ?",
+                (skill_version_id,),
+            )
+            logger.info("Removed unreferenced skill_version %s", skill_version_id)
 
     # Remove bundle files from disk only if no other worker references this skill_version
     from worker_registry import WORKERS_DIR
@@ -2033,6 +2106,18 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     with get_db() as conn:
         try:
             _persist_discovered_workers(conn, workers)
+        except sqlite3.IntegrityError as exc:
+            # Orphaned skill_versions row from a previously-deleted worker with
+            # the same name+version caused a FK or UNIQUE conflict. Clean up
+            # and return a user-friendly 409 (N5 fix).
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            raise HTTPException(
+                status_code=409,
+                detail=f"Worker {worker_id!r} already exists or conflicts with a previous version. "
+                       "Delete the old worker first, then recreate.",
+            ) from exc
         except RuntimeError as exc:
             import shutil
             shutil.rmtree(target_dir, ignore_errors=True)
@@ -2454,11 +2539,17 @@ def list_runs(
     with get_db() as conn:
         cursor = conn.cursor()
         query = """
-            SELECT r.id, r.worker_id, w.name as worker_name, r.status,
+            SELECT r.id, r.worker_id,
+                   COALESCE(
+                       JSON_EXTRACT(sv.manifest_json, '$.title'),
+                       w.name
+                   ) as worker_name,
+                   r.status,
                    r.trigger_source, r.created_at,
                    r.started_at, r.completed_at, r.duration_ms, r.error
             FROM runs r
             LEFT JOIN workers w ON r.worker_id = w.id
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
             WHERE 1=1
         """
         params: list[Any] = []
@@ -2591,11 +2682,17 @@ def get_run(run_id: str) -> RunDetail:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT r.id, r.worker_id, w.name as worker_name, r.status, r.trigger_source, r.runner,
+            SELECT r.id, r.worker_id,
+                   COALESCE(
+                       JSON_EXTRACT(sv.manifest_json, '$.title'),
+                       w.name
+                   ) as worker_name,
+                   r.status, r.trigger_source, r.runner,
                    r.input_json, r.output_json, r.error,
                    r.started_at, r.completed_at, r.duration_ms, r.created_at
             FROM runs r
             LEFT JOIN workers w ON r.worker_id = w.id
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
             WHERE r.id = ?
             """,
             (run_id,),
@@ -2818,6 +2915,12 @@ def _upsert_env_var(name: str, value: str) -> None:
     # Validate name is a legal env var identifier
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         raise ValueError(f"Invalid secret name: {name!r}")
+    # Reject values that contain newline or null bytes — they corrupt the .env
+    # file by injecting extra lines (newline injection attack).
+    if any(c in value for c in ("\n", "\r", "\x00")):
+        raise ValueError(
+            "Secret value must not contain newline or null characters"
+        )
 
     lines = _read_env_lines()
     new_line = f"{name}={value}\n"

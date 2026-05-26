@@ -111,16 +111,21 @@ export function formatRelativeTime(value?: string | null): string {
 }
 
 export function getConnectionAccountLabel(conn: ConnectionRecord) {
-  return (
+  // N10 fix: fall back to connection ID suffix when all human-readable labels
+  // are absent or identical (e.g. two Gmail accounts both showing "federico").
+  // Appending the suffix ensures the cards are visually distinct.
+  const label =
     conn.account_label ||
     conn.email ||
     conn.account_email ||
     conn.connected_as ||
     conn.connected_account?.email ||
     conn.connected_account?.user_id ||
-    conn.user_id ||
-    "unknown account"
-  );
+    conn.user_id;
+  if (label) return label;
+  // Use the last 6 chars of the connection ID as a short disambiguator
+  const idSuffix = conn.id ? conn.id.slice(-6) : "";
+  return idSuffix ? `account …${idSuffix}` : "unknown account";
 }
 
 export function getAuthConfigId(conn: ConnectionRecord) {

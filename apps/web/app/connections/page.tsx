@@ -131,18 +131,35 @@ export default function ConnectionsPage() {
     };
   }, [connections, refresh]);
 
-  const connectionViews = useMemo(
-    () =>
-      connections.map((connection) =>
-        toConnectionView(
-          connection,
-          scopesByConnectionId,
-          metadataByConnectionId,
-          lastUsedBySlug
-        )
-      ),
-    [connections, lastUsedBySlug, metadataByConnectionId, scopesByConnectionId]
-  );
+  const connectionViews = useMemo(() => {
+    const views = connections.map((connection) =>
+      toConnectionView(
+        connection,
+        scopesByConnectionId,
+        metadataByConnectionId,
+        lastUsedBySlug
+      )
+    );
+    // N10 fix: when two connections for the same app share the same accountLabel
+    // (e.g. both come back as "federico" from Composio), append the short
+    // connection ID suffix so each card is visually distinct.
+    const labelByApp: Record<string, Set<string>> = {};
+    for (const v of views) {
+      const key = v.app_name?.toLowerCase() ?? "";
+      if (!labelByApp[key]) labelByApp[key] = new Set();
+      labelByApp[key].add(v.accountLabel);
+    }
+    return views.map((v) => {
+      const key = v.app_name?.toLowerCase() ?? "";
+      const labelsForApp = labelByApp[key];
+      if (labelsForApp && labelsForApp.size < views.filter((x) => (x.app_name?.toLowerCase() ?? "") === key).length) {
+        // Labels not unique — append ID suffix
+        const suffix = v.id.slice(-6);
+        return { ...v, accountLabel: `${v.accountLabel} (…${suffix})` };
+      }
+      return v;
+    });
+  }, [connections, lastUsedBySlug, metadataByConnectionId, scopesByConnectionId]);
 
   async function handleConnect(slug: string) {
     setConnecting(slug);

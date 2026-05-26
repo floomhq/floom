@@ -37,6 +37,10 @@ export default function WorkerDetailPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // N4 fix: always reset notFound at the start of each load so a previous
+      // failed navigation (e.g. /workers/<bad-id>) doesn't persist the state
+      // into the next correct navigation.
+      setNotFound(false);
       try {
         const [w, conns] = await Promise.all([
           api.workers.get(id as string),
@@ -58,8 +62,15 @@ export default function WorkerDetailPage() {
       } catch (e: unknown) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
-        // 404 or "not found" from the API means the worker doesn't exist.
-        if (msg.toLowerCase().includes("not found") || msg.includes("404")) {
+        // N4 fix: only treat it as a true "not found" when the error is
+        // specifically a 404 or a clean "worker not found" message from the API.
+        // Avoid false-positives from arbitrary error text that happens to contain
+        // "not found" (e.g. connection errors mentioning endpoints not found).
+        const isNotFound =
+          msg.includes("404") ||
+          /^worker( .+)? not found$/i.test(msg.trim()) ||
+          msg.toLowerCase() === "not found";
+        if (isNotFound) {
           setNotFound(true);
         } else {
           toast.error(`Failed to load worker: ${msg}`);
