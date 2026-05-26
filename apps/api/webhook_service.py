@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 from typing import Optional
 
@@ -14,6 +15,42 @@ logger = logging.getLogger("floom.webhook_service")
 def _hash_secret(raw_secret: str) -> str:
     """One-way hash the raw secret for storage (SHA-256 hex)."""
     return hashlib.sha256(raw_secret.encode()).hexdigest()
+
+
+def derive_webhook_token(worker_id: str) -> str:
+    """Derive a deterministic webhook token for a worker.
+
+    Token = HMAC-SHA256(FLOOM_SECRET, worker_id)[:32] hex chars.
+    Because FLOOM_SECRET is platform-private, the token is opaque to users
+    who only know the worker_id. The same worker_id always produces the same
+    token, so it can be surfaced in the UI without per-run storage.
+
+    Falls back to a fixed sentinel when FLOOM_SECRET is not set (local dev).
+    """
+    platform_secret = os.environ.get("FLOOM_SECRET", "dev-secret-not-set")
+    return hmac.new(
+        platform_secret.encode(),
+        worker_id.encode(),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+
+
+def build_webhook_url(worker_id: str, base_url: Optional[str] = None) -> str:
+    """Build the full webhook URL for a worker, including the derived token."""
+    token = derive_webhook_token(worker_id)
+    api_base = (
+        base_url
+        or os.environ.get("WORKERS_API_URL")
+        or os.environ.get("FLOOM_API_BASE")
+        or "https://workers-api.floom.dev"
+    ).rstrip("/")
+    return f"{api_base}/webhooks/{worker_id}?token={token}"
+
+
+def verify_webhook_token(worker_id: str, token: str) -> bool:
+    """Return True if the provided token matches the derived token for the worker."""
+    expected = derive_webhook_token(worker_id)
+    return hmac.compare_digest(token, expected)
 
 
 def generate_webhook_secret(worker_id: str) -> str:
