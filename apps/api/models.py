@@ -269,7 +269,10 @@ class WorkerLimits(BaseModel):
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
     runtime: Literal["python311", "node22", "bash", "skill", "none"]
-    runner: str = "local"
+    # E2B-by-default (Federico 2026-05-26): sandboxed dependencies, no host
+    # exposure. Trusted/legacy workers can declare `runner: local` explicitly
+    # to skip the ~1-3s cold start and run in-process with full host access.
+    runner: str = "e2b"
     mode: Optional[Literal["agent", "pure-script"]] = None
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)

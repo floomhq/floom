@@ -1,8 +1,25 @@
 # Workeros
 
-The OS for Background Workers.
+The OS for Background Workers. Open-source, self-hosted, sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
+
+## Worker execution model
+
+Every worker runs in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. The local in-process runner (`runner: local`) remains available as an explicit opt-out for trusted bundles where you want zero cold-start latency.
+
+**Cost comparison at typical use (100 runs/day × 30s average):**
+
+| Service | Cost per month | Volume cap |
+|---|---|---|
+| **workeros + E2B (self-hosted)** | **~$15** | unlimited, $0.20/hr sandbox time |
+| Zapier Professional | $49 | 2,000 tasks |
+| Zapier Pro Plus | $103 | 5,000 tasks |
+| n8n Cloud Pro | $50 | 5,000 executions |
+| n8n Cloud Business | $200 | 25,000 executions |
+| Make.com Pro | $16 | 10,000 operations |
+
+For workers that fire every few seconds OR that need offline operation, switch to `runner: local` in `worker.yml`. The stock workers shipped with this repo are pinned to `local` because they're trusted bundles authored by Floom.
 
 ---
 
