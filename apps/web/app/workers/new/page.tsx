@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle2, Loader2, Upload } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle2, Loader2, Upload, Copy } from "lucide-react";
 import type { ComposioTriggerItem, DraftFromPromptResponse, DraftRequirementItem } from "@/lib/types";
 import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
@@ -412,6 +412,31 @@ function buildYaml(
 
   return lines.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// WebhookUrlBox — shown when webhook trigger selected (new worker, no URL yet)
+// ---------------------------------------------------------------------------
+
+function WebhookUrlBox() {
+  return (
+    <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 space-y-2">
+      <p className="text-xs text-[#666] font-medium">Webhook URL</p>
+      <p className="text-xs text-[#888]">
+        Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
+      </p>
+      <div className="rounded border border-[#e4e4e7] bg-white p-2 font-mono text-xs text-[#999]">
+        https://workers-api.floom.dev/webhooks/&lt;worker-id&gt;?token=...
+      </div>
+      <p className="text-xs text-[#888]">
+        Example curl:
+      </p>
+      <div className="rounded border border-[#e4e4e7] bg-[#1a1a1a] p-2 font-mono text-xs text-[#a8e6a3] overflow-x-auto">
+        {"curl -X POST https://workers-api.floom.dev/webhooks/<worker-id>?token=<token> \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"key\": \"value\"}'"}
+      </div>
+    </div>
+  );
+}
+
 
 function triggerEventId(item: ComposioTriggerItem): string {
   return item.event || item.slug || item.id || item.name || "";
@@ -1840,9 +1865,7 @@ function ReviewStep({
                   </div>
                 )}
                 {triggerType === "webhook" && (
-                  <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 text-sm text-[#555]">
-                    Webhook trigger with per-worker HMAC signing enabled.
-                  </div>
+                  <WebhookUrlBox />
                 )}
                 {triggerType === "composio" && (
                   <ConnectionEventPicker

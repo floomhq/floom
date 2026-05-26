@@ -369,64 +369,61 @@ def _get_stats_batch(worker_ids: List[str]) -> Dict[str, RecentStats]:
     return result
 
 
-def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
-    """Extract all configured trigger labels from a worker dict.
-
-    Returns labels like ['Manual', 'Cron · 0 9 * * *', 'Webhook', 'On gmail · new_email'].
-    """
-    labels: List[str] = []
-    trigger_type = (worker.get("trigger_type") or "manual").lower()
-    config: Dict[str, Any] = worker.get("config") or {}
-    trigger: Dict[str, Any] = config.get("trigger") or {}
-
-    # Manual is the default and almost always present unless an exclusive type overrides it.
-    # Treat 'manual' type explicitly, or assume manual is available when trigger_type is manual.
-    if trigger_type == "manual":
-        labels.append("Manual")
-
-    # Cron
-    cron_expr = trigger.get("cron")
-    if cron_expr:
-        labels.append(f"Cron · {cron_expr}")
-
-    # Webhook
-    if trigger.get("webhook"):
-        labels.append("Webhook")
-
-    # Connection event (composio trigger) - white-label as "On <app> <event>"
-    composio = trigger.get("composio")
-    if composio and isinstance(composio, dict):
-        event = composio.get("event") or ""
-        conn_id = composio.get("connection_id") or ""
-        # Use the connection_id slug as app hint (first segment before underscore/dash)
-        app_hint = conn_id.split("_")[0].split("-")[0] if conn_id else "integration"
-        if event:
-            labels.append(f"On {app_hint} · {event}")
-        else:
-            labels.append(f"On {app_hint}")
-
-    # Scheduled (non-cron schedule type)
-    if trigger_type in ("schedule", "scheduled") and not cron_expr:
+def _trigger_label(trigger: Dict[str, Any]) -> str:
+    """Return a human-readable label for one trigger dict."""
+    t_type = (trigger.get("type") or "manual").lower()
+    if t_type == "manual":
+        return "Manual"
+    if t_type in ("schedule", "scheduled"):
+        cron_expr = trigger.get("cron")
+        if cron_expr:
+            return f"Cron · {cron_expr}"
         every = trigger.get("every")
         at_time = trigger.get("at")
         if every and at_time:
-            labels.append(f"Every {every} at {at_time}")
-        elif every:
-            labels.append(f"Every {every}")
-        else:
-            labels.append("Scheduled")
+            return f"Every {every} at {at_time}"
+        if every:
+            return f"Every {every}"
+        return "Scheduled"
+    if t_type == "webhook":
+        return "Webhook"
+    if t_type == "composio":
+        composio = trigger.get("composio")
+        if composio and isinstance(composio, dict):
+            event = composio.get("event") or ""
+            conn_id = composio.get("connection_id") or ""
+            app_hint = conn_id.split("_")[0].split("-")[0] if conn_id else "integration"
+            if event:
+                return f"On {app_hint} · {event}"
+            return f"On {app_hint}"
+        return "On integration"
+    return t_type.title()
 
-    # Composio-primary trigger (trigger_type == 'composio') with no manual
-    if trigger_type == "composio":
-        # Already handled composio block above; add fallback if nothing added
-        if not labels:
-            labels.append("On integration")
 
-    # Fallback: if nothing was added, show the raw trigger_type
-    if not labels:
-        labels.append(trigger_type.title())
+def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
+    """Extract all configured trigger labels from a worker dict.
 
-    return labels
+    Prefers triggers_json (multi-trigger) if present; falls back to single trigger.
+    Returns labels like ['Manual', 'Cron · 0 9 * * *', 'Webhook', 'On gmail · new_email'].
+    """
+    # Try multi-trigger first (from DB triggers_json column)
+    triggers_json = worker.get("triggers_json")
+    if triggers_json:
+        try:
+            triggers_list = json.loads(triggers_json)
+            if isinstance(triggers_list, list) and triggers_list:
+                return [_trigger_label(t) for t in triggers_list if isinstance(t, dict)]
+        except Exception:
+            pass
+
+    # Fall back to single-trigger logic from config
+    config: Dict[str, Any] = worker.get("config") or {}
+    trigger: Dict[str, Any] = config.get("trigger") or {}
+    trigger_type = (worker.get("trigger_type") or trigger.get("type") or "manual").lower()
+    trigger_with_type = dict(trigger)
+    trigger_with_type.setdefault("type", trigger_type)
+    label = _trigger_label(trigger_with_type)
+    return [label] if label else [trigger_type.title()]
 
 
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
@@ -590,6 +587,27 @@ def _sync_composio_registration(
     return enabled_id, new_signature["event"]
 
 
+def _extract_triggers_from_manifest(manifest: Dict[str, Any], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract the canonical list of trigger dicts from a manifest or config.
+
+    Checks manifest.triggers first (new format), then manifest.trigger,
+    then config.trigger as fallback.
+    """
+    # New format: manifest.triggers list
+    raw_triggers = manifest.get("triggers")
+    if isinstance(raw_triggers, list) and raw_triggers:
+        return [t for t in raw_triggers if isinstance(t, dict)]
+    # Old format: manifest.trigger single object
+    manifest_trigger = manifest.get("trigger")
+    if isinstance(manifest_trigger, dict) and manifest_trigger:
+        return [manifest_trigger]
+    # Fallback: config.trigger
+    config_trigger = config.get("trigger")
+    if isinstance(config_trigger, dict) and config_trigger:
+        return [config_trigger]
+    return [{"type": "manual"}]
+
+
 def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str, Any]]) -> None:
     now = now_iso()
     for w in workers:
@@ -611,6 +629,12 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
             config_model,
             existing_composio,
         )
+        # Build triggers list for multi-trigger storage
+        triggers_list = _extract_triggers_from_manifest(manifest, config)
+        triggers_json_str = json.dumps(triggers_list)
+        # Primary trigger type is the first trigger's type
+        primary_trigger_type = triggers_list[0].get("type") if triggers_list else "manual"
+
         conn.execute(
             """
             INSERT INTO skill_versions
@@ -635,8 +659,8 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                  notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
-                 composio_trigger_id, composio_event)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico', ?, ?)
+                 composio_trigger_id, composio_event, triggers_json)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico', ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
@@ -644,13 +668,14 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 cron_expr=excluded.cron_expr,
                 cron_timezone=excluded.cron_timezone,
                 composio_trigger_id=excluded.composio_trigger_id,
-                composio_event=excluded.composio_event
+                composio_event=excluded.composio_event,
+                triggers_json=excluded.triggers_json
             """,
             (
                 worker_id,
                 skill_version_id,
                 w["name"],
-                trigger.get("type") or w.get("trigger_type") or "manual",
+                primary_trigger_type or trigger.get("type") or w.get("trigger_type") or "manual",
                 trigger.get("cron"),
                 trigger.get("timezone"),
                 json.dumps({}),
@@ -658,6 +683,7 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 now,
                 composio_trigger_id,
                 composio_event,
+                triggers_json_str,
             ),
         )
 
@@ -683,6 +709,7 @@ def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "runner": config.runtime.runner if config and config.runtime else "local",
         "config": config.model_dump(mode="json") if config else {},
         "manifest": manifest_dict,
+        "triggers_json": d.get("triggers_json"),
     }
 
 
@@ -691,7 +718,7 @@ def _list_db_workers() -> List[Dict[str, Any]]:
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT w.id, w.name, w.trigger_type, sv.manifest_json
+                SELECT w.id, w.name, w.trigger_type, w.triggers_json, sv.manifest_json
                 FROM workers w
                 JOIN skill_versions sv ON sv.id = w.skill_version_id
                 ORDER BY w.created_at, w.id
@@ -707,7 +734,7 @@ def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
         with get_db() as conn:
             row = conn.execute(
                 """
-                SELECT w.id, w.name, w.trigger_type, sv.manifest_json
+                SELECT w.id, w.name, w.trigger_type, w.triggers_json, sv.manifest_json
                 FROM workers w
                 JOIN skill_versions sv ON sv.id = w.skill_version_id
                 WHERE w.id = ?
@@ -1214,6 +1241,15 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
     except Exception:
         pass
 
+    # Build webhook URL if this worker has a webhook trigger
+    from webhook_service import build_webhook_url as _build_webhook_url
+    webhook_url: Optional[str] = None
+    if _worker_has_webhook_trigger(worker["id"], config):
+        try:
+            webhook_url = _build_webhook_url(worker["id"])
+        except Exception:
+            pass
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -1235,6 +1271,7 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         skill_md_content=skill_md_content,
         run_py_content=run_py_content,
         files=worker_files,
+        webhook_url=webhook_url,
     )
 
 
@@ -1297,7 +1334,7 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
         from webhook_service import generate_webhook_secret
         # Verify the worker actually has a webhook trigger before rotating
         config = get_worker_config_for_run(worker_id)
-        if not config or config.trigger.type != "webhook":
+        if not _worker_has_webhook_trigger(worker_id, config):
             raise HTTPException(
                 status_code=400,
                 detail=f"Worker {worker_id!r} does not have a webhook trigger — cannot rotate secret",
@@ -3831,14 +3868,50 @@ class WebhookSecretResponse(BaseModel):
     secret: Optional[str] = None  # Only present on generation/rotation
 
 
+def _worker_has_webhook_trigger(worker_id: str, config: Optional["WorkerConfig"]) -> bool:
+    """Return True if any of the worker's triggers is of type 'webhook'.
+
+    Checks triggers_json in the DB first (multi-trigger support), then
+    falls back to the single config.trigger.type.
+    """
+    # Check multi-trigger DB column first
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT triggers_json FROM workers WHERE id = ?",
+                (worker_id,),
+            ).fetchone()
+        if row and row["triggers_json"]:
+            triggers = json.loads(row["triggers_json"])
+            if isinstance(triggers, list):
+                return any(
+                    isinstance(t, dict) and t.get("type") == "webhook"
+                    for t in triggers
+                )
+    except Exception:
+        pass
+    # Fallback: single trigger config
+    if config:
+        return config.trigger.type == "webhook"
+    return False
+
+
 @app.post("/webhooks/{worker_id}", response_model=ActionResponse)
-async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
+async def webhook_trigger(
+    worker_id: str,
+    request: Request,
+    token: Optional[str] = Query(None),
+) -> ActionResponse:
     """Receive an incoming webhook and trigger a worker run.
 
-    If the worker declares webhook.secret=true, the X-Floom-Signature header
-    is verified. On success returns run_id immediately (non-blocking).
+    Authentication accepts either:
+    - ?token=<derived_token>  (deterministic, shown in UI, no rotation needed)
+    - X-Floom-Signature header (legacy HMAC, for backwards compat)
+
+    Both are accepted; if token query param is present it takes priority.
+    On success returns run_id immediately (non-blocking).
     """
-    from webhook_service import get_webhook_secret_hash, verify_signature
+    from webhook_service import get_webhook_secret_hash, verify_signature, verify_webhook_token
 
     # Rate limit: 60 req/60s per (worker_id, client_ip) — in-memory sliding window
     client_ip = (request.client.host if request.client else "unknown")
@@ -3851,7 +3924,7 @@ async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     config = get_worker_config_for_run(worker_id)
-    if not config or config.trigger.type != "webhook":
+    if not _worker_has_webhook_trigger(worker_id, config):
         raise HTTPException(
             status_code=400,
             detail=f"Worker {worker_id!r} does not have a webhook trigger",
@@ -3859,21 +3932,27 @@ async def webhook_trigger(worker_id: str, request: Request) -> ActionResponse:
 
     body = await request.body()
 
-    # Signature verification (only when webhook.secret=true)
-    webhook_cfg = config.trigger.webhook
-    if webhook_cfg and webhook_cfg.secret:
-        secret_hash = get_webhook_secret_hash(worker_id)
-        if not secret_hash:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "Webhook secret not configured — call POST "
-                    f"/workers/{worker_id}/webhook-secret/rotate first"
-                ),
-            )
-        sig_header = request.headers.get("X-Floom-Signature", "")
-        if not verify_signature(body, sig_header, secret_hash):
-            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    # Authentication: token query param takes priority over signature header.
+    if token is not None:
+        # Deterministic token auth — reject on mismatch
+        if not verify_webhook_token(worker_id, token):
+            raise HTTPException(status_code=401, detail="Invalid webhook token")
+    else:
+        # Signature verification (only when webhook.secret=true on first trigger)
+        webhook_cfg = config.trigger.webhook if config else None
+        if webhook_cfg and webhook_cfg.secret:
+            secret_hash = get_webhook_secret_hash(worker_id)
+            if not secret_hash:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Webhook secret not configured — call POST "
+                        f"/workers/{worker_id}/webhook-secret/rotate first"
+                    ),
+                )
+            sig_header = request.headers.get("X-Floom-Signature", "")
+            if not verify_signature(body, sig_header, secret_hash):
+                raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     # Parse body as JSON inputs (or empty dict)
     inputs: Dict[str, Any] = {}
@@ -3907,7 +3986,7 @@ def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     config = get_worker_config_for_run(worker_id)
-    if not config or config.trigger.type != "webhook":
+    if not _worker_has_webhook_trigger(worker_id, config):
         raise HTTPException(
             status_code=400,
             detail=f"Worker {worker_id!r} does not have a webhook trigger",
