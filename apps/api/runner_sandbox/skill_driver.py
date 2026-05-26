@@ -17,6 +17,15 @@ from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.skill")
 
+# Regex patterns imported from run_service for parity with log/transcript redaction.
+# Applied to tool_result content and write_output content before persisting.
+_SECRET_PATTERNS = [
+    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[=:]\s*[^\s'\"]+"),
+    re.compile(r"\b(?:sk|pk)_(?:live|test|proj|sec)_[a-zA-Z0-9_-]+\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),  # JWT
+    re.compile(r"\bBearer\s+[A-Za-z0-9_\-\.=]{16,}\b"),  # Bearer tokens
+]
+
 ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
 MAX_TOOL_ITERATIONS = 12
 COMPOSIO_BASE = "https://backend.composio.dev/api/v3"
@@ -276,14 +285,17 @@ class SkillRuntimeDriver(SandboxDriver):
                         output_artifacts=output_artifacts,
                         config=config,
                         log_fn=log_fn,
+                        secrets=secrets,
                     )
                 except Exception as exc:
                     result = {"ok": False, "error": str(exc)}
+                # Scrub tool_result before appending to transcript for regex-pattern parity.
+                scrubbed_result = self._scrub(result, secrets)
                 transcript.append({
                     "type": "tool_result",
                     "tool_call_id": call_id,
                     "name": self._logical_tool_name(name, args),
-                    "content": result,
+                    "content": scrubbed_result,
                 })
                 messages.append({
                     "role": "tool",
@@ -306,7 +318,7 @@ class SkillRuntimeDriver(SandboxDriver):
             )
 
         if not outputs:
-            self._capture_final_as_single_output(final_content, artifact_dir, outputs, output_artifacts, config)
+            self._capture_final_as_single_output(final_content, artifact_dir, outputs, output_artifacts, config, secrets=secrets)
 
         transcript_artifact = self._write_transcript(run_id, artifact_dir, transcript, secrets)
         artifacts = output_artifacts + [transcript_artifact]
@@ -335,7 +347,11 @@ class SkillRuntimeDriver(SandboxDriver):
         from openai import OpenAI
 
         api_key = secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
-        return OpenAI(api_key=api_key) if api_key else OpenAI()
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is not set. Declare it in the worker's secrets and ensure it is configured."
+            )
+        return OpenAI(api_key=api_key)
 
     def _model_for(self, config: Optional[WorkerConfig]) -> str:
         return (config.model if config and config.model else None) or os.environ.get("OPENAI_DEFAULT_MODEL") or "gpt-4.1"
@@ -394,18 +410,27 @@ class SkillRuntimeDriver(SandboxDriver):
 
         for app in self._declared_connections(config):
             tool_name = f"composio__{self._safe_tool_token(app)}__execute"
+            # Constrain tool_slug to the declared app's namespace via a pattern.
+            # The LLM can only pass slugs that start with <APP>_ (case-insensitive
+            # normalised to uppercase, e.g. GMAIL_ for gmail).
+            app_prefix = app.upper().replace("-", "_") + "_"
             tools.append({
                 "type": "function",
                 "function": {
                     "name": tool_name,
                     "description": (
                         f"Execute a Composio tool for {app}. Logical surface: "
-                        f"composio.{app}.<tool_slug>. Provide the Composio tool slug and arguments."
+                        f"composio.{app}.<tool_slug>. tool_slug must begin with "
+                        f"'{app_prefix}' (e.g. {app_prefix}SEND_EMAIL)."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "tool_slug": {"type": "string"},
+                            "tool_slug": {
+                                "type": "string",
+                                "pattern": f"(?i)^{re.escape(app_prefix)}",
+                                "description": f"Composio tool slug. Must start with '{app_prefix}'.",
+                            },
                             "arguments": {"type": "object"},
                             "text": {"type": "string"},
                         },
@@ -427,9 +452,10 @@ class SkillRuntimeDriver(SandboxDriver):
         output_artifacts: list[Dict[str, Any]],
         config: Optional[WorkerConfig],
         log_fn: Callable[[str, str], None],
+        secrets: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         if name == "write_output":
-            return self._write_output(args, artifact_dir, outputs, output_artifacts, config)
+            return self._write_output(args, artifact_dir, outputs, output_artifacts, config, secrets=secrets)
         if name in {"floom__skills__invoke", "floom.skills.invoke"}:
             return {"ok": False, "error": "not yet"}
         if name in {"floom__workers__invoke", "floom.workers.invoke"}:
@@ -445,9 +471,14 @@ class SkillRuntimeDriver(SandboxDriver):
         outputs: Dict[str, str],
         output_artifacts: list[Dict[str, Any]],
         config: Optional[WorkerConfig],
+        secrets: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         raw_name = str(args.get("name") or "output")
         content = str(args.get("content") or "")
+        # Apply regex-pattern scrubbing parity with log/transcript scrubbing.
+        content = self._scrub_patterns(content)
+        if secrets:
+            content = self._scrub_exact(content, secrets)
         outputs[raw_name] = content
 
         filename = self._filename_for_output(raw_name, config)
@@ -471,6 +502,7 @@ class SkillRuntimeDriver(SandboxDriver):
         outputs: Dict[str, str],
         output_artifacts: list[Dict[str, Any]],
         config: Optional[WorkerConfig],
+        secrets: Optional[Dict[str, str]] = None,
     ) -> None:
         if not final_content.strip() or not config or len(config.outputs) != 1:
             return
@@ -480,6 +512,7 @@ class SkillRuntimeDriver(SandboxDriver):
             outputs,
             output_artifacts,
             config,
+            secrets=secrets,
         )
 
     def _write_transcript(
@@ -511,28 +544,52 @@ class SkillRuntimeDriver(SandboxDriver):
         tool_slug = str(args.get("tool_slug") or self._tool_slug_from_dotted_name(name) or "")
         if not tool_slug:
             return {"ok": False, "error": "Missing tool_slug"}
+
+        # Enforce namespace: tool_slug must begin with <APP>_ for the declared app.
         app_name = self._app_from_composio_tool_name(name)
+        if app_name:
+            expected_prefix = app_name.upper().replace("-", "_") + "_"
+            if not tool_slug.upper().startswith(expected_prefix):
+                return {
+                    "ok": False,
+                    "error": f"tool_slug '{tool_slug}' is outside the declared app namespace '{app_name}'. "
+                             f"Expected prefix: '{expected_prefix}'",
+                    "error_code": "tool_slug_namespace_violation",
+                }
+
+        # Fail fast if the required Composio connection is not active — mirrors runner_local.py:224.
         connection_id = self._connection_id_for(app_name, worker_id, config)
+        if connection_id is None:
+            return {
+                "ok": False,
+                "error": f"No active Composio connection found for app '{app_name}'",
+                "error_code": "missing_connection",
+            }
+
         body: Dict[str, Any] = {
             "user_id": "federico",
             "arguments": args.get("arguments") or {},
+            "connected_account_id": connection_id,
         }
         if args.get("text"):
             body["text"] = args["text"]
-        if connection_id:
-            body["connected_account_id"] = connection_id
 
         api_key = os.environ.get("COMPOSIO_API_KEY", "")
         if not api_key:
             return {"ok": False, "error": "COMPOSIO_API_KEY is not set"}
 
         log_fn(f"[skill] Executing Composio tool {tool_slug}", "info")
-        response = self._requests.post(
-            f"{COMPOSIO_BASE}/tools/execute/{tool_slug}",
-            headers={"x-api-key": api_key, "Content-Type": "application/json"},
-            json=body,
-            timeout=30,
-        )
+        try:
+            response = self._requests.post(
+                f"{COMPOSIO_BASE}/tools/execute/{tool_slug}",
+                headers={"x-api-key": api_key, "Content-Type": "application/json"},
+                json=body,
+                timeout=30,
+            )
+        except requests.exceptions.Timeout:
+            return {"ok": False, "error": "Composio request timed out", "error_code": "composio_timeout"}
+        except requests.exceptions.RequestException as exc:
+            return {"ok": False, "error": f"Composio request failed: {exc}", "error_code": "composio_network_error"}
         try:
             data = response.json()
         except ValueError:
@@ -643,15 +700,27 @@ class SkillRuntimeDriver(SandboxDriver):
         token = re.sub(r"[^A-Za-z0-9_-]+", "_", value)
         return token or "app"
 
+    def _scrub_exact(self, text: str, secrets: Dict[str, str]) -> str:
+        """Replace known secret values with redacted markers."""
+        for name, secret in secrets.items():
+            if secret and len(secret) > 3:
+                text = text.replace(secret, f"<REDACTED:{name}>")
+        return text
+
+    def _scrub_patterns(self, text: str) -> str:
+        """Apply regex patterns from run_service SECRET_PATTERNS for parity."""
+        for pattern in _SECRET_PATTERNS:
+            text = pattern.sub("<REDACTED>", text)
+        return text
+
     def _scrub(self, value: Any, secrets: Dict[str, str]) -> Any:
+        """Recursively scrub secret values and token-like patterns from a value."""
         if isinstance(value, dict):
             return {key: self._scrub(item, secrets) for key, item in value.items()}
         if isinstance(value, list):
             return [self._scrub(item, secrets) for item in value]
         if isinstance(value, str):
-            scrubbed = value
-            for name, secret in secrets.items():
-                if secret and len(secret) > 3:
-                    scrubbed = scrubbed.replace(secret, f"<REDACTED:{name}>")
+            scrubbed = self._scrub_exact(value, secrets)
+            scrubbed = self._scrub_patterns(scrubbed)
             return scrubbed
         return value
