@@ -422,15 +422,23 @@ def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     d = row_to_dict(row)
     config = get_worker_config_for_run(d["id"])
     manifest = json.loads(d.get("manifest_json") or "{}")
+    manifest_dict = manifest if isinstance(manifest, dict) else {}
     return {
         "id": d["id"],
         "name": d["name"],
-        "description": manifest.get("description") if isinstance(manifest, dict) else None,
+        "description": manifest_dict.get("description"),
+        "long_description": manifest_dict.get("long_description"),
+        "use_cases": manifest_dict.get("use_cases"),
+        "example_input": manifest_dict.get("example_input"),
+        "example_output": manifest_dict.get("example_output"),
+        "how_it_works": manifest_dict.get("how_it_works"),
+        "tags": manifest_dict.get("tags") or [],
+        "folder": manifest_dict.get("folder"),
         "status": "healthy",
         "trigger_type": d.get("trigger_type") or (config.trigger.type if config else "manual"),
         "runner": config.runtime.runner if config and config.runtime else "local",
         "config": config.model_dump(mode="json") if config else {},
-        "manifest": manifest,
+        "manifest": manifest_dict,
     }
 
 
@@ -504,6 +512,13 @@ def list_workers() -> List[WorkerSummary]:
                 id=w["id"],
                 name=w["name"],
                 description=w.get("description"),
+                long_description=w.get("long_description"),
+                use_cases=w.get("use_cases"),
+                example_input=w.get("example_input"),
+                example_output=w.get("example_output"),
+                how_it_works=w.get("how_it_works"),
+                tags=w.get("tags") or [],
+                folder=w.get("folder"),
                 status=status,
                 paused=w["id"] in paused_workers,
                 trigger_type=w["trigger_type"],
@@ -612,6 +627,13 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         id=worker["id"],
         name=worker["name"],
         description=worker.get("description"),
+        long_description=worker.get("long_description"),
+        use_cases=worker.get("use_cases"),
+        example_input=worker.get("example_input"),
+        example_output=worker.get("example_output"),
+        how_it_works=worker.get("how_it_works"),
+        tags=worker.get("tags") or [],
+        folder=worker.get("folder"),
         status=status,
         paused=paused,
         trigger_type=worker["trigger_type"],
