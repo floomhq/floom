@@ -68,19 +68,44 @@ init_db()
 # ---------------------------------------------------------------------------
 
 
+_sweep_task: Optional[asyncio.Task] = None
+_SWEEP_INTERVAL_SECONDS = 3600  # Hourly
+
+
+async def _hourly_sweep_loop() -> None:
+    """Run the connection health sweep every hour in the background."""
+    # Delay first run by 60s to let startup finish
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await _run_connection_sweep()
+        except Exception as exc:
+            logger.warning("Connection sweep error: %s", exc)
+        await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: startup + shutdown hooks."""
+    global _sweep_task
     # Wire up SSE publisher before starting workers (avoids circular import)
     register_sse_publisher(_sse_publish)
     # Startup
     reload_workers()
     from scheduler import start_scheduler
     start_scheduler()
+    # Launch hourly connection health sweep
+    _sweep_task = asyncio.create_task(_hourly_sweep_loop())
     yield
     # Shutdown
     from scheduler import stop_scheduler
     stop_scheduler()
+    if _sweep_task:
+        _sweep_task.cancel()
+        try:
+            await _sweep_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -2191,7 +2216,10 @@ PLATFORM_SECRETS: frozenset[str] = frozenset(s["name"] for s in PLATFORM_SECRET_
 def list_secrets() -> List[SecretItem]:
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM secrets ORDER BY name")
+        cursor.execute(
+            "SELECT name, status, last_used_at, last_checked_at, last_check_status "
+            "FROM secrets ORDER BY name"
+        )
         db_secrets = {r["name"]: row_to_dict(r) for r in cursor.fetchall()}
 
     workers = _list_db_workers() or discover_workers(use_cache=True)
@@ -2238,11 +2266,14 @@ def list_secrets() -> List[SecretItem]:
                 (name, status.value, now, now),
             )
 
+        db_row = db_secrets.get(name, {})
         result.append(
             SecretItem(
                 name=name,
                 status=status,
-                last_used_at=db_secrets.get(name, {}).get("last_used_at"),
+                last_used_at=db_row.get("last_used_at"),
+                last_checked_at=db_row.get("last_checked_at"),
+                last_check_status=db_row.get("last_check_status"),
                 used_by=used_by,
             )
         )
@@ -2264,6 +2295,17 @@ class ConnectionItem(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    scopes: List[str] = []
+    account_label: Optional[str] = None
+    display_name: Optional[str] = None
+    last_checked_at: Optional[str] = None
+    last_check_status: Optional[str] = None
+
+
+class ConnectionTestResult(BaseModel):
+    status: str  # "valid" | "failed" | "expired"
+    reason: str
+    tested_at: str
 
 
 class ConnectionInitResponse(BaseModel):
@@ -2321,16 +2363,87 @@ def integrations_catalog(
     return IntegrationCatalogResponse(**result)
 
 
+def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
+    """Parse a JSON-encoded scopes list from the DB; return [] on any error."""
+    if not scopes_json:
+        return []
+    try:
+        parsed = json.loads(scopes_json)
+        if isinstance(parsed, list):
+            return [s for s in parsed if isinstance(s, str)]
+    except Exception:
+        pass
+    return []
+
+
+def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
+    """Fetch Composio connected-account and return normalized account info.
+
+    Returns a dict with keys: email, scopes, user_id, auth_config_id.
+    Returns empty dict on any error.
+    """
+    import requests as _requests
+    base = "https://backend.composio.dev/api/v3"
+    try:
+        key = os.environ.get("COMPOSIO_API_KEY", "")
+        if not key:
+            return {}
+        r = _requests.get(
+            f"{base}/connected_accounts/{composio_conn_id}",
+            headers={"x-api-key": key, "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if not r.ok:
+            return {}
+        data = r.json()
+        account = data.get("connected_account") or data
+        if not isinstance(account, dict):
+            return {}
+
+        email = (
+            account.get("email")
+            or account.get("account_email")
+            or (account.get("connection_data") or {}).get("email")
+            or (account.get("data") or {}).get("email")
+            or (account.get("metadata") or {}).get("email")
+            or (account.get("user") or {}).get("email")
+        )
+        raw_scopes = account.get("scopes") or []
+        if not isinstance(raw_scopes, list):
+            raw_scopes = []
+        scopes = [s for s in raw_scopes if isinstance(s, str)]
+        return {
+            "email": email,
+            "scopes": scopes,
+            "user_id": account.get("user_id") or account.get("userId"),
+            "auth_config_id": (
+                (account.get("auth_config") or {}).get("id")
+                or account.get("auth_config_id")
+            ),
+            "status": (account.get("status") or "").lower() or None,
+        }
+    except Exception as exc:
+        logger.warning("Composio account-info fetch failed for %s: %s", composio_conn_id, exc)
+        return {}
+
+
 @app.get("/connections", response_model=List[ConnectionItem])
 def list_connections() -> List[ConnectionItem]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at "
+            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at, "
+            "scopes_json, account_label, last_checked_at, last_check_status "
             "FROM composio_connections ORDER BY app_name"
         )
         rows = cursor.fetchall()
-    return [ConnectionItem(**row_to_dict(r)) for r in rows]
+
+    result = []
+    for row in rows:
+        d = row_to_dict(row)
+        d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
+        result.append(ConnectionItem(**d))
+    return result
 
 
 @app.post("/connections", response_model=ConnectionInitResponse)
@@ -2431,7 +2544,8 @@ def get_connection_status(connection_id: str) -> ConnectionItem:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at "
+            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at, "
+            "scopes_json, account_label, last_checked_at, last_check_status "
             "FROM composio_connections WHERE id = ?",
             (connection_id,),
         )
@@ -2440,6 +2554,7 @@ def get_connection_status(connection_id: str) -> ConnectionItem:
         raise HTTPException(status_code=404, detail="Connection not found")
 
     item = row_to_dict(row)
+    item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
 
     # Refresh from Composio
     try:
@@ -2485,6 +2600,247 @@ def delete_connection(connection_id: str):
         conn.execute("DELETE FROM composio_connections WHERE id = ?", (connection_id,))
 
     return {"status": "deleted"}
+
+
+@app.get("/connections/{connection_id}/account-info")
+def get_connection_account_info(connection_id: str) -> Dict[str, Any]:
+    """Return Composio connected-account info (email, scopes, user_id, auth_config_id).
+
+    The frontend calls this to hydrate connection cards. The Composio API key
+    lives here on the API service so it never needs to be on Vercel.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT composio_connection_id FROM composio_connections WHERE id = ?",
+            (connection_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    composio_conn_id = row["composio_connection_id"]
+    info = _fetch_composio_account_info(composio_conn_id)
+    if not info:
+        raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
+
+    # Cache scopes + account_label in DB for list endpoint
+    if info.get("scopes") is not None or info.get("email"):
+        now = now_iso()
+        scopes_json = json.dumps(info.get("scopes") or [])
+        account_label = info.get("email") or info.get("user_id") or ""
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE composio_connections SET scopes_json=?, account_label=?, updated_at=? WHERE id=?",
+                (scopes_json, account_label, now, connection_id),
+            )
+
+    return {
+        "id": composio_conn_id,
+        "email": info.get("email"),
+        "scopes": info.get("scopes") or [],
+        "user_id": info.get("user_id"),
+        "auth_config_id": info.get("auth_config_id"),
+    }
+
+
+@app.get("/connections/auth-configs/{auth_config_id}")
+def get_auth_config(auth_config_id: str) -> Dict[str, Any]:
+    """Return Composio auth_config (scopes definition) for a given auth_config_id.
+
+    Proxies to Composio so the key stays on the API service, not on Vercel.
+    """
+    import requests as _requests
+
+    key = os.environ.get("COMPOSIO_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=503, detail="Composio API key not configured")
+
+    base = "https://backend.composio.dev/api/v3"
+
+    try:
+        r = _requests.get(
+            f"{base}/auth_configs/{auth_config_id}",
+            headers={"x-api-key": key, "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if r.ok:
+            body = r.json()
+            scopes = _extract_auth_config_scopes(body)
+            config_id = (
+                (body.get("auth_config") or {}).get("id")
+                or body.get("id")
+                or auth_config_id
+            )
+            return {"id": config_id, "scopes": scopes}
+
+        if r.status_code in {401, 403}:
+            raise HTTPException(status_code=r.status_code, detail="Authentication failed")
+        if r.status_code == 429:
+            raise HTTPException(status_code=429, detail="Rate limited")
+        if r.status_code >= 500:
+            raise HTTPException(status_code=502, detail="Upstream error")
+
+        # Fall back: search by toolkit slug
+        listed = _requests.get(
+            f"{base}/auth_configs",
+            headers={"x-api-key": key, "Content-Type": "application/json"},
+            params={"toolkit_slugs": auth_config_id, "limit": 20},
+            timeout=10,
+        )
+        if listed.ok:
+            items = (listed.json().get("items") or [])
+            item = next(
+                (ac for ac in items if (ac.get("status") or "ENABLED").upper() == "ENABLED"),
+                items[0] if items else None,
+            )
+            if item:
+                scopes = _extract_auth_config_scopes(item)
+                return {
+                    "id": item.get("id") or auth_config_id,
+                    "scopes": scopes,
+                }
+        return {"id": auth_config_id, "scopes": []}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Auth config fetch failed for %s: %s", auth_config_id, exc)
+        return {"id": auth_config_id, "scopes": []}
+
+
+def _extract_auth_config_scopes(body: Any) -> List[str]:
+    """Extract scopes from various Composio auth_config response shapes."""
+    if not isinstance(body, dict):
+        return []
+    candidates = [
+        body,
+        body.get("auth_config") or {},
+        (body.get("auth_config") or {}).get("auth_scheme") or {},
+        body.get("auth_scheme") or {},
+        body.get("config") or {},
+        body.get("oauth") or {},
+    ]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for key in ("scopes", "oauth_scopes", "requested_scopes", "default_scopes"):
+            val = candidate.get(key)
+            if isinstance(val, list) and val:
+                return [s for s in val if isinstance(s, str)]
+        scope = candidate.get("scope")
+        if isinstance(scope, str) and scope:
+            return [s for s in scope.split() if s]
+    return []
+
+
+@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult)
+def test_connection(connection_id: str) -> ConnectionTestResult:
+    """Test whether a connection's token is still valid by calling Composio."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT composio_connection_id FROM composio_connections WHERE id = ?",
+            (connection_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    composio_conn_id = row["composio_connection_id"]
+    tested_at = now_iso()
+
+    try:
+        from composio_client import check_status
+        remote_status = check_status(composio_conn_id)
+    except Exception as exc:
+        _write_connection_check(connection_id, "failed", str(exc), tested_at)
+        return ConnectionTestResult(
+            status="failed",
+            reason=f"Upstream check failed: {exc}",
+            tested_at=tested_at,
+        )
+
+    if remote_status == "not_found":
+        _write_connection_check(connection_id, "failed", "Connection not found in upstream", tested_at)
+        return ConnectionTestResult(
+            status="failed",
+            reason="Connection not found in the integration service",
+            tested_at=tested_at,
+        )
+    if remote_status in ("expired", "failed"):
+        _write_connection_check(connection_id, remote_status, f"Status: {remote_status}", tested_at)
+        return ConnectionTestResult(
+            status=remote_status,
+            reason=f"Connection status is {remote_status}",
+            tested_at=tested_at,
+        )
+    if remote_status == "active":
+        _write_connection_check(connection_id, "valid", None, tested_at)
+        return ConnectionTestResult(
+            status="valid",
+            reason="Connection is active",
+            tested_at=tested_at,
+        )
+
+    # Unknown status: treat as valid but note it
+    _write_connection_check(connection_id, "valid", f"Status: {remote_status}", tested_at)
+    return ConnectionTestResult(
+        status="valid",
+        reason=f"Connection status: {remote_status}",
+        tested_at=tested_at,
+    )
+
+
+def _write_connection_check(
+    connection_id: str,
+    check_status: str,
+    error: Optional[str],
+    checked_at: str,
+) -> None:
+    """Persist health-check result to the DB row."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE composio_connections "
+            "SET last_checked_at=?, last_check_status=?, last_check_error=? "
+            "WHERE id=?",
+            (checked_at, check_status, error, connection_id),
+        )
+
+
+async def _run_connection_sweep() -> None:
+    """Background task: test every connection and update last_checked_at columns."""
+    logger.info("Connection health sweep starting")
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, composio_connection_id FROM composio_connections")
+        rows = cursor.fetchall()
+
+    for row in rows:
+        conn_id = row["id"]
+        composio_conn_id = row["composio_connection_id"]
+        tested_at = now_iso()
+        try:
+            from composio_client import check_status
+            remote_status = check_status(composio_conn_id)
+            check = "valid" if remote_status == "active" else (
+                remote_status if remote_status in ("expired", "failed") else "valid"
+            )
+            error = None if remote_status == "active" else f"Status: {remote_status}"
+        except Exception as exc:
+            check = "failed"
+            error = str(exc)
+        _write_connection_check(conn_id, check, error, tested_at)
+        logger.debug("Swept connection %s: %s", conn_id, check)
+        await asyncio.sleep(0.5)  # Rate-limit Composio calls
+
+    logger.info("Connection health sweep complete (%d connections)", len(rows))
+
+
+@app.post("/system/sweep-connections")
+async def sweep_connections_endpoint():
+    """Trigger a health-check sweep for all connections. Called by external cron."""
+    asyncio.create_task(_run_connection_sweep())
+    return {"status": "sweep_started"}
 
 
 # ---------------------------------------------------------------------------
