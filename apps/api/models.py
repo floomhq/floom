@@ -78,6 +78,19 @@ class WorkerWebhookConfig(BaseModel):
     allowed_methods: List[str] = ["POST"]
 
 
+class WorkerComposioTriggerConfig(BaseModel):
+    event: str
+    connection_id: str
+    filters: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("event", "connection_id")
+    @classmethod
+    def validate_nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value is required")
+        return value.strip()
+
+
 class WorkerTrigger(BaseModel):
     type: str
     cron: Optional[str] = None
@@ -85,6 +98,7 @@ class WorkerTrigger(BaseModel):
     every: Optional[str] = None
     at: Optional[str] = None
     webhook: Optional[WorkerWebhookConfig] = None
+    composio: Optional[WorkerComposioTriggerConfig] = None
 
 
 class WorkerRuntime(BaseModel):
@@ -132,6 +146,8 @@ class WorkerConfig(BaseModel):
                 raise ValueError(
                     "webhook-triggered workers must declare trigger.webhook.secret: true"
                 )
+        if self.trigger.type == "composio" and not self.trigger.composio:
+            raise ValueError("composio-triggered workers must declare trigger.composio")
         return self
 
 
@@ -260,6 +276,13 @@ class WorkerContractTrigger(BaseModel):
     cron: Optional[str] = None
     timezone: Optional[str] = None
     webhook: Optional[WorkerWebhookConfig] = None
+    composio: Optional[WorkerComposioTriggerConfig] = None
+
+    @model_validator(mode="after")
+    def validate_composio(self) -> "WorkerContractTrigger":
+        if self.type == "composio" and not self.composio:
+            raise ValueError("composio-triggered workers must declare trigger.composio")
+        return self
 
 
 class WorkerContract(BaseModel):
@@ -408,6 +431,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             cron=contract.trigger.cron,
             timezone=contract.trigger.timezone,
             webhook=contract.trigger.webhook,
+            composio=contract.trigger.composio,
         ),
         runtime=runtime,
         inputs=inputs,
@@ -528,6 +552,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             type=config.trigger.type,
             cron=config.trigger.cron,
             webhook=config.trigger.webhook,
+            composio=config.trigger.composio,
         ),
         connections=list(config.connections),
         csv_required_columns=config.csv_required_columns,
@@ -655,6 +680,7 @@ class WorkerDetail(BaseModel):
     config: WorkerConfig
     recent_runs: List[RunSummary] = Field(default_factory=list)
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
+    run_py: Optional[str] = None
 
 
 class SecretItem(BaseModel):
