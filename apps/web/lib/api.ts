@@ -81,7 +81,7 @@ export const api = {
   },
   system: {
     info: () => fetchJson<Record<string, unknown>>("/system/info"),
-    platformConfig: () => fetchJson<{ platform_secrets: { name: string; status: string; required: boolean; default: string | null; description: string | null }[] }>("/system/platform-config"),
+    platformConfig: () => fetchJson<{ platform_secrets: { name: string; status: string; required: boolean; default: string | null; description: string | null }[]; infra_paths: { name: string; status: string; required: boolean; default: string | null; description: string | null }[] }>("/system/platform-config"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
   },
   connections: {
