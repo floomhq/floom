@@ -68,6 +68,8 @@ exec:
   runner: local
   inputs: []
   outputs: []
+approvals:
+  required: false
 trigger:
 {trigger_block}
 """
@@ -92,6 +94,15 @@ def _create_manual_worker() -> dict:
 def _create_webhook_worker() -> dict:
     name = _unique_name("tww")
     return _create_worker(_make_worker_yml(name, "webhook"))
+
+
+def _create_approval_worker() -> dict:
+    name = _unique_name("twa")
+    yml = _make_worker_yml(name, "manual").replace(
+        "approvals:\n  required: false",
+        "approvals:\n  required: true\n  label: Approve test output",
+    )
+    return _create_worker(yml)
 
 
 # ===========================================================================
@@ -612,6 +623,60 @@ class TestApprovalStatusPublisher(unittest.TestCase):
         self.assertEqual(status_events[-1]["run_id"], run_id)
         self.assertEqual(status_events[-1]["status"], "rejected")
         self.assertIn("completed_at", status_events[-1])
+
+
+# ===========================================================================
+# Approval-required run lifecycle tests
+# ===========================================================================
+
+class TestApprovalRunLifecycle(unittest.TestCase):
+    """Tests for approval-required status event order."""
+
+    def setUp(self):
+        os.environ.pop("FLOOM_SECRET", None)
+
+    def test_approval_required_run_publishes_pending_before_completed(self):
+        from db import get_db
+        from models import WorkerResult
+        import run_service
+
+        worker = _create_approval_worker()
+        run_id = run_service.create_run(worker["id"], {})
+        events = []
+
+        class FakeDriver:
+            def run(self, **_kwargs):
+                return WorkerResult(status="success", outputs={"message": "ready"})
+
+        def capture(published_run_id: str, event: dict) -> None:
+            if published_run_id == run_id:
+                events.append(dict(event))
+
+        run_service.register_sse_publisher(capture)
+        try:
+            with patch.object(run_service, "get_sandbox_driver", return_value=FakeDriver()):
+                run_service.execute_run(run_id, worker["id"], {})
+        finally:
+            run_service.register_sse_publisher(app_module._sse_publish)
+
+        statuses = [
+            event.get("status")
+            for event in events
+            if event.get("type") == "status"
+        ]
+        self.assertIn("pending_approval", statuses)
+        self.assertNotIn("completed", statuses)
+
+        pending_index = statuses.index("pending_approval")
+        completed_indexes = [idx for idx, status in enumerate(statuses) if status == "completed"]
+        self.assertTrue(all(pending_index < idx for idx in completed_indexes))
+
+        with get_db() as conn:
+            run_row = conn.execute("SELECT status, output_json FROM runs WHERE id = ?", (run_id,)).fetchone()
+            approval_row = conn.execute("SELECT status FROM approvals WHERE run_id = ?", (run_id,)).fetchone()
+        self.assertEqual(run_row["status"], "pending_approval")
+        self.assertEqual(json.loads(run_row["output_json"]), {"message": "ready"})
+        self.assertEqual(approval_row["status"], "pending")
 
 
 # ===========================================================================

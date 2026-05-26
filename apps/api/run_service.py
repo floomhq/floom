@@ -452,9 +452,6 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(f"Run failed: {result.error}", level="error")
         return
 
-    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
-    log_fn("Output generated")
-
     if config.approvals.required:
         update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs)
         preview = ""
@@ -463,8 +460,11 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
             preview = str(outputs.get(first_key, ""))[:500]
         label = config.approvals.label or "Approve output"
         create_approval(run_id, worker_id, label, preview)
+        log_fn("Output generated")
         log_fn("Waiting for approval")
     else:
+        update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
+        log_fn("Output generated")
         log_fn("Run completed")
 
 
