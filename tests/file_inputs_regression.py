@@ -8,12 +8,15 @@ Scenarios covered:
   - Upload exceeding ceiling: 413, no partial blob persisted, temp cleaned up
   - Bind a stricter input post-upload: bind-time reject (media_type mismatch)
   - Concurrent uploads of identical content: single dedup row, no double-write
+  - 10 same-loop async uploads: all succeed and dedup by SHA
   - 5 concurrent runs of same worker with different file SHAs: each sees only its own file
   - Optional file omitted in run 2 after run 1: run 2 inputs dir is clean
-  - POST /uploads with invalid SHA binding: 400 on bind
-  - Bind non-existent SHA: 404
+  - POST /runs with non-SHA file input values: 400 and no worker execution
+  - Bind non-existent SHA: 404 and no orphan queued run
+  - File-size revalidation: upload over worker limit, bind rejected with 400
 """
 
+import asyncio
 import concurrent.futures
 import hashlib
 import json
@@ -23,6 +26,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,7 +154,7 @@ write_test_worker()
 from fastapi.testclient import TestClient  # noqa: E402
 
 import db  # noqa: E402
-from main import app  # noqa: E402
+from main import app, upload_file as api_upload_file  # noqa: E402
 
 
 client = TestClient(app)
@@ -203,6 +207,40 @@ def wait_for_run(run_id: str) -> dict[str, Any]:
 def db_scalar(query: str, params: tuple[Any, ...] = ()) -> Any:
     with sqlite3.connect(DB_PATH) as conn:
         return conn.execute(query, params).fetchone()[0]
+
+
+def db_row(query: str, params: tuple[Any, ...] = ()) -> sqlite3.Row | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        return conn.execute(query, params).fetchone()
+
+
+class AsyncBytesUpload:
+    def __init__(self, filename: str, content: bytes, media_type: str) -> None:
+        self.filename = filename
+        self.content_type = media_type
+        self._content = content
+        self._offset = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        await asyncio.sleep(0)
+        if self._offset >= len(self._content):
+            return b""
+        if size is None or size < 0:
+            size = len(self._content) - self._offset
+        chunk = self._content[self._offset : self._offset + size]
+        self._offset += len(chunk)
+        return chunk
+
+
+async def async_upload_bytes(content: bytes, index: int) -> Any:
+    request = SimpleNamespace(headers={})
+    file = AsyncBytesUpload(f"async-{index}.csv", content, "text/csv")
+    return await api_upload_file(request, file=file, max_size_mb=1, accepts=None)
+
+
+async def run_async_uploads(content: bytes, count: int) -> list[Any]:
+    return await asyncio.gather(*(async_upload_bytes(content, i) for i in range(count)))
 
 
 def main() -> int:
@@ -272,6 +310,41 @@ def main() -> int:
         bad_bind_response.text[:300],
     )
 
+    # --- Non-SHA file input values are rejected before worker execution ---
+    print("\n[section] Non-SHA file input rejection")
+    for raw_value in ("/etc/hosts", "not-a-sha"):
+        trigger = f"non_sha_{raw_value.replace('/', '_').replace('-', '_')}"
+        response = client.post(
+            "/workers/file_access_test/runs",
+            json={
+                "inputs": {"upload": raw_value},
+                "trigger_source": trigger,
+            },
+        )
+        check(
+            f"non-SHA value {raw_value!r} rejected with 400",
+            response.status_code == 400,
+            response.text[:300],
+        )
+        row = db_row(
+            """
+            SELECT status, output_json, error
+            FROM runs
+            WHERE trigger_source = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (trigger,),
+        )
+        check(
+            f"non-SHA value {raw_value!r} did not execute worker",
+            row is not None
+            and row["status"] == "failed"
+            and row["output_json"] is None
+            and "non-SHA value" in (row["error"] or ""),
+            dict(row) if row else "no run row",
+        )
+
     # --- Bind non-existent SHA: 404 ---
     print("\n[section] Bind non-existent SHA")
     fake_sha = "a" * 64
@@ -286,6 +359,46 @@ def main() -> int:
         "bind non-existent SHA rejected with 404",
         bad_sha_response.status_code == 404,
         bad_sha_response.text[:300],
+    )
+    queued_count = db_scalar("SELECT COUNT(*) FROM runs WHERE status = 'queued'")
+    check("missing SHA leaves zero queued runs", queued_count == 0, f"queued={queued_count}")
+    missing_row = db_row(
+        """
+        SELECT status, error
+        FROM runs
+        WHERE trigger_source = 'file_inputs_regression'
+          AND input_json LIKE ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (f"%{fake_sha}%",),
+    )
+    check(
+        "missing SHA run row is marked failed",
+        missing_row is not None
+        and missing_row["status"] == "failed"
+        and "Uploaded file not found" in (missing_row["error"] or ""),
+        dict(missing_row) if missing_row else "no run row",
+    )
+
+    # --- File-size revalidation at bind time ---
+    print("\n[section] Bind-time revalidation: max_size_mb")
+    large_content = b"a,b\n" + (b"x,y\n" * (3 * 1024 * 1024 // 4))
+    large_sha = hashlib.sha256(large_content).hexdigest()
+    large_upload = post_upload(large_content, filename="large.csv", max_size_mb=5)
+    check("3MB upload succeeds with larger upload limit", large_upload.status_code == 200, large_upload.text[:200])
+    check("3MB upload hash matches", large_upload.json().get("sha256") == large_sha, large_upload.text[:200])
+    large_bind = client.post(
+        "/workers/file_access_test/runs",
+        json={
+            "inputs": {"upload": large_sha},
+            "trigger_source": "file_inputs_regression_large",
+        },
+    )
+    check(
+        "3MB file rejected by worker max_size_mb=1 at bind",
+        large_bind.status_code == 400,
+        large_bind.text[:300],
     )
 
     # --- Concurrent uploads of identical content: single dedup row ---
@@ -306,6 +419,21 @@ def main() -> int:
     check("all 5 concurrent uploads return 200", all(s == 200 for s in statuses), str(statuses))
     dup_count = db_scalar("SELECT COUNT(*) FROM files WHERE id = ?", (dup_sha,))
     check("5 concurrent uploads produce one files row", dup_count == 1, f"count={dup_count}")
+
+    # --- Same-event-loop async uploads: unique temp files ---
+    print("\n[section] 10 async uploads same event loop")
+    async_content = b"async,dedup\n1,2\n"
+    async_sha = hashlib.sha256(async_content).hexdigest()
+    async_results = asyncio.run(run_async_uploads(async_content, 10))
+    async_success = all(
+        isinstance(result, dict) and result.get("sha256") == async_sha
+        for result in async_results
+    )
+    check("all 10 async uploads return matching SHA", async_success, str(async_results))
+    async_count = db_scalar("SELECT COUNT(*) FROM files WHERE id = ?", (async_sha,))
+    check("10 async uploads produce one files row", async_count == 1, f"count={async_count}")
+    async_tmp_files = list(BLOBS_DIR.rglob(".upload.*.tmp"))
+    check("10 async uploads leave no upload temp files", len(async_tmp_files) == 0, str(async_tmp_files))
 
     # --- Happy-path run: file is staged per-run ---
     print("\n[section] Happy-path run with file input")

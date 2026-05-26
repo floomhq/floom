@@ -1086,7 +1086,13 @@ def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> A
     # Create the run record first so we have a run_id for per-run file staging.
     run_id = create_run(worker_id, payload.inputs, payload.trigger_source)
     bound_by = request.headers.get("x-floom-user") or "anonymous"
-    resolved_inputs = _resolve_file_input_references(worker_id, run_id, payload.inputs, bound_by=bound_by)
+    try:
+        resolved_inputs = _resolve_file_input_references(
+            worker_id, run_id, payload.inputs, bound_by=bound_by
+        )
+    except HTTPException as exc:
+        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc.detail))
+        raise
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
     with get_db() as conn:
