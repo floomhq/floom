@@ -202,6 +202,39 @@ This is essentially merging `/connections/browse` into the connections page or l
 
 ---
 
+### #13 /settings has a duplicate "Secrets summary" card
+
+**Where:** `apps/web/app/settings/page.tsx:174-204`
+
+**Symptom:** /settings has 5 cards: System Info, Platform configuration, Workers, **Secrets summary** (duplicate), Danger Zone. The "Secrets summary" card shows the same `secrets.list()` data as the dedicated `/secrets` page in the sidebar. Two surfaces for the same data, divergent over time.
+
+**Federico:** "why does it have secrets?"
+
+**Fix scope:** Delete the "Secrets summary" card from `/settings`. Sidebar already exposes `/secrets`.
+
+**Status:** OPEN — trivial.
+
+---
+
+### #14 FLOOM_RUN_TIMEOUT shown as red "missing" but is optional with a default
+
+**Where:** `apps/api/main.py:2122-2132` (PLATFORM_SECRETS set) + `/system/platform-config` endpoint + `apps/web/app/settings/page.tsx:130-158`
+
+**Symptom (Image #17):** Platform configuration shows FLOOM_RUN_TIMEOUT with a red "missing" badge, same severity as a real infra secret being absent. Federico cannot edit it from the UI ("anything i can do for the platform config? some value seems missing but i cannot edit?").
+
+**Reality:**
+- `apps/api/runner_local.py:28` reads `FLOOM_RUN_TIMEOUT` with a 300s default. It is optional.
+- All PLATFORM_SECRETS are systemd env vars in `/root/.config/workeros/api.env` — editing requires SSH, not UI. That's intentional ("Configure these on the server"), but red "missing" makes it look broken.
+
+**Fix scope:**
+- Tag PLATFORM_SECRETS entries with `required: bool` + `default: Optional[str]` metadata. Project `{name, status, required, default}` in `/system/platform-config`.
+- UI: for `required:false, status:missing` render a neutral chip "optional · default 300s" instead of red.
+- Optionally: drop FLOOM_RUN_TIMEOUT from the platform list since it's a tuning knob, not a secret.
+
+**Status:** OPEN — trivial, ship with #13 as a small docs/settings PR.
+
+---
+
 ## Sequencing
 
 Suggested PR cuts (parallelizable):
@@ -211,10 +244,16 @@ Suggested PR cuts (parallelizable):
 3. **PR C — Connections marketplace UX** (#7): replace fixed "Connect a tool" modal with searchable paginated list backed by `GET /integrations/catalog`.
 4. **PR D — Requirements UX** (#4): tighter connection inference + one-method-per-app (OAuth XOR API key).
 5. **PR E — Run inputs + sidebar scroll** (#3 + #5): file inputs for `kind: file`; sticky sidebar.
+6. **PR F — Settings cleanup** (#13 + #14): remove duplicate Secrets card from /settings; tag platform secrets with `required` + `default` so optional vars render neutrally.
 
-PR A and PR B are the heaviest. PR B is the most launch-critical (connections are unusable right now).
+**Parallel lanes:**
+- **Lane 1 (connections):** PR B then PR C in sequence (small overlap on the modal).
+- **Lane 2 (workers):** PR A then PR D then PR E in sequence (all touch /workers files).
+- **Lane 3 (settings polish):** PR F standalone, independent of everything else.
 
-**Total estimated effort:** 10-14 hours of focused work split across the 5 PRs.
+PR B is the most launch-critical (connections are functionally broken right now). Three workstreams can run in parallel worktrees.
+
+**Total estimated effort:** 11-15 hours of focused work split across the 6 PRs.
 
 ---
 
