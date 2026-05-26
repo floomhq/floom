@@ -164,6 +164,33 @@ class TestAuthGate(unittest.TestCase):
         )
         self.assertNotEqual(r.status_code, 401, f"Expected non-401, got {r.status_code}: {r.text}")
 
+    def test_connections_callback_validates_known_connection_id(self):
+        """OAuth callback updates only a persisted Composio connection row."""
+        from db import get_db
+
+        conn_id = f"conn_{_uuid_mod.uuid4().hex[:12]}"
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO composio_connections
+                   (id, app_name, composio_connection_id, status, created_at, updated_at)
+                   VALUES (?, 'gmail', ?, 'initiated', datetime('now'), datetime('now'))""",
+                (f"local_{_uuid_mod.uuid4().hex[:12]}", conn_id),
+            )
+
+        r = client.get(
+            f"/connections/callback?connection_id={conn_id}&status=success",
+            headers=self._headers(False),
+            follow_redirects=False,
+        )
+
+        self.assertNotEqual(r.status_code, 401, f"Expected non-401, got {r.status_code}: {r.text}")
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT status FROM composio_connections WHERE composio_connection_id = ?",
+                (conn_id,),
+            ).fetchone()
+        self.assertEqual(row["status"], "success")
+
     def test_options_cors_preflight_passes(self):
         """OPTIONS requests must not be gated by x-floom-secret."""
         r = client.options("/workers")
@@ -639,6 +666,7 @@ class TestApprovalRunLifecycle(unittest.TestCase):
         worker = _create_approval_worker()
         run_id = run_service.create_run(worker["id"], {})
         events = []
+        approval_exists_when_pending = []
 
         class FakeDriver:
             def run(self, **_kwargs):
@@ -647,6 +675,10 @@ class TestApprovalRunLifecycle(unittest.TestCase):
         def capture(published_run_id: str, event: dict) -> None:
             if published_run_id == run_id:
                 events.append(dict(event))
+                if event.get("type") == "status" and event.get("status") == "pending_approval":
+                    with get_db() as conn:
+                        row = conn.execute("SELECT id FROM approvals WHERE run_id = ?", (run_id,)).fetchone()
+                    approval_exists_when_pending.append(row is not None)
 
         run_service.register_sse_publisher(capture)
         try:
@@ -662,6 +694,7 @@ class TestApprovalRunLifecycle(unittest.TestCase):
         ]
         self.assertIn("pending_approval", statuses)
         self.assertNotIn("completed", statuses)
+        self.assertEqual(approval_exists_when_pending, [True])
 
         pending_index = statuses.index("pending_approval")
         completed_indexes = [idx for idx, status in enumerate(statuses) if status == "completed"]

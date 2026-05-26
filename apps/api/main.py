@@ -1815,14 +1815,25 @@ def connections_callback(connection_id: str = "", status: str = ""):
     from fastapi.responses import RedirectResponse
 
     if connection_id:
+        with get_db() as conn:
+            existing = conn.execute(
+                "SELECT status FROM composio_connections WHERE composio_connection_id = ?",
+                (connection_id,),
+            ).fetchone()
+
+        # Ignore unknown callback IDs; known IDs are validated by persisted state.
+        if not existing:
+            frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+            return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+
         # Try to refresh from Composio first
         try:
             from composio_client import check_status
             remote_status = check_status(connection_id)
         except Exception:
-            remote_status = status or "active"
+            remote_status = ""
 
-        final_status = remote_status if remote_status else (status or "active")
+        final_status = remote_status or status or existing["status"]
         now = now_iso()
         with get_db() as conn:
             conn.execute(
