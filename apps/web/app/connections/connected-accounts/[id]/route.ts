@@ -1,26 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const COMPOSIO_BASE =
   process.env.COMPOSIO_API_BASE || "https://backend.composio.dev/api/v3";
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
-const COMPOSIO_ROUTE_SECRET = process.env.WORKEROS_API_SECRET || API_SECRET;
 
 type JsonObject = Record<string, unknown>;
 
 export async function GET(
-  request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Auth gate: require x-floom-secret when WORKEROS_API_SECRET (or FLOOM_API_SECRET) is set.
-  // When neither is configured (local dev with no secret), allow through.
-  if (COMPOSIO_ROUTE_SECRET) {
-    const incomingSecret = request.headers.get("x-floom-secret") ?? "";
-    if (incomingSecret !== COMPOSIO_ROUTE_SECRET) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
-
   const { id } = await params;
   const decodedId = decodeURIComponent(id);
 

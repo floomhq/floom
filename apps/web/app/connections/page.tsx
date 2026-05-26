@@ -293,20 +293,10 @@ async function loadWorkerDetails() {
   );
 }
 
-const ROUTE_SECRET =
-  typeof process !== "undefined"
-    ? (process.env.NEXT_PUBLIC_WORKEROS_API_SECRET ?? "")
-    : "";
-
-function composioRouteHeaders(): HeadersInit {
-  return ROUTE_SECRET ? { "x-floom-secret": ROUTE_SECRET } : {};
-}
-
 async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetadata | undefined> {
   try {
     const response = await fetch(`/connections/connected-accounts/${encodeURIComponent(id)}`, {
       cache: "no-store",
-      headers: composioRouteHeaders(),
     });
     if (response.status === 503) {
       // Composio not configured — surface via toast once, return undefined
@@ -324,7 +314,6 @@ async function fetchAuthConfig(id: string): Promise<AuthConfigMetadata | undefin
   try {
     const response = await fetch(`/connections/auth-configs/${encodeURIComponent(id)}`, {
       cache: "no-store",
-      headers: composioRouteHeaders(),
     });
     if (response.status === 503) {
       return undefined;
