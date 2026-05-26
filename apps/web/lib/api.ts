@@ -103,6 +103,10 @@ export const api = {
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
+    triggersForApp: (app: string) =>
+      fetchJson<{ items: import("./types").ComposioTriggerItem[] }>(
+        `/integrations/triggers?app=${encodeURIComponent(app)}`
+      ),
     catalog: (params?: { page?: number; limit?: number; search?: string; category?: string }) => {
       const qs = new URLSearchParams();
       qs.set("page", String(params?.page ?? 1));

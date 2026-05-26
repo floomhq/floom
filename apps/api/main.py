@@ -2959,13 +2959,40 @@ _trigger_catalog_cache: Dict[str, Any] = {"expires_at": 0.0, "items": None}
 _trigger_catalog_lock = threading.Lock()
 
 
+def _trigger_item_app_slug(item: Dict[str, Any]) -> str:
+    """Extract the app/toolkit slug from a Composio trigger catalog item (lowercased)."""
+    toolkit = item.get("toolkit") or item.get("app") or {}
+    slug = (
+        toolkit.get("slug")
+        or item.get("toolkit_slug")
+        or item.get("app_name")
+        or item.get("app")
+        or ""
+    )
+    if isinstance(slug, dict):
+        slug = slug.get("slug") or ""
+    return str(slug).lower()
+
+
 @app.get("/integrations/triggers")
-def list_integration_triggers():
-    """Proxy Composio's trigger catalog, cached for one hour."""
+def list_integration_triggers(app: Optional[str] = Query(None, description="Filter by app slug (e.g. 'gmail')")):
+    """Proxy Composio's trigger catalog, cached for one hour.
+
+    Pass ?app=<slug> to return only triggers for that integration.
+    Filtering happens on the cached full catalog so no extra Composio call is
+    made per-app — the cache is always populated from the full list.
+    """
     now = time.monotonic()
     with _trigger_catalog_lock:
         if _trigger_catalog_cache["items"] is not None and now < _trigger_catalog_cache["expires_at"]:
-            return {"items": _trigger_catalog_cache["items"]}
+            items = _trigger_catalog_cache["items"]
+            if app:
+                app_lower = app.lower()
+                items = [
+                    item for item in items
+                    if _trigger_item_app_slug(item) == app_lower
+                ]
+            return {"items": items}
 
     try:
         from composio_client import list_triggers
@@ -2977,6 +3004,10 @@ def list_integration_triggers():
     with _trigger_catalog_lock:
         _trigger_catalog_cache["items"] = items
         _trigger_catalog_cache["expires_at"] = now + 3600
+
+    if app:
+        app_lower = app.lower()
+        items = [item for item in items if _trigger_item_app_slug(item) == app_lower]
     return {"items": items}
 
 
