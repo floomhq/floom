@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle2, Loader2, Upload } from "lucide-react";
-import type { ComposioTriggerItem, ConnectionItem, DraftFromPromptResponse } from "@/lib/types";
+import type { ComposioTriggerItem, ConnectionItem, DraftFromPromptResponse, DraftRequirementItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -736,6 +736,215 @@ function InlineConnectionRow({ appSlug, initialConnected, onConnected }: InlineC
 }
 
 // ---------------------------------------------------------------------------
+// InlineRequirementRow: unified row for one integration (OAuth or API key)
+// ---------------------------------------------------------------------------
+
+interface InlineRequirementRowProps {
+  requirement: DraftRequirementItem;
+  secretName?: string;
+  initialSecretStatus?: "set" | "missing" | "unknown";
+  initialConnected?: boolean;
+  onReady: (app: string) => void;
+}
+
+function InlineRequirementRow({
+  requirement,
+  secretName,
+  initialSecretStatus = "unknown",
+  initialConnected = false,
+  onReady,
+}: InlineRequirementRowProps) {
+  const app = getSupportedApp(requirement.app);
+  const isOAuth = requirement.method === "oauth";
+
+  // OAuth state
+  const [connStatus, setConnStatus] = useState<"connected" | "disconnected" | "connecting">(
+    initialConnected ? "connected" : "disconnected"
+  );
+
+  // API key state
+  const [secretStatus, setSecretStatus] = useState<"set" | "missing" | "unknown" | "saving">(initialSecretStatus);
+  const [secretValue, setSecretValue] = useState("");
+  const [showSecretInput, setShowSecretInput] = useState(initialSecretStatus !== "set");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (showSecretInput && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [showSecretInput]);
+
+  const isReady = isOAuth ? connStatus === "connected" : secretStatus === "set";
+
+  useEffect(() => {
+    if (isReady) onReady(requirement.app);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isReady]);
+
+  async function handleConnect() {
+    setConnStatus("connecting");
+    try {
+      const result = await api.connections.initiate(requirement.app);
+      if (!result.redirect_url) {
+        toast.error(`No OAuth URL returned for ${app.displayName}`);
+        setConnStatus("disconnected");
+        return;
+      }
+      const outcome = await openOAuthPopup({
+        oauthUrl: result.redirect_url,
+        appSlug: requirement.app,
+        onConnected: () => {
+          setConnStatus("connected");
+          onReady(requirement.app);
+          toast.success(`${app.displayName} connected`);
+        },
+      });
+      if (outcome === "timeout") {
+        toast.error(`Connection timed out. Complete the OAuth flow and retry.`);
+        setConnStatus("disconnected");
+      } else if (outcome === "closed") {
+        const connections = await api.connections.list();
+        const active = connections.find(
+          (c) => c.app_name.toLowerCase() === requirement.app.toLowerCase() && c.status === "active"
+        );
+        if (active) {
+          setConnStatus("connected");
+          onReady(requirement.app);
+          toast.success(`${app.displayName} connected`);
+        } else {
+          setConnStatus("disconnected");
+        }
+      }
+    } catch (e: unknown) {
+      setConnStatus("disconnected");
+      toast.error(e instanceof Error ? e.message : `Failed to connect ${app.displayName}`);
+    }
+  }
+
+  async function handleSaveSecret() {
+    const trimmed = secretValue.trim();
+    if (!trimmed || !secretName) {
+      toast.error(`Enter a value for ${secretName ?? "the API key"}`);
+      return;
+    }
+    setSecretStatus("saving");
+    try {
+      await api.secrets.upsert(secretName, trimmed);
+      setSecretStatus("set");
+      setShowSecretInput(false);
+      setSecretValue("");
+      onReady(requirement.app);
+      toast.success(`${secretName} saved`);
+    } catch (e: unknown) {
+      setSecretStatus("missing");
+      toast.error(e instanceof Error ? e.message : `Failed to save ${secretName}`);
+    }
+  }
+
+  const methodBadge = (
+    <span className={`text-xs px-1.5 py-0.5 rounded border font-mono ${
+      isOAuth
+        ? "text-[#2563eb] bg-[#eff6ff] border-[#bfdbfe]"
+        : "text-[#7c3aed] bg-[#f5f3ff] border-[#ddd6fe]"
+    }`}>
+      {isOAuth ? "OAuth" : "API key"}
+    </span>
+  );
+
+  // Fully ready
+  if (isReady) {
+    return (
+      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-[#f0fdf4]">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
+          <span className="text-sm font-medium text-[#15803d]">{app.displayName}</span>
+          {methodBadge}
+        </div>
+        {isOAuth ? (
+          <button type="button" onClick={handleConnect} className="text-xs text-[#999] hover:text-[#666] transition-colors">
+            Reconnect
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { setSecretStatus("missing"); setShowSecretInput(true); }}
+            className="text-xs text-[#999] hover:text-[#666] transition-colors"
+          >
+            Change
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Not ready: show connect/input UI
+  return (
+    <div className="rounded-md border border-[#e4e4e7] bg-white p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-[#333]">{app.displayName}</span>
+          {methodBadge}
+        </div>
+        {isOAuth && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleConnect}
+            disabled={connStatus === "connecting"}
+            className="shrink-0 h-7 text-xs"
+          >
+            {connStatus === "connecting" ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Connecting...
+              </span>
+            ) : (
+              `Connect ${app.displayName}`
+            )}
+          </Button>
+        )}
+      </div>
+      {!isOAuth && secretName && (
+        <>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-[#555]">{secretName}</span>
+            <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
+          </div>
+          {showSecretInput && (
+            <div className="flex gap-2">
+              <Input
+                ref={inputRef}
+                type="password"
+                placeholder={`Enter ${secretName}`}
+                value={secretValue}
+                onChange={(e) => setSecretValue(e.target.value)}
+                className="border-[#e4e4e7] font-mono text-sm flex-1"
+                disabled={secretStatus === "saving"}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveSecret();
+                }}
+              />
+              <Button
+                size="sm"
+                onClick={handleSaveSecret}
+                disabled={secretStatus === "saving" || !secretValue.trim()}
+                className="shrink-0"
+              >
+                {secretStatus === "saving" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  "Save"
+                )}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // InlineRequirements — secrets + connections inline setup panel
 // ---------------------------------------------------------------------------
 
@@ -749,6 +958,7 @@ interface ConnectionState {
 }
 
 interface InlineRequirementsProps {
+  requirements?: DraftRequirementItem[];
   requiredSecrets: string[];
   requiredConnections: string[];
   onAllReady: (ready: boolean) => void;
@@ -757,28 +967,43 @@ interface InlineRequirementsProps {
 }
 
 function InlineRequirements({
+  requirements,
   requiredSecrets,
   requiredConnections,
   onAllReady,
   skipped,
   onSkip,
 }: InlineRequirementsProps) {
+  const [loading, setLoading] = useState(true);
+
+  // State for legacy mode (when requirements array is absent)
   const [secretStates, setSecretStates] = useState<SecretState[]>(
     requiredSecrets.map((name) => ({ name, status: "unknown" as const }))
   );
   const [connectionStates, setConnectionStates] = useState<ConnectionState[]>(
     requiredConnections.map((slug) => ({ slug, connected: false }))
   );
-  const [loading, setLoading] = useState(true);
+
+  // State for new requirements mode
+  const [readyApps, setReadyApps] = useState<Set<string>>(new Set());
+
+  const useNewFormat = Array.isArray(requirements) && requirements.length > 0;
 
   // On mount, check existing secrets and connections
   useEffect(() => {
     let cancelled = false;
     async function checkStatus() {
       try {
+        const allSecrets = useNewFormat
+          ? requirements!.filter((r) => r.method === "api_key").map((r) => `${r.app.toUpperCase().replace(/-/g, "_")}_API_KEY`)
+          : requiredSecrets;
+        const allConnections = useNewFormat
+          ? requirements!.filter((r) => r.method === "oauth").map((r) => r.app)
+          : requiredConnections;
+
         const [secretList, connectionList] = await Promise.all([
-          requiredSecrets.length > 0 ? api.secrets.list() : Promise.resolve([]),
-          requiredConnections.length > 0 ? api.connections.list() : Promise.resolve([]),
+          allSecrets.length > 0 ? api.secrets.list() : Promise.resolve([]),
+          allConnections.length > 0 ? api.connections.list() : Promise.resolve([]),
         ]);
 
         if (cancelled) return;
@@ -790,18 +1015,34 @@ function InlineRequirements({
             .map((c) => c.app_name.toLowerCase())
         );
 
-        setSecretStates(
-          requiredSecrets.map((name) => ({
-            name,
-            status: (secretMap.get(name) ?? "missing") as "set" | "missing",
-          }))
-        );
-        setConnectionStates(
-          requiredConnections.map((slug) => ({
-            slug,
-            connected: activeConnections.has(slug.toLowerCase()),
-          }))
-        );
+        if (useNewFormat) {
+          // Pre-mark apps that are already ready
+          const preReady = new Set<string>();
+          for (const req of requirements!) {
+            if (req.method === "oauth" && activeConnections.has(req.app.toLowerCase())) {
+              preReady.add(req.app);
+            } else if (req.method === "api_key") {
+              const secretName = `${req.app.toUpperCase().replace(/-/g, "_")}_API_KEY`;
+              if ((secretMap.get(secretName) ?? "missing") === "set") {
+                preReady.add(req.app);
+              }
+            }
+          }
+          setReadyApps(preReady);
+        } else {
+          setSecretStates(
+            requiredSecrets.map((name) => ({
+              name,
+              status: (secretMap.get(name) ?? "missing") as "set" | "missing",
+            }))
+          );
+          setConnectionStates(
+            requiredConnections.map((slug) => ({
+              slug,
+              connected: activeConnections.has(slug.toLowerCase()),
+            }))
+          );
+        }
       } catch {
         // API errors: show all as unknown/disconnected so user can still proceed
       } finally {
@@ -814,9 +1055,9 @@ function InlineRequirements({
   }, []);
 
   // Compute readiness
-  const allSecretsSet = secretStates.every((s) => s.status === "set");
-  const allConnectionsConnected = connectionStates.every((c) => c.connected);
-  const allReady = allSecretsSet && allConnectionsConnected;
+  const allReady = useNewFormat
+    ? requirements!.every((r) => readyApps.has(r.app))
+    : secretStates.every((s) => s.status === "set") && connectionStates.every((c) => c.connected);
 
   useEffect(() => {
     onAllReady(allReady);
@@ -834,6 +1075,10 @@ function InlineRequirements({
     );
   }
 
+  function handleRequirementReady(app: string) {
+    setReadyApps((prev) => new Set([...prev, app]));
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-[#999]">
@@ -843,7 +1088,9 @@ function InlineRequirements({
     );
   }
 
-  const hasRequirements = requiredSecrets.length > 0 || requiredConnections.length > 0;
+  const hasRequirements = useNewFormat
+    ? requirements!.length > 0
+    : requiredSecrets.length > 0 || requiredConnections.length > 0;
   if (!hasRequirements) return null;
 
   return (
@@ -872,47 +1119,69 @@ function InlineRequirements({
         </div>
         {!allReady && !skipped && (
           <p className="text-xs text-[#999] mt-0.5">
-            Set up secrets and connections before creating the worker.
+            Connect the integrations this worker needs before creating it.
           </p>
         )}
         {skipped && (
           <p className="text-xs text-amber-600 mt-0.5">
-            Skipped — you can configure these later in Settings / Connections.
+            Skipped. You can configure these later in Settings / Connections.
           </p>
         )}
       </CardHeader>
       {!skipped && (
-        <CardContent className="space-y-4">
-          {requiredSecrets.length > 0 && (
-            <div className="space-y-2">
-              <Label className="text-xs text-[#666] uppercase tracking-wide">API keys</Label>
-              <div className="space-y-2">
-                {secretStates.map((s) => (
-                  <InlineSecretRow
-                    key={s.name}
-                    name={s.name}
-                    initialStatus={s.status}
-                    onSaved={handleSecretSaved}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+        <CardContent className="space-y-2">
+          {useNewFormat ? (
+            // New unified list: one row per app, no duplicates
+            requirements!.map((req) => {
+              const secretName = req.method === "api_key"
+                ? `${req.app.toUpperCase().replace(/-/g, "_")}_API_KEY`
+                : undefined;
+              return (
+                <InlineRequirementRow
+                  key={req.app}
+                  requirement={req}
+                  secretName={secretName}
+                  initialSecretStatus="unknown"
+                  initialConnected={readyApps.has(req.app)}
+                  onReady={handleRequirementReady}
+                />
+              );
+            })
+          ) : (
+            // Legacy two-section layout for backward compatibility
+            <>
+              {requiredSecrets.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-[#666] uppercase tracking-wide">API keys</Label>
+                  <div className="space-y-2">
+                    {secretStates.map((s) => (
+                      <InlineSecretRow
+                        key={s.name}
+                        name={s.name}
+                        initialStatus={s.status}
+                        onSaved={handleSecretSaved}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {requiredConnections.length > 0 && (
-            <div className="space-y-2">
-              <Label className="text-xs text-[#666] uppercase tracking-wide">OAuth connections</Label>
-              <div className="space-y-2">
-                {connectionStates.map((c) => (
-                  <InlineConnectionRow
-                    key={c.slug}
-                    appSlug={c.slug}
-                    initialConnected={c.connected}
-                    onConnected={handleConnectionConnected}
-                  />
-                ))}
-              </div>
-            </div>
+              {requiredConnections.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-[#666] uppercase tracking-wide">OAuth connections</Label>
+                  <div className="space-y-2">
+                    {connectionStates.map((c) => (
+                      <InlineConnectionRow
+                        key={c.slug}
+                        appSlug={c.slug}
+                        initialConnected={c.connected}
+                        onConnected={handleConnectionConnected}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       )}
@@ -975,7 +1244,9 @@ function ReviewStep({
   const [requirementsSkipped, setRequirementsSkipped] = useState(false);
 
   const hasRequirements =
-    draft.required_secrets.length > 0 || draft.required_connections.length > 0;
+    (Array.isArray(draft.requirements) && draft.requirements.length > 0) ||
+    draft.required_secrets.length > 0 ||
+    draft.required_connections.length > 0;
 
   // Persist draft session to survive OAuth popup navigations
   useEffect(() => {
@@ -1091,9 +1362,10 @@ function ReviewStep({
               </Card>
             )}
 
-            {/* Inline requirements — secrets + connections */}
+            {/* Inline requirements: one row per integration, no duplicates */}
             {hasRequirements && (
               <InlineRequirements
+                requirements={draft.requirements}
                 requiredSecrets={draft.required_secrets}
                 requiredConnections={draft.required_connections}
                 onAllReady={handleRequirementsReady}
