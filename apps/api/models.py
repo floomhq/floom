@@ -63,6 +63,8 @@ class WorkerInput(BaseModel):
     options: Optional[List[str]] = None
     default: Optional[Any] = None
     accept_csv: bool = False  # When True, render the CSV column mapper in the UI
+    accepts: Optional[List[str]] = None
+    max_size_mb: Optional[float] = None
 
 
 class WorkerOutput(BaseModel):
@@ -205,6 +207,8 @@ class WorkerContractField(BaseModel):
     placeholder: Optional[str] = None
     options: Optional[List[str]] = None
     accept_csv: bool = False
+    accepts: Optional[List[str]] = None
+    max_size_mb: Optional[float] = None
     columns: Optional[List[str]] = None
     json_required_keys: Optional[List[str]] = None
 
@@ -226,9 +230,14 @@ class WorkerContractField(BaseModel):
                 raise ValueError(f"scalar field {self.name!r} cannot declare path")
         if self.kind == "file":
             if not self.media_type:
-                raise ValueError(f"file field {self.name!r} must declare media_type")
+                if self.accepts:
+                    self.media_type = self.accepts[0]
+                else:
+                    self.media_type = "application/octet-stream"
             if self.type and self.type != "file":
                 raise ValueError(f"file field {self.name!r} cannot declare scalar type")
+            if self.max_size_mb is not None and self.max_size_mb <= 0:
+                raise ValueError(f"file field {self.name!r} max_size_mb must be greater than 0")
         if self.type == "select" and not (self.options or self.enum):
             raise ValueError(f"select field {self.name!r} must declare options or enum")
         return self
@@ -264,6 +273,7 @@ class WorkerContractNetworkCapabilities(BaseModel):
 
 class WorkerContractCapabilities(BaseModel):
     secrets: List[str] = Field(default_factory=list)
+    files: List[str] = Field(default_factory=list)
     network: WorkerContractNetworkCapabilities = Field(default_factory=WorkerContractNetworkCapabilities)
 
 
@@ -411,6 +421,8 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             options=field.options or ([str(value) for value in field.enum] if field.enum else None),
             default=field.default,
             accept_csv=field.accept_csv,
+            accepts=field.accepts or ([field.media_type] if field.kind == "file" and field.media_type else None),
+            max_size_mb=field.max_size_mb,
         )
         for field in contract.exec.inputs
     ]
@@ -459,16 +471,19 @@ def _slug_from_worker_id(worker_id: str) -> str:
 
 def _legacy_input_to_contract_field(field: WorkerInput) -> WorkerContractField:
     if field.type == "file":
+        media_type = field.accepts[0] if field.accepts else ("text/csv" if field.accept_csv else "application/octet-stream")
         return WorkerContractField(
             name=field.name,
             kind="file",
-            media_type="text/csv" if field.accept_csv else "application/octet-stream",
+            media_type=media_type,
             path=f"inputs/{field.name}",
             required=field.required,
             label=field.label,
             description=field.description,
             placeholder=field.placeholder,
             accept_csv=field.accept_csv,
+            accepts=field.accepts or [media_type],
+            max_size_mb=field.max_size_mb,
         )
     scalar_type = {
         "text": "string",
@@ -546,6 +561,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         ),
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
+            files=[field.name for field in config.inputs if field.type == "file"],
             network=WorkerContractNetworkCapabilities(egress=bool(config.secrets or config.connections)),
         ),
         approvals=WorkerContractApprovals(
