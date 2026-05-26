@@ -490,9 +490,6 @@ class AgentDriver(SandboxDriver):
         output_dir: Path,
         timeout_seconds: int,
     ) -> Dict[str, Any]:
-        if config.runtime.runner == "e2b":
-            return self._run_command_e2b(args)
-
         cmd = str(args.get("cmd") or "")
         if not cmd:
             return {"ok": False, "error": "cmd is required"}
@@ -522,6 +519,18 @@ class AgentDriver(SandboxDriver):
             if key in secrets:
                 env[key] = secrets[key]
         timeout = min(int(args.get("timeout") or timeout_seconds), timeout_seconds)
+        if config.runtime.runner == "e2b":
+            return self._run_command_e2b(
+                cmd=cmd,
+                cmd_args=cmd_args,
+                cwd=cwd,
+                env=env,
+                timeout=timeout,
+                bundle_dir=bundle_dir,
+                input_dir=input_dir,
+                output_dir=output_dir,
+                secrets=secrets,
+            )
         with _CWD_LOCK:
             proc = subprocess.run(
                 [cmd, *cmd_args],
@@ -539,10 +548,97 @@ class AgentDriver(SandboxDriver):
             "stderr": _truncate(_scrub(proc.stderr or "", secrets), _STDERR_CAP),
         }
 
-    def _run_command_e2b(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        if not os.environ.get("E2B_API_KEY"):
+    def _run_command_e2b(
+        self,
+        cmd: str,
+        cmd_args: list[str],
+        cwd: Path,
+        env: Dict[str, str],
+        timeout: int,
+        bundle_dir: Path,
+        input_dir: Path,
+        output_dir: Path,
+        secrets: Dict[str, str],
+    ) -> Dict[str, Any]:
+        api_key = os.environ.get("E2B_API_KEY")
+        if not api_key:
             return {"ok": False, "error": "E2B_API_KEY is not configured"}
-        return {"ok": False, "error": "agent run_command for e2b is not available in this runtime"}
+
+        from e2b import Sandbox
+
+        sandbox = Sandbox.create(api_key=api_key, timeout=max(timeout + 60, 180))
+        try:
+            remote_bundle = "/home/user/worker"
+            remote_inputs = "/home/user/inputs"
+            remote_outputs = "/home/user/outputs"
+            for remote_dir in (remote_bundle, remote_inputs, remote_outputs):
+                sandbox.files.make_dir(remote_dir)
+            self._upload_tree(sandbox, bundle_dir, remote_bundle)
+            self._upload_tree(sandbox, input_dir, remote_inputs)
+            self._upload_tree(sandbox, output_dir, remote_outputs)
+            remote_cwd = self._remote_cwd(
+                cwd=cwd,
+                bundle_dir=bundle_dir,
+                input_dir=input_dir,
+                output_dir=output_dir,
+                remote_bundle=remote_bundle,
+                remote_inputs=remote_inputs,
+                remote_outputs=remote_outputs,
+            )
+            proc = sandbox.commands.run(
+                " ".join([self._shell_quote(cmd), *[self._shell_quote(arg) for arg in cmd_args]]),
+                cwd=remote_cwd,
+                envs=env,
+                timeout=float(timeout),
+            )
+            return {
+                "ok": proc.exit_code == 0,
+                "exit_code": proc.exit_code,
+                "stdout": _truncate(_scrub(proc.stdout or "", secrets), _STDOUT_CAP),
+                "stderr": _truncate(_scrub(proc.stderr or "", secrets), _STDERR_CAP),
+            }
+        finally:
+            try:
+                sandbox.kill()
+            except Exception as exc:
+                logger.debug("E2B sandbox already gone (kill suppressed): %s", exc)
+
+    def _upload_tree(self, sandbox: Any, local_root: Path, remote_root: str) -> None:
+        if not local_root.exists():
+            return
+        for path in sorted(local_root.rglob("*")):
+            rel = path.relative_to(local_root).as_posix()
+            remote_path = f"{remote_root}/{rel}"
+            if path.is_dir():
+                sandbox.files.make_dir(remote_path)
+            elif path.is_file():
+                sandbox.files.write(remote_path, path.read_bytes())
+
+    def _remote_cwd(
+        self,
+        cwd: Path,
+        bundle_dir: Path,
+        input_dir: Path,
+        output_dir: Path,
+        remote_bundle: str,
+        remote_inputs: str,
+        remote_outputs: str,
+    ) -> str:
+        for local_root, remote_root in (
+            (bundle_dir, remote_bundle),
+            (input_dir, remote_inputs),
+            (output_dir, remote_outputs),
+        ):
+            try:
+                rel = cwd.relative_to(local_root)
+                suffix = rel.as_posix()
+                return remote_root if suffix == "." else f"{remote_root}/{suffix}"
+            except ValueError:
+                continue
+        return remote_bundle
+
+    def _shell_quote(self, value: str) -> str:
+        return "'" + value.replace("'", "'\"'\"'") + "'"
 
     def _invoke_worker(self, args: Dict[str, Any]) -> Dict[str, Any]:
         target_id = str(args.get("id") or "")
