@@ -312,3 +312,90 @@ class TestDraftFromPromptEndpoint:
             json={"prompt": "Do something"},
         )
         assert resp.status_code == 502
+
+    @patch("openai.OpenAI")
+    def test_unquoted_colon_yaml_retries_then_succeeds(self, mock_openai_cls, client):
+        """If the LLM returns YAML with an unquoted colon in a string value on the
+        first attempt, the endpoint must retry and succeed on the second attempt.
+
+        Regression: gpt-4o-mini occasionally emits `description: Summarize meetings:
+        action items` which fails pyyaml.safe_load with
+        'mapping values are not allowed here'.
+        """
+        bad_yaml = (
+            'schema_version: "0.3"\n'
+            'name: test-worker\n'
+            'title: Summarize meetings: action items\n'
+            'description: A test worker.\n'
+            'version: "0.1.0"\n'
+            'entrypoint: SKILL.md\n'
+            'targets: [generic]\n'
+            'exec:\n'
+            '  runtime: skill\n'
+            '  mode: agent\n'
+            '  runner: e2b\n'
+            'trigger:\n'
+            '  type: manual\n'
+        )
+        bad_response = json.dumps({
+            "worker_yml": bad_yaml,
+            "skill_md": "# x",
+            "suggested_name": "test-worker",
+            "suggested_title": "Test",
+            "required_connections": [],
+            "required_secrets": [],
+            "inputs": [],
+            "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
+        })
+
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = [
+            _mock_openai_response(bad_response),
+            _mock_openai_response(_good_llm_json()),
+        ]
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Summarise meetings and post action items"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert mock_client.chat.completions.create.call_count == 2
+
+        # Second call must include the strict-quoting addendum
+        second_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        system_content = second_call_kwargs["messages"][0]["content"]
+        assert "PREVIOUS ATTEMPT FAILED YAML VALIDATION" in system_content
+
+    @patch("openai.OpenAI")
+    def test_three_consecutive_yaml_failures_returns_502(self, mock_openai_cls, client):
+        """If every retry attempt produces invalid YAML, the endpoint returns 502."""
+        bad_yaml = (
+            'schema_version: "0.3"\n'
+            'name: test-worker\n'
+            'title: Summarize meetings: action items\n'
+            'exec:\n'
+            '  runtime: skill\n'
+        )
+        bad_response = json.dumps({
+            "worker_yml": bad_yaml,
+            "skill_md": "# x",
+            "suggested_name": "test-worker",
+            "suggested_title": "Test",
+            "required_connections": [],
+            "required_secrets": [],
+            "inputs": [],
+            "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
+        })
+
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _mock_openai_response(bad_response)
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Do something"},
+        )
+        assert resp.status_code == 502
+        assert mock_client.chat.completions.create.call_count == 3
+        assert "after 3 attempts" in resp.json()["detail"]
