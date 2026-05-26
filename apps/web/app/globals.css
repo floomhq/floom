@@ -237,7 +237,10 @@ html.dark {
     line-height: 1.55;
     letter-spacing: 0;
     text-rendering: optimizeLegibility;
-    overflow-x: hidden;
+    /* No overflow-x here. html already clips horizontal overflow.
+       overflow-x: hidden on body forces overflow-y: auto which makes
+       body a scroll container, which breaks position: sticky on any
+       descendant. */
   }
 
   code,
