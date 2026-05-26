@@ -139,10 +139,10 @@ logger = logging.getLogger("floom.api")
 # ---------------------------------------------------------------------------
 # SSE event queue registry
 # ---------------------------------------------------------------------------
-# Maps run_id → list of asyncio.Queue. Each connected SSE consumer gets one
-# queue. Entries are weakref-able; when a run reaches terminal state AND all
-# consumers have disconnected the entry is removed.
-_sse_queues: Dict[str, List[asyncio.Queue]] = {}
+# Maps run_id → list of (queue, loop). Each connected SSE consumer gets one
+# queue. Cross-thread asyncio.Queue.put_nowait is unsafe, so we capture the
+# loop the queue was bound to and use call_soon_threadsafe from worker threads.
+_sse_queues: Dict[str, List[tuple]] = {}
 _sse_lock = threading.Lock()
 
 _TERMINAL_STATUSES = frozenset({
@@ -159,27 +159,31 @@ def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
     """Publish an SSE event to all active consumers for a run.
 
     Called from run_service (worker threads) after each state change.
-    Thread-safe: acquires _sse_lock only long enough to snapshot queues.
+    asyncio.Queue is not thread-safe, so we route the put through each
+    queue's bound loop via call_soon_threadsafe.
     """
     with _sse_lock:
-        queues = list(_sse_queues.get(run_id, []))
-    for q in queues:
+        entries = list(_sse_queues.get(run_id, []))
+    for q, loop in entries:
+        def _put(q=q, event=event):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning("SSE queue full for run %s, dropping event", run_id)
         try:
-            q.put_nowait(event)
-        except asyncio.QueueFull:
-            logger.warning("SSE queue full for run %s, dropping event", run_id)
+            loop.call_soon_threadsafe(_put)
+        except RuntimeError:
+            # Loop already closed (consumer disconnected, cleanup pending).
+            pass
 
 
 def _sse_cleanup(run_id: str, q: asyncio.Queue) -> None:
     """Remove a specific consumer queue from the registry."""
     with _sse_lock:
-        queues = _sse_queues.get(run_id)
-        if queues:
-            try:
-                queues.remove(q)
-            except ValueError:
-                pass
-            if not queues:
+        entries = _sse_queues.get(run_id)
+        if entries:
+            _sse_queues[run_id] = [(eq, el) for (eq, el) in entries if eq is not q]
+            if not _sse_queues[run_id]:
                 _sse_queues.pop(run_id, None)
 
 
@@ -1282,9 +1286,10 @@ async def stream_run_events(run_id: str, request: Request):
             yield "data: {\"type\": \"close\"}\n\n"
             return
 
-        # Register the consumer queue
+        # Register the consumer queue with its bound event loop
+        loop = asyncio.get_running_loop()
         with _sse_lock:
-            _sse_queues.setdefault(run_id, []).append(q)
+            _sse_queues.setdefault(run_id, []).append((q, loop))
 
         try:
             while True:
