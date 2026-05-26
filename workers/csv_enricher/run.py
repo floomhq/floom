@@ -58,11 +58,26 @@ def main():
     except FileNotFoundError:
         connections = {}
 
-    csv_text = inputs.get("csv_text", "").strip()
+    csv_file_path = inputs.get("csv_file", "").strip()
     instruction = inputs.get("instruction", "").strip()
 
+    if not csv_file_path:
+        result = {"status": "error", "error": "Missing required input: csv_file"}
+        with open("result.json", "w") as f:
+            json.dump(result, f)
+        return
+
+    try:
+        with open(csv_file_path, "r", encoding="utf-8", errors="replace") as fh:
+            csv_text = fh.read().strip()
+    except Exception as e:
+        result = {"status": "error", "error": f"Could not read CSV file: {str(e)}"}
+        with open("result.json", "w") as f:
+            json.dump(result, f)
+        return
+
     if not csv_text:
-        result = {"status": "error", "error": "Missing required input: csv_text"}
+        result = {"status": "error", "error": "Uploaded CSV file is empty"}
         with open("result.json", "w") as f:
             json.dump(result, f)
         return

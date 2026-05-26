@@ -9,10 +9,7 @@ use_cases:
 - Add recruiter notes to a candidate export.
 - Normalize messy spreadsheet fields into a consistent review column.
 example_input:
-  csv_text: |
-    name,company,title,location
-    Anna Keller,NovaSearch,Senior Recruiter,Berlin
-    Ben Ortiz,Workeros,Developer Experience Lead,Remote
+  csv_file: null
   instruction: Add columns for persona, likely priority, and one concise outreach angle.
 example_output: |
   ## Enriched CSV preview
@@ -48,16 +45,15 @@ exec:
   runtime: python311
   runner: e2b
   inputs:
-  - name: csv_text
-    kind: scalar
-    type: string
+  - name: csv_file
+    kind: file
+    media_type: text/csv
+    accepts:
+    - text/csv
+    max_size_mb: 10
     required: true
-    label: CSV rows
-    placeholder: 'name,company
-
-      Alice,Acme
-
-      Bob,Stark'
+    label: CSV file
+    description: Upload the CSV file you want to enrich.
   - name: instruction
     kind: scalar
     type: string
