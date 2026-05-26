@@ -4,7 +4,6 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
-from datetime import datetime
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +566,15 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
 # Request schemas
 # ---------------------------------------------------------------------------
 
+class WorkerUpdateRequest(BaseModel):
+    trigger_type: Optional[Literal["manual", "schedule", "webhook"]] = None
+    cron_expr: Optional[str] = None
+    cron_timezone: Optional[str] = None
+    webhook_secret_rotate: Optional[bool] = None  # True → rotate secret, return new raw once
+    input_values: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Dict[str, Any]] = None  # declared-not-enforced per T1c flip
+
+
 class RunCreate(BaseModel):
     inputs: Dict[str, Any] = Field(default_factory=dict)
     trigger_source: str = "manual"
@@ -686,6 +694,7 @@ class WorkerDetail(BaseModel):
     recent_runs: List[RunSummary] = Field(default_factory=list)
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
     run_py: Optional[str] = None
+    new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
 
 
 class SecretItem(BaseModel):

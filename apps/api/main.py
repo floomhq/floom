@@ -1,5 +1,6 @@
 """Floom API — FastAPI backend for the OS for Background Workers."""
 
+import asyncio
 import os
 import json
 import sqlite3
@@ -13,6 +14,7 @@ import re
 import time
 import collections
 import threading
+import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,7 +31,6 @@ from models import (
     ApproveRequest,
     RunCreate,
     RejectRequest,
-    PaginationParams,
     WorkerSummary,
     WorkerDetail,
     RunSummary,
@@ -47,16 +48,15 @@ from models import (
     SecretStatus,
     WorkerStatus,
     WorkerConfig,
+    WorkerUpdateRequest,
 )
 from worker_registry import (
     discover_workers,
     get_worker,
-    get_worker_config,
-    get_worker_contract,
     invalidate_worker_cache,
 )
-from run_service import create_run, get_worker_config_for_run, start_run, update_run_status, add_log
-from run_service import get_secrets_for_worker
+from run_service import create_run, get_worker_config_for_run, start_run, add_log
+from run_service import register_sse_publisher
 
 load_dotenv()
 api_env_path = Path("/root/.config/workeros/api.env")
@@ -72,6 +72,8 @@ init_db()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: startup + shutdown hooks."""
+    # Wire up SSE publisher before starting workers (avoids circular import)
+    register_sse_publisher(_sse_publish)
     # Startup
     reload_workers()
     from scheduler import start_scheduler
@@ -100,17 +102,28 @@ app.add_middleware(
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Require x-floom-secret on all write (non-GET, non-OPTIONS) requests.
+    """Require x-floom-secret on ALL requests except exempt paths.
 
-    Skipped when FLOOM_SECRET env var is not configured (localhost dev).
-    The connections/callback GET is also exempt (OAuth redirect landing).
-    Incoming webhooks (/webhooks/<worker_id>) and Composio events are exempt —
-    they use their own HMAC signature verification instead.
+    Exempt paths (no internal secret needed):
+      - /webhooks/*       — HMAC-authed by per-worker secret
+      - /healthz          — liveness probe, no secret
+      - /composio-events  — Composio webhook receiver
+      - /connections/callback — OAuth browser redirect validates connection state
+      - OPTIONS           — CORS preflight
+
+    When FLOOM_SECRET is not set (localhost dev mode), all requests pass.
+    Previously GET/HEAD were exempt; this was a security hole — MCP read
+    tools were effectively unauthenticated.
     """
     secret = os.environ.get("FLOOM_SECRET", "")
-    if secret and request.method not in ("GET", "HEAD", "OPTIONS"):
-        # Exempt incoming webhook calls from the internal secret
-        if request.url.path.startswith("/webhooks/") or request.url.path == "/composio-events":
+    if secret and request.method != "OPTIONS":
+        path = request.url.path
+        if (
+            path.startswith("/webhooks/")
+            or path == "/healthz"
+            or path == "/composio-events"
+            or path == "/connections/callback"
+        ):
             return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
         if header != secret:
@@ -119,6 +132,67 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
+
+# ---------------------------------------------------------------------------
+# SSE event queue registry
+# ---------------------------------------------------------------------------
+# Maps run_id → list of (queue, loop). Each connected SSE consumer gets one
+# queue. Cross-thread asyncio.Queue.put_nowait is unsafe, so we capture the
+# loop the queue was bound to and use call_soon_threadsafe from worker threads.
+_sse_queues: Dict[str, List[tuple]] = {}
+_sse_lock = threading.Lock()
+
+_TERMINAL_STATUSES = frozenset({
+    RunStatus.COMPLETED.value,
+    RunStatus.FAILED.value,
+    RunStatus.APPROVED.value,
+    RunStatus.REJECTED.value,
+    # pending_approval is semi-terminal (waiting for human) — stream it but
+    # keep open so approval events can follow
+})
+
+
+def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
+    """Publish an SSE event to all active consumers for a run.
+
+    Called from run_service (worker threads) after each state change.
+    asyncio.Queue is not thread-safe, so we route the put through each
+    queue's bound loop via call_soon_threadsafe.
+    """
+    with _sse_lock:
+        entries = list(_sse_queues.get(run_id, []))
+    for q, loop in entries:
+        def _put(q=q, event=event):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning("SSE queue full for run %s, dropping event", run_id)
+        try:
+            loop.call_soon_threadsafe(_put)
+        except RuntimeError:
+            # Loop already closed (consumer disconnected, cleanup pending).
+            pass
+
+
+def _sse_cleanup(run_id: str, q: asyncio.Queue) -> None:
+    """Remove a specific consumer queue from the registry."""
+    with _sse_lock:
+        entries = _sse_queues.get(run_id)
+        if entries:
+            _sse_queues[run_id] = [(eq, el) for (eq, el) in entries if eq is not q]
+            if not _sse_queues[run_id]:
+                _sse_queues.pop(run_id, None)
+
+
+# ---------------------------------------------------------------------------
+# /healthz
+# ---------------------------------------------------------------------------
+
+@app.get("/healthz")
+def healthz():
+    """Liveness probe — exempt from x-floom-secret."""
+    return {"status": "ok"}
+
 
 # ---------------------------------------------------------------------------
 # Error handlers
@@ -624,6 +698,183 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
 
 
 # ---------------------------------------------------------------------------
+# PATCH /workers/{worker_id} — partial update
+# ---------------------------------------------------------------------------
+
+@app.patch("/workers/{worker_id}", response_model=WorkerDetail)
+def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
+    """Partially update a worker instance.
+
+    All fields are optional. Rotation of webhook_secret returns the new raw
+    secret once in the response (new_webhook_secret field) — it is never
+    stored in plaintext.
+    """
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    # Validate cron expression if provided
+    new_cron_expr = payload.cron_expr
+    if new_cron_expr is not None:
+        try:
+            from scheduler import compute_next_run_at
+            from datetime import datetime, timezone
+            test_dt = datetime.now(timezone.utc)
+            if compute_next_run_at(new_cron_expr, test_dt) is None:
+                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+        except ImportError:
+            # croniter not available — try basic validation via regex
+            # Standard cron has 5 space-separated fields
+            import re as _re
+            if not _re.fullmatch(r"[\d\*\-\,\/]+(?: [\d\*\-\,\/]+){4}", new_cron_expr.strip()):
+                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+
+    updates: list[str] = []
+    params: list[Any] = []
+
+    if payload.trigger_type is not None:
+        updates.append("trigger_type = ?")
+        params.append(payload.trigger_type)
+
+    if new_cron_expr is not None:
+        updates.append("cron_expr = ?")
+        params.append(new_cron_expr)
+
+    if payload.cron_timezone is not None:
+        updates.append("cron_timezone = ?")
+        params.append(payload.cron_timezone)
+
+    if payload.input_values is not None:
+        updates.append("input_values_json = ?")
+        params.append(json.dumps(payload.input_values))
+
+    # capabilities field is declared-not-enforced per T1c flip — just accept it
+    # No DB column to write to currently; stored in manifest only.
+
+    new_raw_secret: Optional[str] = None
+    if payload.webhook_secret_rotate:
+        from webhook_service import generate_webhook_secret
+        # Verify the worker actually has a webhook trigger before rotating
+        config = get_worker_config_for_run(worker_id)
+        if not config or config.trigger.type != "webhook":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Worker {worker_id!r} does not have a webhook trigger — cannot rotate secret",
+            )
+        new_raw_secret = generate_webhook_secret(worker_id)
+
+    if updates:
+        params.append(worker_id)
+        with get_db() as conn:
+            conn.execute(
+                f"UPDATE workers SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+        invalidate_worker_cache()
+
+    # Reload cron schedule if trigger/cron changed
+    if payload.trigger_type is not None or new_cron_expr is not None or payload.cron_timezone is not None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE workers SET next_run_at = NULL WHERE id = ?",
+                (worker_id,),
+            )
+
+    detail = get_worker_detail(worker_id)
+    if new_raw_secret is not None:
+        detail.new_webhook_secret = new_raw_secret
+    return detail
+
+
+# ---------------------------------------------------------------------------
+# DELETE /workers/{worker_id}
+# ---------------------------------------------------------------------------
+
+@app.delete("/workers/{worker_id}", status_code=204)
+def delete_worker(worker_id: str):
+    """Delete a worker and all dependent rows (runs, artifacts, logs, approvals).
+
+    - FK ON DELETE CASCADE handles dependent rows.
+    - Cancels any in-progress run gracefully (marks failed).
+    - Cleans up webhook secret.
+    - Removes scheduler slot (next_run_at cleared before delete).
+    - skill_version is preserved if other workers share it.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, skill_version_id FROM workers WHERE id = ?", (worker_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Worker not found")
+        skill_version_id = row["skill_version_id"]
+        composio_state = _existing_composio_state(conn, worker_id)
+
+    if composio_state.get("trigger_id"):
+        try:
+            _disable_composio_trigger(
+                composio_state.get("event") or (composio_state.get("signature") or {}).get("event"),
+                composio_state.get("trigger_id"),
+                worker_id,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Cancel any in-progress runs gracefully before deletion
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM runs WHERE worker_id = ? AND status IN ('queued', 'running')",
+            (worker_id,),
+        )
+        active_runs = [r["id"] for r in cursor.fetchall()]
+
+    for run_id in active_runs:
+        try:
+            from run_service import update_run_status
+            update_run_status(run_id, RunStatus.FAILED.value, error="Worker deleted")
+            logger.info("Cancelled active run %s before worker deletion", run_id)
+        except Exception as exc:
+            logger.warning("Could not cancel run %s: %s", run_id, exc)
+
+    # Remove webhook secret
+    try:
+        from webhook_service import delete_webhook_secret
+        delete_webhook_secret(worker_id)
+    except Exception as exc:
+        logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
+
+    # Delete the worker (FK CASCADE removes runs/artifacts/logs/approvals/webhooks)
+    with get_db() as conn:
+        conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+
+    # Check if skill_version is still referenced by other workers; preserve if so
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM workers WHERE skill_version_id = ?",
+            (skill_version_id,),
+        )
+        ref_count = cursor.fetchone()["cnt"]
+
+    # Remove bundle files from disk only if no other worker references this skill_version
+    from worker_registry import WORKERS_DIR
+    bundle_dir = WORKERS_DIR / worker_id
+    if ref_count == 0 and bundle_dir.is_dir():
+        try:
+            import shutil
+            shutil.rmtree(bundle_dir)
+            logger.info("Removed bundle dir %s", bundle_dir)
+        except Exception as exc:
+            logger.warning("Could not remove bundle dir %s: %s", bundle_dir, exc)
+    elif ref_count > 0:
+        logger.info("skill_version %s still referenced by %d workers, bundle preserved", skill_version_id, ref_count)
+
+    invalidate_worker_cache()
+    # 204 No Content — FastAPI returns empty body automatically for status_code=204
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Worker creation
 # ---------------------------------------------------------------------------
 
@@ -754,42 +1005,6 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     return get_worker_detail(worker_id)
-
-
-@app.delete("/workers/{worker_id}")
-def delete_worker(worker_id: str):
-    """Delete a worker and unregister its Composio trigger before removal."""
-    import shutil
-    from worker_registry import WORKERS_DIR
-
-    target_dir = WORKERS_DIR / worker_id
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
-    if not worker and not target_dir.exists():
-        raise HTTPException(status_code=404, detail="Worker not found")
-
-    with get_db() as conn:
-        state = _existing_composio_state(conn, worker_id)
-        if state.get("trigger_id"):
-            try:
-                _disable_composio_trigger(
-                    state.get("event") or (state.get("signature") or {}).get("event"),
-                    state.get("trigger_id"),
-                    worker_id,
-                )
-            except RuntimeError as exc:
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-        conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
-
-    if target_dir.exists():
-        try:
-            resolved_root = WORKERS_DIR.resolve()
-            resolved_target = target_dir.resolve()
-            resolved_target.relative_to(resolved_root)
-        except Exception:
-            raise HTTPException(status_code=403, detail="Invalid worker path")
-        shutil.rmtree(resolved_target)
-    invalidate_worker_cache()
-    return {"status": "deleted"}
 
 
 @app.post("/workers/reload", response_model=ReloadResponse)
@@ -1017,6 +1232,95 @@ def get_run(run_id: str) -> RunDetail:
     )
 
 
+@app.get("/runs/{run_id}/events")
+async def stream_run_events(run_id: str, request: Request):
+    """Server-Sent Events stream for a single run.
+
+    Emits one ``data: <json>\\n\\n`` line per state change: status updates,
+    log lines, artifact additions.
+
+    Closes automatically when the run reaches a terminal state (completed,
+    failed, approved, rejected).
+
+    Memory management:
+    - Queue is registered in _sse_queues when consumer connects.
+    - Queue is removed in _sse_cleanup when consumer disconnects or run ends.
+    - If run is already terminal when client connects, current state is emitted
+      immediately then the stream closes.
+    """
+    # Check run exists
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, status FROM runs WHERE id = ?", (run_id,))
+        run_row = cursor.fetchone()
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    initial_status = run_row["status"]
+    already_terminal = initial_status in _TERMINAL_STATUSES
+
+    async def event_generator():
+        q: asyncio.Queue = asyncio.Queue(maxsize=512)
+
+        # If run already terminal, emit current state and close immediately
+        if already_terminal:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, worker_id, status, error, completed_at FROM runs WHERE id = ?",
+                    (run_id,),
+                )
+                final_row = cursor.fetchone()
+            if final_row:
+                evt = {
+                    "type": "status",
+                    "run_id": run_id,
+                    "status": final_row["status"],
+                    "error": final_row["error"],
+                    "completed_at": final_row["completed_at"],
+                }
+                yield f"data: {json.dumps(evt)}\n\n"
+            yield "data: {\"type\": \"close\"}\n\n"
+            return
+
+        # Register the consumer queue with its bound event loop
+        loop = asyncio.get_running_loop()
+        with _sse_lock:
+            _sse_queues.setdefault(run_id, []).append((q, loop))
+
+        try:
+            while True:
+                # Check for client disconnect
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+                    continue
+
+                yield f"data: {json.dumps(event)}\n\n"
+
+                # Close stream if run reached terminal state
+                evt_type = event.get("type")
+                evt_status = event.get("status", "")
+                if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                    break
+        finally:
+            _sse_cleanup(run_id, q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/runs/{run_id}/logs", response_model=List[LogEntry])
 def get_run_logs(run_id: str) -> List[LogEntry]:
     with get_db() as conn:
@@ -1116,6 +1420,12 @@ def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> Action
             (ApprovalStatus.APPROVED.value, RunStatus.APPROVED.value, run_id),
         )
     edited_note = " (output edited before approval)" if payload and payload.edited_output else ""
+    _sse_publish(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.APPROVED.value,
+        "completed_at": now,
+    })
     add_log(run_id, f"Run approved{edited_note}", level="info")
     logger.info("Run %s approved%s", run_id, edited_note)
     return ActionResponse(status="approved", run_id=run_id)
@@ -1134,6 +1444,12 @@ def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
             "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
             (ApprovalStatus.REJECTED.value, RunStatus.REJECTED.value, run_id),
         )
+    _sse_publish(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.REJECTED.value,
+        "completed_at": now,
+    })
     add_log(run_id, f"Run rejected: {reason}", level="info")
     logger.info("Run %s rejected: %s", run_id, reason)
     return ActionResponse(status="rejected", run_id=run_id)
@@ -1459,7 +1775,7 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
     redirect_url = result["redirect_url"]
 
     # Upsert into local DB (replace any prior row for this app)
-    conn_id = str(__import__("uuid").uuid4())
+    conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     with get_db() as conn:
         # Check if row already exists for this app
@@ -1499,14 +1815,29 @@ def connections_callback(connection_id: str = "", status: str = ""):
     from fastapi.responses import RedirectResponse
 
     if connection_id:
+        with get_db() as conn:
+            existing = conn.execute(
+                "SELECT status FROM composio_connections WHERE composio_connection_id = ?",
+                (connection_id,),
+            ).fetchone()
+
+        # Ignore unknown callback IDs; known IDs are validated by persisted state.
+        if not existing:
+            frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+            return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+
         # Try to refresh from Composio first
         try:
             from composio_client import check_status
             remote_status = check_status(connection_id)
         except Exception:
-            remote_status = status or "active"
+            remote_status = ""
 
-        final_status = remote_status if remote_status else (status or "active")
+        final_status = (
+            remote_status
+            if remote_status and remote_status != "not_found"
+            else (status or existing["status"])
+        )
         now = now_iso()
         with get_db() as conn:
             conn.execute(
