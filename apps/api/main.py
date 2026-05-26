@@ -14,6 +14,7 @@ import re
 import time
 import collections
 import threading
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -659,9 +660,15 @@ async def upload_file(
     # the same filesystem as the final target, making os.replace atomic.
     from files import BLOBS_DIR as _BLOBS_DIR
     _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_upload = _BLOBS_DIR / f".upload.{os.getpid()}.{threading.get_ident()}.tmp"
+    tmp_upload = None
     try:
-        with open(tmp_upload, "wb") as tmp_out:
+        with tempfile.NamedTemporaryFile(
+            dir=_BLOBS_DIR,
+            prefix=".upload.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_out:
+            tmp_upload = Path(tmp_out.name)
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -677,7 +684,8 @@ async def upload_file(
                 hasher.update(chunk)
                 tmp_out.write(chunk)
     except HTTPException:
-        tmp_upload.unlink(missing_ok=True)
+        if tmp_upload is not None:
+            tmp_upload.unlink(missing_ok=True)
         raise
 
     sha256 = hasher.hexdigest()
