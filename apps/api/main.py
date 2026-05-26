@@ -1197,6 +1197,228 @@ class WorkerCreateRequest(BaseModel):
     run_py: str
 
 
+# ---------------------------------------------------------------------------
+# POST /workers/draft-from-prompt
+# ---------------------------------------------------------------------------
+
+_COMPOSIO_APP_KEYWORDS: Dict[str, List[str]] = {
+    "gmail": ["gmail", "email", "mail", "inbox", "message"],
+    "hubspot": ["hubspot", "crm", "contact", "deal", "lead"],
+    "slack": ["slack", "channel", "dm", "message"],
+    "notion": ["notion", "page", "database", "notes"],
+    "granola": ["granola", "meeting", "calendar meeting", "notes"],
+    "salesforce": ["salesforce", "sfdc", "opportunity", "account"],
+    "google-calendar": ["google calendar", "calendar", "event", "schedule", "meeting"],
+    "github": ["github", "pr", "pull request", "issue", "repository", "repo"],
+    "linear": ["linear", "ticket", "issue", "sprint", "project"],
+    "google-sheets": ["google sheets", "spreadsheet", "sheet", "excel"],
+    "airtable": ["airtable", "base", "record"],
+    "stripe": ["stripe", "payment", "invoice", "subscription", "billing"],
+    "jira": ["jira", "ticket", "issue", "sprint"],
+    "figma": ["figma", "design", "prototype"],
+    "discord": ["discord", "channel", "server", "message"],
+    "twitter": ["twitter", "tweet", "post"],
+    "linkedin": ["linkedin", "profile", "connection", "post"],
+    "dropbox": ["dropbox", "file", "folder"],
+    "google-drive": ["google drive", "gdrive", "drive", "document", "doc"],
+}
+
+_DRAFT_SYSTEM_PROMPT = """You are a Workeros worker designer. Given a natural-language description of an automation task, you must output a VALID YAML WorkerContract and extracted metadata as JSON.
+
+The WorkerContract YAML must follow schema_version "0.3" exactly. Key rules:
+- `name`: lowercase slug 3-64 chars (letters, digits, hyphens)
+- `title`: human-readable title
+- `description`: 1-2 sentence description (max 500 chars)
+- `exec.runtime`: must be "skill" for agent mode, or "python311"/"bash"/"node22"/"none"
+- `exec.mode`: "agent" (default for skill runtime) or "pure-script"
+- `exec.runner`: "e2b" (default, sandboxed) or "local"
+- `exec.inputs`: list of fields with name/kind/type/required/label. kind is "scalar" or "file". scalar fields need type (string/number/boolean/select). File fields need media_type.
+- `exec.outputs`: list of fields with name/kind and for files: media_type+path, for scalars: type
+- `exec.secrets`: list of env var names (UPPER_SNAKE_CASE)
+- `trigger.type`: "manual" (default), "schedule", "webhook", or "composio"
+- `version`: semver like "0.1.0"
+- `entrypoint`: "SKILL.md" for agent mode
+- `targets`: ["generic"]
+- `connections`: list of Composio app slugs if integrations are needed
+- `use_cases`: list of 3-5 items
+
+For an agent-mode skill worker, use:
+```yaml
+exec:
+  runtime: skill
+  mode: agent
+  runner: e2b
+  entrypoint: SKILL.md
+```
+
+The SKILL.md content (returned as `skill_md` key) should be detailed system-prompt-style instructions for the agent. Include what tools/APIs to call, what the output format should be, error handling, and any important context.
+
+Respond with ONLY valid JSON in this exact shape (no markdown fences, no extra text):
+{
+  "worker_yml": "<full YAML string>",
+  "skill_md": "<markdown instructions for the agent>",
+  "suggested_name": "<slug>",
+  "suggested_title": "<human title>",
+  "required_connections": ["app-slug1", "app-slug2"],
+  "required_secrets": ["SECRET_NAME"],
+  "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
+  "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}]
+}"""
+
+
+class DraftFromPromptRequest(BaseModel):
+    prompt: str
+
+
+class DraftFromPromptInputField(BaseModel):
+    name: str
+    type: str
+    label: str
+    required: bool = False
+    default: Optional[Any] = None
+
+
+class DraftFromPromptOutputField(BaseModel):
+    name: str
+    type: str
+    label: str
+
+
+class DraftFromPromptResponse(BaseModel):
+    worker_yml: str
+    suggested_name: str
+    suggested_title: str
+    required_connections: List[str]
+    required_secrets: List[str]
+    inputs: List[DraftFromPromptInputField]
+    outputs: List[DraftFromPromptOutputField]
+
+
+def _detect_connections(prompt_lower: str) -> List[str]:
+    """Keyword-match Composio app slugs from the prompt text."""
+    found: List[str] = []
+    for slug, keywords in _COMPOSIO_APP_KEYWORDS.items():
+        if any(kw in prompt_lower for kw in keywords):
+            found.append(slug)
+    return found
+
+
+@app.post("/workers/draft-from-prompt", response_model=DraftFromPromptResponse)
+async def draft_worker_from_prompt(payload: DraftFromPromptRequest) -> DraftFromPromptResponse:
+    """Draft a WorkerContract YAML from a natural-language prompt using LLM."""
+    prompt = (payload.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required and must not be empty")
+    if len(prompt) > 4000:
+        raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
+
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+
+    # Pre-detect connections for the prompt to give the LLM a hint
+    prompt_lower = prompt.lower()
+    detected_connections = _detect_connections(prompt_lower)
+
+    user_message = f"""Design a Workeros worker for this task:
+
+{prompt}
+
+Detected Composio apps that may be needed: {detected_connections if detected_connections else 'none detected — infer from context'}
+
+Generate the full WorkerContract YAML and metadata JSON as specified. Make sure the YAML is valid and passes schema_version 0.3 validation."""
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=openai_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _DRAFT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.2,
+            max_tokens=3000,
+        )
+    except Exception as exc:
+        logger.exception("OpenAI call failed in draft-from-prompt")
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
+
+    raw_content = response.choices[0].message.content or ""
+
+    # Strip markdown code fences if the model wrapped the response
+    raw_content = raw_content.strip()
+    if raw_content.startswith("```"):
+        raw_content = "\n".join(raw_content.split("\n")[1:])
+    if raw_content.endswith("```"):
+        raw_content = "\n".join(raw_content.split("\n")[:-1])
+    raw_content = raw_content.strip()
+
+    try:
+        parsed = json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        logger.error("LLM returned non-JSON for draft-from-prompt: %s", raw_content[:500])
+        raise HTTPException(status_code=502, detail=f"LLM returned invalid JSON: {exc}") from exc
+
+    worker_yml = parsed.get("worker_yml", "")
+    if not worker_yml:
+        raise HTTPException(status_code=502, detail="LLM returned empty worker_yml")
+
+    # Validate the YAML round-trips through parse_worker_manifest
+    import yaml as pyyaml
+    try:
+        raw_manifest = pyyaml.safe_load(worker_yml)
+        if not isinstance(raw_manifest, dict):
+            raise ValueError("worker_yml must be a YAML mapping")
+        from models import parse_worker_manifest
+        parse_worker_manifest(raw_manifest)
+    except Exception as exc:
+        logger.warning("LLM-generated YAML failed validation: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM-generated worker YAML is not valid: {exc}",
+        ) from exc
+
+    suggested_name = parsed.get("suggested_name", "my-worker")
+    suggested_title = parsed.get("suggested_title", "My Worker")
+    required_connections = parsed.get("required_connections") or detected_connections
+    required_secrets = parsed.get("required_secrets") or []
+
+    raw_inputs = parsed.get("inputs") or []
+    inputs = [
+        DraftFromPromptInputField(
+            name=f.get("name", "input"),
+            type=f.get("type", "string"),
+            label=f.get("label", f.get("name", "Input")),
+            required=bool(f.get("required", False)),
+            default=f.get("default"),
+        )
+        for f in raw_inputs if isinstance(f, dict) and f.get("name")
+    ]
+
+    raw_outputs = parsed.get("outputs") or []
+    if not raw_outputs:
+        raw_outputs = [{"name": "summary", "type": "markdown", "label": "Summary"}]
+    outputs = [
+        DraftFromPromptOutputField(
+            name=f.get("name", "summary"),
+            type=f.get("type", "markdown"),
+            label=f.get("label", f.get("name", "Output")),
+        )
+        for f in raw_outputs if isinstance(f, dict) and f.get("name")
+    ]
+
+    return DraftFromPromptResponse(
+        worker_yml=worker_yml,
+        suggested_name=suggested_name,
+        suggested_title=suggested_title,
+        required_connections=required_connections,
+        required_secrets=required_secrets,
+        inputs=inputs,
+        outputs=outputs,
+    )
+
+
 def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
 
