@@ -49,6 +49,7 @@ from models import (
     WorkerConfig,
     WorkerUpdateRequest,
     RecentStats,
+    TriggerSpec,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -409,6 +410,47 @@ def _trigger_label(trigger: Dict[str, Any]) -> str:
             return f"On {app_hint}"
         return "On integration"
     return t_type.title()
+
+
+def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
+    """Build a structured list of TriggerSpec from a worker dict.
+
+    Prefers triggers_json (multi-trigger DB column) when present.
+    Falls back to config.trigger for single-trigger / legacy workers.
+    Legacy workers without triggers_json are wrapped as a one-element list.
+    """
+    triggers_json = worker.get("triggers_json")
+    if triggers_json:
+        try:
+            raw = json.loads(triggers_json)
+            if isinstance(raw, list) and raw:
+                specs = []
+                for t in raw:
+                    if not isinstance(t, dict):
+                        continue
+                    specs.append(TriggerSpec(
+                        type=t.get("type", "manual"),
+                        cron=t.get("cron"),
+                        timezone=t.get("timezone"),
+                        webhook=t.get("webhook"),
+                        composio=t.get("composio"),
+                    ))
+                if specs:
+                    return specs
+        except Exception:
+            pass
+
+    # Fall back to single trigger from config
+    config: Dict[str, Any] = worker.get("config") or {}
+    trigger: Dict[str, Any] = config.get("trigger") or {}
+    trigger_type = (worker.get("trigger_type") or trigger.get("type") or "manual").lower()
+    return [TriggerSpec(
+        type=trigger_type,
+        cron=trigger.get("cron"),
+        timezone=trigger.get("timezone"),
+        webhook=trigger.get("webhook"),
+        composio=trigger.get("composio"),
+    )]
 
 
 def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
@@ -1160,6 +1202,7 @@ def list_workers() -> List[WorkerSummary]:
             status = WorkerStatus.NEEDS_ATTENTION
 
         triggers = _build_triggers_list(w)
+        triggers_spec = _build_triggers_spec(w)
         recent_stats = stats_by_id.get(w["id"])
 
         result.append(
@@ -1179,6 +1222,7 @@ def list_workers() -> List[WorkerSummary]:
                 runner=w["runner"],
                 last_run=last_run,
                 triggers=triggers,
+                triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
             )
         )
@@ -1261,6 +1305,8 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         except Exception:
             pass
 
+    triggers_spec = _build_triggers_spec(worker)
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -1283,6 +1329,7 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         run_py_content=run_py_content,
         files=worker_files,
         webhook_url=webhook_url,
+        triggers_spec=triggers_spec,
     )
 
 
@@ -1515,6 +1562,7 @@ The WorkerContract YAML must follow schema_version "0.3" exactly. Key rules:
 - `exec.outputs`: list of fields with name/kind and for files: media_type+path, for scalars: type
 - `exec.secrets`: list of env var names (UPPER_SNAKE_CASE)
 - `trigger.type`: "manual" (default), "schedule", "webhook", or "composio"
+- `trigger.cron`: REQUIRED when trigger.type is "schedule". ALWAYS include a cron expression. If the user did not specify a time, use `"0 9 * * *"` (daily at 9am). If no schedule context at all, prefer trigger.type "manual" over an empty schedule. Example: `trigger:\n  type: schedule\n  cron: "0 9 * * *"\n  timezone: "UTC"`
 - `version`: semver like "0.1.0"
 - `entrypoint`: "SKILL.md" for agent mode
 - `targets`: ["generic"]

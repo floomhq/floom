@@ -780,6 +780,15 @@ class RecentStats(BaseModel):
     success_rate_7d: Optional[float] = None  # fraction (0.0-1.0) or None if no runs
 
 
+class TriggerSpec(BaseModel):
+    """Structured representation of a single trigger for API responses."""
+    type: str
+    cron: Optional[str] = None
+    timezone: Optional[str] = None
+    webhook: Optional[Dict[str, Any]] = None
+    composio: Optional[Dict[str, Any]] = None
+
+
 class WorkerSummary(BaseModel):
     id: str
     name: str
@@ -795,7 +804,8 @@ class WorkerSummary(BaseModel):
     trigger_type: str
     runner: str
     last_run: Optional[RunSummary] = None
-    triggers: List[str] = Field(default_factory=list)  # all configured trigger labels
+    triggers: List[str] = Field(default_factory=list)  # all configured trigger labels (display strings)
+    triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects
     recent_stats: Optional[RecentStats] = None
 
 
@@ -830,6 +840,7 @@ class WorkerDetail(BaseModel):
     new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
     webhook_url: Optional[str] = None  # Full webhook URL (only when trigger includes webhook)
     files: List[WorkerFile] = Field(default_factory=list)  # All files in the worker dir
+    triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects (all triggers)
 
 
 class SecretItem(BaseModel):
