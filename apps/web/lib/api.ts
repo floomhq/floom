@@ -58,6 +58,10 @@ export const api = {
     },
     get: (id: string) => fetchJson<import("./types").RunDetail>(`/runs/${id}`),
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
+    cancel: (id: string) =>
+      fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
+        method: "POST",
+      }),
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
