@@ -22,16 +22,22 @@ async function handler(
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
 
-  const body =
-    req.method !== "GET" && req.method !== "HEAD"
-      ? await req.arrayBuffer()
-      : undefined;
+  const isUpload = upstreamPath === "/uploads";
+  let body: BodyInit | null | undefined;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    body = isUpload ? req.body : await req.arrayBuffer();
+  }
 
-  const upstream = await fetch(upstreamUrl, {
+  const fetchOptions: RequestInit & { duplex?: "half" } = {
     method: req.method,
     headers: forwardHeaders,
     body: body ? body : undefined,
-  });
+  };
+  if (isUpload && body) {
+    fetchOptions.duplex = "half";
+  }
+
+  const upstream = await fetch(upstreamUrl, fetchOptions);
 
   // Stream response back — preserves binary content (artifacts, etc.)
   const responseHeaders = new Headers();
