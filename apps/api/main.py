@@ -47,6 +47,7 @@ from models import (
     WorkerStatus,
     WorkerConfig,
     WorkerUpdateRequest,
+    RecentStats,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -328,6 +329,103 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
         duration_ms=d.get("duration_ms"),
         error=d.get("error"),
     )
+
+
+def _get_stats_batch(worker_ids: List[str]) -> Dict[str, RecentStats]:
+    """Batch-query 7-day run stats for a list of worker IDs in one SQL call."""
+    if not worker_ids:
+        return {}
+    placeholders = ",".join("?" for _ in worker_ids)
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    worker_id,
+                    MAX(created_at) AS last_run_at,
+                    COUNT(*) AS runs_7d,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS success_rate_7d
+                FROM runs
+                WHERE created_at > datetime('now', '-7 days')
+                  AND worker_id IN ({placeholders})
+                GROUP BY worker_id
+                """,
+                worker_ids,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    result: Dict[str, RecentStats] = {}
+    for row in rows:
+        d = row_to_dict(row)
+        wid = d["worker_id"]
+        runs_7d = int(d["runs_7d"] or 0)
+        rate = float(d["success_rate_7d"]) if d["success_rate_7d"] is not None and runs_7d > 0 else None
+        result[wid] = RecentStats(
+            last_run_at=d.get("last_run_at"),
+            runs_7d=runs_7d,
+            success_rate_7d=rate,
+        )
+    return result
+
+
+def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
+    """Extract all configured trigger labels from a worker dict.
+
+    Returns labels like ['Manual', 'Cron · 0 9 * * *', 'Webhook', 'On gmail · new_email'].
+    """
+    labels: List[str] = []
+    trigger_type = (worker.get("trigger_type") or "manual").lower()
+    config: Dict[str, Any] = worker.get("config") or {}
+    trigger: Dict[str, Any] = config.get("trigger") or {}
+
+    # Manual is the default and almost always present unless an exclusive type overrides it.
+    # Treat 'manual' type explicitly, or assume manual is available when trigger_type is manual.
+    if trigger_type == "manual":
+        labels.append("Manual")
+
+    # Cron
+    cron_expr = trigger.get("cron")
+    if cron_expr:
+        labels.append(f"Cron · {cron_expr}")
+
+    # Webhook
+    if trigger.get("webhook"):
+        labels.append("Webhook")
+
+    # Connection event (composio trigger) - white-label as "On <app> <event>"
+    composio = trigger.get("composio")
+    if composio and isinstance(composio, dict):
+        event = composio.get("event") or ""
+        conn_id = composio.get("connection_id") or ""
+        # Use the connection_id slug as app hint (first segment before underscore/dash)
+        app_hint = conn_id.split("_")[0].split("-")[0] if conn_id else "integration"
+        if event:
+            labels.append(f"On {app_hint} · {event}")
+        else:
+            labels.append(f"On {app_hint}")
+
+    # Scheduled (non-cron schedule type)
+    if trigger_type in ("schedule", "scheduled") and not cron_expr:
+        every = trigger.get("every")
+        at_time = trigger.get("at")
+        if every and at_time:
+            labels.append(f"Every {every} at {at_time}")
+        elif every:
+            labels.append(f"Every {every}")
+        else:
+            labels.append("Scheduled")
+
+    # Composio-primary trigger (trigger_type == 'composio') with no manual
+    if trigger_type == "composio":
+        # Already handled composio block above; add fallback if nothing added
+        if not labels:
+            labels.append("On integration")
+
+    # Fallback: if nothing was added, show the raw trigger_type
+    if not labels:
+        labels.append(trigger_type.title())
+
+    return labels
 
 
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
@@ -917,6 +1015,8 @@ async def upload_file(
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
     workers = _list_db_workers() or discover_workers(use_cache=True)
+    worker_ids = [w["id"] for w in workers]
+    stats_by_id = _get_stats_batch(worker_ids)
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"])
@@ -936,6 +1036,9 @@ def list_workers() -> List[WorkerSummary]:
         ):
             status = WorkerStatus.NEEDS_ATTENTION
 
+        triggers = _build_triggers_list(w)
+        recent_stats = stats_by_id.get(w["id"])
+
         result.append(
             WorkerSummary(
                 id=w["id"],
@@ -952,6 +1055,8 @@ def list_workers() -> List[WorkerSummary]:
                 trigger_type=w["trigger_type"],
                 runner=w["runner"],
                 last_run=last_run,
+                triggers=triggers,
+                recent_stats=recent_stats,
             )
         )
     return result

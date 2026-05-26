@@ -755,6 +755,12 @@ class RunDetail(BaseModel):
     created_at: Optional[str] = None
 
 
+class RecentStats(BaseModel):
+    last_run_at: Optional[str] = None   # ISO timestamp of most recent run
+    runs_7d: int = 0                     # total runs in last 7 days
+    success_rate_7d: Optional[float] = None  # fraction (0.0-1.0) or None if no runs
+
+
 class WorkerSummary(BaseModel):
     id: str
     name: str
@@ -770,6 +776,8 @@ class WorkerSummary(BaseModel):
     trigger_type: str
     runner: str
     last_run: Optional[RunSummary] = None
+    triggers: List[str] = Field(default_factory=list)  # all configured trigger labels
+    recent_stats: Optional[RecentStats] = None
 
 
 class WorkerDetail(BaseModel):
