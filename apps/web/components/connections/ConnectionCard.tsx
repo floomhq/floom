@@ -1,9 +1,10 @@
-import { RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./BrandLogo";
 import {
+  formatRelativeTime,
   formatScope,
   formatTimestamp,
   type ConnectionView,
@@ -40,22 +41,34 @@ function statusBadge(status: string) {
   );
 }
 
+function checkStatusLabel(checkStatus?: string): string {
+  if (!checkStatus) return "unknown";
+  if (checkStatus === "valid") return "valid";
+  if (checkStatus === "expired") return "expired";
+  if (checkStatus === "failed") return "failed";
+  return checkStatus;
+}
+
 export function ConnectionCard({
   connection,
   deleting,
   refreshing,
   reconnecting,
+  testing,
   onDelete,
   onReconnect,
   onRefresh,
+  onTest,
 }: {
   connection: ConnectionView;
   deleting?: boolean;
   refreshing?: boolean;
   reconnecting?: boolean;
+  testing?: boolean;
   onDelete: (connection: ConnectionView) => void;
   onReconnect: (slug: string) => void;
   onRefresh: (connection: ConnectionView) => void;
+  onTest: (connection: ConnectionView) => void;
 }) {
   const visibleScopes = connection.scopes.slice(0, 3);
   const hiddenCount = Math.max(connection.scopes.length - visibleScopes.length, 0);
@@ -101,9 +114,28 @@ export function ConnectionCard({
             )}
           </div>
 
-          <p className="mt-3 max-h-0 overflow-hidden text-xs text-[var(--ink-mute)] opacity-0 transition-all duration-150 group-hover:max-h-5 group-hover:opacity-100 group-focus-within:max-h-5 group-focus-within:opacity-100">
-            Last used {formatTimestamp(connection.lastUsedAt)}
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <p className="text-xs text-[var(--ink-mute)]">
+              Last used {formatTimestamp(connection.lastUsedAt)}
+            </p>
+            {connection.lastCheckedAt && (
+              <p className="text-xs text-[var(--ink-mute)]">
+                Checked {formatRelativeTime(connection.lastCheckedAt)}
+                {connection.lastCheckStatus && (
+                  <span
+                    className={cn(
+                      "ml-1 font-medium",
+                      connection.lastCheckStatus === "valid"
+                        ? "text-[var(--positive)]"
+                        : "text-[var(--negative)]"
+                    )}
+                  >
+                    &middot; {checkStatusLabel(connection.lastCheckStatus)}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-start">
@@ -117,6 +149,17 @@ export function ConnectionCard({
           >
             <RefreshCw className={cn("size-3.5", reconnecting && "animate-spin")} />
             {reconnecting ? "Opening" : "Reconnect"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-[106px]"
+            onClick={() => onTest(connection)}
+            disabled={testing}
+          >
+            <Zap className={cn("size-3.5", testing && "animate-pulse")} />
+            {testing ? "Testing" : "Test"}
           </Button>
           <Button
             type="button"
