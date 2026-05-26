@@ -303,7 +303,7 @@ class WorkerContract(BaseModel):
     title: str
     description: str
     version: str
-    entrypoint: str = "SKILL.md"
+    entrypoint: Optional[str] = None
     system_prompt: Optional[str] = None
     model: Optional[str] = "gpt-5-mini"
     entrypoints: Optional[List[WorkerEntrypoint]] = None
@@ -363,6 +363,8 @@ class WorkerContract(BaseModel):
             raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
         if self.exec.runtime == "none" and self.exec.command:
             raise ValueError("exec.runtime 'none' cannot declare exec.command")
+        if self.exec.runtime == "none" and (self.entrypoint or self.entrypoints):
+            raise ValueError("exec.runtime 'none' cannot declare entrypoints")
         if self.exec.mode == "pure-script" and not self.exec.command:
             raise ValueError("exec.command is required when exec.mode is pure-script")
         return self
