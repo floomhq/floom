@@ -6,8 +6,11 @@ import json
 import threading
 import re
 import logging
+from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime
+
+from dotenv import load_dotenv
 
 from db import get_db, now_iso
 from worker_registry import get_worker_config
@@ -25,6 +28,9 @@ from models import (
 )
 
 logger = logging.getLogger("floom.run_service")
+
+API_ENV_PATH = Path("/root/.config/workeros/api.env")
+LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
 
 # ---------------------------------------------------------------------------
 # Secret scrubbing
@@ -112,6 +118,15 @@ def _merge_instance_inputs(instance: Optional[Dict[str, Any]], inputs: Dict[str,
         return dict(inputs)
     return {**defaults, **inputs}
 
+
+def _runner_key(config: Optional[WorkerConfig]) -> str:
+    if config and config.runtime:
+        runtime_type = (config.runtime.type or "").strip().lower()
+        if runtime_type.startswith("skill"):
+            return runtime_type
+        return config.runtime.runner or "local"
+    return "local"
+
 def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
@@ -130,9 +145,7 @@ def create_run(
         else ApprovalStatus.NOT_REQUIRED
     )
     # Determine runner from config (default to "local" for backward compat)
-    runner = "local"
-    if config and config.runtime:
-        runner = config.runtime.runner or "local"
+    runner = _runner_key(config)
     with get_db() as conn:
         conn.execute(
             """
@@ -242,12 +255,73 @@ def create_approval(
     return approval_id
 
 
+def _store_run_artifacts(
+    run_id: str,
+    artifacts: list[Dict[str, Any]],
+    log_fn: Callable[[str, str], None],
+) -> None:
+    for art in artifacts:
+        try:
+            art_id = f"art_{uuid.uuid4().hex[:12]}"
+            art_name = art.get("name", "artifact")
+            art_type = art.get("type", "file")
+            art_path = art.get("path", "")
+            art_size = art.get("size_bytes", 0)
+            with get_db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO artifacts
+                        (id, run_id, name, type, path, size_bytes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (art_id, run_id, art_name, art_type, art_path, art_size, now_iso()),
+                )
+        except Exception as exc:
+            logger.exception("Failed to store artifact")
+            log_fn(f"Failed to store artifact: {exc}", level="warning")
+
+
+def _load_runtime_env_files() -> None:
+    load_dotenv(LOCAL_ENV_PATH, override=False)
+    if API_ENV_PATH.is_file():
+        load_dotenv(API_ENV_PATH, override=False)
+
+
+def _env_keys_from_file(path: Path) -> set[str]:
+    keys: set[str] = set()
+    if not path.is_file():
+        return keys
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            keys.add(key)
+    return keys
+
+
+def _secret_names_from_db() -> set[str]:
+    try:
+        with get_db() as conn:
+            return {
+                row["name"]
+                for row in conn.execute("SELECT name FROM secrets").fetchall()
+                if row["name"]
+            }
+    except Exception:
+        return set()
+
+
 def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
+    _load_runtime_env_files()
     config = _get_worker_config_for_run(worker_id)
-    if not config:
-        return {}
+    names = set(config.secrets if config else [])
+    names.update(_secret_names_from_db())
+    names.update(_env_keys_from_file(LOCAL_ENV_PATH))
+    names.update(_env_keys_from_file(API_ENV_PATH))
     secrets: Dict[str, str] = {}
-    for name in config.secrets:
+    for name in names:
         value = os.environ.get(name)
         if value:
             secrets[name] = value
@@ -304,9 +378,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         return
 
     # Dispatch to the appropriate sandbox driver based on worker config
-    runner = "local"
-    if config and config.runtime:
-        runner = config.runtime.runner or "local"
+    runner = _runner_key(config)
     log_fn(f"Executing worker (runner={runner})", level="debug")
     driver = get_sandbox_driver(runner)
     result = driver.run(
@@ -319,35 +391,15 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         config=config,
     )
 
+    outputs = result.outputs
+    artifacts = result.artifacts
+    _store_run_artifacts(run_id, artifacts, log_fn)
+
     # Both "error" and "failed" terminal statuses map to a failed run
     if result.status in ("error", "failed"):
         update_run_status(run_id, RunStatus.FAILED.value, error=result.error)
         log_fn(f"Run failed: {result.error}", level="error")
         return
-
-    outputs = result.outputs
-    artifacts = result.artifacts
-
-    # Store artifacts
-    for art in artifacts:
-        try:
-            art_id = f"art_{uuid.uuid4().hex[:12]}"
-            art_name = art.get("name", "artifact")
-            art_type = art.get("type", "file")
-            art_path = art.get("path", "")
-            art_size = art.get("size_bytes", 0)
-            with get_db() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO artifacts
-                        (id, run_id, name, type, path, size_bytes, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (art_id, run_id, art_name, art_type, art_path, art_size, now_iso()),
-                )
-        except Exception as exc:
-            logger.exception("Failed to store artifact")
-            log_fn(f"Failed to store artifact: {exc}", level="warning")
 
     update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
     log_fn("Output generated")
