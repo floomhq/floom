@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { Suspense, use, useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +41,74 @@ type TriggerType = "manual" | "schedule" | "webhook" | "composio";
 function yamlString(value: string): string {
   return JSON.stringify(value);
 }
+
+function yamlBlock(value: string, indent = ""): string[] {
+  return value.split("\n").map((line) => `${indent}${line}`);
+}
+
+function sampleValueForInput(input: InputRow): string | number | boolean | null {
+  if (input.type === "number") return 1;
+  if (input.type === "boolean") return true;
+  if (input.type === "file") return null;
+  if (input.type === "select") {
+    return input.options.split(",").map((option) => option.trim()).filter(Boolean)[0] || "option";
+  }
+  if (input.type === "textarea") return `Sample ${input.label || input.name} with enough detail for a realistic run.`;
+  return `Sample ${input.label || input.name}`;
+}
+
+function yamlScalar(value: string | number | boolean | null): string {
+  if (value === null) return "null";
+  return typeof value === "string" ? yamlString(value) : String(value);
+}
+
+const TEMPLATES: Record<string, {
+  workerId: string;
+  name: string;
+  description: string;
+  inputs: InputRow[];
+  outputs: OutputRow[];
+  secrets: string;
+  approvalsRequired: boolean;
+}> = {
+  research_brief: {
+    workerId: "research-brief",
+    name: "Research Brief",
+    description: "Generates a markdown research brief on any topic.",
+    inputs: [
+      { name: "topic", label: "Research topic", type: "text", required: true, placeholder: "AI recruiting workflow tools in DACH", description: "Topic or question to investigate.", options: "" },
+      { name: "audience", label: "Audience", type: "select", required: true, placeholder: "", description: "Reader profile for tone and depth.", options: "executive, technical, sales" },
+      { name: "depth", label: "Depth", type: "select", required: true, placeholder: "", description: "Level of detail to produce.", options: "overview, detailed, deep_dive" },
+    ],
+    outputs: [{ name: "brief", label: "Research brief", type: "markdown" }],
+    secrets: "OPENAI_API_KEY",
+    approvalsRequired: false,
+  },
+  gmail_intake_brief: {
+    workerId: "gmail-intake-brief",
+    name: "Gmail Intake Brief",
+    description: "Fetches recent Gmail messages matching a query and returns a markdown summary.",
+    inputs: [
+      { name: "query", label: "Gmail search query", type: "text", required: false, placeholder: "is:unread label:intake newer_than:7d", description: "Gmail search syntax.", options: "" },
+      { name: "max_results", label: "Max emails to fetch", type: "number", required: false, placeholder: "5", description: "Maximum number of matching messages.", options: "" },
+    ],
+    outputs: [{ name: "summary", label: "Email summary", type: "markdown" }],
+    secrets: "OPENAI_API_KEY",
+    approvalsRequired: false,
+  },
+  csv_enricher: {
+    workerId: "csv-enricher",
+    name: "CSV Enricher",
+    description: "Enriches CSV rows using a custom instruction.",
+    inputs: [
+      { name: "csv_text", label: "CSV rows", type: "textarea", required: true, placeholder: "name,company\\nAlice,Acme", description: "CSV content with headers.", options: "" },
+      { name: "instruction", label: "Enrichment instruction", type: "text", required: true, placeholder: "Add ICP fit and reason columns.", description: "How each row needs to be enriched.", options: "" },
+    ],
+    outputs: [{ name: "enriched_csv", label: "Enriched CSV", type: "csv" }],
+    secrets: "OPENAI_API_KEY",
+    approvalsRequired: false,
+  },
+};
 
 const DEFAULT_RUN_PY = `from typing import Dict, Any
 
@@ -91,6 +159,33 @@ function buildYaml(
   lines.push(`name: ${slug}`);
   lines.push(`title: ${yamlString(title)}`);
   lines.push(`description: ${yamlString(description || "Custom Workeros worker.")}`);
+  lines.push(`long_description: |`);
+  lines.push(...yamlBlock(`  Explain what ${title} does, when to run it, and what a trustworthy result looks like.`));
+  lines.push(`use_cases:`);
+  lines.push(`- Replace this with a concrete operator workflow.`);
+  lines.push(`- Replace this with a second realistic use case.`);
+  lines.push(`- Replace this with a third realistic use case.`);
+  if (inputs.length > 0) {
+    lines.push(`example_input:`);
+    for (const inp of inputs) {
+      if (!inp.name) continue;
+      const sample = sampleValueForInput(inp);
+      if (typeof sample === "string" && sample.includes("\n")) {
+        lines.push(`  ${inp.name}: |`);
+        lines.push(...yamlBlock(sample, "    "));
+      } else {
+        lines.push(`  ${inp.name}: ${yamlScalar(sample)}`);
+      }
+    }
+  } else {
+    lines.push(`example_input: {}`);
+  }
+  lines.push(`example_output: |`);
+  lines.push(...yamlBlock(`  ## Example output\n\n  Replace this markdown with the worker's expected result shape.`));
+  lines.push(`how_it_works: |`);
+  lines.push(...yamlBlock(`  Input\n    -> validate fields\n    -> run worker logic\n    -> return structured output`));
+  lines.push(`folder: ${yamlString("Custom")}`);
+  lines.push(`tags: ["custom", "template"]`);
   lines.push(`version: "0.1.0"`);
   lines.push(`entrypoint: SKILL.md`);
   lines.push(`targets: [generic]`);
@@ -218,18 +313,55 @@ function triggerAppSlug(item?: ComposioTriggerItem): string {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function NewWorkerPage() {
+export default function NewWorkerPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ template?: string }>;
+}) {
+  return (
+    <Suspense fallback={<NewWorkerSkeleton />}>
+      <NewWorkerPageInner searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+function NewWorkerPageInner({
+  searchParams,
+}: {
+  searchParams?: Promise<{ template?: string }>;
+}) {
+  const resolvedSearchParams = use(searchParams || Promise.resolve({} as { template?: string }));
+  return <NewWorkerContent templateId={resolvedSearchParams.template} />;
+}
+
+function NewWorkerSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="h-8 w-48 bg-[#e4e4e7] rounded-md" />
+        <div className="h-4 w-72 bg-[#ececef] rounded-md mt-2" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="h-[420px] bg-white border border-[#eaeaea] rounded-md" />
+        <div className="h-[420px] bg-white border border-[#eaeaea] rounded-md" />
+      </div>
+    </div>
+  );
+}
+
+function NewWorkerContent({ templateId }: { templateId?: string }) {
   const router = useRouter();
+  const template = templateId ? TEMPLATES[templateId] : undefined;
   const [submitting, setSubmitting] = useState(false);
 
   // Form state
-  const [workerId, setWorkerId] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [inputs, setInputs] = useState<InputRow[]>([]);
-  const [outputs, setOutputs] = useState<OutputRow[]>([]);
-  const [secrets, setSecrets] = useState("");
-  const [approvalsRequired, setApprovalsRequired] = useState(false);
+  const [workerId, setWorkerId] = useState(template?.workerId || "");
+  const [name, setName] = useState(template?.name || "");
+  const [description, setDescription] = useState(template?.description || "");
+  const [inputs, setInputs] = useState<InputRow[]>(template?.inputs || []);
+  const [outputs, setOutputs] = useState<OutputRow[]>(template?.outputs || []);
+  const [secrets, setSecrets] = useState(template?.secrets || "");
+  const [approvalsRequired, setApprovalsRequired] = useState(template?.approvalsRequired || false);
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
   const [triggerType, setTriggerType] = useState<TriggerType>("manual");
   const [cronExpr, setCronExpr] = useState("0 9 * * MON");
