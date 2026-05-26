@@ -9,6 +9,9 @@ type JsonObject = Record<string, unknown>;
 type LocalAuthConfigValidation =
   | { ok: true; ids: Set<string> }
   | { ok: false; response: NextResponse };
+type ConnectedAuthConfigLookup =
+  | { ok: true; authConfigId?: string }
+  | { ok: false };
 
 export async function GET(
   _request: Request,
@@ -16,15 +19,15 @@ export async function GET(
 ) {
   const { id } = await params;
   const decodedId = decodeURIComponent(id);
+  const key = process.env.COMPOSIO_API_KEY || "";
 
   // Verify the auth config id is referenced by at least one local connection
-  const validAuthConfigIds = await fetchLocalAuthConfigIds();
+  const validAuthConfigIds = await fetchLocalAuthConfigIds(decodedId, key);
   if (!validAuthConfigIds.ok) return validAuthConfigIds.response;
   if (!validAuthConfigIds.ids.has(decodedId)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const key = process.env.COMPOSIO_API_KEY || "";
   if (!key) {
     return NextResponse.json(
       { error: "Composio not configured" },
@@ -89,7 +92,10 @@ export async function GET(
   });
 }
 
-async function fetchLocalAuthConfigIds(): Promise<LocalAuthConfigValidation> {
+async function fetchLocalAuthConfigIds(
+  requestedId: string,
+  composioApiKey: string
+): Promise<LocalAuthConfigValidation> {
   if (!API_SECRET) return ownershipUnavailable();
   try {
     const res = await fetch(`${API_BASE}/connections`, {
@@ -109,6 +115,17 @@ async function fetchLocalAuthConfigIds(): Promise<LocalAuthConfigValidation> {
         ids.add(item.app_name.toLowerCase().trim());
       }
     }
+
+    if (requestedId.startsWith("ac_")) {
+      if (!composioApiKey) return ownershipUnavailable();
+
+      for (const connectionId of localConnectionIds(list)) {
+        const result = await fetchConnectedAccountAuthConfigId(connectionId, composioApiKey);
+        if (!result.ok) return ownershipUnavailable();
+        if (result.authConfigId) ids.add(result.authConfigId);
+      }
+    }
+
     return { ok: true, ids };
   } catch {
     return ownershipUnavailable();
@@ -122,6 +139,40 @@ function ownershipUnavailable(): LocalAuthConfigValidation {
       { error: "Cannot verify ownership: backend unavailable" },
       { status: 503 }
     ),
+  };
+}
+
+function localConnectionIds(list: { composio_connection_id?: string }[]) {
+  return list
+    .map((item) => item.composio_connection_id)
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+async function fetchConnectedAccountAuthConfigId(
+  connectionId: string,
+  apiKey: string
+): Promise<ConnectedAuthConfigLookup> {
+  const response = await composioGet(
+    `/connected_accounts/${encodeURIComponent(connectionId)}`,
+    apiKey
+  );
+  if (response.status === 404) return { ok: true as const };
+  if (!response.ok) return { ok: false as const };
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { ok: false as const };
+  }
+
+  const account = getNestedObject(body, ["connected_account"]) ?? asObject(body);
+  return {
+    ok: true as const,
+    authConfigId:
+      getNestedString(account, ["auth_config", "id"]) ||
+      getNestedString(account, ["authConfig", "id"]) ||
+      getNestedString(account, ["auth_config_id"]),
   };
 }
 
@@ -173,6 +224,12 @@ function extractScopes(body: unknown): string[] {
   }
 
   return [];
+}
+
+function asObject(value: unknown): JsonObject | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : undefined;
 }
 
 function getNestedObject(value: unknown, path: string[]): JsonObject | undefined {
