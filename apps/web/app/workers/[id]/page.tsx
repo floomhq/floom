@@ -16,8 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck } from "lucide-react";
-import type { WorkerDetail, WorkerInput, ConnectionItem } from "@/lib/types";
+import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck, File, FolderOpen } from "lucide-react";
+import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -31,6 +31,7 @@ export default function WorkerDetailPage() {
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -45,6 +46,10 @@ export default function WorkerDetailPage() {
         else if (inp.type === "boolean") defaults[inp.name] = false;
       });
       setInputs(defaults);
+      // Default Code tab selection: SKILL.md if present, else worker.yml
+      const files = w.files || [];
+      const defaultFile = files.find((f) => f.path === "SKILL.md") || files.find((f) => f.path === "worker.yml") || files[0];
+      if (defaultFile) setSelectedFile(defaultFile.path);
       setLoading(false);
     });
   }, [id]);
@@ -116,7 +121,6 @@ export default function WorkerDetailPage() {
     return sampleValue !== undefined && sampleValue !== null;
   });
 
-  const isPureScript = (worker.config as { exec?: { mode?: string } }).exec?.mode === "pure-script";
   const requiredSecrets: string[] = worker.config.secrets ?? [];
 
   return (
@@ -302,63 +306,11 @@ export default function WorkerDetailPage() {
 
         {/* Code tab */}
         <TabsContent value="code" className="mt-6">
-          <div className="space-y-6 max-w-3xl">
-            <Card className="border-[#eaeaea] shadow-none bg-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">SKILL.md</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {worker.skill_md_content ? (
-                  <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea] overflow-auto max-h-[600px]">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {worker.skill_md_content}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <p className="text-sm text-[#999]">SKILL.md not available.</p>
-                )}
-              </CardContent>
-            </Card>
-
-            {isPureScript && worker.run_py_content && (
-              <Card className="border-[#eaeaea] shadow-none bg-white">
-                <CardHeader>
-                  <CardTitle className="text-sm font-medium">run.py</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="text-xs font-mono overflow-auto max-h-[500px] bg-[#f9f9f9] p-3 rounded-md border border-[#eaeaea] whitespace-pre">
-                    {worker.run_py_content}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-
-            {!isPureScript && worker.run_py_content && (
-              <Card className="border-[#eaeaea] shadow-none bg-white">
-                <CardHeader>
-                  <CardTitle className="text-sm font-medium">run.py</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="text-xs font-mono overflow-auto max-h-[500px] bg-[#f9f9f9] p-3 rounded-md border border-[#eaeaea] whitespace-pre">
-                    {worker.run_py_content}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-
-            <Card className="border-[#eaeaea] shadow-none bg-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">worker.yml</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {worker.manifest_yaml ? (
-                  <ManifestViewer yaml={worker.manifest_yaml} />
-                ) : (
-                  <p className="text-sm text-[#999]">Manifest not available.</p>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <WorkerFileTree
+            files={worker.files || []}
+            selectedPath={selectedFile}
+            onSelect={setSelectedFile}
+          />
         </TabsContent>
 
         {/* Connections tab */}
@@ -631,6 +583,92 @@ function MarkdownPreview({ value }: { value: string }) {
       <ReactMarkdown remarkPlugins={[remarkGfm]}>
         {value}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorkerFileTree: file tree + viewer for the Code tab
+// ---------------------------------------------------------------------------
+
+function WorkerFileTree({
+  files,
+  selectedPath,
+  onSelect,
+}: {
+  files: WorkerFile[];
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const selected = files.find((f) => f.path === selectedPath) || null;
+
+  if (files.length === 0) {
+    return <p className="text-sm text-[#999]">No files found for this worker.</p>;
+  }
+
+  return (
+    <div className="flex gap-4 items-start max-w-5xl">
+      {/* Left: file list */}
+      <div className="w-52 shrink-0">
+        <Card className="border-[#eaeaea] shadow-none bg-white">
+          <CardHeader className="py-2 px-3">
+            <CardTitle className="text-xs font-medium text-[#666] flex items-center gap-1.5">
+              <FolderOpen className="w-3.5 h-3.5" />
+              Files
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 pb-1">
+            {files.map((f) => (
+              <button
+                key={f.path}
+                type="button"
+                onClick={() => onSelect(f.path)}
+                className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${
+                  f.path === selectedPath
+                    ? "bg-[#f4f4f5] text-black font-semibold"
+                    : "text-[#555] hover:bg-[#f9f9f9]"
+                }`}
+                title={f.path}
+              >
+                <File className="w-3 h-3 shrink-0 text-[#aaa]" />
+                <span className="truncate">{f.path}</span>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Right: content viewer */}
+      <div className="flex-1 min-w-0">
+        {selected ? (
+          <Card className="border-[#eaeaea] shadow-none bg-white">
+            <CardHeader className="py-2 px-4 border-b border-[#eaeaea]">
+              <CardTitle className="text-xs font-medium font-mono text-[#555]">{selected.path}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {selected.binary ? (
+                <div className="p-4 text-sm text-[#999]">Binary file — cannot display.</div>
+              ) : selected.language === "markdown" ? (
+                <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-b-md overflow-auto max-h-[600px]">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {selected.content || ""}
+                  </ReactMarkdown>
+                </div>
+              ) : selected.language === "yaml" ? (
+                <div className="overflow-auto max-h-[600px] p-3 bg-[#f9f9f9] rounded-b-md">
+                  <ManifestViewer yaml={selected.content || ""} />
+                </div>
+              ) : (
+                <pre className="text-xs font-mono overflow-auto max-h-[600px] bg-[#f9f9f9] p-3 rounded-b-md whitespace-pre">
+                  {selected.content || ""}
+                </pre>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <p className="text-sm text-[#999]">Select a file to view.</p>
+        )}
+      </div>
     </div>
   );
 }

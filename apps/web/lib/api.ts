@@ -60,6 +60,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       }),
+    updateFiles: (id: string, files: { path: string; content: string }[]) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/files`, {
+        method: "PUT",
+        body: JSON.stringify({ files }),
+      }),
     delete: (id: string) =>
       fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" }),
   },

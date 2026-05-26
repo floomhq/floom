@@ -149,6 +149,14 @@ export interface WorkerSummary {
   recent_stats?: RecentStats | null;
 }
 
+export interface WorkerFile {
+  path: string;       // relative path from worker root, e.g. "SKILL.md", "lib/helpers.py"
+  language: string;   // "markdown", "python", "yaml", "json", "text"
+  content?: string;   // utf-8 string; absent when binary=true
+  binary: boolean;
+  size: number;
+}
+
 export interface WorkerDetail {
   id: string;
   name: string;
@@ -169,6 +177,7 @@ export interface WorkerDetail {
   run_py?: string;
   skill_md_content?: string;
   run_py_content?: string;
+  files: WorkerFile[];
 }
 
 export interface SecretItem {
