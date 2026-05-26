@@ -103,6 +103,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add OWASP-recommended security headers to every response.
+
+    Cloudflare adds some of these in front of us, but defense-in-depth.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    )
+    # The API serves JSON only; tight CSP is safe.
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    return response
+
 # Simple in-memory token bucket rate limit per x-floom-secret hash.
 # 200 req/min per caller. Reset every 60s. No persistence — per-process,
 # resets on restart. Good enough for single-tenant launch.
