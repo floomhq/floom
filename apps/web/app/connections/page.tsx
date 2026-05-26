@@ -101,7 +101,7 @@ export default function ConnectionsPage() {
       const records = list as ConnectionRecord[];
       setConnections(records);
       hydrateConnectionMetadata(records);
-      // Worker details are auxiliary — load independently so a failure
+      // Worker details are auxiliary; load independently so a failure
       // never blanks the connections list.
       loadWorkerDetails()
         .then((workers) => getLastUsedByConnection(workers))
@@ -299,7 +299,7 @@ async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetada
       cache: "no-store",
     });
     if (response.status === 503) {
-      // Composio not configured — surface via toast once, return undefined
+      // Composio not configured: surface via toast once, return undefined
       toast.error("Composio not configured on this server");
       return undefined;
     }

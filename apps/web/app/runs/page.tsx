@@ -20,12 +20,10 @@ import type { RunSummary, WorkerSummary } from "@/lib/types";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
+  { value: "queued", label: "Queued" },
   { value: "running", label: "Running" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
-  { value: "pending_approval", label: "Pending" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
 ];
 
 const PAGE_SIZE = 20;
@@ -194,7 +192,7 @@ export default function RunsPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
                     <p className="text-xs text-[#999] mt-0.5">
-                      {r.id} · {r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}
+                      {r.id} · {r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}
                     </p>
                   </div>
                   <StatusBadge status={r.status} />
