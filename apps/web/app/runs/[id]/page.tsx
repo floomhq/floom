@@ -162,7 +162,7 @@ export default function RunDetailPage() {
         <div className="flex-1">
           <h1 className="text-2xl font-semibold tracking-tight">{run.id}</h1>
           <p className="text-[#666] text-sm">
-            {run.worker_name || run.worker_id} · {run.created_at ? new Date(run.created_at).toLocaleString() : "—"}
+            {run.worker_name || run.worker_id} · {run.created_at ? new Date(run.created_at).toLocaleString() : "-"}
           </p>
         </div>
         <StatusBadge status={run.status} />

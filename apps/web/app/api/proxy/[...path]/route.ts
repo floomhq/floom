@@ -39,7 +39,7 @@ async function handler(
 
   const upstream = await fetch(upstreamUrl, fetchOptions);
 
-  // Stream response back — preserves binary content (artifacts, etc.)
+  // Stream response back; preserves binary content (artifacts, etc.)
   const responseHeaders = new Headers();
   const ct = upstream.headers.get("content-type");
   if (ct) responseHeaders.set("content-type", ct);

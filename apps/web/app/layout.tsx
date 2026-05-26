@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: "Floom — OS for Background Workers",
+  title: "Floom: OS for Background Workers",
   description: "Spawn workers, run them, and observe everything.",
 };
 

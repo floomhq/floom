@@ -1,5 +1,5 @@
 // Aurora + grain background layers. Drop into the root of any page.
-// Decorative only — aria-hidden.
+// Decorative only (aria-hidden).
 
 export function Ambient() {
   return (
