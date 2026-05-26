@@ -410,9 +410,10 @@ class TestPostWorkersSkillMd:
 
     @pytest.fixture(autouse=True)
     def _patch_workers_dir(self, tmp_path, monkeypatch):
-        """Route WORKERS_DIR to a temp directory for isolation."""
+        """Route WORKERS_DIR to a temp directory and ensure no auth secret is set."""
         import worker_registry
         monkeypatch.setattr(worker_registry, "WORKERS_DIR", tmp_path)
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
         self._workers_dir = tmp_path
 
     def _minimal_yml(self, name: str = "skill-md-test") -> str:
