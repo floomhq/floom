@@ -4,7 +4,6 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
-from datetime import datetime
 
 
 # ---------------------------------------------------------------------------
@@ -301,11 +300,17 @@ class WorkerContract(BaseModel):
     name: str
     title: str
     description: str
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
+    how_it_works: Optional[str] = None
+    folder: Optional[str] = None
     version: str
     model: Optional[str] = None
     entrypoint: str = "SKILL.md"
     targets: List[str] = Field(default_factory=lambda: ["generic"])
-    tags: List[str] = Field(default_factory=list)
+    tags: Optional[List[str]] = None
     authors: List[WorkerContractAuthor] = Field(default_factory=list)
     license: Optional[str] = None
     homepage: Optional[str] = None
@@ -349,6 +354,50 @@ class WorkerContract(BaseModel):
             raise ValueError("description is required")
         if len(value) > 500:
             raise ValueError("description must be 500 characters or fewer")
+        return value
+
+    @field_validator("long_description")
+    @classmethod
+    def validate_long_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if len(value) > 2000:
+            raise ValueError("long_description must be 2000 characters or fewer")
+        return value
+
+    @field_validator("use_cases")
+    @classmethod
+    def validate_use_cases(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        if not 3 <= len(value) <= 5:
+            raise ValueError("use_cases must contain 3 to 5 items")
+        if any(not item.strip() for item in value):
+            raise ValueError("use_cases items must be non-empty")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        if len(value) > 8:
+            raise ValueError("tags must contain 8 items or fewer")
+        if any("/" in tag or not tag.strip() for tag in value):
+            raise ValueError("tags must be flat non-empty strings")
+        return value
+
+    @field_validator("folder")
+    @classmethod
+    def validate_folder(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if len(value) > 64:
+            raise ValueError("folder must be 64 characters or fewer")
+        if value.startswith("/") or value.endswith("/") or ".." in value.split("/"):
+            raise ValueError("folder must be a relative folder path")
+        if not all(part.strip() for part in value.split("/")):
+            raise ValueError("folder path segments must be non-empty")
         return value
 
 
@@ -583,6 +632,15 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
 # Request schemas
 # ---------------------------------------------------------------------------
 
+class WorkerUpdateRequest(BaseModel):
+    trigger_type: Optional[Literal["manual", "schedule", "webhook"]] = None
+    cron_expr: Optional[str] = None
+    cron_timezone: Optional[str] = None
+    webhook_secret_rotate: Optional[bool] = None  # True → rotate secret, return new raw once
+    input_values: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Dict[str, Any]] = None  # declared-not-enforced per T1c flip
+
+
 class RunCreate(BaseModel):
     inputs: Dict[str, Any] = Field(default_factory=dict)
     trigger_source: str = "manual"
@@ -683,6 +741,13 @@ class WorkerSummary(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
+    how_it_works: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    folder: Optional[str] = None
     status: WorkerStatus
     paused: bool = False
     trigger_type: str
@@ -694,6 +759,13 @@ class WorkerDetail(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
+    how_it_works: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    folder: Optional[str] = None
     status: WorkerStatus
     paused: bool = False
     trigger_type: str
@@ -702,6 +774,7 @@ class WorkerDetail(BaseModel):
     recent_runs: List[RunSummary] = Field(default_factory=list)
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
     run_py: Optional[str] = None
+    new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
 
 
 class SecretItem(BaseModel):

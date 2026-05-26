@@ -152,6 +152,13 @@ export interface WorkerSummary {
   id: string;
   name: string;
   description?: string;
+  long_description?: string;
+  use_cases?: string[];
+  example_input?: Record<string, unknown>;
+  example_output?: string;
+  how_it_works?: string;
+  tags: string[];
+  folder?: string;
   status: WorkerStatus;
   paused?: boolean;
   trigger_type: string;
@@ -163,6 +170,13 @@ export interface WorkerDetail {
   id: string;
   name: string;
   description?: string;
+  long_description?: string;
+  use_cases?: string[];
+  example_input?: Record<string, unknown>;
+  example_output?: string;
+  how_it_works?: string;
+  tags: string[];
+  folder?: string;
   status: WorkerStatus;
   paused?: boolean;
   trigger_type: string;

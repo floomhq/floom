@@ -2,6 +2,35 @@ schema_version: '0.3'
 name: webhook-secret-test
 title: Webhook Secret Test Worker
 description: Tests webhook HMAC signature verification.
+long_description: |
+  Exercises the signed webhook path with HMAC verification enabled. Use it to confirm external systems can call Workeros webhooks without exposing unauthenticated write access.
+use_cases:
+- Verify webhook signature validation before connecting a real integration.
+- Test rejected and accepted webhook payload handling.
+- Produce an echo artifact for payload-shape debugging.
+example_input: {}
+example_output: |
+  ```json
+  {
+    "verified": true,
+    "received": {
+      "event": "candidate.updated",
+      "candidate_id": "cand_123"
+    }
+  }
+  ```
+how_it_works: |
+  Signed POST request
+    -> verify HMAC header
+    -> reject invalid signatures
+    -> pass payload into worker
+    -> echo verified payload as JSON
+folder: DevX/Webhooks
+tags:
+- webhook
+- hmac
+- security
+- testing
 version: 0.1.0
 entrypoint: SKILL.md
 targets:

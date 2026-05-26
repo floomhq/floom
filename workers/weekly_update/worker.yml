@@ -2,6 +2,43 @@ schema_version: '0.3'
 name: weekly-update
 title: Weekly Update
 description: Turns raw notes into a polished weekly company update using AI.
+long_description: |
+  Converts rough weekly notes into a polished update for internal, investor, or customer audiences. It keeps the structure consistent while adjusting tone and emphasis for the selected audience.
+use_cases:
+- Turn messy founder notes into an internal Friday update.
+- Prepare an investor-facing progress memo from product and revenue bullets.
+- Rewrite operational updates into a customer-safe changelog style.
+example_input:
+  notes: |
+    - Launched worker description metadata
+    - Added Gmail intake prototype
+    - 12 customer calls, 4 asked for visual examples
+    - Next week: polish folder tree and approval UX
+  audience: investor
+example_output: |
+  # Weekly update
+
+  ## Highlights
+
+  - Shipped worker description metadata to make automation behavior easier to trust.
+  - Validated Gmail intake demand through early prototype testing.
+  - Completed 12 customer calls; 4 explicitly requested clearer visual examples.
+
+  ## Next week
+
+  Focus on folder navigation and approval-flow polish.
+how_it_works: |
+  Raw notes + audience
+    -> group bullets by theme
+    -> rewrite for audience tone
+    -> highlight metrics and next steps
+    -> return approval-ready markdown
+folder: Operations/Reporting
+tags:
+- updates
+- reporting
+- markdown
+- operations
 version: 0.1.0
 entrypoint: SKILL.md
 targets:

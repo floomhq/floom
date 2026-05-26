@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Play, Box, Plug, Pencil } from "lucide-react";
+import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck } from "lucide-react";
 import type { WorkerDetail, WorkerInput, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -82,6 +84,34 @@ export default function WorkerDetailPage() {
     }
   }
 
+  function applyExampleInput() {
+    if (!worker?.example_input) return;
+    // Build next inputs, but skip file fields — filename strings cannot be re-uploaded
+    const nextInputs: Record<string, unknown> = { ...inputs };
+    const fileFieldNames = new Set(
+      worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => inp.name)
+    );
+    let skippedFileFields = false;
+    for (const [key, value] of Object.entries(worker.example_input)) {
+      if (fileFieldNames.has(key)) {
+        // Only copy if value is null/undefined (no sample file); never copy filename strings
+        if (value == null) {
+          // leave file field untouched so the drop zone stays empty
+        } else {
+          skippedFileFields = true;
+        }
+        continue;
+      }
+      nextInputs[key] = value;
+    }
+    setInputs(nextInputs);
+    if (skippedFileFields) {
+      toast.success("Sample applied — upload a file for the file field(s)");
+    } else {
+      toast.success("Sample input applied");
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -104,6 +134,11 @@ export default function WorkerDetailPage() {
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
   );
   const canRun = !running && !worker.paused && missingConnections.length === 0;
+  const canApplySample = worker.config.inputs.every((inp) => {
+    if (!inp.required || inp.type === "file") return true;
+    const sampleValue = worker.example_input?.[inp.name];
+    return sampleValue !== undefined && sampleValue !== null;
+  });
 
   return (
     <div className="space-y-6">
@@ -117,6 +152,14 @@ export default function WorkerDetailPage() {
             {worker.name}
           </h1>
           <p className="text-[#666] text-sm">{worker.description}</p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            {worker.folder && (
+              <Badge variant="secondary" className="text-xs font-normal">{worker.folder}</Badge>
+            )}
+            {(worker.tags || []).map((tag) => (
+              <Badge key={tag} variant="outline" className="text-xs font-normal bg-white">{tag}</Badge>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Link href={`/workers/${worker.id}/edit`}>
@@ -142,6 +185,70 @@ export default function WorkerDetailPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {(worker.long_description || worker.use_cases?.length || worker.example_input || worker.example_output || worker.how_it_works) && (
+            <Card className="border-[#eaeaea] shadow-none bg-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Worker guide</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {worker.long_description && (
+                  <details className="group rounded-md border border-[#eaeaea] bg-[#fafafa] p-3" open={false}>
+                    <summary className="cursor-pointer text-sm font-medium text-[#333] marker:text-[#999]">
+                      Long description
+                    </summary>
+                    <p className="text-sm text-[#666] leading-relaxed mt-2 whitespace-pre-wrap">{worker.long_description}</p>
+                  </details>
+                )}
+
+                {worker.use_cases && worker.use_cases.length > 0 && (
+                  <section>
+                    <h2 className="text-sm font-medium mb-2">Use cases</h2>
+                    <ul className="list-disc pl-5 space-y-1">
+                      {worker.use_cases.map((useCase) => (
+                        <li key={useCase} className="text-sm text-[#666]">{useCase}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+
+                {worker.example_input && (
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 className="text-sm font-medium">Example input</h2>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={applyExampleInput}
+                        disabled={!canApplySample}
+                      >
+                        <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
+                        Use this sample
+                      </Button>
+                    </div>
+                    <ExampleInputPreview inputs={worker.config.inputs} example={worker.example_input} />
+                  </section>
+                )}
+
+                {worker.example_output && (
+                  <section>
+                    <h2 className="text-sm font-medium mb-2">Example output</h2>
+                    <MarkdownPreview value={worker.example_output} />
+                  </section>
+                )}
+
+                {worker.how_it_works && (
+                  <section>
+                    <h2 className="text-sm font-medium mb-2">How it works</h2>
+                    <pre className="text-xs leading-relaxed overflow-auto font-mono bg-[#f4f4f5] p-3 rounded-md border border-[#eaeaea] whitespace-pre-wrap">
+                      {worker.how_it_works}
+                    </pre>
+                  </section>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-[#eaeaea] shadow-none bg-white">
             <CardHeader>
               <CardTitle className="text-sm font-medium">Run worker</CardTitle>
@@ -386,6 +493,69 @@ export default function WorkerDetailPage() {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ExampleInputPreview({
+  inputs,
+  example,
+}: {
+  inputs: WorkerInput[];
+  example: Record<string, unknown>;
+}) {
+  const entries = inputs.length > 0
+    ? inputs.map((input) => ({
+        name: input.name,
+        label: input.label,
+        type: input.type,
+        value: example[input.name],
+      }))
+    : Object.entries(example).map(([name, value]) => ({
+        name,
+        label: name.replace(/_/g, " "),
+        type: typeof value,
+        value,
+      }));
+
+  if (entries.length === 0) {
+    return <p className="text-sm text-[#999]">This worker has no manual inputs.</p>;
+  }
+
+  return (
+    <div className="rounded-md border border-[#eaeaea] overflow-hidden">
+      {entries.map((entry) => (
+        <div key={entry.name} className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)] border-b border-[#eaeaea] last:border-b-0">
+          <div className="bg-[#fafafa] px-3 py-2">
+            <p className="text-xs font-medium text-[#555]">{entry.label}</p>
+            <p className="text-[11px] text-[#999] font-mono">{entry.name} · {entry.type}</p>
+          </div>
+          <div className="px-3 py-2">
+            <pre className={`text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-[#999] italic" : "text-[#333]"}`}>
+              {formatExampleValue(entry.value, entry.type)}
+            </pre>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatExampleValue(value: unknown, type?: string): string {
+  if (value === undefined) return "";
+  if (value === null) {
+    return type === "file" ? "(no sample file — upload one)" : "null";
+  }
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function MarkdownPreview({ value }: { value: string }) {
+  return (
+    <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea]">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {value}
+      </ReactMarkdown>
     </div>
   );
 }
