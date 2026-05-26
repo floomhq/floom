@@ -2,6 +2,40 @@ schema_version: '0.3'
 name: input-types-test
 title: Input Types Test
 description: Exercises every input type to verify the form renderer.
+long_description: |
+  A developer-facing fixture that renders every supported input control and echoes the submitted values. Use it when changing the form renderer, input serialization, or file upload path.
+use_cases:
+- Verify text, textarea, number, select, boolean, and file inputs in one form.
+- Confirm default values and required flags render correctly.
+- Capture raw submitted values for regression checks.
+example_input:
+  text_input: Hello Workeros
+  textarea_input: |
+    Multiline note for renderer verification.
+    Second line stays intact.
+  number_input: 42
+  select_input: beta
+  boolean_input: true
+  file_input: null
+example_output: |
+  ## Input echo
+
+  - `text_input`: Hello Workeros
+  - `number_input`: 42
+  - `select_input`: beta
+  - `boolean_input`: true
+  - `file_input`: sample.txt
+how_it_works: |
+  Form submission
+    -> collect every supported input type
+    -> serialize values into worker inputs
+    -> echo markdown summary and raw JSON
+folder: DevX/Fixtures
+tags:
+- testing
+- inputs
+- devx
+- forms
 version: 0.1.0
 entrypoint: SKILL.md
 targets:
@@ -59,7 +93,11 @@ exec:
     label: Boolean (checkbox)
   - name: file_input
     kind: file
-    media_type: application/octet-stream
+    media_type: text/csv
+    accepts:
+    - text/csv
+    - application/octet-stream
+    max_size_mb: 1
     path: inputs/file_input
     required: false
     label: File upload
@@ -79,6 +117,8 @@ exec:
     label: Raw inputs
 capabilities:
   secrets: []
+  files:
+  - file_input
   network:
     egress: false
 approvals:

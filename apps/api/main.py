@@ -1,20 +1,27 @@
 """Floom API — FastAPI backend for the OS for Background Workers."""
 
+import asyncio
 import os
 import json
 import sqlite3
 import logging
 import mimetypes
+import hashlib
+import hmac
+import base64
+import shutil
 import fcntl
 import re
 import time
 import collections
 import threading
+import tempfile
+import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -22,11 +29,11 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso, DB_PATH
+from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from models import (
     ApproveRequest,
     RunCreate,
     RejectRequest,
-    PaginationParams,
     WorkerSummary,
     WorkerDetail,
     RunSummary,
@@ -44,18 +51,21 @@ from models import (
     SecretStatus,
     WorkerStatus,
     WorkerConfig,
+    WorkerUpdateRequest,
 )
 from worker_registry import (
+    WORKERS_DIR,
     discover_workers,
     get_worker,
-    get_worker_config,
-    get_worker_contract,
     invalidate_worker_cache,
 )
-from run_service import create_run, get_worker_config_for_run, start_run, update_run_status, add_log
-from run_service import get_secrets_for_worker
+from run_service import create_run, get_worker_config_for_run, start_run, add_log
+from run_service import register_sse_publisher
 
 load_dotenv()
+api_env_path = Path("/root/.config/workeros/api.env")
+if api_env_path.is_file():
+    load_dotenv(api_env_path, override=False)
 init_db()
 
 # ---------------------------------------------------------------------------
@@ -66,6 +76,8 @@ init_db()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: startup + shutdown hooks."""
+    # Wire up SSE publisher before starting workers (avoids circular import)
+    register_sse_publisher(_sse_publish)
     # Startup
     reload_workers()
     from scheduler import start_scheduler
@@ -94,17 +106,28 @@ app.add_middleware(
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Require x-floom-secret on all write (non-GET, non-OPTIONS) requests.
+    """Require x-floom-secret on ALL requests except exempt paths.
 
-    Skipped when FLOOM_SECRET env var is not configured (localhost dev).
-    The connections/callback GET is also exempt (OAuth redirect landing).
-    Incoming webhooks (/webhooks/<worker_id>) are exempt — they use their own
-    per-worker HMAC signature verification instead.
+    Exempt paths (no internal secret needed):
+      - /webhooks/*       — HMAC-authed by per-worker secret
+      - /healthz          — liveness probe, no secret
+      - /composio-events  — Composio webhook receiver
+      - /connections/callback — OAuth browser redirect validates connection state
+      - OPTIONS           — CORS preflight
+
+    When FLOOM_SECRET is not set (localhost dev mode), all requests pass.
+    Previously GET/HEAD were exempt; this was a security hole — MCP read
+    tools were effectively unauthenticated.
     """
     secret = os.environ.get("FLOOM_SECRET", "")
-    if secret and request.method not in ("GET", "HEAD", "OPTIONS"):
-        # Exempt incoming webhook calls from the internal secret
-        if request.url.path.startswith("/webhooks/"):
+    if secret and request.method != "OPTIONS":
+        path = request.url.path
+        if (
+            path.startswith("/webhooks/")
+            or path == "/healthz"
+            or path == "/composio-events"
+            or path == "/connections/callback"
+        ):
             return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
         if header != secret:
@@ -113,6 +136,67 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
+
+# ---------------------------------------------------------------------------
+# SSE event queue registry
+# ---------------------------------------------------------------------------
+# Maps run_id → list of (queue, loop). Each connected SSE consumer gets one
+# queue. Cross-thread asyncio.Queue.put_nowait is unsafe, so we capture the
+# loop the queue was bound to and use call_soon_threadsafe from worker threads.
+_sse_queues: Dict[str, List[tuple]] = {}
+_sse_lock = threading.Lock()
+
+_TERMINAL_STATUSES = frozenset({
+    RunStatus.COMPLETED.value,
+    RunStatus.FAILED.value,
+    RunStatus.APPROVED.value,
+    RunStatus.REJECTED.value,
+    # pending_approval is semi-terminal (waiting for human) — stream it but
+    # keep open so approval events can follow
+})
+
+
+def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
+    """Publish an SSE event to all active consumers for a run.
+
+    Called from run_service (worker threads) after each state change.
+    asyncio.Queue is not thread-safe, so we route the put through each
+    queue's bound loop via call_soon_threadsafe.
+    """
+    with _sse_lock:
+        entries = list(_sse_queues.get(run_id, []))
+    for q, loop in entries:
+        def _put(q=q, event=event):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning("SSE queue full for run %s, dropping event", run_id)
+        try:
+            loop.call_soon_threadsafe(_put)
+        except RuntimeError:
+            # Loop already closed (consumer disconnected, cleanup pending).
+            pass
+
+
+def _sse_cleanup(run_id: str, q: asyncio.Queue) -> None:
+    """Remove a specific consumer queue from the registry."""
+    with _sse_lock:
+        entries = _sse_queues.get(run_id)
+        if entries:
+            _sse_queues[run_id] = [(eq, el) for (eq, el) in entries if eq is not q]
+            if not _sse_queues[run_id]:
+                _sse_queues.pop(run_id, None)
+
+
+# ---------------------------------------------------------------------------
+# /healthz
+# ---------------------------------------------------------------------------
+
+@app.get("/healthz")
+def healthz():
+    """Liveness probe — exempt from x-floom-secret."""
+    return {"status": "ok"}
+
 
 # ---------------------------------------------------------------------------
 # Error handlers
@@ -179,10 +263,165 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
     )
 
 
+def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
+    if not (run_runner or "").startswith("skill"):
+        return []
+    transcript = next((artifact for artifact in artifacts if artifact.name == "transcript.jsonl"), None)
+    if not transcript:
+        return []
+
+    from runner_local import ARTIFACTS_DIR
+
+    try:
+        artifacts_dir = ARTIFACTS_DIR.resolve()
+        path = Path(transcript.path).resolve()
+        path.relative_to(artifacts_dir)
+    except Exception:
+        return []
+    if not path.is_file() or path.stat().st_size > 2_000_000:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            parsed = {"type": "parse_error", "content": line}
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+    return rows
+
+
 def _skill_version_id(worker_id: str, manifest: Dict[str, Any]) -> str:
     version = str(manifest.get("version") or "0.1.0")
     safe_version = version.replace(".", "_").replace("-", "_")
     return f"sv_{worker_id}_{safe_version}"
+
+
+def _composio_webhook_url() -> str:
+    base = (
+        os.environ.get("COMPOSIO_WEBHOOK_URL")
+        or os.environ.get("WORKERS_API_URL")
+        or os.environ.get("FLOOM_API_BASE")
+        or "https://workers-api.floom.dev"
+    )
+    base = base.rstrip("/")
+    if base.endswith("/composio-events"):
+        return base
+    return f"{base}/composio-events"
+
+
+def _composio_trigger_signature(config: Optional[WorkerConfig]) -> Optional[Dict[str, Any]]:
+    if not config or config.trigger.type != "composio" or not config.trigger.composio:
+        return None
+    composio = config.trigger.composio
+    return {
+        "event": composio.event,
+        "connection_id": composio.connection_id,
+        "filters": composio.filters or {},
+    }
+
+
+def _config_from_manifest_for_worker(raw: Dict[str, Any], worker_id: str) -> Optional[WorkerConfig]:
+    try:
+        from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
+        parsed = parse_worker_manifest(raw)
+        if isinstance(parsed, WorkerContract):
+            return worker_contract_to_worker_config(parsed, worker_id)
+        return parsed
+    except Exception:
+        logger.exception("Failed to parse worker manifest for composio lifecycle: %s", worker_id)
+        return None
+
+
+def _existing_composio_state(conn: sqlite3.Connection, worker_id: str) -> Dict[str, Any]:
+    try:
+        row = conn.execute(
+            """
+            SELECT w.composio_trigger_id, w.composio_event, sv.manifest_json
+            FROM workers w
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE w.id = ?
+            """,
+            (worker_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return {}
+    if not row:
+        return {}
+    manifest = json.loads(row["manifest_json"] or "{}")
+    old_config = _config_from_manifest_for_worker(manifest, worker_id) if isinstance(manifest, dict) else None
+    return {
+        "trigger_id": row["composio_trigger_id"],
+        "event": row["composio_event"],
+        "signature": _composio_trigger_signature(old_config),
+    }
+
+
+def _disable_composio_trigger(event: Optional[str], trigger_id: Optional[str], worker_id: str) -> None:
+    if not event:
+        return
+    try:
+        from composio_client import disable_trigger
+        disable_trigger(event, trigger_id)
+    except Exception as exc:
+        logger.exception("Failed to disable Composio trigger for worker %s", worker_id)
+        raise RuntimeError(f"Composio disable failed for worker {worker_id}: {exc}") from exc
+
+
+def _enable_composio_trigger(config: WorkerConfig, worker_id: str) -> str:
+    signature = _composio_trigger_signature(config)
+    if not signature:
+        raise RuntimeError(f"Worker {worker_id} does not declare trigger.composio")
+    try:
+        from composio_client import enable_trigger
+        return enable_trigger(
+            signature["event"],
+            signature["connection_id"],
+            _composio_webhook_url(),
+            signature["filters"],
+        )
+    except Exception as exc:
+        logger.exception("Failed to enable Composio trigger for worker %s", worker_id)
+        raise RuntimeError(f"Composio enable failed for worker {worker_id}: {exc}") from exc
+
+
+def _sync_composio_registration(
+    conn: sqlite3.Connection,
+    worker_id: str,
+    config: Optional[WorkerConfig],
+    existing: Optional[Dict[str, Any]] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    existing = existing or _existing_composio_state(conn, worker_id)
+    new_signature = _composio_trigger_signature(config)
+    old_signature = existing.get("signature")
+    old_trigger_id = existing.get("trigger_id")
+    old_event = existing.get("event") or (old_signature or {}).get("event")
+
+    if not new_signature:
+        if old_trigger_id:
+            _disable_composio_trigger(old_event, old_trigger_id, worker_id)
+        return None, None
+
+    if old_trigger_id and old_signature == new_signature:
+        return old_trigger_id, new_signature["event"]
+
+    enabled_id = _enable_composio_trigger(config, worker_id)
+    if old_trigger_id:
+        try:
+            _disable_composio_trigger(old_event, old_trigger_id, worker_id)
+        except RuntimeError:
+            try:
+                _disable_composio_trigger(new_signature["event"], enabled_id, worker_id)
+            except RuntimeError:
+                logger.exception(
+                    "Failed to roll back newly enabled Composio trigger for worker %s",
+                    worker_id,
+                )
+            raise
+    return enabled_id, new_signature["event"]
 
 
 def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str, Any]]) -> None:
@@ -193,6 +432,19 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
         trigger = config.get("trigger") or {}
         worker_id = w["id"]
         skill_version_id = _skill_version_id(worker_id, manifest)
+        config_model = _config_from_manifest_for_worker(manifest, worker_id)
+        if config_model is None and config:
+            try:
+                config_model = WorkerConfig(**config)
+            except Exception:
+                logger.exception("Failed to parse worker config for composio lifecycle: %s", worker_id)
+        existing_composio = _existing_composio_state(conn, worker_id)
+        composio_trigger_id, composio_event = _sync_composio_registration(
+            conn,
+            worker_id,
+            config_model,
+            existing_composio,
+        )
         conn.execute(
             """
             INSERT INTO skill_versions
@@ -207,7 +459,7 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 manifest.get("name") or worker_id.replace("_", "-"),
                 manifest.get("version") or "0.1.0",
                 json.dumps(manifest),
-                f"workers/{worker_id}",
+                str((WORKERS_DIR / worker_id).resolve()),
                 now,
             ),
         )
@@ -216,14 +468,17 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
             INSERT INTO workers
                 (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
-                 notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico')
+                 notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
+                 composio_trigger_id, composio_event)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico', ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
                 trigger_type=excluded.trigger_type,
                 cron_expr=excluded.cron_expr,
-                cron_timezone=excluded.cron_timezone
+                cron_timezone=excluded.cron_timezone,
+                composio_trigger_id=excluded.composio_trigger_id,
+                composio_event=excluded.composio_event
             """,
             (
                 worker_id,
@@ -235,6 +490,8 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 json.dumps({}),
                 json.dumps({}),
                 now,
+                composio_trigger_id,
+                composio_event,
             ),
         )
 
@@ -243,15 +500,23 @@ def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     d = row_to_dict(row)
     config = get_worker_config_for_run(d["id"])
     manifest = json.loads(d.get("manifest_json") or "{}")
+    manifest_dict = manifest if isinstance(manifest, dict) else {}
     return {
         "id": d["id"],
         "name": d["name"],
-        "description": manifest.get("description") if isinstance(manifest, dict) else None,
+        "description": manifest_dict.get("description"),
+        "long_description": manifest_dict.get("long_description"),
+        "use_cases": manifest_dict.get("use_cases"),
+        "example_input": manifest_dict.get("example_input"),
+        "example_output": manifest_dict.get("example_output"),
+        "how_it_works": manifest_dict.get("how_it_works"),
+        "tags": manifest_dict.get("tags") or [],
+        "folder": manifest_dict.get("folder"),
         "status": "healthy",
         "trigger_type": d.get("trigger_type") or (config.trigger.type if config else "manual"),
         "runner": config.runtime.runner if config and config.runtime else "local",
         "config": config.model_dump(mode="json") if config else {},
-        "manifest": manifest,
+        "manifest": manifest_dict,
     }
 
 
@@ -292,6 +557,281 @@ def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
 # Workers
 # ---------------------------------------------------------------------------
 
+
+def _parse_accepts(value: Optional[str]) -> set[str]:
+    if not value:
+        return set()
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return {normalize_media_type(str(item)) for item in parsed if str(item).strip()}
+    except json.JSONDecodeError:
+        pass
+    return {normalize_media_type(part) for part in value.split(",") if part.strip()}
+
+
+def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+    else:
+        target = WORKERS_DIR / worker_id
+    resolved = target.resolve()
+    allowed_root = WORKERS_DIR.parent.resolve()
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid worker bundle path")
+    return resolved
+
+
+_ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
+
+
+def _increment_file_ref_counts(file_ids: List[str]) -> None:
+    """Increment file ref_counts in one short transaction tolerant of run bursts."""
+    if not file_ids:
+        return
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    counts = collections.Counter(file_ids)
+    conn = sqlite3.connect(DB_PATH, timeout=30, detect_types=sqlite3.PARSE_DECLTYPES)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        for file_id, count in counts.items():
+            conn.execute(
+                "UPDATE files SET ref_count = ref_count + ? WHERE id = ?",
+                (count, file_id),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _resolve_file_input_references(
+    worker_id: str, run_id: str, inputs: Dict[str, Any], bound_by: str = "anonymous"
+) -> Dict[str, Any]:
+    """Stage blob files into a per-run inputs directory.
+
+    Files are copied from the content-addressed blob store into
+    ``<artifacts>/<run_id>/inputs/<name><ext>`` so that concurrent runs for
+    the same worker never share or overwrite each other's input files.
+    Optional inputs omitted by this run produce no file in the run directory.
+
+    The resolved value stored in *inputs* is the **absolute path** to the
+    staged file so that the local runner can read it without relying on the
+    process-global cwd.
+    """
+    config = get_worker_config_for_run(worker_id)
+    if not config:
+        return dict(inputs)
+
+    resolved_inputs = dict(inputs)
+    file_inputs = [inp for inp in config.inputs if inp.type == "file"]
+    if not file_inputs:
+        return resolved_inputs
+
+    # Per-run staging dir — isolated from bundle and from other concurrent runs.
+    artifacts_dir = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", str(_ARTIFACTS_DIR))).resolve()
+    run_inputs_dir = artifacts_dir / run_id / "inputs"
+    run_inputs_dir.mkdir(parents=True, exist_ok=True)
+    bound_file_ids: List[str] = []
+
+    with get_db() as conn:
+        for inp in file_inputs:
+            value = resolved_inputs.get(inp.name)
+            if value in (None, ""):
+                # Optional file omitted for this run — leave it absent in the
+                # per-run dir so stale files from earlier runs are never visible.
+                continue
+            if not is_sha256(value):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File input '{inp.name}': value must be a SHA-256 reference "
+                        f"from /uploads, got non-SHA value"
+                    ),
+                )
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
+                raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+
+            row = conn.execute(
+                "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
+                (value,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Uploaded file not found: {inp.name}")
+
+            source = blob_path(row["id"])
+            if not source.is_file():
+                raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
+
+            # Fix 4: Bind-time revalidation — reject if blob violates this input's constraints.
+            if inp.accepts:
+                accepted = set(inp.accepts)
+                if row["media_type"] not in accepted:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"File input '{inp.name}': stored media_type {row['media_type']!r} "
+                            f"is not in accepts {sorted(accepted)}"
+                        ),
+                    )
+            if inp.max_size_mb is not None:
+                max_bytes = int(inp.max_size_mb * 1024 * 1024)
+                if row["size_bytes"] > max_bytes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"File input '{inp.name}': stored size {row['size_bytes']} bytes "
+                            f"exceeds max_size_mb={inp.max_size_mb}"
+                        ),
+                    )
+
+            # Fix 5: File ownership audit — log cross-user bindings (non-blocking per T1c).
+            file_owner = row["uploaded_by"] or "anonymous"
+            if file_owner != bound_by:
+                logger.info(
+                    "file_binding_audit: run=%s worker=%s input=%s sha=%s "
+                    "uploaded_by=%r bound_by=%r",
+                    run_id,
+                    worker_id,
+                    inp.name,
+                    row["id"],
+                    file_owner,
+                    bound_by,
+                )
+                with get_db() as audit_conn:
+                    audit_conn.execute(
+                        """
+                        INSERT INTO file_binding_audit
+                            (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+                    )
+
+            ext = extension_for_file(row["filename"], row["media_type"])
+            mounted = run_inputs_dir / f"{inp.name}{ext}"
+            shutil.copyfile(source, mounted)
+            # Store absolute path so runners don't need cwd tricks to locate the file.
+            resolved_inputs[inp.name] = str(mounted)
+            bound_file_ids.append(row["id"])
+
+    _increment_file_ref_counts(bound_file_ids)
+
+    return resolved_inputs
+
+
+_DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard ceiling
+
+
+@app.post("/uploads")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    max_size_mb: Optional[float] = Form(None),
+    accepts: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    if max_size_mb is not None and max_size_mb <= 0:
+        raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
+
+    media_type = normalize_media_type(
+        file.content_type or mimetypes.guess_type(file.filename or "")[0]
+    )
+    accepted = _parse_accepts(accepts)
+    if accepted and media_type not in accepted:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not accepted",
+        )
+
+    # Fix 3: enforce a hard ceiling even when the client omits max_size_mb.
+    # Stream to a temp file (not memory) and hash on the fly so large uploads
+    # never fully buffer in process RAM before the 413 is raised.
+    if max_size_mb is not None:
+        max_bytes = min(int(max_size_mb * 1024 * 1024), _DEFAULT_UPLOAD_MAX_BYTES)
+    else:
+        max_bytes = _DEFAULT_UPLOAD_MAX_BYTES
+
+    hasher = hashlib.sha256()
+    size = 0
+    # Stream directly to a temp file to avoid memory buffering.
+    # Use BLOBS_DIR from files.py (already env-resolved) so the temp file is on
+    # the same filesystem as the final target, making os.replace atomic.
+    from files import BLOBS_DIR as _BLOBS_DIR
+    _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_upload = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=_BLOBS_DIR,
+            prefix=".upload.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_out:
+            tmp_upload = Path(tmp_out.name)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    tmp_out.flush()
+                    limit_mb = max_size_mb if max_size_mb is not None else (_DEFAULT_UPLOAD_MAX_BYTES // (1024 * 1024))
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Uploaded file exceeds {limit_mb:g} MB",
+                    )
+                hasher.update(chunk)
+                tmp_out.write(chunk)
+    except HTTPException:
+        if tmp_upload is not None:
+            tmp_upload.unlink(missing_ok=True)
+        raise
+
+    sha256 = hasher.hexdigest()
+    target = ensure_blob_dir(sha256)
+    if not target.exists():
+        final_tmp = target.parent / f".{sha256}.tmp.{os.getpid()}.{threading.get_ident()}"
+        try:
+            os.replace(tmp_upload, final_tmp)
+            os.replace(final_tmp, target)
+        finally:
+            final_tmp.unlink(missing_ok=True)
+            tmp_upload.unlink(missing_ok=True)
+    else:
+        # Blob already exists — dedup; remove the temp file.
+        tmp_upload.unlink(missing_ok=True)
+
+    uploaded_by = request.headers.get("x-floom-user") or "anonymous"
+    uploaded_at = now_iso()
+    filename = file.filename or sha256
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO files
+                (id, filename, media_type, size_bytes, uploaded_by, uploaded_at, ref_count)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                filename=files.filename,
+                media_type=files.media_type,
+                size_bytes=files.size_bytes,
+                uploaded_by=files.uploaded_by,
+                uploaded_at=files.uploaded_at,
+                ref_count=files.ref_count
+            """,
+            (sha256, filename, media_type, size, uploaded_by, uploaded_at),
+        )
+
+    return {"id": sha256, "sha256": sha256, "size": size, "media_type": media_type}
+
+
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
     workers = _list_db_workers() or discover_workers(use_cache=True)
@@ -325,6 +865,13 @@ def list_workers() -> List[WorkerSummary]:
                 id=w["id"],
                 name=w["name"],
                 description=w.get("description"),
+                long_description=w.get("long_description"),
+                use_cases=w.get("use_cases"),
+                example_input=w.get("example_input"),
+                example_output=w.get("example_output"),
+                how_it_works=w.get("how_it_works"),
+                tags=w.get("tags") or [],
+                folder=w.get("folder"),
                 status=status,
                 paused=w["id"] in paused_workers,
                 trigger_type=w["trigger_type"],
@@ -414,14 +961,18 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
 
     # Read raw YAML for manifest viewer
     manifest_yaml: Optional[str] = None
+    run_py: Optional[str] = None
     try:
         from worker_registry import WORKERS_DIR
         yml_path = WORKERS_DIR / worker_id / "worker.yml"
+        run_path = WORKERS_DIR / worker_id / "run.py"
         if yml_path.is_file():
             manifest_yaml = yml_path.read_text()
         elif worker.get("manifest"):
             import yaml as pyyaml
             manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
+        if run_path.is_file():
+            run_py = run_path.read_text()
     except Exception:
         pass
 
@@ -429,6 +980,13 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         id=worker["id"],
         name=worker["name"],
         description=worker.get("description"),
+        long_description=worker.get("long_description"),
+        use_cases=worker.get("use_cases"),
+        example_input=worker.get("example_input"),
+        example_output=worker.get("example_output"),
+        how_it_works=worker.get("how_it_works"),
+        tags=worker.get("tags") or [],
+        folder=worker.get("folder"),
         status=status,
         paused=paused,
         trigger_type=worker["trigger_type"],
@@ -436,7 +994,185 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         config=config,
         recent_runs=recent_runs,
         manifest_yaml=manifest_yaml,
+        run_py=run_py,
     )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /workers/{worker_id} — partial update
+# ---------------------------------------------------------------------------
+
+@app.patch("/workers/{worker_id}", response_model=WorkerDetail)
+def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
+    """Partially update a worker instance.
+
+    All fields are optional. Rotation of webhook_secret returns the new raw
+    secret once in the response (new_webhook_secret field) — it is never
+    stored in plaintext.
+    """
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    # Validate cron expression if provided
+    new_cron_expr = payload.cron_expr
+    if new_cron_expr is not None:
+        try:
+            from scheduler import compute_next_run_at
+            from datetime import datetime, timezone
+            test_dt = datetime.now(timezone.utc)
+            if compute_next_run_at(new_cron_expr, test_dt) is None:
+                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+        except ImportError:
+            # croniter not available — try basic validation via regex
+            # Standard cron has 5 space-separated fields
+            import re as _re
+            if not _re.fullmatch(r"[\d\*\-\,\/]+(?: [\d\*\-\,\/]+){4}", new_cron_expr.strip()):
+                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+
+    updates: list[str] = []
+    params: list[Any] = []
+
+    if payload.trigger_type is not None:
+        updates.append("trigger_type = ?")
+        params.append(payload.trigger_type)
+
+    if new_cron_expr is not None:
+        updates.append("cron_expr = ?")
+        params.append(new_cron_expr)
+
+    if payload.cron_timezone is not None:
+        updates.append("cron_timezone = ?")
+        params.append(payload.cron_timezone)
+
+    if payload.input_values is not None:
+        updates.append("input_values_json = ?")
+        params.append(json.dumps(payload.input_values))
+
+    # capabilities field is declared-not-enforced per T1c flip — just accept it
+    # No DB column to write to currently; stored in manifest only.
+
+    new_raw_secret: Optional[str] = None
+    if payload.webhook_secret_rotate:
+        from webhook_service import generate_webhook_secret
+        # Verify the worker actually has a webhook trigger before rotating
+        config = get_worker_config_for_run(worker_id)
+        if not config or config.trigger.type != "webhook":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Worker {worker_id!r} does not have a webhook trigger — cannot rotate secret",
+            )
+        new_raw_secret = generate_webhook_secret(worker_id)
+
+    if updates:
+        params.append(worker_id)
+        with get_db() as conn:
+            conn.execute(
+                f"UPDATE workers SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+        invalidate_worker_cache()
+
+    # Reload cron schedule if trigger/cron changed
+    if payload.trigger_type is not None or new_cron_expr is not None or payload.cron_timezone is not None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE workers SET next_run_at = NULL WHERE id = ?",
+                (worker_id,),
+            )
+
+    detail = get_worker_detail(worker_id)
+    if new_raw_secret is not None:
+        detail.new_webhook_secret = new_raw_secret
+    return detail
+
+
+# ---------------------------------------------------------------------------
+# DELETE /workers/{worker_id}
+# ---------------------------------------------------------------------------
+
+@app.delete("/workers/{worker_id}", status_code=204)
+def delete_worker(worker_id: str):
+    """Delete a worker and all dependent rows (runs, artifacts, logs, approvals).
+
+    - FK ON DELETE CASCADE handles dependent rows.
+    - Cancels any in-progress run gracefully (marks failed).
+    - Cleans up webhook secret.
+    - Removes scheduler slot (next_run_at cleared before delete).
+    - skill_version is preserved if other workers share it.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, skill_version_id FROM workers WHERE id = ?", (worker_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Worker not found")
+        skill_version_id = row["skill_version_id"]
+        composio_state = _existing_composio_state(conn, worker_id)
+
+    if composio_state.get("trigger_id"):
+        try:
+            _disable_composio_trigger(
+                composio_state.get("event") or (composio_state.get("signature") or {}).get("event"),
+                composio_state.get("trigger_id"),
+                worker_id,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Cancel any in-progress runs gracefully before deletion
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM runs WHERE worker_id = ? AND status IN ('queued', 'running')",
+            (worker_id,),
+        )
+        active_runs = [r["id"] for r in cursor.fetchall()]
+
+    for run_id in active_runs:
+        try:
+            from run_service import update_run_status
+            update_run_status(run_id, RunStatus.FAILED.value, error="Worker deleted")
+            logger.info("Cancelled active run %s before worker deletion", run_id)
+        except Exception as exc:
+            logger.warning("Could not cancel run %s: %s", run_id, exc)
+
+    # Remove webhook secret
+    try:
+        from webhook_service import delete_webhook_secret
+        delete_webhook_secret(worker_id)
+    except Exception as exc:
+        logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
+
+    # Delete the worker (FK CASCADE removes runs/artifacts/logs/approvals/webhooks)
+    with get_db() as conn:
+        conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+
+    # Check if skill_version is still referenced by other workers; preserve if so
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM workers WHERE skill_version_id = ?",
+            (skill_version_id,),
+        )
+        ref_count = cursor.fetchone()["cnt"]
+
+    # Remove bundle files from disk only if no other worker references this skill_version
+    from worker_registry import WORKERS_DIR
+    bundle_dir = WORKERS_DIR / worker_id
+    if ref_count == 0 and bundle_dir.is_dir():
+        try:
+            import shutil
+            shutil.rmtree(bundle_dir)
+            logger.info("Removed bundle dir %s", bundle_dir)
+        except Exception as exc:
+            logger.warning("Could not remove bundle dir %s: %s", bundle_dir, exc)
+    elif ref_count > 0:
+        logger.info("skill_version %s still referenced by %d workers, bundle preserved", skill_version_id, ref_count)
+
+    invalidate_worker_cache()
+    # 204 No Content — FastAPI returns empty body automatically for status_code=204
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -448,15 +1184,11 @@ class WorkerCreateRequest(BaseModel):
     run_py: str
 
 
-@app.post("/workers", response_model=WorkerDetail)
-def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
-    """Create a new worker from YAML + Python source."""
+def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
-    from worker_registry import WORKERS_DIR
 
-    # Parse and validate YAML
     try:
-        raw = pyyaml.safe_load(payload.worker_yml)
+        raw = pyyaml.safe_load(worker_yml)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}")
     if not isinstance(raw, dict):
@@ -474,9 +1206,17 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Schema validation failed: {exc}")
 
-    # Check for collision
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
+    return worker_id, config
+
+
+@app.post("/workers", response_model=WorkerDetail)
+def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
+    """Create a new worker from YAML + Python source."""
+    from worker_registry import WORKERS_DIR
+
+    worker_id, config = _parse_worker_payload(payload.worker_yml)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -499,9 +1239,72 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
 
     # Persist to DB
     with get_db() as conn:
-        _persist_discovered_workers(conn, workers)
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Return the new worker detail
+    return get_worker_detail(worker_id)
+
+
+@app.put("/workers/{worker_id}", response_model=WorkerDetail)
+def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
+    """Update an existing worker from YAML + Python source."""
+    from worker_registry import WORKERS_DIR
+
+    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml)
+    if parsed_worker_id != worker_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
+        )
+
+    target_dir = WORKERS_DIR / worker_id
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    worker_yml_path = target_dir / "worker.yml"
+    run_py_path = target_dir / "run.py"
+    requirements_path = target_dir / "requirements.txt"
+    skill_path = target_dir / "SKILL.md"
+    old_worker_yml = worker_yml_path.read_text() if worker_yml_path.exists() else None
+    old_run_py = run_py_path.read_text() if run_py_path.exists() else None
+    had_requirements = requirements_path.exists()
+    old_skill = skill_path.read_text() if skill_path.exists() else None
+
+    worker_yml_path.write_text(payload.worker_yml)
+    run_py_path.write_text(payload.run_py)
+    if not requirements_path.exists():
+        requirements_path.write_text("")
+    if not skill_path.exists():
+        skill_path.write_text(
+            f"# {_config.name}\n\n"
+            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+            "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+        )
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    with get_db() as conn:
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            if old_worker_yml is not None:
+                worker_yml_path.write_text(old_worker_yml)
+            if old_run_py is not None:
+                run_py_path.write_text(old_run_py)
+            if not had_requirements and requirements_path.exists():
+                requirements_path.unlink()
+            if old_skill is not None:
+                skill_path.write_text(old_skill)
+            elif skill_path.exists():
+                skill_path.unlink()
+            invalidate_worker_cache()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
     return get_worker_detail(worker_id)
 
 
@@ -510,7 +1313,10 @@ def reload_workers() -> ReloadResponse:
     invalidate_worker_cache()
     workers = discover_workers()
     with get_db() as conn:
-        _persist_discovered_workers(conn, workers)
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ReloadResponse(status="success", workers_loaded=len(workers))
 
 
@@ -519,13 +1325,32 @@ def reload_workers() -> ReloadResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/workers/{worker_id}/runs", response_model=ActionResponse)
-def create_worker_run(worker_id: str, payload: RunCreate) -> ActionResponse:
+def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> ActionResponse:
     worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
+    # Create the run record first so we have a run_id for per-run file staging.
     run_id = create_run(worker_id, payload.inputs, payload.trigger_source)
-    start_run(run_id, worker_id, payload.inputs)
+    bound_by = request.headers.get("x-floom-user") or "anonymous"
+    try:
+        resolved_inputs = _resolve_file_input_references(
+            worker_id, run_id, payload.inputs, bound_by=bound_by
+        )
+    except HTTPException as exc:
+        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc))
+        raise
+    # Persist resolved inputs (absolute file paths replace SHA values) so that
+    # GET /runs/:id returns the staged paths, not raw SHA strings.
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE runs SET input_json = ? WHERE id = ?",
+            (json.dumps(resolved_inputs), run_id),
+        )
+    start_run(run_id, worker_id, resolved_inputs)
     return ActionResponse(status="running", run_id=run_id)
 
 
@@ -683,6 +1508,7 @@ def get_run(run_id: str) -> RunDetail:
             )
             for r in cursor.fetchall()
         ]
+        transcript = _read_transcript_rows(run["runner"], artifacts)
 
         cursor.execute(
             "SELECT * FROM approvals WHERE run_id = ?",
@@ -715,6 +1541,7 @@ def get_run(run_id: str) -> RunDetail:
         output_schema=output_schema,
         logs=logs,
         artifacts=artifacts,
+        transcript=transcript,
         approval=approval,
         approval_status=ApprovalStatus(run.get("approval_status", "not_required")),
         error=run.get("error"),
@@ -722,6 +1549,95 @@ def get_run(run_id: str) -> RunDetail:
         completed_at=run.get("completed_at"),
         duration_ms=run.get("duration_ms"),
         created_at=run.get("created_at"),
+    )
+
+
+@app.get("/runs/{run_id}/events")
+async def stream_run_events(run_id: str, request: Request):
+    """Server-Sent Events stream for a single run.
+
+    Emits one ``data: <json>\\n\\n`` line per state change: status updates,
+    log lines, artifact additions.
+
+    Closes automatically when the run reaches a terminal state (completed,
+    failed, approved, rejected).
+
+    Memory management:
+    - Queue is registered in _sse_queues when consumer connects.
+    - Queue is removed in _sse_cleanup when consumer disconnects or run ends.
+    - If run is already terminal when client connects, current state is emitted
+      immediately then the stream closes.
+    """
+    # Check run exists
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, status FROM runs WHERE id = ?", (run_id,))
+        run_row = cursor.fetchone()
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    initial_status = run_row["status"]
+    already_terminal = initial_status in _TERMINAL_STATUSES
+
+    async def event_generator():
+        q: asyncio.Queue = asyncio.Queue(maxsize=512)
+
+        # If run already terminal, emit current state and close immediately
+        if already_terminal:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, worker_id, status, error, completed_at FROM runs WHERE id = ?",
+                    (run_id,),
+                )
+                final_row = cursor.fetchone()
+            if final_row:
+                evt = {
+                    "type": "status",
+                    "run_id": run_id,
+                    "status": final_row["status"],
+                    "error": final_row["error"],
+                    "completed_at": final_row["completed_at"],
+                }
+                yield f"data: {json.dumps(evt)}\n\n"
+            yield "data: {\"type\": \"close\"}\n\n"
+            return
+
+        # Register the consumer queue with its bound event loop
+        loop = asyncio.get_running_loop()
+        with _sse_lock:
+            _sse_queues.setdefault(run_id, []).append((q, loop))
+
+        try:
+            while True:
+                # Check for client disconnect
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+                    continue
+
+                yield f"data: {json.dumps(event)}\n\n"
+
+                # Close stream if run reached terminal state
+                evt_type = event.get("type")
+                evt_status = event.get("status", "")
+                if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                    break
+        finally:
+            _sse_cleanup(run_id, q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -824,6 +1740,12 @@ def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> Action
             (ApprovalStatus.APPROVED.value, RunStatus.APPROVED.value, run_id),
         )
     edited_note = " (output edited before approval)" if payload and payload.edited_output else ""
+    _sse_publish(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.APPROVED.value,
+        "completed_at": now,
+    })
     add_log(run_id, f"Run approved{edited_note}", level="info")
     logger.info("Run %s approved%s", run_id, edited_note)
     return ActionResponse(status="approved", run_id=run_id)
@@ -842,6 +1764,12 @@ def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
             "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
             (ApprovalStatus.REJECTED.value, RunStatus.REJECTED.value, run_id),
         )
+    _sse_publish(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.REJECTED.value,
+        "completed_at": now,
+    })
     add_log(run_id, f"Run rejected: {reason}", level="info")
     logger.info("Run %s rejected: %s", run_id, reason)
     return ActionResponse(status="rejected", run_id=run_id)
@@ -992,6 +1920,7 @@ def test_secret(name: str) -> SecretTestResult:
 
 PLATFORM_SECRETS: frozenset[str] = frozenset({
     "COMPOSIO_API_KEY",
+    "COMPOSIO_WEBHOOK_SIGNING_KEY",
     "WORKERS_FRONTEND_URL",
     "FLOOM_DB",
     "FLOOM_WORKERS_DIR",
@@ -1166,7 +2095,7 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
     redirect_url = result["redirect_url"]
 
     # Upsert into local DB (replace any prior row for this app)
-    conn_id = str(__import__("uuid").uuid4())
+    conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     with get_db() as conn:
         # Check if row already exists for this app
@@ -1206,14 +2135,29 @@ def connections_callback(connection_id: str = "", status: str = ""):
     from fastapi.responses import RedirectResponse
 
     if connection_id:
+        with get_db() as conn:
+            existing = conn.execute(
+                "SELECT status FROM composio_connections WHERE composio_connection_id = ?",
+                (connection_id,),
+            ).fetchone()
+
+        # Ignore unknown callback IDs; known IDs are validated by persisted state.
+        if not existing:
+            frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+            return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+
         # Try to refresh from Composio first
         try:
             from composio_client import check_status
             remote_status = check_status(connection_id)
         except Exception:
-            remote_status = status or "active"
+            remote_status = ""
 
-        final_status = remote_status if remote_status else (status or "active")
+        final_status = (
+            remote_status
+            if remote_status and remote_status != "not_found"
+            else (status or existing["status"])
+        )
         now = now_iso()
         with get_db() as conn:
             conn.execute(
@@ -1285,6 +2229,180 @@ def delete_connection(connection_id: str):
         conn.execute("DELETE FROM composio_connections WHERE id = ?", (connection_id,))
 
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Integration trigger catalog + Composio event receiver
+# ---------------------------------------------------------------------------
+
+_trigger_catalog_cache: Dict[str, Any] = {"expires_at": 0.0, "items": None}
+_trigger_catalog_lock = threading.Lock()
+
+
+@app.get("/integrations/triggers")
+def list_integration_triggers():
+    """Proxy Composio's trigger catalog, cached for one hour."""
+    now = time.monotonic()
+    with _trigger_catalog_lock:
+        if _trigger_catalog_cache["items"] is not None and now < _trigger_catalog_cache["expires_at"]:
+            return {"items": _trigger_catalog_cache["items"]}
+
+    try:
+        from composio_client import list_triggers
+        items = list_triggers()
+    except Exception as exc:
+        logger.exception("Failed to fetch Composio trigger catalog")
+        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+
+    with _trigger_catalog_lock:
+        _trigger_catalog_cache["items"] = items
+        _trigger_catalog_cache["expires_at"] = now + 3600
+    return {"items": items}
+
+
+def _signature_values(signature_header: str) -> list[str]:
+    values: list[str] = []
+    signature_header = signature_header.strip()
+    if not signature_header:
+        return values
+    if "," in signature_header:
+        values.append(signature_header.split(",", 1)[1].strip())
+    for part in signature_header.split():
+        if "," in part:
+            values.append(part.split(",", 1)[1].strip())
+        if "=" in part:
+            key, _, value = part.partition("=")
+            if key in {"v1", "sha256"} and value:
+                values.append(value.strip())
+    values.append(signature_header)
+    return [value for value in dict.fromkeys(values) if value]
+
+
+def _verify_composio_signature(body: bytes, request: Request, signing_key: str) -> bool:
+    webhook_id = request.headers.get("webhook-id", "")
+    webhook_timestamp = request.headers.get("webhook-timestamp", "")
+    signature_header = request.headers.get("webhook-signature", "")
+    if not webhook_id or not webhook_timestamp or not signature_header:
+        return False
+
+    try:
+        timestamp = int(webhook_timestamp)
+    except ValueError:
+        return False
+    tolerance = int(os.environ.get("COMPOSIO_WEBHOOK_TOLERANCE_SECONDS", "300"))
+    if tolerance > 0 and abs(time.time() - timestamp) > tolerance:
+        return False
+
+    signing_string = f"{webhook_id}.{webhook_timestamp}.{body.decode('utf-8')}".encode()
+    expected = base64.b64encode(
+        hmac.new(signing_key.encode(), signing_string, hashlib.sha256).digest()
+    ).decode()
+    return any(
+        hmac.compare_digest(expected, provided)
+        for provided in _signature_values(signature_header)
+    )
+
+
+def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
+    candidates = [
+        request.headers.get("X-Composio-Trigger-Id"),
+        request.headers.get("X-Trigger-Id"),
+    ]
+    if isinstance(payload, dict):
+        for key in (
+            "composio_trigger_id",
+            "trigger_id",
+            "triggerId",
+            "trigger_instance_id",
+            "triggerInstanceId",
+            "enabled_trigger_id",
+            "connected_account_trigger_id",
+        ):
+            candidates.append(payload.get(key))
+        for nested_key in ("data", "metadata", "trigger"):
+            nested = payload.get(nested_key)
+            if isinstance(nested, dict):
+                nested_keys = [
+                    "composio_trigger_id",
+                    "trigger_id",
+                    "triggerId",
+                    "trigger_instance_id",
+                    "triggerInstanceId",
+                    "enabled_trigger_id",
+                    "connected_account_trigger_id",
+                ]
+                if nested_key != "data":
+                    nested_keys.append("id")
+                for key in nested_keys:
+                    candidates.append(nested.get(key))
+    return [str(c) for c in candidates if c]
+
+
+def _event_name_from_payload(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("event", "event_name", "trigger_event", "trigger"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    nested = payload.get("metadata")
+    if isinstance(nested, dict):
+        value = nested.get("trigger_slug") or nested.get("event") or nested.get("event_name")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _find_worker_for_composio_event(payload: Any, request: Request) -> Optional[str]:
+    candidates = _candidate_composio_trigger_ids(payload, request)
+    with get_db() as conn:
+        for trigger_id in candidates:
+            row = conn.execute(
+                "SELECT id FROM workers WHERE composio_trigger_id = ? LIMIT 1",
+                (trigger_id,),
+            ).fetchone()
+            if row:
+                return row["id"]
+        if candidates:
+            return None
+        event_name = _event_name_from_payload(payload)
+        if event_name:
+            rows = conn.execute(
+                "SELECT id FROM workers WHERE composio_event = ? AND composio_trigger_id IS NOT NULL",
+                (event_name,),
+            ).fetchall()
+            if len(rows) == 1:
+                return rows[0]["id"]
+    return None
+
+
+@app.post("/composio-events", response_model=ActionResponse)
+async def composio_events(request: Request) -> ActionResponse:
+    """Receive signed Composio trigger webhooks and create worker runs."""
+    signing_key = os.environ.get("COMPOSIO_WEBHOOK_SIGNING_KEY", "")
+    if not signing_key:
+        raise HTTPException(status_code=503, detail="COMPOSIO_WEBHOOK_SIGNING_KEY is not configured")
+
+    body = await request.body()
+    if not _verify_composio_signature(body, request, signing_key):
+        raise HTTPException(status_code=401, detail="Invalid Composio signature")
+
+    if body:
+        try:
+            payload: Any = json.loads(body)
+        except Exception:
+            payload = {"raw": body.decode("utf-8", errors="replace")}
+    else:
+        payload = {}
+
+    worker_id = _find_worker_for_composio_event(payload, request)
+    if not worker_id:
+        raise HTTPException(status_code=404, detail="No worker registered for Composio trigger")
+
+    inputs = {"event": payload}
+    run_id = create_run(worker_id, inputs, trigger_source="composio")
+    start_run(run_id, worker_id, inputs)
+    return ActionResponse(status="queued", run_id=run_id)
 
 
 # ---------------------------------------------------------------------------

@@ -318,6 +318,21 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
         conn.execute(f"PRAGMA foreign_keys = {int(old_foreign_keys)}")
 
 
+def _migrate_composio_trigger_columns(conn: sqlite3.Connection) -> None:
+    """Add Composio trigger registration columns to worker instances."""
+    if not _table_exists(conn, "workers"):
+        return
+    columns = _table_columns(conn, "workers")
+    if "composio_trigger_id" not in columns:
+        conn.execute("ALTER TABLE workers ADD COLUMN composio_trigger_id TEXT")
+    if "composio_event" not in columns:
+        conn.execute("ALTER TABLE workers ADD COLUMN composio_event TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workers_composio_trigger_id "
+        "ON workers(composio_trigger_id)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -485,6 +500,37 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_workers_next_run_at ON workers(next_run_at);
     """,
     _migrate_worker_contract_split,
+    _migrate_composio_trigger_columns,
+    # -- migration 13: content-addressed file input blobs ----------------------
+    """
+    CREATE TABLE IF NOT EXISTS files (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        uploaded_by TEXT,
+        uploaded_at TEXT NOT NULL,
+        ref_count INTEGER DEFAULT 0 NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_files_uploaded_at ON files(uploaded_at);
+    """,
+    # -- migration 13: file_binding_audit for cross-user binding observability ---
+    """
+    CREATE TABLE IF NOT EXISTS file_binding_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        worker_id TEXT NOT NULL,
+        input_name TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        uploaded_by TEXT NOT NULL,
+        bound_by TEXT NOT NULL,
+        bound_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_binding_audit_run_id
+        ON file_binding_audit(run_id);
+    CREATE INDEX IF NOT EXISTS idx_file_binding_audit_file_id
+        ON file_binding_audit(file_id);
+    """,
 ]
 
 

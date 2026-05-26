@@ -2,6 +2,37 @@ schema_version: '0.3'
 name: csv-enricher
 title: CSV Enricher
 description: Enriches CSV rows using a custom instruction.
+long_description: |
+  Adds structured columns to raw CSV rows using the instruction you provide. Use it for quick enrichment passes where the source data is already in a spreadsheet shape and the output needs to stay spreadsheet-friendly.
+use_cases:
+- Score company rows for ICP fit before outreach.
+- Add recruiter notes to a candidate export.
+- Normalize messy spreadsheet fields into a consistent review column.
+example_input:
+  csv_text: |
+    name,company,title,location
+    Anna Keller,NovaSearch,Senior Recruiter,Berlin
+    Ben Ortiz,Workeros,Developer Experience Lead,Remote
+  instruction: Add columns for persona, likely priority, and one concise outreach angle.
+example_output: |
+  ## Enriched CSV preview
+
+  ```csv
+  name,company,title,location,persona,priority,outreach_angle
+  Anna Keller,NovaSearch,Senior Recruiter,Berlin,Recruiting operator,High,Ask about reducing manual candidate writeup work
+  Ben Ortiz,Workeros,Developer Experience Lead,Remote,Developer tooling buyer,Medium,Lead with sandboxed worker reliability and audit trails
+  ```
+how_it_works: |
+  CSV rows
+    -> parse headers and records
+    -> apply enrichment instruction row by row
+    -> return CSV with original columns plus new fields
+folder: Operations/Data
+tags:
+- csv
+- enrichment
+- operations
+- spreadsheet
 version: 0.1.0
 entrypoint: SKILL.md
 targets:
