@@ -55,7 +55,7 @@ limits:
 exec:
   mode: agent
   runtime: skill
-  runner: local
+  runner: e2b
   inputs:
   - name: notes
     kind: scalar

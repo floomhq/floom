@@ -9,6 +9,10 @@ venv/
 data/floom.db
 data/artifacts/*
 !data/artifacts/.gitkeep
+data/blobs/
+
+# Audit reports (may contain leaked secret values in evidence; keep local only)
+docs/launch-readiness/agent-runs/
 
 # Build
 .next/

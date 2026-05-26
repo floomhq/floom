@@ -53,7 +53,7 @@ exec:
   mode: agent
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs:
   - name: text_input
     kind: scalar

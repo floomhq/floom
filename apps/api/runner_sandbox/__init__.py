@@ -1,18 +1,28 @@
-"""Sandbox driver dispatch for Workeros."""
+"""Sandbox driver dispatch for Workeros — E2B-only execution.
+
+Federico 2026-05-26: cut the local in-process runner. E2B is the only sandbox.
+The malicious-bundle audit landed at 45/100 against the in-process runner
+(full host secret exfil, no real timeout, no memory limit, no network egress
+enforcement). Rather than reinvent sandboxing in 300+ lines of subprocess +
+rlimit + seccomp code, delegate to E2B. ~$15/month for 100 runs/day at 30s
+avg, cheaper than Zapier Pro.
+
+agent-mode workers use AgentDriver (LLM tool loop, separate concern).
+pure-script workers always run inside E2B.
+"""
 
 from .base import SandboxDriver
 from .agent_driver import AgentDriver
-from .local import LocalSandboxDriver
 from .e2b_driver import E2BSandboxDriver
 from .skill_driver import SkillRuntimeDriver
 from models import WorkerConfig
 
 
-def get_driver(runner: str = "local", config: WorkerConfig | None = None) -> SandboxDriver:
-    """Return the sandbox driver for the given runner name.
+def get_driver(runner: str = "e2b", config: WorkerConfig | None = None) -> SandboxDriver:
+    """Return the sandbox driver. Pure-script -> E2B; agent-mode -> AgentDriver.
 
-    Agent-mode workers always use AgentDriver. Pure-script workers use
-    runner: "local" (default) | "e2b" | "skill*".
+    Legacy compat: the `runner` parameter is accepted but ignored for pure-script
+    (always E2B now). Skill-runtime workers go through SkillRuntimeDriver.
     """
     if config and config.runtime:
         mode = config.runtime.mode or "agent"
@@ -20,22 +30,17 @@ def get_driver(runner: str = "local", config: WorkerConfig | None = None) -> San
             return AgentDriver()
         if mode != "pure-script":
             raise ValueError(f"Unknown exec mode: {mode!r}. Must be 'agent' or 'pure-script'.")
-        runner = config.runtime.runner or runner
 
-    runner = (runner or "local").strip().lower()
+    # Pure-script: always E2B. The `runner` field is informational only.
+    runner = (runner or "e2b").strip().lower()
     if runner.startswith("skill"):
         return SkillRuntimeDriver()
-    if runner == "local":
-        return LocalSandboxDriver()
-    if runner == "e2b":
-        return E2BSandboxDriver()
-    raise ValueError(f"Unknown runner: {runner!r}. Must be 'local', 'e2b', or 'skill*'.")
+    return E2BSandboxDriver()
 
 
 __all__ = [
     "SandboxDriver",
     "AgentDriver",
-    "LocalSandboxDriver",
     "E2BSandboxDriver",
     "SkillRuntimeDriver",
     "get_driver",
