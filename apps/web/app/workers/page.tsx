@@ -7,8 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, ChevronRight, Folder, Play, Plus, Tags } from "lucide-react";
+import { Box, ChevronRight, Eye, Folder, Pencil, Play, Plus, Tags } from "lucide-react";
 import type { WorkerSummary } from "@/lib/types";
+import { formatRelativeTime } from "@/components/connections/connection-data";
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
@@ -308,6 +309,8 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
     error: "text-red-600 border-red-200 bg-red-50",
   };
   const hoverDescription = firstLine(worker.long_description);
+  const stats = worker.recent_stats;
+  const hasStats = stats && stats.runs_7d > 0;
 
   return (
     <Card
@@ -315,19 +318,35 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
       title={hoverDescription || undefined}
     >
       <CardContent className="p-5 space-y-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
-            <Box className="w-4 h-4 text-[#999]" />
-            <h3 className="font-medium text-[15px]">{worker.name}</h3>
+        {/* Header row: name + status badge + View/Edit actions */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Box className="w-4 h-4 text-[#999] shrink-0" />
+            <h3 className="font-medium text-[15px] truncate">{worker.name}</h3>
           </div>
-          <Badge variant="outline" className={statusColor[worker.status] || statusColor.healthy}>
-            {worker.status.replace("_", " ")}
-          </Badge>
+          <div className="flex items-center gap-1 shrink-0">
+            <Link href={`/workers/${worker.id}`} title="View worker">
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[#888] hover:text-[#333]">
+                <Eye className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+            <Link href={`/workers/${worker.id}/edit`} title="Edit worker">
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[#888] hover:text-[#333]">
+                <Pencil className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+            <Badge variant="outline" className={statusColor[worker.status] || statusColor.healthy}>
+              {worker.status.replace("_", " ")}
+            </Badge>
+          </div>
         </div>
+
         <p className="text-sm text-[#666] line-clamp-2">{worker.description || "No description."}</p>
+
         {worker.folder && (
           <p className="text-xs text-[#999]">{worker.folder}</p>
         )}
+
         {(worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
@@ -339,15 +358,33 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
             ))}
           </div>
         )}
-        <div className="flex items-center gap-3 text-xs text-[#999]">
-          <span>Trigger: {worker.trigger_type}</span>
-          <span>Runner: {worker.runner}</span>
-        </div>
-        {worker.last_run && (
+
+        {/* Trigger chips: show all configured triggers, no runner label */}
+        {(worker.triggers || []).length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {(worker.triggers || []).map((label) => (
+              <span
+                key={label}
+                className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-[#f4f4f5] text-[#555]"
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-[#999]">{worker.trigger_type}</p>
+        )}
+
+        {/* Usage telemetry: only shown if worker has been run in last 7 days */}
+        {hasStats && (
           <p className="text-xs text-[#999]">
-            Last run: {worker.last_run.created_at ? new Date(worker.last_run.created_at).toLocaleString() : "-"} · {worker.last_run.status}
+            {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
+            {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
+            {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
+            {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
           </p>
         )}
+
         <div className="pt-1">
           <Link href={`/workers/${worker.id}`}>
             <Button
