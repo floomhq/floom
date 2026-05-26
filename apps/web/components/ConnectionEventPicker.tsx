@@ -167,10 +167,12 @@ export function ConnectionEventPicker({
       <div className="space-y-1.5">
         <Label className="text-xs text-[#666] uppercase tracking-wide">Integration</Label>
         <Select value={selectedApp} onValueChange={handleAppChange}>
-          <SelectTrigger className="border-[#e4e4e7]">
-            <SelectValue placeholder="Pick a connected integration" />
+          <SelectTrigger className="w-full border-[#e4e4e7]">
+            <SelectValue placeholder="Pick a connected integration">
+              {selectedApp ? appDisplayName(selectedApp) : null}
+            </SelectValue>
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="z-50">
             {connectedApps.map((c) => {
               const slug = c.app_name.toLowerCase();
               return (
@@ -202,10 +204,16 @@ export function ConnectionEventPicker({
             <p className="text-xs text-[#999]">No events found for this integration.</p>
           ) : (
             <Select value={composioEvent} onValueChange={handleEventChange}>
-              <SelectTrigger className="border-[#e4e4e7]">
-                <SelectValue placeholder="Select an event" />
+              <SelectTrigger className="w-full border-[#e4e4e7]">
+                <SelectValue placeholder="Select an event">
+                  {composioEvent
+                    ? (triggers.find((t) => triggerEventId(t) === composioEvent)
+                        ? triggerLabel(triggers.find((t) => triggerEventId(t) === composioEvent)!)
+                        : composioEvent)
+                    : null}
+                </SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-50">
                 {triggers.map((item) => {
                   const eventId = triggerEventId(item);
                   return (
@@ -225,10 +233,10 @@ export function ConnectionEventPicker({
         <div className="space-y-1.5">
           <Label className="text-xs text-[#666] uppercase tracking-wide">Account</Label>
           <Select value={composioConnectionId} onValueChange={(v) => onConnectionIdChange(v ?? "")}>
-            <SelectTrigger className="border-[#e4e4e7]">
+            <SelectTrigger className="w-full border-[#e4e4e7]">
               <SelectValue placeholder="Select account" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="z-50">
               {appConnections.map((conn) => (
                 <SelectItem key={conn.composio_connection_id} value={conn.composio_connection_id}>
                   {conn.account_label || conn.composio_connection_id}
@@ -237,13 +245,6 @@ export function ConnectionEventPicker({
             </SelectContent>
           </Select>
         </div>
-      )}
-
-      {/* Hidden: show resolved IDs for debugging in dev */}
-      {composioEvent && composioConnectionId && (
-        <p className="text-xs text-[#aaa] font-mono">
-          {composioEvent} / {composioConnectionId.slice(0, 16)}...
-        </p>
       )}
     </div>
   );
