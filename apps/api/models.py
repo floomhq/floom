@@ -108,6 +108,10 @@ class WorkerRuntime(BaseModel):
     runner: str = "local"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
+    mode: Literal["agent", "pure-script"] = "pure-script"
+    model: Optional[str] = None
+    system_prompt: Optional[str] = None
+    limits: "WorkerLimits" = Field(default_factory=lambda: WorkerLimits())
 
     @field_validator("runner")
     @classmethod
@@ -242,17 +246,46 @@ class WorkerContractField(BaseModel):
         return self
 
 
+class WorkerEntrypoint(BaseModel):
+    name: str
+    path: str
+    type: str
+
+    @field_validator("name", "path", "type")
+    @classmethod
+    def validate_nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value is required")
+        return value
+
+
+class WorkerLimits(BaseModel):
+    max_tool_iterations: int = Field(default=12, ge=1)
+    max_output_tokens: int = Field(default=4096, ge=1)
+    max_total_tokens: int = Field(default=50000, ge=1)
+    timeout_seconds: int = Field(default=300, ge=1)
+
+
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
+<<<<<<< HEAD
+    runtime: Literal["python311", "node22", "bash", "none"]
+=======
     runtime: str
+>>>>>>> origin/main
     runner: str = "local"
+    mode: Optional[Literal["agent", "pure-script"]] = None
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
 
-    @field_validator("command", "runtime")
+    @field_validator("command")
     @classmethod
+<<<<<<< HEAD
+    def validate_command(cls, value: Optional[str]) -> Optional[str]:
+=======
     def validate_nonempty(cls, value: Optional[str]) -> Optional[str]:
+>>>>>>> origin/main
         if value is not None and not value.strip():
             raise ValueError("value is required")
         return value
@@ -264,6 +297,16 @@ class WorkerContractExec(BaseModel):
         if value not in allowed:
             raise ValueError(f"runner must be one of {sorted(allowed)}, got {value!r}")
         return value
+
+    @model_validator(mode="after")
+    def validate_runtime_mode(self) -> "WorkerContractExec":
+        if self.mode == "pure-script" and not self.command:
+            raise ValueError("exec.command is required when exec.mode is pure-script")
+        if self.mode == "pure-script" and self.runtime == "none":
+            raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
+        if self.runtime == "none" and self.command:
+            raise ValueError("exec.runtime 'none' cannot declare exec.command")
+        return self
 
 
 class WorkerContractNetworkCapabilities(BaseModel):
@@ -307,8 +350,16 @@ class WorkerContract(BaseModel):
     how_it_works: Optional[str] = None
     folder: Optional[str] = None
     version: str
+<<<<<<< HEAD
+    entrypoint: Optional[str] = None
+    system_prompt: Optional[str] = None
+    model: Optional[str] = "gpt-5-mini"
+    entrypoints: Optional[List[WorkerEntrypoint]] = None
+    limits: WorkerLimits = Field(default_factory=WorkerLimits)
+=======
     model: Optional[str] = None
     entrypoint: str = "SKILL.md"
+>>>>>>> origin/main
     targets: List[str] = Field(default_factory=lambda: ["generic"])
     tags: Optional[List[str]] = None
     authors: List[WorkerContractAuthor] = Field(default_factory=list)
@@ -356,6 +407,21 @@ class WorkerContract(BaseModel):
             raise ValueError("description must be 500 characters or fewer")
         return value
 
+<<<<<<< HEAD
+    @model_validator(mode="after")
+    def resolve_exec_mode(self) -> "WorkerContract":
+        if self.exec.mode is None:
+            self.exec.mode = _resolve_legacy_exec_mode(self.exec)
+        if self.exec.runtime == "none" and self.exec.mode != "agent":
+            raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
+        if self.exec.runtime == "none" and self.exec.command:
+            raise ValueError("exec.runtime 'none' cannot declare exec.command")
+        if self.exec.runtime == "none" and (self.entrypoint or self.entrypoints):
+            raise ValueError("exec.runtime 'none' cannot declare entrypoints")
+        if self.exec.mode == "pure-script" and not self.exec.command:
+            raise ValueError("exec.command is required when exec.mode is pure-script")
+        return self
+=======
     @field_validator("long_description")
     @classmethod
     def validate_long_description(cls, value: Optional[str]) -> Optional[str]:
@@ -399,9 +465,16 @@ class WorkerContract(BaseModel):
         if not all(part.strip() for part in value.split("/")):
             raise ValueError("folder path segments must be non-empty")
         return value
+>>>>>>> origin/main
 
 
 WorkerManifest = WorkerConfig | WorkerContract
+
+
+def _resolve_legacy_exec_mode(exec_config: WorkerContractExec) -> Literal["agent", "pure-script"]:
+    if exec_config.runtime in {"python311", "node22", "bash"} and exec_config.command:
+        return "pure-script"
+    return "agent"
 
 
 def parse_worker_manifest(raw: Dict[str, Any]) -> WorkerManifest:
@@ -446,10 +519,23 @@ def _contract_output_type(field: WorkerContractField) -> str:
 
 def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -> WorkerConfig:
     """Project WorkerContract into the existing response/runtime config shape."""
+<<<<<<< HEAD
+    command_parts = contract.exec.command.strip().split() if contract.exec.command else []
+    entrypoint = contract.entrypoint or "SKILL.md"
+    if contract.exec.mode == "pure-script":
+        entrypoint = "run.py"
+        if len(command_parts) >= 2 and command_parts[0].startswith("python"):
+            entrypoint = command_parts[-1]
+        elif command_parts:
+            entrypoint = command_parts[-1]
+    elif contract.entrypoints:
+        entrypoint = contract.entrypoints[0].path
+=======
     command = contract.exec.command.strip().split() if contract.exec.command else []
     entrypoint = contract.entrypoint or "SKILL.md"
     if len(command) >= 2 and command[0].startswith("python"):
         entrypoint = command[-1]
+>>>>>>> origin/main
 
     runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
     runtime = WorkerRuntime(
@@ -457,6 +543,10 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         entrypoint=entrypoint,
         runner=runner,
         command=contract.exec.command,
+        mode=contract.exec.mode or "agent",
+        model=contract.model or "gpt-5-mini",
+        system_prompt=contract.system_prompt,
+        limits=contract.limits,
     )
 
     inputs = [
@@ -604,10 +694,14 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             command=f"python {config.runtime.entrypoint or 'run.py'}",
             runtime="python311",
             runner=config.runtime.runner,
+            mode=config.runtime.mode,
             inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],
             secrets=list(config.secrets),
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
+        system_prompt=config.runtime.system_prompt,
+        model=config.runtime.model or "gpt-5-mini",
+        limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
             files=[field.name for field in config.inputs if field.type == "file"],

@@ -42,7 +42,13 @@ version: 0.1.0
 entrypoint: SKILL.md
 targets:
 - generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
 exec:
+  mode: pure-script
   command: python run.py
   runtime: python311
   runner: local

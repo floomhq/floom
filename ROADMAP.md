@@ -2,7 +2,7 @@
 
 Tracks decisions and scope beyond V0 (V0 spec lives in `SPEC.md`). Each item lists status, decision rationale, and order.
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 ---
 
@@ -25,7 +25,7 @@ Federico 2026-05-26: "skills-based markdown workers should come much earlier tha
 **Strategic gate: every Tier-1 item should also exist on skills-neo's live-skills branch. Same primitive logic.**
 
 1. **WorkerContract migration** — adopt skills-neo's `@floom/shared` manifest schema; split `skill_version` (recipe) vs `worker` (instance). Unlocks marketplace install path from skills.floom.dev.
-2. **Skill-based markdown workers (`runtime.type: skill`, entrypoint `SKILL.md`)** — the connection between skills.floom.dev (library) and workeros (runtime). Non-developers write a markdown spec; LLM executes. **NEW primitive for BOTH workeros and skills-neo** — both products need it built.
+2. **Flexible skill primitive (T1g: agent-default, pure-script opt-in)** — worker = thin WorkerContract manifest wrapper + arbitrary skill bundle. Default execution is `exec.mode: agent`: load `SKILL.md` or declared `entrypoints` as the agent system prompt, pass inputs as JSON, expose bundle/files/output/command/composition/Composio/log tools, and enforce `limits` caps. Deterministic workers explicitly set `exec.mode: pure-script` and run the declared `exec.command` through the existing local/E2B script drivers. `exec.runtime` now means language/runtime (`python311`, `node22`, `bash`, `none`), with per-worker `model`, `system_prompt`, `entrypoints`, and `limits`.
 3. **Capability grants (declared-not-enforced in MVP, Federico 2026-05-26)** — single-user trust, no marketplace yet → don't gate. `capabilities` block in WorkerContract stays optional; frontend renders as audit badge; no error if a worker reads an undeclared secret or connection. Auto-fill at MCP `workers.create` time by static-grepping run.py + worker.yml. Enforcement layer ships when marketplace install (skills.floom.dev → workeros) or multi-user (T4) lands; flag = `capabilities.enforced: true` on those installs. Same default-open semantics apply to `connections`, `skills`, `workers` (composition), and `artifacts_from`. Original fail-closed framing preserved in the historical capability section as the marketplace/multi-tenant ceiling.
 4. **Content-hashed file input bindings** — port `apps/web/lib/live-skills/file-inputs.ts` pattern from skills-neo. Per-worker + per-run authorization.
 5. **5 upstream PRs to skills-neo `live-skills-v0x-schema` branch** — `label`, `placeholder`, `description`, `select+options`, `approvals` block. Backward-compatible additions to `@floom/shared` Zod schema.
@@ -465,7 +465,7 @@ After Gmail (or any) connection goes Active: show a banner on /connections — "
 
 ## V2 — Workers as Skills (markdown-first, code-optional) — [PROMOTED to Tier 1 on 2026-05-26]
 
-**Status note:** This section was originally V2 parked. Federico 2026-05-26 moved skill-based markdown workers to Tier 1 foundational (see top of file Priority Order). The historical content below explains the design + why; the Tier 1 line is the canonical sequencing.
+**Status note:** This section was originally V2 parked. Federico 2026-05-26 moved skills to Tier 1, then broadened the primitive in T1g: skills can be markdown, Python, JS, Bash, multi-file, or no declared entrypoint. The Tier 1 line is the canonical scope; this section preserves the original rationale.
 
 Federico 2026-05-25: "why do workers require python? huh? it can even just be an md file since we have LLM behind it, no? like we want to bring skills to live. skills can be pure md / a mix / pure python..."
 
@@ -536,10 +536,11 @@ The runtime sees `runtime.type: skill`, loads `skill.md` as the system prompt, p
 
 ### What changes
 
-- New runtime type `skill` (alongside `python`)
-- New entrypoint resolution: if `skill.md` present, use skill runtime; if `run.py`, use python; if both, dispatcher Python can call into markdown via `context.skill.run(skill_name, inputs)`
-- LLM choice: declared per-worker (`runtime.model: gpt-4o-mini` or `claude-haiku-4-5` etc.)
-- Tool exposure: workeros's MCP layer auto-exposes the worker's `connections` + `skills` as tools to the LLM
+- New execution mode `exec.mode: agent | pure-script`; new workers default to agent, no-AI script execution is explicit.
+- `exec.runtime` is the language/runtime (`python311`, `node22`, `bash`, `none`), not the agent-vs-script selector.
+- Entry point resolution supports `entrypoint: SKILL.md` plus optional multi-entrypoint `entrypoints[]`; the agent reads more bundle files through `read_file`.
+- LLM choice and caps are declared per worker via top-level `model`, `system_prompt`, and `limits`.
+- Tool exposure gives the agent bundle file tools, `write_output`, contained `run_command`, `invoke_worker`, Composio tools, and logging.
 - Output validation: same schema enforcement (worker.yml declares output type, runtime validates)
 
 ### Open questions
