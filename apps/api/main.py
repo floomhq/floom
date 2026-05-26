@@ -1423,6 +1423,12 @@ def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> Action
             (ApprovalStatus.APPROVED.value, RunStatus.APPROVED.value, run_id),
         )
     edited_note = " (output edited before approval)" if payload and payload.edited_output else ""
+    _sse_publish(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.APPROVED.value,
+        "completed_at": now,
+    })
     add_log(run_id, f"Run approved{edited_note}", level="info")
     logger.info("Run %s approved%s", run_id, edited_note)
     return ActionResponse(status="approved", run_id=run_id)
@@ -1441,6 +1447,12 @@ def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
             "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
             (ApprovalStatus.REJECTED.value, RunStatus.REJECTED.value, run_id),
         )
+    _sse_publish(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": RunStatus.REJECTED.value,
+        "completed_at": now,
+    })
     add_log(run_id, f"Run rejected: {reason}", level="info")
     logger.info("Run %s rejected: %s", run_id, reason)
     return ActionResponse(status="rejected", run_id=run_id)

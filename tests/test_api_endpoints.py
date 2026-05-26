@@ -557,6 +557,64 @@ class TestRunEventsSSE(unittest.TestCase):
 
 
 # ===========================================================================
+# Approval status publisher tests
+# ===========================================================================
+
+class TestApprovalStatusPublisher(unittest.TestCase):
+    """Tests for approval/rejection terminal SSE status events."""
+
+    def setUp(self):
+        os.environ.pop("FLOOM_SECRET", None)
+
+    def _insert_pending_approval_run(self) -> str:
+        from db import get_db
+
+        worker = _create_manual_worker()
+        worker_id = worker["id"]
+        run_id = f"run_{_uuid_mod.uuid4().hex[:12]}"
+        approval_id = f"approval_{_uuid_mod.uuid4().hex[:12]}"
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO runs (id, worker_id, status, trigger_source, runner,
+                   input_json, approval_status, created_at)
+                   VALUES (?, ?, 'pending_approval', 'manual', 'local', '{}', 'pending', datetime('now'))""",
+                (run_id, worker_id),
+            )
+            conn.execute(
+                """INSERT INTO approvals (id, run_id, worker_id, status, label, preview, created_at)
+                   VALUES (?, ?, ?, 'pending', 'Approve output', 'preview', datetime('now'))""",
+                (approval_id, run_id, worker_id),
+            )
+        return run_id
+
+    def test_approve_run_publishes_terminal_status(self):
+        run_id = self._insert_pending_approval_run()
+
+        with patch.object(app_module, "_sse_publish") as publish:
+            r = client.post(f"/runs/{run_id}/approve")
+
+        self.assertEqual(r.status_code, 200)
+        status_events = [call.args[1] for call in publish.call_args_list if call.args[1].get("type") == "status"]
+        self.assertTrue(status_events)
+        self.assertEqual(status_events[-1]["run_id"], run_id)
+        self.assertEqual(status_events[-1]["status"], "approved")
+        self.assertIn("completed_at", status_events[-1])
+
+    def test_reject_run_publishes_terminal_status(self):
+        run_id = self._insert_pending_approval_run()
+
+        with patch.object(app_module, "_sse_publish") as publish:
+            r = client.post(f"/runs/{run_id}/reject", json={"reason": "Not ready"})
+
+        self.assertEqual(r.status_code, 200)
+        status_events = [call.args[1] for call in publish.call_args_list if call.args[1].get("type") == "status"]
+        self.assertTrue(status_events)
+        self.assertEqual(status_events[-1]["run_id"], run_id)
+        self.assertEqual(status_events[-1]["status"], "rejected")
+        self.assertIn("completed_at", status_events[-1])
+
+
+# ===========================================================================
 # /healthz endpoint
 # ===========================================================================
 
