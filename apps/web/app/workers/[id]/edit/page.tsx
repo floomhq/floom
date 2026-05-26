@@ -8,29 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { ArrowLeft, Save } from "lucide-react";
-import type { ComposioTriggerItem, ConnectionItem, WorkerDetail } from "@/lib/types";
+import type { ConnectionItem, WorkerDetail } from "@/lib/types";
+import { CronBuilder } from "@/components/CronBuilder";
+import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 
 type TriggerType = "manual" | "schedule" | "webhook" | "composio";
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
-}
-
-function triggerEventId(item: ComposioTriggerItem): string {
-  return item.event || item.slug || item.id || item.name || "";
-}
-
-function triggerLabel(item: ComposioTriggerItem): string {
-  return item.display_name || item.name || triggerEventId(item);
-}
-
-function triggerAppSlug(item?: ComposioTriggerItem): string {
-  if (!item) return "";
-  const loose = item as unknown as { toolkit_slug?: string; app_name?: string };
-  return (item.toolkit?.slug || item.app?.slug || loose.toolkit_slug || loose.app_name || "").toLowerCase();
 }
 
 function buildTriggerYaml(
@@ -39,11 +26,10 @@ function buildTriggerYaml(
   cronTimezone: string,
   composioEvent: string,
   composioConnectionId: string,
-  composioFilters: string,
 ): string {
   const lines = [`trigger:`, `  type: ${triggerType}`];
   if (triggerType === "schedule") {
-    lines.push(`  cron: ${yamlString(cronExpr || "0 9 * * MON")}`);
+    lines.push(`  cron: ${yamlString(cronExpr || "0 9 * * *")}`);
     lines.push(`  timezone: ${yamlString(cronTimezone || "Europe/Berlin")}`);
   }
   if (triggerType === "webhook") {
@@ -52,16 +38,10 @@ function buildTriggerYaml(
     lines.push(`    allowed_methods: [POST]`);
   }
   if (triggerType === "composio") {
-    let filters: Record<string, unknown> = {};
-    try {
-      filters = composioFilters.trim() ? JSON.parse(composioFilters) : {};
-    } catch {
-      filters = {};
-    }
     lines.push(`  composio:`);
     lines.push(`    event: ${yamlString(composioEvent)}`);
     lines.push(`    connection_id: ${yamlString(composioConnectionId)}`);
-    lines.push(`    filters: ${JSON.stringify(filters)}`);
+    lines.push(`    filters: {}`);
   }
   return lines.join("\n");
 }
@@ -90,19 +70,15 @@ export default function EditWorkerPage() {
   const [triggerType, setTriggerType] = useState<TriggerType>("manual");
   const [cronExpr, setCronExpr] = useState("0 9 * * MON");
   const [cronTimezone, setCronTimezone] = useState("Europe/Berlin");
-  const [composioTriggers, setComposioTriggers] = useState<ComposioTriggerItem[]>([]);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
-  const [triggerSearch, setTriggerSearch] = useState("");
   const [composioEvent, setComposioEvent] = useState("");
   const [composioConnectionId, setComposioConnectionId] = useState("");
-  const [composioFilters, setComposioFilters] = useState("{}");
 
   useEffect(() => {
     Promise.all([
       api.workers.get(id as string),
-      api.integrations.triggers().catch(() => ({ items: [] })),
       api.connections.list().catch(() => []),
-    ]).then(([loadedWorker, triggerCatalog, connectionItems]) => {
+    ]).then(([loadedWorker, connectionItems]) => {
       setWorker(loadedWorker);
       setWorkerYml(loadedWorker.manifest_yaml || "");
       setRunPy(loadedWorker.run_py || "");
@@ -111,39 +87,15 @@ export default function EditWorkerPage() {
       setCronTimezone(loadedWorker.config.trigger.timezone || "Europe/Berlin");
       setComposioEvent(loadedWorker.config.trigger.composio?.event || "");
       setComposioConnectionId(loadedWorker.config.trigger.composio?.connection_id || "");
-      setComposioFilters(JSON.stringify(loadedWorker.config.trigger.composio?.filters || {}, null, 2));
-      setComposioTriggers(triggerCatalog.items || []);
       setConnections(connectionItems);
     });
   }, [id]);
 
-  const selectedComposioTrigger = composioTriggers.find((item) => triggerEventId(item) === composioEvent);
-  const selectedAppSlug = triggerAppSlug(selectedComposioTrigger);
-  const matchingConnections = connections.filter((connection) => {
-    if (connection.status !== "active") return false;
-    if (!selectedAppSlug) return true;
-    return connection.app_name.toLowerCase() === selectedAppSlug;
-  });
-  const filteredComposioTriggers = composioTriggers
-    .filter((item) => {
-      const haystack = `${triggerEventId(item)} ${triggerLabel(item)} ${triggerAppSlug(item)}`.toLowerCase();
-      return haystack.includes(triggerSearch.toLowerCase());
-    })
-    .slice(0, 100);
-
   async function save() {
     if (!worker) return;
-    if (triggerType === "composio") {
-      if (!composioEvent || !composioConnectionId) {
-        toast.error("Connection event and ID are required");
-        return;
-      }
-      try {
-        JSON.parse(composioFilters || "{}");
-      } catch {
-        toast.error("Filters must be valid JSON");
-        return;
-      }
+    if (triggerType === "composio" && (!composioEvent || !composioConnectionId)) {
+      toast.error("Select an integration and event before saving");
+      return;
     }
 
     setSaving(true);
@@ -154,7 +106,6 @@ export default function EditWorkerPage() {
         cronTimezone,
         composioEvent,
         composioConnectionId,
-        composioFilters,
       );
       const updated = await api.workers.update(worker.id, replaceTriggerBlock(workerYml, triggerYaml), runPy);
       toast.success("Worker updated");
@@ -219,73 +170,23 @@ export default function EditWorkerPage() {
               </div>
 
               {triggerType === "schedule" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-3">
+                  <CronBuilder value={cronExpr} onChange={setCronExpr} />
                   <div className="space-y-1.5">
-                    <Label className="text-sm">Cron</Label>
-                    <Input value={cronExpr} onChange={(e) => setCronExpr(e.target.value)} className="border-[#e4e4e7] font-mono text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Timezone</Label>
-                    <Input value={cronTimezone} onChange={(e) => setCronTimezone(e.target.value)} className="border-[#e4e4e7] font-mono text-sm" />
+                    <Label className="text-xs text-[#666] uppercase tracking-wide">Timezone</Label>
+                    <Input value={cronTimezone} onChange={(e) => setCronTimezone(e.target.value)} className="border-[#e4e4e7] font-mono text-sm" placeholder="Europe/Berlin" />
                   </div>
                 </div>
               )}
 
               {triggerType === "composio" && (
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Search events</Label>
-                    <Input value={triggerSearch} onChange={(e) => setTriggerSearch(e.target.value)} className="border-[#e4e4e7]" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Event</Label>
-                    <Select
-                      value={composioEvent}
-                      onValueChange={(value) => {
-                        if (!value) return;
-                        setComposioEvent(value);
-                        setComposioConnectionId("");
-                      }}
-                    >
-                      <SelectTrigger className="border-[#e4e4e7]">
-                        <SelectValue placeholder="Select a connection event" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {filteredComposioTriggers.map((item) => {
-                          const eventId = triggerEventId(item);
-                          return (
-                            <SelectItem key={eventId} value={eventId}>
-                              {triggerLabel(item)} · {eventId}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Connection ID</Label>
-                    {matchingConnections.length > 0 ? (
-                      <Select value={composioConnectionId} onValueChange={(value) => value && setComposioConnectionId(value)}>
-                        <SelectTrigger className="border-[#e4e4e7]">
-                          <SelectValue placeholder="Select connected account" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {matchingConnections.map((connection) => (
-                            <SelectItem key={connection.composio_connection_id} value={connection.composio_connection_id}>
-                              {connection.app_name} · {connection.composio_connection_id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Input value={composioConnectionId} onChange={(e) => setComposioConnectionId(e.target.value)} className="border-[#e4e4e7] font-mono text-sm" />
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm">Filters JSON</Label>
-                    <Textarea value={composioFilters} onChange={(e) => setComposioFilters(e.target.value)} className="min-h-[90px] border-[#e4e4e7] font-mono text-xs" spellCheck={false} />
-                  </div>
-                </div>
+                <ConnectionEventPicker
+                  composioEvent={composioEvent}
+                  composioConnectionId={composioConnectionId}
+                  onEventChange={setComposioEvent}
+                  onConnectionIdChange={setComposioConnectionId}
+                  initialConnections={connections}
+                />
               )}
             </CardContent>
           </Card>
