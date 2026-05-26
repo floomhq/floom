@@ -255,11 +255,20 @@ export interface DraftFromPromptOutputField {
   label: string;
 }
 
+export interface DraftRequirementItem {
+  app: string;
+  method: "oauth" | "api_key";
+  reason: string;
+}
+
 export interface DraftFromPromptResponse {
   worker_yml: string;
   skill_md?: string;
   suggested_name: string;
   suggested_title: string;
+  // New: one entry per app, method is "oauth" or "api_key". No duplicates.
+  requirements?: DraftRequirementItem[];
+  // Legacy fields kept for backward compatibility
   required_connections: string[];
   required_secrets: string[];
   inputs: DraftFromPromptInputField[];
