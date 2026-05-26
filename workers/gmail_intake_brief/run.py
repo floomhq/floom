@@ -1,47 +1,74 @@
-"""Gmail Intake Brief worker.
+"""Gmail Intake Brief — E2B-native worker.
 
 Fetches recent emails via Composio Gmail integration and returns a markdown summary.
+Reads inputs.json, secrets.json, connections.json. Writes result.json.
 
-Context requirements:
-  context.connections.gmail  → Composio connection ID for the user's Gmail
-  context.secrets["OPENAI_API_KEY"]   → for summarization (optional)
-  context.secrets["COMPOSIO_API_KEY"] → injected by runner from env
+connections.json contains: {"gmail": "<composio_connection_id>"}
+secrets.json contains: {"OPENAI_API_KEY": "...", "COMPOSIO_API_KEY": "..."}
 """
 
 from __future__ import annotations
 
+import json
 import os
 
 
-def run(inputs: dict, context) -> dict:
+def _write_error(error: str) -> None:
+    with open("result.json", "w") as f:
+        json.dump({"status": "error", "error": error}, f)
+
+
+def main():
+    with open("inputs.json") as f:
+        inputs = json.load(f)
+
+    try:
+        with open("secrets.json") as f:
+            secrets = json.load(f)
+    except FileNotFoundError:
+        secrets = {}
+
+    try:
+        with open("connections.json") as f:
+            connections = json.load(f)
+    except FileNotFoundError:
+        connections = {}
+
     query = str(inputs.get("query") or "is:unread").strip()
     max_results = int(inputs.get("max_results") or 5)
 
-    composio_api_key = os.environ.get("COMPOSIO_API_KEY") or context.secrets.get("COMPOSIO_API_KEY", "")
-    openai_api_key = context.secrets.get("OPENAI_API_KEY", "")
+    composio_api_key = os.environ.get("COMPOSIO_API_KEY") or secrets.get("COMPOSIO_API_KEY", "")
+    openai_api_key = secrets.get("OPENAI_API_KEY", "")
 
     if not composio_api_key:
-        return {"status": "error", "error": "COMPOSIO_API_KEY not set"}
+        _write_error("COMPOSIO_API_KEY not set")
+        return
 
-    # Get the Gmail connection ID from context
-    gmail_conn_id = context.connections.gmail
-    context.log(f"Using Gmail connection: {gmail_conn_id[:8]}...", level="info")
+    # Get the Gmail connection ID from connections.json
+    gmail_conn_id = connections.get("gmail", "")
+    if not gmail_conn_id:
+        _write_error("Gmail connection not found — ensure 'gmail' is in connections.json")
+        return
 
-    # Fetch emails via Composio
-    emails = _fetch_emails(gmail_conn_id, composio_api_key, query, max_results, context)
+    emails = _fetch_emails(gmail_conn_id, composio_api_key, query, max_results)
 
     if not emails:
         summary = f"No emails found for query `{query}`."
     elif openai_api_key:
-        summary = _summarize_with_openai(emails, openai_api_key, query, context)
+        summary = _summarize_with_openai(emails, openai_api_key, query)
     else:
         summary = _plain_summary(emails, query)
 
-    context.log(f"Summarized {len(emails)} email(s)", level="info")
-    return {"status": "success", "outputs": {"summary": summary}}
+    result = {
+        "status": "success",
+        "outputs": {"summary": summary},
+        "artifacts": [],
+    }
+    with open("result.json", "w") as f:
+        json.dump(result, f)
 
 
-def _fetch_emails(conn_id: str, api_key: str, query: str, max_results: int, context) -> list:
+def _fetch_emails(conn_id: str, api_key: str, query: str, max_results: int) -> list:
     """Fetch emails via Composio v3 tool execute endpoint (no SDK dependency)."""
     import requests
 
@@ -72,16 +99,11 @@ def _fetch_emails(conn_id: str, api_key: str, query: str, max_results: int, cont
                 "message_id": m.get("messageId"),
             })
         return normalized
-    except requests.HTTPError as exc:
-        body_text = exc.response.text[:200] if exc.response is not None else ""
-        context.log(f"Composio fetch HTTP error: {body_text}", level="error")
-        return []
-    except Exception as exc:
-        context.log(f"Failed to fetch emails: {exc}", level="error")
+    except Exception:
         return []
 
 
-def _summarize_with_openai(emails: list, api_key: str, query: str, context) -> str:
+def _summarize_with_openai(emails: list, api_key: str, query: str) -> str:
     """Summarize emails using OpenAI."""
     try:
         import openai
@@ -108,8 +130,7 @@ def _summarize_with_openai(emails: list, api_key: str, query: str, context) -> s
             max_tokens=1024,
         )
         return resp.choices[0].message.content or _plain_summary(emails, query)
-    except Exception as exc:
-        context.log(f"OpenAI summarization failed: {exc} — falling back to plain summary", level="warning")
+    except Exception:
         return _plain_summary(emails, query)
 
 
@@ -122,3 +143,7 @@ def _plain_summary(emails: list, query: str) -> str:
         snippet = (msg.get("snippet") or msg.get("body_plain", ""))[:150]
         lines.append(f"- **{subject}**  \n  From: {sender}  \n  {snippet}")
     return "\n\n".join(lines)
+
+
+if __name__ == "__main__":
+    main()
