@@ -184,24 +184,72 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
 `;
 
 // ---------------------------------------------------------------------------
+// Exec mode type + helpers
+// ---------------------------------------------------------------------------
+
+type ExecMode = "agent" | "pure-script" | "hybrid";
+
+function buildExecBlock(mode: ExecMode): string {
+  if (mode === "agent") {
+    return `exec:
+  runtime: skill
+  mode: agent
+  runner: e2b
+  entrypoint: SKILL.md
+  inputs: []
+  outputs: []`;
+  }
+  if (mode === "pure-script") {
+    return `exec:
+  command: python run.py
+  runtime: python311
+  mode: pure-script
+  runner: e2b
+  inputs: []
+  outputs: []`;
+  }
+  // hybrid
+  return `exec:
+  command: python run.py
+  runtime: python311
+  mode: hybrid
+  runner: e2b
+  entrypoint: run.py
+  inputs: []
+  outputs: []`;
+}
+
+/** Replace or append the exec block in a full YAML string. */
+function replaceExecBlock(yaml: string, execYaml: string): string {
+  const lines = yaml.split("\n");
+  const start = lines.findIndex((line) => /^exec:\s*$/.test(line));
+  if (start === -1) return `${yaml.trimEnd()}\n\n${execYaml}\n`;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^[A-Za-z_][\w_-]*:\s*/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return [...lines.slice(0, start), ...execYaml.split("\n"), ...lines.slice(end)].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Stub YAML for SKILL.md upload path (user will edit before creating)
 // ---------------------------------------------------------------------------
 
-function buildStubYaml(slug: string, title: string): string {
+function buildStubYaml(slug: string, title: string, mode: ExecMode = "agent"): string {
+  const execBlock = buildExecBlock(mode);
+  const entrypointLine = mode === "agent" ? "entrypoint: SKILL.md" : "entrypoint: run.py";
   return `schema_version: "0.3"
 name: ${slug}
 title: ${JSON.stringify(title)}
 description: "Describe what this worker does."
 version: "0.1.0"
-entrypoint: SKILL.md
+${entrypointLine}
 targets: [generic]
 
-exec:
-  runtime: skill
-  mode: agent
-  runner: e2b
-  inputs: []
-  outputs: []
+${execBlock}
 
 trigger:
   type: manual
@@ -426,18 +474,26 @@ function NewWorkerSkeleton() {
 
 // ---------------------------------------------------------------------------
 // PromptStep — Step 1
+// Order: prompt + generate -> upload area -> examples
 // ---------------------------------------------------------------------------
+
+type UploadState = "idle" | "processing" | "navigating";
 
 function PromptStep({
   onDraft,
   onSkillMdUpload,
+  onRunPyUpload,
+  onBundleNavigate,
 }: {
   onDraft: (draft: DraftFromPromptResponse, prompt: string) => void;
   onSkillMdUpload: (skillMd: string, fileName: string) => void;
+  onRunPyUpload: (runPy: string, fileName: string) => void;
+  onBundleNavigate: (workerId: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleGenerate() {
@@ -457,37 +513,123 @@ function PromptStep({
     }
   }
 
-  function handleFile(file: File) {
-    if (!file.name.endsWith(".md") && !file.name.endsWith(".txt")) {
-      toast.error("Please upload a .md file");
+  async function handleFiles(files: FileList | File[]) {
+    const fileArr = Array.from(files);
+    if (fileArr.length === 0) return;
+
+    // Folder upload: multiple files — zip them and POST to /workers/from-bundle
+    if (fileArr.length > 1) {
+      await handleFolderOrMultipleFiles(fileArr);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result;
-      if (typeof text === "string" && text.trim()) {
-        onSkillMdUpload(text, file.name);
-      } else {
-        toast.error("The file appears to be empty");
+
+    const file = fileArr[0];
+
+    if (file.name.endsWith(".zip")) {
+      await handleZipUpload(file);
+      return;
+    }
+
+    if (file.name.endsWith(".py")) {
+      const text = await readFileAsText(file);
+      if (text !== null) onRunPyUpload(text, file.name);
+      return;
+    }
+
+    if (file.name.endsWith(".md") || file.name.endsWith(".txt")) {
+      const text = await readFileAsText(file);
+      if (text !== null) onSkillMdUpload(text, file.name);
+      return;
+    }
+
+    toast.error("Upload a .md, .py, or .zip file, or drag a folder");
+  }
+
+  function readFileAsText(file: File): Promise<string | null> {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result;
+        if (typeof text === "string" && text.trim()) {
+          resolve(text);
+        } else {
+          toast.error("The file appears to be empty");
+          resolve(null);
+        }
+      };
+      reader.onerror = () => { toast.error("Failed to read file"); resolve(null); };
+      reader.readAsText(file);
+    });
+  }
+
+  async function handleZipUpload(file: File) {
+    setUploadState("processing");
+    try {
+      const worker = await api.workers.createFromBundle(file);
+      toast.success(`Worker "${worker.name}" created from bundle`);
+      setUploadState("navigating");
+      onBundleNavigate(worker.id);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to create worker from bundle");
+      setUploadState("idle");
+    }
+  }
+
+  async function handleFolderOrMultipleFiles(files: File[]) {
+    setUploadState("processing");
+    try {
+      // Dynamic import to keep bundle split
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      for (const file of files) {
+        // file.webkitRelativePath is e.g. "my-worker/worker.yml" when from webkitdirectory
+        const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const bytes = await file.arrayBuffer();
+        zip.file(path, bytes);
       }
-    };
-    reader.readAsText(file);
+      const blob = await zip.generateAsync({ type: "blob" });
+      const worker = await api.workers.createFromBundle(blob);
+      toast.success(`Worker "${worker.name}" created from folder`);
+      setUploadState("navigating");
+      onBundleNavigate(worker.id);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to create worker from folder");
+      setUploadState("idle");
+    }
   }
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    const items = e.dataTransfer.items;
+    if (items && items.length > 0) {
+      // Check if any item is a directory via DataTransferItem
+      const firstEntry = items[0].webkitGetAsEntry?.();
+      if (firstEntry?.isDirectory) {
+        // Can't read directory contents without File System Access API in drop events
+        // Fall back to showing a helpful message
+        toast.error("Drag-and-drop folders are not supported in all browsers. Use the folder browse button instead.");
+        return;
+      }
+    }
+    const files = e.dataTransfer.files;
+    if (files.length > 0) void handleFiles(files);
   }
 
   function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      void handleFiles(files);
+    }
+    // Reset so the same file can be re-selected
+    e.target.value = "";
   }
+
+  const isUploading = uploadState !== "idle";
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {/* 1. Prompt box */}
       <Card className="border-[#eaeaea] shadow-none bg-white">
         <CardHeader>
           <CardTitle className="text-base font-medium flex items-center gap-2">
@@ -503,13 +645,14 @@ function PromptStep({
             className="min-h-[140px] border-[#e4e4e7] text-sm resize-none"
             disabled={generating}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                handleGenerate();
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void handleGenerate();
               }
             }}
           />
           <Button
-            onClick={handleGenerate}
+            onClick={() => void handleGenerate()}
             disabled={generating || !prompt.trim()}
             className="w-full"
           >
@@ -531,36 +674,77 @@ function PromptStep({
         </CardContent>
       </Card>
 
-      {/* Upload SKILL.md entry path */}
+      {/* 2. Upload area: .md / .py / .zip / folder */}
       <div className="space-y-2">
-        <p className="text-xs font-medium text-[#666] uppercase tracking-wide">Or upload an existing SKILL.md</p>
+        <p className="text-xs font-medium text-[#666] uppercase tracking-wide">Or upload an existing worker file</p>
         <div
           role="button"
           tabIndex={0}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}
-          className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-md px-4 py-6 cursor-pointer transition-colors ${
-            dragOver
-              ? "border-black bg-[#f4f4f5]"
-              : "border-[#e4e4e7] bg-white hover:border-[#ccc] hover:bg-[#fafafa]"
+          onClick={() => !isUploading && fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (!isUploading && (e.key === "Enter" || e.key === " ")) fileInputRef.current?.click(); }}
+          className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-md px-4 py-8 transition-colors ${
+            isUploading
+              ? "border-[#e4e4e7] bg-[#fafafa] cursor-not-allowed"
+              : dragOver
+              ? "border-black bg-[#f4f4f5] cursor-pointer"
+              : "border-[#e4e4e7] bg-white hover:border-[#ccc] hover:bg-[#fafafa] cursor-pointer"
           }`}
         >
-          <Upload className="w-5 h-5 text-[#999]" />
-          <span className="text-sm text-[#666]">Drop a .md file here, or click to browse</span>
-          <span className="text-xs text-[#999]">You will fill in the worker metadata (name, trigger) before creating</span>
+          {isUploading ? (
+            <>
+              <span className="w-5 h-5 border-2 border-[#666] border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-[#666]">
+                {uploadState === "navigating" ? "Navigating to worker..." : "Processing bundle..."}
+              </span>
+            </>
+          ) : (
+            <>
+              <Upload className="w-5 h-5 text-[#999]" />
+              <span className="text-sm text-[#444] font-medium">Drop a file here, or click to browse</span>
+              <span className="text-xs text-[#999]">
+                .md (SKILL.md), .py (Python script), .zip (full bundle), or a folder
+              </span>
+              <span className="text-xs text-[#bbb]">
+                .md and .py files take you to Step 2 to fill in metadata. Zip or folder bundles are created directly.
+              </span>
+            </>
+          )}
         </div>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".md,.txt"
+          accept=".md,.txt,.py,.zip"
+          // webkitdirectory is not in standard TS types; cast via spread
+          {...({ webkitdirectory: undefined } as React.InputHTMLAttributes<HTMLInputElement>)}
           className="hidden"
           onChange={handleFileInputChange}
+          multiple
         />
+        {/* Separate folder-browse button for browsers that support webkitdirectory */}
+        <button
+          type="button"
+          disabled={isUploading}
+          onClick={() => {
+            // Create a temporary input with webkitdirectory for folder picking
+            const input = document.createElement("input");
+            input.type = "file";
+            (input as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true;
+            input.multiple = true;
+            input.onchange = () => {
+              if (input.files && input.files.length > 0) void handleFiles(input.files);
+            };
+            input.click();
+          }}
+          className="text-xs text-[#999] hover:text-[#555] transition-colors underline"
+        >
+          Browse a folder instead
+        </button>
       </div>
 
+      {/* 3. Examples */}
       <div className="space-y-2">
         <p className="text-xs font-medium text-[#666] uppercase tracking-wide">Examples</p>
         <div className="space-y-2">
@@ -1267,9 +1451,11 @@ export function loadDraftSession(): DraftSession | null {
 function ReviewStep({
   draft,
   originalPrompt,
+  initialExecMode,
 }: {
   draft: DraftFromPromptResponse;
   originalPrompt: string;
+  initialExecMode?: ExecMode;
 }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
@@ -1284,6 +1470,7 @@ function ReviewStep({
   const [composioEvent, setComposioEvent] = useState("");
   const [composioConnectionId, setComposioConnectionId] = useState("");
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
+  const [execMode, setExecMode] = useState<ExecMode>(initialExecMode ?? "agent");
 
   // Inline requirements state
   const [requirementsReady, setRequirementsReady] = useState(false);
@@ -1327,13 +1514,17 @@ function ReviewStep({
       if (activeTab === "yaml") {
         yamlToUse = workerYml;
       } else {
-        // Patch the trigger block into the draft YAML
+        // Patch trigger block and exec mode block into the draft YAML
         const triggerYaml = buildTriggerBlock(
           triggerType, cronExpr, cronTimezone, composioEvent, composioConnectionId,
         );
-        yamlToUse = replaceTriggerBlock(draft.worker_yml, triggerYaml);
+        let base = replaceTriggerBlock(draft.worker_yml, triggerYaml);
+        base = replaceExecBlock(base, buildExecBlock(execMode));
+        yamlToUse = base;
       }
-      const worker = await api.workers.create(yamlToUse, runPy, draft.skill_md);
+      // For hybrid/pure-script we always pass run_py; for agent it is ignored by the backend
+      const skillMdToSend = execMode === "pure-script" ? undefined : draft.skill_md;
+      const worker = await api.workers.create(yamlToUse, runPy, skillMdToSend);
       try { sessionStorage.removeItem(DRAFT_SESSION_KEY); } catch { /* ignore */ }
       toast.success(`Worker "${worker.name}" created`);
       router.push(`/workers/${worker.id}`);
@@ -1379,6 +1570,47 @@ function ReviewStep({
       {activeTab === "review" ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-5">
+            {/* Worker mode picker */}
+            <Card className="border-[#eaeaea] shadow-none bg-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Worker mode</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {([
+                  ["agent", "Agent (SKILL.md only)", "The agent reads SKILL.md and uses tools. No Python required."],
+                  ["pure-script", "Pure Python (run.py only)", "The Python script runs directly. No SKILL.md needed."],
+                  ["hybrid", "Hybrid (run.py + SKILL.md)", "Python controls flow and can invoke an agent helper via SKILL.md."],
+                ] as const).map(([value, label, hint]) => (
+                  <label
+                    key={value}
+                    className={`flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
+                      execMode === value
+                        ? "border-black bg-[#f9f9f9]"
+                        : "border-[#e4e4e7] hover:border-[#ccc] hover:bg-[#fafafa]"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="exec-mode"
+                      value={value}
+                      checked={execMode === value}
+                      onChange={() => setExecMode(value)}
+                      className="mt-0.5 accent-black"
+                    />
+                    <div>
+                      <p className="text-sm font-medium text-[#222]">{label}</p>
+                      <p className="text-xs text-[#888] mt-0.5">{hint}</p>
+                    </div>
+                  </label>
+                ))}
+                {execMode === "hybrid" && (
+                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                    Hybrid runtime support (exposing SKILL.md to run.py at execution) is planned for a future release. Both files will be written to disk.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Identity */}
             <Card className="border-[#eaeaea] shadow-none bg-white">
               <CardHeader>
@@ -1654,6 +1886,7 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
   const [pageMode, setPageMode] = useState<PageMode>("prompt");
   const [draft, setDraft] = useState<DraftFromPromptResponse | null>(null);
   const [originalPrompt, setOriginalPrompt] = useState("");
+  const [initialExecMode, setInitialExecMode] = useState<ExecMode>("agent");
 
   const hasTemplate = Boolean(templateId && TEMPLATES[templateId]);
 
@@ -1664,17 +1897,17 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
   function handleDraft(d: DraftFromPromptResponse, prompt: string) {
     setDraft(d);
     setOriginalPrompt(prompt);
+    setInitialExecMode("agent");
     setPageMode("form");
   }
 
   function handleSkillMdUpload(skillMd: string, fileName: string) {
-    // Derive a slug from the filename (strip .md extension, slugify)
     const rawSlug = fileName.replace(/\.md$/i, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "") || "my-worker";
     const slug = rawSlug.slice(0, 63);
     const title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
     const stubDraft: DraftFromPromptResponse = {
-      worker_yml: buildStubYaml(slug, title),
+      worker_yml: buildStubYaml(slug, title, "agent"),
       skill_md: skillMd,
       suggested_name: slug,
       suggested_title: title,
@@ -1686,7 +1919,34 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
 
     setDraft(stubDraft);
     setOriginalPrompt(`Uploaded: ${fileName}`);
+    setInitialExecMode("agent");
     setPageMode("form");
+  }
+
+  function handleRunPyUpload(runPy: string, fileName: string) {
+    const rawSlug = fileName.replace(/\.py$/i, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "") || "my-worker";
+    const slug = rawSlug.slice(0, 63);
+    const title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const stubDraft: DraftFromPromptResponse = {
+      worker_yml: buildStubYaml(slug, title, "pure-script"),
+      skill_md: undefined,
+      suggested_name: slug,
+      suggested_title: title,
+      required_connections: [],
+      required_secrets: [],
+      inputs: [],
+      outputs: [],
+    };
+
+    setDraft(stubDraft);
+    setOriginalPrompt(`Uploaded: ${fileName}`);
+    setInitialExecMode("pure-script");
+    setPageMode("form");
+  }
+
+  function handleBundleNavigate(workerId: string) {
+    router.push(`/workers/${workerId}`);
   }
 
   return (
@@ -1717,13 +1977,19 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
       </div>
 
       {pageMode === "prompt" && (
-        <PromptStep onDraft={handleDraft} onSkillMdUpload={handleSkillMdUpload} />
+        <PromptStep
+          onDraft={handleDraft}
+          onSkillMdUpload={handleSkillMdUpload}
+          onRunPyUpload={handleRunPyUpload}
+          onBundleNavigate={handleBundleNavigate}
+        />
       )}
 
       {pageMode === "form" && draft && (
         <ReviewStep
           draft={draft}
           originalPrompt={originalPrompt}
+          initialExecMode={initialExecMode}
         />
       )}
     </div>

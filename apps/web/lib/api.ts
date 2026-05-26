@@ -39,6 +39,22 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ prompt }),
       }),
+    createFromBundle: async (zipBlob: Blob): Promise<import("./types").WorkerDetail> => {
+      const form = new FormData();
+      form.append("bundle", zipBlob, "bundle.zip");
+      const res = await fetch(`${API_BASE}/workers/from-bundle`, { method: "POST", body: form });
+      if (!res.ok) {
+        let err: string;
+        try {
+          const body = await res.json();
+          err = body.detail || JSON.stringify(body);
+        } catch {
+          err = res.statusText;
+        }
+        throw new Error(err);
+      }
+      return res.json() as Promise<import("./types").WorkerDetail>;
+    },
     update: (id: string, worker_yml: string, run_py: string, skill_md?: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
         method: "PUT",
