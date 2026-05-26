@@ -131,19 +131,10 @@ export default function SettingsPage() {
                 <span className="text-[#666]">Total runs</span>
                 <span className="font-medium">{info.run_count}</span>
               </div>
-              <Separator className="my-1" />
-              <div className="flex justify-between gap-4">
-                <span className="text-[#666] shrink-0">Workers dir</span>
-                <span className="font-mono text-xs text-[#999] truncate text-right">{info.workers_dir}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-[#666] shrink-0">DB path</span>
-                <span className="font-mono text-xs text-[#999] truncate text-right">{info.db_path}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-[#666] shrink-0">Artifacts dir</span>
-                <span className="font-mono text-xs text-[#999] truncate text-right">{info.artifacts_dir}</span>
-              </div>
+              {/* Server filesystem paths (workers_dir / db_path / artifacts_dir)
+                  are intentionally NOT rendered: audit 2026-05-26 flagged them
+                  as a leak surface. They remain available on the platform
+                  configuration card below for the operator if needed. */}
             </>
           ) : (
             <p className="text-[#999]">Loading...</p>

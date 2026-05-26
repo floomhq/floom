@@ -264,10 +264,17 @@ class E2BSandboxDriver(SandboxDriver):
                 result_raw = sandbox.files.read(f"{workdir}/result.json")
                 result_data = json.loads(result_raw)
             except Exception as exc:
-                log_fn(f"[e2b] Failed to read result.json: {exc}", "error")
+                # Log the full sandbox path (operator detail) but return a
+                # user-friendly error that does not leak the sandbox internal
+                # path. Audit 2026-05-26 flagged the path leak.
+                log_fn(f"[e2b] Failed to read result.json from {workdir}: {exc}", "error")
+                user_msg = (
+                    "Worker did not produce a result. Check run.py wrote "
+                    "result.json with the required schema before exiting."
+                )
                 return WorkerResult(
                     status="error",
-                    error=f"Worker did not produce result.json: {exc}",
+                    error=user_msg,
                     error_code="missing_result",
                 )
 
