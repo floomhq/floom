@@ -426,7 +426,6 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         return
 
     # Dispatch to the appropriate sandbox driver based on worker config
-<<<<<<< HEAD
     runner = "local"
     if config and config.runtime:
         runner = config.runtime.runner or "local"
@@ -438,11 +437,6 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     )
     log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
     driver = get_sandbox_driver(runner, config=config)
-=======
-    runner = _runner_key(config)
-    log_fn(f"Executing worker (runner={runner})", level="debug")
-    driver = get_sandbox_driver(runner)
->>>>>>> origin/main
     result = driver.run(
         worker_id=worker_id,
         run_id=run_id,
