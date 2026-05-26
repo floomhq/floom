@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle2, Loader2, Upload } from "lucide-react";
 import type { ComposioTriggerItem, ConnectionItem, DraftFromPromptResponse } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -138,6 +138,31 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         "artifacts": []
     }
 `;
+
+// ---------------------------------------------------------------------------
+// Stub YAML for SKILL.md upload path (user will edit before creating)
+// ---------------------------------------------------------------------------
+
+function buildStubYaml(slug: string, title: string): string {
+  return `schema_version: "0.3"
+name: ${slug}
+title: ${JSON.stringify(title)}
+description: "Describe what this worker does."
+version: "0.1.0"
+entrypoint: SKILL.md
+targets: [generic]
+
+exec:
+  runtime: skill
+  mode: agent
+  runner: e2b
+  inputs: []
+  outputs: []
+
+trigger:
+  type: manual
+`;
+}
 
 // ---------------------------------------------------------------------------
 // YAML generator
@@ -361,11 +386,15 @@ function NewWorkerSkeleton() {
 
 function PromptStep({
   onDraft,
+  onSkillMdUpload,
 }: {
   onDraft: (draft: DraftFromPromptResponse, prompt: string) => void;
+  onSkillMdUpload: (skillMd: string, fileName: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleGenerate() {
     const trimmed = prompt.trim();
@@ -382,6 +411,35 @@ function PromptStep({
     } finally {
       setGenerating(false);
     }
+  }
+
+  function handleFile(file: File) {
+    if (!file.name.endsWith(".md") && !file.name.endsWith(".txt")) {
+      toast.error("Please upload a .md file");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result;
+      if (typeof text === "string" && text.trim()) {
+        onSkillMdUpload(text, file.name);
+      } else {
+        toast.error("The file appears to be empty");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }
+
+  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
   }
 
   return (
@@ -428,6 +486,36 @@ function PromptStep({
           </p>
         </CardContent>
       </Card>
+
+      {/* Upload SKILL.md entry path */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-[#666] uppercase tracking-wide">Or upload an existing SKILL.md</p>
+        <div
+          role="button"
+          tabIndex={0}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}
+          className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-md px-4 py-6 cursor-pointer transition-colors ${
+            dragOver
+              ? "border-black bg-[#f4f4f5]"
+              : "border-[#e4e4e7] bg-white hover:border-[#ccc] hover:bg-[#fafafa]"
+          }`}
+        >
+          <Upload className="w-5 h-5 text-[#999]" />
+          <span className="text-sm text-[#666]">Drop a .md file here, or click to browse</span>
+          <span className="text-xs text-[#999]">You will fill in the worker metadata (name, trigger) before creating</span>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".md,.txt"
+          className="hidden"
+          onChange={handleFileInputChange}
+        />
+      </div>
 
       <div className="space-y-2">
         <p className="text-xs font-medium text-[#666] uppercase tracking-wide">Examples</p>
@@ -915,7 +1003,7 @@ function ReviewStep({
     setSubmitting(true);
     try {
       const yamlToUse = activeTab === "yaml" ? workerYml : draft.worker_yml;
-      const worker = await api.workers.create(yamlToUse, runPy);
+      const worker = await api.workers.create(yamlToUse, runPy, draft.skill_md);
       try { sessionStorage.removeItem(DRAFT_SESSION_KEY); } catch { /* ignore */ }
       toast.success(`Worker "${worker.name}" created`);
       router.push(`/workers/${worker.id}`);
@@ -988,6 +1076,20 @@ function ReviewStep({
                 </div>
               </CardContent>
             </Card>
+
+            {/* SKILL.md viewer (read-only): shown when draft has skill_md */}
+            {draft.skill_md && (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">SKILL.md (read-only)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-3 rounded-md border border-[#eaeaea] overflow-auto max-h-[300px] text-xs">
+                    <pre className="whitespace-pre-wrap font-mono text-xs text-[#444]">{draft.skill_md}</pre>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Inline requirements — secrets + connections */}
             {hasRequirements && (
@@ -1229,6 +1331,28 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
     setPageMode("form");
   }
 
+  function handleSkillMdUpload(skillMd: string, fileName: string) {
+    // Derive a slug from the filename (strip .md extension, slugify)
+    const rawSlug = fileName.replace(/\.md$/i, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "") || "my-worker";
+    const slug = rawSlug.slice(0, 63);
+    const title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const stubDraft: DraftFromPromptResponse = {
+      worker_yml: buildStubYaml(slug, title),
+      skill_md: skillMd,
+      suggested_name: slug,
+      suggested_title: title,
+      required_connections: [],
+      required_secrets: [],
+      inputs: [],
+      outputs: [],
+    };
+
+    setDraft(stubDraft);
+    setOriginalPrompt(`Uploaded: ${fileName}`);
+    setPageMode("form");
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -1240,7 +1364,7 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
           <p className="text-[#666] text-sm">
             {pageMode === "prompt"
               ? "Describe what you want to automate and we will draft the worker for you."
-              : "Review the generated worker, then create it."}
+              : "Review the worker, then create it."}
           </p>
         </div>
         {pageMode === "form" && (
@@ -1257,7 +1381,7 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
       </div>
 
       {pageMode === "prompt" && (
-        <PromptStep onDraft={handleDraft} />
+        <PromptStep onDraft={handleDraft} onSkillMdUpload={handleSkillMdUpload} />
       )}
 
       {pageMode === "form" && draft && (

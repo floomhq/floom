@@ -65,7 +65,6 @@ export default function WorkerDetailPage() {
 
   function applyExampleInput() {
     if (!worker?.example_input) return;
-    // Build next inputs, but skip file fields (filename strings cannot be re-uploaded)
     const nextInputs: Record<string, unknown> = { ...inputs };
     const fileFieldNames = new Set(
       worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => inp.name)
@@ -73,9 +72,8 @@ export default function WorkerDetailPage() {
     let skippedFileFields = false;
     for (const [key, value] of Object.entries(worker.example_input)) {
       if (fileFieldNames.has(key)) {
-        // Only copy if value is null/undefined (no sample file); never copy filename strings
         if (value == null) {
-          // leave file field untouched so the drop zone stays empty
+          // leave file field untouched
         } else {
           skippedFileFields = true;
         }
@@ -104,7 +102,6 @@ export default function WorkerDetailPage() {
     return <div className="text-sm text-[#999]">Worker not found.</div>;
   }
 
-  // Compute missing connections for this worker
   const requiredConnections: string[] = worker.config.connections ?? [];
   const activeConnectionSlugs = new Set(
     connections.filter((c) => c.status === "active").map((c) => c.app_name.toLowerCase())
@@ -119,8 +116,12 @@ export default function WorkerDetailPage() {
     return sampleValue !== undefined && sampleValue !== null;
   });
 
+  const isPureScript = (worker.config as { exec?: { mode?: string } }).exec?.mode === "pure-script";
+  const requiredSecrets: string[] = worker.config.secrets ?? [];
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => router.push("/workers")}>
           <ArrowLeft className="w-4 h-4" />
@@ -150,308 +151,423 @@ export default function WorkerDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          {(worker.long_description || worker.use_cases?.length || worker.example_input || worker.example_output || worker.how_it_works) && (
+      {/* Main tabs */}
+      <Tabs defaultValue="run">
+        <TabsList className="h-9 bg-[#f4f4f5]">
+          <TabsTrigger value="run" className="h-7 text-sm px-3">Run</TabsTrigger>
+          <TabsTrigger value="code" className="h-7 text-sm px-3">Code</TabsTrigger>
+          <TabsTrigger value="connections" className="h-7 text-sm px-3">Connections</TabsTrigger>
+          <TabsTrigger value="runs" className="h-7 text-sm px-3">Runs</TabsTrigger>
+          <TabsTrigger value="overview" className="h-7 text-sm px-3">Overview</TabsTrigger>
+        </TabsList>
+
+        {/* Run tab */}
+        <TabsContent value="run" className="mt-6">
+          <div className="max-w-xl space-y-4">
             <Card className="border-[#eaeaea] shadow-none bg-white">
               <CardHeader>
-                <CardTitle className="text-sm font-medium">Worker guide</CardTitle>
+                <CardTitle className="text-sm font-medium">Run worker</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-5">
-                {worker.long_description && (
-                  <details className="group rounded-md border border-[#eaeaea] bg-[#fafafa] p-3" open={false}>
-                    <summary className="cursor-pointer text-sm font-medium text-[#333] marker:text-[#999]">
-                      Long description
-                    </summary>
-                    <p className="text-sm text-[#666] leading-relaxed mt-2 whitespace-pre-wrap">{worker.long_description}</p>
-                  </details>
-                )}
+              <CardContent className="space-y-4">
+                {worker.config.inputs.map((inp: WorkerInput) => (
+                  <div key={inp.name} className="space-y-1.5">
+                    <Label className="text-sm">
+                      {inp.label}
+                      {inp.required && <span className="text-red-500 ml-0.5">*</span>}
+                    </Label>
+                    {inp.description && (
+                      <p className="text-xs text-[#777]">{inp.description}</p>
+                    )}
+                    {inp.type === "textarea" ? (
+                      <Textarea
+                        placeholder={inp.placeholder}
+                        value={(inputs[inp.name] as string) || ""}
+                        onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.value }))}
+                        className="min-h-[100px] border-[#e4e4e7]"
+                      />
+                    ) : inp.type === "select" ? (
+                      <Select
+                        value={(inputs[inp.name] as string) || (inp.default as string) || ""}
+                        onValueChange={(val) => setInputs((prev) => ({ ...prev, [inp.name]: val }))}
+                      >
+                        <SelectTrigger className="border-[#e4e4e7]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(inp.options || []).map((opt) => (
+                            <SelectItem key={opt} value={opt}>
+                              {opt}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : inp.type === "boolean" ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`inp-${inp.name}`}
+                          checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
+                          onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.checked }))}
+                          className="w-4 h-4 rounded border-[#e4e4e7] accent-black cursor-pointer"
+                        />
+                        <label htmlFor={`inp-${inp.name}`} className="text-sm text-[#666] cursor-pointer select-none">
+                          {inp.placeholder || inp.label}
+                        </label>
+                      </div>
+                    ) : inp.type === "file" && (inp as WorkerInput & { accept_csv?: boolean }).accept_csv ? (
+                      <CsvColumnMapper
+                        requiredColumns={worker.config.csv_required_columns || []}
+                        label={undefined}
+                        onMapped={(csv) => {
+                          setInputs((prev) => ({ ...prev, [inp.name]: csv }));
+                          setFileNames((prev) => ({ ...prev, [inp.name]: "mapped.csv" }));
+                        }}
+                      />
+                    ) : inp.type === "file" ? (
+                      <FileInputUpload
+                        name={inp.name}
+                        value={inputs[inp.name] as string | undefined}
+                        fileName={fileNames[inp.name]}
+                        accepts={(inp as WorkerInput & { accepts?: string[] }).accepts}
+                        maxSizeMb={(inp as WorkerInput & { max_size_mb?: number }).max_size_mb}
+                        onUploaded={(sha256, name) => {
+                          setInputs((prev) => ({ ...prev, [inp.name]: sha256 }));
+                          setFileNames((prev) => ({ ...prev, [inp.name]: name }));
+                        }}
+                      />
+                    ) : (
+                      <Input
+                        type={inp.type === "number" ? "number" : "text"}
+                        placeholder={inp.placeholder}
+                        value={(inputs[inp.name] as string) || ""}
+                        onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.value }))}
+                        className="border-[#e4e4e7]"
+                      />
+                    )}
+                  </div>
+                ))}
 
-                {worker.use_cases && worker.use_cases.length > 0 && (
-                  <section>
-                    <h2 className="text-sm font-medium mb-2">Use cases</h2>
-                    <ul className="list-disc pl-5 space-y-1">
-                      {worker.use_cases.map((useCase) => (
-                        <li key={useCase} className="text-sm text-[#666]">{useCase}</li>
-                      ))}
-                    </ul>
-                  </section>
+                {worker.config.inputs.length === 0 && (
+                  <p className="text-sm text-[#999]">This worker has no inputs.</p>
                 )}
 
                 {worker.example_input && (
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <h2 className="text-sm font-medium">Example input</h2>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8"
-                        onClick={applyExampleInput}
-                        disabled={!canApplySample}
-                      >
-                        <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
-                        Use this sample
-                      </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={applyExampleInput}
+                    disabled={!canApplySample}
+                    className="border-[#e4e4e7]"
+                  >
+                    <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
+                    Use sample input
+                  </Button>
+                )}
+
+                {missingConnections.length > 0 && (
+                  <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium">Connection required</p>
+                      <p>
+                        Connect{" "}
+                        {missingConnections.map((s, i) => (
+                          <span key={s}>
+                            <span className="font-medium capitalize">{s}</span>
+                            {i < missingConnections.length - 1 ? ", " : ""}
+                          </span>
+                        ))}{" "}
+                        in{" "}
+                        <Link href="/connections" className="underline hover:text-amber-900">
+                          Connections
+                        </Link>{" "}
+                        before running.
+                      </p>
                     </div>
-                    <ExampleInputPreview inputs={worker.config.inputs} example={worker.example_input} />
-                  </section>
+                  </div>
                 )}
 
-                {worker.example_output && (
-                  <section>
-                    <h2 className="text-sm font-medium mb-2">Example output</h2>
-                    <MarkdownPreview value={worker.example_output} />
-                  </section>
-                )}
+                <Button onClick={handleRun} disabled={!canRun} className="w-full">
+                  <Play className="w-4 h-4 mr-1.5" />
+                  {running
+                    ? "Starting..."
+                    : missingConnections.length > 0
+                    ? `Connect ${missingConnections[0]} first`
+                    : "Run worker"}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-                {worker.how_it_works && (
-                  <section>
-                    <h2 className="text-sm font-medium mb-2">How it works</h2>
-                    <pre className="text-xs leading-relaxed overflow-auto font-mono bg-[#f4f4f5] p-3 rounded-md border border-[#eaeaea] whitespace-pre-wrap">
-                      {worker.how_it_works}
-                    </pre>
-                  </section>
+        {/* Code tab */}
+        <TabsContent value="code" className="mt-6">
+          <div className="space-y-6 max-w-3xl">
+            <Card className="border-[#eaeaea] shadow-none bg-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">SKILL.md</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {worker.skill_md_content ? (
+                  <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea] overflow-auto max-h-[600px]">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {worker.skill_md_content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="text-sm text-[#999]">SKILL.md not available.</p>
                 )}
               </CardContent>
             </Card>
-          )}
 
-          <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Run worker</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {worker.config.inputs.map((inp: WorkerInput) => (
-                <div key={inp.name} className="space-y-1.5">
-                  <Label className="text-sm">
-                    {inp.label}
-                    {inp.required && <span className="text-red-500 ml-0.5">*</span>}
-                  </Label>
-                  {inp.description && (
-                    <p className="text-xs text-[#777]">{inp.description}</p>
-                  )}
-                  {inp.type === "textarea" ? (
-                    <Textarea
-                      placeholder={inp.placeholder}
-                      value={(inputs[inp.name] as string) || ""}
-                      onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.value }))}
-                      className="min-h-[100px] border-[#e4e4e7]"
-                    />
-                  ) : inp.type === "select" ? (
-                    <Select
-                      value={(inputs[inp.name] as string) || (inp.default as string) || ""}
-                      onValueChange={(val) => setInputs((prev) => ({ ...prev, [inp.name]: val }))}
-                    >
-                      <SelectTrigger className="border-[#e4e4e7]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(inp.options || []).map((opt) => (
-                          <SelectItem key={opt} value={opt}>
-                            {opt}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : inp.type === "boolean" ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id={`inp-${inp.name}`}
-                        checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
-                        onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.checked }))}
-                        className="w-4 h-4 rounded border-[#e4e4e7] accent-black cursor-pointer"
-                      />
-                      <label htmlFor={`inp-${inp.name}`} className="text-sm text-[#666] cursor-pointer select-none">
-                        {inp.placeholder || inp.label}
-                      </label>
-                    </div>
-                  ) : inp.type === "file" && inp.accept_csv ? (
-                    <CsvColumnMapper
-                      requiredColumns={worker.config.csv_required_columns || []}
-                      label={undefined}
-                      onMapped={(csv) => {
-                        setInputs((prev) => ({ ...prev, [inp.name]: csv }));
-                        setFileNames((prev) => ({ ...prev, [inp.name]: "mapped.csv" }));
-                      }}
-                    />
-                  ) : inp.type === "file" ? (
-                    <FileInputUpload
-                      name={inp.name}
-                      value={inputs[inp.name] as string | undefined}
-                      fileName={fileNames[inp.name]}
-                      accepts={(inp as WorkerInput & { accepts?: string[] }).accepts}
-                      maxSizeMb={(inp as WorkerInput & { max_size_mb?: number }).max_size_mb}
-                      onUploaded={(sha256, name) => {
-                        setInputs((prev) => ({ ...prev, [inp.name]: sha256 }));
-                        setFileNames((prev) => ({ ...prev, [inp.name]: name }));
-                      }}
-                    />
-                  ) : (
-                    <Input
-                      type={inp.type === "number" ? "number" : "text"}
-                      placeholder={inp.placeholder}
-                      value={(inputs[inp.name] as string) || ""}
-                      onChange={(e) => setInputs((prev) => ({ ...prev, [inp.name]: e.target.value }))}
-                      className="border-[#e4e4e7]"
-                    />
-                  )}
-                </div>
-              ))}
-              {missingConnections.length > 0 && (
-                <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                  <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">Connection required</p>
-                    <p>
-                      Connect{" "}
-                      {missingConnections.map((s, i) => (
-                        <span key={s}>
-                          <span className="font-medium capitalize">{s}</span>
-                          {i < missingConnections.length - 1 ? ", " : ""}
-                        </span>
-                      ))}{" "}
-                      in{" "}
-                      <Link href="/connections" className="underline hover:text-amber-900">
-                        Connections
-                      </Link>{" "}
-                      before running.
-                    </p>
-                  </div>
-                </div>
-              )}
-              <Button onClick={handleRun} disabled={!canRun} className="w-full">
-                <Play className="w-4 h-4 mr-1.5" />
-                {running
-                  ? "Starting..."
-                  : missingConnections.length > 0
-                  ? `Connect ${missingConnections[0]} first`
-                  : "Run worker"}
-              </Button>
-            </CardContent>
-          </Card>
+            {isPureScript && worker.run_py_content && (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">run.py</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <pre className="text-xs font-mono overflow-auto max-h-[500px] bg-[#f9f9f9] p-3 rounded-md border border-[#eaeaea] whitespace-pre">
+                    {worker.run_py_content}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
 
-          <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {worker.recent_runs?.length === 0 ? (
-                <p className="text-sm text-[#999]">No runs yet.</p>
-              ) : (
-                worker.recent_runs?.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5]">
-                    <div>
-                      <p className="text-sm font-medium">{r.id}</p>
-                      <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
-                    </div>
-                    <Badge variant="outline">{r.status}</Badge>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </div>
+            {!isPureScript && worker.run_py_content && (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">run.py</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <pre className="text-xs font-mono overflow-auto max-h-[500px] bg-[#f9f9f9] p-3 rounded-md border border-[#eaeaea] whitespace-pre">
+                    {worker.run_py_content}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
 
-        <div className="space-y-6">
-          <Card className="border-[#eaeaea] shadow-none bg-white">
-            <Tabs defaultValue="config">
-              <CardHeader className="pb-0">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium">Configuration</CardTitle>
-                  <TabsList className="h-7 bg-[#f4f4f5]">
-                    <TabsTrigger value="config" className="h-5 text-xs px-2.5">Config</TabsTrigger>
-                    <TabsTrigger value="manifest" className="h-5 text-xs px-2.5">Manifest</TabsTrigger>
-                  </TabsList>
-                </div>
+            <Card className="border-[#eaeaea] shadow-none bg-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">worker.yml</CardTitle>
               </CardHeader>
-              <TabsContent value="config">
-                <CardContent className="space-y-3 text-sm pt-4">
-                  <div className="flex justify-between">
-                    <span className="text-[#666]">Trigger</span>
-                    <span className="font-medium">{worker.config.trigger.type}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#666]">Runtime</span>
-                    <span className="font-medium">{worker.config.runtime.type}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[#666]">Runner</span>
-                    <span className="font-medium">{worker.config.runtime.runner}</span>
-                  </div>
-                  <Separator className="my-2" />
-                  <div>
-                    <span className="text-[#666]">Secrets</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {worker.config.secrets.length === 0 ? (
-                        <span className="text-xs text-[#999]">None</span>
-                      ) : (
-                        worker.config.secrets.map((s) => (
-                          <Badge key={s} variant="secondary" className="text-xs font-normal">
-                            {s}
+              <CardContent>
+                {worker.manifest_yaml ? (
+                  <ManifestViewer yaml={worker.manifest_yaml} />
+                ) : (
+                  <p className="text-sm text-[#999]">Manifest not available.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Connections tab */}
+        <TabsContent value="connections" className="mt-6">
+          <div className="max-w-xl space-y-6">
+            {requiredConnections.length > 0 ? (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">Required integrations</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {requiredConnections.map((slug) => {
+                    const isActive = activeConnectionSlugs.has(slug.toLowerCase());
+                    return (
+                      <div key={slug} className="flex items-center justify-between py-2 border-b border-[#f4f4f5] last:border-0">
+                        <span className="text-sm capitalize font-medium">{slug}</span>
+                        {isActive ? (
+                          <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-200 bg-emerald-50">
+                            Active
                           </Badge>
-                        ))
-                      )}
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs text-amber-600 border-amber-200 bg-amber-50">
+                              Missing
+                            </Badge>
+                            <Link href="/connections">
+                              <Button size="sm" variant="outline" className="h-6 text-xs border-[#e4e4e7]">
+                                Connect
+                              </Button>
+                            </Link>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            ) : (
+              <p className="text-sm text-[#999]">This worker requires no integrations.</p>
+            )}
+
+            {requiredSecrets.length > 0 && (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">Required secrets</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {requiredSecrets.map((s) => (
+                    <div key={s} className="flex items-center justify-between py-2 border-b border-[#f4f4f5] last:border-0">
+                      <span className="text-sm font-mono font-medium">{s}</span>
+                      <Link href="/settings">
+                        <Button size="sm" variant="outline" className="h-6 text-xs border-[#e4e4e7]">
+                          Configure
+                        </Button>
+                      </Link>
                     </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Runs tab */}
+        <TabsContent value="runs" className="mt-6">
+          <div className="max-w-2xl">
+            <Card className="border-[#eaeaea] shadow-none bg-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {worker.recent_runs?.length === 0 ? (
+                  <p className="text-sm text-[#999]">No runs yet.</p>
+                ) : (
+                  worker.recent_runs?.map((r) => (
+                    <Link key={r.id} href={`/runs/${r.id}`}>
+                      <div className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5] cursor-pointer">
+                        <div>
+                          <p className="text-sm font-medium font-mono">{r.id}</p>
+                          <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
+                        </div>
+                        <Badge variant="outline">{r.status}</Badge>
+                      </div>
+                    </Link>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Overview tab */}
+        <TabsContent value="overview" className="mt-6">
+          <div className="max-w-2xl space-y-6">
+            {/* Worker metadata */}
+            <Card className="border-[#eaeaea] shadow-none bg-white">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Configuration</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-[#666]">Trigger</span>
+                  <span className="font-medium">{worker.config.trigger.type}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#666]">Runtime</span>
+                  <span className="font-medium">{worker.config.runtime.type}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#666]">Runner</span>
+                  <span className="font-medium">{worker.config.runtime.runner}</span>
+                </div>
+                <Separator className="my-2" />
+                <div>
+                  <span className="text-[#666]">Inputs</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {worker.config.inputs.length === 0 ? (
+                      <span className="text-xs text-[#999]">None</span>
+                    ) : (
+                      worker.config.inputs.map((inp) => (
+                        <Badge key={inp.name} variant="secondary" className="text-xs font-normal">
+                          {inp.label || inp.name}
+                        </Badge>
+                      ))
+                    )}
                   </div>
-                  <div>
-                    <span className="text-[#666]">Outputs</span>
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {worker.config.outputs.map((o) => (
+                </div>
+                <div>
+                  <span className="text-[#666]">Outputs</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {worker.config.outputs.length === 0 ? (
+                      <span className="text-xs text-[#999]">None</span>
+                    ) : (
+                      worker.config.outputs.map((o) => (
                         <Badge key={o.name} variant="outline" className="text-xs font-normal">
                           {o.label}
                         </Badge>
-                      ))}
-                    </div>
+                      ))
+                    )}
                   </div>
-                  {requiredConnections.length > 0 && (
-                    <>
-                      <Separator className="my-2" />
-                      <div>
-                        <span className="text-[#666]">Connections</span>
-                        <div className="flex flex-col gap-1.5 mt-1.5">
-                          {requiredConnections.map((slug) => {
-                            const isActive = activeConnectionSlugs.has(slug.toLowerCase());
-                            return (
-                              <div key={slug} className="flex items-center justify-between">
-                                <span className="text-xs capitalize">{slug}</span>
-                                {isActive ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs text-emerald-600 border-emerald-200 bg-emerald-50"
-                                  >
-                                    Active
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs text-amber-600 border-amber-200 bg-amber-50"
-                                  >
-                                    Missing
-                                  </Badge>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Long description + use cases + example + how it works */}
+            {(worker.long_description || worker.use_cases?.length || worker.example_input || worker.example_output || worker.how_it_works) && (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">Worker guide</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  {worker.long_description && (
+                    <section>
+                      <h2 className="text-sm font-medium mb-2">Description</h2>
+                      <p className="text-sm text-[#666] leading-relaxed whitespace-pre-wrap">{worker.long_description}</p>
+                    </section>
+                  )}
+
+                  {worker.use_cases && worker.use_cases.length > 0 && (
+                    <section>
+                      <h2 className="text-sm font-medium mb-2">Use cases</h2>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {worker.use_cases.map((useCase) => (
+                          <li key={useCase} className="text-sm text-[#666]">{useCase}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {worker.example_input && (
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h2 className="text-sm font-medium">Example input</h2>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={applyExampleInput}
+                          disabled={!canApplySample}
+                        >
+                          <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
+                          Use this sample
+                        </Button>
                       </div>
-                    </>
+                      <ExampleInputPreview inputs={worker.config.inputs} example={worker.example_input} />
+                    </section>
+                  )}
+
+                  {worker.example_output && (
+                    <section>
+                      <h2 className="text-sm font-medium mb-2">Example output</h2>
+                      <MarkdownPreview value={worker.example_output} />
+                    </section>
+                  )}
+
+                  {worker.how_it_works && (
+                    <section>
+                      <h2 className="text-sm font-medium mb-2">How it works</h2>
+                      <pre className="text-xs leading-relaxed overflow-auto font-mono bg-[#f4f4f5] p-3 rounded-md border border-[#eaeaea] whitespace-pre-wrap">
+                        {worker.how_it_works}
+                      </pre>
+                    </section>
                   )}
                 </CardContent>
-              </TabsContent>
-              <TabsContent value="manifest">
-                <CardContent className="pt-4">
-                  {worker.manifest_yaml ? (
-                    <ManifestViewer yaml={worker.manifest_yaml} />
-                  ) : (
-                    <p className="text-sm text-[#999]">Manifest not available.</p>
-                  )}
-                </CardContent>
-              </TabsContent>
-            </Tabs>
-          </Card>
-        </div>
-      </div>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
