@@ -14,13 +14,10 @@ from dotenv import load_dotenv
 
 from db import get_db, now_iso
 from worker_registry import get_worker_config
-from runner_local import run_worker_local
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
     WorkerConfig,
     WorkerContract,
-    WorkerResult,
-    LogLevel,
     ApprovalStatus,
     RunStatus,
     parse_worker_manifest,
@@ -31,6 +28,28 @@ logger = logging.getLogger("floom.run_service")
 
 API_ENV_PATH = Path("/root/.config/workeros/api.env")
 LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
+
+# ---------------------------------------------------------------------------
+# SSE event publisher hook
+# ---------------------------------------------------------------------------
+# Populated by main.py at startup to avoid circular imports.
+# Signature: (run_id: str, event: dict) -> None
+_sse_publish_fn: Optional[Callable[[str, dict], None]] = None
+
+
+def register_sse_publisher(fn: Callable[[str, dict], None]) -> None:
+    """Called from main.py to wire up the SSE event publisher."""
+    global _sse_publish_fn
+    _sse_publish_fn = fn
+
+
+def _publish_sse(run_id: str, event: dict) -> None:
+    if _sse_publish_fn is not None:
+        try:
+            _sse_publish_fn(run_id, event)
+        except Exception as exc:
+            logger.warning("SSE publish failed for run %s: %s", run_id, exc)
+
 
 # ---------------------------------------------------------------------------
 # Secret scrubbing
@@ -176,6 +195,7 @@ def add_log(
     trace_id: Optional[str] = None,
     attributes: Optional[Dict[str, Any]] = None,
 ) -> None:
+    ts = now_iso()
     with get_db() as conn:
         conn.execute(
             """
@@ -183,8 +203,16 @@ def add_log(
                 (run_id, level, message, timestamp, trace_id)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (run_id, level, message, now_iso(), trace_id),
+            (run_id, level, message, ts, trace_id),
         )
+    _publish_sse(run_id, {
+        "type": "log",
+        "run_id": run_id,
+        "level": level,
+        "message": message,
+        "timestamp": ts,
+        "trace_id": trace_id,
+    })
 
 
 def update_run_status(
@@ -235,6 +263,14 @@ def update_run_status(
             tuple(params),
         )
 
+    # Publish SSE event for the status change
+    _publish_sse(run_id, {
+        "type": "status",
+        "run_id": run_id,
+        "status": status,
+        "error": error,
+    })
+
 
 def create_approval(
     run_id: str,
@@ -267,6 +303,7 @@ def _store_run_artifacts(
             art_type = art.get("type", "file")
             art_path = art.get("path", "")
             art_size = art.get("size_bytes", 0)
+            art_created = now_iso()
             with get_db() as conn:
                 conn.execute(
                     """
@@ -274,8 +311,19 @@ def _store_run_artifacts(
                         (id, run_id, name, type, path, size_bytes, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (art_id, run_id, art_name, art_type, art_path, art_size, now_iso()),
+                    (art_id, run_id, art_name, art_type, art_path, art_size, art_created),
                 )
+            _publish_sse(run_id, {
+                "type": "artifact",
+                "run_id": run_id,
+                "artifact": {
+                    "id": art_id,
+                    "name": art_name,
+                    "artifact_type": art_type,
+                    "size_bytes": art_size,
+                    "created_at": art_created,
+                },
+            })
         except Exception as exc:
             logger.exception("Failed to store artifact")
             log_fn(f"Failed to store artifact: {exc}", level="warning")
@@ -401,19 +449,19 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(f"Run failed: {result.error}", level="error")
         return
 
-    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
-    log_fn("Output generated")
-
     if config.approvals.required:
-        update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs)
         preview = ""
         if outputs:
             first_key = list(outputs.keys())[0]
             preview = str(outputs.get(first_key, ""))[:500]
         label = config.approvals.label or "Approve output"
         create_approval(run_id, worker_id, label, preview)
+        update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs)
+        log_fn("Output generated")
         log_fn("Waiting for approval")
     else:
+        update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
+        log_fn("Output generated")
         log_fn("Run completed")
 
 
