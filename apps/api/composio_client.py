@@ -296,22 +296,51 @@ def disable_trigger(event: str, composio_trigger_id: Optional[str] = None) -> No
     _post(f"/triggers/{event}/disable", body)
 
 
+class NoManagedAuthError(Exception):
+    """Raised when Composio has no managed OAuth credentials for a toolkit.
+
+    This typically means the app is API-key-only or uses a non-standard auth
+    scheme (e.g. DCR_OAUTH) that requires user-supplied credentials.
+    """
+
+
 def _resolve_auth_config_id(app_name: str) -> str:
-    """Find (or create) a Composio-managed auth_config for the given toolkit."""
+    """Find (or create) a Composio-managed auth_config for the given toolkit.
+
+    Raises NoManagedAuthError if Composio does not support managed OAuth for
+    this toolkit (e.g. the app is API-key-only or DCR_OAUTH-only).
+    """
     data = _get("/auth_configs", toolkit_slugs=app_name, limit=20)
     for ac in data.get("items") or []:
         toolkit = ac.get("toolkit") or {}
         if (toolkit.get("slug") or "").lower() == app_name.lower():
             if ac.get("status") in (None, "ENABLED"):
                 return ac["id"]
-    # Create one if none exists
-    created = _post("/auth_configs", {
-        "toolkit": {"slug": app_name},
-        "auth_config": {
-            "type": "use_composio_managed_auth",
-            "name": f"workeros_{app_name}",
-        },
-    })
+    # Create one if none exists.
+    try:
+        created = _post("/auth_configs", {
+            "toolkit": {"slug": app_name},
+            "auth_config": {
+                "type": "use_composio_managed_auth",
+                "name": f"workeros_{app_name}",
+            },
+        })
+    except requests.HTTPError as exc:
+        # Composio returns 400 with slug "Auth_Config_DefaultAuthConfigNotFound"
+        # when the toolkit does not have Composio-managed OAuth credentials.
+        if exc.response is not None and exc.response.status_code == 400:
+            try:
+                body = exc.response.json()
+                err = body.get("error") or {}
+                code = err.get("slug") or err.get("code") or ""
+                if "DefaultAuthConfig" in str(code) or "no managed" in str(err.get("message", "")).lower():
+                    raise NoManagedAuthError(
+                        f"{app_name} does not support Composio-managed OAuth. "
+                        "Add an API key in Secrets instead."
+                    ) from exc
+            except (ValueError, AttributeError):
+                pass
+        raise
     return created["auth_config"]["id"]
 
 
@@ -319,6 +348,8 @@ def initiate_connection(app_name: str, redirect_url: str) -> Dict[str, str]:
     """Initiate OAuth for app_name (v3 API).
 
     Returns {composio_connection_id, redirect_url}.
+
+    Raises NoManagedAuthError if the app does not support Composio-managed OAuth.
     """
     auth_config_id = _resolve_auth_config_id(app_name)
     data = _post("/connected_accounts", {
