@@ -333,17 +333,27 @@ def _secret_names_from_db() -> set[str]:
 
 
 _PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
+    # Platform infrastructure credentials — never legitimate worker inputs.
     "FLOOM_SECRET",
-    "OPENAI_API_KEY",
     "COMPOSIO_API_KEY",
     "COMPOSIO_WEBHOOK_SIGNING_KEY",
     "E2B_API_KEY",
+    "FLOOM_DEPLOY_SECRET",
+    # Platform infra paths / tuning vars — same.
     "WORKERS_FRONTEND_URL",
     "FLOOM_DB",
     "FLOOM_WORKERS_DIR",
     "FLOOM_ARTIFACTS_DIR",
     "FLOOM_RUN_TIMEOUT",
-    "FLOOM_DEPLOY_SECRET",
+    # NOTE: OPENAI_API_KEY is INTENTIONALLY NOT in this list. Workers
+    # legitimately need it to call OpenAI from inside the sandbox (research_brief,
+    # csv_enricher, cv_writeup etc. all declare secrets: [OPENAI_API_KEY]).
+    # Workeros v0 is single-user, so the platform owner == the worker author,
+    # and sharing the OpenAI key is acceptable. When the platform goes
+    # multi-tenant (skills-neo v0.y), this needs to change: each tenant must
+    # bring their own OPENAI_API_KEY via the secrets DB, and the platform's
+    # own key must move to a separate name like PLATFORM_OPENAI_API_KEY.
+    # See ARCHITECTURE.md.
 })
 
 
