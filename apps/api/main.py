@@ -9,17 +9,19 @@ import mimetypes
 import hashlib
 import hmac
 import base64
+import shutil
 import fcntl
 import re
 import time
 import collections
 import threading
+import tempfile
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -27,6 +29,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso, DB_PATH
+from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from models import (
     ApproveRequest,
     RunCreate,
@@ -51,6 +54,7 @@ from models import (
     WorkerUpdateRequest,
 )
 from worker_registry import (
+    WORKERS_DIR,
     discover_workers,
     get_worker,
     invalidate_worker_cache,
@@ -455,7 +459,7 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 manifest.get("name") or worker_id.replace("_", "-"),
                 manifest.get("version") or "0.1.0",
                 json.dumps(manifest),
-                f"workers/{worker_id}",
+                str((WORKERS_DIR / worker_id).resolve()),
                 now,
             ),
         )
@@ -552,6 +556,281 @@ def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Workers
 # ---------------------------------------------------------------------------
+
+
+def _parse_accepts(value: Optional[str]) -> set[str]:
+    if not value:
+        return set()
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return {normalize_media_type(str(item)) for item in parsed if str(item).strip()}
+    except json.JSONDecodeError:
+        pass
+    return {normalize_media_type(part) for part in value.split(",") if part.strip()}
+
+
+def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+    else:
+        target = WORKERS_DIR / worker_id
+    resolved = target.resolve()
+    allowed_root = WORKERS_DIR.parent.resolve()
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid worker bundle path")
+    return resolved
+
+
+_ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
+
+
+def _increment_file_ref_counts(file_ids: List[str]) -> None:
+    """Increment file ref_counts in one short transaction tolerant of run bursts."""
+    if not file_ids:
+        return
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    counts = collections.Counter(file_ids)
+    conn = sqlite3.connect(DB_PATH, timeout=30, detect_types=sqlite3.PARSE_DECLTYPES)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        for file_id, count in counts.items():
+            conn.execute(
+                "UPDATE files SET ref_count = ref_count + ? WHERE id = ?",
+                (count, file_id),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _resolve_file_input_references(
+    worker_id: str, run_id: str, inputs: Dict[str, Any], bound_by: str = "anonymous"
+) -> Dict[str, Any]:
+    """Stage blob files into a per-run inputs directory.
+
+    Files are copied from the content-addressed blob store into
+    ``<artifacts>/<run_id>/inputs/<name><ext>`` so that concurrent runs for
+    the same worker never share or overwrite each other's input files.
+    Optional inputs omitted by this run produce no file in the run directory.
+
+    The resolved value stored in *inputs* is the **absolute path** to the
+    staged file so that the local runner can read it without relying on the
+    process-global cwd.
+    """
+    config = get_worker_config_for_run(worker_id)
+    if not config:
+        return dict(inputs)
+
+    resolved_inputs = dict(inputs)
+    file_inputs = [inp for inp in config.inputs if inp.type == "file"]
+    if not file_inputs:
+        return resolved_inputs
+
+    # Per-run staging dir — isolated from bundle and from other concurrent runs.
+    artifacts_dir = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", str(_ARTIFACTS_DIR))).resolve()
+    run_inputs_dir = artifacts_dir / run_id / "inputs"
+    run_inputs_dir.mkdir(parents=True, exist_ok=True)
+    bound_file_ids: List[str] = []
+
+    with get_db() as conn:
+        for inp in file_inputs:
+            value = resolved_inputs.get(inp.name)
+            if value in (None, ""):
+                # Optional file omitted for this run — leave it absent in the
+                # per-run dir so stale files from earlier runs are never visible.
+                continue
+            if not is_sha256(value):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File input '{inp.name}': value must be a SHA-256 reference "
+                        f"from /uploads, got non-SHA value"
+                    ),
+                )
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
+                raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+
+            row = conn.execute(
+                "SELECT id, filename, media_type, size_bytes, uploaded_by FROM files WHERE id = ?",
+                (value,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Uploaded file not found: {inp.name}")
+
+            source = blob_path(row["id"])
+            if not source.is_file():
+                raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
+
+            # Fix 4: Bind-time revalidation — reject if blob violates this input's constraints.
+            if inp.accepts:
+                accepted = set(inp.accepts)
+                if row["media_type"] not in accepted:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"File input '{inp.name}': stored media_type {row['media_type']!r} "
+                            f"is not in accepts {sorted(accepted)}"
+                        ),
+                    )
+            if inp.max_size_mb is not None:
+                max_bytes = int(inp.max_size_mb * 1024 * 1024)
+                if row["size_bytes"] > max_bytes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"File input '{inp.name}': stored size {row['size_bytes']} bytes "
+                            f"exceeds max_size_mb={inp.max_size_mb}"
+                        ),
+                    )
+
+            # Fix 5: File ownership audit — log cross-user bindings (non-blocking per T1c).
+            file_owner = row["uploaded_by"] or "anonymous"
+            if file_owner != bound_by:
+                logger.info(
+                    "file_binding_audit: run=%s worker=%s input=%s sha=%s "
+                    "uploaded_by=%r bound_by=%r",
+                    run_id,
+                    worker_id,
+                    inp.name,
+                    row["id"],
+                    file_owner,
+                    bound_by,
+                )
+                with get_db() as audit_conn:
+                    audit_conn.execute(
+                        """
+                        INSERT INTO file_binding_audit
+                            (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+                    )
+
+            ext = extension_for_file(row["filename"], row["media_type"])
+            mounted = run_inputs_dir / f"{inp.name}{ext}"
+            shutil.copyfile(source, mounted)
+            # Store absolute path so runners don't need cwd tricks to locate the file.
+            resolved_inputs[inp.name] = str(mounted)
+            bound_file_ids.append(row["id"])
+
+    _increment_file_ref_counts(bound_file_ids)
+
+    return resolved_inputs
+
+
+_DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard ceiling
+
+
+@app.post("/uploads")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    max_size_mb: Optional[float] = Form(None),
+    accepts: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    if max_size_mb is not None and max_size_mb <= 0:
+        raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
+
+    media_type = normalize_media_type(
+        file.content_type or mimetypes.guess_type(file.filename or "")[0]
+    )
+    accepted = _parse_accepts(accepts)
+    if accepted and media_type not in accepted:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not accepted",
+        )
+
+    # Fix 3: enforce a hard ceiling even when the client omits max_size_mb.
+    # Stream to a temp file (not memory) and hash on the fly so large uploads
+    # never fully buffer in process RAM before the 413 is raised.
+    if max_size_mb is not None:
+        max_bytes = min(int(max_size_mb * 1024 * 1024), _DEFAULT_UPLOAD_MAX_BYTES)
+    else:
+        max_bytes = _DEFAULT_UPLOAD_MAX_BYTES
+
+    hasher = hashlib.sha256()
+    size = 0
+    # Stream directly to a temp file to avoid memory buffering.
+    # Use BLOBS_DIR from files.py (already env-resolved) so the temp file is on
+    # the same filesystem as the final target, making os.replace atomic.
+    from files import BLOBS_DIR as _BLOBS_DIR
+    _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_upload = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=_BLOBS_DIR,
+            prefix=".upload.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_out:
+            tmp_upload = Path(tmp_out.name)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    tmp_out.flush()
+                    limit_mb = max_size_mb if max_size_mb is not None else (_DEFAULT_UPLOAD_MAX_BYTES // (1024 * 1024))
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Uploaded file exceeds {limit_mb:g} MB",
+                    )
+                hasher.update(chunk)
+                tmp_out.write(chunk)
+    except HTTPException:
+        if tmp_upload is not None:
+            tmp_upload.unlink(missing_ok=True)
+        raise
+
+    sha256 = hasher.hexdigest()
+    target = ensure_blob_dir(sha256)
+    if not target.exists():
+        final_tmp = target.parent / f".{sha256}.tmp.{os.getpid()}.{threading.get_ident()}"
+        try:
+            os.replace(tmp_upload, final_tmp)
+            os.replace(final_tmp, target)
+        finally:
+            final_tmp.unlink(missing_ok=True)
+            tmp_upload.unlink(missing_ok=True)
+    else:
+        # Blob already exists — dedup; remove the temp file.
+        tmp_upload.unlink(missing_ok=True)
+
+    uploaded_by = request.headers.get("x-floom-user") or "anonymous"
+    uploaded_at = now_iso()
+    filename = file.filename or sha256
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO files
+                (id, filename, media_type, size_bytes, uploaded_by, uploaded_at, ref_count)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                filename=files.filename,
+                media_type=files.media_type,
+                size_bytes=files.size_bytes,
+                uploaded_by=files.uploaded_by,
+                uploaded_at=files.uploaded_at,
+                ref_count=files.ref_count
+            """,
+            (sha256, filename, media_type, size, uploaded_by, uploaded_at),
+        )
+
+    return {"id": sha256, "sha256": sha256, "size": size, "media_type": media_type}
+
 
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
@@ -1046,13 +1325,32 @@ def reload_workers() -> ReloadResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/workers/{worker_id}/runs", response_model=ActionResponse)
-def create_worker_run(worker_id: str, payload: RunCreate) -> ActionResponse:
+def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> ActionResponse:
     worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
+    # Create the run record first so we have a run_id for per-run file staging.
     run_id = create_run(worker_id, payload.inputs, payload.trigger_source)
-    start_run(run_id, worker_id, payload.inputs)
+    bound_by = request.headers.get("x-floom-user") or "anonymous"
+    try:
+        resolved_inputs = _resolve_file_input_references(
+            worker_id, run_id, payload.inputs, bound_by=bound_by
+        )
+    except HTTPException as exc:
+        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc))
+        raise
+    # Persist resolved inputs (absolute file paths replace SHA values) so that
+    # GET /runs/:id returns the staged paths, not raw SHA strings.
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE runs SET input_json = ? WHERE id = ?",
+            (json.dumps(resolved_inputs), run_id),
+        )
+    start_run(run_id, worker_id, resolved_inputs)
     return ActionResponse(status="running", run_id=run_id)
 
 
