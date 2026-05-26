@@ -107,6 +107,9 @@ Explicitly NOT in scope. Will reopen only with a specific trigger.
 | Outgoing HMAC notify URLs | First worker needing webhook-out fan-out |
 | Skeleton visual fix (radius mismatch, dark-mode contrast) | Federico flags as P0 design |
 | Capability grants enforcement (fail-closed) | Marketplace install path OR multi-user |
+| Multi-action skills (`entrypoints[]` exposed as separate API actions + MCP tool param) | First worker that genuinely needs >1 invokable action — workaround today is one worker per action |
+| Richer input/output types (`kind: json` with nested-schema validation, arrays-of-objects) | First user trying to pass nested JSON and asking for first-class type |
+| In-UI preview for file outputs (PDF, Excel, images, video) | Federico wants to glance at a run's output without downloading |
 | Skills marketplace (install from skills.floom.dev) | After workeros has real usage |
 | Library worker (`@floom.worker` decorator for Python apps) | Library use case validated |
 
