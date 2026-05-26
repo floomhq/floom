@@ -34,6 +34,7 @@ from models import (
     RunCreate,
     WorkerSummary,
     WorkerDetail,
+    WorkerFile,
     RunSummary,
     RunDetail,
     LogEntry,
@@ -735,6 +736,90 @@ def _parse_accepts(value: Optional[str]) -> set[str]:
     return {normalize_media_type(part) for part in value.split(",") if part.strip()}
 
 
+_WORKER_FILE_IGNORE = frozenset({
+    "__pycache__",
+    ".DS_Store",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".eggs",
+    "dist",
+    "build",
+    "*.pyc",
+})
+
+
+def _should_ignore_worker_file(rel_path: str) -> bool:
+    """Return True if the file should be omitted from the worker's file listing."""
+    parts = Path(rel_path).parts
+    for part in parts:
+        if part in _WORKER_FILE_IGNORE:
+            return True
+        if part.endswith(".pyc"):
+            return True
+    return False
+
+
+def _language_for_path(rel_path: str) -> str:
+    """Map a file path to a language identifier for syntax highlighting."""
+    ext = Path(rel_path).suffix.lower()
+    return {
+        ".md": "markdown",
+        ".py": "python",
+        ".yml": "yaml",
+        ".yaml": "yaml",
+        ".json": "json",
+        ".txt": "text",
+        ".sh": "bash",
+        ".toml": "toml",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".html": "html",
+        ".css": "css",
+    }.get(ext, "text")
+
+
+def _read_worker_files(worker_dir: Path) -> List[WorkerFile]:
+    """Read all non-ignored files from a worker directory recursively.
+
+    Priority order for display: worker.yml first, SKILL.md second, run.py third,
+    then all remaining files alphabetically.
+    """
+    if not worker_dir.is_dir():
+        return []
+
+    raw_files: List[WorkerFile] = []
+    for file_path in sorted(worker_dir.rglob("*")):
+        if not file_path.is_file():
+            continue
+        try:
+            rel = file_path.relative_to(worker_dir).as_posix()
+        except ValueError:
+            continue
+        if _should_ignore_worker_file(rel):
+            continue
+        size = file_path.stat().st_size
+        language = _language_for_path(rel)
+        # Attempt UTF-8 read; mark binary if it fails
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            raw_files.append(WorkerFile(path=rel, language=language, content=content, binary=False, size=size))
+        except (UnicodeDecodeError, OSError):
+            raw_files.append(WorkerFile(path=rel, language="text", content=None, binary=True, size=size))
+
+    # Sort: worker.yml first, SKILL.md second, run.py third, then alphabetic
+    def _sort_key(f: WorkerFile) -> tuple:
+        order = {"worker.yml": 0, "SKILL.md": 1, "run.py": 2}
+        return (order.get(f.path, 3), f.path)
+
+    raw_files.sort(key=_sort_key)
+    return raw_files
+
+
 def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
     bundle_path = config.runtime.bundle_path if config and config.runtime else None
     if bundle_path:
@@ -1103,16 +1188,18 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
-    # Read raw YAML for manifest viewer, plus SKILL.md and run.py for Code tab
+    # Read all files from the worker directory for Code tab and edit page
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
     skill_md_content: Optional[str] = None
     run_py_content: Optional[str] = None
+    worker_files: List[WorkerFile] = []
     try:
         from worker_registry import WORKERS_DIR
-        yml_path = WORKERS_DIR / worker_id / "worker.yml"
-        run_path = WORKERS_DIR / worker_id / "run.py"
-        skill_path = WORKERS_DIR / worker_id / "SKILL.md"
+        worker_dir = WORKERS_DIR / worker_id
+        yml_path = worker_dir / "worker.yml"
+        run_path = worker_dir / "run.py"
+        skill_path = worker_dir / "SKILL.md"
         if yml_path.is_file():
             manifest_yaml = yml_path.read_text()
         elif worker.get("manifest"):
@@ -1123,6 +1210,7 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
             run_py_content = run_py
         if skill_path.is_file():
             skill_md_content = skill_path.read_text()
+        worker_files = _read_worker_files(worker_dir)
     except Exception:
         pass
 
@@ -1146,6 +1234,7 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         run_py=run_py,
         skill_md_content=skill_md_content,
         run_py_content=run_py_content,
+        files=worker_files,
     )
 
 
@@ -2023,6 +2112,177 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     return get_worker_detail(worker_id)
+
+
+# ---------------------------------------------------------------------------
+# PUT /workers/{worker_id}/files — bulk file replacement (atomic)
+# ---------------------------------------------------------------------------
+
+class WorkerFilePatch(BaseModel):
+    path: str
+    content: str
+
+
+class WorkerFilesUpdateRequest(BaseModel):
+    files: List[WorkerFilePatch]
+
+
+def _validate_worker_file_path(path: str) -> None:
+    """Raise HTTPException if the path is invalid or contains traversal sequences."""
+    if not path or not path.strip():
+        raise HTTPException(status_code=400, detail="file path must not be empty")
+    parts = Path(path).parts
+    for part in parts:
+        if part in ("", ".."):
+            raise HTTPException(status_code=400, detail=f"file path contains invalid segment: {path!r}")
+    if path.startswith("/") or "\\" in path:
+        raise HTTPException(status_code=400, detail=f"file path must be relative: {path!r}")
+
+
+@app.put("/workers/{worker_id}/files", response_model=WorkerDetail)
+def update_worker_files(worker_id: str, payload: WorkerFilesUpdateRequest) -> WorkerDetail:
+    """Replace all files in a worker's directory atomically.
+
+    Accepts a list of {path, content} objects and writes them to disk.
+    The write is atomic: files are written to a temp directory first, then
+    swapped in. If any validation fails, the worker directory is left untouched.
+
+    Path traversal is blocked: paths containing '..' segments or absolute paths
+    are rejected with 400.
+    """
+    from worker_registry import WORKERS_DIR
+
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    target_dir = WORKERS_DIR / worker_id
+    if not target_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Worker directory not found")
+
+    if not payload.files:
+        raise HTTPException(status_code=400, detail="files list must not be empty")
+
+    # Validate all paths upfront before touching the filesystem
+    seen_paths: set = set()
+    for item in payload.files:
+        _validate_worker_file_path(item.path)
+        if item.path in seen_paths:
+            raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
+        seen_paths.add(item.path)
+
+    # Must include worker.yml
+    if "worker.yml" not in seen_paths:
+        raise HTTPException(status_code=400, detail="files must include worker.yml")
+
+    # Validate worker.yml is parseable
+    yml_item = next(f for f in payload.files if f.path == "worker.yml")
+    parsed_worker_id, _config = _parse_worker_payload(yml_item.content)
+    if parsed_worker_id != worker_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"worker.yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
+        )
+
+    # Atomic write strategy:
+    #   1. Write all new file contents to a temp staging dir (same filesystem).
+    #   2. Back up existing files by renaming them to .bak paths.
+    #   3. Move staged files into the target dir.
+    #   4. On success: remove backups. On failure: restore backups.
+    #
+    # This keeps the worker_id directory in place throughout, avoiding the
+    # FK constraint issues that arise when the directory is renamed away and
+    # re-discovered with a different skill_version_id.
+    import shutil
+
+    tmp_dir: Optional[Path] = None
+    backed_up: List[tuple] = []  # list of (original_path, backup_path)
+
+    try:
+        # Stage new files to a temp dir
+        tmp_dir = WORKERS_DIR / f".{worker_id}.tmp.{os.getpid()}"
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        tmp_dir.mkdir(parents=True)
+
+        for item in payload.files:
+            dest = tmp_dir / item.path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(item.content, encoding="utf-8")
+
+        # Remove any existing files NOT in the new payload (keep backups)
+        existing_files = list(target_dir.rglob("*"))
+        new_paths = {item.path for item in payload.files}
+        for existing in existing_files:
+            if not existing.is_file():
+                continue
+            try:
+                rel = existing.relative_to(target_dir).as_posix()
+            except ValueError:
+                continue
+            if rel not in new_paths and not _should_ignore_worker_file(rel):
+                bak = existing.with_suffix(existing.suffix + f".bak{os.getpid()}")
+                existing.rename(bak)
+                backed_up.append((existing, bak))
+
+        # Write new files from staging dir into target dir, backing up existing ones
+        for item in payload.files:
+            dest = target_dir / item.path
+            if dest.exists():
+                bak = dest.with_suffix(dest.suffix + f".bak{os.getpid()}")
+                dest.rename(bak)
+                backed_up.append((dest, bak))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(tmp_dir / item.path, dest)
+
+        # Reload registry and re-persist only this worker to avoid FK conflicts
+        # with other workers in a shared DB environment.
+        invalidate_worker_cache()
+        workers = discover_workers()
+        this_worker_list = [w for w in workers if w["id"] == worker_id]
+        if not this_worker_list:
+            raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after update")
+        with get_db() as conn:
+            try:
+                _persist_discovered_workers(conn, this_worker_list)
+            except RuntimeError as exc:
+                # Roll back: restore backups
+                for orig, bak in reversed(backed_up):
+                    try:
+                        if orig.exists():
+                            orig.unlink()
+                        bak.rename(orig)
+                    except Exception:
+                        pass
+                invalidate_worker_cache()
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        # Remove backups on success
+        for _orig, bak in backed_up:
+            bak.unlink(missing_ok=True)
+        backed_up.clear()
+
+        return get_worker_detail(worker_id)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("update_worker_files failed for %s", worker_id)
+        # Restore backups on unexpected error
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Failed to update worker files: {exc}") from exc
+    finally:
+        if tmp_dir is not None and tmp_dir.exists():
+            try:
+                shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
 
 
 @app.post("/workers/reload", response_model=ReloadResponse)

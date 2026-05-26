@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ArrowLeft, Save } from "lucide-react";
-import type { ConnectionItem, WorkerDetail } from "@/lib/types";
+import { ArrowLeft, Save, FilePlus, Trash2, File } from "lucide-react";
+import type { ConnectionItem, WorkerDetail, WorkerFile } from "@/lib/types";
 import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 
@@ -64,8 +64,8 @@ export default function EditWorkerPage() {
   const { id } = useParams();
   const router = useRouter();
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
-  const [workerYml, setWorkerYml] = useState("");
-  const [runPy, setRunPy] = useState("");
+  const [files, setFiles] = useState<{ path: string; content: string }[]>([]);
+  const [selectedPath, setSelectedPath] = useState<string>("worker.yml");
   const [saving, setSaving] = useState(false);
   const [triggerType, setTriggerType] = useState<TriggerType>("manual");
   const [cronExpr, setCronExpr] = useState("0 9 * * MON");
@@ -74,14 +74,35 @@ export default function EditWorkerPage() {
   const [composioEvent, setComposioEvent] = useState("");
   const [composioConnectionId, setComposioConnectionId] = useState("");
 
+  // "Add file" dialog state
+  const [addingFile, setAddingFile] = useState(false);
+  const [newFilePath, setNewFilePath] = useState("");
+
   useEffect(() => {
     Promise.all([
       api.workers.get(id as string),
       api.connections.list().catch(() => []),
     ]).then(([loadedWorker, connectionItems]) => {
       setWorker(loadedWorker);
-      setWorkerYml(loadedWorker.manifest_yaml || "");
-      setRunPy(loadedWorker.run_py || "");
+
+      // Build editable file list from the files array
+      const workerFiles = (loadedWorker.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+
+      // Fallback: if files array is empty, use legacy fields
+      if (workerFiles.length === 0) {
+        const fallback: { path: string; content: string }[] = [];
+        if (loadedWorker.manifest_yaml) fallback.push({ path: "worker.yml", content: loadedWorker.manifest_yaml });
+        if (loadedWorker.run_py) fallback.push({ path: "run.py", content: loadedWorker.run_py });
+        if (loadedWorker.skill_md_content) fallback.push({ path: "SKILL.md", content: loadedWorker.skill_md_content });
+        setFiles(fallback);
+      } else {
+        setFiles(workerFiles);
+      }
+
+      // Default selection: worker.yml
+      setSelectedPath("worker.yml");
       setTriggerType((loadedWorker.config.trigger.type as TriggerType) || "manual");
       setCronExpr(loadedWorker.config.trigger.cron || "0 9 * * MON");
       setCronTimezone(loadedWorker.config.trigger.timezone || "Europe/Berlin");
@@ -90,6 +111,22 @@ export default function EditWorkerPage() {
       setConnections(connectionItems);
     });
   }, [id]);
+
+  const getContent = useCallback(
+    (path: string): string => {
+      return files.find((f) => f.path === path)?.content || "";
+    },
+    [files]
+  );
+
+  const setContent = useCallback(
+    (path: string, content: string) => {
+      setFiles((prev) =>
+        prev.map((f) => (f.path === path ? { ...f, content } : f))
+      );
+    },
+    []
+  );
 
   async function save() {
     if (!worker) return;
@@ -100,6 +137,8 @@ export default function EditWorkerPage() {
 
     setSaving(true);
     try {
+      // Update trigger block inside worker.yml
+      const ymlContent = getContent("worker.yml");
       const triggerYaml = buildTriggerYaml(
         triggerType,
         cronExpr,
@@ -107,7 +146,13 @@ export default function EditWorkerPage() {
         composioEvent,
         composioConnectionId,
       );
-      const updated = await api.workers.update(worker.id, replaceTriggerBlock(workerYml, triggerYaml), runPy);
+      const updatedYml = replaceTriggerBlock(ymlContent, triggerYaml);
+
+      const patchedFiles = files.map((f) =>
+        f.path === "worker.yml" ? { ...f, content: updatedYml } : f
+      );
+
+      const updated = await api.workers.updateFiles(worker.id, patchedFiles);
       toast.success("Worker updated");
       router.push(`/workers/${updated.id}`);
     } catch (error: unknown) {
@@ -117,9 +162,36 @@ export default function EditWorkerPage() {
     }
   }
 
+  function addFile() {
+    const trimmed = newFilePath.trim();
+    if (!trimmed) return;
+    if (files.some((f) => f.path === trimmed)) {
+      toast.error(`File "${trimmed}" already exists`);
+      return;
+    }
+    setFiles((prev) => [...prev, { path: trimmed, content: "" }]);
+    setSelectedPath(trimmed);
+    setNewFilePath("");
+    setAddingFile(false);
+  }
+
+  function deleteFile(path: string) {
+    if (path === "worker.yml") {
+      toast.error("Cannot delete worker.yml");
+      return;
+    }
+    if (!confirm(`Delete "${path}"?`)) return;
+    setFiles((prev) => prev.filter((f) => f.path !== path));
+    if (selectedPath === path) {
+      setSelectedPath("worker.yml");
+    }
+  }
+
   if (!worker) {
     return <div className="text-sm text-[#999]">Loading...</div>;
   }
+
+  const selectedFile = files.find((f) => f.path === selectedPath) || null;
 
   return (
     <div className="space-y-6">
@@ -137,7 +209,8 @@ export default function EditWorkerPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
+        {/* Left: trigger config + file tree */}
         <div className="space-y-5">
           <Card className="border-[#eaeaea] shadow-none bg-white">
             <CardHeader>
@@ -146,7 +219,7 @@ export default function EditWorkerPage() {
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-sm">Type</Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {([
                     ["manual", "Manual"],
                     ["schedule", "Cron"],
@@ -191,22 +264,83 @@ export default function EditWorkerPage() {
             </CardContent>
           </Card>
 
+          {/* File tree */}
           <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">run.py</CardTitle>
+            <CardHeader className="py-2 px-3 flex flex-row items-center justify-between">
+              <CardTitle className="text-xs font-medium text-[#666]">Files</CardTitle>
+              <button
+                type="button"
+                onClick={() => setAddingFile((v) => !v)}
+                className="text-[#666] hover:text-black transition-colors"
+                title="Add file"
+              >
+                <FilePlus className="w-3.5 h-3.5" />
+              </button>
             </CardHeader>
-            <CardContent>
-              <Textarea value={runPy} onChange={(e) => setRunPy(e.target.value)} className="min-h-[260px] border-[#e4e4e7] font-mono text-xs" spellCheck={false} />
+            <CardContent className="p-0 pb-1">
+              {addingFile && (
+                <div className="px-3 py-2 flex gap-1.5 border-b border-[#f4f4f5]">
+                  <Input
+                    className="h-6 text-xs font-mono border-[#e4e4e7] py-0"
+                    placeholder="lib/helpers.py"
+                    value={newFilePath}
+                    onChange={(e) => setNewFilePath(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") addFile();
+                      if (e.key === "Escape") { setAddingFile(false); setNewFilePath(""); }
+                    }}
+                    autoFocus
+                  />
+                  <Button size="sm" className="h-6 px-2 text-xs" onClick={addFile}>Add</Button>
+                </div>
+              )}
+              {files.map((f) => (
+                <div
+                  key={f.path}
+                  className={`group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer transition-colors ${
+                    f.path === selectedPath
+                      ? "bg-[#f4f4f5] text-black"
+                      : "text-[#555] hover:bg-[#f9f9f9]"
+                  }`}
+                  onClick={() => setSelectedPath(f.path)}
+                >
+                  <File className="w-3 h-3 shrink-0 text-[#aaa]" />
+                  <span className="text-xs font-mono truncate flex-1" title={f.path}>{f.path}</span>
+                  {f.path !== "worker.yml" && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); deleteFile(f.path); }}
+                      className="opacity-0 group-hover:opacity-100 text-[#bbb] hover:text-red-500 transition-all"
+                      title={`Delete ${f.path}`}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </CardContent>
           </Card>
         </div>
 
+        {/* Right: editor */}
         <Card className="border-[#eaeaea] shadow-none bg-white">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">worker.yml</CardTitle>
+          <CardHeader className="py-2 px-4 border-b border-[#eaeaea]">
+            <CardTitle className="text-xs font-medium font-mono text-[#555]">
+              {selectedFile ? selectedFile.path : "Select a file"}
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Textarea value={workerYml} onChange={(e) => setWorkerYml(e.target.value)} className="min-h-[640px] border-[#e4e4e7] font-mono text-xs" spellCheck={false} />
+          <CardContent className="p-3">
+            {selectedFile ? (
+              <Textarea
+                key={selectedFile.path}
+                value={selectedFile.content}
+                onChange={(e) => setContent(selectedFile.path, e.target.value)}
+                className="min-h-[640px] border-[#e4e4e7] font-mono text-xs"
+                spellCheck={false}
+              />
+            ) : (
+              <p className="text-sm text-[#999]">Select a file to edit.</p>
+            )}
           </CardContent>
         </Card>
       </div>
