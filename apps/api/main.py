@@ -59,6 +59,9 @@ from run_service import create_run, get_worker_config_for_run, start_run, update
 from run_service import get_secrets_for_worker
 
 load_dotenv()
+api_env_path = Path("/root/.config/workeros/api.env")
+if api_env_path.is_file():
+    load_dotenv(api_env_path, override=False)
 init_db()
 
 # ---------------------------------------------------------------------------
@@ -180,6 +183,37 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
         duration_ms=d.get("duration_ms"),
         error=d.get("error"),
     )
+
+
+def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
+    if not (run_runner or "").startswith("skill"):
+        return []
+    transcript = next((artifact for artifact in artifacts if artifact.name == "transcript.jsonl"), None)
+    if not transcript:
+        return []
+
+    from runner_local import ARTIFACTS_DIR
+
+    try:
+        artifacts_dir = ARTIFACTS_DIR.resolve()
+        path = Path(transcript.path).resolve()
+        path.relative_to(artifacts_dir)
+    except Exception:
+        return []
+    if not path.is_file() or path.stat().st_size > 2_000_000:
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            parsed = {"type": "parse_error", "content": line}
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+    return rows
 
 
 def _skill_version_id(worker_id: str, manifest: Dict[str, Any]) -> str:
@@ -939,6 +973,7 @@ def get_run(run_id: str) -> RunDetail:
             )
             for r in cursor.fetchall()
         ]
+        transcript = _read_transcript_rows(run["runner"], artifacts)
 
         cursor.execute(
             "SELECT * FROM approvals WHERE run_id = ?",
@@ -971,6 +1006,7 @@ def get_run(run_id: str) -> RunDetail:
         output_schema=output_schema,
         logs=logs,
         artifacts=artifacts,
+        transcript=transcript,
         approval=approval,
         approval_status=ApprovalStatus(run.get("approval_status", "not_required")),
         error=run.get("error"),
