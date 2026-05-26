@@ -167,6 +167,23 @@ export default function RunDetailPage() {
         </div>
         <StatusBadge status={run.status} />
         {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}
+        {(run.status === "running" || run.status === "queued") && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (!confirm("Cancel this run?")) return;
+              try {
+                await api.runs.cancel(run.id);
+                toast.success("Cancellation requested");
+              } catch (e) {
+                toast.error(`Cancel failed: ${e instanceof Error ? e.message : "unknown"}`);
+              }
+            }}
+          >
+            Cancel run
+          </Button>
+        )}
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
