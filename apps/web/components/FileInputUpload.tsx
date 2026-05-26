@@ -145,4 +145,3 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
     </div>
   );
 }
-

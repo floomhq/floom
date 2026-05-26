@@ -59,4 +59,3 @@ def extension_for_file(filename: Optional[str], media_type: Optional[str]) -> st
         return suffix
 
     return ".bin"
-
