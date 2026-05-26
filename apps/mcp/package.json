@@ -1,0 +1,35 @@
+{
+  "name": "@floomhq/workeros",
+  "version": "0.1.0",
+  "description": "MCP server for managing Workeros workers and runs.",
+  "type": "module",
+  "bin": {
+    "workeros-mcp": "./dist/server.js",
+    "workeros": "./dist/cli.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT"
+}
