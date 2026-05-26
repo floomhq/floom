@@ -31,23 +31,18 @@ from dotenv import load_dotenv
 from db import init_db, get_db, now_iso, DB_PATH
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from models import (
-    ApproveRequest,
     RunCreate,
-    RejectRequest,
     WorkerSummary,
     WorkerDetail,
     RunSummary,
     RunDetail,
     LogEntry,
     Artifact,
-    ApprovalDetail,
     OutputField,
     SecretItem,
     ReloadResponse,
     ActionResponse,
-    WorkerStateResponse,
     RunStatus,
-    ApprovalStatus,
     SecretStatus,
     WorkerStatus,
     WorkerConfig,
@@ -209,10 +204,6 @@ _sse_lock = threading.Lock()
 _TERMINAL_STATUSES = frozenset({
     RunStatus.COMPLETED.value,
     RunStatus.FAILED.value,
-    RunStatus.APPROVED.value,
-    RunStatus.REJECTED.value,
-    # pending_approval is semi-terminal (waiting for human) — stream it but
-    # keep open so approval events can follow
 })
 
 
@@ -283,22 +274,13 @@ def row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
-def _get_paused_workers() -> set:
-    """Return set of worker_ids that are currently paused."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT worker_id FROM worker_state WHERE paused = 1")
-        return {r["worker_id"] for r in cursor.fetchall()}
-
-
 def _get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
             SELECT id, worker_id, 'manual' as trigger_source, status,
-                   created_at, started_at, completed_at, duration_ms,
-                   COALESCE(approval_status, 'not_required') as approval_status
+                   created_at, started_at, completed_at, duration_ms
             FROM runs WHERE worker_id = ? ORDER BY created_at DESC LIMIT 1
             """,
             (worker_id,),
@@ -315,7 +297,6 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
         worker_name=d.get("worker_name"),
         status=RunStatus(d["status"]),
         trigger_source=d["trigger_source"],
-        approval_status=ApprovalStatus(d.get("approval_status", "not_required")),
         created_at=d.get("created_at"),
         started_at=d.get("started_at"),
         completed_at=d.get("completed_at"),
@@ -911,7 +892,6 @@ async def upload_file(
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers() -> List[WorkerSummary]:
     workers = _list_db_workers() or discover_workers(use_cache=True)
-    paused_workers = _get_paused_workers()
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"])
@@ -925,14 +905,9 @@ def list_workers() -> List[WorkerSummary]:
             if missing:
                 status = WorkerStatus.MISSING_SECRET
         if (
-            status not in (WorkerStatus.MISSING_SECRET, WorkerStatus.ERROR)
-            and w["id"] in paused_workers
-        ):
-            status = WorkerStatus.PAUSED
-        elif (
             status == WorkerStatus.HEALTHY
             and last_run
-            and last_run.status in (RunStatus.FAILED, RunStatus.REJECTED)
+            and last_run.status == RunStatus.FAILED
         ):
             status = WorkerStatus.NEEDS_ATTENTION
 
@@ -949,41 +924,12 @@ def list_workers() -> List[WorkerSummary]:
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),
                 status=status,
-                paused=w["id"] in paused_workers,
                 trigger_type=w["trigger_type"],
                 runner=w["runner"],
                 last_run=last_run,
             )
         )
     return result
-
-
-@app.post("/workers/{worker_id}/pause", response_model=WorkerStateResponse)
-def pause_worker(worker_id: str) -> WorkerStateResponse:
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO worker_state (worker_id, paused, updated_at) VALUES (?, 1, ?)
-               ON CONFLICT(worker_id) DO UPDATE SET paused=1, updated_at=excluded.updated_at""",
-            (worker_id, now_iso()),
-        )
-    return WorkerStateResponse(worker_id=worker_id, paused=True)
-
-
-@app.post("/workers/{worker_id}/unpause", response_model=WorkerStateResponse)
-def unpause_worker(worker_id: str) -> WorkerStateResponse:
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    with get_db() as conn:
-        conn.execute(
-            """INSERT INTO worker_state (worker_id, paused, updated_at) VALUES (?, 0, ?)
-               ON CONFLICT(worker_id) DO UPDATE SET paused=0, updated_at=excluded.updated_at""",
-            (worker_id, now_iso()),
-        )
-    return WorkerStateResponse(worker_id=worker_id, paused=False)
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
@@ -996,19 +942,13 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT id, worker_id, status, trigger_source, approval_status,
+            SELECT id, worker_id, status, trigger_source,
                    created_at, started_at, completed_at, duration_ms, error
             FROM runs WHERE worker_id = ? ORDER BY created_at DESC LIMIT 10
             """,
             (worker_id,),
         )
         recent_runs = [_make_run_summary(r) for r in cursor.fetchall()]
-        cursor.execute(
-            "SELECT paused FROM worker_state WHERE worker_id = ?",
-            (worker_id,),
-        )
-        state_row = cursor.fetchone()
-        paused = bool(state_row["paused"]) if state_row else False
 
     config_dict = worker.get("config", {})
     try:
@@ -1026,12 +966,10 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         missing = [s for s in config.secrets if s not in os.environ]
         if missing:
             status = WorkerStatus.MISSING_SECRET
-    if status not in (WorkerStatus.MISSING_SECRET, WorkerStatus.ERROR) and paused:
-        status = WorkerStatus.PAUSED
-    elif (
+    if (
         status == WorkerStatus.HEALTHY
         and recent_runs
-        and recent_runs[0].status in (RunStatus.FAILED, RunStatus.REJECTED)
+        and recent_runs[0].status == RunStatus.FAILED
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
@@ -1064,7 +1002,6 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         tags=worker.get("tags") or [],
         folder=worker.get("folder"),
         status=status,
-        paused=paused,
         trigger_type=worker["trigger_type"],
         runner=worker["runner"],
         config=config,
@@ -1169,7 +1106,7 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
 
 @app.delete("/workers/{worker_id}", status_code=204)
 def delete_worker(worker_id: str):
-    """Delete a worker and all dependent rows (runs, artifacts, logs, approvals).
+    """Delete a worker and all dependent rows (runs, artifacts, logs).
 
     - FK ON DELETE CASCADE handles dependent rows.
     - Cancels any in-progress run gracefully (marks failed).
@@ -1220,7 +1157,7 @@ def delete_worker(worker_id: str):
     except Exception as exc:
         logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
 
-    # Delete the worker (FK CASCADE removes runs/artifacts/logs/approvals/webhooks)
+    # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
     with get_db() as conn:
         conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
 
@@ -1473,7 +1410,7 @@ def list_runs(
         cursor = conn.cursor()
         query = """
             SELECT r.id, r.worker_id, w.name as worker_name, r.status,
-                   r.trigger_source, r.created_at, r.approval_status,
+                   r.trigger_source, r.created_at,
                    r.started_at, r.completed_at, r.duration_ms, r.error
             FROM runs r
             LEFT JOIN workers w ON r.worker_id = w.id
@@ -1497,7 +1434,6 @@ def list_runs(
 def clear_runs():
     with get_db() as conn:
         conn.execute("DELETE FROM artifacts")
-        conn.execute("DELETE FROM approvals")
         conn.execute("DELETE FROM logs")
         conn.execute("DELETE FROM runs")
     logger.info("All run history cleared")
@@ -1564,7 +1500,7 @@ def get_run(run_id: str) -> RunDetail:
         cursor.execute(
             """
             SELECT r.id, r.worker_id, w.name as worker_name, r.status, r.trigger_source, r.runner,
-                   r.input_json, r.output_json, r.approval_status, r.error,
+                   r.input_json, r.output_json, r.error,
                    r.started_at, r.completed_at, r.duration_ms, r.created_at
             FROM runs r
             LEFT JOIN workers w ON r.worker_id = w.id
@@ -1618,26 +1554,6 @@ def get_run(run_id: str) -> RunDetail:
         ]
         transcript = _read_transcript_rows(run["runner"], artifacts)
 
-        cursor.execute(
-            "SELECT * FROM approvals WHERE run_id = ?",
-            (run_id,),
-        )
-        approval_row = cursor.fetchone()
-        approval = None
-        if approval_row:
-            a = row_to_dict(approval_row)
-            approval = ApprovalDetail(
-                id=a["id"],
-                run_id=a["run_id"],
-                worker_id=a["worker_id"],
-                status=ApprovalStatus(a["status"]),
-                label=a.get("label"),
-                preview=a.get("preview"),
-                created_at=a["created_at"],
-                decided_at=a.get("decided_at"),
-                reason=a.get("reason"),
-            )
-
     return RunDetail(
         id=run["id"],
         worker_id=run["worker_id"],
@@ -1650,8 +1566,6 @@ def get_run(run_id: str) -> RunDetail:
         logs=logs,
         artifacts=artifacts,
         transcript=transcript,
-        approval=approval,
-        approval_status=ApprovalStatus(run.get("approval_status", "not_required")),
         error=run.get("error"),
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
@@ -1768,132 +1682,6 @@ def get_run_logs(run_id: str) -> List[LogEntry]:
         LogEntry(level=r["level"], message=r["message"], timestamp=r["timestamp"], trace_id=row_to_dict(r).get("trace_id"))
         for r in rows
     ]
-
-
-# ---------------------------------------------------------------------------
-# Approvals
-# ---------------------------------------------------------------------------
-
-@app.get("/approvals", response_model=List[ApprovalDetail])
-def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT a.id, a.run_id, a.worker_id, w.name as worker_name,
-                   a.status, a.label, a.preview, a.created_at, a.decided_at,
-                   a.reason
-            FROM approvals a
-            LEFT JOIN workers w ON a.worker_id = w.id
-            WHERE a.status = ?
-            ORDER BY a.created_at DESC
-            """,
-            (status,),
-        )
-        rows = cursor.fetchall()
-    result = []
-    for r in rows:
-        rd = row_to_dict(r)
-        preview_type: Optional[str] = None
-        config = get_worker_config_for_run(r["worker_id"])
-        if config and config.outputs:
-            preview_type = config.outputs[0].type
-        result.append(
-            ApprovalDetail(
-                id=r["id"],
-                run_id=r["run_id"],
-                worker_id=r["worker_id"],
-                worker_name=rd.get("worker_name"),
-                status=ApprovalStatus(r["status"]),
-                label=rd.get("label"),
-                preview=rd.get("preview"),
-                preview_type=preview_type,
-                created_at=r["created_at"],
-                decided_at=rd.get("decided_at"),
-                reason=rd.get("reason"),
-            )
-        )
-    return result
-
-
-@app.post("/runs/{run_id}/approve", response_model=ActionResponse)
-def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> ActionResponse:
-    now = now_iso()
-
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
-        if cursor.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-    # If edited output provided, patch the run's output_json before marking approved
-    if payload and payload.edited_output is not None:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT output_json FROM runs WHERE id = ?", (run_id,))
-            row = cursor.fetchone()
-            if row and row["output_json"]:
-                try:
-                    existing_output = json.loads(row["output_json"])
-                    # Replace the value of the first output key with the edited content
-                    if existing_output:
-                        first_key = next(iter(existing_output))
-                        existing_output[first_key] = payload.edited_output
-                    patched_json = json.dumps(existing_output)
-                except (json.JSONDecodeError, StopIteration):
-                    patched_json = json.dumps({"output": payload.edited_output})
-                conn.execute(
-                    "UPDATE runs SET output_json = ? WHERE id = ?",
-                    (patched_json, run_id),
-                )
-
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE approvals SET status = ?, decided_at = ? WHERE run_id = ?",
-            (ApprovalStatus.APPROVED.value, now, run_id),
-        )
-        conn.execute(
-            "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
-            (ApprovalStatus.APPROVED.value, RunStatus.APPROVED.value, run_id),
-        )
-    edited_note = " (output edited before approval)" if payload and payload.edited_output else ""
-    _sse_publish(run_id, {
-        "type": "status",
-        "run_id": run_id,
-        "status": RunStatus.APPROVED.value,
-        "completed_at": now,
-    })
-    add_log(run_id, f"Run approved{edited_note}", level="info")
-    logger.info("Run %s approved%s", run_id, edited_note)
-    return ActionResponse(status="approved", run_id=run_id)
-
-
-@app.post("/runs/{run_id}/reject", response_model=ActionResponse)
-def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
-    reason = payload.reason or "No reason provided"
-    now = now_iso()
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
-        if cursor.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-        conn.execute(
-            "UPDATE approvals SET status = ?, decided_at = ?, reason = ? WHERE run_id = ?",
-            (ApprovalStatus.REJECTED.value, now, reason, run_id),
-        )
-        conn.execute(
-            "UPDATE runs SET approval_status = ?, status = ? WHERE id = ?",
-            (ApprovalStatus.REJECTED.value, RunStatus.REJECTED.value, run_id),
-        )
-    _sse_publish(run_id, {
-        "type": "status",
-        "run_id": run_id,
-        "status": RunStatus.REJECTED.value,
-        "completed_at": now,
-    })
-    add_log(run_id, f"Run rejected: {reason}", level="info")
-    logger.info("Run %s rejected: %s", run_id, reason)
-    return ActionResponse(status="rejected", run_id=run_id)
 
 
 # ---------------------------------------------------------------------------
