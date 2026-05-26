@@ -5,6 +5,8 @@ import json
 import sqlite3
 import logging
 import mimetypes
+import hashlib
+import hmac
 import fcntl
 import re
 import time
@@ -98,13 +100,13 @@ async def auth_middleware(request: Request, call_next):
 
     Skipped when FLOOM_SECRET env var is not configured (localhost dev).
     The connections/callback GET is also exempt (OAuth redirect landing).
-    Incoming webhooks (/webhooks/<worker_id>) are exempt — they use their own
-    per-worker HMAC signature verification instead.
+    Incoming webhooks (/webhooks/<worker_id>) and Composio events are exempt —
+    they use their own HMAC signature verification instead.
     """
     secret = os.environ.get("FLOOM_SECRET", "")
     if secret and request.method not in ("GET", "HEAD", "OPTIONS"):
         # Exempt incoming webhook calls from the internal secret
-        if request.url.path.startswith("/webhooks/"):
+        if request.url.path.startswith("/webhooks/") or request.url.path == "/composio-events":
             return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
         if header != secret:
@@ -185,6 +187,120 @@ def _skill_version_id(worker_id: str, manifest: Dict[str, Any]) -> str:
     return f"sv_{worker_id}_{safe_version}"
 
 
+def _composio_webhook_url() -> str:
+    base = (
+        os.environ.get("COMPOSIO_WEBHOOK_URL")
+        or os.environ.get("WORKERS_API_URL")
+        or os.environ.get("FLOOM_API_BASE")
+        or "https://workers-api.floom.dev"
+    )
+    base = base.rstrip("/")
+    if base.endswith("/composio-events"):
+        return base
+    return f"{base}/composio-events"
+
+
+def _composio_trigger_signature(config: Optional[WorkerConfig]) -> Optional[Dict[str, Any]]:
+    if not config or config.trigger.type != "composio" or not config.trigger.composio:
+        return None
+    composio = config.trigger.composio
+    return {
+        "event": composio.event,
+        "connection_id": composio.connection_id,
+        "filters": composio.filters or {},
+    }
+
+
+def _config_from_manifest_for_worker(raw: Dict[str, Any], worker_id: str) -> Optional[WorkerConfig]:
+    try:
+        from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
+        parsed = parse_worker_manifest(raw)
+        if isinstance(parsed, WorkerContract):
+            return worker_contract_to_worker_config(parsed, worker_id)
+        return parsed
+    except Exception:
+        logger.exception("Failed to parse worker manifest for composio lifecycle: %s", worker_id)
+        return None
+
+
+def _existing_composio_state(conn: sqlite3.Connection, worker_id: str) -> Dict[str, Any]:
+    try:
+        row = conn.execute(
+            """
+            SELECT w.composio_trigger_id, w.composio_event, sv.manifest_json
+            FROM workers w
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE w.id = ?
+            """,
+            (worker_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return {}
+    if not row:
+        return {}
+    manifest = json.loads(row["manifest_json"] or "{}")
+    old_config = _config_from_manifest_for_worker(manifest, worker_id) if isinstance(manifest, dict) else None
+    return {
+        "trigger_id": row["composio_trigger_id"],
+        "event": row["composio_event"],
+        "signature": _composio_trigger_signature(old_config),
+    }
+
+
+def _disable_composio_trigger(event: Optional[str], trigger_id: Optional[str], worker_id: str) -> None:
+    if not event:
+        return
+    try:
+        from composio_client import disable_trigger
+        disable_trigger(event, trigger_id)
+    except Exception as exc:
+        logger.exception("Failed to disable Composio trigger for worker %s", worker_id)
+        raise RuntimeError(f"Composio disable failed for worker {worker_id}: {exc}") from exc
+
+
+def _enable_composio_trigger(config: WorkerConfig, worker_id: str) -> str:
+    signature = _composio_trigger_signature(config)
+    if not signature:
+        raise RuntimeError(f"Worker {worker_id} does not declare trigger.composio")
+    try:
+        from composio_client import enable_trigger
+        return enable_trigger(
+            signature["event"],
+            signature["connection_id"],
+            _composio_webhook_url(),
+            signature["filters"],
+        )
+    except Exception as exc:
+        logger.exception("Failed to enable Composio trigger for worker %s", worker_id)
+        raise RuntimeError(f"Composio enable failed for worker {worker_id}: {exc}") from exc
+
+
+def _sync_composio_registration(
+    conn: sqlite3.Connection,
+    worker_id: str,
+    config: WorkerConfig,
+    existing: Optional[Dict[str, Any]] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    existing = existing or _existing_composio_state(conn, worker_id)
+    new_signature = _composio_trigger_signature(config)
+    old_signature = existing.get("signature")
+    old_trigger_id = existing.get("trigger_id")
+    old_event = existing.get("event") or (old_signature or {}).get("event")
+
+    if old_trigger_id and old_signature and old_signature != new_signature:
+        _disable_composio_trigger(old_event, old_trigger_id, worker_id)
+        old_trigger_id = None
+
+    if not new_signature:
+        return None, None
+
+    if old_trigger_id and old_signature == new_signature:
+        return old_trigger_id, new_signature["event"]
+
+    enabled_id = _enable_composio_trigger(config, worker_id)
+    return enabled_id, new_signature["event"]
+
+
 def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str, Any]]) -> None:
     now = now_iso()
     for w in workers:
@@ -193,6 +309,16 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
         trigger = config.get("trigger") or {}
         worker_id = w["id"]
         skill_version_id = _skill_version_id(worker_id, manifest)
+        config_model = _config_from_manifest_for_worker(manifest, worker_id)
+        if config_model is None:
+            config_model = WorkerConfig(**config)
+        existing_composio = _existing_composio_state(conn, worker_id)
+        composio_trigger_id, composio_event = _sync_composio_registration(
+            conn,
+            worker_id,
+            config_model,
+            existing_composio,
+        )
         conn.execute(
             """
             INSERT INTO skill_versions
@@ -216,14 +342,17 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
             INSERT INTO workers
                 (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
-                 notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico')
+                 notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
+                 composio_trigger_id, composio_event)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico', ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
                 trigger_type=excluded.trigger_type,
                 cron_expr=excluded.cron_expr,
-                cron_timezone=excluded.cron_timezone
+                cron_timezone=excluded.cron_timezone,
+                composio_trigger_id=excluded.composio_trigger_id,
+                composio_event=excluded.composio_event
             """,
             (
                 worker_id,
@@ -235,6 +364,8 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 json.dumps({}),
                 json.dumps({}),
                 now,
+                composio_trigger_id,
+                composio_event,
             ),
         )
 
@@ -414,14 +545,18 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
 
     # Read raw YAML for manifest viewer
     manifest_yaml: Optional[str] = None
+    run_py: Optional[str] = None
     try:
         from worker_registry import WORKERS_DIR
         yml_path = WORKERS_DIR / worker_id / "worker.yml"
+        run_path = WORKERS_DIR / worker_id / "run.py"
         if yml_path.is_file():
             manifest_yaml = yml_path.read_text()
         elif worker.get("manifest"):
             import yaml as pyyaml
             manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
+        if run_path.is_file():
+            run_py = run_path.read_text()
     except Exception:
         pass
 
@@ -436,6 +571,7 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         config=config,
         recent_runs=recent_runs,
         manifest_yaml=manifest_yaml,
+        run_py=run_py,
     )
 
 
@@ -448,15 +584,11 @@ class WorkerCreateRequest(BaseModel):
     run_py: str
 
 
-@app.post("/workers", response_model=WorkerDetail)
-def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
-    """Create a new worker from YAML + Python source."""
+def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
-    from worker_registry import WORKERS_DIR
 
-    # Parse and validate YAML
     try:
-        raw = pyyaml.safe_load(payload.worker_yml)
+        raw = pyyaml.safe_load(worker_yml)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}")
     if not isinstance(raw, dict):
@@ -474,9 +606,17 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Schema validation failed: {exc}")
 
-    # Check for collision
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
+    return worker_id, config
+
+
+@app.post("/workers", response_model=WorkerDetail)
+def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
+    """Create a new worker from YAML + Python source."""
+    from worker_registry import WORKERS_DIR
+
+    worker_id, config = _parse_worker_payload(payload.worker_yml)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -499,10 +639,86 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
 
     # Persist to DB
     with get_db() as conn:
-        _persist_discovered_workers(conn, workers)
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Return the new worker detail
     return get_worker_detail(worker_id)
+
+
+@app.put("/workers/{worker_id}", response_model=WorkerDetail)
+def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
+    """Update an existing worker from YAML + Python source."""
+    from worker_registry import WORKERS_DIR
+
+    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml)
+    if parsed_worker_id != worker_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
+        )
+
+    target_dir = WORKERS_DIR / worker_id
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    (target_dir / "worker.yml").write_text(payload.worker_yml)
+    (target_dir / "run.py").write_text(payload.run_py)
+    if not (target_dir / "requirements.txt").exists():
+        (target_dir / "requirements.txt").write_text("")
+    if not (target_dir / "SKILL.md").exists():
+        (target_dir / "SKILL.md").write_text(
+            f"# {_config.name}\n\n"
+            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+            "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+        )
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    with get_db() as conn:
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return get_worker_detail(worker_id)
+
+
+@app.delete("/workers/{worker_id}")
+def delete_worker(worker_id: str):
+    """Delete a worker and unregister its Composio trigger before removal."""
+    import shutil
+    from worker_registry import WORKERS_DIR
+
+    target_dir = WORKERS_DIR / worker_id
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    if not worker and not target_dir.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    with get_db() as conn:
+        state = _existing_composio_state(conn, worker_id)
+        if state.get("trigger_id"):
+            try:
+                _disable_composio_trigger(
+                    state.get("event") or (state.get("signature") or {}).get("event"),
+                    state.get("trigger_id"),
+                    worker_id,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+
+    if target_dir.exists():
+        try:
+            resolved_root = WORKERS_DIR.resolve()
+            resolved_target = target_dir.resolve()
+            resolved_target.relative_to(resolved_root)
+        except Exception:
+            raise HTTPException(status_code=403, detail="Invalid worker path")
+        shutil.rmtree(resolved_target)
+    invalidate_worker_cache()
+    return {"status": "deleted"}
 
 
 @app.post("/workers/reload", response_model=ReloadResponse)
@@ -510,7 +726,10 @@ def reload_workers() -> ReloadResponse:
     invalidate_worker_cache()
     workers = discover_workers()
     with get_db() as conn:
-        _persist_discovered_workers(conn, workers)
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ReloadResponse(status="success", workers_loaded=len(workers))
 
 
@@ -992,6 +1211,7 @@ def test_secret(name: str) -> SecretTestResult:
 
 PLATFORM_SECRETS: frozenset[str] = frozenset({
     "COMPOSIO_API_KEY",
+    "COMPOSIO_WEBHOOK_SIGNING_KEY",
     "WORKERS_FRONTEND_URL",
     "FLOOM_DB",
     "FLOOM_WORKERS_DIR",
@@ -1243,6 +1463,161 @@ def delete_connection(connection_id: str):
         conn.execute("DELETE FROM composio_connections WHERE id = ?", (connection_id,))
 
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Integration trigger catalog + Composio event receiver
+# ---------------------------------------------------------------------------
+
+_trigger_catalog_cache: Dict[str, Any] = {"expires_at": 0.0, "items": None}
+_trigger_catalog_lock = threading.Lock()
+
+
+@app.get("/integrations/triggers")
+def list_integration_triggers():
+    """Proxy Composio's trigger catalog, cached for one hour."""
+    now = time.monotonic()
+    with _trigger_catalog_lock:
+        if _trigger_catalog_cache["items"] is not None and now < _trigger_catalog_cache["expires_at"]:
+            return {"items": _trigger_catalog_cache["items"]}
+
+    try:
+        from composio_client import list_triggers
+        items = list_triggers()
+    except Exception as exc:
+        logger.exception("Failed to fetch Composio trigger catalog")
+        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+
+    with _trigger_catalog_lock:
+        _trigger_catalog_cache["items"] = items
+        _trigger_catalog_cache["expires_at"] = now + 3600
+    return {"items": items}
+
+
+def _extract_composio_signature(request: Request) -> str:
+    for name in (
+        "X-Composio-Signature",
+        "X-Composio-Webhook-Signature",
+        "X-Hub-Signature-256",
+    ):
+        value = request.headers.get(name)
+        if value:
+            return value
+    return ""
+
+
+def _signature_digest(signature_header: str) -> str:
+    signature_header = signature_header.strip()
+    if signature_header.startswith("sha256="):
+        return signature_header[len("sha256="):]
+    if "," in signature_header:
+        for part in signature_header.split(","):
+            key, _, value = part.strip().partition("=")
+            if key in {"v1", "sha256"} and value:
+                return value
+    return signature_header
+
+
+def _verify_composio_signature(body: bytes, signature_header: str, signing_key: str) -> bool:
+    provided = _signature_digest(signature_header)
+    if not provided:
+        return False
+    expected = hmac.new(signing_key.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided, expected)
+
+
+def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
+    candidates = [
+        request.headers.get("X-Composio-Trigger-Id"),
+        request.headers.get("X-Trigger-Id"),
+    ]
+    if isinstance(payload, dict):
+        for key in (
+            "composio_trigger_id",
+            "trigger_id",
+            "triggerId",
+            "enabled_trigger_id",
+            "connected_account_trigger_id",
+        ):
+            candidates.append(payload.get(key))
+        for nested_key in ("data", "metadata", "trigger"):
+            nested = payload.get(nested_key)
+            if isinstance(nested, dict):
+                for key in (
+                    "composio_trigger_id",
+                    "trigger_id",
+                    "triggerId",
+                    "id",
+                    "enabled_trigger_id",
+                    "connected_account_trigger_id",
+                ):
+                    candidates.append(nested.get(key))
+    return [str(c) for c in candidates if c]
+
+
+def _event_name_from_payload(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("event", "event_name", "trigger_event", "trigger"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    nested = payload.get("metadata")
+    if isinstance(nested, dict):
+        value = nested.get("event") or nested.get("event_name")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _find_worker_for_composio_event(payload: Any, request: Request) -> Optional[str]:
+    candidates = _candidate_composio_trigger_ids(payload, request)
+    with get_db() as conn:
+        for trigger_id in candidates:
+            row = conn.execute(
+                "SELECT id FROM workers WHERE composio_trigger_id = ? LIMIT 1",
+                (trigger_id,),
+            ).fetchone()
+            if row:
+                return row["id"]
+        event_name = _event_name_from_payload(payload)
+        if event_name:
+            rows = conn.execute(
+                "SELECT id FROM workers WHERE composio_event = ? AND composio_trigger_id IS NOT NULL",
+                (event_name,),
+            ).fetchall()
+            if len(rows) == 1:
+                return rows[0]["id"]
+    return None
+
+
+@app.post("/composio-events", response_model=ActionResponse)
+async def composio_events(request: Request) -> ActionResponse:
+    """Receive signed Composio trigger webhooks and create worker runs."""
+    signing_key = os.environ.get("COMPOSIO_WEBHOOK_SIGNING_KEY", "")
+    if not signing_key:
+        raise HTTPException(status_code=503, detail="COMPOSIO_WEBHOOK_SIGNING_KEY is not configured")
+
+    body = await request.body()
+    if not _verify_composio_signature(body, _extract_composio_signature(request), signing_key):
+        raise HTTPException(status_code=401, detail="Invalid Composio signature")
+
+    if body:
+        try:
+            payload: Any = json.loads(body)
+        except Exception:
+            payload = {"raw": body.decode("utf-8", errors="replace")}
+    else:
+        payload = {}
+
+    worker_id = _find_worker_for_composio_event(payload, request)
+    if not worker_id:
+        raise HTTPException(status_code=404, detail="No worker registered for Composio trigger")
+
+    inputs = {"event": payload}
+    run_id = create_run(worker_id, inputs, trigger_source="composio")
+    start_run(run_id, worker_id, inputs)
+    return ActionResponse(status="queued", run_id=run_id)
 
 
 # ---------------------------------------------------------------------------

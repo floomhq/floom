@@ -25,8 +25,18 @@ export interface WorkerOutput {
 export interface WorkerTrigger {
   type: string;
   cron?: string;
+  timezone?: string;
   every?: string;
   at?: string;
+  webhook?: {
+    secret: boolean;
+    allowed_methods: string[];
+  };
+  composio?: {
+    event: string;
+    connection_id: string;
+    filters?: Record<string, unknown>;
+  };
 }
 
 export interface WorkerRuntime {
@@ -149,6 +159,7 @@ export interface WorkerDetail {
   config: WorkerConfig;
   recent_runs: RunSummary[];
   manifest_yaml?: string;
+  run_py?: string;
 }
 
 export interface SecretItem {
@@ -193,4 +204,21 @@ export interface ConnectionInitResponse {
 export interface SupportedApp {
   slug: string;
   display_name: string;
+}
+
+export interface ComposioTriggerItem {
+  id?: string;
+  name?: string;
+  slug?: string;
+  event?: string;
+  display_name?: string;
+  description?: string;
+  toolkit?: {
+    slug?: string;
+    name?: string;
+  };
+  app?: {
+    slug?: string;
+    name?: string;
+  };
 }

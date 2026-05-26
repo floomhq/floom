@@ -318,6 +318,21 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
         conn.execute(f"PRAGMA foreign_keys = {int(old_foreign_keys)}")
 
 
+def _migrate_composio_trigger_columns(conn: sqlite3.Connection) -> None:
+    """Add Composio trigger registration columns to worker instances."""
+    if not _table_exists(conn, "workers"):
+        return
+    columns = _table_columns(conn, "workers")
+    if "composio_trigger_id" not in columns:
+        conn.execute("ALTER TABLE workers ADD COLUMN composio_trigger_id TEXT")
+    if "composio_event" not in columns:
+        conn.execute("ALTER TABLE workers ADD COLUMN composio_event TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workers_composio_trigger_id "
+        "ON workers(composio_trigger_id)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -485,6 +500,7 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_workers_next_run_at ON workers(next_run_at);
     """,
     _migrate_worker_contract_split,
+    _migrate_composio_trigger_columns,
 ]
 
 

@@ -38,6 +38,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ worker_yml, run_py }),
       }),
+    update: (id: string, worker_yml: string, run_py: string) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ worker_yml, run_py }),
+      }),
+    delete: (id: string) =>
+      fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" }),
   },
   runs: {
     list: (params?: { worker_id?: string; status?: string; limit?: number; offset?: number }) => {
@@ -97,5 +104,9 @@ export const api = {
       fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
     delete: (id: string) =>
       fetchJson<{ status: string }>(`/connections/${id}`, { method: "DELETE" }),
+  },
+  integrations: {
+    triggers: () =>
+      fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
   },
 };

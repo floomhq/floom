@@ -88,6 +88,64 @@ def list_connections() -> List[Dict[str, Any]]:
     return result
 
 
+def list_triggers() -> List[Dict[str, Any]]:
+    """Return the Composio v3 trigger catalog."""
+    data = _get("/triggers", limit=1000)
+    if isinstance(data, list):
+        return data
+    items = data.get("items") or data.get("triggers") or data.get("data") or []
+    return items if isinstance(items, list) else []
+
+
+def _extract_enabled_trigger_id(event: str, data: Any) -> str:
+    """Extract Composio's trigger subscription id from known v3 response shapes."""
+    if not isinstance(data, dict):
+        return event
+    candidates = [
+        data.get("id"),
+        data.get("trigger_id"),
+        data.get("triggerId"),
+        data.get("enabled_trigger_id"),
+        data.get("connected_account_trigger_id"),
+    ]
+    trigger = data.get("trigger")
+    if isinstance(trigger, dict):
+        candidates.extend([trigger.get("id"), trigger.get("trigger_id")])
+    item = data.get("item") or data.get("data")
+    if isinstance(item, dict):
+        candidates.extend([item.get("id"), item.get("trigger_id")])
+    for candidate in candidates:
+        if candidate:
+            return str(candidate)
+    return event
+
+
+def enable_trigger(
+    event: str,
+    connection_id: str,
+    webhook_url: str,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Enable a Composio trigger and return the enabled trigger id."""
+    data = _post(
+        f"/triggers/{event}/enable",
+        {
+            "connection_id": connection_id,
+            "webhook_url": webhook_url,
+            "config": config or {},
+        },
+    )
+    return _extract_enabled_trigger_id(event, data)
+
+
+def disable_trigger(event: str, composio_trigger_id: Optional[str] = None) -> None:
+    """Disable a Composio trigger subscription for an event."""
+    body: Dict[str, Any] = {}
+    if composio_trigger_id:
+        body["trigger_id"] = composio_trigger_id
+    _post(f"/triggers/{event}/disable", body)
+
+
 def _resolve_auth_config_id(app_name: str) -> str:
     """Find (or create) a Composio-managed auth_config for the given toolkit."""
     data = _get("/auth_configs", toolkit_slugs=app_name, limit=20)
