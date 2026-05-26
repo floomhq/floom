@@ -2856,7 +2856,23 @@ def _delete_env_var(name: str) -> bool:
 
 @app.post("/secrets/{name}", response_model=SecretTestResult)
 def upsert_secret(name: str, payload: SecretUpsertRequest) -> SecretTestResult:
-    """Create or update a secret. Value is write-only — never returned."""
+    """Create or update a secret. Value is write-only — never returned.
+
+    SECURITY: refuses to overwrite a platform infrastructure secret. A
+    May 2026 audit found that POST /secrets/FLOOM_SECRET would happily
+    overwrite the running process's FLOOM_SECRET env var, locking the
+    owner out immediately. Platform secrets are managed via systemd
+    EnvironmentFile, not the user-secrets API.
+    """
+    if name in PLATFORM_SECRETS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{name!r} is a platform infrastructure secret managed via "
+                "the server's environment file. It cannot be set via the "
+                "secrets API. See ARCHITECTURE.md."
+            ),
+        )
     try:
         _upsert_env_var(name, payload.value)
     except ValueError as exc:
@@ -2877,7 +2893,19 @@ def upsert_secret(name: str, payload: SecretUpsertRequest) -> SecretTestResult:
 
 @app.delete("/secrets/{name}", response_model=SecretTestResult)
 def delete_secret(name: str) -> SecretTestResult:
-    """Delete a secret from .env and env."""
+    """Delete a secret from .env and env.
+
+    SECURITY: refuses to delete a platform infrastructure secret for the
+    same reason as upsert_secret.
+    """
+    if name in PLATFORM_SECRETS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{name!r} is a platform infrastructure secret. It cannot "
+                "be deleted via the secrets API."
+            ),
+        )
     removed = _delete_env_var(name)
     with get_db() as conn:
         conn.execute("DELETE FROM secrets WHERE name = ?", (name,))
