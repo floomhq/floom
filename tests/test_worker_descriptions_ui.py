@@ -14,12 +14,184 @@ import json
 import asyncio
 from pathlib import Path
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 
 # Point worker_registry at the repo workers dir
 os.environ.setdefault("FLOOM_WORKERS_DIR", str(REPO_ROOT / "workers"))
+
+from models import parse_worker_manifest
+
+# ---------------------------------------------------------------------------
+# Pure-logic: new-worker YAML generator (mirrors frontend buildYaml)
+# ---------------------------------------------------------------------------
+
+def _yaml_string(value: str) -> str:
+    return json.dumps(value)
+
+
+def _yaml_block(value: str, indent: str = "") -> list[str]:
+    return [f"{indent}{line}" for line in value.split("\n")]
+
+
+def _yaml_scalar(value: str | int | bool | None) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return _yaml_string(value)
+    return str(value)
+
+
+def _sample_value_for_input(input_row: dict) -> str | int | bool | None:
+    if input_row["type"] == "number":
+        return 1
+    if input_row["type"] == "boolean":
+        return True
+    if input_row["type"] == "file":
+        return None
+    if input_row["type"] == "select":
+        options = [option.strip() for option in input_row.get("options", "").split(",") if option.strip()]
+        return options[0] if options else "option"
+    if input_row["type"] == "textarea":
+        return f"Sample {input_row.get('label') or input_row['name']} with enough detail for a realistic run."
+    return f"Sample {input_row.get('label') or input_row['name']}"
+
+
+def _build_new_worker_yaml(
+    worker_id: str,
+    name: str,
+    description: str,
+    inputs: list[dict],
+    outputs: list[dict],
+    secrets: str,
+    approvals_required: bool,
+) -> str:
+    """Python mirror of the frontend buildYaml function."""
+    slug = (worker_id or "my-worker").replace("_", "-")
+    title = name or "My Worker"
+    secret_names = [s.strip() for s in secrets.split(",") if s.strip()]
+    lines: list[str] = []
+    lines.append('schema_version: "0.3"')
+    lines.append(f"name: {slug}")
+    lines.append(f"title: {_yaml_string(title)}")
+    lines.append(f"description: {_yaml_string(description or 'Custom Workeros worker.')}")
+    lines.append("long_description: |")
+    lines.extend(_yaml_block(f"  Explain what {title} does, when to run it, and what a trustworthy result looks like."))
+    lines.append("use_cases:")
+    lines.append("- Replace this with a concrete operator workflow.")
+    lines.append("- Replace this with a second realistic use case.")
+    lines.append("- Replace this with a third realistic use case.")
+    if inputs:
+        lines.append("example_input:")
+        for inp in inputs:
+            if not inp.get("name"):
+                continue
+            sample = _sample_value_for_input(inp)
+            if isinstance(sample, str) and "\n" in sample:
+                lines.append(f"  {inp['name']}: |")
+                lines.extend(_yaml_block(sample, "    "))
+            else:
+                lines.append(f"  {inp['name']}: {_yaml_scalar(sample)}")
+    else:
+        lines.append("example_input: {}")
+    lines.append("example_output: |")
+    lines.extend(_yaml_block("  ## Example output\n\n  Replace this markdown with the worker's expected result shape."))
+    lines.append("how_it_works: |")
+    lines.extend(_yaml_block("  Input\n    -> validate fields\n    -> run worker logic\n    -> return structured output"))
+    lines.append(f"folder: {_yaml_string('Custom')}")
+    lines.append('tags: ["custom", "template"]')
+    lines.append('version: "0.1.0"')
+    lines.append("entrypoint: SKILL.md")
+    lines.append("targets: [generic]")
+    lines.append("")
+    lines.append("exec:")
+    lines.append("  command: python run.py")
+    lines.append("  runtime: python311")
+    lines.append("  runner: local")
+    if inputs:
+        lines.append("  inputs:")
+        for inp in inputs:
+            if not inp.get("name"):
+                continue
+            is_file = inp["type"] == "file"
+            scalar_type = "string" if inp["type"] in {"text", "textarea"} else inp["type"]
+            lines.append(f"  - name: {inp['name']}")
+            lines.append(f"    kind: {'file' if is_file else 'scalar'}")
+            if is_file:
+                lines.append("    media_type: application/octet-stream")
+                lines.append(f"    path: inputs/{inp['name']}")
+            else:
+                lines.append(f"    type: {scalar_type}")
+            lines.append(f"    required: {_yaml_scalar(inp['required'])}")
+            lines.append(f"    label: {_yaml_string(inp.get('label') or inp['name'])}")
+    else:
+        lines.append("  inputs: []")
+    lines.append(f"  secrets: [{', '.join(secret_names)}]")
+    if outputs:
+        lines.append("  outputs:")
+        for out in outputs:
+            if not out.get("name"):
+                continue
+            lines.append(f"  - name: {out['name']}")
+            lines.append("    kind: scalar")
+            lines.append("    type: string")
+            lines.append("    required: true")
+            lines.append(f"    label: {_yaml_string(out.get('label') or out['name'])}")
+    else:
+        lines.append("  outputs: []")
+    lines.append("")
+    lines.append("capabilities:")
+    lines.append(f"  secrets: [{', '.join(secret_names)}]")
+    lines.append(f"  network: {{ egress: {_yaml_scalar(bool(secret_names))} }}")
+    lines.append("")
+    lines.append("approvals:")
+    lines.append(f"  required: {_yaml_scalar(approvals_required)}")
+    lines.append("")
+    lines.append("trigger:")
+    lines.append("  type: manual")
+    return "\n".join(lines)
+
+
+class TestNewWorkerYamlGenerator:
+    def test_file_input_example_round_trips_as_null(self):
+        manifest_yaml = _build_new_worker_yaml(
+            worker_id="custom-file-worker",
+            name="Custom File Worker",
+            description="Processes an uploaded file.",
+            inputs=[
+                {
+                    "name": "source_file",
+                    "label": "Source file",
+                    "type": "file",
+                    "required": True,
+                    "placeholder": "",
+                    "description": "",
+                    "options": "",
+                },
+                {
+                    "name": "instruction",
+                    "label": "Instruction",
+                    "type": "text",
+                    "required": True,
+                    "placeholder": "",
+                    "description": "",
+                    "options": "",
+                },
+            ],
+            outputs=[],
+            secrets="",
+            approvals_required=False,
+        )
+        raw = yaml.safe_load(manifest_yaml)
+        manifest = parse_worker_manifest(raw)
+        assert manifest.example_input["source_file"] is None
+        assert manifest.example_input["instruction"] == "Sample Instruction"
+        assert "source_file: null" in manifest_yaml
+
 
 # ---------------------------------------------------------------------------
 # Pure-logic: folder tree grouping (mirrors frontend buildFolderTree)

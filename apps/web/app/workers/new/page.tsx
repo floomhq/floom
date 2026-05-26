@@ -46,15 +46,20 @@ function yamlBlock(value: string, indent = ""): string[] {
   return value.split("\n").map((line) => `${indent}${line}`);
 }
 
-function sampleValueForInput(input: InputRow): string | number | boolean {
+function sampleValueForInput(input: InputRow): string | number | boolean | null {
   if (input.type === "number") return 1;
   if (input.type === "boolean") return true;
-  if (input.type === "file") return `sample-${input.name}.txt`;
+  if (input.type === "file") return null;
   if (input.type === "select") {
     return input.options.split(",").map((option) => option.trim()).filter(Boolean)[0] || "option";
   }
   if (input.type === "textarea") return `Sample ${input.label || input.name} with enough detail for a realistic run.`;
   return `Sample ${input.label || input.name}`;
+}
+
+function yamlScalar(value: string | number | boolean | null): string {
+  if (value === null) return "null";
+  return typeof value === "string" ? yamlString(value) : String(value);
 }
 
 const TEMPLATES: Record<string, {
@@ -169,7 +174,7 @@ function buildYaml(
         lines.push(`  ${inp.name}: |`);
         lines.push(...yamlBlock(sample, "    "));
       } else {
-        lines.push(`  ${inp.name}: ${typeof sample === "string" ? yamlString(sample) : sample}`);
+        lines.push(`  ${inp.name}: ${yamlScalar(sample)}`);
       }
     }
   } else {
