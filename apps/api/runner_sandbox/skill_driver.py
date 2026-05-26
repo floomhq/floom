@@ -217,14 +217,30 @@ class SkillRuntimeDriver(SandboxDriver):
         final_content = ""
 
         for iteration in range(MAX_TOOL_ITERATIONS):
-            completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=0.5,
-                timeout=timeout_seconds,
-            )
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.5,
+                    timeout=timeout_seconds,
+                )
+            except Exception as exc:
+                transcript.append({
+                    "type": "error",
+                    "role": "runtime",
+                    "content": str(exc),
+                    "error_code": "openai_call_failed",
+                })
+                transcript_artifact = self._write_transcript(run_id, artifact_dir, transcript, secrets)
+                return WorkerResult(
+                    status="error",
+                    artifacts=output_artifacts + [transcript_artifact],
+                    error=str(exc),
+                    error_code="openai_call_failed",
+                    retryable=True,
+                )
             assistant_message = _message_from_completion(completion)
             final_content = _message_content(assistant_message)
             messages.append(_message_to_dict(assistant_message))
@@ -249,17 +265,20 @@ class SkillRuntimeDriver(SandboxDriver):
                     "name": self._logical_tool_name(name, args),
                     "arguments": args,
                 })
-                result = self._dispatch_tool(
-                    name=name,
-                    args=args,
-                    worker_id=worker_id,
-                    run_id=run_id,
-                    artifact_dir=artifact_dir,
-                    outputs=outputs,
-                    output_artifacts=output_artifacts,
-                    config=config,
-                    log_fn=log_fn,
-                )
+                try:
+                    result = self._dispatch_tool(
+                        name=name,
+                        args=args,
+                        worker_id=worker_id,
+                        run_id=run_id,
+                        artifact_dir=artifact_dir,
+                        outputs=outputs,
+                        output_artifacts=output_artifacts,
+                        config=config,
+                        log_fn=log_fn,
+                    )
+                except Exception as exc:
+                    result = {"ok": False, "error": str(exc)}
                 transcript.append({
                     "type": "tool_result",
                     "tool_call_id": call_id,
@@ -272,10 +291,18 @@ class SkillRuntimeDriver(SandboxDriver):
                     "content": _json_dumps(result),
                 })
         else:
+            transcript.append({
+                "type": "error",
+                "role": "runtime",
+                "content": f"Skill runtime exceeded {MAX_TOOL_ITERATIONS} tool iterations",
+                "error_code": "tool_loop_exhausted",
+            })
+            transcript_artifact = self._write_transcript(run_id, artifact_dir, transcript, secrets)
             return WorkerResult(
                 status="error",
                 error=f"Skill runtime exceeded {MAX_TOOL_ITERATIONS} tool iterations",
                 error_code="tool_loop_exhausted",
+                artifacts=output_artifacts + [transcript_artifact],
             )
 
         if not outputs:

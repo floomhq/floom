@@ -41,6 +41,16 @@ class FakeOpenAIClient:
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
+class FailingOpenAIClient:
+    def __init__(self):
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self.create),
+        )
+
+    def create(self, **_kwargs):
+        raise RuntimeError("simulated model failure")
+
+
 def assistant_message(content="", tool_calls=None):
     return SimpleNamespace(
         role="assistant",
@@ -267,6 +277,35 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             artifact_names = {artifact["name"] for artifact in result.artifacts}
             self.assertIn("wrong_name.txt", artifact_names)
             self.assertIn("transcript.jsonl", artifact_names)
+
+    def test_model_failure_still_writes_transcript_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker_dir = base / "worker"
+            artifacts_dir = base / "artifacts"
+            worker_dir.mkdir()
+            (worker_dir / "SKILL.md").write_text("Write a brief.", encoding="utf-8")
+            skill_driver.ARTIFACTS_DIR = artifacts_dir
+
+            driver = skill_driver.SkillRuntimeDriver(openai_client=FailingOpenAIClient())
+
+            result = driver.run(
+                worker_id="research_brief",
+                run_id="run_model_failure",
+                inputs={"topic": "AI agents"},
+                secrets={"OPENAI_API_KEY": "secret-value"},
+                log_fn=lambda *_args, **_kwargs: None,
+                trace_id="trace_test",
+                config=config_for(worker_dir),
+            )
+
+            self.assertEqual(result.status, "error")
+            self.assertEqual(result.error_code, "openai_call_failed")
+            artifact_names = {artifact["name"] for artifact in result.artifacts}
+            self.assertIn("transcript.jsonl", artifact_names)
+            transcript_text = (artifacts_dir / "run_model_failure" / "transcript.jsonl").read_text(encoding="utf-8")
+            self.assertIn("openai_call_failed", transcript_text)
+            self.assertIn("simulated model failure", transcript_text)
 
 
 if __name__ == "__main__":
