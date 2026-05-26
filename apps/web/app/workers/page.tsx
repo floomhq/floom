@@ -69,7 +69,7 @@ export default function WorkersPage() {
         <EmptyWorkersState />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-5 items-start">
-          <aside className="rounded-md border border-[#eaeaea] bg-white p-3 space-y-4">
+          <aside className="rounded-md border border-[#eaeaea] bg-white p-3 space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
             <div>
               <div className="flex items-center gap-2 text-xs font-medium text-[#555] mb-2">
                 <Folder className="w-3.5 h-3.5" />
