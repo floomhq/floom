@@ -426,9 +426,23 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         return
 
     # Dispatch to the appropriate sandbox driver based on worker config
+<<<<<<< HEAD
+    runner = "local"
+    if config and config.runtime:
+        runner = config.runtime.runner or "local"
+    mode = config.runtime.mode if config and config.runtime else "pure-script"
+    timeout_seconds = (
+        config.runtime.limits.timeout_seconds
+        if config and config.runtime and config.runtime.limits
+        else 300
+    )
+    log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
+    driver = get_sandbox_driver(runner, config=config)
+=======
     runner = _runner_key(config)
     log_fn(f"Executing worker (runner={runner})", level="debug")
     driver = get_sandbox_driver(runner)
+>>>>>>> origin/main
     result = driver.run(
         worker_id=worker_id,
         run_id=run_id,
@@ -436,6 +450,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         secrets=secrets,
         log_fn=log_fn,
         trace_id=trace_id,
+        timeout_seconds=timeout_seconds,
         config=config,
     )
 
