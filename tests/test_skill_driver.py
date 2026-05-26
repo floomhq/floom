@@ -527,7 +527,8 @@ class ComposioToolDispatchTest(unittest.TestCase):
             mock_requests = MagicMock()
             mock_requests.post.return_value = mock_response
 
-            with patch.object(skill_driver.SkillRuntimeDriver, "_connection_id_for", return_value="ca_test"):
+            with patch.dict("os.environ", {"COMPOSIO_API_KEY": "ck"}), \
+                    patch.object(skill_driver.SkillRuntimeDriver, "_connection_id_for", return_value="ca_test"):
                 result = self._run_tool_call(
                     worker_dir,
                     "run_dotted_declared_app",
