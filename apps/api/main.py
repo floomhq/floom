@@ -1088,10 +1088,52 @@ class ConnectionInitResponse(BaseModel):
     composio_connection_id: str
 
 
+class IntegrationCatalogItem(BaseModel):
+    slug: str
+    name: str
+    logo_url: str
+    description: str
+    categories: List[str]
+    tools_count: int = 0
+    triggers_count: int = 0
+
+
+class IntegrationCatalogResponse(BaseModel):
+    items: List[IntegrationCatalogItem]
+    page: int
+    limit: int
+    total_items: int
+    total_pages: int
+    next_page: Optional[int] = None
+    categories: List[str] = []
+
+
 def _get_callback_url() -> str:
     """Build the OAuth callback URL for Composio to redirect to."""
     base = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
     return f"{base}/connections/callback"
+
+
+@app.get("/integrations/catalog", response_model=IntegrationCatalogResponse)
+def integrations_catalog(
+    page: int = Query(1, ge=1),
+    limit: int = Query(30, ge=1, le=100),
+    search: str = Query("", max_length=120),
+    category: str = Query("", max_length=80),
+) -> IntegrationCatalogResponse:
+    from composio_client import list_catalog_apps
+
+    try:
+        result = list_catalog_apps(
+            page=page,
+            limit=limit,
+            search=search,
+            category=category,
+        )
+    except Exception as exc:
+        logger.exception("Failed to load Composio catalog")
+        raise HTTPException(status_code=502, detail=f"Composio catalog error: {exc}") from exc
+    return IntegrationCatalogResponse(**result)
 
 
 @app.get("/connections", response_model=List[ConnectionItem])

@@ -194,3 +194,23 @@ export interface SupportedApp {
   slug: string;
   display_name: string;
 }
+
+export interface IntegrationCatalogItem {
+  slug: string;
+  name: string;
+  logo_url: string;
+  description: string;
+  categories: string[];
+  tools_count: number;
+  triggers_count: number;
+}
+
+export interface IntegrationCatalogResponse {
+  items: IntegrationCatalogItem[];
+  page: number;
+  limit: number;
+  total_items: number;
+  total_pages: number;
+  next_page: number | null;
+  categories: string[];
+}
