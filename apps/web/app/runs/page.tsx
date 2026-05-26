@@ -219,8 +219,10 @@ export default function RunsPage() {
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
-                    <p className="text-xs text-[#999] mt-0.5">
-                      {r.id} · {r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}
+                    <p className="text-xs text-[#bbb] mt-0.5">
+                      <span className="font-mono text-[10px]">{r.id}</span>
+                      <span className="text-[#ccc] mx-1">·</span>
+                      <span className="text-[#999]">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</span>
                     </p>
                   </div>
                   <StatusBadge status={r.status} />

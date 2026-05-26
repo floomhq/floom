@@ -589,6 +589,16 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE workers ADD COLUMN triggers_json TEXT;
     """,
+    # -- migration 21: clean up orphaned skill_versions rows (N5 fix) ----------
+    # Rows in skill_versions that are not referenced by any worker can block
+    # recreating a worker with the same name+version (UNIQUE constraint).
+    # This one-time cleanup removes any orphans left by prior deletions.
+    """
+    DELETE FROM skill_versions
+    WHERE id NOT IN (
+        SELECT skill_version_id FROM workers WHERE skill_version_id IS NOT NULL
+    );
+    """,
 ]
 
 

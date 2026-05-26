@@ -17,6 +17,7 @@ const POPUP_WIDTH = 600;
 const POPUP_HEIGHT = 700;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 60_000;
+const POLL_MAX_ATTEMPTS = 30;
 
 export type OAuthPopupResult = "connected" | "timeout" | "closed";
 
@@ -32,10 +33,13 @@ export interface OAuthPopupOptions {
 function openCenteredPopup(url: string): Window | null {
   const left = Math.round(window.screenX + (window.outerWidth - POPUP_WIDTH) / 2);
   const top = Math.round(window.screenY + (window.outerHeight - POPUP_HEIGHT) / 2);
+  // "popup=yes" is the modern hint that tells the browser to treat this as a
+  // focused popup window rather than a background tab. Without it some browsers
+  // open the URL behind the current window.
   return window.open(
     url,
     `oauth-${Date.now()}`,
-    `width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
+    `popup=yes,width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
   );
 }
 
@@ -47,9 +51,11 @@ export function openOAuthPopup({
   return new Promise((resolve) => {
     const popup = openCenteredPopup(oauthUrl);
     if (!popup) {
-      // Browser blocked popup — fallback: open in new tab
-      window.open(oauthUrl, "_blank", "noopener,noreferrer");
-      resolve("closed");
+      // Browser blocked the popup — fall back to full-page redirect so the
+      // user can complete OAuth. The callback page will post a message back or
+      // the polling will pick it up on return.
+      window.location.href = oauthUrl;
+      // We never resolve here; the page navigates away.
       return;
     }
 
@@ -84,9 +90,18 @@ export function openOAuthPopup({
     }
     window.addEventListener("message", onMessage);
 
-    // Strategy 2: poll GET /connections every 2s
+    // Strategy 2: poll GET /connections every 2s, up to POLL_MAX_ATTEMPTS
     const normalizedSlug = appSlug.toLowerCase();
+    let pollAttempts = 0;
     pollTimer = setInterval(async () => {
+      if (done) return;
+      pollAttempts++;
+      if (pollAttempts > POLL_MAX_ATTEMPTS) {
+        // Exceeded cap — stop polling; timeout timer will resolve if still open
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = null;
+        return;
+      }
       try {
         const connections = await api.connections.list();
         const active = connections.find(
