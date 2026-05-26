@@ -7,9 +7,11 @@ import json
 import copy
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
@@ -306,6 +308,274 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             transcript_text = (artifacts_dir / "run_model_failure" / "transcript.jsonl").read_text(encoding="utf-8")
             self.assertIn("openai_call_failed", transcript_text)
             self.assertIn("simulated model failure", transcript_text)
+
+
+class ComposioToolDispatchTest(unittest.TestCase):
+    """Unhappy-path coverage for the Composio tool dispatch surface."""
+
+    def _setup(self, tmp, *, connections=None):
+        base = Path(tmp)
+        worker_dir = base / "worker"
+        artifacts_dir = base / "artifacts"
+        worker_dir.mkdir()
+        (worker_dir / "SKILL.md").write_text("Call composio.gmail.execute.", encoding="utf-8")
+        skill_driver.ARTIFACTS_DIR = artifacts_dir
+        return base, worker_dir, artifacts_dir
+
+    def test_composio_tool_slug_outside_namespace_is_rejected_pre_http(self):
+        """LLM picking a slug outside its declared app namespace must NOT hit the wire."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio__gmail__execute",
+                            {"tool_slug": "SLACK_SEND_MESSAGE", "arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nFallback"),
+            ])
+            mock_requests = MagicMock()
+            driver = skill_driver.SkillRuntimeDriver(
+                openai_client=fake_client,
+                requests_session=mock_requests,
+            )
+
+            result = driver.run(
+                worker_id="research_brief",
+                run_id="run_namespace_violation",
+                inputs={"topic": "AI agents"},
+                secrets={"OPENAI_API_KEY": "k", "COMPOSIO_API_KEY": "ck"},
+                log_fn=lambda *a, **k: None,
+                trace_id="trace_test",
+                config=config_for(worker_dir, connections=["gmail"]),
+            )
+
+            self.assertEqual(result.status, "success")
+            # Critical: no HTTP request issued for the cross-namespace slug.
+            self.assertFalse(mock_requests.post.called, "Composio HTTP must not be called for out-of-namespace slug")
+            transcript = artifacts_dir / "run_namespace_violation" / "transcript.jsonl"
+            rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
+            tool_results = [r for r in rows if r.get("type") == "tool_result"]
+            self.assertTrue(any(
+                r["content"].get("error_code") == "tool_slug_namespace_violation"
+                for r in tool_results
+            ))
+
+    def test_missing_composio_connection_fails_fast(self):
+        """No active connection for the declared app -> missing_connection BEFORE HTTP."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio__gmail__execute",
+                            {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nDone"),
+            ])
+            mock_requests = MagicMock()
+            driver = skill_driver.SkillRuntimeDriver(
+                openai_client=fake_client,
+                requests_session=mock_requests,
+            )
+
+            with patch.object(driver, "_connection_id_for", return_value=None):
+                result = driver.run(
+                    worker_id="research_brief",
+                    run_id="run_missing_conn",
+                    inputs={"topic": "AI agents"},
+                    secrets={"OPENAI_API_KEY": "k", "COMPOSIO_API_KEY": "ck"},
+                    log_fn=lambda *a, **k: None,
+                    trace_id="trace_test",
+                    config=config_for(worker_dir, connections=["gmail"]),
+                )
+
+            self.assertEqual(result.status, "success")
+            self.assertFalse(mock_requests.post.called, "No HTTP must fire when connection_id is None")
+            transcript = artifacts_dir / "run_missing_conn" / "transcript.jsonl"
+            rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
+            tool_results = [r for r in rows if r.get("type") == "tool_result"]
+            self.assertTrue(any(
+                r["content"].get("error_code") == "missing_connection"
+                for r in tool_results
+            ))
+
+    def test_composio_http_timeout_captured_as_tool_result(self):
+        """Network timeout -> tool_result error, run continues to completion."""
+        import requests as _requests_module
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio__gmail__execute",
+                            {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nRecovered"),
+            ])
+            mock_requests = MagicMock()
+            mock_requests.exceptions = _requests_module.exceptions
+            mock_requests.post.side_effect = _requests_module.exceptions.Timeout("timeout")
+            driver = skill_driver.SkillRuntimeDriver(
+                openai_client=fake_client,
+                requests_session=mock_requests,
+            )
+
+            with patch.object(driver, "_connection_id_for", return_value="ca_test"):
+                import os as _os
+                _os.environ["COMPOSIO_API_KEY"] = "ck"
+                result = driver.run(
+                    worker_id="research_brief",
+                    run_id="run_composio_timeout",
+                    inputs={"topic": "AI agents"},
+                    secrets={"OPENAI_API_KEY": "k"},
+                    log_fn=lambda *a, **k: None,
+                    trace_id="trace_test",
+                    config=config_for(worker_dir, connections=["gmail"]),
+                )
+
+            self.assertEqual(result.status, "success")
+            transcript = artifacts_dir / "run_composio_timeout" / "transcript.jsonl"
+            rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
+            tool_results = [r for r in rows if r.get("type") == "tool_result"]
+            self.assertTrue(any(
+                r["content"].get("error_code") == "composio_timeout"
+                for r in tool_results
+            ))
+
+    def test_composio_http_5xx_captured_as_tool_result(self):
+        """Upstream 500 -> tool_result error with status_code, run continues."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+            fake_client = FakeOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call(
+                            "composio__gmail__execute",
+                            {"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {}},
+                        )
+                    ]
+                ),
+                assistant_message(content="# Brief\nRecovered"),
+            ])
+            mock_response = MagicMock()
+            mock_response.status_code = 500
+            mock_response.json.return_value = {"error": "internal server error"}
+            mock_requests = MagicMock()
+            import requests as _r
+            mock_requests.exceptions = _r.exceptions
+            mock_requests.post.return_value = mock_response
+            driver = skill_driver.SkillRuntimeDriver(
+                openai_client=fake_client,
+                requests_session=mock_requests,
+            )
+
+            with patch.object(driver, "_connection_id_for", return_value="ca_test"):
+                import os as _os
+                _os.environ["COMPOSIO_API_KEY"] = "ck"
+                result = driver.run(
+                    worker_id="research_brief",
+                    run_id="run_composio_500",
+                    inputs={"topic": "AI agents"},
+                    secrets={"OPENAI_API_KEY": "k"},
+                    log_fn=lambda *a, **k: None,
+                    trace_id="trace_test",
+                    config=config_for(worker_dir, connections=["gmail"]),
+                )
+
+            self.assertEqual(result.status, "success")
+            transcript = artifacts_dir / "run_composio_500" / "transcript.jsonl"
+            rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
+            tool_results = [r for r in rows if r.get("type") == "tool_result"]
+            self.assertTrue(any(
+                r["content"].get("status_code") == 500 for r in tool_results
+            ))
+
+    def test_concurrent_runs_no_shared_mutable_state(self):
+        """5 parallel runs of the same worker must each capture their own output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, artifacts_dir = self._setup(tmp)
+
+            results = {}
+            errors = []
+
+            def runner(run_idx: int):
+                try:
+                    fake_client = FakeOpenAIClient([
+                        assistant_message(
+                            tool_calls=[
+                                tool_call(
+                                    "write_output",
+                                    {"name": "brief", "content": f"# Brief {run_idx}"},
+                                )
+                            ]
+                        ),
+                        assistant_message(content="Done."),
+                    ])
+                    driver = skill_driver.SkillRuntimeDriver(openai_client=fake_client)
+                    r = driver.run(
+                        worker_id="research_brief",
+                        run_id=f"run_concurrent_{run_idx}",
+                        inputs={"topic": f"Topic {run_idx}"},
+                        secrets={"OPENAI_API_KEY": "k"},
+                        log_fn=lambda *a, **k: None,
+                        trace_id=f"trace_{run_idx}",
+                        config=config_for(worker_dir),
+                    )
+                    results[run_idx] = r
+                except Exception as exc:
+                    errors.append((run_idx, exc))
+
+            threads = [threading.Thread(target=runner, args=(i,)) for i in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(errors, [])
+            self.assertEqual(len(results), 5)
+            for i, r in results.items():
+                self.assertEqual(r.status, "success")
+                self.assertEqual(r.outputs["brief"], f"# Brief {i}")
+
+    def test_skill_path_traversal_rejected(self):
+        """bundle_path with .. components must NOT escape WORKERS_DIR."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker_dir = base / "worker"
+            artifacts_dir = base / "artifacts"
+            worker_dir.mkdir()
+            (worker_dir / "SKILL.md").write_text("noop", encoding="utf-8")
+            skill_driver.ARTIFACTS_DIR = artifacts_dir
+
+            fake_client = FakeOpenAIClient([assistant_message(content="# Brief")])
+            driver = skill_driver.SkillRuntimeDriver(openai_client=fake_client)
+
+            # Force config to have a traversal-attempt bundle_path
+            cfg = config_for(worker_dir)
+            cfg.runtime.bundle_path = "../../../etc"
+
+            result = driver.run(
+                worker_id="research_brief",
+                run_id="run_traversal",
+                inputs={"topic": "x"},
+                secrets={"OPENAI_API_KEY": "k"},
+                log_fn=lambda *a, **k: None,
+                trace_id="trace",
+                config=cfg,
+            )
+
+            self.assertEqual(result.status, "error")
+            self.assertIn(result.error_code, ("skill_not_found", "skill_path_invalid"))
 
 
 if __name__ == "__main__":
