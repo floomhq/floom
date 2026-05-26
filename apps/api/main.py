@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import hashlib
 import hmac
+import base64
 import fcntl
 import re
 import time
@@ -278,7 +279,7 @@ def _enable_composio_trigger(config: WorkerConfig, worker_id: str) -> str:
 def _sync_composio_registration(
     conn: sqlite3.Connection,
     worker_id: str,
-    config: WorkerConfig,
+    config: Optional[WorkerConfig],
     existing: Optional[Dict[str, Any]] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     existing = existing or _existing_composio_state(conn, worker_id)
@@ -287,17 +288,27 @@ def _sync_composio_registration(
     old_trigger_id = existing.get("trigger_id")
     old_event = existing.get("event") or (old_signature or {}).get("event")
 
-    if old_trigger_id and old_signature and old_signature != new_signature:
-        _disable_composio_trigger(old_event, old_trigger_id, worker_id)
-        old_trigger_id = None
-
     if not new_signature:
+        if old_trigger_id:
+            _disable_composio_trigger(old_event, old_trigger_id, worker_id)
         return None, None
 
     if old_trigger_id and old_signature == new_signature:
         return old_trigger_id, new_signature["event"]
 
     enabled_id = _enable_composio_trigger(config, worker_id)
+    if old_trigger_id:
+        try:
+            _disable_composio_trigger(old_event, old_trigger_id, worker_id)
+        except RuntimeError:
+            try:
+                _disable_composio_trigger(new_signature["event"], enabled_id, worker_id)
+            except RuntimeError:
+                logger.exception(
+                    "Failed to roll back newly enabled Composio trigger for worker %s",
+                    worker_id,
+                )
+            raise
     return enabled_id, new_signature["event"]
 
 
@@ -310,8 +321,11 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
         worker_id = w["id"]
         skill_version_id = _skill_version_id(worker_id, manifest)
         config_model = _config_from_manifest_for_worker(manifest, worker_id)
-        if config_model is None:
-            config_model = WorkerConfig(**config)
+        if config_model is None and config:
+            try:
+                config_model = WorkerConfig(**config)
+            except Exception:
+                logger.exception("Failed to parse worker config for composio lifecycle: %s", worker_id)
         existing_composio = _existing_composio_state(conn, worker_id)
         composio_trigger_id, composio_event = _sync_composio_registration(
             conn,
@@ -642,6 +656,9 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
         try:
             _persist_discovered_workers(conn, workers)
         except RuntimeError as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Return the new worker detail
@@ -664,12 +681,21 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
     if not target_dir.exists():
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    (target_dir / "worker.yml").write_text(payload.worker_yml)
-    (target_dir / "run.py").write_text(payload.run_py)
-    if not (target_dir / "requirements.txt").exists():
-        (target_dir / "requirements.txt").write_text("")
-    if not (target_dir / "SKILL.md").exists():
-        (target_dir / "SKILL.md").write_text(
+    worker_yml_path = target_dir / "worker.yml"
+    run_py_path = target_dir / "run.py"
+    requirements_path = target_dir / "requirements.txt"
+    skill_path = target_dir / "SKILL.md"
+    old_worker_yml = worker_yml_path.read_text() if worker_yml_path.exists() else None
+    old_run_py = run_py_path.read_text() if run_py_path.exists() else None
+    had_requirements = requirements_path.exists()
+    old_skill = skill_path.read_text() if skill_path.exists() else None
+
+    worker_yml_path.write_text(payload.worker_yml)
+    run_py_path.write_text(payload.run_py)
+    if not requirements_path.exists():
+        requirements_path.write_text("")
+    if not skill_path.exists():
+        skill_path.write_text(
             f"# {_config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
             "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
@@ -681,6 +707,17 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
         try:
             _persist_discovered_workers(conn, workers)
         except RuntimeError as exc:
+            if old_worker_yml is not None:
+                worker_yml_path.write_text(old_worker_yml)
+            if old_run_py is not None:
+                run_py_path.write_text(old_run_py)
+            if not had_requirements and requirements_path.exists():
+                requirements_path.unlink()
+            if old_skill is not None:
+                skill_path.write_text(old_skill)
+            elif skill_path.exists():
+                skill_path.unlink()
+            invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     return get_worker_detail(worker_id)
 
@@ -1494,36 +1531,47 @@ def list_integration_triggers():
     return {"items": items}
 
 
-def _extract_composio_signature(request: Request) -> str:
-    for name in (
-        "X-Composio-Signature",
-        "X-Composio-Webhook-Signature",
-        "X-Hub-Signature-256",
-    ):
-        value = request.headers.get(name)
-        if value:
-            return value
-    return ""
-
-
-def _signature_digest(signature_header: str) -> str:
+def _signature_values(signature_header: str) -> list[str]:
+    values: list[str] = []
     signature_header = signature_header.strip()
-    if signature_header.startswith("sha256="):
-        return signature_header[len("sha256="):]
+    if not signature_header:
+        return values
     if "," in signature_header:
-        for part in signature_header.split(","):
-            key, _, value = part.strip().partition("=")
+        values.append(signature_header.split(",", 1)[1].strip())
+    for part in signature_header.split():
+        if "," in part:
+            values.append(part.split(",", 1)[1].strip())
+        if "=" in part:
+            key, _, value = part.partition("=")
             if key in {"v1", "sha256"} and value:
-                return value
-    return signature_header
+                values.append(value.strip())
+    values.append(signature_header)
+    return [value for value in dict.fromkeys(values) if value]
 
 
-def _verify_composio_signature(body: bytes, signature_header: str, signing_key: str) -> bool:
-    provided = _signature_digest(signature_header)
-    if not provided:
+def _verify_composio_signature(body: bytes, request: Request, signing_key: str) -> bool:
+    webhook_id = request.headers.get("webhook-id", "")
+    webhook_timestamp = request.headers.get("webhook-timestamp", "")
+    signature_header = request.headers.get("webhook-signature", "")
+    if not webhook_id or not webhook_timestamp or not signature_header:
         return False
-    expected = hmac.new(signing_key.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(provided, expected)
+
+    try:
+        timestamp = int(webhook_timestamp)
+    except ValueError:
+        return False
+    tolerance = int(os.environ.get("COMPOSIO_WEBHOOK_TOLERANCE_SECONDS", "300"))
+    if tolerance > 0 and abs(time.time() - timestamp) > tolerance:
+        return False
+
+    signing_string = f"{webhook_id}.{webhook_timestamp}.{body.decode('utf-8')}".encode()
+    expected = base64.b64encode(
+        hmac.new(signing_key.encode(), signing_string, hashlib.sha256).digest()
+    ).decode()
+    return any(
+        hmac.compare_digest(expected, provided)
+        for provided in _signature_values(signature_header)
+    )
 
 
 def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
@@ -1536,6 +1584,8 @@ def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]
             "composio_trigger_id",
             "trigger_id",
             "triggerId",
+            "trigger_instance_id",
+            "triggerInstanceId",
             "enabled_trigger_id",
             "connected_account_trigger_id",
         ):
@@ -1543,14 +1593,18 @@ def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]
         for nested_key in ("data", "metadata", "trigger"):
             nested = payload.get(nested_key)
             if isinstance(nested, dict):
-                for key in (
+                nested_keys = [
                     "composio_trigger_id",
                     "trigger_id",
                     "triggerId",
-                    "id",
+                    "trigger_instance_id",
+                    "triggerInstanceId",
                     "enabled_trigger_id",
                     "connected_account_trigger_id",
-                ):
+                ]
+                if nested_key != "data":
+                    nested_keys.append("id")
+                for key in nested_keys:
                     candidates.append(nested.get(key))
     return [str(c) for c in candidates if c]
 
@@ -1564,7 +1618,7 @@ def _event_name_from_payload(payload: Any) -> Optional[str]:
             return value
     nested = payload.get("metadata")
     if isinstance(nested, dict):
-        value = nested.get("event") or nested.get("event_name")
+        value = nested.get("trigger_slug") or nested.get("event") or nested.get("event_name")
         if isinstance(value, str) and value:
             return value
     return None
@@ -1580,6 +1634,8 @@ def _find_worker_for_composio_event(payload: Any, request: Request) -> Optional[
             ).fetchone()
             if row:
                 return row["id"]
+        if candidates:
+            return None
         event_name = _event_name_from_payload(payload)
         if event_name:
             rows = conn.execute(
@@ -1599,7 +1655,7 @@ async def composio_events(request: Request) -> ActionResponse:
         raise HTTPException(status_code=503, detail="COMPOSIO_WEBHOOK_SIGNING_KEY is not configured")
 
     body = await request.body()
-    if not _verify_composio_signature(body, _extract_composio_signature(request), signing_key):
+    if not _verify_composio_signature(body, request, signing_key):
         raise HTTPException(status_code=401, detail="Invalid Composio signature")
 
     if body:

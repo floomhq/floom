@@ -195,17 +195,27 @@ export default function EditWorkerPage() {
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
                 <Label className="text-sm">Type</Label>
-                <Select value={triggerType} onValueChange={(value) => value && setTriggerType(value as TriggerType)}>
-                  <SelectTrigger className="border-[#e4e4e7]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="schedule">Cron</SelectItem>
-                    <SelectItem value="webhook">Webhook</SelectItem>
-                    <SelectItem value="composio">Composio event</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    ["manual", "Manual"],
+                    ["schedule", "Cron"],
+                    ["webhook", "Webhook"],
+                    ["composio", "Composio event"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setTriggerType(value)}
+                      className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
+                        triggerType === value
+                          ? "border-black bg-black text-white"
+                          : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {triggerType === "schedule" && (

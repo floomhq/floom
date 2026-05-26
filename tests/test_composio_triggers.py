@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import importlib
@@ -81,6 +82,21 @@ def _signature(body: bytes, key="test-signing-key"):
     return "sha256=" + hmac.new(key.encode(), body, hashlib.sha256).hexdigest()
 
 
+def _composio_webhook_headers(body: bytes, key="test-signing-key"):
+    webhook_id = "msg_test_123"
+    webhook_timestamp = str(int(time.time()))
+    signing_string = f"{webhook_id}.{webhook_timestamp}.{body.decode('utf-8')}".encode()
+    signature = base64.b64encode(
+        hmac.new(key.encode(), signing_string, hashlib.sha256).digest()
+    ).decode()
+    return {
+        "webhook-id": webhook_id,
+        "webhook-timestamp": webhook_timestamp,
+        "webhook-signature": f"v1,{signature}",
+        "Content-Type": "application/json",
+    }
+
+
 def _create_worker(client):
     return client.post(
         "/workers",
@@ -117,14 +133,19 @@ def test_composio_events_with_valid_hmac_creates_run(monkeypatch, tmp_path):
         created = _create_worker(client)
         assert created.status_code == 200, created.text
         body = json.dumps({
-            "trigger_id": "ct_gmail_123",
-            "event": "GMAIL_NEW_EMAIL",
-            "payload": {"subject": "Hello"},
+            "id": "msg_abc123",
+            "type": "composio.trigger.message",
+            "metadata": {
+                "trigger_id": "ct_gmail_123",
+                "trigger_slug": "GMAIL_NEW_EMAIL",
+                "connected_account_id": "conn_gmail_federico_stub",
+            },
+            "data": {"subject": "Hello"},
         }).encode()
         response = client.post(
             "/composio-events",
             content=body,
-            headers={"X-Composio-Signature": _signature(body), "Content-Type": "application/json"},
+            headers=_composio_webhook_headers(body),
         )
 
     assert response.status_code == 200, response.text
@@ -133,7 +154,7 @@ def test_composio_events_with_valid_hmac_creates_run(monkeypatch, tmp_path):
         row = conn.execute("SELECT worker_id, trigger_source, input_json FROM runs WHERE id = ?", (run_id,)).fetchone()
     assert row["worker_id"] == "gmail-composio"
     assert row["trigger_source"] == "composio"
-    assert json.loads(row["input_json"])["event"]["payload"]["subject"] == "Hello"
+    assert json.loads(row["input_json"])["event"]["data"]["subject"] == "Hello"
 
 
 def test_composio_events_with_invalid_hmac_returns_401(monkeypatch, tmp_path):
@@ -142,10 +163,39 @@ def test_composio_events_with_invalid_hmac_returns_401(monkeypatch, tmp_path):
     with TestClient(main.app) as client:
         created = _create_worker(client)
         assert created.status_code == 200, created.text
+        body = json.dumps({
+            "metadata": {"trigger_id": "ct_gmail_123", "trigger_slug": "GMAIL_NEW_EMAIL"},
+            "data": {},
+        }).encode()
         response = client.post(
             "/composio-events",
-            json={"trigger_id": "ct_gmail_123", "event": "GMAIL_NEW_EMAIL"},
-            headers={"X-Composio-Signature": "sha256=bad"},
+            content=body,
+            headers={
+                "webhook-id": "msg_bad",
+                "webhook-timestamp": str(int(time.time())),
+                "webhook-signature": "v1,bad",
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 401, response.text
+
+
+def test_composio_events_rejects_legacy_body_only_hmac(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        body = json.dumps({
+            "metadata": {"trigger_id": "ct_gmail_123", "trigger_slug": "GMAIL_NEW_EMAIL"},
+            "data": {"subject": "legacy"},
+        }).encode()
+        response = client.post(
+            "/composio-events",
+            content=body,
+            headers={"X-Composio-Signature": _signature(body), "Content-Type": "application/json"},
         )
 
     assert response.status_code == 401, response.text
@@ -166,6 +216,156 @@ def test_worker_delete_calls_composio_disable(monkeypatch, tmp_path):
     assert disabled == [("GMAIL_NEW_EMAIL", "ct_gmail_123")]
 
 
+def test_worker_update_trigger_change_disables_previous_composio_trigger(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    enabled = []
+    disabled = []
+
+    def fake_enable(event, connection_id, webhook_url, config):
+        trigger_id = f"ct_gmail_{len(enabled) + 1}"
+        enabled.append((event, connection_id, webhook_url, config, trigger_id))
+        return trigger_id
+
+    monkeypatch.setattr(composio_client, "enable_trigger", fake_enable)
+    monkeypatch.setattr(composio_client, "disable_trigger", lambda event, trigger_id=None: disabled.append((event, trigger_id)))
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        updated = client.put(
+            "/workers/gmail-composio",
+            json={"worker_yml": _worker_yml(connection_id="conn_gmail_second"), "run_py": RUN_PY},
+        )
+        assert updated.status_code == 200, updated.text
+
+    assert enabled == [
+        ("GMAIL_NEW_EMAIL", "conn_gmail_federico_stub", "https://example.test/composio-events", {}, "ct_gmail_1"),
+        ("GMAIL_NEW_EMAIL", "conn_gmail_second", "https://example.test/composio-events", {}, "ct_gmail_2"),
+    ]
+    assert disabled == [("GMAIL_NEW_EMAIL", "ct_gmail_1")]
+    with main.get_db() as conn:
+        row = conn.execute("SELECT composio_trigger_id, composio_event FROM workers WHERE id = ?", ("gmail-composio",)).fetchone()
+    assert row["composio_trigger_id"] == "ct_gmail_2"
+    assert row["composio_event"] == "GMAIL_NEW_EMAIL"
+
+
+def test_worker_update_rolls_back_new_composio_trigger_when_old_disable_fails(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    enabled = []
+    disabled = []
+
+    def fake_enable(event, connection_id, webhook_url, config):
+        trigger_id = f"ct_gmail_{len(enabled) + 1}"
+        enabled.append((event, connection_id, trigger_id))
+        return trigger_id
+
+    def fake_disable(event, trigger_id=None):
+        disabled.append((event, trigger_id))
+        if trigger_id == "ct_gmail_1":
+            raise RuntimeError("old disable failed")
+
+    monkeypatch.setattr(composio_client, "enable_trigger", fake_enable)
+    monkeypatch.setattr(composio_client, "disable_trigger", fake_disable)
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        updated = client.put(
+            "/workers/gmail-composio",
+            json={"worker_yml": _worker_yml(connection_id="conn_gmail_second"), "run_py": RUN_PY},
+        )
+
+    assert updated.status_code == 502, updated.text
+    assert enabled == [
+        ("GMAIL_NEW_EMAIL", "conn_gmail_federico_stub", "ct_gmail_1"),
+        ("GMAIL_NEW_EMAIL", "conn_gmail_second", "ct_gmail_2"),
+    ]
+    assert disabled == [
+        ("GMAIL_NEW_EMAIL", "ct_gmail_1"),
+        ("GMAIL_NEW_EMAIL", "ct_gmail_2"),
+    ]
+    with main.get_db() as conn:
+        row = conn.execute("SELECT composio_trigger_id FROM workers WHERE id = ?", ("gmail-composio",)).fetchone()
+    assert row["composio_trigger_id"] == "ct_gmail_1"
+
+
+def test_composio_events_with_stale_trigger_id_does_not_fallback_to_event(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_current")
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        body = json.dumps({
+            "metadata": {
+                "trigger_id": "ct_stale",
+                "trigger_slug": "GMAIL_NEW_EMAIL",
+            },
+            "data": {"subject": "stale"},
+        }).encode()
+        response = client.post(
+            "/composio-events",
+            content=body,
+            headers=_composio_webhook_headers(body),
+        )
+
+    assert response.status_code == 404, response.text
+    with main.get_db() as conn:
+        run_count = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+    assert run_count == 0
+
+
+def test_composio_events_with_stale_trigger_instance_id_does_not_fallback_to_event(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_current")
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        body = json.dumps({
+            "metadata": {
+                "trigger_instance_id": "ct_stale",
+                "trigger_slug": "GMAIL_NEW_EMAIL",
+            },
+            "data": {"subject": "stale instance"},
+        }).encode()
+        response = client.post(
+            "/composio-events",
+            content=body,
+            headers=_composio_webhook_headers(body),
+        )
+
+    assert response.status_code == 404, response.text
+    with main.get_db() as conn:
+        run_count = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+    assert run_count == 0
+
+
+def test_composio_events_without_trigger_id_can_fallback_to_unique_event_with_data_id(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_current")
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        body = json.dumps({
+            "metadata": {"trigger_slug": "GMAIL_NEW_EMAIL"},
+            "data": {"id": "email_123", "subject": "fallback"},
+        }).encode()
+        response = client.post(
+            "/composio-events",
+            content=body,
+            headers=_composio_webhook_headers(body),
+        )
+
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run_id"]
+    with main.get_db() as conn:
+        row = conn.execute("SELECT worker_id, input_json FROM runs WHERE id = ?", (run_id,)).fetchone()
+    assert row["worker_id"] == "gmail-composio"
+    assert json.loads(row["input_json"])["event"]["data"]["id"] == "email_123"
+
+
 def test_gmail_composio_register_and_stub_event_end_to_end(monkeypatch, tmp_path):
     main, composio_client = _load_api(monkeypatch, tmp_path)
     monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
@@ -173,14 +373,19 @@ def test_gmail_composio_register_and_stub_event_end_to_end(monkeypatch, tmp_path
         created = _create_worker(client)
         assert created.status_code == 200, created.text
         body = json.dumps({
-            "trigger_id": "ct_gmail_123",
-            "event": "GMAIL_NEW_EMAIL",
-            "payload": {"from": "federico@example.test"},
+            "id": "msg_abc123",
+            "type": "composio.trigger.message",
+            "metadata": {
+                "trigger_id": "ct_gmail_123",
+                "trigger_slug": "GMAIL_NEW_EMAIL",
+                "connected_account_id": "conn_gmail_federico_stub",
+            },
+            "data": {"from": "federico@example.test"},
         }).encode()
         event_response = client.post(
             "/composio-events",
             content=body,
-            headers={"X-Composio-Signature": _signature(body), "Content-Type": "application/json"},
+            headers=_composio_webhook_headers(body),
         )
         assert event_response.status_code == 200, event_response.text
         run_id = event_response.json()["run_id"]
@@ -195,3 +400,83 @@ def test_gmail_composio_register_and_stub_event_end_to_end(monkeypatch, tmp_path
             time.sleep(0.1)
 
     assert final_status == "completed"
+
+
+def test_composio_events_without_signing_key_returns_503(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.delenv("COMPOSIO_WEBHOOK_SIGNING_KEY", raising=False)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        response = client.post(
+            "/composio-events",
+            json={"metadata": {"trigger_id": "ct_gmail_123", "trigger_slug": "GMAIL_NEW_EMAIL"}},
+        )
+
+    assert response.status_code == 503, response.text
+
+
+def test_composio_client_uses_current_v3_trigger_endpoints(monkeypatch, tmp_path):
+    _main, composio_client = _load_api(monkeypatch, tmp_path)
+    calls = []
+
+    def fake_get(path, **params):
+        calls.append(("GET", path, params))
+        return {"items": [{"slug": "GMAIL_NEW_EMAIL"}]}
+
+    def fake_post(path, body):
+        calls.append(("POST", path, body))
+        return {"trigger_id": "ti_gmail_123"}
+
+    def fake_patch(path, body):
+        calls.append(("PATCH", path, body))
+        return {"status": "success"}
+
+    monkeypatch.setattr(composio_client, "_get", fake_get)
+    monkeypatch.setattr(composio_client, "_post", fake_post)
+    monkeypatch.setattr(composio_client, "_patch", fake_patch)
+
+    assert composio_client.list_triggers() == [{"slug": "GMAIL_NEW_EMAIL"}]
+    trigger_id = composio_client.enable_trigger(
+        "GMAIL_NEW_EMAIL",
+        "conn_gmail_federico_stub",
+        "https://example.test/composio-events",
+        {"labelIds": ["INBOX"]},
+    )
+    composio_client.disable_trigger("GMAIL_NEW_EMAIL", trigger_id)
+
+    assert ("GET", "/triggers_types", {"limit": 1000}) in calls
+    assert (
+        "POST",
+        "/trigger_instances/GMAIL_NEW_EMAIL/upsert",
+        {
+            "connected_account_id": "conn_gmail_federico_stub",
+            "trigger_config": {"labelIds": ["INBOX"]},
+        },
+    ) in calls
+    assert ("PATCH", "/trigger_instances/manage/ti_gmail_123", {"status": "disable"}) in calls
+
+
+def test_integrations_triggers_proxy_caches_catalog(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    calls = []
+
+    def fake_list_triggers():
+        calls.append("list")
+        return [{"slug": "GMAIL_NEW_EMAIL"}]
+
+    monkeypatch.setattr(composio_client, "list_triggers", fake_list_triggers)
+    main._trigger_catalog_cache["items"] = None
+    main._trigger_catalog_cache["expires_at"] = 0.0
+
+    with TestClient(main.app) as client:
+        first = client.get("/integrations/triggers")
+        second = client.get("/integrations/triggers")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json() == {"items": [{"slug": "GMAIL_NEW_EMAIL"}]}
+    assert second.json() == first.json()
+    assert calls == ["list"]

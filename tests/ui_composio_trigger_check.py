@@ -1,4 +1,10 @@
+import os
+import re
+
 from playwright.sync_api import sync_playwright, expect
+
+
+BASE_URL = os.environ.get("WORKEROS_WEB_BASE_URL", "http://127.0.0.1:3007").rstrip("/")
 
 TRIGGERS = {
     "items": [
@@ -67,23 +73,32 @@ def fulfill_json(route, data):
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
+    browser = p.firefox.launch(headless=True)
     page = browser.new_page(viewport={"width": 1440, "height": 1200})
     page.route("**/api/proxy/integrations/triggers", lambda route: fulfill_json(route, TRIGGERS))
     page.route("**/api/proxy/connections", lambda route: fulfill_json(route, CONNECTIONS))
     page.route("**/api/proxy/workers/gmail-composio", lambda route: fulfill_json(route, WORKER))
 
-    page.goto("http://127.0.0.1:3007/workers/new?trigger=composio")
+    page.goto(f"{BASE_URL}/workers/new")
     page.wait_for_load_state("networkidle")
-    print(page.url)
-    print(page.locator("body").inner_text())
+    page.wait_for_timeout(1000)
+    expect(page.get_by_text("New worker")).to_be_visible()
+    page.mouse.click(750, 548)
+    page.add_style_tag(content="*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}")
     expect(page.get_by_text("Search events")).to_be_visible()
     expect(page.get_by_text("Filters JSON")).to_be_visible()
-    page.screenshot(path="/tmp/workeros-t15a-new-composio.png", full_page=True)
+    page.get_by_text("Select a Composio event").click()
+    page.get_by_role("option", name=re.compile("New Gmail Email")).click()
+    page.get_by_text("Select connected account").click()
+    page.get_by_role("option", name=re.compile("conn_gmail_federico_stub")).click()
+    expect(page.get_by_text("GMAIL_NEW_EMAIL").first).to_be_visible()
+    expect(page.get_by_text("conn_gmail_federico_stub").first).to_be_visible()
+    page.screenshot(path="/tmp/workeros-t15a-new-composio.png", animations="disabled", timeout=10000)
 
-    page.goto("http://127.0.0.1:3007/workers/gmail-composio/edit")
+    page.goto(f"{BASE_URL}/workers/gmail-composio/edit")
     page.wait_for_load_state("networkidle")
+    page.add_style_tag(content="*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}")
     expect(page.get_by_text("Composio event")).to_be_visible()
     expect(page.get_by_text("Filters JSON")).to_be_visible()
-    page.screenshot(path="/tmp/workeros-t15a-edit-composio.png", full_page=True)
+    page.screenshot(path="/tmp/workeros-t15a-edit-composio.png", animations="disabled", timeout=10000)
     browser.close()
