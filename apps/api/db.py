@@ -585,6 +585,10 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_composio_connections_status
         ON composio_connections(status);
     """,
+    # -- migration 20: triggers_json for multi-trigger support (PR P) ----------
+    """
+    ALTER TABLE workers ADD COLUMN triggers_json TEXT;
+    """,
 ]
 
 
@@ -612,7 +616,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
