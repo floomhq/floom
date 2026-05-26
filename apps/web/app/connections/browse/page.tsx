@@ -198,7 +198,7 @@ export default function ConnectionsBrowsePage() {
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">Browse integrations</h1>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            Search the full Composio catalog and connect OAuth apps for workers.
+            Search the full integration catalog and connect any of 1000+ apps for your workers.
           </p>
         </div>
         <div className="text-sm text-[var(--ink-mute)]">{pageSummary}</div>

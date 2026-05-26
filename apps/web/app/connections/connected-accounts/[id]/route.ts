@@ -27,7 +27,7 @@ export async function GET(
   const key = process.env.COMPOSIO_API_KEY || "";
   if (!key) {
     return NextResponse.json(
-      { error: "Composio not configured" },
+      { error: "Connections backend not configured" },
       { status: 503 }
     );
   }
@@ -47,7 +47,7 @@ export async function GET(
     const status = response.status;
     if (status === 401 || status === 403) {
       return NextResponse.json(
-        { error: "Composio authentication failed" },
+        { error: "Connection authentication failed" },
         { status }
       );
     }
@@ -56,13 +56,13 @@ export async function GET(
     }
     if (status === 429) {
       return NextResponse.json(
-        { error: "Composio rate limit exceeded" },
+        { error: "Connection rate limit exceeded" },
         { status: 429 }
       );
     }
     if (status >= 500) {
       return NextResponse.json(
-        { error: "Composio service unavailable" },
+        { error: "Connection service unavailable" },
         { status: 502 }
       );
     }

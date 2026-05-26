@@ -300,7 +300,7 @@ async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetada
     });
     if (response.status === 503) {
       // Composio not configured: surface via toast once, return undefined
-      toast.error("Composio not configured on this server");
+      toast.error("Connections backend not configured on this server");
       return undefined;
     }
     if (!response.ok) return undefined;
