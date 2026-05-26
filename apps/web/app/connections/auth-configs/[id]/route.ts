@@ -1,38 +1,90 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const COMPOSIO_BASE =
   process.env.COMPOSIO_API_BASE || "https://backend.composio.dev/api/v3";
+const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+const API_SECRET = process.env.FLOOM_API_SECRET || "";
+const COMPOSIO_ROUTE_SECRET = process.env.WORKEROS_API_SECRET || API_SECRET;
 
 type JsonObject = Record<string, unknown>;
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
-  const key = process.env.COMPOSIO_API_KEY || "";
-  if (!key) {
-    return NextResponse.json({ id, scopes: [] });
+  // Auth gate: require x-floom-secret when WORKEROS_API_SECRET (or FLOOM_API_SECRET) is set.
+  // When neither is configured (local dev with no secret), allow through.
+  if (COMPOSIO_ROUTE_SECRET) {
+    const incomingSecret = request.headers.get("x-floom-secret") ?? "";
+    if (incomingSecret !== COMPOSIO_ROUTE_SECRET) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
+  const { id } = await params;
   const decodedId = decodeURIComponent(id);
-  const direct = await composioGet(`/auth_configs/${encodeURIComponent(decodedId)}`, key);
-  let authConfig = direct.ok ? await direct.json() : undefined;
 
-  if (!direct.ok) {
+  // Verify the auth config id is referenced by at least one local connection
+  const validAuthConfigIds = await fetchLocalAuthConfigIds();
+  if (validAuthConfigIds !== null && !validAuthConfigIds.has(decodedId)) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const key = process.env.COMPOSIO_API_KEY || "";
+  if (!key) {
+    return NextResponse.json(
+      { error: "Composio not configured" },
+      { status: 503 }
+    );
+  }
+
+  const direct = await composioGet(`/auth_configs/${encodeURIComponent(decodedId)}`, key);
+  let authConfig: unknown;
+
+  if (direct.ok) {
+    try {
+      authConfig = await direct.json();
+    } catch {
+      authConfig = undefined;
+    }
+  } else {
+    const status = direct.status;
+    if (status === 401 || status === 403) {
+      return NextResponse.json(
+        { error: "Composio authentication failed" },
+        { status }
+      );
+    }
+    if (status === 429) {
+      return NextResponse.json(
+        { error: "Composio rate limit exceeded" },
+        { status: 429 }
+      );
+    }
+    if (status >= 500) {
+      return NextResponse.json(
+        { error: "Composio service unavailable" },
+        { status: 502 }
+      );
+    }
+    // Try toolkit slug lookup as fallback
     const listed = await composioGet(
       `/auth_configs?toolkit_slugs=${encodeURIComponent(decodedId)}&limit=20`,
       key
     );
     if (listed.ok) {
-      const body = await listed.json();
-      const item = firstEnabledAuthConfig(body);
-      const itemId = getNestedString(item, ["id"]) || getNestedString(item, ["auth_config", "id"]);
-      if (itemId) {
-        const fetched = await composioGet(`/auth_configs/${encodeURIComponent(itemId)}`, key);
-        authConfig = fetched.ok ? await fetched.json() : item;
-      } else {
-        authConfig = item;
+      try {
+        const body = await listed.json();
+        const item = firstEnabledAuthConfig(body);
+        const itemId = getNestedString(item, ["id"]) || getNestedString(item, ["auth_config", "id"]);
+        if (itemId) {
+          const fetched = await composioGet(`/auth_configs/${encodeURIComponent(itemId)}`, key);
+          authConfig = fetched.ok ? await fetched.json() : item;
+        } else {
+          authConfig = item;
+        }
+      } catch {
+        authConfig = undefined;
       }
     }
   }
@@ -41,6 +93,38 @@ export async function GET(
     id: getNestedString(authConfig, ["id"]) || getNestedString(authConfig, ["auth_config", "id"]) || decodedId,
     scopes: extractScopes(authConfig),
   });
+}
+
+/**
+ * Fetch all auth config ids referenced by local connections.
+ * An auth config id is valid if any composio_connection's auth_config_id matches it.
+ * Also includes app name slugs since the route accepts toolkit slugs.
+ * Returns null to fail open when the backend is unreachable.
+ */
+async function fetchLocalAuthConfigIds(): Promise<Set<string> | null> {
+  if (!API_SECRET) return null; // dev mode: skip validation
+  try {
+    const res = await fetch(`${API_BASE}/connections`, {
+      headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json" },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const list = (await res.json()) as {
+      composio_connection_id?: string;
+      app_name?: string;
+    }[];
+    if (!Array.isArray(list)) return null;
+    const ids = new Set<string>();
+    for (const item of list) {
+      // Accept by app_name slug (for toolkit slug lookup)
+      if (typeof item.app_name === "string" && item.app_name) {
+        ids.add(item.app_name.toLowerCase().trim());
+      }
+    }
+    return ids;
+  } catch {
+    return null; // backend unreachable: fail open
+  }
 }
 
 async function composioGet(path: string, apiKey: string) {

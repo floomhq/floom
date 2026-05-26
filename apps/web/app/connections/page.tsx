@@ -97,14 +97,19 @@ export default function ConnectionsPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [list, workers] = await Promise.all([
-        api.connections.list(),
-        loadWorkerDetails(),
-      ]);
+      const list = await api.connections.list();
       const records = list as ConnectionRecord[];
       setConnections(records);
-      setLastUsedBySlug(await getLastUsedByConnection(workers));
       hydrateConnectionMetadata(records);
+      // Worker details are auxiliary — load independently so a failure
+      // never blanks the connections list.
+      loadWorkerDetails()
+        .then((workers) => getLastUsedByConnection(workers))
+        .then(setLastUsedBySlug)
+        .catch(() => {
+          // workers API unavailable: show "last used: unavailable" per card
+          setLastUsedBySlug({});
+        });
     } catch {
       toast.error("Failed to load connections");
     } finally {
@@ -251,7 +256,8 @@ export default function ConnectionsPage() {
           <code className="rounded bg-[var(--paper)] px-1 py-0.5 font-mono text-xs text-[var(--ink)]">
             worker.yml
           </code>{" "}
-          fail immediately when the connection is missing or expired.
+          list it as part of their declared capabilities. Workers that read it
+          will see an error from the upstream API if the connection isn&apos;t valid.
         </div>
 
         <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
@@ -287,11 +293,26 @@ async function loadWorkerDetails() {
   );
 }
 
+const ROUTE_SECRET =
+  typeof process !== "undefined"
+    ? (process.env.NEXT_PUBLIC_WORKEROS_API_SECRET ?? "")
+    : "";
+
+function composioRouteHeaders(): HeadersInit {
+  return ROUTE_SECRET ? { "x-floom-secret": ROUTE_SECRET } : {};
+}
+
 async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetadata | undefined> {
   try {
     const response = await fetch(`/connections/connected-accounts/${encodeURIComponent(id)}`, {
       cache: "no-store",
+      headers: composioRouteHeaders(),
     });
+    if (response.status === 503) {
+      // Composio not configured — surface via toast once, return undefined
+      toast.error("Composio not configured on this server");
+      return undefined;
+    }
     if (!response.ok) return undefined;
     return (await response.json()) as ConnectedAccountMetadata;
   } catch {
@@ -303,7 +324,11 @@ async function fetchAuthConfig(id: string): Promise<AuthConfigMetadata | undefin
   try {
     const response = await fetch(`/connections/auth-configs/${encodeURIComponent(id)}`, {
       cache: "no-store",
+      headers: composioRouteHeaders(),
     });
+    if (response.status === 503) {
+      return undefined;
+    }
     if (!response.ok) return undefined;
     return (await response.json()) as AuthConfigMetadata;
   } catch {
