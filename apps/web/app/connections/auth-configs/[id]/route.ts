@@ -6,6 +6,9 @@ const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
 
 type JsonObject = Record<string, unknown>;
+type LocalAuthConfigValidation =
+  | { ok: true; ids: Set<string> }
+  | { ok: false; response: NextResponse };
 
 export async function GET(
   _request: Request,
@@ -16,7 +19,8 @@ export async function GET(
 
   // Verify the auth config id is referenced by at least one local connection
   const validAuthConfigIds = await fetchLocalAuthConfigIds();
-  if (validAuthConfigIds !== null && !validAuthConfigIds.has(decodedId)) {
+  if (!validAuthConfigIds.ok) return validAuthConfigIds.response;
+  if (!validAuthConfigIds.ids.has(decodedId)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -85,25 +89,19 @@ export async function GET(
   });
 }
 
-/**
- * Fetch all auth config ids referenced by local connections.
- * An auth config id is valid if any composio_connection's auth_config_id matches it.
- * Also includes app name slugs since the route accepts toolkit slugs.
- * Returns null to fail open when the backend is unreachable.
- */
-async function fetchLocalAuthConfigIds(): Promise<Set<string> | null> {
-  if (!API_SECRET) return null; // dev mode: skip validation
+async function fetchLocalAuthConfigIds(): Promise<LocalAuthConfigValidation> {
+  if (!API_SECRET) return ownershipUnavailable();
   try {
     const res = await fetch(`${API_BASE}/connections`, {
       headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json" },
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) return ownershipUnavailable();
     const list = (await res.json()) as {
       composio_connection_id?: string;
       app_name?: string;
     }[];
-    if (!Array.isArray(list)) return null;
+    if (!Array.isArray(list)) return ownershipUnavailable();
     const ids = new Set<string>();
     for (const item of list) {
       // Accept by app_name slug (for toolkit slug lookup)
@@ -111,10 +109,20 @@ async function fetchLocalAuthConfigIds(): Promise<Set<string> | null> {
         ids.add(item.app_name.toLowerCase().trim());
       }
     }
-    return ids;
+    return { ok: true, ids };
   } catch {
-    return null; // backend unreachable: fail open
+    return ownershipUnavailable();
   }
+}
+
+function ownershipUnavailable(): LocalAuthConfigValidation {
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error: "Cannot verify ownership: backend unavailable" },
+      { status: 503 }
+    ),
+  };
 }
 
 async function composioGet(path: string, apiKey: string) {

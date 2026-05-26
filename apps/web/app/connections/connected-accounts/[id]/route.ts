@@ -6,6 +6,9 @@ const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
 
 type JsonObject = Record<string, unknown>;
+type LocalIdValidation =
+  | { ok: true; ids: Set<string> }
+  | { ok: false; response: NextResponse };
 
 export async function GET(
   _request: Request,
@@ -16,7 +19,8 @@ export async function GET(
 
   // Verify the composio_connection_id exists in local composio_connections table
   const localIds = await fetchLocalComposioConnectionIds();
-  if (localIds !== null && !localIds.has(decodedId)) {
+  if (!localIds.ok) return localIds.response;
+  if (!localIds.ids.has(decodedId)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -85,28 +89,37 @@ export async function GET(
   });
 }
 
-/**
- * Fetch the set of composio_connection_ids from the local backend DB.
- * Returns null if the backend is unreachable (fail open to avoid breaking the page).
- */
-async function fetchLocalComposioConnectionIds(): Promise<Set<string> | null> {
-  if (!API_SECRET) return null; // dev mode: skip validation
+async function fetchLocalComposioConnectionIds(): Promise<LocalIdValidation> {
+  if (!API_SECRET) return ownershipUnavailable();
   try {
     const res = await fetch(`${API_BASE}/connections`, {
       headers: { "x-floom-secret": API_SECRET, "Content-Type": "application/json" },
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) return ownershipUnavailable();
     const list = (await res.json()) as { composio_connection_id?: string }[];
-    if (!Array.isArray(list)) return null;
-    return new Set(
-      list
-        .map((item) => item.composio_connection_id)
-        .filter((v): v is string => typeof v === "string" && v.length > 0)
-    );
+    if (!Array.isArray(list)) return ownershipUnavailable();
+    return {
+      ok: true,
+      ids: new Set(
+        list
+          .map((item) => item.composio_connection_id)
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+      ),
+    };
   } catch {
-    return null; // backend unreachable: fail open
+    return ownershipUnavailable();
   }
+}
+
+function ownershipUnavailable(): LocalIdValidation {
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error: "Cannot verify ownership: backend unavailable" },
+      { status: 503 }
+    ),
+  };
 }
 
 function extractEmail(account: JsonObject | undefined) {
