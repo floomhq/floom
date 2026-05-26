@@ -1,4 +1,19 @@
 export type WorkerStatus = "healthy" | "needs_attention" | "missing_secret" | "error";
+
+export interface TriggerSpec {
+  type: string;
+  cron?: string;
+  timezone?: string;
+  webhook?: {
+    secret: boolean;
+    allowed_methods: string[];
+  };
+  composio?: {
+    event: string;
+    connection_id: string;
+    filters?: Record<string, unknown>;
+  };
+}
 export type RunStatus = "queued" | "running" | "completed" | "failed";
 export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type SecretStatus = "set" | "missing";
@@ -146,6 +161,7 @@ export interface WorkerSummary {
   runner: string;
   last_run?: RunSummary;
   triggers: string[];
+  triggers_spec: TriggerSpec[];
   recent_stats?: RecentStats | null;
 }
 
@@ -180,6 +196,7 @@ export interface WorkerDetail {
   new_webhook_secret?: string;
   webhook_url?: string;
   files: WorkerFile[];
+  triggers_spec: TriggerSpec[];
 }
 
 export interface SecretItem {

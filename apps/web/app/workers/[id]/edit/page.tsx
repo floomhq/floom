@@ -9,47 +9,118 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ArrowLeft, Save, FilePlus, Trash2, File, Copy } from "lucide-react";
-import type { ConnectionItem, WorkerDetail, WorkerFile } from "@/lib/types";
+import { ArrowLeft, Save, FilePlus, Trash2, File, Copy, Plus, X } from "lucide-react";
+import type { ConnectionItem, TriggerSpec, WorkerDetail, WorkerFile } from "@/lib/types";
 import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 
 type TriggerType = "manual" | "schedule" | "webhook" | "composio";
 
+// ---------------------------------------------------------------------------
+// Per-trigger row state (richer than TriggerSpec for local editing)
+// ---------------------------------------------------------------------------
+
+interface TriggerRow {
+  id: string; // local unique key for React
+  type: TriggerType;
+  cronExpr: string;
+  cronTimezone: string;
+  composioEvent: string;
+  composioConnectionId: string;
+}
+
+function makeTriggerRow(spec?: TriggerSpec): TriggerRow {
+  return {
+    id: Math.random().toString(36).slice(2),
+    type: ((spec?.type as TriggerType) || "manual"),
+    cronExpr: spec?.cron || "0 9 * * MON",
+    cronTimezone: spec?.timezone || "Europe/Berlin",
+    composioEvent: spec?.composio?.event || "",
+    composioConnectionId: spec?.composio?.connection_id || "",
+  };
+}
+
+function defaultTriggerRow(): TriggerRow {
+  return makeTriggerRow(undefined);
+}
+
+// ---------------------------------------------------------------------------
+// YAML helpers
+// ---------------------------------------------------------------------------
+
 function yamlString(value: string): string {
   return JSON.stringify(value);
 }
 
-function buildTriggerYaml(
-  triggerType: TriggerType,
-  cronExpr: string,
-  cronTimezone: string,
-  composioEvent: string,
-  composioConnectionId: string,
-): string {
-  const lines = [`trigger:`, `  type: ${triggerType}`];
-  if (triggerType === "schedule") {
-    lines.push(`  cron: ${yamlString(cronExpr || "0 9 * * *")}`);
-    lines.push(`  timezone: ${yamlString(cronTimezone || "Europe/Berlin")}`);
+function buildSingleTriggerYaml(row: TriggerRow): string {
+  const lines = [`  - type: ${row.type}`];
+  if (row.type === "schedule") {
+    lines.push(`    cron: ${yamlString(row.cronExpr || "0 9 * * *")}`);
+    lines.push(`    timezone: ${yamlString(row.cronTimezone || "Europe/Berlin")}`);
   }
-  if (triggerType === "webhook") {
-    lines.push(`  webhook:`);
-    lines.push(`    secret: true`);
-    lines.push(`    allowed_methods: [POST]`);
+  if (row.type === "webhook") {
+    lines.push(`    webhook:`);
+    lines.push(`      secret: true`);
+    lines.push(`      allowed_methods: [POST]`);
   }
-  if (triggerType === "composio") {
-    lines.push(`  composio:`);
-    lines.push(`    event: ${yamlString(composioEvent)}`);
-    lines.push(`    connection_id: ${yamlString(composioConnectionId)}`);
-    lines.push(`    filters: {}`);
+  if (row.type === "composio") {
+    lines.push(`    composio:`);
+    lines.push(`      event: ${yamlString(row.composioEvent)}`);
+    lines.push(`      connection_id: ${yamlString(row.composioConnectionId)}`);
+    lines.push(`      filters: {}`);
   }
   return lines.join("\n");
 }
 
+function buildTriggersYaml(rows: TriggerRow[]): string {
+  if (rows.length === 1) {
+    // Use singular `trigger:` for backward compat with single-trigger workers
+    const row = rows[0];
+    const lines = [`trigger:`, `  type: ${row.type}`];
+    if (row.type === "schedule") {
+      lines.push(`  cron: ${yamlString(row.cronExpr || "0 9 * * *")}`);
+      lines.push(`  timezone: ${yamlString(row.cronTimezone || "Europe/Berlin")}`);
+    }
+    if (row.type === "webhook") {
+      lines.push(`  webhook:`);
+      lines.push(`    secret: true`);
+      lines.push(`    allowed_methods: [POST]`);
+    }
+    if (row.type === "composio") {
+      lines.push(`  composio:`);
+      lines.push(`    event: ${yamlString(row.composioEvent)}`);
+      lines.push(`    connection_id: ${yamlString(row.composioConnectionId)}`);
+      lines.push(`    filters: {}`);
+    }
+    return lines.join("\n");
+  }
+
+  // Multi-trigger: use `triggers:` array
+  const lines = [`triggers:`];
+  for (const row of rows) {
+    lines.push(buildSingleTriggerYaml(row));
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Replace the trigger block (either `trigger:` or `triggers:`) in the full
+ * YAML string. Handles both singular and array forms.
+ */
 function replaceTriggerBlock(yaml: string, triggerYaml: string): string {
   const lines = yaml.split("\n");
-  const start = lines.findIndex((line) => /^trigger:\s*$/.test(line));
-  if (start === -1) return `${yaml.trimEnd()}\n\n${triggerYaml}\n`;
+
+  // Find `trigger:` or `triggers:` at root level
+  const start = lines.findIndex((line) =>
+    /^triggers?:\s*$/.test(line)
+  );
+
+  if (start === -1) {
+    // No trigger block found — append
+    return `${yaml.trimEnd()}\n\n${triggerYaml}\n`;
+  }
+
+  // Find end of trigger block: next root-level key
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
     if (/^[A-Za-z_][\w_-]*:\s*/.test(lines[i])) {
@@ -57,8 +128,143 @@ function replaceTriggerBlock(yaml: string, triggerYaml: string): string {
       break;
     }
   }
-  return [...lines.slice(0, start), ...triggerYaml.split("\n"), ...lines.slice(end)].join("\n");
+
+  return [
+    ...lines.slice(0, start),
+    ...triggerYaml.split("\n"),
+    ...lines.slice(end),
+  ].join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// TriggerRowEditor component
+// ---------------------------------------------------------------------------
+
+interface TriggerRowEditorProps {
+  row: TriggerRow;
+  index: number;
+  total: number;
+  connections: ConnectionItem[];
+  webhookUrl?: string;
+  onChange: (updated: TriggerRow) => void;
+  onRemove: () => void;
+}
+
+function TriggerRowEditor({
+  row,
+  index,
+  total,
+  connections,
+  webhookUrl,
+  onChange,
+  onRemove,
+}: TriggerRowEditorProps) {
+  const isOnly = total === 1;
+
+  return (
+    <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-[#666] uppercase tracking-wide">
+          Trigger {total > 1 ? index + 1 : ""}
+        </span>
+        {!isOnly && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="text-[#bbb] hover:text-red-500 transition-colors"
+            title="Remove trigger"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {(["manual", "schedule", "webhook", "composio"] as const).map((value) => {
+          const labels: Record<string, string> = {
+            manual: "Manual",
+            schedule: "Cron",
+            webhook: "Webhook",
+            composio: "Connection event",
+          };
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onChange({ ...row, type: value })}
+              className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
+                row.type === value
+                  ? "border-black bg-black text-white"
+                  : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
+              }`}
+            >
+              {labels[value]}
+            </button>
+          );
+        })}
+      </div>
+
+      {row.type === "schedule" && (
+        <div className="space-y-3">
+          <CronBuilder
+            value={row.cronExpr}
+            onChange={(v) => onChange({ ...row, cronExpr: v })}
+          />
+          <div className="space-y-1.5">
+            <Label className="text-xs text-[#666] uppercase tracking-wide">Timezone</Label>
+            <Input
+              value={row.cronTimezone}
+              onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
+              className="border-[#e4e4e7] font-mono text-sm"
+              placeholder="Europe/Berlin"
+            />
+          </div>
+        </div>
+      )}
+
+      {row.type === "composio" && (
+        <ConnectionEventPicker
+          composioEvent={row.composioEvent}
+          composioConnectionId={row.composioConnectionId}
+          onEventChange={(v) => onChange({ ...row, composioEvent: v })}
+          onConnectionIdChange={(v) => onChange({ ...row, composioConnectionId: v })}
+          initialConnections={connections}
+        />
+      )}
+
+      {row.type === "webhook" && webhookUrl && (
+        <div className="space-y-2">
+          <Label className="text-xs text-[#666] uppercase tracking-wide">Webhook URL</Label>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs font-mono bg-[#f4f4f5] border border-[#e4e4e7] rounded px-2 py-1.5 break-all">
+              {webhookUrl}
+            </code>
+            <button
+              type="button"
+              title="Copy URL"
+              onClick={() => {
+                navigator.clipboard.writeText(webhookUrl).then(
+                  () => toast.success("URL copied"),
+                  () => toast.error("Failed to copy"),
+                );
+              }}
+              className="shrink-0 p-1.5 rounded border border-[#e4e4e7] bg-white hover:bg-[#f4f4f5] transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5 text-[#666]" />
+            </button>
+          </div>
+          <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
+            {`curl -X POST '${webhookUrl}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
 
 export default function EditWorkerPage() {
   const { id } = useParams();
@@ -67,12 +273,8 @@ export default function EditWorkerPage() {
   const [files, setFiles] = useState<{ path: string; content: string }[]>([]);
   const [selectedPath, setSelectedPath] = useState<string>("worker.yml");
   const [saving, setSaving] = useState(false);
-  const [triggerType, setTriggerType] = useState<TriggerType>("manual");
-  const [cronExpr, setCronExpr] = useState("0 9 * * MON");
-  const [cronTimezone, setCronTimezone] = useState("Europe/Berlin");
+  const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
-  const [composioEvent, setComposioEvent] = useState("");
-  const [composioConnectionId, setComposioConnectionId] = useState("");
 
   // "Add file" dialog state
   const [addingFile, setAddingFile] = useState(false);
@@ -103,11 +305,13 @@ export default function EditWorkerPage() {
 
       // Default selection: worker.yml
       setSelectedPath("worker.yml");
-      setTriggerType((loadedWorker.config.trigger.type as TriggerType) || "manual");
-      setCronExpr(loadedWorker.config.trigger.cron || "0 9 * * MON");
-      setCronTimezone(loadedWorker.config.trigger.timezone || "Europe/Berlin");
-      setComposioEvent(loadedWorker.config.trigger.composio?.event || "");
-      setComposioConnectionId(loadedWorker.config.trigger.composio?.connection_id || "");
+
+      // Populate trigger rows from triggers_spec (multi-trigger) or config.trigger (legacy)
+      const specs: TriggerSpec[] = loadedWorker.triggers_spec?.length
+        ? loadedWorker.triggers_spec
+        : [loadedWorker.config.trigger];
+
+      setTriggerRows(specs.map((s) => makeTriggerRow(s)));
       setConnections(connectionItems);
     });
   }, [id]);
@@ -128,24 +332,33 @@ export default function EditWorkerPage() {
     []
   );
 
+  function updateTriggerRow(index: number, updated: TriggerRow) {
+    setTriggerRows((prev) => prev.map((r, i) => (i === index ? updated : r)));
+  }
+
+  function addTriggerRow() {
+    setTriggerRows((prev) => [...prev, defaultTriggerRow()]);
+  }
+
+  function removeTriggerRow(index: number) {
+    setTriggerRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function save() {
     if (!worker) return;
-    if (triggerType === "composio" && (!composioEvent || !composioConnectionId)) {
-      toast.error("Select an integration and event before saving");
-      return;
+
+    // Validate composio rows
+    for (const row of triggerRows) {
+      if (row.type === "composio" && (!row.composioEvent || !row.composioConnectionId)) {
+        toast.error("Select an integration and event for every connection-event trigger");
+        return;
+      }
     }
 
     setSaving(true);
     try {
-      // Update trigger block inside worker.yml
       const ymlContent = getContent("worker.yml");
-      const triggerYaml = buildTriggerYaml(
-        triggerType,
-        cronExpr,
-        cronTimezone,
-        composioEvent,
-        composioConnectionId,
-      );
+      const triggerYaml = buildTriggersYaml(triggerRows);
       const updatedYml = replaceTriggerBlock(ymlContent, triggerYaml);
 
       const patchedFiles = files.map((f) =>
@@ -213,81 +426,32 @@ export default function EditWorkerPage() {
         {/* Left: trigger config + file tree */}
         <div className="space-y-5">
           <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Trigger</CardTitle>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Triggers</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm">Type</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    ["manual", "Manual"],
-                    ["schedule", "Cron"],
-                    ["webhook", "Webhook"],
-                    ["composio", "Connection event"],
-                  ] as const).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setTriggerType(value)}
-                      className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
-                        triggerType === value
-                          ? "border-black bg-black text-white"
-                          : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {triggerType === "schedule" && (
-                <div className="space-y-3">
-                  <CronBuilder value={cronExpr} onChange={setCronExpr} />
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-[#666] uppercase tracking-wide">Timezone</Label>
-                    <Input value={cronTimezone} onChange={(e) => setCronTimezone(e.target.value)} className="border-[#e4e4e7] font-mono text-sm" placeholder="Europe/Berlin" />
-                  </div>
-                </div>
-              )}
-
-              {triggerType === "composio" && (
-                <ConnectionEventPicker
-                  composioEvent={composioEvent}
-                  composioConnectionId={composioConnectionId}
-                  onEventChange={setComposioEvent}
-                  onConnectionIdChange={setComposioConnectionId}
-                  initialConnections={connections}
+            <CardContent className="space-y-3">
+              {triggerRows.map((row, index) => (
+                <TriggerRowEditor
+                  key={row.id}
+                  row={row}
+                  index={index}
+                  total={triggerRows.length}
+                  connections={connections}
+                  webhookUrl={
+                    row.type === "webhook" ? worker.webhook_url : undefined
+                  }
+                  onChange={(updated) => updateTriggerRow(index, updated)}
+                  onRemove={() => removeTriggerRow(index)}
                 />
-              )}
-
-              {triggerType === "webhook" && worker?.webhook_url && (
-                <div className="space-y-2">
-                  <Label className="text-xs text-[#666] uppercase tracking-wide">Webhook URL</Label>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 text-xs font-mono bg-[#f4f4f5] border border-[#e4e4e7] rounded px-2 py-1.5 break-all">
-                      {worker.webhook_url}
-                    </code>
-                    <button
-                      type="button"
-                      title="Copy URL"
-                      onClick={() => {
-                        navigator.clipboard.writeText(worker.webhook_url!).then(
-                          () => toast.success("URL copied"),
-                          () => toast.error("Failed to copy"),
-                        );
-                      }}
-                      className="shrink-0 p-1.5 rounded border border-[#e4e4e7] bg-white hover:bg-[#f4f4f5] transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5 text-[#666]" />
-                    </button>
-                  </div>
-                  <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                    {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
-                  </pre>
-                </div>
-              )}
+              ))}
+              <button
+                type="button"
+                onClick={addTriggerRow}
+                className="flex items-center gap-1.5 text-xs text-[#666] hover:text-black transition-colors py-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add trigger
+              </button>
             </CardContent>
           </Card>
 
