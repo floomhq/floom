@@ -1,0 +1,295 @@
+/* eslint-disable @next/next/no-img-element */
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  Search,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { api } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { IntegrationCatalogItem, IntegrationCatalogResponse } from "@/lib/types";
+
+const PAGE_SIZE = 30;
+
+const CATEGORY_FILTERS = [
+  { value: "", label: "All" },
+  { value: "popular", label: "Popular" },
+  { value: "productivity", label: "Productivity" },
+  { value: "email", label: "Email" },
+  { value: "crm", label: "CRM" },
+  { value: "social", label: "Social" },
+  { value: "marketing", label: "Marketing" },
+  { value: "data-&-analytics", label: "Data" },
+  { value: "collaboration-&-communication", label: "Collaboration" },
+];
+
+function shortDescription(item: IntegrationCatalogItem) {
+  return item.description || `${item.name} integration for Workeros workers.`;
+}
+
+function CatalogSkeleton() {
+  return (
+    <>
+      {Array.from({ length: PAGE_SIZE }).map((_, index) => (
+        <div
+          key={index}
+          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-lg border border-line bg-[var(--paper)] p-4 shadow-sm"
+        >
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-md" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-3 w-14" />
+            </div>
+          </div>
+          <div className="pt-4">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="mt-2 h-3 w-2/3" />
+          </div>
+          <Skeleton className="h-7 w-full rounded-md" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function CatalogCard({
+  item,
+  connecting,
+  onConnect,
+}: {
+  item: IntegrationCatalogItem;
+  connecting: boolean;
+  onConnect: (slug: string) => void;
+}) {
+  return (
+    <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-lg border border-line bg-[var(--paper)] p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line bg-[var(--paper-2)]">
+          <img
+            src={item.logo_url}
+            alt={`${item.name} logo`}
+            className="h-6 w-6 object-contain"
+            loading="eager"
+            decoding="async"
+          />
+        </div>
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-ink">{item.name}</h2>
+          <p className="mt-0.5 truncate text-xs text-[var(--ink-mute)]">{item.slug}</p>
+        </div>
+      </div>
+
+      <div className="min-w-0 pt-4">
+        <p className="truncate text-sm text-[var(--ink-soft)]">{shortDescription(item)}</p>
+        {item.categories[0] ? (
+          <Badge variant="outline" className="mt-3 max-w-full truncate text-[11px]">
+            {item.categories[0].replaceAll("-", " ")}
+          </Badge>
+        ) : null}
+      </div>
+
+      <Button
+        type="button"
+        size="sm"
+        className="w-full"
+        disabled={connecting}
+        onClick={() => onConnect(item.slug)}
+      >
+        {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />}
+        {connecting ? "Opening..." : "Connect"}
+      </Button>
+    </article>
+  );
+}
+
+export default function ConnectionsBrowsePage() {
+  const [catalog, setCatalog] = useState<IntegrationCatalogResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [page, setPage] = useState(1);
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [search]);
+
+  const loadCatalog = useCallback(async () => {
+    setLoading(true);
+    try {
+      const nextCatalog = await api.integrations.catalog({
+        page,
+        limit: PAGE_SIZE,
+        search: debouncedSearch,
+        category,
+      });
+      setCatalog(nextCatalog);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load integrations");
+    } finally {
+      setLoading(false);
+    }
+  }, [category, debouncedSearch, page]);
+
+  useEffect(() => {
+    void loadCatalog();
+  }, [loadCatalog]);
+
+  const pageSummary = useMemo(() => {
+    if (!catalog) return "Loading integrations";
+    const start = catalog.total_items === 0 ? 0 : (catalog.page - 1) * catalog.limit + 1;
+    const end = Math.min(catalog.page * catalog.limit, catalog.total_items);
+    return `${start}-${end} of ${catalog.total_items.toLocaleString()} integrations`;
+  }, [catalog]);
+
+  async function handleConnect(slug: string) {
+    setConnecting(slug);
+    const oauthTab = window.open("", "_blank");
+    if (oauthTab) oauthTab.opener = null;
+    try {
+      const result = await api.connections.initiate(slug);
+      if (result.redirect_url) {
+        if (oauthTab) {
+          oauthTab.location.href = result.redirect_url;
+        } else {
+          window.open(result.redirect_url, "_blank");
+        }
+        toast.success(`OAuth opened for ${slug}`);
+      } else {
+        oauthTab?.close();
+        toast.success(`Connection initiated for ${slug}`);
+      }
+    } catch (error) {
+      oauthTab?.close();
+      toast.error(error instanceof Error ? error.message : `Failed to connect ${slug}`);
+    } finally {
+      setConnecting(null);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <Link
+            href="/connections"
+            className="mb-3 inline-flex h-7 items-center gap-1 rounded-md text-[0.8rem] font-medium text-[var(--ink-soft)] hover:text-ink"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Connections
+          </Link>
+          <h1 className="text-2xl font-semibold tracking-tight">Browse integrations</h1>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            Search the full Composio catalog and connect OAuth apps for workers.
+          </p>
+        </div>
+        <div className="text-sm text-[var(--ink-mute)]">{pageSummary}</div>
+      </div>
+
+      <section className="space-y-3 rounded-lg border border-line bg-[var(--glass-bg)] p-3 shadow-sm backdrop-blur-[10px]">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-mute)]" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search Gmail, Slack, Notion..."
+            className="h-10 bg-[var(--paper)] pl-8 pr-8"
+            aria-label="Search integrations"
+          />
+          {search ? (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--ink-mute)] hover:bg-[var(--bg-2)] hover:text-ink"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {CATEGORY_FILTERS.map((filter) => (
+            <Button
+              key={filter.value || "all"}
+              type="button"
+              size="sm"
+              variant={category === filter.value ? "default" : "outline"}
+              className="h-7 whitespace-nowrap"
+              onClick={() => {
+                setCategory(filter.value);
+                setPage(1);
+              }}
+            >
+              {filter.label}
+            </Button>
+          ))}
+        </div>
+      </section>
+
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3">
+        {loading ? (
+          <CatalogSkeleton />
+        ) : catalog?.items.length ? (
+          catalog.items.map((item) => (
+            <CatalogCard
+              key={item.slug}
+              item={item}
+              connecting={connecting === item.slug}
+              onConnect={handleConnect}
+            />
+          ))
+        ) : (
+          <div className="col-span-full rounded-lg border border-dashed border-line bg-[var(--paper)] px-4 py-12 text-center">
+            <p className="text-sm font-medium text-ink">No integrations found</p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">Clear filters or try a broader search.</p>
+          </div>
+        )}
+      </section>
+
+      <div className="flex items-center justify-between border-t border-line pt-4">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={loading || page <= 1}
+          onClick={() => setPage((current) => Math.max(1, current - 1))}
+        >
+          <ChevronLeft />
+          Previous
+        </Button>
+        <span className="text-sm text-[var(--ink-mute)]">
+          Page {catalog?.page ?? page} of {catalog?.total_pages ?? "..."}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={loading || !catalog?.next_page}
+          onClick={() => setPage((current) => current + 1)}
+        >
+          Next
+          <ChevronRight />
+        </Button>
+      </div>
+    </div>
+  );
+}
