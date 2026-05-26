@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Search, X } from "lucide-react";
 import type { RunDetail, LogEntry, TranscriptRow } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
 import { toast } from "sonner";
@@ -161,10 +161,28 @@ export default function RunDetailPage() {
           <ArrowLeft className="w-4 h-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{run.id}</h1>
-          <p className="text-[#666] text-sm">
-            {run.worker_name || run.worker_id} · {run.created_at ? new Date(run.created_at).toLocaleString() : "-"}
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {run.worker_name || run.worker_id}
+          </h1>
+          <div className="flex items-center gap-2 mt-0.5">
+            <code className="text-xs font-mono text-[#999]">{run.id}</code>
+            <button
+              type="button"
+              title="Copy run ID"
+              onClick={() => {
+                navigator.clipboard.writeText(run.id).then(
+                  () => toast.success("Run ID copied"),
+                  () => toast.error("Failed to copy"),
+                );
+              }}
+              className="text-[#bbb] hover:text-[#555] transition-colors"
+            >
+              <Copy className="w-3 h-3" />
+            </button>
+            <span className="text-xs text-[#999]">
+              {run.created_at ? new Date(run.created_at).toLocaleString() : ""}
+            </span>
+          </div>
         </div>
         <StatusBadge status={run.status} />
         {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}

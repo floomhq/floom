@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -115,23 +115,31 @@ export default function WorkerDetailPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-8 w-8 rounded-full" />
+        {/* Header skeleton */}
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-8 w-8 rounded" />
           <div className="space-y-2 flex-1">
-            <Skeleton className="h-7 w-64" />
-            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-7 w-52" />
+            <Skeleton className="h-4 w-72" />
           </div>
+          <Skeleton className="h-8 w-20 rounded" />
         </div>
-        <div className="flex gap-1 border border-[#eaeaea] rounded-md p-1 bg-white w-fit">
-          {[80, 60, 96, 56, 72].map((w) => (
-            <Skeleton key={w} className={`h-7 w-${w / 4} rounded-sm`} style={{ width: w }} />
+        {/* Tab strip skeleton */}
+        <div className="flex gap-1 border border-[#eaeaea] rounded-md p-1 bg-[#f4f4f5] w-fit">
+          {[48, 52, 96, 44, 72].map((w, i) => (
+            <Skeleton key={i} className="h-7 rounded-sm" style={{ width: w }} />
           ))}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Skeleton className="h-[320px] rounded-lg" />
-          <Skeleton className="h-[320px] rounded-lg" />
+        {/* Content skeletons: card with a few rows */}
+        <div className="max-w-xl space-y-3">
+          <div className="rounded-lg border border-[#eaeaea] bg-white p-5 space-y-3">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
         </div>
-        <p className="text-xs text-[#999] text-center animate-pulse">Loading worker...</p>
       </div>
     );
   }
@@ -201,12 +209,12 @@ export default function WorkerDetailPage() {
 
       {/* Main tabs */}
       <Tabs defaultValue="run">
-        <TabsList className="h-9 bg-[#f4f4f5]">
-          <TabsTrigger value="run" className="h-7 text-sm px-3">Run</TabsTrigger>
-          <TabsTrigger value="code" className="h-7 text-sm px-3">Code</TabsTrigger>
-          <TabsTrigger value="connections" className="h-7 text-sm px-3">Connections</TabsTrigger>
-          <TabsTrigger value="runs" className="h-7 text-sm px-3">Runs</TabsTrigger>
-          <TabsTrigger value="overview" className="h-7 text-sm px-3">Overview</TabsTrigger>
+        <TabsList className="h-9 bg-[#f4f4f5] overflow-x-auto whitespace-nowrap flex-nowrap w-full">
+          <TabsTrigger value="run" className="h-7 text-sm px-3 shrink-0">Run</TabsTrigger>
+          <TabsTrigger value="code" className="h-7 text-sm px-3 shrink-0">Code</TabsTrigger>
+          <TabsTrigger value="connections" className="h-7 text-sm px-3 shrink-0">Connections</TabsTrigger>
+          <TabsTrigger value="runs" className="h-7 text-sm px-3 shrink-0">Runs</TabsTrigger>
+          <TabsTrigger value="overview" className="h-7 text-sm px-3 shrink-0">Overview</TabsTrigger>
         </TabsList>
 
         {/* Run tab */}
@@ -672,6 +680,54 @@ function MarkdownPreview({ value }: { value: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// SyntaxHighlightedCode: lazy highlight.js viewer for non-markdown files
+// ---------------------------------------------------------------------------
+
+function SyntaxHighlightedCode({ content, language }: { content: string; language?: string }) {
+  const codeRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    import("highlight.js/lib/core").then(async (hljsCore) => {
+      const hljs = hljsCore.default;
+      // Register only needed languages
+      if (language === "python") {
+        const python = await import("highlight.js/lib/languages/python");
+        hljs.registerLanguage("python", python.default);
+      } else if (language === "yaml") {
+        const yaml = await import("highlight.js/lib/languages/yaml");
+        hljs.registerLanguage("yaml", yaml.default);
+      } else if (language === "json") {
+        const json = await import("highlight.js/lib/languages/json");
+        hljs.registerLanguage("json", json.default);
+      } else if (language === "javascript" || language === "typescript") {
+        const js = await import("highlight.js/lib/languages/javascript");
+        hljs.registerLanguage("javascript", js.default);
+      } else if (language === "bash" || language === "shell") {
+        const bash = await import("highlight.js/lib/languages/bash");
+        hljs.registerLanguage("bash", bash.default);
+      }
+      if (!cancelled && codeRef.current) {
+        hljs.highlightElement(codeRef.current);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [content, language]);
+
+  return (
+    <pre className="text-xs font-mono overflow-auto max-h-[600px] bg-[#1e1e2e] rounded-b-md whitespace-pre m-0">
+      <code
+        ref={codeRef}
+        className={language ? `language-${language}` : ""}
+        style={{ background: "transparent", padding: "0.75rem", display: "block" }}
+      >
+        {content}
+      </code>
+    </pre>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // WorkerFileTree: file tree + viewer for the Code tab
 // ---------------------------------------------------------------------------
 
@@ -738,14 +794,11 @@ function WorkerFileTree({
                     {selected.content || ""}
                   </ReactMarkdown>
                 </div>
-              ) : selected.language === "yaml" ? (
-                <div className="overflow-auto max-h-[600px] p-3 bg-[#f9f9f9] rounded-b-md">
-                  <ManifestViewer yaml={selected.content || ""} />
-                </div>
               ) : (
-                <pre className="text-xs font-mono overflow-auto max-h-[600px] bg-[#f9f9f9] p-3 rounded-b-md whitespace-pre">
-                  {selected.content || ""}
-                </pre>
+                <SyntaxHighlightedCode
+                  content={selected.content || ""}
+                  language={selected.language}
+                />
               )}
             </CardContent>
           </Card>
@@ -757,39 +810,3 @@ function WorkerFileTree({
   );
 }
 
-// ---------------------------------------------------------------------------
-// ManifestViewer: syntax-highlighted YAML viewer
-// ---------------------------------------------------------------------------
-
-function ManifestViewer({ yaml }: { yaml: string }) {
-  const lines = yaml.split("\n");
-  return (
-    <pre className="text-xs leading-relaxed overflow-auto max-h-[400px] font-mono bg-[#f9f9f9] p-3 rounded-md">
-      {lines.map((line, i) => {
-        const keyMatch = line.match(/^(\s*)([\w_-]+):\s*(.*)$/);
-        if (keyMatch) {
-          const [, indent, key, value] = keyMatch;
-          return (
-            <div key={i}>
-              {indent}
-              <span style={{ color: "var(--ink-soft)" }}>{key}</span>
-              <span style={{ color: "var(--ink-mute)" }}>: </span>
-              <span style={{ color: "var(--ink)" }}>{value}</span>
-            </div>
-          );
-        }
-        const listMatch = line.match(/^(\s*-\s*)(.*)$/);
-        if (listMatch) {
-          const [, prefix, rest] = listMatch;
-          return (
-            <div key={i}>
-              <span style={{ color: "var(--ink-mute)" }}>{prefix}</span>
-              <span style={{ color: "var(--ink)" }}>{rest}</span>
-            </div>
-          );
-        }
-        return <div key={i}>{line || " "}</div>;
-      })}
-    </pre>
-  );
-}

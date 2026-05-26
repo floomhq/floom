@@ -173,7 +173,26 @@ export default function SecretsPage() {
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : secrets.length === 0 ? (
-            <p className="text-sm text-[#999]">No secrets configured. Add one above.</p>
+            <div className="py-12 flex flex-col items-center gap-3 text-center">
+              <div className="w-10 h-10 rounded-full bg-[#f4f4f5] flex items-center justify-center">
+                <KeyRound className="w-5 h-5 text-[#aaa]" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#333]">No secrets configured</p>
+                <p className="text-xs text-[#999] mt-1 max-w-xs">
+                  Workers that call external APIs require secrets. Add them here and reference them in your worker YAML.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setAddingOpen(true)}
+                className="mt-1 gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add a secret
+              </Button>
+            </div>
           ) : (
             secrets.map((s) => (
               <div key={s.name} className="space-y-2">
