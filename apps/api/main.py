@@ -2757,17 +2757,63 @@ def integrations_catalog(
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
     search: str = Query("", max_length=120),
-    category: str = Query("", max_length=80),
+    category: str = Query("", max_length=200),
 ) -> IntegrationCatalogResponse:
+    """Return the integration catalog, with optional comma-separated category OR-filter.
+
+    When ``category`` contains multiple comma-separated slugs, results from each
+    slug are fetched separately and merged (union, de-duplicated by app slug).
+    """
     from composio_client import list_catalog_apps
 
+    # Split comma-separated categories for OR-merge support.
+    category_slugs = [s.strip() for s in category.split(",") if s.strip()] if category.strip() else []
+
     try:
-        result = list_catalog_apps(
-            page=page,
-            limit=limit,
-            search=search,
-            category=category,
-        )
+        if len(category_slugs) <= 1:
+            # Simple path: single category or no category.
+            single_category = category_slugs[0] if category_slugs else ""
+            result = list_catalog_apps(
+                page=page,
+                limit=limit,
+                search=search,
+                category=single_category,
+            )
+        else:
+            # Multi-category: fetch each slug and merge (de-duplicated by app slug).
+            seen: Dict[str, Any] = {}
+            for slug in category_slugs:
+                try:
+                    partial = list_catalog_apps(
+                        page=1,
+                        limit=100,
+                        search=search,
+                        category=slug,
+                    )
+                    for item in partial.get("items") or []:
+                        if item["slug"] not in seen:
+                            seen[item["slug"]] = item
+                except Exception:
+                    logger.warning("Failed to fetch category %s from Composio", slug)
+
+            all_items = list(seen.values())
+            total_items = len(all_items)
+            total_pages = max(1, (total_items + limit - 1) // limit)
+            start = (page - 1) * limit
+            page_items = all_items[start : start + limit]
+            next_page_num = page + 1 if page < total_pages else None
+            all_categories = sorted({cat for item in all_items for cat in (item.get("categories") or [])})
+            result = {
+                "items": page_items,
+                "page": page,
+                "limit": limit,
+                "total_items": total_items,
+                "total_pages": total_pages,
+                "next_page": next_page_num,
+                "categories": all_categories,
+            }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to load Composio catalog")
         raise HTTPException(status_code=502, detail=f"Composio catalog error: {exc}") from exc
@@ -2874,28 +2920,16 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
     composio_conn_id = result["composio_connection_id"]
     redirect_url = result["redirect_url"]
 
-    # Upsert into local DB (replace any prior row for this app)
+    # Always insert a new row — multiple accounts per app are allowed.
+    # Each Composio connected_account is a distinct row identified by its own UUID.
     conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     with get_db() as conn:
-        # Check if row already exists for this app
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id FROM composio_connections WHERE app_name = ?", (app_name,)
+        conn.execute(
+            "INSERT INTO composio_connections (id, app_name, composio_connection_id, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'initiated', ?, ?)",
+            (conn_id, app_name, composio_conn_id, now, now),
         )
-        existing = cursor.fetchone()
-        if existing:
-            conn_id = existing["id"]
-            conn.execute(
-                "UPDATE composio_connections SET composio_connection_id=?, status='initiated', updated_at=? WHERE id=?",
-                (composio_conn_id, now, conn_id),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO composio_connections (id, app_name, composio_connection_id, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'initiated', ?, ?)",
-                (conn_id, app_name, composio_conn_id, now, now),
-            )
 
     return ConnectionInitResponse(
         id=conn_id,
