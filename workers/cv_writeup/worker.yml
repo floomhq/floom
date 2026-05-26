@@ -10,7 +10,7 @@ use_cases:
 - Extract skills, seniority, availability, and compensation signals into JSON.
 - Adapt the same profile for a different client or role brief.
 example_input:
-  cv_file: anna-keller-senior-java-engineer.pdf
+  cv_file: null
   client_brief: 'Client: N26 Berlin. Role: Senior Java Backend Engineer. Must-haves: 5+ years Java, Spring Boot, Kafka, microservices. Nice-to-have: banking domain. Perm hire, EUR 90-110k.'
   target_format: branded_markdown
 example_output: |

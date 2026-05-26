@@ -16,7 +16,7 @@ example_input:
   number_input: 42
   select_input: beta
   boolean_input: true
-  file_input: sample.txt
+  file_input: null
 example_output: |
   ## Input echo
 

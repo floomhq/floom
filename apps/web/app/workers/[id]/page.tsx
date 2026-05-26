@@ -85,17 +85,30 @@ export default function WorkerDetailPage() {
 
   function applyExampleInput() {
     if (!worker?.example_input) return;
-    const nextInputs: Record<string, unknown> = { ...inputs, ...worker.example_input };
-    const nextFileNames: Record<string, string> = { ...fileNames };
-    worker.config.inputs.forEach((inp) => {
-      const value = worker.example_input?.[inp.name];
-      if (inp.type === "file" && typeof value === "string") {
-        nextFileNames[inp.name] = value;
+    // Build next inputs, but skip file fields — filename strings cannot be re-uploaded
+    const nextInputs: Record<string, unknown> = { ...inputs };
+    const fileFieldNames = new Set(
+      worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => inp.name)
+    );
+    let skippedFileFields = false;
+    for (const [key, value] of Object.entries(worker.example_input)) {
+      if (fileFieldNames.has(key)) {
+        // Only copy if value is null/undefined (no sample file); never copy filename strings
+        if (value == null) {
+          // leave file field untouched so the drop zone stays empty
+        } else {
+          skippedFileFields = true;
+        }
+        continue;
       }
-    });
+      nextInputs[key] = value;
+    }
     setInputs(nextInputs);
-    setFileNames(nextFileNames);
-    toast.success("Sample input applied");
+    if (skippedFileFields) {
+      toast.success("Sample applied — upload a file for the file field(s)");
+    } else {
+      toast.success("Sample input applied");
+    }
   }
 
   if (loading) {
@@ -504,8 +517,8 @@ function ExampleInputPreview({
             <p className="text-[11px] text-[#999] font-mono">{entry.name} · {entry.type}</p>
           </div>
           <div className="px-3 py-2">
-            <pre className="text-xs font-mono whitespace-pre-wrap break-words text-[#333]">
-              {formatExampleValue(entry.value)}
+            <pre className={`text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-[#999] italic" : "text-[#333]"}`}>
+              {formatExampleValue(entry.value, entry.type)}
             </pre>
           </div>
         </div>
@@ -514,8 +527,11 @@ function ExampleInputPreview({
   );
 }
 
-function formatExampleValue(value: unknown): string {
+function formatExampleValue(value: unknown, type?: string): string {
   if (value === undefined) return "";
+  if (value === null) {
+    return type === "file" ? "(no sample file — upload one)" : "null";
+  }
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
 }
