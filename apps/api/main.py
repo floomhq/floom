@@ -8,6 +8,7 @@ import mimetypes
 import hashlib
 import hmac
 import base64
+import shutil
 import fcntl
 import re
 import time
@@ -25,7 +26,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from db import init_db, get_db, now_iso, DB_PATH
-from files import ensure_blob_dir, normalize_media_type
+from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from models import (
     ApproveRequest,
     RunCreate,
@@ -50,6 +51,7 @@ from models import (
     WorkerConfig,
 )
 from worker_registry import (
+    WORKERS_DIR,
     discover_workers,
     get_worker,
     get_worker_config,
@@ -485,6 +487,69 @@ def _parse_accepts(value: Optional[str]) -> set[str]:
     return {normalize_media_type(part) for part in value.split(",") if part.strip()}
 
 
+def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+    else:
+        target = WORKERS_DIR / worker_id
+    resolved = target.resolve()
+    allowed_root = WORKERS_DIR.parent.resolve()
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid worker bundle path")
+    return resolved
+
+
+def _resolve_file_input_references(worker_id: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    config = get_worker_config_for_run(worker_id)
+    if not config:
+        return dict(inputs)
+
+    resolved_inputs = dict(inputs)
+    file_inputs = [inp for inp in config.inputs if inp.type == "file"]
+    if not file_inputs:
+        return resolved_inputs
+
+    bundle_dir = _worker_bundle_dir(worker_id, config)
+    input_dir = bundle_dir / "inputs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    with get_db() as conn:
+        for inp in file_inputs:
+            value = resolved_inputs.get(inp.name)
+            if value in (None, ""):
+                continue
+            if not is_sha256(value):
+                continue
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
+                raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+
+            row = conn.execute(
+                "SELECT id, filename, media_type, size_bytes FROM files WHERE id = ?",
+                (value,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail=f"Uploaded file not found: {inp.name}")
+
+            source = blob_path(row["id"])
+            if not source.is_file():
+                raise HTTPException(status_code=400, detail=f"Uploaded file blob missing: {inp.name}")
+
+            ext = extension_for_file(row["filename"], row["media_type"])
+            mounted = input_dir / f"{inp.name}{ext}"
+            shutil.copyfile(source, mounted)
+            resolved_inputs[inp.name] = f"inputs/{mounted.name}"
+            conn.execute(
+                "UPDATE files SET ref_count = ref_count + 1 WHERE id = ?",
+                (row["id"],),
+            )
+
+    return resolved_inputs
+
+
 @app.post("/uploads")
 async def upload_file(
     request: Request,
@@ -901,8 +966,9 @@ def create_worker_run(worker_id: str, payload: RunCreate) -> ActionResponse:
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    run_id = create_run(worker_id, payload.inputs, payload.trigger_source)
-    start_run(run_id, worker_id, payload.inputs)
+    resolved_inputs = _resolve_file_input_references(worker_id, payload.inputs)
+    run_id = create_run(worker_id, resolved_inputs, payload.trigger_source)
+    start_run(run_id, worker_id, resolved_inputs)
     return ActionResponse(status="running", run_id=run_id)
 
 
