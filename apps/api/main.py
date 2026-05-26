@@ -19,7 +19,7 @@ import tempfile
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -2119,17 +2119,72 @@ def test_secret(name: str) -> SecretTestResult:
 # Platform secrets — infra vars that belong in Settings, NOT the secrets UI
 # ---------------------------------------------------------------------------
 
-PLATFORM_SECRETS: frozenset[str] = frozenset({
-    "COMPOSIO_API_KEY",
-    "COMPOSIO_WEBHOOK_SIGNING_KEY",
-    "WORKERS_FRONTEND_URL",
-    "FLOOM_DB",
-    "FLOOM_WORKERS_DIR",
-    "FLOOM_ARTIFACTS_DIR",
-    "FLOOM_RUN_TIMEOUT",
-    "FLOOM_SECRET",
-    "E2B_API_KEY",
-})
+class PlatformSecretSpec(TypedDict):
+    name: str
+    required: bool
+    default: Optional[str]
+    description: Optional[str]
+
+
+PLATFORM_SECRET_SPECS: list[PlatformSecretSpec] = [
+    {
+        "name": "COMPOSIO_API_KEY",
+        "required": True,
+        "default": None,
+        "description": "Composio API key for the connections backend",
+    },
+    {
+        "name": "COMPOSIO_WEBHOOK_SIGNING_KEY",
+        "required": True,
+        "default": None,
+        "description": "HMAC key for verifying Composio webhook deliveries",
+    },
+    {
+        "name": "WORKERS_FRONTEND_URL",
+        "required": True,
+        "default": None,
+        "description": "Base URL for OAuth callbacks (e.g. https://workers.floom.dev)",
+    },
+    {
+        "name": "FLOOM_DB",
+        "required": False,
+        "default": "../../data/floom.db",
+        "description": "SQLite DB path",
+    },
+    {
+        "name": "FLOOM_WORKERS_DIR",
+        "required": False,
+        "default": "../../workers",
+        "description": "Workers directory",
+    },
+    {
+        "name": "FLOOM_ARTIFACTS_DIR",
+        "required": False,
+        "default": "../../data/artifacts",
+        "description": "Artifacts directory",
+    },
+    {
+        "name": "FLOOM_RUN_TIMEOUT",
+        "required": False,
+        "default": "300",
+        "description": "Default run timeout in seconds",
+    },
+    {
+        "name": "FLOOM_SECRET",
+        "required": True,
+        "default": None,
+        "description": "Shared secret for x-floom-secret auth",
+    },
+    {
+        "name": "E2B_API_KEY",
+        "required": True,
+        "default": None,
+        "description": "E2B sandbox API key",
+    },
+]
+
+# Set of platform secret names for fast membership checks (used in list_secrets filtering)
+PLATFORM_SECRETS: frozenset[str] = frozenset(s["name"] for s in PLATFORM_SECRET_SPECS)
 
 
 @app.get("/secrets", response_model=List[SecretItem])
@@ -2614,10 +2669,13 @@ async def composio_events(request: Request) -> ActionResponse:
 def platform_config():
     """Return platform-level configuration vars with set/missing status (values never returned)."""
     items = []
-    for name in sorted(PLATFORM_SECRETS):
+    for spec in sorted(PLATFORM_SECRET_SPECS, key=lambda s: s["name"]):
         items.append({
-            "name": name,
-            "status": "set" if os.environ.get(name) else "missing",
+            "name": spec["name"],
+            "status": "set" if os.environ.get(spec["name"]) else "missing",
+            "required": spec["required"],
+            "default": spec["default"],
+            "description": spec["description"],
         })
     return {"platform_secrets": items}
 
