@@ -21,7 +21,7 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 - **Flexible exec block** — `exec.mode: agent | pure-script`, `exec.runtime: python311 | node22 | bash | skill | none`, optional `entrypoints[]` for multi-tool skills, `system_prompt`, `model` (default `gpt-5-mini`), `limits.{max_tool_iterations, max_output_tokens, max_total_tokens, timeout_seconds}`.
 - **Capability grants — declared-not-enforced** — `capabilities.{secrets, files, connections, network.egress}` is documentation only at launch; the frontend renders it as an audit badge. No fail-closed enforcement until marketplace install or multi-user lands.
 - **Content-hashed file inputs** — `/uploads` endpoint, sha256 dedup, per-run mount into `<artifacts>/<run_id>/inputs/`, bind-time revalidation against `inp.accepts` and `inp.max_size_mb`, ownership audit log.
-- **Sandbox abstraction** — `runner: local | e2b` per worker. Local for trusted bundles, E2B for sandboxed/untrusted. Local runner serializes `os.chdir` under a process lock.
+- **Sandbox abstraction — E2B-by-default** — `runner: e2b` is the default; `runner: local` is the explicit opt-out for trusted bundles. Sandboxed dependency isolation, no host process exposure, ~$15/mo for 100 runs/day (vs Zapier Pro $49 / n8n Cloud Pro $50). Local runner serializes `os.chdir` under a process lock for the opt-out case.
 
 ### Triggers
 
