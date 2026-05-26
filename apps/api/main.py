@@ -219,6 +219,21 @@ async def auth_middleware(request: Request, call_next):
 
 logger = logging.getLogger("floom.api")
 
+
+@app.on_event("startup")
+async def _log_runtime_architecture() -> None:
+    """Make the execution architecture visible on every boot.
+
+    Auditors and operators should not have to read the source to learn that
+    workers run in E2B sandboxes. This banner lands in journalctl on every
+    restart of `workeros-api.service`.
+    """
+    logger.info(
+        "[startup] Execution: E2B sandbox microVMs only (no in-process worker execution). "
+        "See ARCHITECTURE.md."
+    )
+
+
 # ---------------------------------------------------------------------------
 # SSE event queue registry
 # ---------------------------------------------------------------------------
@@ -433,7 +448,7 @@ def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Di
     if not transcript:
         return []
 
-    from runner_local import ARTIFACTS_DIR
+    from runner_utils import ARTIFACTS_DIR
 
     try:
         artifacts_dir = ARTIFACTS_DIR.resolve()
@@ -2469,7 +2484,7 @@ def download_artifact(run_id: str, artifact_id: str):
     art = row_to_dict(row)
     path_str = art["path"]
 
-    from runner_local import ARTIFACTS_DIR
+    from runner_utils import ARTIFACTS_DIR
     from pathlib import Path
     try:
         artifacts_dir = ARTIFACTS_DIR.resolve()
@@ -3818,7 +3833,7 @@ def system_info():
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) as cnt FROM runs")
         run_count = cursor.fetchone()["cnt"]
-    from runner_local import ARTIFACTS_DIR
+    from runner_utils import ARTIFACTS_DIR
     from worker_registry import WORKERS_DIR
     return {
         "api_version": app.version,

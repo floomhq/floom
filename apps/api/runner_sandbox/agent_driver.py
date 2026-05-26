@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from models import WorkerConfig, WorkerResult
-from runner_local import ARTIFACTS_DIR, _validate_output_schema
+from runner_utils import ARTIFACTS_DIR, _validate_output_schema
 from worker_registry import WORKERS_DIR
 
 from .base import SandboxDriver

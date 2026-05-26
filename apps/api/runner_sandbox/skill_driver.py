@@ -561,7 +561,7 @@ class SkillRuntimeDriver(SandboxDriver):
                     "error_code": "tool_slug_namespace_violation",
                 }
 
-        # Fail fast if the required Composio connection is not active — mirrors runner_local.py:224.
+        # Fail fast if the required Composio connection is not active — mirrors runner_utils.py:224.
         connection_id = self._connection_id_for(app_name, worker_id, config)
         if connection_id is None:
             return {
@@ -674,7 +674,7 @@ class SkillRuntimeDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         config: Optional[WorkerConfig],
     ) -> Optional[str]:
-        from runner_local import _validate_output_schema
+        from runner_utils import _validate_output_schema
 
         return _validate_output_schema(worker_id, outputs, log_fn, config=config)
 
