@@ -154,6 +154,7 @@ write_test_worker()
 from fastapi.testclient import TestClient  # noqa: E402
 
 import db  # noqa: E402
+import main as api_main  # noqa: E402
 from main import app, upload_file as api_upload_file  # noqa: E402
 
 
@@ -399,6 +400,48 @@ def main() -> int:
         "3MB file rejected by worker max_size_mb=1 at bind",
         large_bind.status_code == 400,
         large_bind.text[:300],
+    )
+
+    # --- Non-HTTP bind failure cleanup ---
+    print("\n[section] Non-HTTP bind failure cleanup")
+    ref_fail_content = b"refcount,failure\n1,2\n"
+    ref_fail_sha = hashlib.sha256(ref_fail_content).hexdigest()
+    ref_fail_upload = post_upload(ref_fail_content, filename="ref-fail.csv")
+    check("ref-count failure fixture upload succeeds", ref_fail_upload.status_code == 200, ref_fail_upload.text[:200])
+    original_increment = api_main._increment_file_ref_count
+
+    def fail_ref_count(file_id: str) -> None:
+        raise RuntimeError(f"synthetic ref-count failure for {file_id}")
+
+    api_main._increment_file_ref_count = fail_ref_count
+    try:
+        no_raise_client = TestClient(app, raise_server_exceptions=False)
+        ref_fail_bind = no_raise_client.post(
+            "/workers/file_access_test/runs",
+            json={
+                "inputs": {"upload": ref_fail_sha},
+                "trigger_source": "file_inputs_regression_ref_fail",
+            },
+        )
+    finally:
+        api_main._increment_file_ref_count = original_increment
+
+    check("non-HTTP bind failure returns 500", ref_fail_bind.status_code == 500, ref_fail_bind.text[:300])
+    ref_fail_row = db_row(
+        """
+        SELECT status, error
+        FROM runs
+        WHERE trigger_source = 'file_inputs_regression_ref_fail'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    )
+    check(
+        "non-HTTP bind failure run row is marked failed",
+        ref_fail_row is not None
+        and ref_fail_row["status"] == "failed"
+        and "synthetic ref-count failure" in (ref_fail_row["error"] or ""),
+        dict(ref_fail_row) if ref_fail_row else "no run row",
     )
 
     # --- Concurrent uploads of identical content: single dedup row ---

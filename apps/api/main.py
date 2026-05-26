@@ -1093,6 +1093,9 @@ def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> A
     except HTTPException as exc:
         update_run_status(run_id, RunStatus.FAILED.value, error=str(exc.detail))
         raise
+    except Exception as exc:
+        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc))
+        raise
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
     with get_db() as conn:
