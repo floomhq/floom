@@ -181,12 +181,14 @@ class AgentDriver(SandboxDriver):
                 )
 
             log_fn(f"Agent iteration {iteration + 1}", "debug")
+            # GPT-5 family + newer models use max_completion_tokens; older use max_tokens.
+            token_kwarg = "max_completion_tokens" if model.startswith(("gpt-5", "gpt-4.1", "o1", "o3")) else "max_tokens"
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
                 tools=tools,
                 tool_choice="auto",
-                max_tokens=limits.max_output_tokens,
+                **{token_kwarg: limits.max_output_tokens},
             )
             total_tokens += self._usage_tokens(response)
             if total_tokens > limits.max_total_tokens:
