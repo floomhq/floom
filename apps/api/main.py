@@ -124,7 +124,7 @@ async def auth_middleware(request: Request, call_next):
         path = request.url.path
         if (
             path.startswith("/webhooks/")
-            or path == "/healthz"
+            or path in {"/healthz", "/health"}
             or path == "/composio-events"
             or path == "/connections/callback"
         ):
@@ -193,8 +193,9 @@ def _sse_cleanup(run_id: str, q: asyncio.Queue) -> None:
 # ---------------------------------------------------------------------------
 
 @app.get("/healthz")
+@app.get("/health")
 def healthz():
-    """Liveness probe — exempt from x-floom-secret."""
+    """Liveness probe — exempt from x-floom-secret. Aliased at /health for common LB conventions."""
     return {"status": "ok"}
 
 
@@ -1692,6 +1693,9 @@ async def stream_run_events(run_id: str, request: Request):
 def get_run_logs(run_id: str) -> List[LogEntry]:
     with get_db() as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Run not found")
         cursor.execute(
             """
             SELECT level, message, timestamp, trace_id
@@ -1756,6 +1760,12 @@ def list_approvals(status: str = "pending") -> List[ApprovalDetail]:
 def approve_run(run_id: str, payload: Optional[ApproveRequest] = None) -> ActionResponse:
     now = now_iso()
 
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+
     # If edited output provided, patch the run's output_json before marking approved
     if payload and payload.edited_output is not None:
         with get_db() as conn:
@@ -1803,6 +1813,10 @@ def reject_run(run_id: str, payload: RejectRequest) -> ActionResponse:
     reason = payload.reason or "No reason provided"
     now = now_iso()
     with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Run not found")
         conn.execute(
             "UPDATE approvals SET status = ?, decided_at = ?, reason = ? WHERE run_id = ?",
             (ApprovalStatus.REJECTED.value, now, reason, run_id),
