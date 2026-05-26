@@ -29,10 +29,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
       }),
-    pause: (id: string) =>
-      fetchJson<import("./types").ActionResponse>(`/workers/${id}/pause`, { method: "POST" }),
-    unpause: (id: string) =>
-      fetchJson<import("./types").ActionResponse>(`/workers/${id}/unpause`, { method: "POST" }),
     create: (worker_yml: string, run_py: string) =>
       fetchJson<import("./types").WorkerDetail>("/workers", {
         method: "POST",
@@ -57,20 +53,6 @@ export const api = {
     },
     get: (id: string) => fetchJson<import("./types").RunDetail>(`/runs/${id}`),
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
-    approve: (id: string, editedOutput?: string) =>
-      fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
-        method: "POST",
-        body: JSON.stringify(editedOutput != null ? { edited_output: editedOutput } : {}),
-      }),
-    reject: (id: string, reason?: string) =>
-      fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      }),
-  },
-  approvals: {
-    list: (status = "pending") =>
-      fetchJson<import("./types").ApprovalDetail[]>(`/approvals?status=${status}`),
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),

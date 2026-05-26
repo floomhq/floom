@@ -108,7 +108,7 @@ export default function RunDetailPage() {
   useEffect(() => {
     void load();
     const interval = setInterval(() => {
-      if (run && (run.status === "running" || run.status === "queued" || run.status === "pending_approval")) {
+      if (run && (run.status === "running" || run.status === "queued")) {
         setRefreshing(true);
         void load();
       }
@@ -384,9 +384,6 @@ function StatusBadge({ status }: { status: string }) {
     running: "text-blue-600 border-blue-200 bg-blue-50",
     completed: "text-emerald-600 border-emerald-200 bg-emerald-50",
     failed: "text-red-600 border-red-200 bg-red-50",
-    pending_approval: "text-amber-600 border-amber-200 bg-amber-50",
-    approved: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    rejected: "text-red-600 border-red-200 bg-red-50",
     queued: "text-gray-600 border-gray-200 bg-gray-50",
   };
   return (
