@@ -220,21 +220,14 @@ async def auth_middleware(request: Request, call_next):
 logger = logging.getLogger("floom.api")
 
 
-@app.on_event("startup")
-async def _log_runtime_architecture() -> None:
-    """Make the execution architecture visible on every boot.
-
-    Auditors and operators should not have to read the source to learn that
-    workers run in E2B sandboxes. Written to stderr so it appears in
-    journalctl alongside uvicorn's own startup lines (the floom.api logger
-    has no INFO-level handler configured).
-    """
-    import sys
-    sys.stderr.write(
-        "[workeros] Execution: E2B sandbox microVMs only "
-        "(no in-process worker execution). See ARCHITECTURE.md.\n"
-    )
-    sys.stderr.flush()
+# Architecture banner: visible in journalctl on every API boot so auditors
+# and operators don't have to read the source to learn that workers run
+# in E2B sandbox microVMs, never in this process. See ARCHITECTURE.md.
+print(
+    "[workeros] Execution: E2B sandbox microVMs only "
+    "(no in-process worker execution). See ARCHITECTURE.md.",
+    flush=True,
+)
 
 
 # ---------------------------------------------------------------------------
