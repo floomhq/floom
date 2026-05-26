@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, ChevronRight, Eye, Folder, Pencil, Play, Plus, Tags } from "lucide-react";
+import { Box, Eye, Folder, Pencil, Play, Plus, Tags, X } from "lucide-react";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 
@@ -16,7 +16,6 @@ export default function WorkersPage() {
   const [loading, setLoading] = useState(true);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [folderFilter, setFolderFilter] = useState<string | null>(null);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api.workers.list().then((w) => {
@@ -25,7 +24,10 @@ export default function WorkersPage() {
     }).catch(() => setLoading(false));
   }, []);
 
-  const folders = useMemo(() => buildFolderTree(workers), [workers]);
+  // Flatten folders into leaf-path chips (e.g. "Recruiting/Search Assistant")
+  const flatFolders = useMemo(() => flattenFolders(workers), [workers]);
+  const hasFolders = flatFolders.length > 0;
+
   const allTags = useMemo(
     () => Array.from(new Set(workers.flatMap((worker) => worker.tags || []))).sort(),
     [workers],
@@ -37,17 +39,9 @@ export default function WorkersPage() {
   });
   const hasFilter = Boolean(tagFilter || folderFilter);
 
-  function toggleFolder(path: string) {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }
-
   return (
     <div className="space-y-6">
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Workers</h1>
@@ -69,58 +63,76 @@ export default function WorkersPage() {
       {!loading && workers.length === 0 ? (
         <EmptyWorkersState />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-5 items-start lg:items-stretch">
-          <aside className="rounded-md border border-[#eaeaea] bg-white p-3 space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-medium text-[#555] mb-2">
-                <Folder className="w-3.5 h-3.5" />
-                Folders
+        <div className="space-y-4">
+          {/* Top filter bar */}
+          <div className="rounded-md border border-[#eaeaea] bg-white px-4 py-3 space-y-3">
+            {/* Folders row (hidden when no folders defined) */}
+            {(hasFolders || loading) && (
+              <div className="flex items-start gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-[#555] pt-1 shrink-0">
+                  <Folder className="w-3.5 h-3.5" />
+                  <span>Folders</span>
+                </div>
+                {loading ? (
+                  <Skeleton className="h-6 w-48" />
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFolderFilter(null)}
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs border transition-colors ${
+                        !folderFilter
+                          ? "bg-[#1a1a1a] text-white border-[#1a1a1a]"
+                          : "bg-white text-[#555] border-[#d4d4d8] hover:bg-[#f4f4f5]"
+                      }`}
+                    >
+                      All
+                    </button>
+                    {flatFolders.map(({ path, label, count }) => (
+                      <button
+                        key={path}
+                        type="button"
+                        onClick={() => setFolderFilter((cur) => cur === path ? null : path)}
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs border transition-colors ${
+                          folderFilter === path
+                            ? "bg-[#1a1a1a] text-white border-[#1a1a1a]"
+                            : "bg-white text-[#555] border-[#d4d4d8] hover:bg-[#f4f4f5]"
+                        }`}
+                      >
+                        {label}
+                        <span className="ml-1 opacity-60">{count}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tags row */}
+            <div className="flex items-start gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-[#555] pt-1 shrink-0">
+                <Tags className="w-3.5 h-3.5" />
+                <span>Tags</span>
               </div>
               {loading ? (
-                <Skeleton className="h-24 w-full" />
-              ) : folders.length === 0 ? (
-                <p className="text-xs text-[#999]">No folders.</p>
-              ) : (
-                <div className="space-y-1">
-                  <button
-                    type="button"
-                    onClick={() => setFolderFilter(null)}
-                    className={`w-full text-left text-xs rounded px-2 py-1.5 ${!folderFilter ? "bg-[#f4f4f5] text-[#222]" : "text-[#666] hover:bg-[#f7f7f6]"}`}
-                  >
-                    All folders
-                  </button>
-                  {folders.map((folder) => (
-                    <FolderNode
-                      key={folder.path}
-                      node={folder}
-                      activePath={folderFilter}
-                      expandedFolders={expandedFolders}
-                      onToggle={toggleFolder}
-                      onSelect={setFolderFilter}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 text-xs font-medium text-[#555] mb-2">
-                <Tags className="w-3.5 h-3.5" />
-                Tags
-              </div>
-              {allTags.length === 0 ? (
-                <p className="text-xs text-[#999]">No tags.</p>
+                <Skeleton className="h-6 w-64" />
+              ) : allTags.length === 0 ? (
+                <p className="text-xs text-[#999] pt-1">No tags.</p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {allTags.map((tag) => (
                     <button
                       key={tag}
                       type="button"
-                      onClick={() => setTagFilter((current) => current === tag ? null : tag)}
+                      onClick={() => setTagFilter((cur) => cur === tag ? null : tag)}
                     >
                       <Badge
                         variant="outline"
-                        className={`cursor-pointer text-xs font-normal ${tagFilter === tag ? "bg-[#1a1a1a] text-white border-[#1a1a1a]" : "bg-white hover:bg-[#f4f4f5]"}`}
+                        className={`cursor-pointer text-xs font-normal ${
+                          tagFilter === tag
+                            ? "bg-[#1a1a1a] text-white border-[#1a1a1a]"
+                            : "bg-white hover:bg-[#f4f4f5]"
+                        }`}
                       >
                         {tag}
                       </Badge>
@@ -128,138 +140,94 @@ export default function WorkersPage() {
                   ))}
                 </div>
               )}
-            </div>
 
-            {hasFilter && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full h-8 text-xs"
-                onClick={() => {
-                  setTagFilter(null);
-                  setFolderFilter(null);
-                }}
-              >
-                Clear filters
-              </Button>
-            )}
-          </aside>
-
-          <div className="space-y-3">
-            {hasFilter && (
-              <div className="text-xs text-[#666]">
-                Showing {filteredWorkers.length} of {workers.length}
-                {folderFilter ? ` in ${folderFilter}` : ""}
-                {tagFilter ? ` tagged ${tagFilter}` : ""}
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {loading
-                ? Array.from({ length: 4 }).map((_, i) => (
-                    <Skeleton key={i} className="h-44 w-full" />
-                  ))
-                : filteredWorkers.map((w) => (
-                    <WorkerCard key={w.id} worker={w} onTagClick={setTagFilter} />
-                  ))}
+              {/* Clear filters button inline with tags row when filter is active */}
+              {hasFilter && (
+                <button
+                  type="button"
+                  onClick={() => { setTagFilter(null); setFolderFilter(null); }}
+                  className="ml-auto shrink-0 flex items-center gap-1 text-xs text-[#888] hover:text-[#333] transition-colors pt-1"
+                >
+                  <X className="w-3 h-3" />
+                  Clear filters
+                </button>
+              )}
             </div>
-            {!loading && filteredWorkers.length === 0 && (
-              <p className="text-sm text-[#999]">No workers match the active filters.</p>
-            )}
           </div>
+
+          {/* Filter summary */}
+          {hasFilter && (
+            <div className="text-xs text-[#666]">
+              Showing {filteredWorkers.length} of {workers.length}
+              {folderFilter ? ` in ${folderFilter}` : ""}
+              {tagFilter ? ` tagged "${tagFilter}"` : ""}
+            </div>
+          )}
+
+          {/* Worker cards: full-width grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {loading
+              ? Array.from({ length: 8 }).map((_, i) => (
+                  <Skeleton key={i} className="h-44 w-full" />
+                ))
+              : filteredWorkers.map((w) => (
+                  <WorkerCard key={w.id} worker={w} onTagClick={setTagFilter} />
+                ))}
+          </div>
+
+          {!loading && filteredWorkers.length === 0 && (
+            <p className="text-sm text-[#999]">No workers match the active filters.</p>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-interface FolderNodeModel {
-  name: string;
+interface FlatFolder {
   path: string;
+  label: string;
   count: number;
-  children: FolderNodeModel[];
 }
 
-function buildFolderTree(workers: WorkerSummary[]): FolderNodeModel[] {
-  const roots: FolderNodeModel[] = [];
-  const byPath = new Map<string, FolderNodeModel>();
+/**
+ * Flatten the folder tree into a list of leaf-path chips.
+ * Parent folders that have children are shown as "Parent/Child" labels.
+ * Workers with no folder are ignored (they appear under "All").
+ */
+function flattenFolders(workers: WorkerSummary[]): FlatFolder[] {
+  const countByPath = new Map<string, number>();
 
   for (const worker of workers) {
     if (!worker.folder) continue;
+    // Count this worker under its exact path and all ancestor paths
     const parts = worker.folder.split("/").filter(Boolean);
     let path = "";
-    let siblings = roots;
     for (const part of parts) {
       path = path ? `${path}/${part}` : part;
-      let node = byPath.get(path);
-      if (!node) {
-        node = { name: part, path, count: 0, children: [] };
-        byPath.set(path, node);
-        siblings.push(node);
-        siblings.sort((a, b) => a.name.localeCompare(b.name));
-      }
-      node.count += 1;
-      siblings = node.children;
+      countByPath.set(path, (countByPath.get(path) ?? 0) + 1);
     }
   }
 
-  return roots;
-}
+  if (countByPath.size === 0) return [];
 
-function FolderNode({
-  node,
-  activePath,
-  expandedFolders,
-  onToggle,
-  onSelect,
-}: {
-  node: FolderNodeModel;
-  activePath: string | null;
-  expandedFolders: Set<string>;
-  onToggle: (path: string) => void;
-  onSelect: (path: string) => void;
-}) {
-  const expanded = expandedFolders.has(node.path);
-  const hasChildren = node.children.length > 0;
+  // Build the tree to find which nodes are leaves vs. parents
+  const allPaths = Array.from(countByPath.keys()).sort();
 
-  return (
-    <div>
-      <div className={`flex items-center rounded ${activePath === node.path ? "bg-[#f4f4f5]" : "hover:bg-[#f7f7f6]"}`}>
-        <button
-          type="button"
-          className="h-7 w-7 shrink-0 flex items-center justify-center text-[#777]"
-          onClick={() => hasChildren && onToggle(node.path)}
-          aria-label={expanded ? `Collapse ${node.path}` : `Expand ${node.path}`}
-        >
-          {hasChildren && (
-            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} />
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => onSelect(node.path)}
-          className="min-w-0 flex-1 text-left text-xs py-1.5 pr-2 text-[#555]"
-          title={node.path}
-        >
-          <span className="truncate inline-block max-w-[135px] align-bottom">{node.name}</span>
-          <span className="ml-1 text-[#999]">{node.count}</span>
-        </button>
-      </div>
-      {expanded && hasChildren && (
-        <div className="ml-4 mt-1 space-y-1">
-          {node.children.map((child) => (
-            <FolderNode
-              key={child.path}
-              node={child}
-              activePath={activePath}
-              expandedFolders={expandedFolders}
-              onToggle={onToggle}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  // A path is "shown" if it has no children OR if it has children but also
+  // has workers directly in it (not only via children). For simplicity, we
+  // always show every unique path used by at least one worker (the full set of
+  // distinct folder values), then sort. This makes "Recruiting/Search Assistant" a
+  // separate chip from "Recruiting".
+  const distinctFolders = Array.from(
+    new Set(workers.map((w) => w.folder).filter(Boolean) as string[])
+  ).sort();
+
+  return distinctFolders.map((path) => ({
+    path,
+    label: path, // show full path e.g. "Recruiting/Search Assistant"
+    count: countByPath.get(path) ?? 0,
+  }));
 }
 
 function EmptyWorkersState() {
