@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import type { SecretItem } from "@/lib/types";
+import { formatRelativeTime } from "@/components/connections/connection-data";
 
 export default function SecretsPage() {
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
@@ -183,6 +184,22 @@ export default function SecretsPage() {
                       <p className="text-sm font-medium font-mono">{s.name}</p>
                       {s.used_by.length > 0 && (
                         <p className="text-xs text-[#999]">Used by: {s.used_by.join(", ")}</p>
+                      )}
+                      {s.last_checked_at && (
+                        <p className="text-xs text-[#999]">
+                          Checked {formatRelativeTime(s.last_checked_at)}
+                          {s.last_check_status && (
+                            <span
+                              className={
+                                s.last_check_status === "valid"
+                                  ? " text-emerald-600 font-medium"
+                                  : " text-red-500 font-medium"
+                              }
+                            >
+                              {" "}&middot; {s.last_check_status}
+                            </span>
+                          )}
+                        </p>
                       )}
                     </div>
                   </div>
