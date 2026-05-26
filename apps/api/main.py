@@ -2261,6 +2261,18 @@ class PlatformSecretSpec(TypedDict):
 
 PLATFORM_SECRET_SPECS: list[PlatformSecretSpec] = [
     {
+        "name": "OPENAI_API_KEY",
+        "required": True,
+        "default": None,
+        "description": "OpenAI API key, used by the platform for prompt-to-worker drafting and any worker that calls OpenAI",
+    },
+    {
+        "name": "E2B_API_KEY",
+        "required": True,
+        "default": None,
+        "description": "E2B sandbox API key",
+    },
+    {
         "name": "COMPOSIO_API_KEY",
         "required": True,
         "default": None,
@@ -2273,11 +2285,22 @@ PLATFORM_SECRET_SPECS: list[PlatformSecretSpec] = [
         "description": "HMAC key for verifying Composio webhook deliveries",
     },
     {
+        "name": "FLOOM_SECRET",
+        "required": True,
+        "default": None,
+        "description": "Shared secret for x-floom-secret auth",
+    },
+    {
         "name": "WORKERS_FRONTEND_URL",
         "required": True,
         "default": None,
         "description": "Base URL for OAuth callbacks (e.g. https://workers.floom.dev)",
     },
+]
+
+# Infrastructure/filesystem config vars shown in a separate section on /settings.
+# Not secrets: no values, just paths and tuning params.
+INFRA_PATH_SPECS: list[PlatformSecretSpec] = [
     {
         "name": "FLOOM_DB",
         "required": False,
@@ -2301,18 +2324,6 @@ PLATFORM_SECRET_SPECS: list[PlatformSecretSpec] = [
         "required": False,
         "default": "300",
         "description": "Default run timeout in seconds",
-    },
-    {
-        "name": "FLOOM_SECRET",
-        "required": True,
-        "default": None,
-        "description": "Shared secret for x-floom-secret auth",
-    },
-    {
-        "name": "E2B_API_KEY",
-        "required": True,
-        "default": None,
-        "description": "E2B sandbox API key",
     },
 ]
 
@@ -3132,16 +3143,18 @@ async def composio_events(request: Request) -> ActionResponse:
 @app.get("/system/platform-config")
 def platform_config():
     """Return platform-level configuration vars with set/missing status (values never returned)."""
-    items = []
-    for spec in sorted(PLATFORM_SECRET_SPECS, key=lambda s: s["name"]):
-        items.append({
+    def _to_item(spec: PlatformSecretSpec) -> dict:
+        return {
             "name": spec["name"],
             "status": "set" if os.environ.get(spec["name"]) else "missing",
             "required": spec["required"],
             "default": spec["default"],
             "description": spec["description"],
-        })
-    return {"platform_secrets": items}
+        }
+
+    platform_items = [_to_item(s) for s in PLATFORM_SECRET_SPECS]
+    infra_items = [_to_item(s) for s in INFRA_PATH_SPECS]
+    return {"platform_secrets": platform_items, "infra_paths": infra_items}
 
 
 @app.get("/system/info")

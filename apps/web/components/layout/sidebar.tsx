@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Activity, Box, Clock, KeyRound, Settings, Menu, X, Plug } from "lucide-react";
@@ -57,9 +58,7 @@ export function Sidebar() {
     <>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--accent-line)] bg-[var(--sidebar-glass)] px-4 shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:hidden">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
-            F
-          </div>
+          <Image src="/floom-mark.png" width={28} height={28} alt="Floom" className="rounded-md" />
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
         </Link>
         <div className="flex items-center gap-2">
@@ -79,9 +78,7 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/70 dark:bg-white/[0.055]" aria-hidden="true" />
         <div className="px-5 py-6">
           <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
-              F
-            </div>
+            <Image src="/floom-mark.png" width={28} height={28} alt="Floom" className="rounded-md" />
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
           </Link>
         </div>
@@ -103,9 +100,7 @@ export function Sidebar() {
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/70 dark:bg-white/[0.055]" aria-hidden="true" />
             <div className="flex items-center justify-between border-b border-[var(--accent-line)] px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--solid)] text-sm font-bold text-[var(--solid-fg)] shadow-btn">
-                  F
-                </div>
+                <Image src="/floom-mark.png" width={28} height={28} alt="Floom" className="rounded-md" />
                 <span className="font-semibold text-[15px] tracking-tight">Floom</span>
               </Link>
               <button

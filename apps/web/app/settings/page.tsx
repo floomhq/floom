@@ -28,6 +28,7 @@ interface PlatformSecret {
 export default function SettingsPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformSecrets, setPlatformSecrets] = useState<PlatformSecret[]>([]);
+  const [infraPaths, setInfraPaths] = useState<PlatformSecret[]>([]);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -40,6 +41,7 @@ export default function SettingsPage() {
       ]);
       setInfo(infoRes as unknown as SystemInfo);
       setPlatformSecrets(platformRes.platform_secrets);
+      setInfraPaths(platformRes.infra_paths ?? []);
     } catch (e) {
       console.error(e);
     }
@@ -153,24 +155,53 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-sm font-medium">Platform configuration</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-xs text-[#999] mb-3">
-            Infrastructure secrets managed outside the Secrets UI. Configure these on the server.
-          </p>
-          {platformSecrets.length === 0 ? (
-            <p className="text-sm text-[#999]">Loading...</p>
-          ) : (
-            platformSecrets.map((s) => (
-              <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                <div className="min-w-0">
-                  <span className="text-sm font-mono text-[#333]">{s.name}</span>
-                  {s.description && (
-                    <p className="text-xs text-[#999] mt-0.5">{s.description}</p>
-                  )}
+        <CardContent className="space-y-4">
+          <div>
+            <p className="text-xs font-medium text-[#555] mb-2">Required secrets</p>
+            <p className="text-xs text-[#999] mb-3">
+              Credentials the platform needs to run. Set these as environment variables on the server.
+            </p>
+            <div className="space-y-2">
+              {platformSecrets.length === 0 ? (
+                <p className="text-sm text-[#999]">Loading...</p>
+              ) : (
+                platformSecrets.map((s) => (
+                  <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                    <div className="min-w-0">
+                      <span className="text-sm font-mono text-[#333]">{s.name}</span>
+                      {s.description && (
+                        <p className="text-xs text-[#999] mt-0.5">{s.description}</p>
+                      )}
+                    </div>
+                    {platformSecretBadge(s)}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          {infraPaths.length > 0 && (
+            <>
+              <Separator />
+              <div>
+                <p className="text-xs font-medium text-[#555] mb-2">Infrastructure paths</p>
+                <p className="text-xs text-[#999] mb-3">
+                  Filesystem and tuning config. Defaults work for most setups.
+                </p>
+                <div className="space-y-2">
+                  {infraPaths.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                      <div className="min-w-0">
+                        <span className="text-sm font-mono text-[#333]">{s.name}</span>
+                        {s.description && (
+                          <p className="text-xs text-[#999] mt-0.5">{s.description}</p>
+                        )}
+                      </div>
+                      {platformSecretBadge(s)}
+                    </div>
+                  ))}
                 </div>
-                {platformSecretBadge(s)}
               </div>
-            ))
+            </>
           )}
         </CardContent>
       </Card>
