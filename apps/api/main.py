@@ -742,6 +742,21 @@ async def upload_file(
     if max_size_mb is not None and max_size_mb <= 0:
         raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
 
+    # P1-3: reject path-traversal-shaped filenames at the request boundary.
+    # The blob is stored by SHA so a malicious filename never reaches the FS, but
+    # we surface a 400 instead of silently sanitizing — the caller should know.
+    raw_filename = file.filename or ""
+    if raw_filename and (
+        "/" in raw_filename
+        or "\\" in raw_filename
+        or raw_filename.startswith(".")
+        or ".." in raw_filename.split("/")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="filename must not contain path separators, leading dots, or '..' segments",
+        )
+
     media_type = normalize_media_type(
         file.content_type or mimetypes.guess_type(file.filename or "")[0]
     )
@@ -1194,6 +1209,21 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
 
+    # P1-3: reject path-traversal in caller-supplied bundle_path BEFORE schema parsing
+    # (the projection from WorkerContract may strip the field, so we check raw YAML).
+    raw_exec = raw.get("exec") if isinstance(raw.get("exec"), dict) else {}
+    raw_runtime = raw.get("runtime") if isinstance(raw.get("runtime"), dict) else {}
+    for src in (raw_exec, raw_runtime, raw):
+        bundle_hint = src.get("bundle_path") if isinstance(src, dict) else None
+        if not bundle_hint:
+            continue
+        if not isinstance(bundle_hint, str):
+            raise HTTPException(status_code=400, detail="bundle_path must be a string")
+        if bundle_hint.startswith("/") or "\\" in bundle_hint:
+            raise HTTPException(status_code=400, detail="bundle_path must be a relative path")
+        if ".." in bundle_hint.replace("\\", "/").split("/"):
+            raise HTTPException(status_code=400, detail="bundle_path must not contain '..' segments")
+
     try:
         from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
         parsed = parse_worker_manifest(raw)
@@ -1329,6 +1359,23 @@ def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> A
     worker = _get_db_worker(worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+
+    # P1-2: Validate required inputs at the request boundary before creating a run row.
+    # Use the same WorkerConfig the runner will see — get_worker_config_for_run resolves
+    # both DB-backed and filesystem-discovered workers into the same shape.
+    run_config = get_worker_config_for_run(worker_id)
+    if run_config is not None:
+        declared_inputs = getattr(run_config, "inputs", []) or []
+        missing = [
+            inp.name for inp in declared_inputs
+            if getattr(inp, "required", False)
+            and (inp.name not in payload.inputs or payload.inputs.get(inp.name) in (None, ""))
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required inputs: {', '.join(missing)}",
+            )
 
     # Create the run record first so we have a run_id for per-run file staging.
     run_id = create_run(worker_id, payload.inputs, payload.trigger_source)
