@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 
@@ -137,7 +138,16 @@ export default function SettingsPage() {
                   configuration card below for the operator if needed. */}
             </>
           ) : (
-            <p className="text-[#999]">Loading...</p>
+            // N8 fix: skeleton placeholders instead of "Loading..." text to
+            // eliminate the 4-6s flash on first load.
+            <div className="space-y-3">
+              {[120, 96, 80].map((w, i) => (
+                <div key={i} className="flex justify-between items-center">
+                  <Skeleton className="h-4" style={{ width: 80 }} />
+                  <Skeleton className="h-4" style={{ width: w }} />
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -154,7 +164,15 @@ export default function SettingsPage() {
             </p>
             <div className="space-y-2">
               {platformSecrets.length === 0 ? (
-                <p className="text-sm text-[#999]">Loading...</p>
+                // Skeleton while loading platform secrets
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                      <Skeleton className="h-4 w-36" />
+                      <Skeleton className="h-5 w-14 rounded-full" />
+                    </div>
+                  ))}
+                </div>
               ) : (
                 platformSecrets.map((s) => (
                   <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">

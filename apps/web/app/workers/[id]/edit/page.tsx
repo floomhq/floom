@@ -6,15 +6,76 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowLeft, Save, FilePlus, Trash2, File, Copy, Plus, X } from "lucide-react";
 import type { ConnectionItem, TriggerSpec, WorkerDetail, WorkerFile } from "@/lib/types";
 import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
+// N7: syntax-highlighted code editor (react-simple-code-editor + highlight.js)
+import Editor from "react-simple-code-editor";
+import "highlight.js/styles/github.css";
 
 type TriggerType = "manual" | "schedule" | "webhook" | "composio";
+
+// ---------------------------------------------------------------------------
+// N7: syntax highlighter helper for the edit textarea
+// ---------------------------------------------------------------------------
+
+function detectLanguage(path: string): string {
+  if (path.endsWith(".py")) return "python";
+  if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
+  if (path.endsWith(".json")) return "json";
+  if (path.endsWith(".md") || path.endsWith(".txt")) return "markdown";
+  if (path.endsWith(".sh")) return "bash";
+  return "plaintext";
+}
+
+// Lazy highlight: returns highlighted HTML string using highlight.js.
+// Falls back to the raw code string if hljs fails to load.
+async function highlightCode(code: string, language: string): Promise<string> {
+  try {
+    const hljsCore = await import("highlight.js/lib/core");
+    const hljs = hljsCore.default;
+    if (language === "python") {
+      const py = await import("highlight.js/lib/languages/python");
+      if (!hljs.getLanguage("python")) hljs.registerLanguage("python", py.default);
+    } else if (language === "yaml") {
+      const yaml = await import("highlight.js/lib/languages/yaml");
+      if (!hljs.getLanguage("yaml")) hljs.registerLanguage("yaml", yaml.default);
+    } else if (language === "json") {
+      const json = await import("highlight.js/lib/languages/json");
+      if (!hljs.getLanguage("json")) hljs.registerLanguage("json", json.default);
+    } else if (language === "bash") {
+      const bash = await import("highlight.js/lib/languages/bash");
+      if (!hljs.getLanguage("bash")) hljs.registerLanguage("bash", bash.default);
+    }
+    if (hljs.getLanguage(language)) {
+      return hljs.highlight(code, { language }).value;
+    }
+    return code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  } catch {
+    return code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+}
+
+// Synchronous highlight wrapper used by react-simple-code-editor's highlight prop.
+// We cache the last computed highlighted HTML per (code, language) pair and
+// trigger an async refresh on mismatch to keep the editor responsive.
+const _hlCache = new Map<string, string>();
+
+function makeHighlighter(language: string) {
+  return (code: string): string => {
+    const key = `${language}:${code}`;
+    if (_hlCache.has(key)) return _hlCache.get(key)!;
+    // Return escaped plain text immediately; async update will re-render
+    const plain = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    void highlightCode(code, language).then((html) => {
+      _hlCache.set(key, html);
+    });
+    return plain;
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Per-trigger row state (richer than TriggerSpec for local editing)
@@ -542,17 +603,31 @@ export default function EditWorkerPage() {
               {selectedFile ? selectedFile.path : "Select a file"}
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-3">
+          {/* N7: syntax-highlighted editor using react-simple-code-editor */}
+          <CardContent className="p-0">
             {selectedFile ? (
-              <Textarea
-                key={selectedFile.path}
-                value={selectedFile.content}
-                onChange={(e) => setContent(selectedFile.path, e.target.value)}
-                className="min-h-[640px] border-[#e4e4e7] font-mono text-xs"
-                spellCheck={false}
-              />
+              <div className="rounded-b-md overflow-hidden" style={{ minHeight: 640 }}>
+                <Editor
+                  key={selectedFile.path}
+                  value={selectedFile.content}
+                  onValueChange={(code) => setContent(selectedFile.path, code)}
+                  highlight={makeHighlighter(detectLanguage(selectedFile.path))}
+                  padding={12}
+                  tabSize={2}
+                  insertSpaces
+                  style={{
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 12,
+                    minHeight: 640,
+                    background: "#fff",
+                    outline: "none",
+                    lineHeight: "1.6",
+                  }}
+                  textareaClassName="focus:outline-none"
+                />
+              </div>
             ) : (
-              <p className="text-sm text-[#999]">Select a file to edit.</p>
+              <p className="text-sm text-[#999] p-3">Select a file to edit.</p>
             )}
           </CardContent>
         </Card>
