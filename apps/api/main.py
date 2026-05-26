@@ -152,7 +152,7 @@ async def security_headers_middleware(request: Request, call_next):
 import hashlib
 _rate_lock = threading.Lock()
 _rate_buckets: Dict[str, list] = {}
-_RATE_LIMIT = int(os.environ.get("FLOOM_RATE_LIMIT_PER_MIN", "200"))
+_RATE_LIMIT = int(os.environ.get("FLOOM_RATE_LIMIT_PER_MIN", "2000"))
 _RATE_WINDOW = 60.0
 
 
@@ -3339,6 +3339,54 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     return []
 
 
+def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[str]:
+    """Resolve the connected user's email via Composio's tool-execute proxy.
+
+    Composio masks the raw OAuth access_token from `/connected_accounts/<id>`
+    (returns only 8 chars), so we cannot call provider userinfo endpoints
+    directly. Instead, we invoke a per-toolkit identity tool through Composio's
+    /tools/execute proxy; Composio uses the real token server-side and returns
+    just the response we asked for. Returns None on any error.
+
+    Verified working for Gmail via GMAIL_GET_PROFILE -> response_data.emailAddress.
+    Per-provider tool slug map below; extend as needed.
+    """
+    import requests as _requests
+    PROVIDER_IDENTITY_TOOLS = {
+        "gmail": ("GMAIL_GET_PROFILE", lambda d: d.get("emailAddress")),
+        "googledrive": ("GOOGLEDRIVE_GET_ABOUT_USER", lambda d: ((d.get("user") or {}).get("emailAddress"))),
+        "googlecalendar": ("GOOGLECALENDAR_GET_CURRENT_USER", lambda d: d.get("email")),
+        "linkedin": ("LINKEDIN_GET_MY_INFO", lambda d: d.get("email")),
+        "hubspot": ("HUBSPOT_GET_OWNER_BY_ID", lambda d: d.get("email")),
+        "slack": ("SLACK_USERS_INFO", lambda d: ((d.get("user") or {}).get("profile") or {}).get("email")),
+        "github": ("GITHUB_GET_THE_AUTHENTICATED_USER", lambda d: d.get("email") or (d.get("login") and f"{d['login']}@github")),
+    }
+    spec = PROVIDER_IDENTITY_TOOLS.get(toolkit_slug)
+    if not spec:
+        return None
+    tool_slug, extract = spec
+    try:
+        key = os.environ.get("COMPOSIO_API_KEY", "")
+        if not key:
+            return None
+        r = _requests.post(
+            f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+            headers={"x-api-key": key, "Content-Type": "application/json"},
+            json={"connected_account_id": composio_conn_id, "user_id": "federico", "arguments": {}},
+            timeout=8,
+        )
+        if not r.ok:
+            return None
+        payload = r.json()
+        if not payload.get("successful"):
+            return None
+        data = payload.get("data", {}).get("response_data") or payload.get("data", {})
+        return extract(data) if isinstance(data, dict) else None
+    except Exception as exc:
+        logger.debug("provider email fetch failed for %s: %s", toolkit_slug, exc)
+    return None
+
+
 def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
     """Fetch Composio connected-account and return normalized account info.
 
@@ -3375,6 +3423,15 @@ def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
         if not isinstance(raw_scopes, list):
             raw_scopes = []
         scopes = [s for s in raw_scopes if isinstance(s, str)]
+        # Fallback: Composio doesn't return email for managed-OAuth connections
+        # and masks the raw access_token, so we cannot call provider userinfo
+        # directly. Use Composio's /tools/execute proxy to invoke a per-provider
+        # identity tool (e.g. GMAIL_GET_PROFILE) which runs server-side with the
+        # real token and returns the email. Cached on the DB row by the caller.
+        if not email:
+            toolkit_slug = ((account.get("toolkit") or {}).get("slug") or "").lower()
+            if toolkit_slug and composio_conn_id:
+                email = _fetch_provider_email(toolkit_slug, composio_conn_id)
         return {
             "email": email,
             "scopes": scopes,
@@ -3789,6 +3846,22 @@ async def _run_connection_sweep() -> None:
             check = "failed"
             error = str(exc)
         _write_connection_check(conn_id, check, error, tested_at)
+        # Also refresh account_label + scopes for ACTIVE connections so the
+        # user sees their actual email rather than the hardcoded "federico"
+        # user_id. _fetch_composio_account_info uses Composio's tool-execute
+        # proxy to get the real email via GMAIL_GET_PROFILE etc.
+        if check == "valid":
+            try:
+                info = _fetch_composio_account_info(composio_conn_id)
+                email_or_user = info.get("email") or info.get("user_id") or ""
+                if email_or_user:
+                    with get_db() as conn2:
+                        conn2.execute(
+                            "UPDATE composio_connections SET account_label=?, updated_at=? WHERE id=?",
+                            (email_or_user, tested_at, conn_id),
+                        )
+            except Exception as exc:
+                logger.debug("account_label refresh failed for %s: %s", conn_id, exc)
         logger.debug("Swept connection %s: %s", conn_id, check)
         await asyncio.sleep(0.5)  # Rate-limit Composio calls
 
