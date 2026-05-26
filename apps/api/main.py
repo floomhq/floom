@@ -2428,13 +2428,32 @@ def list_runs(
 
 
 @app.post("/runs/clear")
-def clear_runs():
+def clear_runs(confirm: str = Query("", description="Must be 'yes-wipe-all-runs' to proceed.")):
+    """Wipe all run history.
+
+    Destructive operation. Requires explicit `?confirm=yes-wipe-all-runs`
+    query param to proceed. A May 2026 audit accidentally deleted 256 runs
+    by hitting this endpoint with just the platform secret. The confirmation
+    string makes the destructive intent explicit and prevents accidental
+    invocation by API explorers.
+    """
+    if confirm != "yes-wipe-all-runs":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Destructive endpoint. Append ?confirm=yes-wipe-all-runs to "
+                "proceed. This wipes every run, log, and artifact record."
+            ),
+        )
     with get_db() as conn:
+        cursor = conn.execute("SELECT COUNT(*) AS n FROM runs")
+        row = cursor.fetchone()
+        deleted_count = int(row["n"]) if row else 0
         conn.execute("DELETE FROM artifacts")
         conn.execute("DELETE FROM logs")
         conn.execute("DELETE FROM runs")
-    logger.info("All run history cleared")
-    return {"status": "cleared"}
+    logger.warning("All run history cleared (%d runs deleted)", deleted_count)
+    return {"status": "cleared", "deleted_runs": deleted_count}
 
 
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
