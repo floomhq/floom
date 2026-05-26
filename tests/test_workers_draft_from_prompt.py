@@ -399,3 +399,104 @@ class TestDraftFromPromptEndpoint:
         assert resp.status_code == 502
         assert mock_client.chat.completions.create.call_count == 3
         assert "after 3 attempts" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: POST /workers writes skill_md correctly (Issue #1)
+# ---------------------------------------------------------------------------
+
+class TestPostWorkersSkillMd:
+    """Verify that POST /workers writes the provided skill_md to SKILL.md on disk."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_workers_dir(self, tmp_path, monkeypatch):
+        """Route WORKERS_DIR to a temp directory for isolation."""
+        import worker_registry
+        monkeypatch.setattr(worker_registry, "WORKERS_DIR", tmp_path)
+        self._workers_dir = tmp_path
+
+    def _minimal_yml(self, name: str = "skill-md-test") -> str:
+        return f"""schema_version: "0.3"
+name: {name}
+title: "Skill Md Test"
+description: "A worker for testing skill_md write."
+version: "0.1.0"
+entrypoint: SKILL.md
+targets: [generic]
+exec:
+  runtime: skill
+  mode: agent
+  runner: e2b
+  inputs: []
+  outputs: []
+trigger:
+  type: manual
+"""
+
+    def test_provided_skill_md_is_written_to_disk(self, client):
+        """When skill_md is provided in the request body, SKILL.md on disk matches exactly."""
+        custom_skill = "# Custom Skill\n\nThis is the real skill content."
+        resp = client.post(
+            "/workers",
+            json={
+                "worker_yml": self._minimal_yml("skill-md-test"),
+                "run_py": "def run(inputs, context): return {'status': 'success', 'outputs': {}, 'artifacts': []}",
+                "skill_md": custom_skill,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        skill_path = self._workers_dir / "skill-md-test" / "SKILL.md"
+        assert skill_path.is_file(), "SKILL.md was not created"
+        assert skill_path.read_text() == custom_skill, "SKILL.md content does not match provided skill_md"
+
+    def test_omitted_skill_md_writes_placeholder(self, client):
+        """When skill_md is not provided, a placeholder SKILL.md is written."""
+        resp = client.post(
+            "/workers",
+            json={
+                "worker_yml": self._minimal_yml("placeholder-test"),
+                "run_py": "def run(inputs, context): return {'status': 'success', 'outputs': {}, 'artifacts': []}",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        skill_path = self._workers_dir / "placeholder-test" / "SKILL.md"
+        assert skill_path.is_file(), "SKILL.md placeholder was not created"
+        content = skill_path.read_text()
+        assert "placeholder" in content.lower() or content.startswith("#"), (
+            "Expected a placeholder or heading, got: " + content[:100]
+        )
+
+    def test_draft_from_prompt_response_exposes_skill_md(self, client):
+        """draft-from-prompt response includes the skill_md field from the LLM."""
+        from unittest.mock import MagicMock, patch
+
+        mock_skill = "# Granola Worker\n\nFetch and summarise meetings."
+        llm_payload = {
+            "worker_yml": _good_worker_yml(),
+            "skill_md": mock_skill,
+            "suggested_name": "test-worker",
+            "suggested_title": "Test Worker",
+            "required_connections": ["granola"],
+            "required_secrets": [],
+            "inputs": [],
+            "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
+        }
+        import json as json_mod
+
+        with patch("openai.OpenAI") as mock_cls:
+            mock_client_inst = MagicMock()
+            mock_cls.return_value = mock_client_inst
+            choice = MagicMock()
+            choice.message.content = json_mod.dumps(llm_payload)
+            response = MagicMock()
+            response.choices = [choice]
+            mock_client_inst.chat.completions.create.return_value = response
+
+            resp = client.post(
+                "/workers/draft-from-prompt",
+                json={"prompt": "Summarise my granola meetings"},
+            )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert "skill_md" in data
+        assert data["skill_md"] == mock_skill

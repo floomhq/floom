@@ -973,13 +973,16 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
-    # Read raw YAML for manifest viewer
+    # Read raw YAML for manifest viewer, plus SKILL.md and run.py for Code tab
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
+    skill_md_content: Optional[str] = None
+    run_py_content: Optional[str] = None
     try:
         from worker_registry import WORKERS_DIR
         yml_path = WORKERS_DIR / worker_id / "worker.yml"
         run_path = WORKERS_DIR / worker_id / "run.py"
+        skill_path = WORKERS_DIR / worker_id / "SKILL.md"
         if yml_path.is_file():
             manifest_yaml = yml_path.read_text()
         elif worker.get("manifest"):
@@ -987,6 +990,9 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
             manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
         if run_path.is_file():
             run_py = run_path.read_text()
+            run_py_content = run_py
+        if skill_path.is_file():
+            skill_md_content = skill_path.read_text()
     except Exception:
         pass
 
@@ -1008,6 +1014,8 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
         recent_runs=recent_runs,
         manifest_yaml=manifest_yaml,
         run_py=run_py,
+        skill_md_content=skill_md_content,
+        run_py_content=run_py_content,
     )
 
 
@@ -1194,6 +1202,7 @@ def delete_worker(worker_id: str):
 class WorkerCreateRequest(BaseModel):
     worker_yml: str
     run_py: str
+    skill_md: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1291,6 +1300,7 @@ class DraftFromPromptOutputField(BaseModel):
 
 class DraftFromPromptResponse(BaseModel):
     worker_yml: str
+    skill_md: Optional[str] = None
     suggested_name: str
     suggested_title: str
     required_connections: List[str]
@@ -1450,8 +1460,11 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
         for f in raw_outputs if isinstance(f, dict) and f.get("name")
     ]
 
+    skill_md = parsed.get("skill_md") or None
+
     return DraftFromPromptResponse(
         worker_yml=worker_yml,
+        skill_md=skill_md,
         suggested_name=suggested_name,
         suggested_title=suggested_title,
         required_connections=required_connections,
@@ -1519,11 +1532,14 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     (target_dir / "worker.yml").write_text(payload.worker_yml)
     (target_dir / "run.py").write_text(payload.run_py)
     (target_dir / "requirements.txt").write_text("")
-    (target_dir / "SKILL.md").write_text(
-        f"# {config.name}\n\n"
-        "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
-        "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
-    )
+    if payload.skill_md:
+        (target_dir / "SKILL.md").write_text(payload.skill_md)
+    else:
+        (target_dir / "SKILL.md").write_text(
+            f"# {config.name}\n\n"
+            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+            "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+        )
 
     # Register
     invalidate_worker_cache()
@@ -1572,7 +1588,9 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
     run_py_path.write_text(payload.run_py)
     if not requirements_path.exists():
         requirements_path.write_text("")
-    if not skill_path.exists():
+    if payload.skill_md:
+        skill_path.write_text(payload.skill_md)
+    elif not skill_path.exists():
         skill_path.write_text(
             f"# {_config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "

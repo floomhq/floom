@@ -915,7 +915,7 @@ function ReviewStep({
     setSubmitting(true);
     try {
       const yamlToUse = activeTab === "yaml" ? workerYml : draft.worker_yml;
-      const worker = await api.workers.create(yamlToUse, runPy);
+      const worker = await api.workers.create(yamlToUse, runPy, draft.skill_md);
       try { sessionStorage.removeItem(DRAFT_SESSION_KEY); } catch { /* ignore */ }
       toast.success(`Worker "${worker.name}" created`);
       router.push(`/workers/${worker.id}`);

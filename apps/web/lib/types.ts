@@ -159,6 +159,8 @@ export interface WorkerDetail {
   recent_runs: RunSummary[];
   manifest_yaml?: string;
   run_py?: string;
+  skill_md_content?: string;
+  run_py_content?: string;
 }
 
 export interface SecretItem {
@@ -242,6 +244,7 @@ export interface DraftFromPromptOutputField {
 
 export interface DraftFromPromptResponse {
   worker_yml: string;
+  skill_md?: string;
   suggested_name: string;
   suggested_title: string;
   required_connections: string[];

@@ -29,20 +29,20 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
       }),
-    create: (worker_yml: string, run_py: string) =>
+    create: (worker_yml: string, run_py: string, skill_md?: string) =>
       fetchJson<import("./types").WorkerDetail>("/workers", {
         method: "POST",
-        body: JSON.stringify({ worker_yml, run_py }),
+        body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       }),
     draftFromPrompt: (prompt: string) =>
       fetchJson<import("./types").DraftFromPromptResponse>("/workers/draft-from-prompt", {
         method: "POST",
         body: JSON.stringify({ prompt }),
       }),
-    update: (id: string, worker_yml: string, run_py: string) =>
+    update: (id: string, worker_yml: string, run_py: string, skill_md?: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
         method: "PUT",
-        body: JSON.stringify({ worker_yml, run_py }),
+        body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       }),
     delete: (id: string) =>
       fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" }),
