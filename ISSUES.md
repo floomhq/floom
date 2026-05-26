@@ -284,3 +284,224 @@ PR B is the most launch-critical (connections are functionally broken right now)
 - Multi-action skills (already deferred post-launch in ROADMAP.md)
 - Rich JSON output preview (deferred post-launch)
 - In-UI file preview for PDF/Excel/images (deferred post-launch)
+
+---
+
+# Round 2 — 2026-05-26 afternoon walkthrough
+
+After PRs #34-#40 + the sticky-sidebar fix landed, Federico did another walkthrough. Twelve more items (#16-#27).
+
+---
+
+### #16 Worker cards have no View / Edit buttons, only Run
+
+**Where:** `apps/web/app/workers/page.tsx` worker card grid
+
+**Federico:** "I should not only be able to run them but also just look at them or edit them, right?"
+
+**Fix scope:** Each worker card needs three actions: **View** (read-only detail page), **Edit** (open YAML/SKILL.md editor), **Run** (existing primary action). Could be a primary button + secondary icon buttons or a small action row. The detail page at `/workers/[id]` (now tabs) already supports both modes; just need links from the card.
+
+**Status:** OPEN
+
+---
+
+### #17 Cards show "Trigger: manual · Runner: e2b" — runner is always e2b, triggers can be multiple
+
+**Where:** `apps/web/app/workers/page.tsx` worker card metadata row
+
+**Federico:** "Why does it say trigger manual and runner e2b? You can have multiple triggers for each worker, right, and the runner is always e2b."
+
+**Two problems:**
+1. **Runner: e2b** is hardcoded on every worker (since the local runner was removed). Showing it on every card is noise. Drop it.
+2. **Trigger: manual** is shown as a single value but a worker can have multiple triggers (manual + cron + webhook + connection event). Show ALL configured triggers as chips.
+
+**Fix scope:**
+- Remove the runner label entirely from worker cards.
+- Project all configured triggers (not just the first one) on `WorkerSummary` and render as chip row: `[Manual] [Cron · daily 9am] [Webhook] [On Slack message]`.
+
+**Status:** OPEN
+
+---
+
+### #18 Worker cards missing usage telemetry (last run, recent invocations, success rate)
+
+**Where:** `apps/web/app/workers/page.tsx` worker card
+
+**Federico:** "we can make the workers' cards nicer by adding some data on when they were last run, like over the last days, how often they were invoked, stuff like that"
+
+**Fix scope:**
+- Backend: aggregate run stats per worker for the last 7d/30d. New endpoint `GET /workers/{id}/stats` OR include `recent_stats: {last_run_at, runs_7d, success_rate_7d}` directly on `WorkerSummary`.
+- Frontend: render below the worker description as a small inline meta line: "Last run 2h ago · 14 runs in 7d · 92% success".
+
+**Status:** OPEN
+
+---
+
+### #19 /workers/new upload only accepts SKILL.md; should accept .py, .zip, full folder
+
+**Where:** `apps/web/app/workers/new/page.tsx` upload control (added in PR A)
+
+**Federico:** "now I have the option to upload an md file or skillmd file, but I should be able to upload also something else, like a Python script or a zip or a folder with the whole skill."
+
+**Fix scope:**
+- Upload input accepts: `.md`, `.py`, `.zip`, OR a folder (via `webkitdirectory`).
+- Backend `POST /workers` already accepts `worker_yml` + `run_py` + `skill_md`. Extend or add `POST /workers/from-bundle` that accepts a multipart zip/folder upload, unpacks it, validates `worker.yml`, and registers the worker.
+- For `.py` upload: prefill `run_py`, generate a stub `worker.yml` + minimal `SKILL.md`.
+- For `.zip` / folder: unpack, expect `worker.yml` + `SKILL.md` + `run.py`, validate all three.
+
+**Status:** OPEN
+
+---
+
+### #20 /workers/new layout — better stacking order
+
+**Where:** `apps/web/app/workers/new/page.tsx` Step 1
+
+**Federico:** "Maybe also have me, I'm not sure, having the prompt box, and then below the upload and below the examples. I think this can be smoother, better layout."
+
+**Current order:** Prompt textarea (with Generate + Cmd+Enter hint) → 5 example prompts → upload button somewhere. Federico wants: **prompt** → **upload area** → **examples** in that vertical order.
+
+**Fix scope:** Reorder the Step 1 components on `/workers/new`. Trivial layout swap.
+
+**Status:** OPEN
+
+---
+
+### #21 "Press Cmd+Enter to generate" hint is shown but the shortcut doesn't actually work
+
+**Where:** `apps/web/app/workers/new/page.tsx`
+
+**Federico:** "it says 'Command Enter', but this doesn't even work"
+
+**Fix scope:** Wire the textarea's onKeyDown to detect `(e.metaKey || e.ctrlKey) && e.key === 'Enter'` → trigger Generate. Don't show the hint until the handler is wired.
+
+**Status:** OPEN
+
+---
+
+### #22 Requirements UX should expose BOTH OAuth and API key per app when both exist
+
+**Where:** `apps/web/app/workers/new/page.tsx` Step 2 "Set up requirements" + `apps/api/main.py` `_DRAFT_SYSTEM_PROMPT` / `requirements` projection
+
+**Symptom:** PR D's fix has the LLM pick ONE method per app (OAuth XOR API key). Federico's prompt "Summarise Granola meetings, update HubSpot" now returns Granola=API-key + HubSpot=OAuth. Federico wants the USER to be able to choose between OAuth and API key for each app where both methods exist:
+- Granola: both API key and Composio OAuth available
+- HubSpot: both API key (MCP) and Composio OAuth available
+
+**Federico:** "for both I should have both options, because they both offer API keys (MCP keys, whatever), and they also both have Composio connections."
+
+**Fix scope:**
+- Extend `RequirementItem` to: `{app, available_methods: ["oauth", "api_key"], preferred_method, reason}` instead of locking to one.
+- Backend queries Composio catalog to discover which auth modes each app supports, AND uses a small static table for apps that have native API keys (Granola, etc.).
+- Frontend renders each requirement as: `<app icon> <name> <toggle: OAuth | API key>`. Default selection = `preferred_method`. User can switch.
+
+**Status:** OPEN — this REVERSES part of PR D's "one method per app" stance. Federico's intent is one method PER USER CHOICE, not one method enforced.
+
+---
+
+### #23 Cron trigger needs a visual scheduler, not a raw cron expression input
+
+**Where:** `apps/web/app/workers/new/page.tsx` Step 2 trigger picker + `apps/web/app/workers/[id]/edit/`
+
+**Federico:** "I should have a scheduler so I can actually just pick the cron instead of having to insert the cron code. Who knows this?"
+
+**Fix scope:**
+- Add a visual cron builder component. Common UX: dropdowns for `Every: [day, week, month, hour]` + `At: [time]` + `On: [days of week]`. Output the corresponding cron string under the hood.
+- For power users: a "Custom cron expression" toggle that exposes the raw input.
+- Library: probably easiest to write a small one from scratch since most cron-picker libs are heavy. Or use `react-js-cron`.
+
+**Status:** OPEN
+
+---
+
+### #24 Connection event trigger picker is empty / unconfigured
+
+**Where:** `apps/web/app/workers/new/page.tsx` Step 2 trigger picker
+
+**Federico:** "For the connection event, I cannot choose anything. This is not proper yet."
+
+**Fix scope:**
+- Connection-event trigger needs: (a) pick a connected app, (b) pick a trigger type from that app's catalog (e.g. Gmail → "new message in label X", Slack → "new message in channel Y").
+- Backend `composio_client.py` already has trigger catalog support via `GET /integrations/triggers`. Extend to filter by app slug.
+- Frontend: when user picks "Connection event" as trigger type, render two dropdowns: app picker → event picker. Persist into `trigger.composio = {app, event_slug, config}`.
+
+**Status:** OPEN — partially exists; needs UI polish to actually be usable.
+
+---
+
+### #25 Worker can be Python or Python+SKILL.md hybrid, not just agent skill
+
+**Where:** `apps/web/app/workers/new/page.tsx` Step 2 worker mode picker
+
+**Federico:** "Also, this worker could also be Python. It could have SkillMD plus Python or just Python with invocation of agent. I guess SkillMD plus Python is best, but yeah, way to go here."
+
+**Fix scope:**
+- Step 2 should expose `exec.mode` choices: `agent` (SKILL.md only), `pure-script` (run.py only), `hybrid` (run.py orchestrates + can call agent with SKILL.md when needed).
+- Backend already supports the first two. "Hybrid" is conceptually `pure-script` + access to an agent helper. Probably needs a new helper in the E2B sandbox runtime.
+- Frontend: radio group with explanation of each. Default = `agent`.
+
+**Status:** OPEN — `hybrid` mode is a small new primitive in the runtime. Could ship the radio with `agent`/`pure-script` first, hybrid as a follow-up.
+
+---
+
+### #26 Platform secrets list is bloated; only OPENAI / E2B / COMPOSIO are mandatory
+
+**Where:** `apps/api/main.py:2272` `PLATFORM_SECRETS` list
+
+**Federico:** "for secrets like platform secrets, are OpenAI and E2B, right? Composio. I think these three are necessary, and the others are all for the workers themselves, right? These three are for the platform to actually work, right?"
+
+**Current platform-config entries (after PR F):**
+- COMPOSIO_API_KEY (required) ✓ platform
+- COMPOSIO_WEBHOOK_SIGNING_KEY (required) ✓ platform
+- E2B_API_KEY (required) ✓ platform
+- FLOOM_SECRET (required) ✓ platform (it's the auth shared secret)
+- WORKERS_FRONTEND_URL (required) → infra config, not really a secret
+- FLOOM_DB / FLOOM_WORKERS_DIR / FLOOM_ARTIFACTS_DIR (optional) → infra paths, not secrets
+- FLOOM_RUN_TIMEOUT (optional) → tuning knob
+
+**MISSING:** OPENAI_API_KEY — currently treated as a worker secret because workers consume it, but it's also used by the platform itself for `draft-from-prompt`. Should appear on the platform list.
+
+**Fix scope:**
+- Reduce `PLATFORM_SECRETS` to truly platform-only: `OPENAI_API_KEY`, `E2B_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `FLOOM_SECRET`, `WORKERS_FRONTEND_URL`.
+- Move FLOOM_DB / FLOOM_WORKERS_DIR / FLOOM_ARTIFACTS_DIR / FLOOM_RUN_TIMEOUT to a separate "Infrastructure paths" section (or drop them from the UI entirely since the user can never edit them).
+
+**Status:** OPEN — also need to add OPENAI_API_KEY to the platform list (currently missing).
+
+---
+
+### #27 Real Floom logo, not generated "F" tile
+
+**Where:** `apps/web/app/icon.tsx`, `apps/web/app/apple-icon.tsx`, `apps/web/components/Sidebar.tsx`
+
+**Federico:** "let's use the real Floom logo and so on. You can get it from skills neo, for example."
+
+**Fix scope:**
+- Source: `~/skills-neo/` repo, look for the official logo (likely `apps/web/public/logo*` or `apps/web/components/Logo.tsx`).
+- Replace the generated "F" `ImageResponse` in `icon.tsx` + `apple-icon.tsx` with the real SVG/PNG.
+- Replace the sidebar's `<div>F</div>` brand mark in `apps/web/components/Sidebar.tsx` with the real logo (proper SVG component).
+
+**Status:** OPEN — small UI polish.
+
+---
+
+## Round 2 Sequencing
+
+12 new items, grouped into 5 PRs (mostly parallel-safe):
+
+| PR | Scope | Issues |
+|----|-------|--------|
+| **PR H** | Worker card improvements: View/Edit buttons, drop runner label, show all triggers, last-run/usage stats | #16 #17 #18 |
+| **PR I** | /workers/new layout + uploads: reorder Step 1, accept .py/.zip/folder, wire Cmd+Enter, mode picker (agent/pure-script/hybrid) | #19 #20 #21 #25 |
+| **PR J** | Triggers UX: visual cron scheduler + connection-event picker actually works | #23 #24 |
+| **PR K** | Requirements UX v2: per-app OAuth XOR API key TOGGLE (user choice, not LLM enforced) | #22 |
+| **PR L** | Platform polish: real Floom logo (icon, apple-icon, sidebar) + reduce platform-secrets to mandatory three + add OPENAI_API_KEY | #26 #27 |
+
+**Parallel lanes:**
+- Lane 1 (worker UX): PR H → PR I (both touch /workers files, sequential)
+- Lane 2 (creation flow): PR J → PR K (both touch /workers/new, sequential)
+- Lane 3 (polish): PR L standalone
+
+PR I and PR J have small overlap on `/workers/new` Step 1/Step 2 — handle in sequence, not parallel.
+
+PR K is the most surprising one because it REVERSES PR D's stance: "one method per app" is wrong, the user wants to choose method per app.
+
+**Total estimated effort:** 10-14 hours.
