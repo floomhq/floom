@@ -1234,26 +1234,30 @@ class WorkerCreateRequest(BaseModel):
 # POST /workers/draft-from-prompt
 # ---------------------------------------------------------------------------
 
+# Strict keyword map: only match if the app name itself appears in the prompt.
+# Generic words like "meeting", "message", "file" have been removed to avoid
+# false positives (e.g. "Granola meetings" should not imply google-calendar).
 _COMPOSIO_APP_KEYWORDS: Dict[str, List[str]] = {
-    "gmail": ["gmail", "email", "mail", "inbox", "message"],
-    "hubspot": ["hubspot", "crm", "contact", "deal", "lead"],
-    "slack": ["slack", "channel", "dm", "message"],
-    "notion": ["notion", "page", "database", "notes"],
-    "granola": ["granola", "meeting", "calendar meeting", "notes"],
-    "salesforce": ["salesforce", "sfdc", "opportunity", "account"],
-    "google-calendar": ["google calendar", "calendar", "event", "schedule", "meeting"],
-    "github": ["github", "pr", "pull request", "issue", "repository", "repo"],
-    "linear": ["linear", "ticket", "issue", "sprint", "project"],
-    "google-sheets": ["google sheets", "spreadsheet", "sheet", "excel"],
-    "airtable": ["airtable", "base", "record"],
-    "stripe": ["stripe", "payment", "invoice", "subscription", "billing"],
-    "jira": ["jira", "ticket", "issue", "sprint"],
-    "figma": ["figma", "design", "prototype"],
-    "discord": ["discord", "channel", "server", "message"],
-    "twitter": ["twitter", "tweet", "post"],
-    "linkedin": ["linkedin", "profile", "connection", "post"],
-    "dropbox": ["dropbox", "file", "folder"],
-    "google-drive": ["google drive", "gdrive", "drive", "document", "doc"],
+    "gmail": ["gmail"],
+    "hubspot": ["hubspot"],
+    "slack": ["slack"],
+    "notion": ["notion"],
+    "granola": ["granola"],
+    "salesforce": ["salesforce", "sfdc"],
+    "google-calendar": ["google calendar", "google cal"],
+    "github": ["github"],
+    "linear": ["linear"],
+    "google-sheets": ["google sheets", "google sheet"],
+    "airtable": ["airtable"],
+    "stripe": ["stripe"],
+    "jira": ["jira"],
+    "figma": ["figma"],
+    "discord": ["discord"],
+    "twitter": ["twitter", "x.com"],
+    "linkedin": ["linkedin"],
+    "dropbox": ["dropbox"],
+    "google-drive": ["google drive", "gdrive"],
+    "apollo": ["apollo"],
 }
 
 _DRAFT_SYSTEM_PROMPT = """You are a Workeros worker designer. Given a natural-language description of an automation task, you must output a VALID YAML WorkerContract and extracted metadata as JSON.
@@ -1292,17 +1296,35 @@ exec:
 
 The SKILL.md content (returned as `skill_md` key) should be detailed system-prompt-style instructions for the agent. Include what tools/APIs to call, what the output format should be, error handling, and any important context.
 
+IMPORTANT RULES FOR INTEGRATION REQUIREMENTS:
+- Only include integrations (connections/secrets) for apps that are EXPLICITLY NAMED in the user's prompt. Do not infer apps from generic words.
+  - "Granola meetings" -> only granola (NOT google-calendar)
+  - "post to Slack" -> only slack
+  - "update HubSpot" -> only hubspot
+  - "Google Calendar event" -> google-calendar (because "Google Calendar" is explicit)
+- For each required integration, choose ONE authentication method: either "oauth" (preferred, when the app supports it) OR "api_key" (when OAuth is not available or the app uses API keys). Never list the same app twice with different methods.
+- Apps that commonly use OAuth: gmail, hubspot, slack, notion, github, linear, google-calendar, google-sheets, google-drive, salesforce, linkedin, discord, twitter, dropbox, airtable, jira
+- Apps that commonly use API keys: granola, apollo, stripe, figma, and most niche/specialty APIs
+- For required_secrets: only include for api_key method integrations (e.g. GRANOLA_API_KEY, APOLLO_API_KEY)
+- For required_connections: only include app slugs for oauth method integrations
+
 Respond with ONLY valid JSON in this exact shape (no markdown fences, no extra text):
 {
   "worker_yml": "<full YAML string>",
   "skill_md": "<markdown instructions for the agent>",
   "suggested_name": "<slug>",
   "suggested_title": "<human title>",
-  "required_connections": ["app-slug1", "app-slug2"],
-  "required_secrets": ["SECRET_NAME"],
+  "requirements": [
+    {"app": "hubspot", "method": "oauth", "reason": "Post action items to HubSpot CRM contacts"},
+    {"app": "granola", "method": "api_key", "reason": "Fetch meeting notes from Granola"}
+  ],
+  "required_connections": ["hubspot"],
+  "required_secrets": ["GRANOLA_API_KEY"],
   "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
   "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}]
-}"""
+}
+
+The `requirements` array is the authoritative source for integrations. `required_connections` must contain only the `app` slugs from requirements where `method` is "oauth". `required_secrets` must contain only the secret names (UPPER_SNAKE_CASE of app_API_KEY) for requirements where `method` is "api_key"."""
 
 
 class DraftFromPromptRequest(BaseModel):
@@ -1323,11 +1345,21 @@ class DraftFromPromptOutputField(BaseModel):
     label: str
 
 
+class RequirementItem(BaseModel):
+    """One integration requirement: a single app with exactly one auth method."""
+    app: str
+    method: str  # "oauth" or "api_key"
+    reason: str = ""
+
+
 class DraftFromPromptResponse(BaseModel):
     worker_yml: str
     skill_md: Optional[str] = None
     suggested_name: str
     suggested_title: str
+    # New: one entry per app, method is "oauth" or "api_key"
+    requirements: List[RequirementItem] = []
+    # Legacy fields kept for backward compatibility
     required_connections: List[str]
     required_secrets: List[str]
     inputs: List[DraftFromPromptInputField]
@@ -1458,8 +1490,64 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
 
     suggested_name = parsed.get("suggested_name", "my-worker")
     suggested_title = parsed.get("suggested_title", "My Worker")
-    required_connections = parsed.get("required_connections") or detected_connections
-    required_secrets = parsed.get("required_secrets") or []
+
+    # --- Process requirements array (new format) ---
+    # Build deduplicated requirements: one entry per app, no duplicates.
+    requirements: List[RequirementItem] = []
+    seen_apps: set = set()
+
+    raw_requirements = parsed.get("requirements") or []
+    if isinstance(raw_requirements, list):
+        for req in raw_requirements:
+            if not isinstance(req, dict):
+                continue
+            app_slug = (req.get("app") or "").strip().lower()
+            method = (req.get("method") or "oauth").strip().lower()
+            reason = req.get("reason") or ""
+            if not app_slug or app_slug in seen_apps:
+                continue
+            # Normalize method: only "oauth" or "api_key" are valid
+            if method not in ("oauth", "api_key"):
+                method = "oauth"
+            requirements.append(RequirementItem(app=app_slug, method=method, reason=reason))
+            seen_apps.add(app_slug)
+
+    # If LLM did not return structured requirements, fall back to detected connections
+    # and build requirements from required_connections + required_secrets.
+    if not requirements:
+        llm_connections = parsed.get("required_connections") or detected_connections
+        llm_secrets = parsed.get("required_secrets") or []
+        # Infer apps from secrets: HUBSPOT_API_KEY -> hubspot
+        secret_apps = set()
+        for secret in llm_secrets:
+            if isinstance(secret, str) and secret.endswith("_API_KEY"):
+                app_from_secret = secret[: -len("_API_KEY")].lower().replace("_", "-")
+                secret_apps.add(app_from_secret)
+        for conn in llm_connections:
+            slug = (conn or "").strip().lower()
+            if not slug or slug in seen_apps:
+                continue
+            # If this app also appears in secret_apps, prefer oauth (not both)
+            requirements.append(RequirementItem(app=slug, method="oauth", reason=""))
+            seen_apps.add(slug)
+        for app_slug in secret_apps:
+            if app_slug not in seen_apps:
+                requirements.append(RequirementItem(app=app_slug, method="api_key", reason=""))
+                seen_apps.add(app_slug)
+
+    # Derive legacy fields from requirements for backward compatibility
+    required_connections = [r.app for r in requirements if r.method == "oauth"]
+    required_secrets_from_reqs = [
+        f"{r.app.upper().replace('-', '_')}_API_KEY"
+        for r in requirements if r.method == "api_key"
+    ]
+    # Also include any explicitly-listed secrets that don't overlap with api_key requirements
+    llm_raw_secrets = parsed.get("required_secrets") or []
+    extra_secrets = [
+        s for s in llm_raw_secrets
+        if isinstance(s, str) and s not in required_secrets_from_reqs
+    ]
+    required_secrets = required_secrets_from_reqs + extra_secrets
 
     raw_inputs = parsed.get("inputs") or []
     inputs = [
@@ -1492,6 +1580,7 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
         skill_md=skill_md,
         suggested_name=suggested_name,
         suggested_title=suggested_title,
+        requirements=requirements,
         required_connections=required_connections,
         required_secrets=required_secrets,
         inputs=inputs,
