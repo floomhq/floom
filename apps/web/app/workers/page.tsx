@@ -1,18 +1,37 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, ChevronDown, ChevronUp, Eye, Folder, Pencil, Play, Plus, Tags, X } from "lucide-react";
-import type { WorkerSummary } from "@/lib/types";
+import {
+  Box, ChevronDown, ChevronUp, Eye, Folder, Pencil, Play, Plus, Star, Tags, X,
+} from "lucide-react";
+import type { WorkerSummary, TimeseriesDay } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
+import { Sparkline } from "@/components/Sparkline";
 
 const TAG_COLLAPSED_MAX = 8;
 const SESSION_KEY_TAGS_EXPANDED = "workeros:tags-expanded";
+const LS_KEY_FAVORITES = "workeros:favorites";
+
+function getFavorites(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_KEY_FAVORITES);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavorites(favs: Set<string>) {
+  try {
+    localStorage.setItem(LS_KEY_FAVORITES, JSON.stringify(Array.from(favs)));
+  } catch {}
+}
 
 export default function WorkersPage() {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
@@ -26,6 +45,8 @@ export default function WorkersPage() {
       return false;
     }
   });
+  const [favorites, setFavorites] = useState<Set<string>>(() => getFavorites());
+  const [viewMode, setViewMode] = useState<"grid" | "drive">("drive");
 
   useEffect(() => {
     api.workers.list().then((w) => {
@@ -34,7 +55,17 @@ export default function WorkersPage() {
     }).catch(() => setLoading(false));
   }, []);
 
-  // Flatten folders into leaf-path chips (e.g. "Recruiting/NovaSearch")
+  const toggleFavorite = useCallback((id: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveFavorites(next);
+      return next;
+    });
+  }, []);
+
+  // Flatten folders into leaf-path chips
   const flatFolders = useMemo(() => flattenFolders(workers), [workers]);
   const hasFolders = flatFolders.length > 0;
 
@@ -42,12 +73,35 @@ export default function WorkersPage() {
     () => Array.from(new Set(workers.flatMap((worker) => worker.tags || []))).sort(),
     [workers],
   );
+
+  // Recent workers: top 5 by last_run_at DESC, fill with most recently created
+  const recentWorkers = useMemo(() => {
+    const withRuns = workers
+      .filter((w) => w.recent_stats?.last_run_at)
+      .sort((a, b) => {
+        const ta = new Date(a.recent_stats!.last_run_at!).getTime();
+        const tb = new Date(b.recent_stats!.last_run_at!).getTime();
+        return tb - ta;
+      });
+    if (withRuns.length >= 5) return withRuns.slice(0, 5);
+    const withRunIds = new Set(withRuns.map((w) => w.id));
+    const rest = workers.filter((w) => !withRunIds.has(w.id));
+    return [...withRuns, ...rest].slice(0, 5);
+  }, [workers]);
+
+  const favoriteWorkers = useMemo(
+    () => workers.filter((w) => favorites.has(w.id)),
+    [workers, favorites],
+  );
+
   const filteredWorkers = workers.filter((worker) => {
     const matchesTag = !tagFilter || (worker.tags || []).includes(tagFilter);
     const matchesFolder = !folderFilter || worker.folder === folderFilter || worker.folder?.startsWith(`${folderFilter}/`);
     return matchesTag && matchesFolder;
   });
   const hasFilter = Boolean(tagFilter || folderFilter);
+
+  const isDriveMode = viewMode === "drive" && !hasFilter;
 
   return (
     <div className="space-y-6">
@@ -73,11 +127,63 @@ export default function WorkersPage() {
       {!loading && workers.length === 0 ? (
         <EmptyWorkersState />
       ) : (
-        <div className="space-y-4">
-          {/* Top filter bar */}
+        <div className="space-y-6">
+          {/* Drive-style layout (default when no filters active) */}
+          {isDriveMode && !loading && (
+            <>
+              {/* Recent section */}
+              {recentWorkers.length > 0 && (
+                <section>
+                  <h2 className="text-xs font-semibold text-[#999] uppercase tracking-wide mb-3">Recent</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                    {recentWorkers.map((w) => (
+                      <WorkerCard key={w.id} worker={w} isFavorite={favorites.has(w.id)} onTagClick={setTagFilter} onFavoriteToggle={toggleFavorite} compact />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Favourites section */}
+              {favoriteWorkers.length > 0 && (
+                <section>
+                  <h2 className="text-xs font-semibold text-[#999] uppercase tracking-wide mb-3">Favourites</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {favoriteWorkers.map((w) => (
+                      <WorkerCard key={w.id} worker={w} isFavorite onTagClick={setTagFilter} onFavoriteToggle={toggleFavorite} />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Folders section */}
+              {hasFolders && (
+                <section>
+                  <h2 className="text-xs font-semibold text-[#999] uppercase tracking-wide mb-3">Folders</h2>
+                  <div className="flex flex-wrap gap-3">
+                    {flatFolders.map(({ path, label, count }) => (
+                      <button
+                        key={path}
+                        type="button"
+                        onClick={() => setFolderFilter(path)}
+                        className="flex items-center gap-2 rounded-md border border-[#eaeaea] bg-white px-4 py-3 hover:border-[#d4d4d8] hover:bg-[#fafafa] transition-colors text-left"
+                      >
+                        <Folder className="w-5 h-5 text-[#888]" />
+                        <div>
+                          <p className="text-sm font-medium text-[#333]">{label}</p>
+                          <p className="text-xs text-[#999]">{count} worker{count === 1 ? "" : "s"}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          {/* Filter bar (always visible but compact in drive mode) */}
           <div className="rounded-md border border-[#eaeaea] bg-white px-4 py-3 space-y-3">
-            {/* Folders row (hidden when no folders defined) */}
-            {(hasFolders || loading) && (
+            {/* Folder filter chips — shown only when filter is active in drive mode, always in non-drive mode */}
+            {(!isDriveMode || hasFilter) && (hasFolders || loading) && (
               <div className="flex items-start gap-2">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-[#555] pt-1 shrink-0">
                   <Folder className="w-3.5 h-3.5" />
@@ -168,7 +274,6 @@ export default function WorkersPage() {
                 </div>
               )}
 
-              {/* Clear filters button inline with tags row when filter is active */}
               {hasFilter && (
                 <button
                   type="button"
@@ -191,25 +296,40 @@ export default function WorkersPage() {
             </div>
           )}
 
-          {/* Worker cards: full-width grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {loading
-              ? Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-44 w-full" />
-                ))
-              : filteredWorkers.map((w) => (
-                  <WorkerCard key={w.id} worker={w} onTagClick={setTagFilter} />
-                ))}
-          </div>
+          {/* All workers section */}
+          <section>
+            {isDriveMode && (
+              <h2 className="text-xs font-semibold text-[#999] uppercase tracking-wide mb-3">All workers</h2>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {loading
+                ? Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="h-44 w-full" />
+                  ))
+                : filteredWorkers.map((w) => (
+                    <WorkerCard
+                      key={w.id}
+                      worker={w}
+                      isFavorite={favorites.has(w.id)}
+                      onTagClick={setTagFilter}
+                      onFavoriteToggle={toggleFavorite}
+                    />
+                  ))}
+            </div>
 
-          {!loading && filteredWorkers.length === 0 && (
-            <p className="text-sm text-[#999]">No workers match the active filters.</p>
-          )}
+            {!loading && filteredWorkers.length === 0 && (
+              <p className="text-sm text-[#999]">No workers match the active filters.</p>
+            )}
+          </section>
         </div>
       )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Helper: flatten folder tree
+// ---------------------------------------------------------------------------
 
 interface FlatFolder {
   path: string;
@@ -217,17 +337,11 @@ interface FlatFolder {
   count: number;
 }
 
-/**
- * Flatten the folder tree into a list of leaf-path chips.
- * Parent folders that have children are shown as "Parent/Child" labels.
- * Workers with no folder are ignored (they appear under "All").
- */
 function flattenFolders(workers: WorkerSummary[]): FlatFolder[] {
   const countByPath = new Map<string, number>();
 
   for (const worker of workers) {
     if (!worker.folder) continue;
-    // Count this worker under its exact path and all ancestor paths
     const parts = worker.folder.split("/").filter(Boolean);
     let path = "";
     for (const part of parts) {
@@ -238,42 +352,26 @@ function flattenFolders(workers: WorkerSummary[]): FlatFolder[] {
 
   if (countByPath.size === 0) return [];
 
-  // Build the tree to find which nodes are leaves vs. parents
-  const allPaths = Array.from(countByPath.keys()).sort();
-
-  // A path is "shown" if it has no children OR if it has children but also
-  // has workers directly in it (not only via children). For simplicity, we
-  // always show every unique path used by at least one worker (the full set of
-  // distinct folder values), then sort. This makes "Recruiting/NovaSearch" a
-  // separate chip from "Recruiting".
   const distinctFolders = Array.from(
     new Set(workers.map((w) => w.folder).filter(Boolean) as string[])
   ).sort();
 
   return distinctFolders.map((path) => ({
     path,
-    label: path, // show full path e.g. "Recruiting/NovaSearch"
+    label: path,
     count: countByPath.get(path) ?? 0,
   }));
 }
 
+// ---------------------------------------------------------------------------
+// EmptyWorkersState
+// ---------------------------------------------------------------------------
+
 function EmptyWorkersState() {
   const templates = [
-    {
-      id: "research_brief",
-      title: "Research brief",
-      description: "Markdown brief from topic, audience, and depth.",
-    },
-    {
-      id: "gmail_intake_brief",
-      title: "Gmail intake brief",
-      description: "Unread Gmail triage summary with next actions.",
-    },
-    {
-      id: "csv_enricher",
-      title: "CSV enricher",
-      description: "Spreadsheet enrichment with structured output.",
-    },
+    { id: "research_brief", title: "Research brief", description: "Markdown brief from topic, audience, and depth." },
+    { id: "gmail_intake_brief", title: "Gmail intake brief", description: "Unread Gmail triage summary with next actions." },
+    { id: "csv_enricher", title: "CSV enricher", description: "Spreadsheet enrichment with structured output." },
   ];
 
   return (
@@ -296,7 +394,23 @@ function EmptyWorkersState() {
   );
 }
 
-function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick: (tag: string) => void }) {
+// ---------------------------------------------------------------------------
+// WorkerCard
+// ---------------------------------------------------------------------------
+
+function WorkerCard({
+  worker,
+  isFavorite,
+  onTagClick,
+  onFavoriteToggle,
+  compact,
+}: {
+  worker: WorkerSummary;
+  isFavorite: boolean;
+  onTagClick: (tag: string) => void;
+  onFavoriteToggle: (id: string) => void;
+  compact?: boolean;
+}) {
   const statusColor: Record<string, string> = {
     healthy: "text-emerald-600 border-emerald-200 bg-emerald-50",
     needs_attention: "text-amber-600 border-amber-200 bg-amber-50",
@@ -306,20 +420,31 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
   const hoverDescription = firstLine(worker.long_description);
   const stats = worker.recent_stats;
   const hasStats = stats && stats.runs_7d > 0;
+  const hasSparkline = Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && hasStats;
 
   return (
     <Card
       className="border-[#eaeaea] shadow-none bg-white hover:border-[#d4d4d8] transition-colors"
       title={hoverDescription || undefined}
     >
-      <CardContent className="p-5 space-y-3">
-        {/* Header row: name + status badge + View/Edit actions */}
+      <CardContent className={`p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
+        {/* Header row */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Box className="w-4 h-4 text-[#999] shrink-0" />
             <h3 className="font-medium text-[15px] truncate">{worker.name}</h3>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+              onClick={() => onFavoriteToggle(worker.id)}
+              className={`h-7 w-7 flex items-center justify-center rounded transition-colors ${
+                isFavorite ? "text-amber-400 hover:text-amber-500" : "text-[#ccc] hover:text-amber-400"
+              }`}
+            >
+              <Star className={`w-3.5 h-3.5 ${isFavorite ? "fill-current" : ""}`} />
+            </button>
             <Link href={`/workers/${worker.id}`} title="View worker">
               <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[#888] hover:text-[#333]">
                 <Eye className="w-3.5 h-3.5" />
@@ -336,13 +461,15 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
           </div>
         </div>
 
-        <p className="text-sm text-[#666] line-clamp-2">{worker.description || "No description."}</p>
+        {!compact && (
+          <p className="text-sm text-[#666] line-clamp-2">{worker.description || "No description."}</p>
+        )}
 
         {worker.folder && (
           <p className="text-xs text-[#999]">{worker.folder}</p>
         )}
 
-        {(worker.tags || []).length > 0 && (
+        {!compact && (worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
               <button key={tag} type="button" onClick={() => onTagClick(tag)}>
@@ -354,7 +481,7 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
           </div>
         )}
 
-        {/* Trigger chips: show all configured triggers, no runner label */}
+        {/* Trigger chips */}
         {(worker.triggers || []).length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {(worker.triggers || []).map((label) => (
@@ -370,7 +497,14 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
           <p className="text-xs text-[#999]">{worker.trigger_type}</p>
         )}
 
-        {/* Usage telemetry: only shown if worker has been run in last 7 days */}
+        {/* Sparkline (only shown when timeseries data available and has runs) */}
+        {hasSparkline && (
+          <div>
+            <Sparkline data={worker.timeseries!} width={120} height={28} />
+          </div>
+        )}
+
+        {/* Usage stats text */}
         {hasStats && (
           <p className="text-xs text-[#999]">
             {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
@@ -382,11 +516,7 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
 
         <div className="pt-1">
           <Link href={`/workers/${worker.id}`}>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="w-full"
-            >
+            <Button variant="secondary" size="sm" className="w-full">
               <Play className="w-3.5 h-3.5 mr-1.5" />
               Run worker
             </Button>

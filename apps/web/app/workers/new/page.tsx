@@ -18,6 +18,7 @@ import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 import {
   ExecModePicker,
+  FilesEditor,
   RequirementsEditor,
   TriggersEditor,
   WorkerMetadataForm,
@@ -26,6 +27,7 @@ import {
   replaceTriggerBlock as replaceTriggersBlock,
 } from "@/components/worker-form";
 import type { ExecMode as WorkerExecMode, TriggerRow } from "@/components/worker-form";
+import type { DraftFile } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1588,6 +1590,9 @@ function ReviewStep({
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
   const [execMode, setExecMode] = useState<WorkerExecMode>(initialExecMode ?? "agent");
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(
+    draft.files && draft.files.length > 0 ? draft.files[0].path : null
+  );
 
   // Requirements state
   const [requirementsReady, setRequirementsReady] = useState(false);
@@ -1659,9 +1664,27 @@ function ReviewStep({
         }
         yamlToUse = base;
       }
-      // For hybrid/pure-script we always pass run_py; for agent it is ignored by the backend
-      const skillMdToSend = execMode === "pure-script" ? undefined : draft.skill_md;
-      const worker = await api.workers.create(yamlToUse, runPy, skillMdToSend);
+      let worker: import("@/lib/types").WorkerDetail;
+      if (draft.files && draft.files.length > 0) {
+        // Skill-bundle path: zip all files and POST to /workers/from-bundle
+        // Patch the YAML file inside the bundle with user-chosen triggers / exec mode
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        for (const f of draft.files) {
+          const isYaml = f.path === "worker.yml" || f.path.endsWith(".yml") || f.path.endsWith(".yaml");
+          zip.file(f.path, isYaml && f.path === "worker.yml" ? yamlToUse : f.content);
+        }
+        // Ensure worker.yml is present (LLM may have named it differently)
+        if (!draft.files.some((f) => f.path === "worker.yml")) {
+          zip.file("worker.yml", yamlToUse);
+        }
+        const blob = await zip.generateAsync({ type: "blob" });
+        worker = await api.workers.createFromBundle(blob);
+      } else {
+        // Legacy path: separate YAML + run.py + skill_md
+        const skillMdToSend = execMode === "pure-script" ? undefined : draft.skill_md;
+        worker = await api.workers.create(yamlToUse, runPy, skillMdToSend);
+      }
       try { sessionStorage.removeItem(DRAFT_SESSION_KEY); } catch { /* ignore */ }
       toast.success(`Worker "${worker.name}" created`);
       router.push(`/workers/${worker.id}`);
@@ -1718,8 +1741,38 @@ function ReviewStep({
               idError={idError}
             />
 
-            {/* SKILL.md viewer (read-only): shown when draft has skill_md */}
-            {draft.skill_md && (
+            {/* File tree viewer (read-only): prefer draft.files bundle, fall back to skill_md */}
+            {draft.files && draft.files.length > 0 ? (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">Generated files (read-only)</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <FilesEditor
+                    mode="view"
+                    selectedPath={selectedFilePath}
+                    onSelect={setSelectedFilePath}
+                    files={draft.files.map((f) => ({
+                      path: f.path,
+                      content: f.content,
+                      binary: false,
+                      size: f.content.length,
+                      language: f.path.endsWith(".py")
+                        ? "python"
+                        : f.path.endsWith(".yml") || f.path.endsWith(".yaml")
+                        ? "yaml"
+                        : f.path.endsWith(".json")
+                        ? "json"
+                        : f.path.endsWith(".md") || f.path.endsWith(".txt")
+                        ? "markdown"
+                        : f.path.endsWith(".sh")
+                        ? "bash"
+                        : "text",
+                    }))}
+                  />
+                </CardContent>
+              </Card>
+            ) : draft.skill_md ? (
               <Card className="border-[#eaeaea] shadow-none bg-white">
                 <CardHeader>
                   <CardTitle className="text-sm font-medium">SKILL.md (read-only)</CardTitle>
@@ -1730,7 +1783,7 @@ function ReviewStep({
                   </div>
                 </CardContent>
               </Card>
-            )}
+            ) : null}
 
             {/* Requirements (shared component) */}
             {hasRequirements && (

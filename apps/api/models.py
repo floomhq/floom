@@ -780,6 +780,14 @@ class RecentStats(BaseModel):
     success_rate_7d: Optional[float] = None  # fraction (0.0-1.0) or None if no runs
 
 
+class TimeseriesDay(BaseModel):
+    """One day of run telemetry for the sparkline chart."""
+    date: str        # "YYYY-MM-DD"
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+
+
 class TriggerSpec(BaseModel):
     """Structured representation of a single trigger for API responses."""
     type: str
@@ -807,6 +815,7 @@ class WorkerSummary(BaseModel):
     triggers: List[str] = Field(default_factory=list)  # all configured trigger labels (display strings)
     triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects
     recent_stats: Optional[RecentStats] = None
+    timeseries: Optional[List[TimeseriesDay]] = None  # 14-day sparkline data; None when not loaded
 
 
 class WorkerFile(BaseModel):
