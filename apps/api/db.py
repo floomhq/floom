@@ -536,6 +536,15 @@ MIGRATIONS: list[Migration] = [
     DROP TABLE IF EXISTS approvals;
     DROP TABLE IF EXISTS worker_state;
     """,
+    # -- migration 16: cancel_requested column on runs (cancel mechanism) -------
+    """
+    ALTER TABLE runs ADD COLUMN cancel_requested INTEGER DEFAULT 0 NOT NULL;
+    ALTER TABLE runs ADD COLUMN cancelled_at TEXT;
+    """,
+    # -- migration 17: drop file_binding_audit (scope cut: no UI consumer) -----
+    """
+    DROP TABLE IF EXISTS file_binding_audit;
+    """,
 ]
 
 

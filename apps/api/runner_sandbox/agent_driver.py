@@ -173,6 +173,16 @@ class AgentDriver(SandboxDriver):
         model = config.runtime.model or "gpt-5-mini"
 
         for iteration in range(limits.max_tool_iterations):
+            # Check cancel_requested before each iteration so the agent stops
+            # promptly on user cancel (runaway LLM token loops).
+            if self._cancel_requested(run_id):
+                log_fn("Cancel requested; stopping agent loop", "info")
+                return WorkerResult(
+                    status="failed",
+                    error="Run cancelled by user",
+                    error_code="cancelled",
+                )
+
             if total_tokens >= limits.max_total_tokens:
                 return WorkerResult(
                     status="error",
@@ -264,6 +274,18 @@ class AgentDriver(SandboxDriver):
             }
         )
         return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
+
+    def _cancel_requested(self, run_id: str) -> bool:
+        """Check if the run's cancel_requested flag is set in the DB."""
+        try:
+            from db import get_db
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT cancel_requested FROM runs WHERE id = ?", (run_id,)
+                ).fetchone()
+            return bool(row and row["cancel_requested"])
+        except Exception:
+            return False
 
     def _make_openai_client(self) -> Any:
         from openai import OpenAI
