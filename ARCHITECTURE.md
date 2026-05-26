@@ -23,7 +23,9 @@
 - The `runner_local.py` module that existed in earlier commits was renamed to `runner_utils.py` in PR R. Its `run_worker_local` executor function was deleted in PR #28. The remaining contents are pure utility helpers (path constants, validation functions, context builders) consumed by the E2B driver to prepare the per-run payload.
 - E2B sandboxes are Firecracker microVMs hosted by E2B. They do not share a Python interpreter, filesystem, network namespace, or environment variables with the API service.
 
-**Verified in-sandbox isolation** (from `docs/launch-readiness/MORNING-REPORT.md`): a malicious bundle running `os.environ` dump inside an E2B sandbox returned only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from the sandbox.
+**Verified in-sandbox isolation** (from `docs/launch-readiness/MORNING-REPORT.md` + `docs/audits/security-edge-2026-05-26.md`): a malicious bundle running `os.environ` dump inside an E2B sandbox returns only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from `os.environ` inside the sandbox.
+
+**Also absent from `secrets.json`** as of the 2026-05-26 fix. Earlier code (`run_service.py` pre-fix at lines 340-341) unioned every key in `/root/.config/workeros/api.env` into the secrets dict serialized into the sandbox payload, leaking platform credentials to any pure-script worker that read `secrets.json`. The fix adds a `_PLATFORM_SECRET_NAMES` denylist so platform infra credentials can NEVER appear in the sandbox payload, regardless of whether a worker.yml or the secrets DB tries to declare one of those names. See `tests/test_sandbox_secrets_isolation.py` for the regression.
 
 This means attacks like:
 - Worker reaches localhost FastAPI to read `/secrets`
