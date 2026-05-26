@@ -9,12 +9,26 @@ function CallbackInner() {
   const params = useSearchParams();
 
   useEffect(() => {
-    // The backend's /connections/callback already handles updating the DB
-    // and redirects to /connections?connected=1.
-    // This page is a fallback in case the user manually lands here.
+    // If this page was opened as a popup from the inline OAuth flow,
+    // notify the opener so the poll can resolve immediately.
+    if (window.opener && typeof window.opener.postMessage === "function") {
+      // Extract app slug from URL search params if present
+      const appSlug = params.get("app") || params.get("app_name") || "";
+      window.opener.postMessage(
+        { type: "oauth-connected", appSlug },
+        window.location.origin
+      );
+    }
+
     const connected = params.get("connected");
     if (connected === "1") {
-      router.replace("/connections");
+      // Opened in popup: postMessage already sent above, close popup.
+      // Opened in main window: redirect to connections page.
+      if (window.opener) {
+        window.close();
+      } else {
+        router.replace("/connections");
+      }
     } else {
       // Forward all params to the API callback endpoint, then redirect
       const connectionId = params.get("connection_id") || params.get("connectionId") || "";
@@ -22,7 +36,7 @@ function CallbackInner() {
       const qs = new URLSearchParams();
       if (connectionId) qs.set("connection_id", connectionId);
       if (status) qs.set("status", status);
-      // The API proxy will handle DB update + redirect
+      // The API proxy will handle DB update + redirect back here with ?connected=1
       window.location.href = `/api/proxy/connections/callback?${qs.toString()}`;
     }
   }, [params, router]);

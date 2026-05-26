@@ -1,8 +1,10 @@
 "use client";
 
-import { Suspense, use, useState, useCallback, useEffect } from "react";
+import { Suspense, use, useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { openOAuthPopup } from "@/lib/oauth-popup";
+import { getSupportedApp } from "@/components/connections/connection-data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle2, Loader2 } from "lucide-react";
 import type { ComposioTriggerItem, ConnectionItem, DraftFromPromptResponse } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -447,8 +449,419 @@ function PromptStep({
 }
 
 // ---------------------------------------------------------------------------
+// InlineSecretRow — inline secret entry card
+// ---------------------------------------------------------------------------
+
+interface InlineSecretRowProps {
+  name: string;
+  initialStatus: "set" | "missing" | "unknown";
+  onSaved: (name: string) => void;
+}
+
+function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps) {
+  const [status, setStatus] = useState<"set" | "missing" | "unknown" | "saving">(initialStatus);
+  const [value, setValue] = useState("");
+  const [showInput, setShowInput] = useState(initialStatus !== "set");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the input when shown
+  useEffect(() => {
+    if (showInput && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [showInput]);
+
+  async function handleSave() {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      toast.error(`Enter a value for ${name}`);
+      return;
+    }
+    setStatus("saving");
+    try {
+      await api.secrets.upsert(name, trimmed);
+      setStatus("set");
+      setShowInput(false);
+      setValue("");
+      onSaved(name);
+      toast.success(`${name} saved`);
+    } catch (e: unknown) {
+      setStatus("missing");
+      toast.error(e instanceof Error ? e.message : `Failed to save ${name}`);
+    }
+  }
+
+  if (status === "set") {
+    return (
+      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-[#f0fdf4]">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
+          <span className="text-sm font-mono font-medium text-[#15803d]">{name}</span>
+          <span className="text-xs text-[#16a34a]">Set</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setStatus("missing"); setShowInput(true); }}
+          className="text-xs text-[#999] hover:text-[#666] transition-colors"
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-[#e4e4e7] bg-white p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-mono font-medium text-[#333]">{name}</span>
+        <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
+      </div>
+      {showInput && (
+        <div className="flex gap-2">
+          <Input
+            ref={inputRef}
+            type="password"
+            placeholder={`Enter ${name}`}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="border-[#e4e4e7] font-mono text-sm flex-1"
+            disabled={status === "saving"}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSave();
+            }}
+          />
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={status === "saving" || !value.trim()}
+            className="shrink-0"
+          >
+            {status === "saving" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              "Save"
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// InlineConnectionRow — inline OAuth connection card
+// ---------------------------------------------------------------------------
+
+interface InlineConnectionRowProps {
+  appSlug: string;
+  initialConnected: boolean;
+  onConnected: (slug: string) => void;
+}
+
+function InlineConnectionRow({ appSlug, initialConnected, onConnected }: InlineConnectionRowProps) {
+  const [status, setStatus] = useState<"connected" | "disconnected" | "connecting">(
+    initialConnected ? "connected" : "disconnected"
+  );
+  const app = getSupportedApp(appSlug);
+
+  async function handleConnect() {
+    setStatus("connecting");
+    try {
+      const result = await api.connections.initiate(appSlug);
+      if (!result.redirect_url) {
+        toast.error(`No OAuth URL returned for ${app.displayName}`);
+        setStatus("disconnected");
+        return;
+      }
+      const outcome = await openOAuthPopup({
+        oauthUrl: result.redirect_url,
+        appSlug,
+        onConnected: () => {
+          setStatus("connected");
+          onConnected(appSlug);
+          toast.success(`${app.displayName} connected`);
+        },
+      });
+      if (outcome === "timeout") {
+        toast.error(`Connection timed out. Complete the OAuth flow and retry.`);
+        setStatus("disconnected");
+      } else if (outcome === "closed") {
+        // Popup was closed without completing — check if it got connected anyway
+        const connections = await api.connections.list();
+        const active = connections.find(
+          (c) => c.app_name.toLowerCase() === appSlug.toLowerCase() && c.status === "active"
+        );
+        if (active) {
+          setStatus("connected");
+          onConnected(appSlug);
+          toast.success(`${app.displayName} connected`);
+        } else {
+          setStatus("disconnected");
+        }
+      }
+    } catch (e: unknown) {
+      setStatus("disconnected");
+      toast.error(e instanceof Error ? e.message : `Failed to connect ${app.displayName}`);
+    }
+  }
+
+  if (status === "connected") {
+    return (
+      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-[#f0fdf4]">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
+          <span className="text-sm font-medium text-[#15803d]">{app.displayName}</span>
+          <span className="text-xs text-[#16a34a]">Connected</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleConnect}
+          className="text-xs text-[#999] hover:text-[#666] transition-colors"
+        >
+          Reconnect
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-white">
+      <span className="text-sm font-medium text-[#333]">{app.displayName}</span>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleConnect}
+        disabled={status === "connecting"}
+        className="shrink-0 h-7 text-xs"
+      >
+        {status === "connecting" ? (
+          <span className="flex items-center gap-1.5">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Connecting...
+          </span>
+        ) : (
+          `Connect ${app.displayName}`
+        )}
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// InlineRequirements — secrets + connections inline setup panel
+// ---------------------------------------------------------------------------
+
+interface SecretState {
+  name: string;
+  status: "set" | "missing" | "unknown";
+}
+interface ConnectionState {
+  slug: string;
+  connected: boolean;
+}
+
+interface InlineRequirementsProps {
+  requiredSecrets: string[];
+  requiredConnections: string[];
+  onAllReady: (ready: boolean) => void;
+  skipped: boolean;
+  onSkip: () => void;
+}
+
+function InlineRequirements({
+  requiredSecrets,
+  requiredConnections,
+  onAllReady,
+  skipped,
+  onSkip,
+}: InlineRequirementsProps) {
+  const [secretStates, setSecretStates] = useState<SecretState[]>(
+    requiredSecrets.map((name) => ({ name, status: "unknown" as const }))
+  );
+  const [connectionStates, setConnectionStates] = useState<ConnectionState[]>(
+    requiredConnections.map((slug) => ({ slug, connected: false }))
+  );
+  const [loading, setLoading] = useState(true);
+
+  // On mount, check existing secrets and connections
+  useEffect(() => {
+    let cancelled = false;
+    async function checkStatus() {
+      try {
+        const [secretList, connectionList] = await Promise.all([
+          requiredSecrets.length > 0 ? api.secrets.list() : Promise.resolve([]),
+          requiredConnections.length > 0 ? api.connections.list() : Promise.resolve([]),
+        ]);
+
+        if (cancelled) return;
+
+        const secretMap = new Map(secretList.map((s) => [s.name, s.status]));
+        const activeConnections = new Set(
+          connectionList
+            .filter((c) => c.status === "active")
+            .map((c) => c.app_name.toLowerCase())
+        );
+
+        setSecretStates(
+          requiredSecrets.map((name) => ({
+            name,
+            status: (secretMap.get(name) ?? "missing") as "set" | "missing",
+          }))
+        );
+        setConnectionStates(
+          requiredConnections.map((slug) => ({
+            slug,
+            connected: activeConnections.has(slug.toLowerCase()),
+          }))
+        );
+      } catch {
+        // API errors: show all as unknown/disconnected so user can still proceed
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void checkStatus();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Compute readiness
+  const allSecretsSet = secretStates.every((s) => s.status === "set");
+  const allConnectionsConnected = connectionStates.every((c) => c.connected);
+  const allReady = allSecretsSet && allConnectionsConnected;
+
+  useEffect(() => {
+    onAllReady(allReady);
+  }, [allReady, onAllReady]);
+
+  function handleSecretSaved(name: string) {
+    setSecretStates((prev) =>
+      prev.map((s) => (s.name === name ? { ...s, status: "set" } : s))
+    );
+  }
+
+  function handleConnectionConnected(slug: string) {
+    setConnectionStates((prev) =>
+      prev.map((c) => (c.slug === slug ? { ...c, connected: true } : c))
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-[#999]">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        Checking existing secrets and connections...
+      </div>
+    );
+  }
+
+  const hasRequirements = requiredSecrets.length > 0 || requiredConnections.length > 0;
+  if (!hasRequirements) return null;
+
+  return (
+    <Card className="border-[#eaeaea] shadow-none bg-white">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium">
+            {allReady ? (
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-[#16a34a]" />
+                Requirements ready
+              </span>
+            ) : (
+              "Set up requirements"
+            )}
+          </CardTitle>
+          {!allReady && !skipped && (
+            <button
+              type="button"
+              onClick={onSkip}
+              className="text-xs text-[#999] hover:text-[#666] transition-colors"
+            >
+              Skip for now
+            </button>
+          )}
+        </div>
+        {!allReady && !skipped && (
+          <p className="text-xs text-[#999] mt-0.5">
+            Set up secrets and connections before creating the worker.
+          </p>
+        )}
+        {skipped && (
+          <p className="text-xs text-amber-600 mt-0.5">
+            Skipped — you can configure these later in Settings / Connections.
+          </p>
+        )}
+      </CardHeader>
+      {!skipped && (
+        <CardContent className="space-y-4">
+          {requiredSecrets.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-xs text-[#666] uppercase tracking-wide">API keys</Label>
+              <div className="space-y-2">
+                {secretStates.map((s) => (
+                  <InlineSecretRow
+                    key={s.name}
+                    name={s.name}
+                    initialStatus={s.status}
+                    onSaved={handleSecretSaved}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {requiredConnections.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-xs text-[#666] uppercase tracking-wide">OAuth connections</Label>
+              <div className="space-y-2">
+                {connectionStates.map((c) => (
+                  <InlineConnectionRow
+                    key={c.slug}
+                    appSlug={c.slug}
+                    initialConnected={c.connected}
+                    onConnected={handleConnectionConnected}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ReviewStep — Step 2
 // ---------------------------------------------------------------------------
+
+const DRAFT_SESSION_KEY = "workeros:draft-in-progress";
+
+interface DraftSession {
+  prompt: string;
+  draft: DraftFromPromptResponse;
+}
+
+/** Persist draft to sessionStorage so a popup OAuth flow doesn't lose it. */
+function persistDraftSession(prompt: string, draft: DraftFromPromptResponse) {
+  try {
+    sessionStorage.setItem(DRAFT_SESSION_KEY, JSON.stringify({ prompt, draft }));
+  } catch {
+    // sessionStorage unavailable (private browsing restrictions)
+  }
+}
+
+/** Load persisted draft from sessionStorage (used on reload after OAuth popup). */
+export function loadDraftSession(): DraftSession | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as DraftSession;
+  } catch {
+    return null;
+  }
+}
 
 function ReviewStep({
   draft,
@@ -469,10 +882,32 @@ function ReviewStep({
   const [cronTimezone, setCronTimezone] = useState("Europe/Berlin");
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
 
+  // Inline requirements state
+  const [requirementsReady, setRequirementsReady] = useState(false);
+  const [requirementsSkipped, setRequirementsSkipped] = useState(false);
+
+  const hasRequirements =
+    draft.required_secrets.length > 0 || draft.required_connections.length > 0;
+
+  // Persist draft session to survive OAuth popup navigations
+  useEffect(() => {
+    persistDraftSession(originalPrompt, draft);
+    return () => {
+      // Clear when the component unmounts (worker created or start-over)
+      try { sessionStorage.removeItem(DRAFT_SESSION_KEY); } catch { /* ignore */ }
+    };
+  }, [originalPrompt, draft]);
+
   const idError =
     workerId && !/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(workerId)
       ? "Use lowercase letters, numbers, and hyphens. Start and end with a letter or number."
       : null;
+
+  const canCreate =
+    !submitting &&
+    !!workerId &&
+    !idError &&
+    (requirementsReady || requirementsSkipped || !hasRequirements);
 
   async function handleCreate() {
     if (!workerId) { toast.error("Worker ID is required"); return; }
@@ -481,6 +916,7 @@ function ReviewStep({
     try {
       const yamlToUse = activeTab === "yaml" ? workerYml : draft.worker_yml;
       const worker = await api.workers.create(yamlToUse, runPy);
+      try { sessionStorage.removeItem(DRAFT_SESSION_KEY); } catch { /* ignore */ }
       toast.success(`Worker "${worker.name}" created`);
       router.push(`/workers/${worker.id}`);
     } catch (e: unknown) {
@@ -489,6 +925,10 @@ function ReviewStep({
       setSubmitting(false);
     }
   }
+
+  const handleRequirementsReady = useCallback((ready: boolean) => {
+    setRequirementsReady(ready);
+  }, []);
 
   const displayYaml = activeTab === "yaml" ? workerYml : draft.worker_yml;
 
@@ -549,42 +989,16 @@ function ReviewStep({
               </CardContent>
             </Card>
 
-            {/* Requirements */}
-            <Card className="border-[#eaeaea] shadow-none bg-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Requirements detected</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-xs text-[#666] uppercase tracking-wide">Connections needed</Label>
-                  {draft.required_connections.length === 0 ? (
-                    <p className="text-sm text-[#999]">None detected</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {draft.required_connections.map((conn) => (
-                        <span key={conn} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#f0fdf4] text-[#15803d] border border-[#bbf7d0]">
-                          {conn}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs text-[#666] uppercase tracking-wide">Secrets needed</Label>
-                  {draft.required_secrets.length === 0 ? (
-                    <p className="text-sm text-[#999]">None detected</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {draft.required_secrets.map((s) => (
-                        <span key={s} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#fef3c7] text-[#92400e] border border-[#fde68a] font-mono">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            {/* Inline requirements — secrets + connections */}
+            {hasRequirements && (
+              <InlineRequirements
+                requiredSecrets={draft.required_secrets}
+                requiredConnections={draft.required_connections}
+                onAllReady={handleRequirementsReady}
+                skipped={requirementsSkipped}
+                onSkip={() => setRequirementsSkipped(true)}
+              />
+            )}
 
             {/* I/O schema */}
             {draft.inputs.length > 0 && (
@@ -684,13 +1098,37 @@ function ReviewStep({
               </CardContent>
             </Card>
 
-            <Button
-              onClick={handleCreate}
-              disabled={submitting || !workerId || !!idError}
-              className="w-full"
-            >
-              {submitting ? "Creating worker..." : "Create worker"}
-            </Button>
+            <div className="space-y-2">
+              <Button
+                onClick={handleCreate}
+                disabled={!canCreate}
+                className="w-full"
+              >
+                {submitting ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Creating worker...
+                  </span>
+                ) : hasRequirements && !requirementsReady && !requirementsSkipped ? (
+                  "Set up requirements to create worker"
+                ) : (
+                  "Create worker"
+                )}
+              </Button>
+              {hasRequirements && !requirementsReady && !requirementsSkipped && (
+                <p className="text-xs text-center text-[#999]">
+                  Complete the requirements above, or{" "}
+                  <button
+                    type="button"
+                    onClick={() => setRequirementsSkipped(true)}
+                    className="underline hover:text-[#666] transition-colors"
+                  >
+                    skip for now
+                  </button>{" "}
+                  to create and configure later.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Right: YAML preview */}
@@ -739,10 +1177,17 @@ function ReviewStep({
 
             <Button
               onClick={handleCreate}
-              disabled={submitting || !workerId || !!idError}
+              disabled={!canCreate}
               className="w-full"
             >
-              {submitting ? "Creating worker..." : "Create worker"}
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Creating worker...
+                </span>
+              ) : (
+                "Create worker"
+              )}
             </Button>
           </div>
 
