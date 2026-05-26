@@ -82,7 +82,8 @@ function CatalogCard({
             src={item.logo_url}
             alt={`${item.name} logo`}
             className="h-6 w-6 object-contain"
-            loading="lazy"
+            loading="eager"
+            decoding="async"
           />
         </div>
         <div className="min-w-0">
