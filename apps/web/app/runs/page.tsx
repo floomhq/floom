@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, Play } from "lucide-react";
+import { ChevronRight, Download, Play } from "lucide-react";
 import type { RunSummary, WorkerSummary } from "@/lib/types";
 
 const STATUS_OPTIONS = [
@@ -215,7 +215,7 @@ export default function RunsPage() {
                 <Link
                   key={r.id}
                   href={`/runs/${r.id}`}
-                  className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
+                  className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors cursor-pointer"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
@@ -225,7 +225,10 @@ export default function RunsPage() {
                       <span className="text-[#999]">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</span>
                     </p>
                   </div>
-                  <StatusBadge status={r.status} />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StatusBadge status={r.status} />
+                    <ChevronRight className="w-3.5 h-3.5 text-[#bbb]" />
+                  </div>
                 </Link>
               ))}
               {hasMore && (

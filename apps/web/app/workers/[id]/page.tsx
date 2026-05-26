@@ -16,11 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck, File, FolderOpen, Copy } from "lucide-react";
+import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck, ChevronRight, File, FolderOpen, Copy } from "lucide-react";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FileInputUpload } from "@/components/FileInputUpload";
+import { FilesEditor } from "@/components/worker-form";
 
 export default function WorkerDetailPage() {
   const { id } = useParams();
@@ -409,7 +410,8 @@ export default function WorkerDetailPage() {
 
         {/* Code tab */}
         <TabsContent value="code" className="mt-6">
-          <WorkerFileTree
+          <FilesEditor
+            mode="view"
             files={worker.files || []}
             selectedPath={selectedFile}
             onSelect={setSelectedFile}
@@ -490,12 +492,15 @@ export default function WorkerDetailPage() {
                 ) : (
                   worker.recent_runs?.map((r) => (
                     <Link key={r.id} href={`/runs/${r.id}`}>
-                      <div className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5] cursor-pointer">
+                      <div className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5] cursor-pointer transition-colors">
                         <div>
                           <p className="text-sm font-medium font-mono">{r.id}</p>
                           <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
                         </div>
-                        <Badge variant="outline">{r.status}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{r.status}</Badge>
+                          <ChevronRight className="w-3.5 h-3.5 text-[#bbb]" />
+                        </div>
                       </div>
                     </Link>
                   ))
