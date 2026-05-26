@@ -1833,7 +1833,11 @@ def connections_callback(connection_id: str = "", status: str = ""):
         except Exception:
             remote_status = ""
 
-        final_status = remote_status or status or existing["status"]
+        final_status = (
+            remote_status
+            if remote_status and remote_status != "not_found"
+            else (status or existing["status"])
+        )
         now = now_iso()
         with get_db() as conn:
             conn.execute(
