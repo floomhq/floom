@@ -133,6 +133,11 @@ export default function WorkerDetailPage() {
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
   );
   const canRun = !running && !worker.paused && missingConnections.length === 0;
+  const canApplySample = worker.config.inputs.every((inp) => {
+    if (!inp.required || inp.type === "file") return true;
+    const sampleValue = worker.example_input?.[inp.name];
+    return sampleValue !== undefined && sampleValue !== null;
+  });
 
   return (
     <div className="space-y-6">
@@ -209,7 +214,13 @@ export default function WorkerDetailPage() {
                   <section className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <h2 className="text-sm font-medium">Example input</h2>
-                      <Button variant="outline" size="sm" className="h-8" onClick={applyExampleInput}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={applyExampleInput}
+                        disabled={!canApplySample}
+                      >
                         <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
                         Use this sample
                       </Button>
