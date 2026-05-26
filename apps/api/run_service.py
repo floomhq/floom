@@ -396,6 +396,17 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(err, level="error")
         return
 
+    # Resolve Composio connections declared in worker.yml.
+    connection_ids: Dict[str, str] = {}
+    if config.connections:
+        log_fn("Resolving connections", level="debug")
+        from runner_local import _resolve_connections
+        connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
+        if conn_err:
+            update_run_status(run_id, RunStatus.FAILED.value, error=conn_err)
+            log_fn(conn_err, level="error")
+            return
+
     # Dispatch to the appropriate sandbox driver based on worker config
     runner = "local"
     if config and config.runtime:
@@ -417,6 +428,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         trace_id=trace_id,
         timeout_seconds=timeout_seconds,
         config=config,
+        connection_ids=connection_ids,
     )
 
     outputs = result.outputs

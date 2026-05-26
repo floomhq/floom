@@ -1,12 +1,34 @@
-from typing import Dict, Any
+"""Reverse Match CRM — E2B-native worker.
+
+Reads inputs.json, secrets.json. Writes result.json.
+"""
 import csv
 import io
 import json
+import os
 from datetime import datetime, timezone
 
 
-def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
-    context.log("Reverse Match CRM started")
+def _write_error(error: str) -> None:
+    with open("result.json", "w") as f:
+        json.dump({"status": "error", "error": error}, f)
+
+
+def main():
+    with open("inputs.json") as f:
+        inputs = json.load(f)
+
+    try:
+        with open("secrets.json") as f:
+            secrets = json.load(f)
+    except FileNotFoundError:
+        secrets = {}
+
+    try:
+        with open("connections.json") as f:
+            connections = json.load(f)
+    except FileNotFoundError:
+        connections = {}
 
     crm_csv = inputs.get("crm_csv", "").strip()
     job_brief = inputs.get("job_brief", "").strip()
@@ -21,9 +43,11 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         top_n = 10
 
     if not crm_csv:
-        return {"status": "error", "error": "Missing required input: crm_csv"}
+        _write_error("Missing required input: crm_csv")
+        return
     if not job_brief:
-        return {"status": "error", "error": "Missing required input: job_brief"}
+        _write_error("Missing required input: job_brief")
+        return
 
     required_modules = [m.strip() for m in required_modules_raw.split(",") if m.strip()] if required_modules_raw else []
 
@@ -31,16 +55,15 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         reader = csv.DictReader(io.StringIO(crm_csv))
         rows = list(reader)
     except Exception as e:
-        return {"status": "error", "error": f"Invalid CSV: {str(e)}"}
+        _write_error(f"Invalid CSV: {str(e)}")
+        return
 
     if not rows:
-        return {"status": "error", "error": "CSV has no data rows"}
-
-    context.log(f"Loaded {len(rows)} CRM contacts")
+        _write_error("CSV has no data rows")
+        return
 
     # Build freshness warnings and source row index lookup
     now_utc = datetime.now(timezone.utc)
-    # Build email lookup by name for post-processing
     email_by_name = {r.get("name", "").strip(): r.get("email", "").strip() for r in rows}
     for idx, row in enumerate(rows):
         last_active = row.get("last_active_iso", "").strip()
@@ -60,7 +83,6 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         row["_profile_age_risk"] = warning
         row["_source_row_index"] = idx + 2  # 1-indexed + header row = row 2 for first data row
 
-    # Format rows for the LLM (include row index so model can reference it)
     rows_json = json.dumps(
         [
             {
@@ -111,10 +133,9 @@ CRM candidates:
 
 Score all {len(rows)} candidates and return the JSON array."""
 
-    context.log("Scoring candidates with AI")
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=context.secrets.get("OPENAI_API_KEY"))
+        client = OpenAI(api_key=secrets.get("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -125,47 +146,46 @@ Score all {len(rows)} candidates and return the JSON array."""
             max_tokens=4000,
         )
         raw = response.choices[0].message.content.strip()
-        # Strip code fences if present
         if raw.startswith("```"):
             lines = raw.splitlines()
             lines = [l for l in lines if not l.startswith("```")]
             raw = "\n".join(lines).strip()
         scored = json.loads(raw)
     except json.JSONDecodeError as e:
-        return {"status": "error", "error": f"LLM returned malformed JSON: {e}"}
+        _write_error(f"LLM returned malformed JSON: {e}")
+        return
     except Exception as e:
-        return {"status": "error", "error": f"OpenAI call failed: {e}"}
+        _write_error(f"OpenAI call failed: {e}")
+        return
 
     if not isinstance(scored, list):
-        return {"status": "error", "error": "LLM did not return a JSON array"}
+        _write_error("LLM did not return a JSON array")
+        return
 
     # Validate schema
     required_keys = {"name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "profile_age_risk", "outreach_next_step", "source_row_index"}
     for idx, item in enumerate(scored):
         missing = required_keys - set(item.keys())
         if missing:
-            return {"status": "error", "error": f"Row {idx} missing keys: {missing}"}
+            _write_error(f"Row {idx} missing keys: {missing}")
+            return
 
     # Filter and sort
     above_threshold = [s for s in scored if float(s["fit_score"]) >= min_score]
     above_threshold.sort(key=lambda x: float(x["fit_score"]), reverse=True)
     top = above_threshold[:top_n]
 
-    context.log(f"Found {len(above_threshold)} candidates above threshold {min_score}, returning top {len(top)}")
-
-    # Build output CSV — add contact_email from source rows
+    # Build output CSV
     out = io.StringIO()
     fieldnames = ["name", "fit_score", "reasoning", "dach_fit", "contractor_or_perm", "profile_age_risk", "outreach_next_step", "source_row_index", "contact_email"]
     writer = csv.DictWriter(out, fieldnames=fieldnames)
     writer.writeheader()
     for item in top:
         row_out = {k: item.get(k, "") for k in fieldnames}
-        # Lookup email from original source CSV
         row_out["contact_email"] = email_by_name.get(str(item.get("name", "")).strip(), "")
         writer.writerow(row_out)
     top_csv = out.getvalue().strip()
 
-    # Build summary
     dach_yes = sum(1 for s in above_threshold if s.get("dach_fit") == "Yes")
     freelancer_count = sum(1 for s in above_threshold if s.get("contractor_or_perm") in ("Freiberufler", "Beides"))
     top_names = ", ".join(s["name"] for s in top[:3]) if top else "none"
@@ -187,11 +207,18 @@ Score all {len(rows)} candidates and return the JSON array."""
 {"No candidates above threshold — consider lowering min_score or broadening the job brief." if not above_threshold else f"Prioritise outreach to {top_names}. Review freshness warnings before contact."}
 """
 
-    return {
+    result = {
         "status": "success",
         "outputs": {
             "top_candidates": top_csv,
             "all_above_threshold_count": str(len(above_threshold)),
             "analysis_summary": analysis_summary,
         },
+        "artifacts": [],
     }
+    with open("result.json", "w") as f:
+        json.dump(result, f)
+
+
+if __name__ == "__main__":
+    main()

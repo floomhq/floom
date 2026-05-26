@@ -1,18 +1,16 @@
-from typing import Dict, Any, List
+"""CSV Enricher — E2B-native worker.
+
+Reads inputs.json, secrets.json. Writes result.json.
+"""
 import csv
 import io
 import json
+import os
 import re
 
 
-def _extract_columns_from_instruction(instruction: str, client) -> List[str]:
-    """Use a small LLM call to parse the instruction and extract requested column names.
-
-    Examples:
-      "Add fit_score 1-5 + DACH market fit" -> ["fit_score", "dach_fit"]
-      "Add seniority level and salary range"  -> ["seniority_level", "salary_range"]
-      "Score candidates 1-10"                -> ["score"]
-    """
+def _extract_columns_from_instruction(instruction: str, client) -> list:
+    """Use a small LLM call to parse the instruction and extract requested column names."""
     parse_prompt = (
         "Extract the column names that should be added to a CSV based on this instruction.\n"
         "Return ONLY a JSON array of snake_case column name strings. No commentary. No extra text.\n"
@@ -32,57 +30,73 @@ def _extract_columns_from_instruction(instruction: str, client) -> List[str]:
             max_tokens=100,
         )
         raw = resp.choices[0].message.content.strip()
-        # Strip code fences
         if raw.startswith("```"):
             lines = raw.splitlines()
             lines = [l for l in lines if not l.startswith("```")]
             raw = "\n".join(lines).strip()
         cols = json.loads(raw)
         if isinstance(cols, list) and all(isinstance(c, str) for c in cols) and cols:
-            # Sanitize: snake_case, no spaces
             return [re.sub(r"[^a-z0-9_]", "_", c.lower().strip()).strip("_") or "enriched" for c in cols]
     except Exception:
         pass
     return ["enriched"]
 
 
-def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
-    context["log"]("Run started")
-    context["log"]("Parsing CSV input")
+def main():
+    with open("inputs.json") as f:
+        inputs = json.load(f)
+
+    try:
+        with open("secrets.json") as f:
+            secrets = json.load(f)
+    except FileNotFoundError:
+        secrets = {}
+
+    try:
+        with open("connections.json") as f:
+            connections = json.load(f)
+    except FileNotFoundError:
+        connections = {}
 
     csv_text = inputs.get("csv_text", "").strip()
     instruction = inputs.get("instruction", "").strip()
 
     if not csv_text:
-        return {"status": "error", "error": "Missing required input: csv_text"}
+        result = {"status": "error", "error": "Missing required input: csv_text"}
+        with open("result.json", "w") as f:
+            json.dump(result, f)
+        return
+
     if not instruction:
-        return {"status": "error", "error": "Missing required input: instruction"}
+        result = {"status": "error", "error": "Missing required input: instruction"}
+        with open("result.json", "w") as f:
+            json.dump(result, f)
+        return
 
     try:
         reader = csv.DictReader(io.StringIO(csv_text))
         rows = list(reader)
         original_fieldnames = list(reader.fieldnames or [])
     except Exception as e:
-        return {"status": "error", "error": f"Invalid CSV: {str(e)}"}
+        result = {"status": "error", "error": f"Invalid CSV: {str(e)}"}
+        with open("result.json", "w") as f:
+            json.dump(result, f)
+        return
 
     if not rows:
-        return {"status": "error", "error": "CSV has no data rows"}
-
-    context["log"](f"Loaded {len(rows)} rows")
+        result = {"status": "error", "error": "CSV has no data rows"}
+        with open("result.json", "w") as f:
+            json.dump(result, f)
+        return
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=context["secrets"].get("OPENAI_API_KEY"))
+        client = OpenAI(api_key=secrets.get("OPENAI_API_KEY"))
 
-        # Derive new column names from the instruction
-        context["log"]("Deriving output columns from instruction")
         new_columns = _extract_columns_from_instruction(instruction, client)
-        context["log"](f"Derived columns: {new_columns}")
 
         output_fieldnames = original_fieldnames + new_columns
         output_fieldnames_str = ", ".join(output_fieldnames)
-
-        context["log"]("Enriching with AI")
 
         system_prompt = (
             "You are a data enrichment assistant.\n"
@@ -109,7 +123,6 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         )
 
         enriched = response.choices[0].message.content.strip()
-        # Clean up markdown code blocks if present
         if enriched.startswith("```"):
             lines = enriched.splitlines()
             if lines[0].startswith("```"):
@@ -122,10 +135,6 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         first_line = enriched.splitlines()[0] if enriched else ""
         returned_cols = [c.strip().strip('"') for c in first_line.split(",")]
         if returned_cols != output_fieldnames:
-            context["log"](
-                f"Column mismatch: expected {output_fieldnames}, got {returned_cols}. Rebuilding.",
-                level="warning",
-            )
             try:
                 repair_reader = csv.DictReader(io.StringIO(enriched))
                 repair_rows = list(repair_reader)
@@ -141,12 +150,9 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
             except Exception:
                 pass  # keep LLM output as-is if repair fails
 
-        context["log"]("AI enrichment complete")
     except Exception as e:
-        context["log"](f"OpenAI failed: {str(e)}", level="error")
         new_columns = ["enriched"]
         output_fieldnames = original_fieldnames + new_columns
-        # Fallback: add a single enriched column
         enriched_rows = []
         for row in rows:
             new_row = dict(row)
@@ -157,12 +163,17 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         writer.writeheader()
         writer.writerows(enriched_rows)
         enriched = out.getvalue().strip()
-        context["log"]("Fell back to template enrichment")
 
-    return {
+    result = {
         "status": "success",
         "outputs": {
-            "enriched_csv": enriched
+            "enriched_csv": enriched,
         },
-        "artifacts": []
+        "artifacts": [],
     }
+    with open("result.json", "w") as f:
+        json.dump(result, f)
+
+
+if __name__ == "__main__":
+    main()
