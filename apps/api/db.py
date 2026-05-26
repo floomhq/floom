@@ -545,6 +545,17 @@ MIGRATIONS: list[Migration] = [
     """
     DROP TABLE IF EXISTS file_binding_audit;
     """,
+    # -- migration 18: health-check columns on connections + secrets + cached fields ----
+    """
+    ALTER TABLE composio_connections ADD COLUMN last_checked_at TEXT;
+    ALTER TABLE composio_connections ADD COLUMN last_check_status TEXT;
+    ALTER TABLE composio_connections ADD COLUMN last_check_error TEXT;
+    ALTER TABLE composio_connections ADD COLUMN scopes_json TEXT;
+    ALTER TABLE composio_connections ADD COLUMN account_label TEXT;
+    ALTER TABLE secrets ADD COLUMN last_checked_at TEXT;
+    ALTER TABLE secrets ADD COLUMN last_check_status TEXT;
+    ALTER TABLE secrets ADD COLUMN last_check_error TEXT;
+    """,
 ]
 
 
@@ -572,7 +583,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
