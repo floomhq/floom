@@ -34,6 +34,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ worker_yml, run_py }),
       }),
+    draftFromPrompt: (prompt: string) =>
+      fetchJson<import("./types").DraftFromPromptResponse>("/workers/draft-from-prompt", {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+      }),
     update: (id: string, worker_yml: string, run_py: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
         method: "PUT",
