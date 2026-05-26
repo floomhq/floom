@@ -266,6 +266,7 @@ export interface DraftFromPromptOutputField {
 export interface DraftRequirementItem {
   app: string;
   method: "oauth" | "api_key";
+  available_methods: string[];  // authoritative list from backend; length 1 = no toggle
   reason: string;
 }
 

@@ -670,3 +670,103 @@ class TestRequirementsUX:
         from main import _detect_connections
         result = _detect_connections("summarise my granola meetings")
         assert "google-calendar" not in result
+
+    @patch("openai.OpenAI")
+    def test_granola_slack_have_both_available_methods(self, mock_openai_cls, client):
+        """Granola and Slack both support OAuth + API key; available_methods must list both."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="granola-slack-sync",
+                connections=[],
+                requirements=[
+                    {"app": "granola", "method": "api_key", "reason": "Granola API key"},
+                    {"app": "slack", "method": "oauth", "reason": "Slack OAuth"},
+                ],
+                secrets=["GRANOLA_API_KEY"],
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Summarise my Granola meetings and post to Slack"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        requirements = data.get("requirements", [])
+        apps = {r["app"]: r for r in requirements}
+
+        assert "granola" in apps, f"granola not in requirements: {requirements}"
+        assert "slack" in apps, f"slack not in requirements: {requirements}"
+
+        granola_req = apps["granola"]
+        assert sorted(granola_req["available_methods"]) == ["api_key", "oauth"], (
+            f"Granola should have both methods, got: {granola_req['available_methods']}"
+        )
+        slack_req = apps["slack"]
+        assert sorted(slack_req["available_methods"]) == ["api_key", "oauth"], (
+            f"Slack should have both methods, got: {slack_req['available_methods']}"
+        )
+
+    @patch("openai.OpenAI")
+    def test_apollo_has_api_key_only(self, mock_openai_cls, client):
+        """Apollo is api_key only; available_methods must contain only 'api_key'."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="apollo-enricher",
+                connections=[],
+                requirements=[
+                    {"app": "apollo", "method": "api_key", "reason": "Apollo API key for enrichment"},
+                ],
+                secrets=["APOLLO_API_KEY"],
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Enrich leads using Apollo"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        requirements = data.get("requirements", [])
+        apollo_reqs = [r for r in requirements if r["app"] == "apollo"]
+        assert len(apollo_reqs) == 1, f"Expected exactly 1 apollo requirement, got: {requirements}"
+        assert apollo_reqs[0]["available_methods"] == ["api_key"], (
+            f"Apollo should be api_key only, got: {apollo_reqs[0]['available_methods']}"
+        )
+
+    @patch("openai.OpenAI")
+    def test_llm_suggested_method_is_initial_value(self, mock_openai_cls, client):
+        """The LLM-suggested method for an app wins as the initial method value."""
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        # LLM suggests granola via api_key (even though both are available)
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            _good_llm_json(
+                name="granola-worker",
+                connections=[],
+                requirements=[
+                    {"app": "granola", "method": "api_key", "reason": "Granola API key preferred"},
+                ],
+                secrets=["GRANOLA_API_KEY"],
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Summarise Granola meetings"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        requirements = data.get("requirements", [])
+        granola_reqs = [r for r in requirements if r["app"] == "granola"]
+        assert len(granola_reqs) == 1, f"Expected 1 granola requirement, got: {requirements}"
+        # LLM said api_key; initial method must be api_key (not forced to oauth)
+        assert granola_reqs[0]["method"] == "api_key", (
+            f"Initial method should be LLM suggestion 'api_key', got: {granola_reqs[0]['method']}"
+        )
+        # Both methods still available for toggling
+        assert sorted(granola_reqs[0]["available_methods"]) == ["api_key", "oauth"]
