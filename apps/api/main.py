@@ -507,6 +507,24 @@ def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
 _ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
 
 
+def _increment_file_ref_count(file_id: str) -> None:
+    """Increment file ref_count in a short transaction tolerant of run bursts."""
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=30, detect_types=sqlite3.PARSE_DECLTYPES)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("UPDATE files SET ref_count = ref_count + 1 WHERE id = ?", (file_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def _resolve_file_input_references(
     worker_id: str, run_id: str, inputs: Dict[str, Any], bound_by: str = "anonymous"
 ) -> Dict[str, Any]:
@@ -614,10 +632,7 @@ def _resolve_file_input_references(
             shutil.copyfile(source, mounted)
             # Store absolute path so runners don't need cwd tricks to locate the file.
             resolved_inputs[inp.name] = str(mounted)
-            conn.execute(
-                "UPDATE files SET ref_count = ref_count + 1 WHERE id = ?",
-                (row["id"],),
-            )
+            _increment_file_ref_count(row["id"])
 
     return resolved_inputs
 
