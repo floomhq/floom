@@ -47,8 +47,9 @@ class E2BSandboxDriver(SandboxDriver):
 
     The worker's run.py MUST:
     1. Read inputs from inputs.json
-    2. Optionally read secrets from secrets.json
-    3. Write result.json with {"status": ..., "outputs": {...}, "error": ...}
+    2. Optionally read secrets from secrets.json (declared secrets dict)
+    3. Optionally read connections.json (Composio app slug -> connection_id)
+    4. Write result.json with {"status": ..., "outputs": {...}, "error": ...}
     """
 
     def run(
@@ -61,10 +62,12 @@ class E2BSandboxDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int = 300,
         config: Optional[WorkerConfig] = None,
+        connection_ids: Optional[Dict[str, str]] = None,
     ) -> WorkerResult:
         try:
             return self._run_in_sandbox(
-                worker_id, run_id, inputs, secrets, log_fn, trace_id, timeout_seconds, config
+                worker_id, run_id, inputs, secrets, log_fn, trace_id,
+                timeout_seconds, config, connection_ids or {},
             )
         except Exception as exc:
             logger.exception(
@@ -88,6 +91,7 @@ class E2BSandboxDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int,
         config: Optional[WorkerConfig],
+        connection_ids: Dict[str, str],
     ) -> WorkerResult:
         from e2b import Sandbox  # e2b 2.x
 
@@ -183,6 +187,14 @@ class E2BSandboxDriver(SandboxDriver):
             sandbox.files.write(
                 f"{workdir}/secrets.json",
                 json.dumps(secrets, indent=2),
+            )
+
+            # Write connections.json: Composio app slug -> connection_id mapping.
+            # Workers that declare connections: [...] in worker.yml read this to
+            # find the authenticated connection ID for each app.
+            sandbox.files.write(
+                f"{workdir}/connections.json",
+                json.dumps(connection_ids, indent=2),
             )
 
             # Install requirements if present and non-empty

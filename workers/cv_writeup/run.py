@@ -1,72 +1,12 @@
-from typing import Dict, Any
+"""CV Writeup — E2B-native worker.
+
+Reads inputs.json, secrets.json. Writes result.json.
+"""
 import base64
 import io
 import json
+import os
 import re
-
-
-def _extract_text_from_base64(data_uri: str) -> str:
-    """Extract text from a base64-encoded file (PDF, DOCX, or plain text)."""
-    # Parse data URI: data:<mime>;base64,<data>
-    if "," in data_uri:
-        header, b64data = data_uri.split(",", 1)
-    else:
-        header = ""
-        b64data = data_uri
-
-    raw_bytes = base64.b64decode(b64data)
-
-    # Detect type from header
-    mime = ""
-    if "application/pdf" in header or header == "":
-        # Try PDF first (magic bytes)
-        if raw_bytes[:4] == b"%PDF":
-            mime = "pdf"
-        elif raw_bytes[:2] in (b"PK",):
-            mime = "docx"
-        else:
-            mime = "text"
-    elif "pdf" in header.lower():
-        mime = "pdf"
-    elif "docx" in header.lower() or "openxmlformats" in header.lower() or "msword" in header.lower():
-        mime = "docx"
-    else:
-        mime = "text"
-
-    if not mime:
-        # Fallback: check magic bytes
-        if raw_bytes[:4] == b"%PDF":
-            mime = "pdf"
-        elif raw_bytes[:2] == b"PK":
-            mime = "docx"
-        else:
-            mime = "text"
-
-    if mime == "pdf":
-        try:
-            from pypdf import PdfReader
-            reader = PdfReader(io.BytesIO(raw_bytes))
-            pages = []
-            for page in reader.pages:
-                pages.append(page.extract_text() or "")
-            return "\n".join(pages)
-        except Exception as e:
-            raise RuntimeError(f"PDF parsing failed: {e}")
-
-    if mime == "docx":
-        try:
-            from docx import Document
-            doc = Document(io.BytesIO(raw_bytes))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            return "\n".join(paragraphs)
-        except Exception as e:
-            raise RuntimeError(f"DOCX parsing failed: {e}")
-
-    # Plain text
-    try:
-        return raw_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        return raw_bytes.decode("latin-1", errors="replace")
 
 
 FORMAT_INSTRUCTIONS = {
@@ -107,33 +47,124 @@ Strengths: bullet list. Risks: bullet list. Overall fit verdict (1 sentence).
 }
 
 
-def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
-    context.log("CV Writeup worker started")
+def _extract_text_from_base64(data_uri: str) -> str:
+    """Extract text from a base64-encoded file (PDF, DOCX, or plain text)."""
+    if "," in data_uri:
+        header, b64data = data_uri.split(",", 1)
+    else:
+        header = ""
+        b64data = data_uri
 
-    cv_file = inputs.get("cv_file", "").strip()
+    raw_bytes = base64.b64decode(b64data)
+
+    mime = ""
+    if "application/pdf" in header or header == "":
+        if raw_bytes[:4] == b"%PDF":
+            mime = "pdf"
+        elif raw_bytes[:2] in (b"PK",):
+            mime = "docx"
+        else:
+            mime = "text"
+    elif "pdf" in header.lower():
+        mime = "pdf"
+    elif "docx" in header.lower() or "openxmlformats" in header.lower() or "msword" in header.lower():
+        mime = "docx"
+    else:
+        mime = "text"
+
+    if not mime:
+        if raw_bytes[:4] == b"%PDF":
+            mime = "pdf"
+        elif raw_bytes[:2] == b"PK":
+            mime = "docx"
+        else:
+            mime = "text"
+
+    if mime == "pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw_bytes))
+            pages = []
+            for page in reader.pages:
+                pages.append(page.extract_text() or "")
+            return "\n".join(pages)
+        except Exception as e:
+            raise RuntimeError(f"PDF parsing failed: {e}")
+
+    if mime == "docx":
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(raw_bytes))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            return "\n".join(paragraphs)
+        except Exception as e:
+            raise RuntimeError(f"DOCX parsing failed: {e}")
+
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw_bytes.decode("latin-1", errors="replace")
+
+
+def _write_error(error: str) -> None:
+    with open("result.json", "w") as f:
+        json.dump({"status": "error", "error": error}, f)
+
+
+def main():
+    with open("inputs.json") as f:
+        inputs = json.load(f)
+
+    try:
+        with open("secrets.json") as f:
+            secrets = json.load(f)
+    except FileNotFoundError:
+        secrets = {}
+
+    try:
+        with open("connections.json") as f:
+            connections = json.load(f)
+    except FileNotFoundError:
+        connections = {}
+
+    # cv_file may be a path (e2b file input) or a base64 data URI
+    cv_file_input = inputs.get("cv_file", "").strip()
     client_brief = inputs.get("client_brief", "").strip()
     target_format = inputs.get("target_format", "branded_markdown").strip()
 
-    if not cv_file:
-        return {"status": "error", "error": "Missing required input: cv_file"}
+    if not cv_file_input:
+        _write_error("Missing required input: cv_file")
+        return
     if not client_brief:
-        return {"status": "error", "error": "Missing required input: client_brief"}
+        _write_error("Missing required input: client_brief")
+        return
     if target_format not in FORMAT_INSTRUCTIONS:
         target_format = "branded_markdown"
 
-    context.log("Extracting text from CV file")
+    # Resolve file: if it's a relative/absolute path written by the E2B driver, read it
+    if not cv_file_input.startswith("data:"):
+        try:
+            with open(cv_file_input, "rb") as fh:
+                raw = fh.read()
+            # Wrap as base64 so the shared extractor can handle it
+            import base64 as _b64
+            cv_file_b64 = "data:application/octet-stream;base64," + _b64.b64encode(raw).decode()
+        except Exception as e:
+            _write_error(f"Could not read cv_file path: {e}")
+            return
+    else:
+        cv_file_b64 = cv_file_input
+
     try:
-        cv_text = _extract_text_from_base64(cv_file)
+        cv_text = _extract_text_from_base64(cv_file_b64)
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        _write_error(str(e))
+        return
 
     if not cv_text.strip():
-        return {"status": "error", "error": "Could not extract any text from the uploaded CV"}
+        _write_error("Could not extract any text from the uploaded CV")
+        return
 
-    context.log(f"Extracted {len(cv_text)} characters from CV")
-
-    # Step 1: Extract structured profile
-    context.log("Extracting structured profile")
     extract_prompt = """Extract the following fields from this CV text and return ONLY a JSON object with these exact keys:
 {
   "name": "Full name",
@@ -149,7 +180,7 @@ Return ONLY the JSON. No commentary."""
 
     try:
         from openai import OpenAI
-        client_ai = OpenAI(api_key=context.secrets.get("OPENAI_API_KEY"))
+        client_ai = OpenAI(api_key=secrets.get("OPENAI_API_KEY"))
 
         extract_resp = client_ai.chat.completions.create(
             model="gpt-4o-mini",
@@ -166,16 +197,16 @@ Return ONLY the JSON. No commentary."""
             lines = [l for l in lines if not l.startswith("```")]
             profile_raw = "\n".join(lines).strip()
         extracted_profile = json.loads(profile_raw)
-    except json.JSONDecodeError as e:
-        context.log(f"Profile extraction JSON error: {e}", level="warning")
-        extracted_profile = {"name": "", "current_title": "", "current_company": "", "years_experience": 0, "key_skills": [], "languages": [], "location": "", "contact": ""}
+    except json.JSONDecodeError:
+        extracted_profile = {
+            "name": "", "current_title": "", "current_company": "",
+            "years_experience": 0, "key_skills": [], "languages": [],
+            "location": "", "contact": "",
+        }
     except Exception as e:
-        return {"status": "error", "error": f"OpenAI profile extraction failed: {e}"}
+        _write_error(f"OpenAI profile extraction failed: {e}")
+        return
 
-    context.log(f"Profile extracted: {extracted_profile.get('name', '?')} @ {extracted_profile.get('current_company', '?')}")
-
-    # Step 2: Generate writeup
-    context.log(f"Generating {target_format} writeup")
     format_instruction = FORMAT_INSTRUCTIONS[target_format]
 
     writeup_system = f"""You are a senior recruiter at NovaSearch, a DACH tech recruiting boutique specialising in Java/Backend/FinTech.
@@ -204,14 +235,20 @@ Write the candidate writeup now."""
         )
         writeup = writeup_resp.choices[0].message.content.strip()
     except Exception as e:
-        return {"status": "error", "error": f"OpenAI writeup generation failed: {e}"}
+        _write_error(f"OpenAI writeup generation failed: {e}")
+        return
 
-    context.log("Writeup generated successfully")
-
-    return {
+    result = {
         "status": "success",
         "outputs": {
             "writeup": writeup,
             "extracted_profile": json.dumps(extracted_profile, ensure_ascii=False, indent=2),
         },
+        "artifacts": [],
     }
+    with open("result.json", "w") as f:
+        json.dump(result, f)
+
+
+if __name__ == "__main__":
+    main()
