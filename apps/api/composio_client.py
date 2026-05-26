@@ -184,17 +184,34 @@ def list_connections() -> List[Dict[str, Any]]:
 
 
 def list_triggers() -> List[Dict[str, Any]]:
-    """Return the Composio v3 trigger catalog."""
-    try:
-        data = _get("/triggers_types", limit=1000)
-    except requests.HTTPError as exc:
-        if exc.response is None or exc.response.status_code not in {404, 405, 410}:
-            raise
-        data = _get("/triggers", limit=1000)
-    if isinstance(data, list):
-        return data
-    items = data.get("items") or data.get("triggers") or data.get("data") or data.get("trigger_types") or []
-    return items if isinstance(items, list) else []
+    """Return the Composio v3 trigger catalog (all pages)."""
+    def fetch_page(cursor: Optional[str]) -> Dict[str, Any]:
+        params: Dict[str, Any] = {"limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            return _get("/triggers_types", **params)
+        except requests.HTTPError as exc:
+            if exc.response is None or exc.response.status_code not in {404, 405, 410}:
+                raise
+            return _get("/triggers", **params)
+
+    all_items: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+    max_pages = 50  # safety cap (5000 triggers max)
+    for _ in range(max_pages):
+        data = fetch_page(cursor)
+        if isinstance(data, list):
+            all_items.extend(data)
+            break
+        items = data.get("items") or data.get("triggers") or data.get("data") or data.get("trigger_types") or []
+        if isinstance(items, list):
+            all_items.extend(items)
+        next_cursor = data.get("next_cursor") or data.get("nextCursor")
+        if not next_cursor:
+            break
+        cursor = str(next_cursor)
+    return all_items
 
 
 def _extract_enabled_trigger_id(event: str, data: Any) -> str:
