@@ -135,7 +135,7 @@ export default function EditWorkerPage() {
     if (!worker) return;
     if (triggerType === "composio") {
       if (!composioEvent || !composioConnectionId) {
-        toast.error("Composio event and connection ID are required");
+        toast.error("Connection event and ID are required");
         return;
       }
       try {
@@ -200,7 +200,7 @@ export default function EditWorkerPage() {
                     ["manual", "Manual"],
                     ["schedule", "Cron"],
                     ["webhook", "Webhook"],
-                    ["composio", "Composio event"],
+                    ["composio", "Connection event"],
                   ] as const).map(([value, label]) => (
                     <button
                       key={value}
@@ -248,7 +248,7 @@ export default function EditWorkerPage() {
                       }}
                     >
                       <SelectTrigger className="border-[#e4e4e7]">
-                        <SelectValue placeholder="Select a Composio event" />
+                        <SelectValue placeholder="Select a connection event" />
                       </SelectTrigger>
                       <SelectContent>
                         {filteredComposioTriggers.map((item) => {

@@ -647,7 +647,7 @@ function ReviewStep({
                       ["manual", "Manual"],
                       ["schedule", "Cron"],
                       ["webhook", "Webhook"],
-                      ["composio", "Composio event"],
+                      ["composio", "Connection event"],
                     ] as const).map(([value, label]) => (
                       <button
                         key={value}
@@ -992,7 +992,7 @@ function OldFormContent({ templateId }: { templateId?: string }) {
               <div className="space-y-1.5">
                 <Label className="text-sm">Type</Label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {([["manual", "Manual"], ["schedule", "Cron"], ["webhook", "Webhook"], ["composio", "Composio event"]] as const).map(([value, label]) => (
+                  {([["manual", "Manual"], ["schedule", "Cron"], ["webhook", "Webhook"], ["composio", "Connection event"]] as const).map(([value, label]) => (
                     <button
                       key={value}
                       type="button"
@@ -1031,7 +1031,7 @@ function OldFormContent({ templateId }: { templateId?: string }) {
                     <Label className="text-sm">Event</Label>
                     <Select value={composioEvent} onValueChange={(value) => { if (!value) return; setComposioEvent(value); setComposioConnectionId(""); }}>
                       <SelectTrigger className="border-[#e4e4e7]">
-                        <SelectValue placeholder="Select a Composio event" />
+                        <SelectValue placeholder="Select a connection event" />
                       </SelectTrigger>
                       <SelectContent>
                         {filteredComposioTriggers.map((item) => {

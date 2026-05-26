@@ -30,7 +30,7 @@ export async function GET(
 
   if (!key) {
     return NextResponse.json(
-      { error: "Composio not configured" },
+      { error: "Connections backend not configured" },
       { status: 503 }
     );
   }
@@ -48,19 +48,19 @@ export async function GET(
     const status = direct.status;
     if (status === 401 || status === 403) {
       return NextResponse.json(
-        { error: "Composio authentication failed" },
+        { error: "Connection authentication failed" },
         { status }
       );
     }
     if (status === 429) {
       return NextResponse.json(
-        { error: "Composio rate limit exceeded" },
+        { error: "Connection rate limit exceeded" },
         { status: 429 }
       );
     }
     if (status >= 500) {
       return NextResponse.json(
-        { error: "Composio service unavailable" },
+        { error: "Connection service unavailable" },
         { status: 502 }
       );
     }
