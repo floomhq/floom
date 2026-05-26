@@ -31,6 +31,8 @@ export type ConnectionView = ConnectionRecord & {
   displayName: string;
   icon: string;
   lastUsedAt?: string;
+  lastCheckedAt?: string;
+  lastCheckStatus?: string;
   scopes: string[];
 };
 
@@ -94,8 +96,23 @@ export function formatTimestamp(value?: string) {
   }).format(date);
 }
 
+export function formatRelativeTime(value?: string | null): string {
+  if (!value) return "never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 2) return "just now";
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  const diffD = Math.floor(diffH / 24);
+  return `${diffD}d ago`;
+}
+
 export function getConnectionAccountLabel(conn: ConnectionRecord) {
   return (
+    conn.account_label ||
     conn.email ||
     conn.account_email ||
     conn.connected_as ||
@@ -133,7 +150,11 @@ export function toConnectionView(
   const metadata = metadataByConnectionId[conn.id] ?? {};
   const merged = { ...conn, ...metadata };
   const app = getSupportedApp(merged.app_name);
-  const scopes = scopesByConnectionId[conn.id] ?? getConnectionScopes(merged);
+  // Use scopes from: (1) hydrated metadata, (2) API-returned scopes, (3) auth_config scopes
+  const apiScopes = Array.isArray(conn.scopes) ? conn.scopes : [];
+  const scopes =
+    scopesByConnectionId[conn.id] ??
+    (apiScopes.length > 0 ? apiScopes : getConnectionScopes(merged));
   return {
     ...merged,
     accountLabel: getConnectionAccountLabel(merged),
@@ -144,6 +165,8 @@ export function toConnectionView(
       merged.last_used_at ||
       merged.last_used ||
       lastUsedBySlug[normalizeAppSlug(merged.app_name)],
+    lastCheckedAt: conn.last_checked_at ?? undefined,
+    lastCheckStatus: conn.last_check_status ?? undefined,
     scopes,
   };
 }

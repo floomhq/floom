@@ -50,6 +50,7 @@ export default function ConnectionsPage() {
     Record<string, Partial<ConnectionRecord>>
   >({});
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -192,6 +193,26 @@ export default function ConnectionsPage() {
     }
   }
 
+  async function handleTest(connection: ConnectionView) {
+    setTesting(connection.id);
+    try {
+      const result = await api.connections.test(connection.id);
+      if (result.status === "valid") {
+        toast.success(`${connection.displayName}: connection is valid`);
+      } else if (result.status === "expired") {
+        toast.warning(`${connection.displayName}: connection expired. Reconnect to restore access.`);
+      } else {
+        toast.error(`${connection.displayName}: connection test failed. ${result.reason}`);
+      }
+      // Refresh list to pick up updated last_checked_at
+      void refresh();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Test failed");
+    } finally {
+      setTesting(null);
+    }
+  }
+
   async function handleDelete(connection: ConnectionView) {
     setDeleting(connection.id);
     try {
@@ -243,9 +264,11 @@ export default function ConnectionsPage() {
                 deleting={deleting === connection.id}
                 refreshing={refreshing === connection.id}
                 reconnecting={connecting === connection.app_name}
+                testing={testing === connection.id}
                 onDelete={handleDelete}
                 onReconnect={handleConnect}
                 onRefresh={handleRefresh}
+                onTest={handleTest}
               />
             ))
           )}

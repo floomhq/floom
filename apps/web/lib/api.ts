@@ -95,6 +95,10 @@ export const api = {
       fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
     delete: (id: string) =>
       fetchJson<{ status: string }>(`/connections/${id}`, { method: "DELETE" }),
+    test: (id: string) =>
+      fetchJson<import("./types").ConnectionTestResult>(`/connections/${id}/test`, {
+        method: "POST",
+      }),
   },
   integrations: {
     triggers: () =>
