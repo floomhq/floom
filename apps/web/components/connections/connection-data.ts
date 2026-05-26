@@ -44,7 +44,6 @@ export const SUPPORTED_APPS: SupportedConnectionApp[] = [
   { slug: "github", displayName: "GitHub", icon: "github" },
   { slug: "hubspot", displayName: "HubSpot", icon: "hubspot" },
   { slug: "salesforce", displayName: "Salesforce", icon: "salesforce" },
-  { slug: "composio", displayName: "Composio", icon: "composio" },
   // Restored: backend composio_client.py still supports these
   { slug: "linkedin", displayName: "LinkedIn", icon: "linkedin" },
   { slug: "apollo", displayName: "Apollo", icon: "apollo" },
