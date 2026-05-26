@@ -54,7 +54,6 @@ limits:
   timeout_seconds: 300
 exec:
   mode: agent
-  mode: agent
   runtime: skill
   runner: local
   inputs:
