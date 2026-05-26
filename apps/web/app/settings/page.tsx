@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { SecretItem } from "@/lib/types";
 
 interface SystemInfo {
   api_version: string;
@@ -21,11 +20,13 @@ interface SystemInfo {
 interface PlatformSecret {
   name: string;
   status: string;
+  required: boolean;
+  default: string | null;
+  description: string | null;
 }
 
 export default function SettingsPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
-  const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [platformSecrets, setPlatformSecrets] = useState<PlatformSecret[]>([]);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -33,13 +34,11 @@ export default function SettingsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [infoRes, secretsRes, platformRes] = await Promise.all([
+      const [infoRes, platformRes] = await Promise.all([
         api.system.info(),
-        api.secrets.list(),
         api.system.platformConfig(),
       ]);
       setInfo(infoRes as unknown as SystemInfo);
-      setSecrets(secretsRes);
       setPlatformSecrets(platformRes.platform_secrets);
     } catch (e) {
       console.error(e);
@@ -79,6 +78,29 @@ export default function SettingsPage() {
     } finally {
       setClearing(false);
     }
+  }
+
+  function platformSecretBadge(s: PlatformSecret) {
+    if (s.status === "set") {
+      return (
+        <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50 shrink-0 ml-2">
+          set
+        </Badge>
+      );
+    }
+    if (!s.required) {
+      const label = s.default ? `optional, default: ${s.default}` : "optional";
+      return (
+        <Badge variant="outline" className="text-[#888] border-[#ddd] bg-[#f7f7f7] shrink-0 ml-2">
+          {label}
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50 shrink-0 ml-2">
+        missing
+      </Badge>
+    );
   }
 
   return (
@@ -140,17 +162,13 @@ export default function SettingsPage() {
           ) : (
             platformSecrets.map((s) => (
               <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                <span className="text-sm font-mono text-[#333]">{s.name}</span>
-                <Badge
-                  variant="outline"
-                  className={
-                    s.status === "set"
-                      ? "text-emerald-600 border-emerald-200 bg-emerald-50 shrink-0 ml-2"
-                      : "text-red-600 border-red-200 bg-red-50 shrink-0 ml-2"
-                  }
-                >
-                  {s.status}
-                </Badge>
+                <div className="min-w-0">
+                  <span className="text-sm font-mono text-[#333]">{s.name}</span>
+                  {s.description && (
+                    <p className="text-xs text-[#999] mt-0.5">{s.description}</p>
+                  )}
+                </div>
+                {platformSecretBadge(s)}
               </div>
             ))
           )}
@@ -168,38 +186,6 @@ export default function SettingsPage() {
               {reloading ? "Reloading..." : "Reload workers"}
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Secrets summary</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {secrets.length === 0 ? (
-            <p className="text-sm text-[#999]">No worker secrets configured.</p>
-          ) : (
-            secrets.map((s) => (
-              <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                <div className="min-w-0">
-                  <span className="text-sm font-mono">{s.name}</span>
-                  {s.used_by.length > 0 && (
-                    <span className="text-xs text-[#999] ml-2">used by: {s.used_by.join(", ")}</span>
-                  )}
-                </div>
-                <Badge
-                  variant="outline"
-                  className={
-                    s.status === "set"
-                      ? "text-emerald-600 border-emerald-200 bg-emerald-50 shrink-0 ml-2"
-                      : "text-red-600 border-red-200 bg-red-50 shrink-0 ml-2"
-                  }
-                >
-                  {s.status}
-                </Badge>
-              </div>
-            ))
-          )}
         </CardContent>
       </Card>
 
