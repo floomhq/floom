@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import sys
 import tempfile
 import unittest
@@ -33,7 +34,7 @@ class FakeOpenAIClient:
         )
 
     def create(self, **kwargs):
-        self.calls.append(kwargs)
+        self.calls.append(copy.deepcopy(kwargs))
         if not self._messages:
             raise AssertionError("OpenAI stub exhausted")
         message = self._messages.pop(0)
@@ -121,6 +122,10 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             self.assertTrue(any(row["type"] == "tool_call" and row["name"] == "write_output" for row in rows))
             self.assertIn("write_output", {tool["function"]["name"] for tool in fake_client.calls[0]["tools"]})
             self.assertEqual(fake_client.calls[0]["model"], "gpt-test")
+            tool_message = fake_client.calls[1]["messages"][-1]
+            self.assertEqual(tool_message["role"], "tool")
+            self.assertEqual(tool_message["tool_call_id"], "call_1")
+            self.assertNotIn("name", tool_message)
 
     def test_transcript_artifact_scrubs_secret_values(self):
         with tempfile.TemporaryDirectory() as tmp:

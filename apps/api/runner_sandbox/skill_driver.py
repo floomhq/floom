@@ -269,7 +269,6 @@ class SkillRuntimeDriver(SandboxDriver):
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "name": name,
                     "content": _json_dumps(result),
                 })
         else:

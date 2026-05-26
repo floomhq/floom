@@ -30,9 +30,10 @@ from runner_sandbox.skill_driver import SkillRuntimeDriver  # noqa: E402
 
 
 class FakeOpenAIClient:
-    def __init__(self):
+    def __init__(self, output_name: str = "brief"):
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
         self.calls = 0
+        self.output_name = output_name
 
     def create(self, **_kwargs):
         self.calls += 1
@@ -47,7 +48,7 @@ class FakeOpenAIClient:
                         function=SimpleNamespace(
                             name="write_output",
                             arguments=json.dumps({
-                                "name": "brief",
+                                "name": self.output_name,
                                 "content": "# Research Brief\n\nStubbed integration output.",
                             }),
                         ),
@@ -105,6 +106,34 @@ def assert_skill_runtime() -> None:
     print(f"skill runtime completed: {run_id}")
 
 
+def assert_failed_skill_transcript_persisted() -> None:
+    original_client = SkillRuntimeDriver._client
+    SkillRuntimeDriver._client = lambda self, secrets: FakeOpenAIClient(output_name="wrong_name")
+    try:
+        run_id = create_run(
+            "research_brief",
+            {"topic": "AI agents", "audience": "executive", "depth": "overview"},
+            trigger_source="integration",
+        )
+        execute_run(
+            run_id,
+            "research_brief",
+            {"topic": "AI agents", "audience": "executive", "depth": "overview"},
+        )
+    finally:
+        SkillRuntimeDriver._client = original_client
+
+    row = run_row(run_id)
+    assert row["status"] == "failed", row["status"]
+    artifacts = artifacts_for(run_id)
+    names = {artifact["name"] for artifact in artifacts}
+    assert "wrong_name.txt" in names, names
+    assert "transcript.jsonl" in names, names
+    transcript = next(artifact for artifact in artifacts if artifact["name"] == "transcript.jsonl")
+    assert Path(transcript["path"]).is_file(), transcript["path"]
+    print(f"failed skill transcript persisted: {run_id}")
+
+
 def assert_code_runtime_regression() -> None:
     inputs = {
         "text_input": "hello",
@@ -129,5 +158,6 @@ if __name__ == "__main__":
     loaded = main.reload_workers()
     assert loaded.workers_loaded == 12, loaded
     assert_skill_runtime()
+    assert_failed_skill_transcript_persisted()
     assert_code_runtime_regression()
     print("skill runtime integration passed")

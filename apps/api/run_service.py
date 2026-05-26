@@ -255,6 +255,32 @@ def create_approval(
     return approval_id
 
 
+def _store_run_artifacts(
+    run_id: str,
+    artifacts: list[Dict[str, Any]],
+    log_fn: Callable[[str, str], None],
+) -> None:
+    for art in artifacts:
+        try:
+            art_id = f"art_{uuid.uuid4().hex[:12]}"
+            art_name = art.get("name", "artifact")
+            art_type = art.get("type", "file")
+            art_path = art.get("path", "")
+            art_size = art.get("size_bytes", 0)
+            with get_db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO artifacts
+                        (id, run_id, name, type, path, size_bytes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (art_id, run_id, art_name, art_type, art_path, art_size, now_iso()),
+                )
+        except Exception as exc:
+            logger.exception("Failed to store artifact")
+            log_fn(f"Failed to store artifact: {exc}", level="warning")
+
+
 def _load_runtime_env_files() -> None:
     load_dotenv(LOCAL_ENV_PATH, override=False)
     if API_ENV_PATH.is_file():
@@ -365,35 +391,15 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         config=config,
     )
 
+    outputs = result.outputs
+    artifacts = result.artifacts
+    _store_run_artifacts(run_id, artifacts, log_fn)
+
     # Both "error" and "failed" terminal statuses map to a failed run
     if result.status in ("error", "failed"):
         update_run_status(run_id, RunStatus.FAILED.value, error=result.error)
         log_fn(f"Run failed: {result.error}", level="error")
         return
-
-    outputs = result.outputs
-    artifacts = result.artifacts
-
-    # Store artifacts
-    for art in artifacts:
-        try:
-            art_id = f"art_{uuid.uuid4().hex[:12]}"
-            art_name = art.get("name", "artifact")
-            art_type = art.get("type", "file")
-            art_path = art.get("path", "")
-            art_size = art.get("size_bytes", 0)
-            with get_db() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO artifacts
-                        (id, run_id, name, type, path, size_bytes, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (art_id, run_id, art_name, art_type, art_path, art_size, now_iso()),
-                )
-        except Exception as exc:
-            logger.exception("Failed to store artifact")
-            log_fn(f"Failed to store artifact: {exc}", level="warning")
 
     update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
     log_fn("Output generated")
