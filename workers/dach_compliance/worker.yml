@@ -2,11 +2,50 @@ schema_version: '0.3'
 name: dach-compliance
 title: DACH Compliance + Rate Benchmark
 description: AÜG risk assessment, Scheinselbständigkeit check, and DACH market rate benchmark for contractor engagements.
+long_description: |
+  Reviews a DACH contractor engagement for common compliance risks and gives a practical market-rate benchmark. It is built for recruiters and account teams who need a fast pre-check before proposing a contractor setup.
+use_cases:
+- Flag AUG or Scheinselbstaendigkeit risk before client submission.
+- Benchmark daily rates for senior DACH technical roles.
+- Prepare talking points for contract structure and role scope.
+example_input:
+  engagement_type: AUG
+  role_summary: Senior Java Backend Engineer, Spring Boot, Kafka, embedded in the client's Berlin platform team for 12 months.
+  proposed_daily_rate_eur: 780
+  location: Berlin, Germany
+  experience_years: 8
+example_output: |
+  ## Compliance report
+
+  **Risk level:** Medium
+
+  **Main flags:** Embedded team structure, long duration, and client-directed delivery increase AUG sensitivity.
+
+  **Rate view:** EUR 780/day is within the expected Berlin senior Java contractor range when Kafka and regulated-domain experience are present.
+how_it_works: |
+  Engagement facts
+    -> classify contract structure
+    -> check DACH red flags
+    -> benchmark role, location, and seniority
+    -> return compliance notes and rate range
+folder: Recruiting/Compliance
+tags:
+- dach
+- compliance
+- rates
+- recruiting
+- contractors
 version: 0.1.0
 entrypoint: SKILL.md
 targets:
 - generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
 exec:
+  mode: pure-script
   command: python run.py
   runtime: python311
   runner: local

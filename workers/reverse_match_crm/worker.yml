@@ -2,11 +2,53 @@ schema_version: '0.3'
 name: reverse-match-crm
 title: Reverse Match CRM
 description: Score your CRM contacts against a job brief and surface the top fits with DACH-specific signals.
+long_description: |
+  Scores a recruiter CRM export against a live job brief and returns the best-fit candidates with DACH-specific reasoning. It is built for NovaSearch-style reverse matching when speed and explainability both matter.
+use_cases:
+- Find the strongest candidates in an old CRM export for a new role.
+- Explain why a candidate fits a DACH contract or permanent search.
+- Prioritize outreach with fit score, risk notes, and next step.
+example_input:
+  crm_csv: |
+    name,email,current_company,current_title,headline,last_active_iso,skills,notes
+    Anna Keller,anna@example.com,Solaris,Senior Java Engineer,FinTech backend specialist,2024-03-01,Java;Kafka;Spring Boot,Available May
+    Mehmet Yilmaz,mehmet@example.com,Zalando,Platform Engineer,Kubernetes and Python,2023-11-12,Kubernetes;Python;AWS,Open to contract
+  job_brief: Senior Java Backend Engineer for Berlin FinTech, 6-12 month AUG contract, Spring Boot and Kafka required, EUR 700-850/day.
+  required_modules: Spring Boot, Kafka
+  min_score: 0.65
+  top_n: 5
+example_output: |
+  ## Analysis summary
+
+  **Top match:** Anna Keller, fit score 0.89.
+
+  **Reasoning:** Direct Java, Spring Boot, Kafka, and fintech backend experience. Recent availability note supports immediate outreach.
+
+  **Next step:** Send contractor availability and rate confirmation message.
+how_it_works: |
+  CRM CSV + job brief
+    -> validate required columns
+    -> score each contact against role signals
+    -> add DACH fit and profile-age risk
+    -> return top candidates CSV and summary
+folder: Recruiting/NovaSearch
+tags:
+- recruiting
+- crm
+- matching
+- novasearch
+- dach
 version: 0.1.0
 entrypoint: SKILL.md
 targets:
 - generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
 exec:
+  mode: pure-script
   command: python run.py
   runtime: python311
   runner: local

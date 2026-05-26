@@ -4,7 +4,6 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
-from datetime import datetime
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +62,8 @@ class WorkerInput(BaseModel):
     options: Optional[List[str]] = None
     default: Optional[Any] = None
     accept_csv: bool = False  # When True, render the CSV column mapper in the UI
+    accepts: Optional[List[str]] = None
+    max_size_mb: Optional[float] = None
 
 
 class WorkerOutput(BaseModel):
@@ -78,6 +79,19 @@ class WorkerWebhookConfig(BaseModel):
     allowed_methods: List[str] = ["POST"]
 
 
+class WorkerComposioTriggerConfig(BaseModel):
+    event: str
+    connection_id: str
+    filters: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("event", "connection_id")
+    @classmethod
+    def validate_nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value is required")
+        return value.strip()
+
+
 class WorkerTrigger(BaseModel):
     type: str
     cron: Optional[str] = None
@@ -85,6 +99,7 @@ class WorkerTrigger(BaseModel):
     every: Optional[str] = None
     at: Optional[str] = None
     webhook: Optional[WorkerWebhookConfig] = None
+    composio: Optional[WorkerComposioTriggerConfig] = None
 
 
 class WorkerRuntime(BaseModel):
@@ -93,6 +108,10 @@ class WorkerRuntime(BaseModel):
     runner: str = "local"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
+    mode: Literal["agent", "pure-script"] = "pure-script"
+    model: Optional[str] = None
+    system_prompt: Optional[str] = None
+    limits: "WorkerLimits" = Field(default_factory=lambda: WorkerLimits())
 
     @field_validator("runner")
     @classmethod
@@ -112,6 +131,7 @@ class WorkerConfig(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    model: Optional[str] = None
     trigger: WorkerTrigger
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
@@ -132,6 +152,8 @@ class WorkerConfig(BaseModel):
                 raise ValueError(
                     "webhook-triggered workers must declare trigger.webhook.secret: true"
                 )
+        if self.trigger.type == "composio" and not self.trigger.composio:
+            raise ValueError("composio-triggered workers must declare trigger.composio")
         return self
 
 
@@ -188,6 +210,8 @@ class WorkerContractField(BaseModel):
     placeholder: Optional[str] = None
     options: Optional[List[str]] = None
     accept_csv: bool = False
+    accepts: Optional[List[str]] = None
+    max_size_mb: Optional[float] = None
     columns: Optional[List[str]] = None
     json_required_keys: Optional[List[str]] = None
 
@@ -209,26 +233,52 @@ class WorkerContractField(BaseModel):
                 raise ValueError(f"scalar field {self.name!r} cannot declare path")
         if self.kind == "file":
             if not self.media_type:
-                raise ValueError(f"file field {self.name!r} must declare media_type")
+                if self.accepts:
+                    self.media_type = self.accepts[0]
+                else:
+                    self.media_type = "application/octet-stream"
             if self.type and self.type != "file":
                 raise ValueError(f"file field {self.name!r} cannot declare scalar type")
+            if self.max_size_mb is not None and self.max_size_mb <= 0:
+                raise ValueError(f"file field {self.name!r} max_size_mb must be greater than 0")
         if self.type == "select" and not (self.options or self.enum):
             raise ValueError(f"select field {self.name!r} must declare options or enum")
         return self
 
 
+class WorkerEntrypoint(BaseModel):
+    name: str
+    path: str
+    type: str
+
+    @field_validator("name", "path", "type")
+    @classmethod
+    def validate_nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("value is required")
+        return value
+
+
+class WorkerLimits(BaseModel):
+    max_tool_iterations: int = Field(default=12, ge=1)
+    max_output_tokens: int = Field(default=4096, ge=1)
+    max_total_tokens: int = Field(default=50000, ge=1)
+    timeout_seconds: int = Field(default=300, ge=1)
+
+
 class WorkerContractExec(BaseModel):
-    command: str
-    runtime: str
+    command: Optional[str] = None
+    runtime: Literal["python311", "node22", "bash", "skill", "none"]
     runner: str = "local"
+    mode: Optional[Literal["agent", "pure-script"]] = None
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
 
-    @field_validator("command", "runtime")
+    @field_validator("command")
     @classmethod
-    def validate_nonempty(cls, value: str) -> str:
-        if not value.strip():
+    def validate_command(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
             raise ValueError("value is required")
         return value
 
@@ -240,6 +290,16 @@ class WorkerContractExec(BaseModel):
             raise ValueError(f"runner must be one of {sorted(allowed)}, got {value!r}")
         return value
 
+    @model_validator(mode="after")
+    def validate_runtime_mode(self) -> "WorkerContractExec":
+        if self.mode == "pure-script" and not self.command:
+            raise ValueError("exec.command is required when exec.mode is pure-script")
+        if self.mode == "pure-script" and self.runtime == "none":
+            raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
+        if self.runtime == "none" and self.command:
+            raise ValueError("exec.runtime 'none' cannot declare exec.command")
+        return self
+
 
 class WorkerContractNetworkCapabilities(BaseModel):
     egress: bool = False
@@ -247,6 +307,7 @@ class WorkerContractNetworkCapabilities(BaseModel):
 
 class WorkerContractCapabilities(BaseModel):
     secrets: List[str] = Field(default_factory=list)
+    files: List[str] = Field(default_factory=list)
     network: WorkerContractNetworkCapabilities = Field(default_factory=WorkerContractNetworkCapabilities)
 
 
@@ -260,6 +321,13 @@ class WorkerContractTrigger(BaseModel):
     cron: Optional[str] = None
     timezone: Optional[str] = None
     webhook: Optional[WorkerWebhookConfig] = None
+    composio: Optional[WorkerComposioTriggerConfig] = None
+
+    @model_validator(mode="after")
+    def validate_composio(self) -> "WorkerContractTrigger":
+        if self.type == "composio" and not self.composio:
+            raise ValueError("composio-triggered workers must declare trigger.composio")
+        return self
 
 
 class WorkerContract(BaseModel):
@@ -267,10 +335,20 @@ class WorkerContract(BaseModel):
     name: str
     title: str
     description: str
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
+    how_it_works: Optional[str] = None
+    folder: Optional[str] = None
     version: str
-    entrypoint: str = "SKILL.md"
+    entrypoint: Optional[str] = "SKILL.md"
+    system_prompt: Optional[str] = None
+    model: Optional[str] = "gpt-5-mini"
+    entrypoints: Optional[List[WorkerEntrypoint]] = None
+    limits: WorkerLimits = Field(default_factory=WorkerLimits)
     targets: List[str] = Field(default_factory=lambda: ["generic"])
-    tags: List[str] = Field(default_factory=list)
+    tags: Optional[List[str]] = None
     authors: List[WorkerContractAuthor] = Field(default_factory=list)
     license: Optional[str] = None
     homepage: Optional[str] = None
@@ -316,8 +394,72 @@ class WorkerContract(BaseModel):
             raise ValueError("description must be 500 characters or fewer")
         return value
 
+    @model_validator(mode="after")
+    def resolve_exec_mode(self) -> "WorkerContract":
+        if self.exec.mode is None:
+            self.exec.mode = _resolve_legacy_exec_mode(self.exec)
+        if self.exec.runtime == "none" and self.exec.mode != "agent":
+            raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
+        if self.exec.runtime == "none" and self.exec.command:
+            raise ValueError("exec.runtime 'none' cannot declare exec.command")
+        if self.exec.runtime == "none" and (self.entrypoint or self.entrypoints):
+            raise ValueError("exec.runtime 'none' cannot declare entrypoints")
+        if self.exec.mode == "pure-script" and not self.exec.command:
+            raise ValueError("exec.command is required when exec.mode is pure-script")
+        return self
+
+    @field_validator("long_description")
+    @classmethod
+    def validate_long_description(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if len(value) > 2000:
+            raise ValueError("long_description must be 2000 characters or fewer")
+        return value
+
+    @field_validator("use_cases")
+    @classmethod
+    def validate_use_cases(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        if not 3 <= len(value) <= 5:
+            raise ValueError("use_cases must contain 3 to 5 items")
+        if any(not item.strip() for item in value):
+            raise ValueError("use_cases items must be non-empty")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        if len(value) > 8:
+            raise ValueError("tags must contain 8 items or fewer")
+        if any("/" in tag or not tag.strip() for tag in value):
+            raise ValueError("tags must be flat non-empty strings")
+        return value
+
+    @field_validator("folder")
+    @classmethod
+    def validate_folder(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if len(value) > 64:
+            raise ValueError("folder must be 64 characters or fewer")
+        if value.startswith("/") or value.endswith("/") or ".." in value.split("/"):
+            raise ValueError("folder must be a relative folder path")
+        if not all(part.strip() for part in value.split("/")):
+            raise ValueError("folder path segments must be non-empty")
+        return value
+
 
 WorkerManifest = WorkerConfig | WorkerContract
+
+
+def _resolve_legacy_exec_mode(exec_config: WorkerContractExec) -> Literal["agent", "pure-script"]:
+    if exec_config.runtime in {"python311", "node22", "bash"} and exec_config.command:
+        return "pure-script"
+    return "agent"
 
 
 def parse_worker_manifest(raw: Dict[str, Any]) -> WorkerManifest:
@@ -362,17 +504,27 @@ def _contract_output_type(field: WorkerContractField) -> str:
 
 def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -> WorkerConfig:
     """Project WorkerContract into the existing response/runtime config shape."""
-    command = contract.exec.command.strip().split()
-    entrypoint = "run.py"
-    if len(command) >= 2 and command[0].startswith("python"):
-        entrypoint = command[-1]
+    command_parts = contract.exec.command.strip().split() if contract.exec.command else []
+    entrypoint = contract.entrypoint or "SKILL.md"
+    if contract.exec.mode == "pure-script":
+        entrypoint = "run.py"
+        if len(command_parts) >= 2 and command_parts[0].startswith("python"):
+            entrypoint = command_parts[-1]
+        elif command_parts:
+            entrypoint = command_parts[-1]
+    elif contract.entrypoints:
+        entrypoint = contract.entrypoints[0].path
 
     runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
     runtime = WorkerRuntime(
-        type="python",
+        type=contract.exec.runtime,
         entrypoint=entrypoint,
         runner=runner,
         command=contract.exec.command,
+        mode=contract.exec.mode or "agent",
+        model=contract.model or "gpt-5-mini",
+        system_prompt=contract.system_prompt,
+        limits=contract.limits,
     )
 
     inputs = [
@@ -386,6 +538,8 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             options=field.options or ([str(value) for value in field.enum] if field.enum else None),
             default=field.default,
             accept_csv=field.accept_csv,
+            accepts=field.accepts or ([field.media_type] if field.kind == "file" and field.media_type else None),
+            max_size_mb=field.max_size_mb,
         )
         for field in contract.exec.inputs
     ]
@@ -403,11 +557,13 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         id=worker_id,
         name=contract.title,
         description=contract.description,
+        model=contract.model,
         trigger=WorkerTrigger(
             type=contract.trigger.type,
             cron=contract.trigger.cron,
             timezone=contract.trigger.timezone,
             webhook=contract.trigger.webhook,
+            composio=contract.trigger.composio,
         ),
         runtime=runtime,
         inputs=inputs,
@@ -432,16 +588,19 @@ def _slug_from_worker_id(worker_id: str) -> str:
 
 def _legacy_input_to_contract_field(field: WorkerInput) -> WorkerContractField:
     if field.type == "file":
+        media_type = field.accepts[0] if field.accepts else ("text/csv" if field.accept_csv else "application/octet-stream")
         return WorkerContractField(
             name=field.name,
             kind="file",
-            media_type="text/csv" if field.accept_csv else "application/octet-stream",
+            media_type=media_type,
             path=f"inputs/{field.name}",
             required=field.required,
             label=field.label,
             description=field.description,
             placeholder=field.placeholder,
             accept_csv=field.accept_csv,
+            accepts=field.accepts or [media_type],
+            max_size_mb=field.max_size_mb,
         )
     scalar_type = {
         "text": "string",
@@ -512,12 +671,17 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             command=f"python {config.runtime.entrypoint or 'run.py'}",
             runtime="python311",
             runner=config.runtime.runner,
+            mode=config.runtime.mode,
             inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],
             secrets=list(config.secrets),
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
+        system_prompt=config.runtime.system_prompt,
+        model=config.runtime.model or config.model or "gpt-5-mini",
+        limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
+            files=[field.name for field in config.inputs if field.type == "file"],
             network=WorkerContractNetworkCapabilities(egress=bool(config.secrets or config.connections)),
         ),
         approvals=WorkerContractApprovals(
@@ -528,6 +692,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             type=config.trigger.type,
             cron=config.trigger.cron,
             webhook=config.trigger.webhook,
+            composio=config.trigger.composio,
         ),
         connections=list(config.connections),
         csv_required_columns=config.csv_required_columns,
@@ -537,6 +702,15 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
+
+class WorkerUpdateRequest(BaseModel):
+    trigger_type: Optional[Literal["manual", "schedule", "webhook"]] = None
+    cron_expr: Optional[str] = None
+    cron_timezone: Optional[str] = None
+    webhook_secret_rotate: Optional[bool] = None  # True → rotate secret, return new raw once
+    input_values: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Dict[str, Any]] = None  # declared-not-enforced per T1c flip
+
 
 class RunCreate(BaseModel):
     inputs: Dict[str, Any] = Field(default_factory=dict)
@@ -624,6 +798,7 @@ class RunDetail(BaseModel):
     output_schema: List["OutputField"] = Field(default_factory=list)
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
+    transcript: List[Dict[str, Any]] = Field(default_factory=list)
     approval: Optional[ApprovalDetail] = None
     approval_status: ApprovalStatus
     error: Optional[str] = None
@@ -637,6 +812,13 @@ class WorkerSummary(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
+    how_it_works: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    folder: Optional[str] = None
     status: WorkerStatus
     paused: bool = False
     trigger_type: str
@@ -648,6 +830,13 @@ class WorkerDetail(BaseModel):
     id: str
     name: str
     description: Optional[str] = None
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
+    how_it_works: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    folder: Optional[str] = None
     status: WorkerStatus
     paused: bool = False
     trigger_type: str
@@ -655,6 +844,8 @@ class WorkerDetail(BaseModel):
     config: WorkerConfig
     recent_runs: List[RunSummary] = Field(default_factory=list)
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
+    run_py: Optional[str] = None
+    new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
 
 
 class SecretItem(BaseModel):

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { Suspense, use, useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import type { ComposioTriggerItem, ConnectionItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,10 +36,79 @@ interface OutputRow {
 
 const INPUT_TYPES = ["text", "textarea", "number", "select", "file", "boolean"] as const;
 const OUTPUT_TYPES = ["markdown", "text", "json", "csv", "file"] as const;
+type TriggerType = "manual" | "schedule" | "webhook" | "composio";
 
 function yamlString(value: string): string {
   return JSON.stringify(value);
 }
+
+function yamlBlock(value: string, indent = ""): string[] {
+  return value.split("\n").map((line) => `${indent}${line}`);
+}
+
+function sampleValueForInput(input: InputRow): string | number | boolean | null {
+  if (input.type === "number") return 1;
+  if (input.type === "boolean") return true;
+  if (input.type === "file") return null;
+  if (input.type === "select") {
+    return input.options.split(",").map((option) => option.trim()).filter(Boolean)[0] || "option";
+  }
+  if (input.type === "textarea") return `Sample ${input.label || input.name} with enough detail for a realistic run.`;
+  return `Sample ${input.label || input.name}`;
+}
+
+function yamlScalar(value: string | number | boolean | null): string {
+  if (value === null) return "null";
+  return typeof value === "string" ? yamlString(value) : String(value);
+}
+
+const TEMPLATES: Record<string, {
+  workerId: string;
+  name: string;
+  description: string;
+  inputs: InputRow[];
+  outputs: OutputRow[];
+  secrets: string;
+  approvalsRequired: boolean;
+}> = {
+  research_brief: {
+    workerId: "research-brief",
+    name: "Research Brief",
+    description: "Generates a markdown research brief on any topic.",
+    inputs: [
+      { name: "topic", label: "Research topic", type: "text", required: true, placeholder: "AI recruiting workflow tools in DACH", description: "Topic or question to investigate.", options: "" },
+      { name: "audience", label: "Audience", type: "select", required: true, placeholder: "", description: "Reader profile for tone and depth.", options: "executive, technical, sales" },
+      { name: "depth", label: "Depth", type: "select", required: true, placeholder: "", description: "Level of detail to produce.", options: "overview, detailed, deep_dive" },
+    ],
+    outputs: [{ name: "brief", label: "Research brief", type: "markdown" }],
+    secrets: "OPENAI_API_KEY",
+    approvalsRequired: false,
+  },
+  gmail_intake_brief: {
+    workerId: "gmail-intake-brief",
+    name: "Gmail Intake Brief",
+    description: "Fetches recent Gmail messages matching a query and returns a markdown summary.",
+    inputs: [
+      { name: "query", label: "Gmail search query", type: "text", required: false, placeholder: "is:unread label:intake newer_than:7d", description: "Gmail search syntax.", options: "" },
+      { name: "max_results", label: "Max emails to fetch", type: "number", required: false, placeholder: "5", description: "Maximum number of matching messages.", options: "" },
+    ],
+    outputs: [{ name: "summary", label: "Email summary", type: "markdown" }],
+    secrets: "OPENAI_API_KEY",
+    approvalsRequired: false,
+  },
+  csv_enricher: {
+    workerId: "csv-enricher",
+    name: "CSV Enricher",
+    description: "Enriches CSV rows using a custom instruction.",
+    inputs: [
+      { name: "csv_text", label: "CSV rows", type: "textarea", required: true, placeholder: "name,company\\nAlice,Acme", description: "CSV content with headers.", options: "" },
+      { name: "instruction", label: "Enrichment instruction", type: "text", required: true, placeholder: "Add ICP fit and reason columns.", description: "How each row needs to be enriched.", options: "" },
+    ],
+    outputs: [{ name: "enriched_csv", label: "Enriched CSV", type: "csv" }],
+    secrets: "OPENAI_API_KEY",
+    approvalsRequired: false,
+  },
+};
 
 const DEFAULT_RUN_PY = `from typing import Dict, Any
 
@@ -71,6 +141,12 @@ function buildYaml(
   outputs: OutputRow[],
   secrets: string,
   approvalsRequired: boolean,
+  triggerType: TriggerType,
+  cronExpr: string,
+  cronTimezone: string,
+  composioEvent: string,
+  composioConnectionId: string,
+  composioFilters: string,
 ): string {
   const slug = (workerId || "my-worker").replace(/_/g, "-");
   const title = name || "My Worker";
@@ -83,6 +159,33 @@ function buildYaml(
   lines.push(`name: ${slug}`);
   lines.push(`title: ${yamlString(title)}`);
   lines.push(`description: ${yamlString(description || "Custom Workeros worker.")}`);
+  lines.push(`long_description: |`);
+  lines.push(...yamlBlock(`  Explain what ${title} does, when to run it, and what a trustworthy result looks like.`));
+  lines.push(`use_cases:`);
+  lines.push(`- Replace this with a concrete operator workflow.`);
+  lines.push(`- Replace this with a second realistic use case.`);
+  lines.push(`- Replace this with a third realistic use case.`);
+  if (inputs.length > 0) {
+    lines.push(`example_input:`);
+    for (const inp of inputs) {
+      if (!inp.name) continue;
+      const sample = sampleValueForInput(inp);
+      if (typeof sample === "string" && sample.includes("\n")) {
+        lines.push(`  ${inp.name}: |`);
+        lines.push(...yamlBlock(sample, "    "));
+      } else {
+        lines.push(`  ${inp.name}: ${yamlScalar(sample)}`);
+      }
+    }
+  } else {
+    lines.push(`example_input: {}`);
+  }
+  lines.push(`example_output: |`);
+  lines.push(...yamlBlock(`  ## Example output\n\n  Replace this markdown with the worker's expected result shape.`));
+  lines.push(`how_it_works: |`);
+  lines.push(...yamlBlock(`  Input\n    -> validate fields\n    -> run worker logic\n    -> return structured output`));
+  lines.push(`folder: ${yamlString("Custom")}`);
+  lines.push(`tags: ["custom", "template"]`);
   lines.push(`version: "0.1.0"`);
   lines.push(`entrypoint: SKILL.md`);
   lines.push(`targets: [generic]`);
@@ -161,28 +264,124 @@ function buildYaml(
   lines.push(`  required: ${approvalsRequired}`);
   lines.push(``);
   lines.push(`trigger:`);
-  lines.push(`  type: manual`);
+  lines.push(`  type: ${triggerType}`);
+  if (triggerType === "schedule") {
+    lines.push(`  cron: ${yamlString(cronExpr || "0 9 * * MON")}`);
+    lines.push(`  timezone: ${yamlString(cronTimezone || "Europe/Berlin")}`);
+  }
+  if (triggerType === "webhook") {
+    lines.push(`  webhook:`);
+    lines.push(`    secret: true`);
+    lines.push(`    allowed_methods: [POST]`);
+  }
+  if (triggerType === "composio") {
+    let filters: Record<string, unknown> = {};
+    try {
+      filters = composioFilters.trim() ? JSON.parse(composioFilters) : {};
+    } catch {
+      filters = {};
+    }
+    lines.push(`  composio:`);
+    lines.push(`    event: ${yamlString(composioEvent)}`);
+    lines.push(`    connection_id: ${yamlString(composioConnectionId)}`);
+    lines.push(`    filters: ${JSON.stringify(filters)}`);
+  }
 
   return lines.join("\n");
+}
+
+function triggerEventId(item: ComposioTriggerItem): string {
+  return item.event || item.slug || item.id || item.name || "";
+}
+
+function triggerLabel(item: ComposioTriggerItem): string {
+  return item.display_name || item.name || triggerEventId(item);
+}
+
+function triggerAppSlug(item?: ComposioTriggerItem): string {
+  if (!item) return "";
+  return (
+    item.toolkit?.slug ||
+    item.app?.slug ||
+    (item as unknown as { toolkit_slug?: string }).toolkit_slug ||
+    (item as unknown as { app_name?: string }).app_name ||
+    ""
+  ).toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
-export default function NewWorkerPage() {
+export default function NewWorkerPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ template?: string }>;
+}) {
+  return (
+    <Suspense fallback={<NewWorkerSkeleton />}>
+      <NewWorkerPageInner searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+function NewWorkerPageInner({
+  searchParams,
+}: {
+  searchParams?: Promise<{ template?: string }>;
+}) {
+  const resolvedSearchParams = use(searchParams || Promise.resolve({} as { template?: string }));
+  return <NewWorkerContent templateId={resolvedSearchParams.template} />;
+}
+
+function NewWorkerSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="h-8 w-48 bg-[#e4e4e7] rounded-md" />
+        <div className="h-4 w-72 bg-[#ececef] rounded-md mt-2" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="h-[420px] bg-white border border-[#eaeaea] rounded-md" />
+        <div className="h-[420px] bg-white border border-[#eaeaea] rounded-md" />
+      </div>
+    </div>
+  );
+}
+
+function NewWorkerContent({ templateId }: { templateId?: string }) {
   const router = useRouter();
+  const template = templateId ? TEMPLATES[templateId] : undefined;
   const [submitting, setSubmitting] = useState(false);
 
   // Form state
-  const [workerId, setWorkerId] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [inputs, setInputs] = useState<InputRow[]>([]);
-  const [outputs, setOutputs] = useState<OutputRow[]>([]);
-  const [secrets, setSecrets] = useState("");
-  const [approvalsRequired, setApprovalsRequired] = useState(false);
+  const [workerId, setWorkerId] = useState(template?.workerId || "");
+  const [name, setName] = useState(template?.name || "");
+  const [description, setDescription] = useState(template?.description || "");
+  const [inputs, setInputs] = useState<InputRow[]>(template?.inputs || []);
+  const [outputs, setOutputs] = useState<OutputRow[]>(template?.outputs || []);
+  const [secrets, setSecrets] = useState(template?.secrets || "");
+  const [approvalsRequired, setApprovalsRequired] = useState(template?.approvalsRequired || false);
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
+  const [triggerType, setTriggerType] = useState<TriggerType>("manual");
+  const [cronExpr, setCronExpr] = useState("0 9 * * MON");
+  const [cronTimezone, setCronTimezone] = useState("Europe/Berlin");
+  const [composioTriggers, setComposioTriggers] = useState<ComposioTriggerItem[]>([]);
+  const [connections, setConnections] = useState<ConnectionItem[]>([]);
+  const [triggerSearch, setTriggerSearch] = useState("");
+  const [composioEvent, setComposioEvent] = useState("");
+  const [composioConnectionId, setComposioConnectionId] = useState("");
+  const [composioFilters, setComposioFilters] = useState("{}");
+
+  useEffect(() => {
+    Promise.all([
+      api.integrations.triggers().catch(() => ({ items: [] })),
+      api.connections.list().catch(() => []),
+    ]).then(([triggerCatalog, connectionItems]) => {
+      setComposioTriggers(triggerCatalog.items || []);
+      setConnections(connectionItems);
+    });
+  }, []);
 
   // ID validation
   const idError =
@@ -190,7 +389,35 @@ export default function NewWorkerPage() {
       ? "Use lowercase letters, numbers, and hyphens. Start and end with a letter or number."
       : null;
 
-  const yaml = buildYaml(workerId, name, description, inputs, outputs, secrets, approvalsRequired);
+  const selectedComposioTrigger = composioTriggers.find((item) => triggerEventId(item) === composioEvent);
+  const selectedAppSlug = triggerAppSlug(selectedComposioTrigger);
+  const matchingConnections = connections.filter((connection) => {
+    if (connection.status !== "active") return false;
+    if (!selectedAppSlug) return true;
+    return connection.app_name.toLowerCase() === selectedAppSlug;
+  });
+  const filteredComposioTriggers = composioTriggers
+    .filter((item) => {
+      const haystack = `${triggerEventId(item)} ${triggerLabel(item)} ${triggerAppSlug(item)}`.toLowerCase();
+      return haystack.includes(triggerSearch.toLowerCase());
+    })
+    .slice(0, 100);
+
+  const yaml = buildYaml(
+    workerId,
+    name,
+    description,
+    inputs,
+    outputs,
+    secrets,
+    approvalsRequired,
+    triggerType,
+    cronExpr,
+    cronTimezone,
+    composioEvent,
+    composioConnectionId,
+    composioFilters,
+  );
 
   // Input row helpers
   const addInput = useCallback(() => {
@@ -237,6 +464,26 @@ export default function NewWorkerPage() {
     if (inputs.some((inp) => inp.type === "select" && !inp.options.split(",").some((o) => o.trim()))) {
       toast.error("Select inputs need at least one option");
       return;
+    }
+    if (triggerType === "schedule" && !cronExpr.trim()) {
+      toast.error("Cron expression is required");
+      return;
+    }
+    if (triggerType === "composio") {
+      if (!composioEvent) {
+        toast.error("Composio event is required");
+        return;
+      }
+      if (!composioConnectionId) {
+        toast.error("Connection ID is required");
+        return;
+      }
+      try {
+        JSON.parse(composioFilters || "{}");
+      } catch {
+        toast.error("Filters must be valid JSON");
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -305,6 +552,138 @@ export default function NewWorkerPage() {
                   className="min-h-[60px] border-[#e4e4e7]"
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Trigger */}
+          <Card className="border-[#eaeaea] shadow-none bg-white">
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Trigger</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-sm">Type</Label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    ["manual", "Manual"],
+                    ["schedule", "Cron"],
+                    ["webhook", "Webhook"],
+                    ["composio", "Composio event"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setTriggerType(value)}
+                      className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
+                        triggerType === value
+                          ? "border-black bg-black text-white"
+                          : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {triggerType === "schedule" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Cron</Label>
+                    <Input
+                      value={cronExpr}
+                      onChange={(e) => setCronExpr(e.target.value)}
+                      className="border-[#e4e4e7] font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Timezone</Label>
+                    <Input
+                      value={cronTimezone}
+                      onChange={(e) => setCronTimezone(e.target.value)}
+                      className="border-[#e4e4e7] font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {triggerType === "webhook" && (
+                <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 text-sm text-[#555]">
+                  Webhook trigger with per-worker HMAC signing enabled.
+                </div>
+              )}
+
+              {triggerType === "composio" && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Search events</Label>
+                    <Input
+                      placeholder="GMAIL_NEW_EMAIL, SLACK_MESSAGE_POSTED..."
+                      value={triggerSearch}
+                      onChange={(e) => setTriggerSearch(e.target.value)}
+                      className="border-[#e4e4e7]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Event</Label>
+                    <Select
+                      value={composioEvent}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        setComposioEvent(value);
+                        setComposioConnectionId("");
+                      }}
+                    >
+                      <SelectTrigger className="border-[#e4e4e7]">
+                        <SelectValue placeholder="Select a Composio event" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredComposioTriggers.map((item) => {
+                          const eventId = triggerEventId(item);
+                          return (
+                            <SelectItem key={eventId} value={eventId}>
+                              {triggerLabel(item)} · {eventId}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Connection ID</Label>
+                    {matchingConnections.length > 0 ? (
+                      <Select value={composioConnectionId} onValueChange={(value) => value && setComposioConnectionId(value)}>
+                        <SelectTrigger className="border-[#e4e4e7]">
+                          <SelectValue placeholder="Select connected account" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {matchingConnections.map((connection) => (
+                            <SelectItem key={connection.composio_connection_id} value={connection.composio_connection_id}>
+                              {connection.app_name} · {connection.composio_connection_id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        placeholder="ca_xxx"
+                        value={composioConnectionId}
+                        onChange={(e) => setComposioConnectionId(e.target.value)}
+                        className="border-[#e4e4e7] font-mono text-sm"
+                      />
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Filters JSON</Label>
+                    <Textarea
+                      value={composioFilters}
+                      onChange={(e) => setComposioFilters(e.target.value)}
+                      className="min-h-[90px] border-[#e4e4e7] font-mono text-xs"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

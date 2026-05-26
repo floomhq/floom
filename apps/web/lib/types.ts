@@ -25,8 +25,18 @@ export interface WorkerOutput {
 export interface WorkerTrigger {
   type: string;
   cron?: string;
+  timezone?: string;
   every?: string;
   at?: string;
+  webhook?: {
+    secret: boolean;
+    allowed_methods: string[];
+  };
+  composio?: {
+    event: string;
+    connection_id: string;
+    filters?: Record<string, unknown>;
+  };
 }
 
 export interface WorkerRuntime {
@@ -85,6 +95,16 @@ export interface Artifact {
   created_at: string;
 }
 
+export interface TranscriptRow {
+  type?: string;
+  role?: string;
+  content?: unknown;
+  name?: string;
+  arguments?: unknown;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+}
+
 export interface ApprovalDetail {
   id: string;
   run_id: string;
@@ -118,6 +138,7 @@ export interface RunDetail {
   output_schema: OutputField[];
   logs: LogEntry[];
   artifacts: Artifact[];
+  transcript: TranscriptRow[];
   approval?: ApprovalDetail;
   approval_status: ApprovalStatus;
   error?: string;
@@ -131,6 +152,13 @@ export interface WorkerSummary {
   id: string;
   name: string;
   description?: string;
+  long_description?: string;
+  use_cases?: string[];
+  example_input?: Record<string, unknown>;
+  example_output?: string;
+  how_it_works?: string;
+  tags: string[];
+  folder?: string;
   status: WorkerStatus;
   paused?: boolean;
   trigger_type: string;
@@ -142,6 +170,13 @@ export interface WorkerDetail {
   id: string;
   name: string;
   description?: string;
+  long_description?: string;
+  use_cases?: string[];
+  example_input?: Record<string, unknown>;
+  example_output?: string;
+  how_it_works?: string;
+  tags: string[];
+  folder?: string;
   status: WorkerStatus;
   paused?: boolean;
   trigger_type: string;
@@ -149,6 +184,7 @@ export interface WorkerDetail {
   config: WorkerConfig;
   recent_runs: RunSummary[];
   manifest_yaml?: string;
+  run_py?: string;
 }
 
 export interface SecretItem {
@@ -193,4 +229,41 @@ export interface ConnectionInitResponse {
 export interface SupportedApp {
   slug: string;
   display_name: string;
+}
+
+export interface ComposioTriggerItem {
+  id?: string;
+  name?: string;
+  slug?: string;
+  event?: string;
+  display_name?: string;
+  description?: string;
+  toolkit?: {
+    slug?: string;
+    name?: string;
+  };
+  app?: {
+    slug?: string;
+    name?: string;
+  };
+}
+
+export interface IntegrationCatalogItem {
+  slug: string;
+  name: string;
+  logo_url: string;
+  description: string;
+  categories: string[];
+  tools_count: number;
+  triggers_count: number;
+}
+
+export interface IntegrationCatalogResponse {
+  items: IntegrationCatalogItem[];
+  page: number;
+  limit: number;
+  total_items: number;
+  total_pages: number;
+  next_page: number | null;
+  categories: string[];
 }
