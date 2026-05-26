@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download } from "lucide-react";
+import { Download, Play } from "lucide-react";
 import type { RunSummary, WorkerSummary } from "@/lib/types";
 
 const STATUS_OPTIONS = [
@@ -177,9 +177,37 @@ export default function RunsPage() {
           {loading ? (
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : runs.length === 0 ? (
-            <div className="p-8 text-center space-y-2">
-              <p className="text-sm font-medium text-[#666]">No runs match these filters.</p>
-              <p className="text-xs text-[#999]">Try clearing filters, or trigger a worker from the Workers page to create a new run.</p>
+            <div className="py-12 flex flex-col items-center gap-3 text-center">
+              <div className="w-10 h-10 rounded-full bg-[#f4f4f5] flex items-center justify-center">
+                <Play className="w-5 h-5 text-[#aaa]" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#333]">
+                  {workerFilter || statusFilter ? "No runs match these filters" : "No runs yet"}
+                </p>
+                <p className="text-xs text-[#999] mt-1 max-w-xs">
+                  {workerFilter || statusFilter
+                    ? "Try clearing filters to see all runs."
+                    : "Runs appear here when you execute a worker manually or via a trigger."}
+                </p>
+              </div>
+              {!workerFilter && !statusFilter && (
+                <Link href="/workers">
+                  <Button size="sm" variant="outline" className="mt-1">
+                    <Play className="w-3.5 h-3.5 mr-1.5" />
+                    Run a worker
+                  </Button>
+                </Link>
+              )}
+              {(workerFilter || statusFilter) && (
+                <button
+                  type="button"
+                  onClick={() => { setWorkerFilter(""); setStatusFilter(""); }}
+                  className="text-xs text-[#666] hover:text-[#333] underline"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           ) : (
             <>

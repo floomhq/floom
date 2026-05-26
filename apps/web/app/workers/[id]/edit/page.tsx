@@ -271,6 +271,7 @@ export default function EditWorkerPage() {
   const router = useRouter();
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [files, setFiles] = useState<{ path: string; content: string }[]>([]);
+  const [originalContents, setOriginalContents] = useState<Record<string, string>>({});
   const [selectedPath, setSelectedPath] = useState<string>("worker.yml");
   const [saving, setSaving] = useState(false);
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
@@ -293,15 +294,21 @@ export default function EditWorkerPage() {
         .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
 
       // Fallback: if files array is empty, use legacy fields
+      let resolvedFiles: { path: string; content: string }[];
       if (workerFiles.length === 0) {
         const fallback: { path: string; content: string }[] = [];
         if (loadedWorker.manifest_yaml) fallback.push({ path: "worker.yml", content: loadedWorker.manifest_yaml });
         if (loadedWorker.run_py) fallback.push({ path: "run.py", content: loadedWorker.run_py });
         if (loadedWorker.skill_md_content) fallback.push({ path: "SKILL.md", content: loadedWorker.skill_md_content });
-        setFiles(fallback);
+        resolvedFiles = fallback;
       } else {
-        setFiles(workerFiles);
+        resolvedFiles = workerFiles;
       }
+      setFiles(resolvedFiles);
+      // Snapshot originals for dirty tracking
+      const snap: Record<string, string> = {};
+      for (const f of resolvedFiles) snap[f.path] = f.content;
+      setOriginalContents(snap);
 
       // Default selection: worker.yml
       setSelectedPath("worker.yml");
@@ -332,6 +339,9 @@ export default function EditWorkerPage() {
     []
   );
 
+  // Dirty state: true if any file content differs from the original snapshot
+  const isDirty = files.some((f) => f.content !== (originalContents[f.path] ?? ""));
+
   function updateTriggerRow(index: number, updated: TriggerRow) {
     setTriggerRows((prev) => prev.map((r, i) => (i === index ? updated : r)));
   }
@@ -342,6 +352,11 @@ export default function EditWorkerPage() {
 
   function removeTriggerRow(index: number) {
     setTriggerRows((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function navigateAway(path: string) {
+    if (isDirty && !confirm("Discard unsaved changes?")) return;
+    router.push(path);
   }
 
   async function save() {
@@ -409,16 +424,23 @@ export default function EditWorkerPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => router.push(`/workers/${id}`)}>
+        <Button variant="ghost" size="sm" onClick={() => navigateAway(`/workers/${id}`)}>
           <ArrowLeft className="w-4 h-4" />
         </Button>
         <div className="flex-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Edit worker</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">Edit worker</h1>
+            {isDirty && (
+              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                Unsaved changes
+              </span>
+            )}
+          </div>
           <p className="text-[#666] text-sm">{worker.name}</p>
         </div>
-        <Button size="sm" onClick={save} disabled={saving}>
+        <Button size="sm" onClick={save} disabled={saving || !isDirty}>
           <Save className="w-4 h-4 mr-1.5" />
-          {saving ? "Saving..." : "Save"}
+          {saving ? "Saving..." : isDirty ? "Save" : "Saved"}
         </Button>
       </div>
 
