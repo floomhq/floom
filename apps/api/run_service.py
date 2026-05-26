@@ -18,7 +18,6 @@ from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
     WorkerConfig,
     WorkerContract,
-    ApprovalStatus,
     RunStatus,
     parse_worker_manifest,
     worker_contract_to_worker_config,
@@ -158,11 +157,6 @@ def create_run(
     if instance and not instance.get("enabled", True):
         raise ValueError(f"Worker {worker_id} is disabled")
     effective_inputs = _merge_instance_inputs(instance, inputs)
-    approval_status = (
-        ApprovalStatus.PENDING
-        if config and config.approvals.required
-        else ApprovalStatus.NOT_REQUIRED
-    )
     # Determine runner from config (default to "local" for backward compat)
     runner = _runner_key(config)
     with get_db() as conn:
@@ -170,8 +164,8 @@ def create_run(
             """
             INSERT INTO runs
                 (id, worker_id, status, trigger_source, runner,
-                 input_json, approval_status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 input_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -180,7 +174,6 @@ def create_run(
                 trigger_source,
                 runner,
                 json.dumps(effective_inputs),
-                approval_status.value,
                 now_iso(),
             ),
         )
@@ -238,9 +231,6 @@ def update_run_status(
         if status in {
             RunStatus.COMPLETED.value,
             RunStatus.FAILED.value,
-            RunStatus.PENDING_APPROVAL.value,
-            RunStatus.APPROVED.value,
-            RunStatus.REJECTED.value,
         }:
             updates.append("completed_at = ?")
             params.append(now_iso())
@@ -270,25 +260,6 @@ def update_run_status(
         "status": status,
         "error": error,
     })
-
-
-def create_approval(
-    run_id: str,
-    worker_id: str,
-    label: str,
-    preview: str,
-) -> str:
-    approval_id = f"approval_{uuid.uuid4().hex[:12]}"
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO approvals
-                (id, run_id, worker_id, status, label, preview, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (approval_id, run_id, worker_id, ApprovalStatus.PENDING.value, label, preview, now_iso()),
-        )
-    return approval_id
 
 
 def _store_run_artifacts(
@@ -458,20 +429,9 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(f"Run failed: {result.error}", level="error")
         return
 
-    if config.approvals.required:
-        preview = ""
-        if outputs:
-            first_key = list(outputs.keys())[0]
-            preview = str(outputs.get(first_key, ""))[:500]
-        label = config.approvals.label or "Approve output"
-        create_approval(run_id, worker_id, label, preview)
-        update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs)
-        log_fn("Output generated")
-        log_fn("Waiting for approval")
-    else:
-        update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
-        log_fn("Output generated")
-        log_fn("Run completed")
+    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
+    log_fn("Output generated")
+    log_fn("Run completed")
 
 
 def start_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:

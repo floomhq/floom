@@ -531,6 +531,11 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_file_binding_audit_file_id
         ON file_binding_audit(file_id);
     """,
+    # -- migration 15: drop approvals + worker_state tables (scope cut) ---------
+    """
+    DROP TABLE IF EXISTS approvals;
+    DROP TABLE IF EXISTS worker_state;
+    """,
 ]
 
 
@@ -558,7 +563,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

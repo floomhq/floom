@@ -30,7 +30,6 @@ export default function WorkerDetailPage() {
   const [inputs, setInputs] = useState<Record<string, unknown>>({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
-  const [toggling, setToggling] = useState(false);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
 
   useEffect(() => {
@@ -49,26 +48,6 @@ export default function WorkerDetailPage() {
       setLoading(false);
     });
   }, [id]);
-
-  async function handlePauseToggle() {
-    if (!worker) return;
-    setToggling(true);
-    try {
-      if (worker.paused) {
-        await api.workers.unpause(worker.id);
-        toast.success("Worker unpaused");
-      } else {
-        await api.workers.pause(worker.id);
-        toast.success("Worker paused");
-      }
-      const updated = await api.workers.get(worker.id);
-      setWorker(updated);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to toggle pause");
-    } finally {
-      setToggling(false);
-    }
-  }
 
   async function handleRun() {
     if (!worker) return;
@@ -133,7 +112,7 @@ export default function WorkerDetailPage() {
   const missingConnections = requiredConnections.filter(
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
   );
-  const canRun = !running && !worker.paused && missingConnections.length === 0;
+  const canRun = !running && missingConnections.length === 0;
   const canApplySample = worker.config.inputs.every((inp) => {
     if (!inp.required || inp.type === "file") return true;
     const sampleValue = worker.example_input?.[inp.name];
@@ -168,18 +147,6 @@ export default function WorkerDetailPage() {
               Edit
             </Button>
           </Link>
-          {worker.paused && (
-            <Badge variant="outline" className="text-gray-500 border-gray-200 bg-gray-50">Paused</Badge>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handlePauseToggle}
-            disabled={toggling}
-            className={worker.paused ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-[#e4e4e7]"}
-          >
-            {toggling ? "..." : worker.paused ? "Unpause" : "Pause"}
-          </Button>
         </div>
       </div>
 
@@ -357,8 +324,6 @@ export default function WorkerDetailPage() {
                 <Play className="w-4 h-4 mr-1.5" />
                 {running
                   ? "Starting..."
-                  : worker.paused
-                  ? "Worker paused"
                   : missingConnections.length > 0
                   ? `Connect ${missingConnections[0]} first`
                   : "Run worker"}
@@ -471,12 +436,6 @@ export default function WorkerDetailPage() {
                         </div>
                       </div>
                     </>
-                  )}
-                  {worker.config.approvals.required && (
-                    <div className="flex justify-between">
-                      <span className="text-[#666]">Approval</span>
-                      <span className="font-medium text-amber-600">Required</span>
-                    </div>
                   )}
                 </CardContent>
               </TabsContent>
