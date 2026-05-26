@@ -165,6 +165,8 @@ export interface SecretItem {
   name: string;
   status: SecretStatus;
   last_used_at?: string;
+  last_checked_at?: string | null;
+  last_check_status?: string | null;
   used_by: string[];
 }
 
@@ -191,6 +193,17 @@ export interface ConnectionItem {
   status: ConnectionStatus;
   created_at: string;
   updated_at: string;
+  scopes?: string[];
+  account_label?: string | null;
+  display_name?: string | null;
+  last_checked_at?: string | null;
+  last_check_status?: string | null;
+}
+
+export interface ConnectionTestResult {
+  status: "valid" | "failed" | "expired";
+  reason: string;
+  tested_at: string;
 }
 
 export interface ConnectionInitResponse {
