@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import type { ComposioTriggerItem, ConnectionItem } from "@/lib/types";
@@ -69,7 +68,6 @@ const TEMPLATES: Record<string, {
   inputs: InputRow[];
   outputs: OutputRow[];
   secrets: string;
-  approvalsRequired: boolean;
 }> = {
   research_brief: {
     workerId: "research-brief",
@@ -82,7 +80,6 @@ const TEMPLATES: Record<string, {
     ],
     outputs: [{ name: "brief", label: "Research brief", type: "markdown" }],
     secrets: "OPENAI_API_KEY",
-    approvalsRequired: false,
   },
   gmail_intake_brief: {
     workerId: "gmail-intake-brief",
@@ -94,7 +91,6 @@ const TEMPLATES: Record<string, {
     ],
     outputs: [{ name: "summary", label: "Email summary", type: "markdown" }],
     secrets: "OPENAI_API_KEY",
-    approvalsRequired: false,
   },
   csv_enricher: {
     workerId: "csv-enricher",
@@ -106,7 +102,6 @@ const TEMPLATES: Record<string, {
     ],
     outputs: [{ name: "enriched_csv", label: "Enriched CSV", type: "csv" }],
     secrets: "OPENAI_API_KEY",
-    approvalsRequired: false,
   },
 };
 
@@ -140,7 +135,6 @@ function buildYaml(
   inputs: InputRow[],
   outputs: OutputRow[],
   secrets: string,
-  approvalsRequired: boolean,
   triggerType: TriggerType,
   cronExpr: string,
   cronTimezone: string,
@@ -260,9 +254,6 @@ function buildYaml(
   lines.push(`  secrets: [${secretNames.join(", ")}]`);
   lines.push(`  network: { egress: ${secretNames.length > 0} }`);
   lines.push(``);
-  lines.push(`approvals:`);
-  lines.push(`  required: ${approvalsRequired}`);
-  lines.push(``);
   lines.push(`trigger:`);
   lines.push(`  type: ${triggerType}`);
   if (triggerType === "schedule") {
@@ -361,7 +352,6 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
   const [inputs, setInputs] = useState<InputRow[]>(template?.inputs || []);
   const [outputs, setOutputs] = useState<OutputRow[]>(template?.outputs || []);
   const [secrets, setSecrets] = useState(template?.secrets || "");
-  const [approvalsRequired, setApprovalsRequired] = useState(template?.approvalsRequired || false);
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
   const [triggerType, setTriggerType] = useState<TriggerType>("manual");
   const [cronExpr, setCronExpr] = useState("0 9 * * MON");
@@ -410,7 +400,6 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
     inputs,
     outputs,
     secrets,
-    approvalsRequired,
     triggerType,
     cronExpr,
     cronTimezone,
@@ -871,7 +860,7 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
           {/* Secrets + Approvals */}
           <Card className="border-[#eaeaea] shadow-none bg-white">
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Secrets & approvals</CardTitle>
+              <CardTitle className="text-sm font-medium">Secrets</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1.5">
@@ -883,19 +872,6 @@ function NewWorkerContent({ templateId }: { templateId?: string }) {
                   className="border-[#e4e4e7] font-mono text-sm"
                 />
                 <p className="text-xs text-[#999]">Comma-separated env var names this worker needs.</p>
-              </div>
-              <Separator />
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="approvals-required"
-                  checked={approvalsRequired}
-                  onChange={(e) => setApprovalsRequired(e.target.checked)}
-                  className="w-4 h-4 rounded border-[#e4e4e7] accent-black cursor-pointer"
-                />
-                <label htmlFor="approvals-required" className="text-sm text-[#333] cursor-pointer select-none">
-                  Require approval before completing
-                </label>
               </div>
             </CardContent>
           </Card>

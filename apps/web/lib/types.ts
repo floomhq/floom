@@ -1,6 +1,5 @@
-export type WorkerStatus = "healthy" | "needs_attention" | "paused" | "missing_secret" | "error";
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "pending_approval" | "approved" | "rejected";
-export type ApprovalStatus = "not_required" | "pending" | "approved" | "rejected";
+export type WorkerStatus = "healthy" | "needs_attention" | "missing_secret" | "error";
+export type RunStatus = "queued" | "running" | "completed" | "failed";
 export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type SecretStatus = "set" | "missing";
 
@@ -45,11 +44,6 @@ export interface WorkerRuntime {
   runner: string;
 }
 
-export interface WorkerApprovalConfig {
-  required: boolean;
-  label?: string;
-}
-
 export interface WorkerConfig {
   id: string;
   name: string;
@@ -60,7 +54,6 @@ export interface WorkerConfig {
   secrets: string[];
   connections: string[];  // Composio app slugs required by this worker
   outputs: WorkerOutput[];
-  approvals: WorkerApprovalConfig;
   csv_required_columns?: string[];
 }
 
@@ -70,7 +63,6 @@ export interface RunSummary {
   worker_name?: string;
   status: RunStatus;
   trigger_source: string;
-  approval_status: ApprovalStatus;
   created_at?: string;
   started_at?: string;
   completed_at?: string;
@@ -105,20 +97,6 @@ export interface TranscriptRow {
   tool_call_id?: string;
 }
 
-export interface ApprovalDetail {
-  id: string;
-  run_id: string;
-  worker_id: string;
-  worker_name?: string;
-  status: ApprovalStatus;
-  label?: string;
-  preview?: string;
-  preview_type?: string;
-  created_at: string;
-  decided_at?: string;
-  reason?: string;
-}
-
 export interface OutputField {
   name: string;
   type: string;  // "markdown" | "json" | "csv" | "text" | "file"
@@ -139,8 +117,6 @@ export interface RunDetail {
   logs: LogEntry[];
   artifacts: Artifact[];
   transcript: TranscriptRow[];
-  approval?: ApprovalDetail;
-  approval_status: ApprovalStatus;
   error?: string;
   started_at?: string;
   completed_at?: string;
@@ -160,7 +136,6 @@ export interface WorkerSummary {
   tags: string[];
   folder?: string;
   status: WorkerStatus;
-  paused?: boolean;
   trigger_type: string;
   runner: string;
   last_run?: RunSummary;
@@ -178,7 +153,6 @@ export interface WorkerDetail {
   tags: string[];
   folder?: string;
   status: WorkerStatus;
-  paused?: boolean;
   trigger_type: string;
   runner: string;
   config: WorkerConfig;
