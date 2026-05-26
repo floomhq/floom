@@ -408,12 +408,12 @@ def main() -> int:
     ref_fail_sha = hashlib.sha256(ref_fail_content).hexdigest()
     ref_fail_upload = post_upload(ref_fail_content, filename="ref-fail.csv")
     check("ref-count failure fixture upload succeeds", ref_fail_upload.status_code == 200, ref_fail_upload.text[:200])
-    original_increment = api_main._increment_file_ref_count
+    original_increment = api_main._increment_file_ref_counts
 
-    def fail_ref_count(file_id: str) -> None:
-        raise RuntimeError(f"synthetic ref-count failure for {file_id}")
+    def fail_ref_count(file_ids: list[str]) -> None:
+        raise RuntimeError(f"synthetic ref-count failure for {','.join(file_ids)}")
 
-    api_main._increment_file_ref_count = fail_ref_count
+    api_main._increment_file_ref_counts = fail_ref_count
     try:
         no_raise_client = TestClient(app, raise_server_exceptions=False)
         ref_fail_bind = no_raise_client.post(
@@ -424,7 +424,7 @@ def main() -> int:
             },
         )
     finally:
-        api_main._increment_file_ref_count = original_increment
+        api_main._increment_file_ref_counts = original_increment
 
     check("non-HTTP bind failure returns 500", ref_fail_bind.status_code == 500, ref_fail_bind.text[:300])
     ref_fail_row = db_row(
@@ -442,6 +442,29 @@ def main() -> int:
         and ref_fail_row["status"] == "failed"
         and "synthetic ref-count failure" in (ref_fail_row["error"] or ""),
         dict(ref_fail_row) if ref_fail_row else "no run row",
+    )
+
+    # --- Multi-file bind failure does not increment earlier refs ---
+    print("\n[section] Multi-file bind failure ref_count rollback")
+    multi_content = b"multi,file\n1,2\n"
+    multi_sha = hashlib.sha256(multi_content).hexdigest()
+    multi_upload = post_upload(multi_content, filename="multi.csv")
+    check("multi-file fixture upload succeeds", multi_upload.status_code == 200, multi_upload.text[:200])
+    multi_ref_before = db_scalar("SELECT ref_count FROM files WHERE id = ?", (multi_sha,))
+    missing_optional_sha = "b" * 64
+    multi_bind = client.post(
+        "/workers/file_access_test/runs",
+        json={
+            "inputs": {"upload": multi_sha, "optional_doc": missing_optional_sha},
+            "trigger_source": "file_inputs_regression_multi_fail",
+        },
+    )
+    check("later missing optional SHA rejected with 404", multi_bind.status_code == 404, multi_bind.text[:300])
+    multi_ref_after = db_scalar("SELECT ref_count FROM files WHERE id = ?", (multi_sha,))
+    check(
+        "failed multi-file bind leaves earlier ref_count unchanged",
+        multi_ref_after == multi_ref_before,
+        f"before={multi_ref_before} after={multi_ref_after}",
     )
 
     # --- Concurrent uploads of identical content: single dedup row ---
