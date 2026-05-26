@@ -261,21 +261,38 @@ def run_worker_local(
         run_fn = module_globals["run"]
         log_fn("Executing worker run()", level="debug")
 
-        # NOTE: In-process execution cannot enforce a true timeout via
-        # signal/alarm because it runs inside the same thread.  For a
-        # hard timeout, switch to the subprocess or E2B runner.
-        #
-        # Fix 2: os.chdir() is process-global. Acquire the module-level lock
-        # so concurrent runs in daemon threads don't race on the cwd.
-        # File inputs are stored as absolute paths (see _resolve_file_input_references)
-        # so workers reading Path(inputs["<name>"]) work correctly regardless.
-        previous_cwd = os.getcwd()
-        with _CWD_LOCK:
+        # Thread-based soft timeout. The worker still runs in-process so a CPU-bound
+        # loop CAN'T be force-killed (Python has no thread.kill), but if the worker
+        # ever yields (any I/O, sleep, requests, etc.) we mark it failed at the
+        # deadline and return — preventing infinite-wait situations. Hard kills
+        # for in-process require the subprocess refactor (deferred).
+        import threading
+        result_holder = {"r": None, "err": None}
+        def _runner():
             try:
-                os.chdir(worker_dir)
-                result = run_fn(inputs, context)
-            finally:
-                os.chdir(previous_cwd)
+                previous_cwd = os.getcwd()
+                with _CWD_LOCK:
+                    try:
+                        os.chdir(worker_dir)
+                        result_holder["r"] = run_fn(inputs, context)
+                    finally:
+                        os.chdir(previous_cwd)
+            except Exception as exc:
+                result_holder["err"] = exc
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_seconds)
+        if thread.is_alive():
+            log_fn(f"Worker exceeded timeout of {timeout_seconds}s", level="error")
+            return WorkerResult(
+                status="error",
+                error=f"Worker exceeded timeout of {timeout_seconds}s",
+                error_code="timeout",
+            )
+        if result_holder["err"]:
+            raise result_holder["err"]
+        result = result_holder["r"]
 
         if not isinstance(result, dict):
             return WorkerResult(

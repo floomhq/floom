@@ -103,6 +103,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Simple in-memory token bucket rate limit per x-floom-secret hash.
+# 200 req/min per caller. Reset every 60s. No persistence — per-process,
+# resets on restart. Good enough for single-tenant launch.
+import hashlib
+_rate_lock = threading.Lock()
+_rate_buckets: Dict[str, list] = {}
+_RATE_LIMIT = int(os.environ.get("FLOOM_RATE_LIMIT_PER_MIN", "200"))
+_RATE_WINDOW = 60.0
+
+
+def _rate_caller_key(request: Request) -> str:
+    """Hash the secret header so logs never expose it. Fall back to IP for unauthed paths."""
+    secret = request.headers.get("x-floom-secret") or ""
+    if secret:
+        return "s:" + hashlib.sha256(secret.encode()).hexdigest()[:16]
+    return "ip:" + (request.client.host if request.client else "unknown")
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """200 req/min per caller. Exempt: webhooks (their own HMAC), healthz."""
+    path = request.url.path
+    if path.startswith("/webhooks/") or path in {"/healthz", "/health"}:
+        return await call_next(request)
+    now = time.time()
+    key = _rate_caller_key(request)
+    with _rate_lock:
+        bucket = _rate_buckets.get(key, [])
+        bucket = [t for t in bucket if t > now - _RATE_WINDOW]
+        if len(bucket) >= _RATE_LIMIT:
+            from fastapi.responses import JSONResponse as _RLJSONResponse
+            return _RLJSONResponse(
+                status_code=429,
+                content={"detail": f"Rate limit exceeded: {_RATE_LIMIT} req/min"},
+                headers={"Retry-After": "60"},
+            )
+        bucket.append(now)
+        _rate_buckets[key] = bucket
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
