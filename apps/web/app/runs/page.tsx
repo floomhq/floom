@@ -109,7 +109,6 @@ export default function RunsPage() {
       started_at: r.started_at || "",
       completed_at: r.completed_at || "",
       duration_ms: r.duration_ms ?? "",
-      approval_status: r.approval_status,
     }));
     const csv = Papa.unparse(rows);
     const blob = new Blob([csv], { type: "text/csv" });
