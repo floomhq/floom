@@ -520,13 +520,24 @@ function PromptStep({
   const [dragOver, setDragOver] = useState(false);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Ref to the textarea DOM node so handleGenerate can always read the live value
+  // even if React state lags (e.g. browser automation, fast typing).
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Returns the current prompt, preferring the live DOM value so that the
+  // Generate button and handler are never blocked by stale React state.
+  function getLivePrompt(): string {
+    return (textareaRef.current?.value ?? prompt).trim();
+  }
 
   async function handleGenerate() {
-    const trimmed = prompt.trim();
+    const trimmed = getLivePrompt();
     if (!trimmed) {
       toast.error("Describe what you want the worker to do");
       return;
     }
+    // Sync React state with the live DOM value before proceeding.
+    setPrompt(trimmed);
     setGenerating(true);
     try {
       const draft = await api.workers.draftFromPrompt(trimmed);
@@ -664,9 +675,16 @@ function PromptStep({
         </CardHeader>
         <CardContent className="space-y-4">
           <Textarea
+            ref={textareaRef}
             placeholder="e.g. Summarise all my meetings from Granola and update HubSpot with action items daily"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            // onInput fires on every native DOM mutation, including browser-automation
+            // keypresses that don't always trigger React's synthetic onChange.
+            onInput={(e) => {
+              const val = (e.target as HTMLTextAreaElement).value;
+              if (val !== prompt) setPrompt(val);
+            }}
             className="min-h-[140px] border-[#e4e4e7] text-sm resize-none"
             disabled={generating}
             onKeyDown={(e) => {
@@ -678,7 +696,7 @@ function PromptStep({
           />
           <Button
             onClick={() => void handleGenerate()}
-            disabled={generating || !prompt.trim()}
+            disabled={generating || !getLivePrompt()}
             className="w-full"
           >
             {generating ? (
