@@ -1,8 +1,23 @@
-"""Local Python runner — executes trusted worker code in-process.
+"""Worker runtime utilities (helpers only, not an executor).
 
-SECURITY: This runner uses ``exec()`` and is intended **only for trusted
-local code**.  For untrusted or user-submitted code, use the E2B sandbox
-runner (future) or a subprocess-based runner.
+This module used to host an in-process worker executor (`run_worker_local`).
+That executor was REMOVED in PR #28 when the platform switched to E2B-only
+execution. Only utility helpers remain, used by the E2B sandbox drivers and
+the API server:
+
+  - ARTIFACTS_DIR, WORKERS_DIR, DEFAULT_TIMEOUT_SECONDS constants
+  - _validate_output_schema, _safe_path, _resolve_connections helpers
+  - make_context: builds a WorkerContext (used by the E2B driver to prepare
+    the inputs/secrets/connections payload that gets serialized into the
+    sandbox).
+
+DO NOT add a workers-execute-in-process path to this module. Workers must
+run inside E2B sandbox microVMs via `runner_sandbox.E2BSandboxDriver`. See
+ARCHITECTURE.md at the repo root.
+
+(Renamed from `runner_local.py` to `runner_utils.py` to remove the misleading
+name; auditors had assumed the file still executed workers locally and
+fabricated catastrophic findings based on that assumption.)
 """
 
 import csv
@@ -20,7 +35,7 @@ from pathlib import Path
 from models import WorkerConfig, WorkerContext, WorkerResult
 from worker_registry import get_worker_entrypoint, get_worker_config
 
-logger = logging.getLogger("floom.runner_local")
+logger = logging.getLogger("floom.runner_utils")
 
 WORKERS_DIR = Path(os.environ.get("FLOOM_WORKERS_DIR", "../../workers")).resolve()
 ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
