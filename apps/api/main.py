@@ -1308,23 +1308,24 @@ IMPORTANT RULES FOR INTEGRATION REQUIREMENTS:
 - For required_secrets: only include for api_key method integrations (e.g. GRANOLA_API_KEY, APOLLO_API_KEY)
 - For required_connections: only include app slugs for oauth method integrations
 
-Respond with ONLY valid JSON in this exact shape (no markdown fences, no extra text):
+CRITICAL: Only include apps in `requirements` that are LITERALLY MENTIONED BY NAME in the user's prompt. Do not copy any apps from the example shape below. The example shape uses placeholder names like `<app-slug>` purely to show the JSON structure, NOT the actual apps to include.
+
+Respond with ONLY valid JSON in this exact shape (no markdown fences, no extra text). Replace every `<placeholder>` with values derived from the user's actual prompt:
 {
   "worker_yml": "<full YAML string>",
   "skill_md": "<markdown instructions for the agent>",
   "suggested_name": "<slug>",
   "suggested_title": "<human title>",
   "requirements": [
-    {"app": "hubspot", "method": "oauth", "reason": "Post action items to HubSpot CRM contacts"},
-    {"app": "granola", "method": "api_key", "reason": "Fetch meeting notes from Granola"}
+    {"app": "<app-slug-from-user-prompt>", "method": "oauth_or_api_key", "reason": "<one-line why>"}
   ],
-  "required_connections": ["hubspot"],
-  "required_secrets": ["GRANOLA_API_KEY"],
+  "required_connections": ["<oauth-app-slugs-from-user-prompt-only>"],
+  "required_secrets": ["<UPPER_SNAKE_CASE_API_KEY_only_for_api_key_apps>"],
   "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
   "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}]
 }
 
-The `requirements` array is the authoritative source for integrations. `required_connections` must contain only the `app` slugs from requirements where `method` is "oauth". `required_secrets` must contain only the secret names (UPPER_SNAKE_CASE of app_API_KEY) for requirements where `method` is "api_key"."""
+The `requirements` array is the authoritative source for integrations. `required_connections` must contain only the `app` slugs from requirements where `method` is "oauth". `required_secrets` must contain only the secret names (UPPER_SNAKE_CASE of app_API_KEY) for requirements where `method` is "api_key". If the user's prompt mentions zero integrations, return an empty `requirements` array."""
 
 
 class DraftFromPromptRequest(BaseModel):
