@@ -170,6 +170,7 @@ class SkillRuntimeDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int = 300,
         config: Optional[WorkerConfig] = None,
+        connection_ids: Optional[Dict[str, str]] = None,
     ) -> WorkerResult:
         try:
             return self._run_skill(worker_id, run_id, inputs, secrets, log_fn, timeout_seconds, config)
