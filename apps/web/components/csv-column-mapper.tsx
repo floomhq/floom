@@ -265,7 +265,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
       <div className="flex items-center gap-2 p-2 rounded bg-[#f4f4f5] text-xs text-[#666]">
         <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
         <span className="font-medium truncate">{fileName}</span>
-        <span className="text-[#999]">— {csvRows.length} rows</span>
+        <span className="text-[#999]">({csvRows.length} rows)</span>
         <button
           className="ml-auto text-[#999] hover:text-[#333] underline"
           onClick={() => { setCsvHeaders([]); setCsvRows([]); setMapping({}); setAutoMappedCount(0); setFileName(""); setError(null); }}
@@ -276,7 +276,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
       <p className="text-xs text-[#666]">
         Auto-mapped <span className="font-medium">{autoMappedCount} of {requiredColumns.length}</span> columns
         {autoMappedCount < requiredColumns.length && (
-          <span className="text-amber-600"> — {requiredColumns.length - autoMappedCount} need manual selection</span>
+          <span className="text-amber-600"> ({requiredColumns.length - autoMappedCount} need manual selection)</span>
         )}
       </p>
 
@@ -295,10 +295,10 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
                   onValueChange={(val: string | null) => setMapping((prev) => ({ ...prev, [col]: val ?? "" }))}
                 >
                   <SelectTrigger className="h-7 text-xs border-[#e4e4e7] w-full">
-                    <SelectValue placeholder="— skip —" />
+                    <SelectValue placeholder="(skip)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">— skip —</SelectItem>
+                    <SelectItem value="">(skip)</SelectItem>
                     {csvHeaders.map((h) => (
                       <SelectItem key={h} value={h}>{h}</SelectItem>
                     ))}

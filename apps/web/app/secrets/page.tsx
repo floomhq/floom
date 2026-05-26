@@ -100,7 +100,7 @@ export default function SecretsPage() {
       if (result.status === "valid") {
         toast.success(`${name}: valid`);
       } else {
-        toast.error(`${name}: invalid — ${result.reason}`);
+        toast.error(`${name}: invalid: ${result.reason}`);
       }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Test failed");
@@ -279,7 +279,7 @@ export default function SecretsPage() {
       <Card className="border-[#eaeaea] shadow-none bg-white">
         <CardContent className="p-5 text-sm text-[#666]">
           <p>
-            Secret values are write-only — they are never returned by the API. Changes to{" "}
+            Secret values are write-only; they are never returned by the API. Changes to{" "}
             <code className="bg-[#f4f4f5] px-1 py-0.5 rounded text-xs">.env</code>{" "}
             take effect immediately without restarting workers.
           </p>
