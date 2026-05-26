@@ -336,7 +336,10 @@ class WorkerContract(BaseModel):
     repository: Optional[str] = None
     exec: WorkerContractExec
     capabilities: WorkerContractCapabilities = Field(default_factory=WorkerContractCapabilities)
+    # Single trigger (legacy, backward compat). New manifests should use `triggers`.
     trigger: WorkerContractTrigger = Field(default_factory=WorkerContractTrigger)
+    # Multiple triggers (new). If provided, `trigger` is derived from triggers[0].
+    triggers: Optional[List[WorkerContractTrigger]] = None
     connections: List[str] = Field(default_factory=list)
     csv_required_columns: Optional[List[str]] = None
 
@@ -386,6 +389,13 @@ class WorkerContract(BaseModel):
             raise ValueError("exec.runtime 'none' cannot declare entrypoints")
         if self.exec.mode in ("pure-script", "hybrid") and not self.exec.command:
             raise ValueError(f"exec.command is required when exec.mode is {self.exec.mode!r}")
+        # Canonicalize triggers: if `triggers` list present, use it; else derive from `trigger`.
+        if self.triggers:
+            # `trigger` field is first trigger for backward compat consumers.
+            self.trigger = self.triggers[0]
+        else:
+            # No `triggers` list supplied: populate it from the single `trigger`.
+            self.triggers = [self.trigger]
         return self
 
     @field_validator("long_description")
@@ -809,6 +819,7 @@ class WorkerDetail(BaseModel):
     skill_md_content: Optional[str] = None  # Raw SKILL.md content
     run_py_content: Optional[str] = None  # Alias for run_py, explicit for Code tab
     new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
+    webhook_url: Optional[str] = None  # Full webhook URL (only when trigger includes webhook)
     files: List[WorkerFile] = Field(default_factory=list)  # All files in the worker dir
 
 

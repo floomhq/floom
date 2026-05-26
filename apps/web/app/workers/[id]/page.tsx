@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck, File, FolderOpen } from "lucide-react";
+import { ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck, File, FolderOpen, Copy } from "lucide-react";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -301,6 +301,46 @@ export default function WorkerDetailPage() {
                 </Button>
               </CardContent>
             </Card>
+
+            {worker.webhook_url && (
+              <Card className="border-[#eaeaea] shadow-none bg-white">
+                <CardHeader>
+                  <CardTitle className="text-sm font-medium">Webhook</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-xs text-[#666]">
+                    Send a POST request to this URL to trigger the worker. The token authenticates the request.
+                  </p>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-[#666] uppercase tracking-wide">Webhook URL</Label>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-xs font-mono bg-[#f4f4f5] border border-[#e4e4e7] rounded px-2 py-1.5 break-all">
+                        {worker.webhook_url}
+                      </code>
+                      <button
+                        type="button"
+                        title="Copy URL"
+                        onClick={() => {
+                          navigator.clipboard.writeText(worker.webhook_url!).then(
+                            () => toast.success("URL copied"),
+                            () => toast.error("Failed to copy"),
+                          );
+                        }}
+                        className="shrink-0 p-1.5 rounded border border-[#e4e4e7] bg-white hover:bg-[#f4f4f5] transition-colors"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-[#666]" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-[#666] uppercase tracking-wide">Example curl</Label>
+                    <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                      {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
+                    </pre>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </TabsContent>
 
