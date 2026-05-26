@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawn } from "node:child_process";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -23,13 +27,39 @@ exec:
       type: string
 `;
 
+const workerYamlWithConnection = `${workerYaml}
+connections: [gmail]
+`;
+
 const runPy = `def run(inputs, context):
     return {"result": inputs.get("message", "ok")}
+`;
+
+const runPyWithSecret = `import os
+
+def run(inputs, context):
+    return {"key": os.environ["OPENAI_API_KEY"]}
 `;
 
 function json(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(body));
+}
+
+function empty(response, status) {
+  response.writeHead(status);
+  response.end();
+}
+
+function sse(response, events) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+  });
+  for (const event of events) {
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  response.end();
 }
 
 async function readBody(request) {
@@ -41,7 +71,7 @@ async function readBody(request) {
   return text ? JSON.parse(text) : {};
 }
 
-function makeWorkerDetail(id) {
+function makeWorkerDetail(id, overrides = {}) {
   return {
     id,
     name: "MCP Test Worker",
@@ -63,26 +93,66 @@ function makeWorkerDetail(id) {
     },
     recent_runs: [],
     manifest_yaml: workerYaml,
+    ...overrides,
   };
 }
 
 async function startMockApi() {
   const seen = [];
+  const bodies = [];
   const server = createServer(async (request, response) => {
-    assert.equal(request.headers["x-floom-secret"], "test-secret");
     const url = new URL(request.url || "/", "http://127.0.0.1");
     seen.push(`${request.method} ${url.pathname}`);
+
+    if (request.headers["x-floom-secret"] !== "test-secret") {
+      json(response, 401, { detail: "Unauthorized" });
+      return;
+    }
 
     if (request.method === "GET" && url.pathname === "/workers") {
       json(response, 200, []);
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/workers/mcp-test-worker") {
+      json(response, 200, makeWorkerDetail("mcp-test-worker"));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/workers") {
       const body = await readBody(request);
-      assert.equal(body.worker_yml, workerYaml);
-      assert.equal(body.run_py, runPy);
-      json(response, 200, makeWorkerDetail("mcp-test-worker"));
+      bodies.push(body);
+      assert.equal(body.run_py.includes("WORKEROS_API_SECRET"), false);
+      json(response, 200, makeWorkerDetail("mcp-test-worker", { manifest_yaml: body.worker_yml }));
+      return;
+    }
+
+    if (request.method === "PATCH" && url.pathname === "/workers/mcp-test-worker") {
+      const body = await readBody(request);
+      bodies.push(body);
+      assert.equal(body.trigger_type, "schedule");
+      assert.equal(body.cron_expr, "0 9 * * *");
+      assert.equal(body.cron_timezone, "Europe/Berlin");
+      assert.deepEqual(body.input_values, { message: "scheduled" });
+      assert.deepEqual(body.capabilities, { secrets: ["OPENAI_API_KEY"] });
+      assert.equal(body.webhook_secret_rotate, false);
+      json(response, 200, makeWorkerDetail("mcp-test-worker", { trigger_type: "schedule" }));
+      return;
+    }
+
+    if (request.method === "PATCH" && url.pathname === "/workers/missing") {
+      await readBody(request);
+      json(response, 404, { detail: "Worker not found" });
+      return;
+    }
+
+    if (request.method === "DELETE" && url.pathname === "/workers/mcp-test-worker") {
+      empty(response, 204);
+      return;
+    }
+
+    if (request.method === "DELETE" && url.pathname === "/workers/missing") {
+      json(response, 404, { detail: "Worker not found" });
       return;
     }
 
@@ -90,6 +160,11 @@ async function startMockApi() {
       const body = await readBody(request);
       assert.deepEqual(body.inputs, { message: "hello" });
       json(response, 200, { status: "running", run_id: "run_test" });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs") {
+      json(response, 200, [{ id: "run_test", worker_id: "mcp-test-worker", status: "completed" }]);
       return;
     }
 
@@ -116,6 +191,28 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/runs/run_test/events") {
+      sse(response, [
+        { type: "status", run_id: "run_test", status: "running" },
+        { type: "status", run_id: "run_test", status: "completed" },
+        { type: "close" },
+      ]);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs/run_terminal/events") {
+      sse(response, [
+        { type: "status", run_id: "run_terminal", status: "completed", completed_at: "2026-05-26T00:00:01Z" },
+        { type: "close" },
+      ]);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs/missing/events") {
+      json(response, 404, { detail: "Run not found" });
+      return;
+    }
+
     json(response, 404, { detail: "Not found" });
   });
 
@@ -126,14 +223,12 @@ async function startMockApi() {
   return {
     server,
     seen,
+    bodies,
     baseUrl: `http://127.0.0.1:${address.port}`,
   };
 }
 
-test("workeros MCP lists, creates, runs, and reads a worker through stdio", async (t) => {
-  const mock = await startMockApi();
-  t.after(() => mock.server.close());
-
+async function withClient(mock, secret, fn) {
   const client = new Client({ name: "workeros-mcp-test", version: "0.1.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -141,55 +236,236 @@ test("workeros MCP lists, creates, runs, and reads a worker through stdio", asyn
     env: {
       ...process.env,
       WORKEROS_API_BASE: mock.baseUrl,
-      WORKEROS_API_SECRET: "test-secret",
+      WORKEROS_API_SECRET: secret,
     },
   });
-  t.after(async () => {
-    await client.close();
-  });
-
   await client.connect(transport);
+  try {
+    await fn(client);
+  } finally {
+    await client.close();
+  }
+}
 
-  const tools = await client.listTools();
-  const names = tools.tools.map((tool) => tool.name).sort();
-  assert.deepEqual(names, [
-    "runs.get",
-    "runs.list",
-    "runs.watch",
-    "workers.create",
-    "workers.delete",
-    "workers.get",
-    "workers.list",
-    "workers.run",
-    "workers.update",
-  ]);
-
-  const listed = await client.callTool({ name: "workers.list", arguments: {} });
-  assert.deepEqual(listed.structuredContent, { data: [] });
-
-  const created = await client.callTool({
-    name: "workers.create",
-    arguments: { worker_yml: workerYaml, run_py: runPy },
+async function runCli(args, env = {}, stdin = "") {
+  const child = spawn(process.execPath, ["dist/cli.js", ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env, ...env },
+    stdio: ["pipe", "pipe", "pipe"],
   });
-  assert.equal(created.structuredContent.id, "mcp-test-worker");
+  child.stdin.end(stdin);
+  const stdout = [];
+  const stderr = [];
+  child.stdout.on("data", (chunk) => stdout.push(chunk));
+  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  const [code] = await once(child, "exit");
+  return {
+    code,
+    stdout: Buffer.concat(stdout).toString("utf8"),
+    stderr: Buffer.concat(stderr).toString("utf8"),
+  };
+}
 
-  const run = await client.callTool({
-    name: "workers.run",
-    arguments: { id: "mcp-test-worker", inputs: { message: "hello" } },
-  });
-  assert.equal(run.structuredContent.run_id, "run_test");
+test("workeros MCP exposes nine tools and covers lifecycle happy paths", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
 
-  const readRun = await client.callTool({
-    name: "runs.get",
-    arguments: { id: "run_test" },
+  await withClient(mock, "test-secret", async (client) => {
+    const tools = await client.listTools();
+    const names = tools.tools.map((tool) => tool.name).sort();
+    assert.deepEqual(names, [
+      "runs.get",
+      "runs.list",
+      "runs.watch",
+      "workers.create",
+      "workers.delete",
+      "workers.get",
+      "workers.list",
+      "workers.run",
+      "workers.update",
+    ]);
+
+    const listed = await client.callTool({ name: "workers.list", arguments: {} });
+    assert.deepEqual(listed.structuredContent, { data: [] });
+
+    const created = await client.callTool({
+      name: "workers.create",
+      arguments: { worker_yml: workerYaml, run_py: runPy },
+    });
+    assert.equal(created.structuredContent.id, "mcp-test-worker");
+
+    const readWorker = await client.callTool({ name: "workers.get", arguments: { id: "mcp-test-worker" } });
+    assert.equal(readWorker.structuredContent.id, "mcp-test-worker");
+
+    const updated = await client.callTool({
+      name: "workers.update",
+      arguments: {
+        id: "mcp-test-worker",
+        trigger_type: "schedule",
+        cron_expr: "0 9 * * *",
+        cron_timezone: "Europe/Berlin",
+        input_values: { message: "scheduled" },
+        capabilities: { secrets: ["OPENAI_API_KEY"] },
+        webhook_secret_rotate: false,
+      },
+    });
+    assert.equal(updated.structuredContent.trigger_type, "schedule");
+
+    const run = await client.callTool({
+      name: "workers.run",
+      arguments: { id: "mcp-test-worker", inputs: { message: "hello" } },
+    });
+    assert.equal(run.structuredContent.run_id, "run_test");
+
+    const listedRuns = await client.callTool({ name: "runs.list", arguments: { worker_id: "mcp-test-worker" } });
+    assert.equal(listedRuns.structuredContent.data[0].id, "run_test");
+
+    const readRun = await client.callTool({ name: "runs.get", arguments: { id: "run_test" } });
+    assert.equal(readRun.structuredContent.status, "completed");
+    assert.deepEqual(readRun.structuredContent.output, { result: "hello" });
+
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_test", timeout_ms: 5000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "status", "close"]);
+
+    const deleted = await client.callTool({ name: "workers.delete", arguments: { id: "mcp-test-worker" } });
+    assert.deepEqual(deleted.structuredContent, {});
   });
-  assert.equal(readRun.structuredContent.status, "completed");
-  assert.deepEqual(readRun.structuredContent.output, { result: "hello" });
 
   assert.deepEqual(mock.seen, [
     "GET /workers",
     "POST /workers",
+    "GET /workers/mcp-test-worker",
+    "PATCH /workers/mcp-test-worker",
     "POST /workers/mcp-test-worker/runs",
+    "GET /runs",
     "GET /runs/run_test",
+    "GET /runs/run_test/events",
+    "DELETE /workers/mcp-test-worker",
   ]);
+});
+
+test("workers.update, workers.delete, and runs.watch surface 404s in tool results", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const update = await client.callTool({ name: "workers.update", arguments: { id: "missing", trigger_type: "manual" } });
+    assert.equal(update.isError, true);
+    assert.equal(update.structuredContent.status, 404);
+    assert.match(update.content[0].text, /Worker not found/);
+
+    const deleted = await client.callTool({ name: "workers.delete", arguments: { id: "missing" } });
+    assert.equal(deleted.isError, true);
+    assert.equal(deleted.structuredContent.status, 404);
+    assert.match(deleted.content[0].text, /Worker not found/);
+
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "missing", timeout_ms: 5000 } });
+    assert.equal(watched.isError, true);
+    assert.equal(watched.structuredContent.status, 404);
+    assert.match(watched.content[0].text, /HTTP 404/);
+  });
+});
+
+test("workers.update, workers.delete, and runs.watch surface auth failures in tool results", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "wrong-secret", async (client) => {
+    const update = await client.callTool({ name: "workers.update", arguments: { id: "mcp-test-worker", trigger_type: "manual" } });
+    assert.equal(update.isError, true);
+    assert.equal(update.structuredContent.status, 401);
+
+    const deleted = await client.callTool({ name: "workers.delete", arguments: { id: "mcp-test-worker" } });
+    assert.equal(deleted.isError, true);
+    assert.equal(deleted.structuredContent.status, 401);
+
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_test", timeout_ms: 5000 } });
+    assert.equal(watched.isError, true);
+    assert.equal(watched.structuredContent.status, 401);
+  });
+});
+
+test("runs.watch emits already-terminal final state and close event", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_terminal", timeout_ms: 5000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "close"]);
+  });
+});
+
+test("workers.create auto-fills capabilities from run.py environment variables", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const created = await client.callTool({
+      name: "workers.create",
+      arguments: { worker_yml: workerYaml, run_py: runPyWithSecret },
+    });
+    assert.equal(created.structuredContent.id, "mcp-test-worker");
+  });
+
+  assert.match(mock.bodies.at(-1).worker_yml, /capabilities:\n  secrets:\n    - OPENAI_API_KEY/);
+});
+
+test("workers.create auto-fills capabilities from worker.yml connection declarations", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const created = await client.callTool({
+      name: "workers.create",
+      arguments: { worker_yml: workerYamlWithConnection, run_py: runPy },
+    });
+    assert.equal(created.structuredContent.id, "mcp-test-worker");
+  });
+
+  assert.match(mock.bodies.at(-1).worker_yml, /capabilities:\n  connections:\n    - gmail/);
+});
+
+test("install subcommand patches agent config idempotently", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-home-"));
+  try {
+    const claudeDir = join(home, ".claude");
+    const configPath = join(claudeDir, "settings.json");
+    await mkdir(claudeDir, { recursive: true });
+    await writeFile(configPath, JSON.stringify({ mcpServers: { existing: { command: "true" } } }, null, 2));
+
+    const env = { HOME: home, WORKEROS_API_SECRET: "test-secret" };
+    const first = await runCli(["install"], env);
+    assert.equal(first.code, 0);
+    assert.match(first.stdout, /Installed Workeros MCP config for Claude Code/);
+    assert.doesNotMatch(first.stdout, /test-secret/);
+
+    const second = await runCli(["install"], env);
+    assert.equal(second.code, 0);
+
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(config.mcpServers.workeros.command, "npx");
+    assert.deepEqual(config.mcpServers.workeros.args, ["-y", "@floomhq/workeros"]);
+    assert.equal(config.mcpServers.workeros.env.WORKEROS_API_SECRET, "test-secret");
+    assert.deepEqual(Object.keys(config.mcpServers).sort(), ["existing", "workeros"]);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("install subcommand prints manual snippets when no agent config file exists", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-home-"));
+  try {
+    const result = await runCli(["install"], { HOME: home, WORKEROS_API_SECRET: "test-secret" });
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /No supported agent config file was found/);
+    assert.match(result.stdout, /Claude Code: ~\/\.claude\/settings\.json/);
+    assert.match(result.stdout, /Cursor: ~\/\.cursor\/mcp\.json/);
+    assert.match(result.stdout, /Continue: ~\/\.continue\/\.continuerc\.json/);
+    assert.match(result.stdout, /"@floomhq\/workeros"/);
+    assert.doesNotMatch(result.stdout, /test-secret/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });

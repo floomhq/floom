@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -5,6 +6,8 @@ import { z } from "zod";
 
 const DEFAULT_API_BASE = "https://workers-api.floom.dev";
 const TERMINAL_RUN_STATUSES = new Set([
+  "success",
+  "error",
   "completed",
   "failed",
   "pending_approval",
@@ -38,17 +41,62 @@ function apiSecret(): string {
 }
 
 function jsonResult(data: unknown, summary?: string): CallToolResult {
+  const safeData = redactSecrets(data);
   const structuredContent =
-    data && typeof data === "object" && !Array.isArray(data) ? (data as JsonObject) : { data };
+    safeData && typeof safeData === "object" && !Array.isArray(safeData) ? (safeData as JsonObject) : { data: safeData };
   return {
     content: [
       {
         type: "text",
-        text: summary ? `${summary}\n${JSON.stringify(data, null, 2)}` : JSON.stringify(data, null, 2),
+        text: summary ? `${summary}\n${JSON.stringify(safeData, null, 2)}` : JSON.stringify(safeData, null, 2),
       },
     ],
     structuredContent,
   };
+}
+
+function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSecrets(item));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const redacted: JsonObject = {};
+  for (const [key, nested] of Object.entries(value as JsonObject)) {
+    if (/(secret|token|password|api[_-]?key)/i.test(key)) {
+      redacted[key] = "[redacted]";
+    } else {
+      redacted[key] = redactSecrets(nested);
+    }
+  }
+  return redacted;
+}
+
+function errorResult(error: unknown): CallToolResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const status = error instanceof WorkerosApiError ? error.status : undefined;
+  const body = error instanceof WorkerosApiError ? error.body : undefined;
+  const structuredContent: JsonObject = { error: message };
+  if (status !== undefined) {
+    structuredContent.status = status;
+  }
+  if (body !== undefined) {
+    structuredContent.body = body;
+  }
+  return {
+    isError: true,
+    content: [{ type: "text", text: message }],
+    structuredContent,
+  };
+}
+
+async function callTool(handler: () => Promise<CallToolResult>): Promise<CallToolResult> {
+  try {
+    return await handler();
+  } catch (error) {
+    return errorResult(error);
+  }
 }
 
 async function parseResponse(response: Response): Promise<unknown> {
@@ -114,6 +162,7 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
   const events: JsonObject[] = [];
   let status: string | undefined;
   let buffer = "";
+  let sawTerminalStatus = false;
 
   try {
     const response = await fetch(buildUrl(`/runs/${encodeURIComponent(runId)}/events`), {
@@ -158,9 +207,15 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
           status = candidate;
         }
         if (status && TERMINAL_RUN_STATUSES.has(status)) {
-          await reader.cancel();
-          return { run_id: runId, status, events };
+          sawTerminalStatus = true;
         }
+        if (event.type === "close" || (event.data && typeof event.data === "object" && (event.data as JsonObject).type === "close")) {
+          await reader.cancel();
+          return { run_id: runId, status: status || "closed", events };
+        }
+      }
+      if (sawTerminalStatus && events.length > 0 && buffer === "") {
+        continue;
       }
     }
   } catch (error) {
@@ -207,6 +262,96 @@ function parseSseEvent(chunk: string): JsonObject | null {
   return Object.keys(event).length ? event : null;
 }
 
+function extractEnvSecrets(runPy: string): string[] {
+  const secrets = new Set<string>();
+  const patterns = [
+    /\bos\.environ\s*\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]/g,
+    /\bos\.environ\.get\s*\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']/g,
+    /\bos\.getenv\s*\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of runPy.matchAll(pattern)) {
+      secrets.add(match[1]);
+    }
+  }
+  return [...secrets].sort();
+}
+
+function extractConnections(workerYml: string): string[] {
+  const connections = new Set<string>();
+  const inline = workerYml.match(/^connections:\s*\[([^\]]*)\]\s*$/m);
+  if (inline) {
+    for (const item of inline[1].split(",")) {
+      const value = item.trim().replace(/^["']|["']$/g, "");
+      if (value) {
+        connections.add(value);
+      }
+    }
+  }
+
+  const lines = workerYml.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^connections:\s*$/.test(line));
+  if (start !== -1) {
+    for (let index = start + 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (/^\S/.test(line) && line.trim()) {
+        break;
+      }
+      const match = line.match(/^\s*-\s*([^#\s]+|"[^"]+"|'[^']+')/);
+      if (match) {
+        connections.add(match[1].trim().replace(/^["']|["']$/g, ""));
+      }
+    }
+  }
+
+  return [...connections].sort();
+}
+
+function hasCapabilityList(workerYml: string, key: "secrets" | "connections"): boolean {
+  const lines = workerYml.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^capabilities:\s*(?:#.*)?$/.test(line));
+  if (start === -1) {
+    return false;
+  }
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\S/.test(line) && line.trim()) {
+      break;
+    }
+    if (new RegExp(`^\\s{2}${key}:`).test(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function capabilityBlock(key: "secrets" | "connections", values: string[]): string[] {
+  return [`  ${key}:`, ...values.map((value) => `    - ${value}`)];
+}
+
+function addCapabilityList(workerYml: string, key: "secrets" | "connections", values: string[]): string {
+  if (values.length === 0 || hasCapabilityList(workerYml, key)) {
+    return workerYml;
+  }
+
+  const lines = workerYml.split(/\r?\n/);
+  const capsIndex = lines.findIndex((line) => /^capabilities:\s*(?:#.*)?$/.test(line));
+  if (capsIndex === -1) {
+    const suffix = workerYml.endsWith("\n") ? "" : "\n";
+    return `${workerYml}${suffix}capabilities:\n${capabilityBlock(key, values).join("\n")}\n`;
+  }
+
+  lines.splice(capsIndex + 1, 0, ...capabilityBlock(key, values));
+  return lines.join("\n");
+}
+
+function autoFillCapabilities(workerYml: string, runPy: string): string {
+  let updated = workerYml;
+  updated = addCapabilityList(updated, "secrets", extractEnvSecrets(runPy));
+  updated = addCapabilityList(updated, "connections", extractConnections(workerYml));
+  return updated;
+}
+
 const workerIdSchema = z.object({
   id: z.string().min(1).describe("Workeros worker id."),
 });
@@ -229,7 +374,7 @@ export function createServer(): McpServer {
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async () => jsonResult(await request("GET", "/workers")),
+    async () => callTool(async () => jsonResult(await request("GET", "/workers"))),
   );
 
   server.registerTool(
@@ -240,7 +385,7 @@ export function createServer(): McpServer {
       inputSchema: workerIdSchema.shape,
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ id }) => jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}`)),
+    async ({ id }) => callTool(async () => jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}`))),
   );
 
   server.registerTool(
@@ -255,7 +400,12 @@ export function createServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ worker_yml, run_py }) =>
-      jsonResult(await request("POST", "/workers", { worker_yml, run_py }), "Worker created."),
+      callTool(async () =>
+        jsonResult(
+          await request("POST", "/workers", { worker_yml: autoFillCapabilities(worker_yml, run_py), run_py }),
+          "Worker created.",
+        ),
+      ),
   );
 
   server.registerTool(
@@ -270,11 +420,14 @@ export function createServer(): McpServer {
         cron_timezone: z.string().optional().describe("IANA timezone for cron workers."),
         input_values: z.record(z.string(), z.unknown()).optional().describe("Saved default input values for future runs."),
         capabilities: z.record(z.string(), z.unknown()).optional().describe("Optional documented capabilities; not enforced."),
+        webhook_secret_rotate: z.boolean().optional().describe("Rotate the worker webhook secret and return the new raw secret once."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ id, ...updates }) =>
-      jsonResult(await request("PATCH", `/workers/${encodeURIComponent(id)}`, updates), "Worker updated."),
+      callTool(async () =>
+        jsonResult(await request("PATCH", `/workers/${encodeURIComponent(id)}`, updates), "Worker updated."),
+      ),
   );
 
   server.registerTool(
@@ -285,7 +438,8 @@ export function createServer(): McpServer {
       inputSchema: workerIdSchema.shape,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
-    async ({ id }) => jsonResult(await request("DELETE", `/workers/${encodeURIComponent(id)}`), "Worker deleted."),
+    async ({ id }) =>
+      callTool(async () => jsonResult(await request("DELETE", `/workers/${encodeURIComponent(id)}`), "Worker deleted.")),
   );
 
   server.registerTool(
@@ -301,9 +455,11 @@ export function createServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ id, inputs, trigger_source }) =>
-      jsonResult(
-        await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source }),
-        "Worker run started.",
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(id)}/runs`, { inputs, trigger_source }),
+          "Worker run started.",
+        ),
       ),
   );
 
@@ -321,7 +477,7 @@ export function createServer(): McpServer {
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async ({ worker_id, status, limit, offset }) =>
-      jsonResult(await request("GET", "/runs", undefined, { worker_id, status, limit, offset })),
+      callTool(async () => jsonResult(await request("GET", "/runs", undefined, { worker_id, status, limit, offset }))),
   );
 
   server.registerTool(
@@ -332,7 +488,7 @@ export function createServer(): McpServer {
       inputSchema: runIdSchema.shape,
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ id }) => jsonResult(await request("GET", `/runs/${encodeURIComponent(id)}`)),
+    async ({ id }) => callTool(async () => jsonResult(await request("GET", `/runs/${encodeURIComponent(id)}`))),
   );
 
   server.registerTool(
@@ -346,7 +502,8 @@ export function createServer(): McpServer {
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ id, timeout_ms }) => jsonResult(await watchRunEvents(id, timeout_ms), "Run watch completed."),
+    async ({ id, timeout_ms }) =>
+      callTool(async () => jsonResult(await watchRunEvents(id, timeout_ms), "Run watch completed.")),
   );
 
   return server;
