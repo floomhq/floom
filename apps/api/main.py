@@ -14,7 +14,7 @@ import re
 import time
 import collections
 import threading
-import weakref
+import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -31,7 +31,6 @@ from models import (
     ApproveRequest,
     RunCreate,
     RejectRequest,
-    PaginationParams,
     WorkerSummary,
     WorkerDetail,
     RunSummary,
@@ -54,12 +53,10 @@ from models import (
 from worker_registry import (
     discover_workers,
     get_worker,
-    get_worker_config,
-    get_worker_contract,
     invalidate_worker_cache,
 )
-from run_service import create_run, get_worker_config_for_run, start_run, update_run_status, add_log
-from run_service import get_secrets_for_worker, register_sse_publisher
+from run_service import create_run, get_worker_config_for_run, start_run, add_log
+from run_service import register_sse_publisher
 
 load_dotenv()
 api_env_path = Path("/root/.config/workeros/api.env")
@@ -1778,7 +1775,7 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
     redirect_url = result["redirect_url"]
 
     # Upsert into local DB (replace any prior row for this app)
-    conn_id = str(__import__("uuid").uuid4())
+    conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     with get_db() as conn:
         # Check if row already exists for this app

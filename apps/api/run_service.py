@@ -14,13 +14,10 @@ from dotenv import load_dotenv
 
 from db import get_db, now_iso
 from worker_registry import get_worker_config
-from runner_local import run_worker_local
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
     WorkerConfig,
     WorkerContract,
-    WorkerResult,
-    LogLevel,
     ApprovalStatus,
     RunStatus,
     parse_worker_manifest,

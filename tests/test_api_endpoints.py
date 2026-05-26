@@ -10,7 +10,6 @@ Uses FastAPI TestClient (synchronous) and a fresh in-memory SQLite DB per
 test class so tests are hermetic.
 """
 
-import asyncio
 import json
 import os
 import sys
@@ -18,7 +17,7 @@ import tempfile
 import threading
 import time
 import unittest
-from typing import Optional
+import uuid as _uuid_mod
 from unittest.mock import patch
 
 # Point to the API source before importing
@@ -47,8 +46,6 @@ client = TestClient(app_module.app, raise_server_exceptions=True)
 # ---------------------------------------------------------------------------
 
 _RUN_PY = "# placeholder\ndef run(context): return {}\n"
-
-import uuid as _uuid_mod
 
 
 def _make_worker_yml(name: str, trigger_type: str = "manual") -> str:
@@ -260,7 +257,6 @@ class TestPatchWorker(unittest.TestCase):
         wid = webhook_worker["id"]
         client.patch(f"/workers/{wid}", json={"webhook_secret_rotate": True})
         r = client.get(f"/workers/{wid}")
-        body_str = r.text
         # new_webhook_secret should be null on a plain GET
         body = r.json()
         self.assertIsNone(body.get("new_webhook_secret"))
