@@ -94,7 +94,7 @@ class WorkerTrigger(BaseModel):
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
-    runner: str = "local"
+    runner: str = "e2b"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
     mode: Literal["agent", "pure-script", "hybrid"] = "pure-script"
@@ -105,9 +105,13 @@ class WorkerRuntime(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, v: str) -> str:
-        allowed = {"local", "e2b"}
-        if v not in allowed:
-            raise ValueError(f"runner must be one of {sorted(allowed)}, got {v!r}")
+        # In-process execution was removed in PR #28; only E2B is supported.
+        # Coerce legacy `local` declarations to `e2b` for backward-compat
+        # with old worker.yml files, but reject anything else.
+        if v == "local":
+            return "e2b"
+        if v != "e2b":
+            raise ValueError(f"runner must be 'e2b' (got {v!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
         return v
 
 
@@ -252,9 +256,10 @@ class WorkerLimits(BaseModel):
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
     runtime: Literal["python311", "node22", "bash", "skill", "none"]
-    # E2B-by-default (Federico 2026-05-26): sandboxed dependencies, no host
-    # exposure. Trusted/legacy workers can declare `runner: local` explicitly
-    # to skip the ~1-3s cold start and run in-process with full host access.
+    # E2B-only execution. Workers must run in sandboxed microVMs. The
+    # `runner: local` declaration is legacy and gets coerced to `e2b` for
+    # backward-compatibility with old worker.yml files (in-process executor
+    # was removed in PR #28).
     runner: str = "e2b"
     mode: Optional[Literal["agent", "pure-script", "hybrid"]] = None
     inputs: List[WorkerContractField] = Field(default_factory=list)
@@ -271,9 +276,13 @@ class WorkerContractExec(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, value: str) -> str:
-        allowed = {"local", "e2b"}
-        if value not in allowed:
-            raise ValueError(f"runner must be one of {sorted(allowed)}, got {value!r}")
+        # Coerce legacy `local` to `e2b` (PR #28 removed the in-process
+        # executor; this guard prevents misleading manifests). Reject any
+        # other value with a clear message.
+        if value == "local":
+            return "e2b"
+        if value != "e2b":
+            raise ValueError(f"runner must be 'e2b' (got {value!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
         return value
 
     @model_validator(mode="after")
