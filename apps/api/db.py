@@ -556,6 +556,35 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE secrets ADD COLUMN last_check_status TEXT;
     ALTER TABLE secrets ADD COLUMN last_check_error TEXT;
     """,
+    # -- migration 19: drop unique constraint on app_name to allow multiple
+    #    accounts per app (e.g. two Gmail accounts). Recreate table without
+    #    the UNIQUE index on app_name; composio_connection_id remains unique
+    #    per row via the primary-key id.
+    """
+    CREATE TABLE IF NOT EXISTS composio_connections_new (
+        id TEXT PRIMARY KEY,
+        app_name TEXT NOT NULL,
+        composio_connection_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'initiated',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_checked_at TEXT,
+        last_check_status TEXT,
+        last_check_error TEXT,
+        scopes_json TEXT,
+        account_label TEXT
+    );
+    INSERT INTO composio_connections_new
+        SELECT id, app_name, composio_connection_id, status, created_at, updated_at,
+               last_checked_at, last_check_status, last_check_error, scopes_json, account_label
+        FROM composio_connections;
+    DROP TABLE composio_connections;
+    ALTER TABLE composio_connections_new RENAME TO composio_connections;
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_app_name
+        ON composio_connections(app_name);
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_status
+        ON composio_connections(status);
+    """,
 ]
 
 

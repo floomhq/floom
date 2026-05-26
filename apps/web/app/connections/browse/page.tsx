@@ -23,16 +23,47 @@ import type { IntegrationCatalogItem, IntegrationCatalogResponse } from "@/lib/t
 
 const PAGE_SIZE = 30;
 
+// Curated list of popular app slugs for the "Popular" filter.
+// Shown when no Composio category matches the friendly label.
+const POPULAR_APP_SLUGS = new Set([
+  "gmail",
+  "slack",
+  "notion",
+  "github",
+  "googlecalendar",
+  "hubspot",
+  "linear",
+  "googlesheets",
+  "salesforce",
+  "discord",
+  "linkedin",
+  "stripe",
+  "googledrive",
+  "airtable",
+  "jira",
+  "dropbox",
+]);
+
+// Maps friendly UI labels to Composio category slugs.
+// Composio's actual categories differ from the friendly names shown in the UI.
+// Sending a comma-separated list asks the backend to OR-filter across all of them.
+const CATEGORY_MAP: Record<string, string[]> = {
+  Productivity: ["productivity", "notes", "documents", "project-management", "task-management"],
+  Email: ["email"],
+  CRM: ["crm"],
+  Social: ["social-media-accounts", "social"],
+  Marketing: ["marketing", "marketing-automation"],
+  Data: ["databases", "spreadsheets", "analytics"],
+  Collaboration: ["team-chat", "team-collaboration", "video-conferencing"],
+};
+
 const CATEGORY_FILTERS = [
   { value: "", label: "All" },
   { value: "popular", label: "Popular" },
-  { value: "productivity", label: "Productivity" },
-  { value: "email", label: "Email" },
-  { value: "crm", label: "CRM" },
-  { value: "social", label: "Social" },
-  { value: "marketing", label: "Marketing" },
-  { value: "data-&-analytics", label: "Data" },
-  { value: "collaboration-&-communication", label: "Collaboration" },
+  ...Object.keys(CATEGORY_MAP).map((label) => ({
+    value: CATEGORY_MAP[label].join(","),
+    label,
+  })),
 ];
 
 function shortDescription(item: IntegrationCatalogItem) {
@@ -135,13 +166,35 @@ export default function ConnectionsBrowsePage() {
   const loadCatalog = useCallback(async () => {
     setLoading(true);
     try {
-      const nextCatalog = await api.integrations.catalog({
-        page,
-        limit: PAGE_SIZE,
-        search: debouncedSearch,
-        category,
-      });
-      setCatalog(nextCatalog);
+      if (category === "popular") {
+        // Fetch all (unfiltered) and filter client-side to popular slugs.
+        // Popular is a curated list, not a Composio category.
+        const nextCatalog = await api.integrations.catalog({
+          page: 1,
+          limit: 100,
+          search: debouncedSearch,
+          category: "",
+        });
+        const filtered = nextCatalog.items.filter((item) =>
+          POPULAR_APP_SLUGS.has(item.slug.toLowerCase())
+        );
+        setCatalog({
+          ...nextCatalog,
+          items: filtered,
+          total_items: filtered.length,
+          total_pages: 1,
+          page: 1,
+          next_page: null,
+        });
+      } else {
+        const nextCatalog = await api.integrations.catalog({
+          page,
+          limit: PAGE_SIZE,
+          search: debouncedSearch,
+          category,
+        });
+        setCatalog(nextCatalog);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load integrations");
     } finally {
