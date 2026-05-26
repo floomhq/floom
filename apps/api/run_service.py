@@ -400,7 +400,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     connection_ids: Dict[str, str] = {}
     if config.connections:
         log_fn("Resolving connections", level="debug")
-        from runner_local import _resolve_connections
+        from runner_utils import _resolve_connections
         connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
         if conn_err:
             update_run_status(run_id, RunStatus.FAILED.value, error=conn_err)

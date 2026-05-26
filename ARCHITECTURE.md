@@ -1,0 +1,66 @@
+# Workeros Architecture
+
+**For auditors, operators, and contributors: read this before testing or filing security findings.**
+
+## Where this runs
+
+| Component | URL | Where |
+|---|---|---|
+| Web app (Next.js) | https://workers.floom.dev | Vercel (`workeros-web` project) |
+| API service (FastAPI) | https://workers-api.floom.dev | AX41 server, Cloudflare-fronted |
+| API internal port | `127.0.0.1:8011` | systemd unit `workeros-api.service` |
+| SQLite DB | `/root/workeros/data/floom.db` | AX41 disk |
+| Worker source bundles | `/root/workeros/workers/<worker_id>/` | AX41 disk |
+| Run artifacts | `/root/workeros/data/artifacts/` | AX41 disk |
+
+**Do NOT test against `http://localhost:8000` or `http://127.0.0.1:8000`.** That is not Workeros. The API binds explicitly to port 8011. If you see port 8000 in your test setup, you are running a misconfigured dev server, not the production service.
+
+## How workers execute (THE important part)
+
+**Workers run exclusively in E2B sandbox microVMs.** There is no in-process execution path.
+
+- `runner_sandbox/__init__.py` exposes only `E2BSandboxDriver`. The `get_driver()` dispatcher returns `E2BSandboxDriver` for any value of `runner` (default `"e2b"`).
+- The `runner_local.py` module that existed in earlier commits was renamed to `runner_utils.py` in PR R. Its `run_worker_local` executor function was deleted in PR #28. The remaining contents are pure utility helpers (path constants, validation functions, context builders) consumed by the E2B driver to prepare the per-run payload.
+- E2B sandboxes are Firecracker microVMs hosted by E2B. They do not share a Python interpreter, filesystem, network namespace, or environment variables with the API service.
+
+**Verified in-sandbox isolation** (from `docs/launch-readiness/MORNING-REPORT.md`): a malicious bundle running `os.environ` dump inside an E2B sandbox returned only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from the sandbox.
+
+This means attacks like:
+- Worker reaches localhost FastAPI to read `/secrets`
+- Worker reads `os.environ` and exfiltrates platform secrets
+- Worker introspects `sys.modules` to find the FastAPI app and inject routes
+- Worker mutates env vars seen by subsequent workers
+- Worker writes to API service files
+
+**do not apply to Workeros.** They require workers to share a Python interpreter with the API. They don't. If a security audit produces these findings, the audit was run against the wrong infrastructure (typically a clone of the repo with a hand-spun `uvicorn main:app` instance and no E2B credentials).
+
+## API authentication
+
+The API is gated by a shared `x-floom-secret` header. Requests without it return 401. The secret value lives in `/root/.config/workeros/api.env` (read by systemd, not committed). Exempt paths: `/health`, `/healthz`, `/connections/callback`, `/composio-events`, `/webhooks/<worker_id>` (token-gated separately).
+
+## Rate limiting
+
+200 req/min per `x-floom-secret` hash (token-bucket). Excess returns 429 with `Retry-After: 60`.
+
+## Security headers
+
+Every response includes: HSTS (max-age 31536000), X-Frame-Options DENY, Content-Security-Policy default-src 'self', Permissions-Policy, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin.
+
+## How to run a real audit
+
+1. Hit `https://workers-api.floom.dev` (not localhost) with the production `x-floom-secret`.
+2. Test that workers can NOT do what they shouldn't by submitting a malicious bundle and verifying the result. The E2B sandbox isolates them.
+3. If you want to test the API surface (auth, rate limit, input validation, path traversal, etc.), point your tools at `workers-api.floom.dev`.
+4. Read this file before filing any "workers can compromise the platform" finding.
+
+## How to operate
+
+- API: `systemctl {status,restart} workeros-api.service`
+- API logs: `journalctl -u workeros-api.service`
+- DB: `sqlite3 /root/workeros/data/floom.db`
+- Worker source: edit files under `/root/workeros/workers/<worker_id>/` and call `POST /workers/reload`
+- Frontend: deploy with `cd apps/web && vercel --prod --yes && vercel alias set <new-id>.vercel.app workers.floom.dev`
+
+## Why this document exists
+
+A May 2026 audit produced a 22/100 score with claims of "workers can inject FastAPI routes" and "env poisoning is permanent". The audit had tested a local dev server on port 8000 with the (already-deleted) in-process executor. None of the findings applied to production. This file is meant to prevent that mistake from recurring.
