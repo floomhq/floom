@@ -649,9 +649,11 @@ async def upload_file(
     hasher = hashlib.sha256()
     size = 0
     # Stream directly to a temp file to avoid memory buffering.
-    blobs_base = Path(os.environ.get("FLOOM_BLOBS_DIR", "../../data/blobs")).resolve()
-    blobs_base.mkdir(parents=True, exist_ok=True)
-    tmp_upload = blobs_base / f".upload.{os.getpid()}.{threading.get_ident()}.tmp"
+    # Use BLOBS_DIR from files.py (already env-resolved) so the temp file is on
+    # the same filesystem as the final target, making os.replace atomic.
+    from files import BLOBS_DIR as _BLOBS_DIR
+    _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_upload = _BLOBS_DIR / f".upload.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         with open(tmp_upload, "wb") as tmp_out:
             while True:
