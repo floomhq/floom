@@ -1424,6 +1424,7 @@ Respond with ONLY valid JSON in this exact shape (no markdown fences, no extra t
   "requirements": [
     {"app": "<app-slug-from-user-prompt>", "method": "oauth_or_api_key", "reason": "<one-line why>"}
   ],
+  "available_methods_hint": {"<app-slug>": ["oauth", "api_key"]},
   "required_connections": ["<oauth-app-slugs-from-user-prompt-only>"],
   "required_secrets": ["<UPPER_SNAKE_CASE_API_KEY_only_for_api_key_apps>"],
   "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
@@ -1454,8 +1455,70 @@ class DraftFromPromptOutputField(BaseModel):
 class RequirementItem(BaseModel):
     """One integration requirement: a single app with exactly one auth method."""
     app: str
-    method: str  # "oauth" or "api_key"
+    method: str  # "oauth" or "api_key" -- the CURRENT selection (default = LLM suggestion)
+    available_methods: List[str] = []  # both "oauth" and "api_key" if both supported; otherwise just the one
     reason: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Authoritative auth-modes table
+# The LLM's reported available_methods is informational only; this table is
+# authoritative because the LLM hallucinates. Backend enriches every
+# RequirementItem with available_methods from this table before returning.
+# ---------------------------------------------------------------------------
+
+_BOTH_METHODS: frozenset = frozenset({
+    "gmail",
+    "hubspot",
+    "slack",
+    "notion",
+    "github",
+    "linear",
+    "googlecalendar",
+    "google-calendar",
+    "googlesheets",
+    "google-sheets",
+    "googledrive",
+    "google-drive",
+    "googledocs",
+    "google-docs",
+    "salesforce",
+    "linkedin",
+    "discord",
+    "dropbox",
+    "airtable",
+    "jira",
+    "granola",
+    "asana",
+    "monday",
+    "trello",
+    "twitter",
+})
+
+_API_KEY_ONLY: frozenset = frozenset({
+    "apollo",
+    "stripe",
+    "openai",
+    "perplexityai",
+    "anthropic",
+    "serpapi",
+    "firecrawl",
+    "tavily",
+})
+
+
+def _available_methods_for_app(app_slug: str) -> List[str]:
+    """Return the authoritative list of available auth methods for an app.
+
+    Normalises slug to lowercase before lookup.
+    """
+    slug = (app_slug or "").lower().strip()
+    if slug in _API_KEY_ONLY:
+        return ["api_key"]
+    if slug in _BOTH_METHODS:
+        return ["oauth", "api_key"]
+    # Unknown app: default to both so the user is not blocked
+    return ["oauth", "api_key"]
 
 
 class DraftFromPromptResponse(BaseModel):
@@ -1640,6 +1703,22 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
             if app_slug not in seen_apps:
                 requirements.append(RequirementItem(app=app_slug, method="api_key", reason=""))
                 seen_apps.add(app_slug)
+
+    # Enrich each requirement with available_methods from the authoritative table.
+    # The LLM's suggestion for method is kept as the default selection, but
+    # available_methods tells the frontend which toggle options to show the user.
+    enriched_requirements: List[RequirementItem] = []
+    for req in requirements:
+        avail = _available_methods_for_app(req.app)
+        # If LLM suggested a method not in avail, pick the first available instead.
+        method = req.method if req.method in avail else avail[0]
+        enriched_requirements.append(RequirementItem(
+            app=req.app,
+            method=method,
+            available_methods=avail,
+            reason=req.reason,
+        ))
+    requirements = enriched_requirements
 
     # Derive legacy fields from requirements for backward compatibility
     required_connections = [r.app for r in requirements if r.method == "oauth"]

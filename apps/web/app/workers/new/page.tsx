@@ -973,6 +973,7 @@ interface InlineRequirementRowProps {
   initialSecretStatus?: "set" | "missing" | "unknown";
   initialConnected?: boolean;
   onReady: (app: string) => void;
+  onMethodChange: (app: string, method: "oauth" | "api_key") => void;
 }
 
 function InlineRequirementRow({
@@ -981,16 +982,22 @@ function InlineRequirementRow({
   initialSecretStatus = "unknown",
   initialConnected = false,
   onReady,
+  onMethodChange,
 }: InlineRequirementRowProps) {
   const app = getSupportedApp(requirement.app);
   const isOAuth = requirement.method === "oauth";
+  const availMethods = requirement.available_methods ?? [];
+  const canToggle = availMethods.length === 2;
 
   // OAuth state
   const [connStatus, setConnStatus] = useState<"connected" | "disconnected" | "connecting">(
     initialConnected ? "connected" : "disconnected"
   );
 
-  // API key state
+  // API key state -- derive secret name from current method
+  const effectiveSecretName = requirement.method === "api_key"
+    ? (secretName ?? `${requirement.app.toUpperCase().replace(/-/g, "_")}_API_KEY`)
+    : undefined;
   const [secretStatus, setSecretStatus] = useState<"set" | "missing" | "unknown" | "saving">(initialSecretStatus);
   const [secretValue, setSecretValue] = useState("");
   const [showSecretInput, setShowSecretInput] = useState(initialSecretStatus !== "set");
@@ -1001,6 +1008,19 @@ function InlineRequirementRow({
       inputRef.current.focus();
     }
   }, [showSecretInput]);
+
+  // When method changes, reset ready state for this app so the new method's
+  // credential must be verified before the user can proceed.
+  const prevMethod = useRef(requirement.method);
+  useEffect(() => {
+    if (prevMethod.current !== requirement.method) {
+      prevMethod.current = requirement.method;
+      setConnStatus("disconnected");
+      setSecretStatus("unknown");
+      setSecretValue("");
+      setShowSecretInput(true);
+    }
+  }, [requirement.method]);
 
   const isReady = isOAuth ? connStatus === "connected" : secretStatus === "set";
 
@@ -1051,25 +1071,46 @@ function InlineRequirementRow({
 
   async function handleSaveSecret() {
     const trimmed = secretValue.trim();
-    if (!trimmed || !secretName) {
-      toast.error(`Enter a value for ${secretName ?? "the API key"}`);
+    if (!trimmed || !effectiveSecretName) {
+      toast.error(`Enter a value for ${effectiveSecretName ?? "the API key"}`);
       return;
     }
     setSecretStatus("saving");
     try {
-      await api.secrets.upsert(secretName, trimmed);
+      await api.secrets.upsert(effectiveSecretName, trimmed);
       setSecretStatus("set");
       setShowSecretInput(false);
       setSecretValue("");
       onReady(requirement.app);
-      toast.success(`${secretName} saved`);
+      toast.success(`${effectiveSecretName} saved`);
     } catch (e: unknown) {
       setSecretStatus("missing");
-      toast.error(e instanceof Error ? e.message : `Failed to save ${secretName}`);
+      toast.error(e instanceof Error ? e.message : `Failed to save ${effectiveSecretName}`);
     }
   }
 
-  const methodBadge = (
+  // Method toggle: two-option segmented control (shown when both methods are available)
+  const methodToggle = canToggle ? (
+    <div className="flex items-center rounded border border-[#e4e4e7] overflow-hidden text-xs font-mono">
+      {(["oauth", "api_key"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onMethodChange(requirement.app, m)}
+          className={`px-2 py-0.5 transition-colors ${
+            requirement.method === m
+              ? m === "oauth"
+                ? "bg-[#2563eb] text-white"
+                : "bg-[#7c3aed] text-white"
+              : "bg-white text-[#666] hover:bg-[#f4f4f5]"
+          }`}
+        >
+          {m === "oauth" ? "OAuth" : "API key"}
+        </button>
+      ))}
+    </div>
+  ) : (
+    // Single method: informational badge only, no toggle
     <span className={`text-xs px-1.5 py-0.5 rounded border font-mono ${
       isOAuth
         ? "text-[#2563eb] bg-[#eff6ff] border-[#bfdbfe]"
@@ -1082,25 +1123,27 @@ function InlineRequirementRow({
   // Fully ready
   if (isReady) {
     return (
-      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-[#f0fdf4]">
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
-          <span className="text-sm font-medium text-[#15803d]">{app.displayName}</span>
-          {methodBadge}
+      <div className="rounded-md border border-[#e4e4e7] bg-[#f0fdf4] p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
+            <span className="text-sm font-medium text-[#15803d]">{app.displayName}</span>
+            {methodToggle}
+          </div>
+          {isOAuth ? (
+            <button type="button" onClick={handleConnect} className="text-xs text-[#999] hover:text-[#666] transition-colors">
+              Reconnect
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setSecretStatus("missing"); setShowSecretInput(true); }}
+              className="text-xs text-[#999] hover:text-[#666] transition-colors"
+            >
+              Change
+            </button>
+          )}
         </div>
-        {isOAuth ? (
-          <button type="button" onClick={handleConnect} className="text-xs text-[#999] hover:text-[#666] transition-colors">
-            Reconnect
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => { setSecretStatus("missing"); setShowSecretInput(true); }}
-            className="text-xs text-[#999] hover:text-[#666] transition-colors"
-          >
-            Change
-          </button>
-        )}
       </div>
     );
   }
@@ -1111,7 +1154,7 @@ function InlineRequirementRow({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-[#333]">{app.displayName}</span>
-          {methodBadge}
+          {methodToggle}
         </div>
         {isOAuth && (
           <Button
@@ -1132,10 +1175,10 @@ function InlineRequirementRow({
           </Button>
         )}
       </div>
-      {!isOAuth && secretName && (
+      {!isOAuth && effectiveSecretName && (
         <>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-[#555]">{secretName}</span>
+            <span className="text-xs font-mono text-[#555]">{effectiveSecretName}</span>
             <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
           </div>
           {showSecretInput && (
@@ -1143,7 +1186,7 @@ function InlineRequirementRow({
               <Input
                 ref={inputRef}
                 type="password"
-                placeholder={`Enter ${secretName}`}
+                placeholder={`Enter ${effectiveSecretName}`}
                 value={secretValue}
                 onChange={(e) => setSecretValue(e.target.value)}
                 className="border-[#e4e4e7] font-mono text-sm flex-1"
@@ -1190,6 +1233,7 @@ interface InlineRequirementsProps {
   requiredSecrets: string[];
   requiredConnections: string[];
   onAllReady: (ready: boolean) => void;
+  onRequirementsChange?: (updated: DraftRequirementItem[]) => void;
   skipped: boolean;
   onSkip: () => void;
 }
@@ -1199,10 +1243,16 @@ function InlineRequirements({
   requiredSecrets,
   requiredConnections,
   onAllReady,
+  onRequirementsChange,
   skipped,
   onSkip,
 }: InlineRequirementsProps) {
   const [loading, setLoading] = useState(true);
+
+  // Mutable local copy of requirements so user can flip methods without re-drafting
+  const [localRequirements, setLocalRequirements] = useState<DraftRequirementItem[]>(
+    requirements ?? []
+  );
 
   // State for legacy mode (when requirements array is absent)
   const [secretStates, setSecretStates] = useState<SecretState[]>(
@@ -1284,7 +1334,7 @@ function InlineRequirements({
 
   // Compute readiness
   const allReady = useNewFormat
-    ? requirements!.every((r) => readyApps.has(r.app))
+    ? localRequirements.every((r) => readyApps.has(r.app))
     : secretStates.every((s) => s.status === "set") && connectionStates.every((c) => c.connected);
 
   useEffect(() => {
@@ -1307,6 +1357,22 @@ function InlineRequirements({
     setReadyApps((prev) => new Set([...prev, app]));
   }
 
+  function handleMethodChange(app: string, method: "oauth" | "api_key") {
+    setLocalRequirements((prev) => {
+      const updated = prev.map((r) =>
+        r.app === app ? { ...r, method } : r
+      );
+      onRequirementsChange?.(updated);
+      return updated;
+    });
+    // When method flips, this app is no longer ready until new credential verified
+    setReadyApps((prev) => {
+      const next = new Set(prev);
+      next.delete(app);
+      return next;
+    });
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-[#999]">
@@ -1317,7 +1383,7 @@ function InlineRequirements({
   }
 
   const hasRequirements = useNewFormat
-    ? requirements!.length > 0
+    ? localRequirements.length > 0
     : requiredSecrets.length > 0 || requiredConnections.length > 0;
   if (!hasRequirements) return null;
 
@@ -1360,7 +1426,7 @@ function InlineRequirements({
         <CardContent className="space-y-2">
           {useNewFormat ? (
             // New unified list: one row per app, no duplicates
-            requirements!.map((req) => {
+            localRequirements.map((req) => {
               const secretName = req.method === "api_key"
                 ? `${req.app.toUpperCase().replace(/-/g, "_")}_API_KEY`
                 : undefined;
@@ -1372,6 +1438,7 @@ function InlineRequirements({
                   initialSecretStatus="unknown"
                   initialConnected={readyApps.has(req.app)}
                   onReady={handleRequirementReady}
+                  onMethodChange={handleMethodChange}
                 />
               );
             })
@@ -1475,6 +1542,10 @@ function ReviewStep({
   // Inline requirements state
   const [requirementsReady, setRequirementsReady] = useState(false);
   const [requirementsSkipped, setRequirementsSkipped] = useState(false);
+  // Tracks user-chosen methods (mutable copy of draft.requirements)
+  const [chosenRequirements, setChosenRequirements] = useState<DraftRequirementItem[]>(
+    draft.requirements ?? []
+  );
 
   const hasRequirements =
     (Array.isArray(draft.requirements) && draft.requirements.length > 0) ||
@@ -1520,6 +1591,21 @@ function ReviewStep({
         );
         let base = replaceTriggerBlock(draft.worker_yml, triggerYaml);
         base = replaceExecBlock(base, buildExecBlock(execMode));
+        // Patch connections list based on user-chosen methods:
+        // only apps with method=oauth go into connections; api_key apps are secrets.
+        if (chosenRequirements.length > 0) {
+          const oauthApps = chosenRequirements.filter((r) => r.method === "oauth").map((r) => r.app);
+          const connectionsLine = oauthApps.length > 0
+            ? `connections: [${oauthApps.join(", ")}]`
+            : "connections: []";
+          // Replace existing connections line or append before trigger block
+          const hasConn = /^connections:/m.test(base);
+          if (hasConn) {
+            base = base.replace(/^connections:.*$/m, connectionsLine);
+          } else {
+            base = `${base.trimEnd()}\n${connectionsLine}\n`;
+          }
+        }
         yamlToUse = base;
       }
       // For hybrid/pure-script we always pass run_py; for agent it is ignored by the backend
@@ -1656,10 +1742,11 @@ function ReviewStep({
             {/* Inline requirements: one row per integration, no duplicates */}
             {hasRequirements && (
               <InlineRequirements
-                requirements={draft.requirements}
+                requirements={chosenRequirements.length > 0 ? chosenRequirements : draft.requirements}
                 requiredSecrets={draft.required_secrets}
                 requiredConnections={draft.required_connections}
                 onAllReady={handleRequirementsReady}
+                onRequirementsChange={setChosenRequirements}
                 skipped={requirementsSkipped}
                 onSkip={() => setRequirementsSkipped(true)}
               />
