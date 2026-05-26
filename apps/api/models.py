@@ -97,7 +97,7 @@ class WorkerRuntime(BaseModel):
     runner: str = "local"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
-    mode: Literal["agent", "pure-script"] = "pure-script"
+    mode: Literal["agent", "pure-script", "hybrid"] = "pure-script"
     model: Optional[str] = None
     system_prompt: Optional[str] = None
     limits: "WorkerLimits" = Field(default_factory=lambda: WorkerLimits())
@@ -256,7 +256,7 @@ class WorkerContractExec(BaseModel):
     # exposure. Trusted/legacy workers can declare `runner: local` explicitly
     # to skip the ~1-3s cold start and run in-process with full host access.
     runner: str = "e2b"
-    mode: Optional[Literal["agent", "pure-script"]] = None
+    mode: Optional[Literal["agent", "pure-script", "hybrid"]] = None
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
@@ -278,9 +278,9 @@ class WorkerContractExec(BaseModel):
 
     @model_validator(mode="after")
     def validate_runtime_mode(self) -> "WorkerContractExec":
-        if self.mode == "pure-script" and not self.command:
-            raise ValueError("exec.command is required when exec.mode is pure-script")
-        if self.mode == "pure-script" and self.runtime == "none":
+        if self.mode in ("pure-script", "hybrid") and not self.command:
+            raise ValueError(f"exec.command is required when exec.mode is {self.mode!r}")
+        if self.mode in ("pure-script", "hybrid") and self.runtime == "none":
             raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
         if self.runtime == "none" and self.command:
             raise ValueError("exec.runtime 'none' cannot declare exec.command")
@@ -384,8 +384,8 @@ class WorkerContract(BaseModel):
             raise ValueError("exec.runtime 'none' cannot declare exec.command")
         if self.exec.runtime == "none" and (self.entrypoint or self.entrypoints):
             raise ValueError("exec.runtime 'none' cannot declare entrypoints")
-        if self.exec.mode == "pure-script" and not self.exec.command:
-            raise ValueError("exec.command is required when exec.mode is pure-script")
+        if self.exec.mode in ("pure-script", "hybrid") and not self.exec.command:
+            raise ValueError(f"exec.command is required when exec.mode is {self.exec.mode!r}")
         return self
 
     @field_validator("long_description")

@@ -1779,6 +1779,114 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     return get_worker_detail(worker_id)
 
 
+# ---------------------------------------------------------------------------
+# POST /workers/from-bundle — create a worker from a zip bundle
+# ---------------------------------------------------------------------------
+
+@app.post("/workers/from-bundle", response_model=WorkerDetail)
+async def create_worker_from_bundle(
+    bundle: UploadFile = File(...),
+) -> WorkerDetail:
+    """Create a new worker from an uploaded zip bundle.
+
+    The zip must contain ``worker.yml`` at the root or inside exactly one
+    top-level directory. It must include at least one of: SKILL.md, run.py.
+    Returns 400 if the structure is invalid, 409 if the worker_id already
+    exists.
+    """
+    import zipfile
+    import io
+    from worker_registry import WORKERS_DIR
+
+    raw_bytes = await bundle.read()
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw_bytes))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
+
+    names = zf.namelist()
+
+    # Determine bundle prefix: support flat root or single top-level dir.
+    # worker.yml can be at "worker.yml" or "<dir>/worker.yml"
+    prefix = ""
+    if "worker.yml" not in names:
+        # Try single-dir layout: all paths share the same top-level dir
+        top_dirs = {n.split("/")[0] for n in names if "/" in n}
+        if len(top_dirs) == 1:
+            candidate = f"{next(iter(top_dirs))}/worker.yml"
+            if candidate in names:
+                prefix = next(iter(top_dirs)) + "/"
+    if not prefix and "worker.yml" not in names:
+        raise HTTPException(
+            status_code=400,
+            detail="Bundle must contain worker.yml at root or inside a single top-level directory",
+        )
+
+    worker_yml_path_in_zip = f"{prefix}worker.yml"
+    worker_yml = zf.read(worker_yml_path_in_zip).decode("utf-8")
+
+    worker_id, config = _parse_worker_payload(worker_yml)
+
+    target_dir = WORKERS_DIR / worker_id
+    if target_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+
+    # Extract all files under the prefix into target_dir
+    target_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        for zip_name in names:
+            if not zip_name.startswith(prefix):
+                continue
+            rel = zip_name[len(prefix):]
+            if not rel or rel.endswith("/"):
+                continue  # skip directories
+            # Guard against path traversal
+            parts = rel.split("/")
+            if any(p in ("", "..") for p in parts):
+                raise HTTPException(status_code=400, detail=f"Invalid path in bundle: {rel!r}")
+            dest = target_dir
+            for part in parts[:-1]:
+                dest = dest / part
+                dest.mkdir(exist_ok=True)
+            (dest / parts[-1]).write_bytes(zf.read(zip_name))
+    except HTTPException:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=f"Failed to extract bundle: {exc}") from exc
+
+    # Ensure run.py exists (stub if absent)
+    run_py_path = target_dir / "run.py"
+    if not run_py_path.exists():
+        run_py_path.write_text(
+            "from typing import Dict, Any\n\n"
+            "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
+            "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
+        )
+
+    # Ensure requirements.txt exists
+    req_path = target_dir / "requirements.txt"
+    if not req_path.exists():
+        req_path.write_text("")
+
+    # Register
+    invalidate_worker_cache()
+    workers = discover_workers()
+    with get_db() as conn:
+        try:
+            _persist_discovered_workers(conn, workers)
+        except RuntimeError as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return get_worker_detail(worker_id)
+
+
 @app.put("/workers/{worker_id}", response_model=WorkerDetail)
 def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
     """Update an existing worker from YAML + Python source."""
