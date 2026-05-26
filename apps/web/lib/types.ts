@@ -222,6 +222,34 @@ export interface ComposioTriggerItem {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Draft from prompt
+// ---------------------------------------------------------------------------
+
+export interface DraftFromPromptInputField {
+  name: string;
+  type: string;
+  label: string;
+  required: boolean;
+  default?: string | number | boolean | null;
+}
+
+export interface DraftFromPromptOutputField {
+  name: string;
+  type: string;
+  label: string;
+}
+
+export interface DraftFromPromptResponse {
+  worker_yml: string;
+  suggested_name: string;
+  suggested_title: string;
+  required_connections: string[];
+  required_secrets: string[];
+  inputs: DraftFromPromptInputField[];
+  outputs: DraftFromPromptOutputField[];
+}
+
 export interface IntegrationCatalogItem {
   slug: string;
   name: string;
