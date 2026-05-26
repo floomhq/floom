@@ -345,7 +345,7 @@ function WorkerCard({ worker, onTagClick }: { worker: WorkerSummary; onTagClick:
         </div>
         {worker.last_run && (
           <p className="text-xs text-[#999]">
-            Last run: {worker.last_run.created_at ? new Date(worker.last_run.created_at).toLocaleString() : "—"} · {worker.last_run.status}
+            Last run: {worker.last_run.created_at ? new Date(worker.last_run.created_at).toLocaleString() : "-"} · {worker.last_run.status}
           </p>
         )}
         <div className="pt-1">

@@ -138,7 +138,7 @@ export default function OverviewPage() {
               >
                 <div>
                   <p className="text-sm font-medium">{r.worker_name || r.worker_id}</p>
-                  <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</p>
+                  <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
                 </div>
                 <StatusBadge status={r.status} />
               </Link>

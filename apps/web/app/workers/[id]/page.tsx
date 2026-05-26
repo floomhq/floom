@@ -65,7 +65,7 @@ export default function WorkerDetailPage() {
 
   function applyExampleInput() {
     if (!worker?.example_input) return;
-    // Build next inputs, but skip file fields — filename strings cannot be re-uploaded
+    // Build next inputs, but skip file fields (filename strings cannot be re-uploaded)
     const nextInputs: Record<string, unknown> = { ...inputs };
     const fileFieldNames = new Set(
       worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => inp.name)
@@ -85,7 +85,7 @@ export default function WorkerDetailPage() {
     }
     setInputs(nextInputs);
     if (skippedFileFields) {
-      toast.success("Sample applied — upload a file for the file field(s)");
+      toast.success("Sample applied. Upload a file for the file field(s)");
     } else {
       toast.success("Sample input applied");
     }
@@ -343,7 +343,7 @@ export default function WorkerDetailPage() {
                   <div key={r.id} className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5]">
                     <div>
                       <p className="text-sm font-medium">{r.id}</p>
-                      <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</p>
+                      <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
                     </div>
                     <Badge variant="outline">{r.status}</Badge>
                   </div>
@@ -503,7 +503,7 @@ function ExampleInputPreview({
 function formatExampleValue(value: unknown, type?: string): string {
   if (value === undefined) return "";
   if (value === null) {
-    return type === "file" ? "(no sample file — upload one)" : "null";
+    return type === "file" ? "(no sample file, upload one)" : "null";
   }
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
@@ -520,7 +520,7 @@ function MarkdownPreview({ value }: { value: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// ManifestViewer — syntax-highlighted YAML viewer
+// ManifestViewer: syntax-highlighted YAML viewer
 // ---------------------------------------------------------------------------
 
 function ManifestViewer({ yaml }: { yaml: string }) {
