@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -47,11 +48,12 @@ const POPULAR_APP_SLUGS = new Set([
 // Maps friendly UI labels to Composio category slugs.
 // Composio's actual categories differ from the friendly names shown in the UI.
 // Sending a comma-separated list asks the backend to OR-filter across all of them.
+// Slugs verified against GET /integrations/catalog on 2026-05-26.
 const CATEGORY_MAP: Record<string, string[]> = {
-  Productivity: ["productivity", "notes", "documents", "project-management", "task-management"],
-  Email: ["email"],
-  CRM: ["crm"],
-  Social: ["social-media-accounts", "social"],
+  Productivity: ["productivity", "notes", "documents", "project-management", "task-management", "calendar"],
+  Email: ["email", "communication"],
+  CRM: ["crm", "contact-management"],
+  Social: ["social-media-accounts", "social-media-marketing"],
   Marketing: ["marketing", "marketing-automation"],
   Data: ["databases", "spreadsheets", "analytics"],
   Collaboration: ["team-chat", "team-collaboration", "video-conferencing"],
@@ -147,6 +149,7 @@ function CatalogCard({
 }
 
 export default function ConnectionsBrowsePage() {
+  const router = useRouter();
   const [catalog, setCatalog] = useState<IntegrationCatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -238,7 +241,20 @@ export default function ConnectionsBrowsePage() {
       }
     } catch (error) {
       oauthTab?.close();
-      toast.error(error instanceof Error ? error.message : `Failed to connect ${slug}`);
+      const msg = error instanceof Error ? error.message : `Failed to connect ${slug}`;
+      // Backend returns "api_key_only: ..." when the app uses API-key auth, not OAuth.
+      // Redirect to secrets so the user can add the key there instead.
+      if (msg.startsWith("api_key_only:")) {
+        toast.info(`${slug} uses an API key, not OAuth. Add the key in Secrets.`, {
+          action: {
+            label: "Go to Secrets",
+            onClick: () => router.push("/secrets"),
+          },
+          duration: 8000,
+        });
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setConnecting(null);
     }
