@@ -505,3 +505,151 @@ PR I and PR J have small overlap on `/workers/new` Step 1/Step 2 — handle in s
 PR K is the most surprising one because it REVERSES PR D's stance: "one method per app" is wrong, the user wants to choose method per app.
 
 **Total estimated effort:** 10-14 hours.
+
+---
+
+# Round 3 — 2026-05-26 evening walkthrough
+
+After PRs #34-#45 landed and the sticky-sidebar/overflow fix shipped. Six more items (#28-#33).
+
+---
+
+### #28 Wrong Floom logo
+
+**Where:** `apps/web/app/icon.png`, `apps/web/app/apple-icon.png`, `apps/web/public/floom-mark.png`, `apps/web/components/Sidebar.tsx`
+
+**Federico:** "you chose the wrong old logo"
+
+PR L pulled `floom-mark.png` from `/root/skills-neo/apps/web/public/`. Federico says it's not the right one. Need to identify the CORRECT current Floom logo source. Candidates:
+- `/root/floom-minimal/` (canonical production Floom checkout)
+- `~/floom-internal/` (private floom repo)
+
+**Fix scope:** Find the right logo asset and replace icon.png + apple-icon.png + floom-mark.png + sidebar Image src.
+
+**Status:** OPEN — needs Federico to point to the right asset, OR I find it via grep.
+
+---
+
+### #29 Move worker folders + tags from left sidebar to top filter bar
+
+**Where:** `apps/web/app/workers/page.tsx`
+
+**Federico:** "can the worker folders and tags pls be at top instead of sidebar"
+
+Currently the /workers page has a 240px left aside with Folders + Tags (sticky, after the items-stretch fix). Federico wants this inline at the TOP of the page above the worker cards grid, freeing up the full width for the cards.
+
+**Fix scope:**
+- Drop the `lg:grid-cols-[240px_minmax(0,1fr)]` grid layout.
+- Render Folders as a horizontal chip row at the top of the page below the h1.
+- Render Tags as a wrapped chip row below the folders.
+- The worker cards grid spans full width (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`).
+
+**Status:** OPEN
+
+---
+
+### #30 One worker can have multiple files (not just SKILL.md + run.py)
+
+**Where:** `apps/api/main.py` POST /workers, `apps/web/app/workers/[id]/page.tsx` Code tab, `apps/web/app/workers/[id]/edit/page.tsx`
+
+**Federico:** "one worker can have multiple files, right?"
+
+Worker dir on disk can already contain arbitrary files. PR I added `/workers/from-bundle` which accepts zip with multiple files. But the UI Code tab + Edit page only handle SKILL.md / worker.yml / run.py.
+
+**Fix scope:**
+- API: `GET /workers/{id}` includes `files: [{path, language, content}]` array listing ALL files in the worker dir.
+- Frontend Code tab: render a file tree (left) + content viewer (right), or tabbed picker.
+- Edit page: support adding/editing/deleting arbitrary files.
+
+**Status:** OPEN
+
+---
+
+### #31 Webhook trigger doesn't show the webhook URL
+
+**Where:** `apps/web/app/workers/new/page.tsx` Step 2 trigger picker + `apps/web/app/workers/[id]/edit/page.tsx`
+
+**Federico:** "webhook option doesnt show a webhook url or so?"
+
+When the user picks Webhook as trigger, the UI must surface:
+- The webhook URL to POST to
+- The HMAC signing secret
+- A Copy URL button
+- Optionally a Test webhook panel
+
+**Fix scope:**
+- Backend: generate / surface a unique URL + signing secret per worker. The DB already has `webhook_secret_hash` (`apps/api/db.py:110`).
+- Frontend: render the URL + secret in a code box after worker creation, plus on the worker detail Run/Overview tab.
+
+**Status:** OPEN
+
+---
+
+### #32 Connection-event UI feels broken / not polished
+
+**Where:** `apps/web/components/ConnectionEventPicker.tsx` (PR J)
+
+**Symptoms from screenshots (Images #20, #21):**
+- Integration dropdown shows lowercase "gmail" not "Gmail"
+- Event dropdown shows raw slugs `GMAIL_NEW_GMAIL_MESSAGE` in some views instead of human-readable "New Gmail Message Received Trigger"
+- Technical metadata line `GMAIL_NEW_GMAIL_MESSAGE / ca_hl07t_hUuFjb...` leaks slug + connection_id to user
+- Dropdown options visually overlap labels (z-index / overflow)
+- Dropdown styling inconsistent between Integration and Event
+
+**Federico:** "connection events feels broken on the ui?"
+
+**Fix scope:**
+- Use `appDisplayName(slug)` so "Gmail" appears in the Integration dropdown trigger (not "gmail").
+- Use event `name` field for SelectItem label (e.g. "New Gmail Message Received"); hide raw slug.
+- Drop the `GMAIL_NEW_... / ca_...` technical footer.
+- Fix z-index / overflow so dropdowns don't visually clash.
+- Make both Selects look identical (same component, same styles).
+
+**Status:** OPEN
+
+---
+
+### #33 Multiple triggers per worker
+
+**Where:** `apps/api/models.py` `WorkerContract.trigger`, `apps/web/app/workers/new/page.tsx`, `apps/web/app/workers/[id]/edit/page.tsx`
+
+**Federico:** "why cant i have multiple triggers for one worker?"
+
+Currently `trigger: {type, ...}` is a single object. A worker can only have one trigger.
+
+**Fix scope:**
+- Backend: change `trigger` to `triggers: List[WorkerTrigger]`. Accept both `trigger: ...` (single, legacy) AND `triggers: [...]` on input; canonicalize to list internally.
+- Each trigger has its own config. Example:
+  ```yaml
+  triggers:
+    - type: manual
+    - type: schedule
+      cron: "0 9 * * *"
+    - type: webhook
+    - type: composio
+      composio:
+        app: gmail
+        event_slug: GMAIL_NEW_GMAIL_MESSAGE
+        composio_connection_id: ca_...
+  ```
+- Frontend trigger picker becomes a list with "Add trigger" button. Each row has a type dropdown + type-specific config.
+- Scheduler / webhook handler / composio-events handler iterate triggers to find matches.
+
+**Status:** OPEN — biggest change in this round; probably its own PR.
+
+---
+
+## Round 3 Sequencing
+
+6 new items, 4 PRs:
+
+| PR | Scope | Issues |
+|----|-------|--------|
+| **PR M** | Right Floom logo + ConnectionEventPicker polish | #28 #32 |
+| **PR N** | Top filter bar for /workers (drop left aside) | #29 |
+| **PR O** | Multi-file worker support (file tree on detail + edit) | #30 |
+| **PR P** | Webhook URL surfacing + multiple triggers (both touch trigger schema) | #31 #33 |
+
+PR M, PR N, PR O are independent and can run in parallel. PR P is the heaviest because it changes the worker manifest schema.
+
+**Total estimated effort:** 8-12 hours.
