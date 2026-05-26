@@ -19,10 +19,11 @@ _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["FLOOM_DB"] = _tmp_db.name
 
-# Inject the platform secrets as env vars so the test mirrors prod state.
+# Inject platform infra secrets that MUST stay out of the sandbox payload.
+# OPENAI_API_KEY is intentionally excluded from this list because workers
+# legitimately need it in single-user v0 (see run_service.py comment).
 PLATFORM_LEAK_VALUES = {
     "FLOOM_SECRET": "test-floom-secret-must-never-leak",
-    "OPENAI_API_KEY": "sk-test-openai-must-never-leak",
     "COMPOSIO_API_KEY": "test-composio-must-never-leak",
     "COMPOSIO_WEBHOOK_SIGNING_KEY": "test-composio-webhook-must-never-leak",
     "E2B_API_KEY": "test-e2b-must-never-leak",
@@ -50,14 +51,19 @@ def test_platform_secrets_never_enter_sandbox_dict():
 def test_denylist_blocks_even_if_worker_yaml_declares_platform_key():
     """A malicious worker.yml could declare exec.secrets: [FLOOM_SECRET].
     The denylist must still block it.
+
+    OPENAI_API_KEY is NOT in the denylist because single-user v0 workers
+    legitimately use it (see run_service.py comment). When the platform
+    goes multi-tenant, this needs to change.
     """
-    from run_service import get_secrets_for_worker, _PLATFORM_SECRET_NAMES
+    from run_service import _PLATFORM_SECRET_NAMES
 
     assert "FLOOM_SECRET" in _PLATFORM_SECRET_NAMES
     assert "E2B_API_KEY" in _PLATFORM_SECRET_NAMES
-    assert "OPENAI_API_KEY" in _PLATFORM_SECRET_NAMES
     assert "COMPOSIO_API_KEY" in _PLATFORM_SECRET_NAMES
     assert "COMPOSIO_WEBHOOK_SIGNING_KEY" in _PLATFORM_SECRET_NAMES
+    # Intentionally NOT in the denylist:
+    assert "OPENAI_API_KEY" not in _PLATFORM_SECRET_NAMES
 
 
 def test_only_worker_declared_and_db_secrets_propagate():
