@@ -41,6 +41,14 @@ def get_platform_config():
     return {item["name"]: item for item in data["platform_secrets"]}
 
 
+def get_infra_paths():
+    resp = client.get("/system/platform-config", headers=_AUTH_HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "infra_paths" in data, "Response missing 'infra_paths' key"
+    return {item["name"]: item for item in data["infra_paths"]}
+
+
 class TestPlatformConfigShape:
     """Verify the response contains the new required/default/description fields."""
 
@@ -51,10 +59,18 @@ class TestPlatformConfigShape:
         assert isinstance(data["platform_secrets"], list)
         assert len(data["platform_secrets"]) > 0
 
+    def test_response_has_infra_paths_list(self):
+        resp = client.get("/system/platform-config", headers=_AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["infra_paths"], list)
+        assert len(data["infra_paths"]) > 0
+
     def test_each_item_has_required_fields(self):
         resp = client.get("/system/platform-config", headers=_AUTH_HEADERS)
-        items = resp.json()["platform_secrets"]
-        for item in items:
+        data = resp.json()
+        all_items = data["platform_secrets"] + data["infra_paths"]
+        for item in all_items:
             assert "name" in item, f"Missing 'name' in {item}"
             assert "status" in item, f"Missing 'status' in {item}"
             assert "required" in item, f"Missing 'required' in {item}"
@@ -62,37 +78,83 @@ class TestPlatformConfigShape:
             assert "description" in item, f"Missing 'description' in {item}"
 
     def test_required_field_is_bool(self):
-        items = client.get(
-            "/system/platform-config", headers=_AUTH_HEADERS
-        ).json()["platform_secrets"]
-        for item in items:
+        resp = client.get("/system/platform-config", headers=_AUTH_HEADERS)
+        data = resp.json()
+        all_items = data["platform_secrets"] + data["infra_paths"]
+        for item in all_items:
             assert isinstance(item["required"], bool), (
                 f"{item['name']}.required should be bool, got {type(item['required'])}"
             )
 
+    def test_infra_vars_not_in_platform_secrets(self):
+        """FLOOM_DB etc. must live in infra_paths, not in platform_secrets."""
+        infra_names = {"FLOOM_DB", "FLOOM_WORKERS_DIR", "FLOOM_ARTIFACTS_DIR", "FLOOM_RUN_TIMEOUT"}
+        secrets = get_platform_config()
+        overlap = infra_names & set(secrets.keys())
+        assert not overlap, f"Infra vars found in platform_secrets: {overlap}"
+
+    def test_infra_vars_in_infra_paths(self):
+        """FLOOM_DB etc. must appear in the infra_paths section."""
+        infra = get_infra_paths()
+        for name in ("FLOOM_DB", "FLOOM_WORKERS_DIR", "FLOOM_ARTIFACTS_DIR", "FLOOM_RUN_TIMEOUT"):
+            assert name in infra, f"{name} missing from infra_paths"
+
+
+class TestOpenAiApiKeyRequired:
+    """OPENAI_API_KEY is required and must appear in platform_secrets."""
+
+    def test_openai_api_key_in_platform_secrets(self):
+        secrets = get_platform_config()
+        assert "OPENAI_API_KEY" in secrets, "OPENAI_API_KEY not found in platform_secrets"
+
+    def test_openai_api_key_is_required(self):
+        secrets = get_platform_config()
+        spec = secrets["OPENAI_API_KEY"]
+        assert spec["required"] is True, "OPENAI_API_KEY should be required=True"
+
+    def test_openai_api_key_shows_set_when_env_present(self):
+        os.environ["OPENAI_API_KEY"] = "sk-test-key"
+        try:
+            secrets = get_platform_config()
+            spec = secrets["OPENAI_API_KEY"]
+            assert spec["status"] == "set", f"Expected 'set', got {spec['status']!r}"
+        finally:
+            os.environ.pop("OPENAI_API_KEY", None)
+
+    def test_openai_api_key_shows_missing_when_absent(self):
+        saved = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            secrets = get_platform_config()
+            spec = secrets["OPENAI_API_KEY"]
+            assert spec["status"] == "missing"
+        finally:
+            if saved is not None:
+                os.environ["OPENAI_API_KEY"] = saved
+
 
 class TestFloomRunTimeoutOptional:
-    """FLOOM_RUN_TIMEOUT is optional with default '300' and should not show as red missing."""
+    """FLOOM_RUN_TIMEOUT is optional with default '300', now in infra_paths section."""
+
+    def test_floom_run_timeout_in_infra_paths(self):
+        infra = get_infra_paths()
+        assert "FLOOM_RUN_TIMEOUT" in infra, "FLOOM_RUN_TIMEOUT not found in infra_paths"
 
     def test_floom_run_timeout_not_required(self):
-        secrets = get_platform_config()
-        spec = secrets.get("FLOOM_RUN_TIMEOUT")
-        assert spec is not None, "FLOOM_RUN_TIMEOUT not found in platform config"
+        infra = get_infra_paths()
+        spec = infra["FLOOM_RUN_TIMEOUT"]
         assert spec["required"] is False, "FLOOM_RUN_TIMEOUT should be optional"
 
     def test_floom_run_timeout_has_default_300(self):
-        secrets = get_platform_config()
-        spec = secrets["FLOOM_RUN_TIMEOUT"]
-        assert spec["default"] == "300", (
-            f"Expected default '300', got {spec['default']!r}"
-        )
+        infra = get_infra_paths()
+        spec = infra["FLOOM_RUN_TIMEOUT"]
+        assert spec["default"] == "300", f"Expected default '300', got {spec['default']!r}"
 
     def test_floom_run_timeout_missing_without_env_var(self):
         """When env var is absent, status is 'missing' but required is False."""
         saved = os.environ.pop("FLOOM_RUN_TIMEOUT", None)
         try:
-            secrets = get_platform_config()
-            spec = secrets["FLOOM_RUN_TIMEOUT"]
+            infra = get_infra_paths()
+            spec = infra["FLOOM_RUN_TIMEOUT"]
             assert spec["status"] == "missing"
             assert spec["required"] is False
             assert spec["default"] == "300"
