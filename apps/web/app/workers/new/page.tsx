@@ -16,6 +16,16 @@ import { ArrowLeft, Plus, Trash2, Sparkles, ChevronRight, RotateCcw, CheckCircle
 import type { ComposioTriggerItem, DraftFromPromptResponse, DraftRequirementItem } from "@/lib/types";
 import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
+import {
+  ExecModePicker,
+  RequirementsEditor,
+  TriggersEditor,
+  WorkerMetadataForm,
+  buildTriggersYaml,
+  defaultTriggerRow,
+  replaceTriggerBlock as replaceTriggersBlock,
+} from "@/components/worker-form";
+import type { ExecMode as WorkerExecMode, TriggerRow } from "@/components/worker-form";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1574,15 +1584,12 @@ function ReviewStep({
   const [workerYml, setWorkerYml] = useState(draft.worker_yml);
   const [workerId, setWorkerId] = useState(draft.suggested_name);
   const [name, setName] = useState(draft.suggested_title);
-  const [triggerType, setTriggerType] = useState<TriggerType>("manual");
-  const [cronExpr, setCronExpr] = useState("0 9 * * MON");
-  const [cronTimezone, setCronTimezone] = useState("Europe/Berlin");
-  const [composioEvent, setComposioEvent] = useState("");
-  const [composioConnectionId, setComposioConnectionId] = useState("");
+  // Multi-trigger state (uses shared TriggersEditor)
+  const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
   const [runPy, setRunPy] = useState(DEFAULT_RUN_PY);
-  const [execMode, setExecMode] = useState<ExecMode>(initialExecMode ?? "agent");
+  const [execMode, setExecMode] = useState<WorkerExecMode>(initialExecMode ?? "agent");
 
-  // Inline requirements state
+  // Requirements state
   const [requirementsReady, setRequirementsReady] = useState(false);
   const [requirementsSkipped, setRequirementsSkipped] = useState(false);
   // Tracks user-chosen methods (mutable copy of draft.requirements)
@@ -1618,9 +1625,12 @@ function ReviewStep({
   async function handleCreate() {
     if (!workerId) { toast.error("Worker ID is required"); return; }
     if (idError) { toast.error(idError); return; }
-    if (triggerType === "composio" && (!composioEvent || !composioConnectionId)) {
-      toast.error("Select an integration event and connection");
-      return;
+    // Validate composio trigger rows
+    for (const row of triggerRows) {
+      if (row.type === "composio" && (!row.composioEvent || !row.composioConnectionId)) {
+        toast.error("Select an integration event and connection for every connection-event trigger");
+        return;
+      }
     }
     setSubmitting(true);
     try {
@@ -1629,10 +1639,8 @@ function ReviewStep({
         yamlToUse = workerYml;
       } else {
         // Patch trigger block and exec mode block into the draft YAML
-        const triggerYaml = buildTriggerBlock(
-          triggerType, cronExpr, cronTimezone, composioEvent, composioConnectionId,
-        );
-        let base = replaceTriggerBlock(draft.worker_yml, triggerYaml);
+        const triggerYaml = buildTriggersYaml(triggerRows);
+        let base = replaceTriggersBlock(draft.worker_yml, triggerYaml);
         base = replaceExecBlock(base, buildExecBlock(execMode));
         // Patch connections list based on user-chosen methods:
         // only apps with method=oauth go into connections; api_key apps are secrets.
@@ -1699,74 +1707,16 @@ function ReviewStep({
       {activeTab === "review" ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           <div className="space-y-5">
-            {/* Worker mode picker */}
-            <Card className="border-[#eaeaea] shadow-none bg-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Worker mode</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {([
-                  ["agent", "Agent (SKILL.md only)", "The agent reads SKILL.md and uses tools. No Python required."],
-                  ["pure-script", "Pure Python (run.py only)", "The Python script runs directly. No SKILL.md needed."],
-                  ["hybrid", "Hybrid (run.py + SKILL.md)", "Python controls flow and can invoke an agent helper via SKILL.md."],
-                ] as const).map(([value, label, hint]) => (
-                  <label
-                    key={value}
-                    className={`flex items-start gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
-                      execMode === value
-                        ? "border-black bg-[#f9f9f9]"
-                        : "border-[#e4e4e7] hover:border-[#ccc] hover:bg-[#fafafa]"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="exec-mode"
-                      value={value}
-                      checked={execMode === value}
-                      onChange={() => setExecMode(value)}
-                      className="mt-0.5 accent-black"
-                    />
-                    <div>
-                      <p className="text-sm font-medium text-[#222]">{label}</p>
-                      <p className="text-xs text-[#888] mt-0.5">{hint}</p>
-                    </div>
-                  </label>
-                ))}
-                {execMode === "hybrid" && (
-                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                    Hybrid runtime support (exposing SKILL.md to run.py at execution) is planned for a future release. Both files will be written to disk.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+            {/* Worker mode picker (shared component) */}
+            <ExecModePicker value={execMode} onChange={setExecMode} />
 
-            {/* Identity */}
-            <Card className="border-[#eaeaea] shadow-none bg-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Identity</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm">
-                    Worker ID <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    value={workerId}
-                    onChange={(e) => setWorkerId(e.target.value.toLowerCase().replace(/[\s_]+/g, "-"))}
-                    className={`border-[#e4e4e7] font-mono ${idError ? "border-red-400" : ""}`}
-                  />
-                  {idError && <p className="text-xs text-red-500">{idError}</p>}
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Name</Label>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="border-[#e4e4e7]"
-                  />
-                </div>
-              </CardContent>
-            </Card>
+            {/* Identity (shared component, create mode) */}
+            <WorkerMetadataForm
+              mode="create"
+              values={{ workerId, name }}
+              onChange={(v) => { setWorkerId(v.workerId); setName(v.name); }}
+              idError={idError}
+            />
 
             {/* SKILL.md viewer (read-only): shown when draft has skill_md */}
             {draft.skill_md && (
@@ -1782,9 +1732,9 @@ function ReviewStep({
               </Card>
             )}
 
-            {/* Inline requirements: one row per integration, no duplicates */}
+            {/* Requirements (shared component) */}
             {hasRequirements && (
-              <InlineRequirements
+              <RequirementsEditor
                 requirements={chosenRequirements.length > 0 ? chosenRequirements : draft.requirements}
                 requiredSecrets={draft.required_secrets}
                 requiredConnections={draft.required_connections}
@@ -1843,58 +1793,11 @@ function ReviewStep({
               </Card>
             )}
 
-            {/* Trigger override */}
-            <Card className="border-[#eaeaea] shadow-none bg-white">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Trigger</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm">Type</Label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {([
-                      ["manual", "Manual"],
-                      ["schedule", "Cron"],
-                      ["webhook", "Webhook"],
-                      ["composio", "Connection event"],
-                    ] as const).map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setTriggerType(value)}
-                        className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
-                          triggerType === value
-                            ? "border-black bg-black text-white"
-                            : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {triggerType === "schedule" && (
-                  <div className="space-y-3">
-                    <CronBuilder value={cronExpr} onChange={setCronExpr} />
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-[#666] uppercase tracking-wide">Timezone</Label>
-                      <Input value={cronTimezone} onChange={(e) => setCronTimezone(e.target.value)} className="border-[#e4e4e7] font-mono text-sm" placeholder="Europe/Berlin" />
-                    </div>
-                  </div>
-                )}
-                {triggerType === "webhook" && (
-                  <WebhookUrlBox />
-                )}
-                {triggerType === "composio" && (
-                  <ConnectionEventPicker
-                    composioEvent={composioEvent}
-                    composioConnectionId={composioConnectionId}
-                    onEventChange={setComposioEvent}
-                    onConnectionIdChange={setComposioConnectionId}
-                  />
-                )}
-              </CardContent>
-            </Card>
+            {/* Triggers (shared component) */}
+            <TriggersEditor
+              rows={triggerRows}
+              onChange={setTriggerRows}
+            />
 
             <div className="space-y-2">
               <Button
