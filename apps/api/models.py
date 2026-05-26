@@ -13,7 +13,6 @@ from enum import Enum
 class WorkerStatus(str, Enum):
     HEALTHY = "healthy"
     NEEDS_ATTENTION = "needs_attention"
-    PAUSED = "paused"
     MISSING_SECRET = "missing_secret"
     ERROR = "error"
 
@@ -23,16 +22,6 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    PENDING_APPROVAL = "pending_approval"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-
-
-class ApprovalStatus(str, Enum):
-    NOT_REQUIRED = "not_required"
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
 
 
 class LogLevel(str, Enum):
@@ -122,11 +111,6 @@ class WorkerRuntime(BaseModel):
         return v
 
 
-class WorkerApprovalConfig(BaseModel):
-    required: bool = False
-    label: Optional[str] = None
-
-
 class WorkerConfig(BaseModel):
     id: str
     name: str
@@ -138,7 +122,6 @@ class WorkerConfig(BaseModel):
     secrets: List[str] = []
     connections: List[str] = []  # Composio app slugs required by this worker
     outputs: List[WorkerOutput] = []
-    approvals: WorkerApprovalConfig = WorkerApprovalConfig()
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
 
     @model_validator(mode="after")
@@ -314,11 +297,6 @@ class WorkerContractCapabilities(BaseModel):
     network: WorkerContractNetworkCapabilities = Field(default_factory=WorkerContractNetworkCapabilities)
 
 
-class WorkerContractApprovals(BaseModel):
-    required: bool = False
-    label: Optional[str] = None
-
-
 class WorkerContractTrigger(BaseModel):
     type: str = "manual"
     cron: Optional[str] = None
@@ -358,7 +336,6 @@ class WorkerContract(BaseModel):
     repository: Optional[str] = None
     exec: WorkerContractExec
     capabilities: WorkerContractCapabilities = Field(default_factory=WorkerContractCapabilities)
-    approvals: WorkerContractApprovals = Field(default_factory=WorkerContractApprovals)
     trigger: WorkerContractTrigger = Field(default_factory=WorkerContractTrigger)
     connections: List[str] = Field(default_factory=list)
     csv_required_columns: Optional[List[str]] = None
@@ -573,10 +550,6 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         secrets=contract.exec.secrets,
         connections=contract.connections,
         outputs=outputs,
-        approvals=WorkerApprovalConfig(
-            required=contract.approvals.required,
-            label=contract.approvals.label,
-        ),
         csv_required_columns=contract.csv_required_columns,
     )
 
@@ -687,10 +660,6 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             files=[field.name for field in config.inputs if field.type == "file"],
             network=WorkerContractNetworkCapabilities(egress=bool(config.secrets or config.connections)),
         ),
-        approvals=WorkerContractApprovals(
-            required=config.approvals.required,
-            label=config.approvals.label,
-        ),
         trigger=WorkerContractTrigger(
             type=config.trigger.type,
             cron=config.trigger.cron,
@@ -720,14 +689,6 @@ class RunCreate(BaseModel):
     trigger_source: str = "manual"
 
 
-class RejectRequest(BaseModel):
-    reason: Optional[str] = None
-
-
-class ApproveRequest(BaseModel):
-    edited_output: Optional[str] = None  # If set, replaces the first output field value before approval
-
-
 class PaginationParams(BaseModel):
     limit: int = Field(50, ge=1, le=500)
     offset: int = Field(0, ge=0)
@@ -743,7 +704,6 @@ class RunSummary(BaseModel):
     worker_name: Optional[str] = None
     status: RunStatus
     trigger_source: str
-    approval_status: ApprovalStatus
     created_at: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -768,20 +728,6 @@ class Artifact(BaseModel):
     created_at: str
 
 
-class ApprovalDetail(BaseModel):
-    id: str
-    run_id: str
-    worker_id: str
-    worker_name: Optional[str] = None
-    status: ApprovalStatus
-    label: Optional[str] = None
-    preview: Optional[str] = None
-    preview_type: Optional[str] = None  # "markdown" | "json" | "csv" | "text" | "file"
-    created_at: str
-    decided_at: Optional[str] = None
-    reason: Optional[str] = None  # Rejection reason or approval note
-
-
 class OutputField(BaseModel):
     name: str
     type: str  # "markdown", "json", "csv", "text", "file"
@@ -802,8 +748,6 @@ class RunDetail(BaseModel):
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
     transcript: List[Dict[str, Any]] = Field(default_factory=list)
-    approval: Optional[ApprovalDetail] = None
-    approval_status: ApprovalStatus
     error: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -823,7 +767,6 @@ class WorkerSummary(BaseModel):
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
-    paused: bool = False
     trigger_type: str
     runner: str
     last_run: Optional[RunSummary] = None
@@ -841,7 +784,6 @@ class WorkerDetail(BaseModel):
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
-    paused: bool = False
     trigger_type: str
     runner: str
     config: WorkerConfig
@@ -866,11 +808,6 @@ class ReloadResponse(BaseModel):
 class ActionResponse(BaseModel):
     status: str
     run_id: Optional[str] = None
-
-
-class WorkerStateResponse(BaseModel):
-    worker_id: str
-    paused: bool
 
 
 # ---------------------------------------------------------------------------
