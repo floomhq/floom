@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import { main as runServer } from "./server.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -136,6 +137,10 @@ async function install(): Promise<void> {
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const command = argv[0];
+  if (!command) {
+    await runServer();
+    return;
+  }
   if (command === "install") {
     await install();
     return;

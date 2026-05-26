@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -73,9 +75,9 @@ function redactSecrets(value: unknown): unknown {
 }
 
 function errorResult(error: unknown): CallToolResult {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = redactSecretText(error instanceof Error ? error.message : String(error));
   const status = error instanceof WorkerosApiError ? error.status : undefined;
-  const body = error instanceof WorkerosApiError ? error.body : undefined;
+  const body = error instanceof WorkerosApiError ? redactSecrets(error.body) : undefined;
   const structuredContent: JsonObject = { error: message };
   if (status !== undefined) {
     structuredContent.status = status;
@@ -88,6 +90,13 @@ function errorResult(error: unknown): CallToolResult {
     content: [{ type: "text", text: message }],
     structuredContent,
   };
+}
+
+function redactSecretText(text: string): string {
+  return text.replace(
+    /((?:secret|token|password|api[_-]?key)["']?\s*[:=]\s*["']?)([^"',}\s]+)/gi,
+    "$1[redacted]",
+  );
 }
 
 async function callTool(handler: () => Promise<CallToolResult>): Promise<CallToolResult> {
@@ -142,10 +151,11 @@ async function request(
 
   const parsed = await parseResponse(response);
   if (!response.ok) {
+    const safeParsed = redactSecrets(parsed);
     const detail =
-      typeof parsed === "object" && parsed && "detail" in parsed
-        ? String((parsed as { detail: unknown }).detail)
-        : JSON.stringify(parsed);
+      typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
+        ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
+        : JSON.stringify(safeParsed);
     throw new WorkerosApiError(
       `Workeros API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
       response.status,
@@ -175,8 +185,13 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
 
     if (!response.ok) {
       const parsed = await parseResponse(response);
+      const safeParsed = redactSecrets(parsed);
+      const detail =
+        typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
+          ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
+          : JSON.stringify(safeParsed);
       throw new WorkerosApiError(
-        `Workeros API GET /runs/${runId}/events failed with HTTP ${response.status}`,
+        `Workeros API GET /runs/${runId}/events failed with HTTP ${response.status}: ${detail}`,
         response.status,
         parsed,
       );
@@ -214,7 +229,8 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
         }
       }
       if (sawTerminalStatus && events.length > 0 && buffer === "") {
-        continue;
+        await reader.cancel();
+        return { run_id: runId, status, events };
       }
     }
   } catch (error) {
@@ -421,7 +437,7 @@ export function createServer(): McpServer {
         capabilities: z.record(z.string(), z.unknown()).optional().describe("Optional documented capabilities; not enforced."),
         webhook_secret_rotate: z.boolean().optional().describe("Rotate the worker webhook secret and return the new raw secret once."),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ id, ...updates }) =>
       callTool(async () =>
@@ -514,8 +530,11 @@ export async function main(): Promise<void> {
   await server.connect(transport);
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`workeros-mcp failed: ${message}`);
-  process.exit(1);
-});
+const executedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`workeros-mcp failed: ${message}`);
+    process.exit(1);
+  });
+}

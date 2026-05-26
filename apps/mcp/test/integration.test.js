@@ -208,8 +208,20 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/runs/run_terminal_no_close/events") {
+      sse(response, [
+        { type: "status", run_id: "run_terminal_no_close", status: "completed", completed_at: "2026-05-26T00:00:01Z" },
+      ]);
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/runs/missing/events") {
       json(response, 404, { detail: "Run not found" });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/runs/secret_error/events") {
+      json(response, 500, { api_key: "sk-test-secret-value" });
       return;
     }
 
@@ -228,11 +240,11 @@ async function startMockApi() {
   };
 }
 
-async function withClient(mock, secret, fn) {
+async function withClient(mock, secret, fn, entry = "dist/server.js") {
   const client = new Client({ name: "workeros-mcp-test", version: "0.1.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["dist/server.js"],
+    args: [entry],
     env: {
       ...process.env,
       WORKEROS_API_BASE: mock.baseUrl,
@@ -386,6 +398,20 @@ test("workers.update, workers.delete, and runs.watch surface auth failures in to
   });
 });
 
+test("API error text redacts secret-like response fields", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "secret_error", timeout_ms: 5000 } });
+    assert.equal(watched.isError, true);
+    assert.equal(watched.structuredContent.status, 500);
+    assert.match(watched.content[0].text, /\[redacted\]/);
+    assert.doesNotMatch(watched.content[0].text, /sk-test-secret-value/);
+    assert.equal(watched.structuredContent.body.api_key, "[redacted]");
+  });
+});
+
 test("runs.watch emits already-terminal final state and close event", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());
@@ -395,6 +421,27 @@ test("runs.watch emits already-terminal final state and close event", async (t) 
     assert.equal(watched.structuredContent.status, "completed");
     assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "close"]);
   });
+});
+
+test("runs.watch returns on terminal status even without a close event", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_terminal_no_close", timeout_ms: 5000 } });
+    assert.equal(watched.structuredContent.status, "completed");
+    assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status"]);
+  });
+});
+
+test("workeros CLI without a subcommand serves MCP over stdio", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const tools = await client.listTools();
+    assert.equal(tools.tools.some((tool) => tool.name === "workers.list"), true);
+  }, "dist/cli.js");
 });
 
 test("workers.create auto-fills capabilities from run.py environment variables", async (t) => {
