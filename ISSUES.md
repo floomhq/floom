@@ -40,15 +40,19 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
-### #3 Sidebar layout breaks on scroll
+### #3 Sidebar layout breaks on scroll (BOTH /workers and /workers/[id])
 
-**Where:** `apps/web/app/workers/[id]/page.tsx` + global layout. Image #8 shows the left nav going off-screen when the page content scrolls (csv_enricher /workers/csv_enricher).
+**Where:**
+- `apps/web/app/workers/page.tsx:72` (inner folders+tags `<aside>` on the worker list page, sits in `grid-cols-[240px_minmax(0,1fr)]` with no sticky/overflow styles)
+- `apps/web/app/workers/[id]/page.tsx` (worker detail page sidebar)
 
-**Federico:** "sidebar broken on scroll"
+**Federico:** "the sidebar on https://workers.floom.dev/workers is still broken" (raised twice; PR E was originally scoped to /workers/[id], broaden to cover /workers list too)
 
-**Fix scope:** The left sidebar nav should be `position: sticky; top: 0; height: 100vh; overflow-y: auto;` (or equivalent flex layout) so it stays pinned while main content scrolls.
+**Symptom:** When the worker list grows past the viewport, the folders+tags aside scrolls with the page content and ends up off-screen above the fold while the user is still scrolling through workers. The aside has no `position: sticky` / `top` / `max-height` / `overflow-y` styles.
 
-**Status:** OPEN
+**Fix scope:** Both asides need `position: sticky; top: <header-height>; max-height: calc(100vh - <header-height>); overflow-y: auto;` so they pin while main content scrolls and the inner content is independently scrollable.
+
+**Status:** OPEN — covered by PR E.
 
 ---
 
@@ -235,6 +239,23 @@ This is essentially merging `/connections/browse` into the connections page or l
 
 ---
 
+### #15 No proper favicon
+
+**Where:** `apps/web/app/favicon.ico` (currently a default Next.js placeholder)
+
+**Federico:** "have no proper favicon"
+
+**Symptom:** Browser tab shows the default Next.js favicon, not a Floom-branded one. The HTML head correctly links to `/favicon.ico` so the wiring is fine; only the file content needs to change.
+
+**Fix scope:**
+- Replace `apps/web/app/favicon.ico` with a proper Floom-branded icon (the "F" mark from the sidebar at `apps/web/components/Sidebar.tsx` — currently rendered as an HTML element `<div class="...bg-[var(--solid)] text-[var(--solid-fg)]">F</div>`, would translate to an icon).
+- Add `apps/web/app/icon.tsx` (Next.js dynamic icon generation) OR drop a real `.ico` + 192/512 PNGs in `apps/web/app/` so Next.js auto-wires them.
+- Verify mobile + apple-touch-icon variants.
+
+**Status:** OPEN — small UI polish, ship in PR G.
+
+---
+
 ## Sequencing
 
 Suggested PR cuts (parallelizable):
@@ -245,15 +266,16 @@ Suggested PR cuts (parallelizable):
 4. **PR D — Requirements UX** (#4): tighter connection inference + one-method-per-app (OAuth XOR API key).
 5. **PR E — Run inputs + sidebar scroll** (#3 + #5): file inputs for `kind: file`; sticky sidebar.
 6. **PR F — Settings cleanup** (#13 + #14): remove duplicate Secrets card from /settings; tag platform secrets with `required` + `default` so optional vars render neutrally.
+7. **PR G — Favicon + /workers sidebar** (#3 partial + #15): proper Floom-branded favicon; sticky sidebar on `/workers` list page. Standalone, small.
 
 **Parallel lanes:**
 - **Lane 1 (connections):** PR B then PR C in sequence (small overlap on the modal).
-- **Lane 2 (workers):** PR A then PR D then PR E in sequence (all touch /workers files).
-- **Lane 3 (settings polish):** PR F standalone, independent of everything else.
+- **Lane 2 (workers):** PR A then PR D then PR E in sequence (all touch /workers files). #3 sticky sidebar on /workers/[id] stays in PR E; PR G covers the /workers list aside which is independent.
+- **Lane 3 (polish):** PR F and PR G standalone, independent of everything else.
 
-PR B is the most launch-critical (connections are functionally broken right now). Three workstreams can run in parallel worktrees.
+PR B is the most launch-critical (connections are functionally broken right now). Four workstreams can run in parallel worktrees.
 
-**Total estimated effort:** 11-15 hours of focused work split across the 6 PRs.
+**Total estimated effort:** 12-16 hours of focused work split across the 7 PRs.
 
 ---
 
