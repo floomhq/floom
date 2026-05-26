@@ -85,6 +85,16 @@ export interface Artifact {
   created_at: string;
 }
 
+export interface TranscriptRow {
+  type?: string;
+  role?: string;
+  content?: unknown;
+  name?: string;
+  arguments?: unknown;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+}
+
 export interface ApprovalDetail {
   id: string;
   run_id: string;
@@ -118,6 +128,7 @@ export interface RunDetail {
   output_schema: OutputField[];
   logs: LogEntry[];
   artifacts: Artifact[];
+  transcript: TranscriptRow[];
   approval?: ApprovalDetail;
   approval_status: ApprovalStatus;
   error?: string;

@@ -628,6 +628,7 @@ class RunDetail(BaseModel):
     output_schema: List["OutputField"] = Field(default_factory=list)
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
+    transcript: List[Dict[str, Any]] = Field(default_factory=list)
     approval: Optional[ApprovalDetail] = None
     approval_status: ApprovalStatus
     error: Optional[str] = None
