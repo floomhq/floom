@@ -790,6 +790,8 @@ class WorkerDetail(BaseModel):
     recent_runs: List[RunSummary] = Field(default_factory=list)
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
     run_py: Optional[str] = None
+    skill_md_content: Optional[str] = None  # Raw SKILL.md content
+    run_py_content: Optional[str] = None  # Alias for run_py, explicit for Code tab
     new_webhook_secret: Optional[str] = None  # Present only on webhook_secret_rotate=true
 
 
