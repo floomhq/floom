@@ -56,12 +56,25 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 - **Folder tree + tag chips** — flat folder grouping on `/workers`, tag filter chips, no nested route changes.
 - **Transcript tab** — agent-mode runs render the LLM transcript on `/runs/{id}`. Code-mode runs hide the tab.
 
+### Consumer creation flow (B2C-ready) — Federico 2026-05-26
+
+- **Prompt-to-worker on `/workers/new`** — user pastes a natural-language description ("summarise all my meetings from Granola and update my CRM HubSpot accordingly"). System uses an LLM to (1) draft `SKILL.md` for the worker, (2) identify required Composio connections from the prompt, (3) identify required OpenAI/API secrets, (4) generate the I/O schema (inputs from the prompt nouns, output as markdown). User reviews + edits.
+- **Inline OAuth + secret entry** — at create-time the form walks the user through connecting any required SaaS (Composio OAuth popup) and entering any required secrets, in-flow. No separate `/secrets` or `/connections` detour. After connect/enter, the form re-renders with green checkmarks.
+- **One-click test** — run the worker with `example_input` after creation. Show the result inline. If it fails, surface the error + suggest a fix.
+- **One-click schedule** — convert a successful test into a recurring worker (cron / webhook / Composio event). Single dropdown for the trigger type, sensible defaults.
+
+### Run lifecycle controls
+
+- **Cancel run** — `POST /runs/{id}/cancel` marks `cancel_requested: true`. The runner respects this between iterations / on terminal-status writes. UI has a "Cancel" button on `/runs/{id}` for any non-terminal run. Distinct from worker pause (which was cut): pause is "stop this worker firing"; cancel is "kill this specific in-flight run now." For LLM agent runs that go into runaway token loops.
+
 ### API endpoints
 
 - `GET/POST /workers` — list and create.
 - `GET /workers/{id}` — detail.
 - `PATCH /workers/{id}` — update trigger, cron, inputs, capabilities; rotate webhook secret.
 - `DELETE /workers/{id}` — delete row, cancel running runs, release bundle dir if shared `skill_version` unused.
+- `POST /workers/draft-from-prompt` — given a natural-language prompt, return a draft WorkerContract (SKILL.md body, required connections, required secrets, I/O schema) for the user to review and edit on `/workers/new`.
+- `POST /runs/{id}/cancel` — request cancellation of an in-flight run. Returns 200 if the request was recorded, 404 if no such run, 409 if already terminal. The runner respects cancel_requested between iterations and on the next status write.
 - `GET /runs/{id}/events` — SSE stream of status/log/artifact events. Closes on terminal state.
 - `POST /uploads` — content-hashed file blob upload.
 - `POST /webhooks/{worker_id}` — HMAC-authed inbound webhook.
