@@ -1,5 +1,9 @@
-from typing import Dict, Any
+"""DACH Compliance + Rate Benchmark — E2B-native worker.
+
+Reads inputs.json, secrets.json. Writes result.json.
+"""
 import json
+import os
 
 
 # DACH market rate data (agency-estimate, based on Gulp/Freelancermap/Figures data 2024-2025)
@@ -60,8 +64,26 @@ def _detect_seniority(years: int) -> str:
     return "lead"
 
 
-def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
-    context.log("DACH Compliance + Rate Benchmark started")
+def _write_error(error: str) -> None:
+    with open("result.json", "w") as f:
+        json.dump({"status": "error", "error": error}, f)
+
+
+def main():
+    with open("inputs.json") as f:
+        inputs = json.load(f)
+
+    try:
+        with open("secrets.json") as f:
+            secrets = json.load(f)
+    except FileNotFoundError:
+        secrets = {}
+
+    try:
+        with open("connections.json") as f:
+            connections = json.load(f)
+    except FileNotFoundError:
+        connections = {}
 
     engagement_type = inputs.get("engagement_type", "AÜG").strip()
     role_summary = inputs.get("role_summary", "").strip()
@@ -78,7 +100,8 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
         proposed_rate = 0.0
 
     if not role_summary:
-        return {"status": "error", "error": "Missing required input: role_summary"}
+        _write_error("Missing required input: role_summary")
+        return
 
     # --- Rate benchmark (deterministic) ---
     stack = _detect_stack(role_summary)
@@ -120,12 +143,7 @@ def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
 *Source: {rate_source}*
 """
 
-    context.log("Rate benchmark computed, generating compliance analysis with AI")
-
-    # --- Compliance report (LLM) — branched by engagement type ---
-    # AÜG: leased employee by definition — NOT self-employed. Scheinselbständigkeit does NOT apply.
-    # Werkvertrag/Dienstvertrag: freelancer/self-employed context — Scheinselbständigkeit applies.
-    # Festanstellung: standard employment — compliance is routine, no AÜG/Scheinselbständigkeit.
+    # --- Compliance report (LLM) ---
     system_prompt = """You are a DACH employment law specialist with deep knowledge of:
 - AÜG (Arbeitnehmerüberlassungsgesetz) — the German temporary work agency act
 - Scheinselbständigkeit (false self-employment) criteria under German law (applies to Freiberufler/Werkvertrag ONLY)
@@ -146,7 +164,6 @@ CRITICAL DISTINCTION:
 Write concise, actionable analysis. No generic disclaimers. Reference: https://www.bmas.de/DE/Arbeit/Arbeitnehmerrechte/Arbeitnehmerueberlassung/arbeitnehmerueberlassung.html
 """
 
-    # Build engagement-specific prompt instructions
     if engagement_type == "AÜG":
         compliance_focus = """Produce a compliance report covering ONLY AÜG-specific topics:
 1. 18-month maximum deployment period (§ 1 Abs. 1b AÜG) — track from contract start
@@ -211,7 +228,7 @@ Also return a separate JSON object (after the markdown, separated by <<<JSON>>>)
 
     try:
         from openai import OpenAI
-        ai_client = OpenAI(api_key=context.secrets.get("OPENAI_API_KEY"))
+        ai_client = OpenAI(api_key=secrets.get("OPENAI_API_KEY"))
         response = ai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -223,14 +240,13 @@ Also return a separate JSON object (after the markdown, separated by <<<JSON>>>)
         )
         full_response = response.choices[0].message.content.strip()
     except Exception as e:
-        return {"status": "error", "error": f"OpenAI compliance analysis failed: {e}"}
+        _write_error(f"OpenAI compliance analysis failed: {e}")
+        return
 
-    # Split out JSON from markdown
     if "<<<JSON>>>" in full_response:
         parts = full_response.split("<<<JSON>>>", 1)
         compliance_report = parts[0].strip()
         json_part = parts[1].strip()
-        # Strip code fences
         if json_part.startswith("```"):
             lines = json_part.splitlines()
             lines = [l for l in lines if not l.startswith("```")]
@@ -243,13 +259,18 @@ Also return a separate JSON object (after the markdown, separated by <<<JSON>>>)
         compliance_report = full_response
         red_flags = {"risk_level": "UNKNOWN", "items": ["Red flags JSON not returned by model"]}
 
-    context.log(f"Compliance analysis complete. Risk level: {red_flags.get('risk_level', '?')}")
-
-    return {
+    result = {
         "status": "success",
         "outputs": {
             "compliance_report": compliance_report,
             "rate_benchmark": rate_benchmark_md,
             "red_flags": json.dumps(red_flags, ensure_ascii=False, indent=2),
         },
+        "artifacts": [],
     }
+    with open("result.json", "w") as f:
+        json.dump(result, f)
+
+
+if __name__ == "__main__":
+    main()

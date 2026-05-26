@@ -54,7 +54,7 @@ from worker_registry import (
     get_worker,
     invalidate_worker_cache,
 )
-from run_service import create_run, get_worker_config_for_run, start_run, add_log
+from run_service import create_run, get_worker_config_for_run, start_run, add_log, update_run_status
 from run_service import register_sse_publisher
 
 load_dotenv()
@@ -1144,7 +1144,6 @@ def delete_worker(worker_id: str):
 
     for run_id in active_runs:
         try:
-            from run_service import update_run_status
             update_run_status(run_id, RunStatus.FAILED.value, error="Worker deleted")
             logger.info("Cancelled active run %s before worker deletion", run_id)
         except Exception as exc:
