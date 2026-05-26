@@ -1241,6 +1241,12 @@ The WorkerContract YAML must follow schema_version "0.3" exactly. Key rules:
 - `connections`: list of Composio app slugs if integrations are needed
 - `use_cases`: list of 3-5 items
 
+CRITICAL YAML SAFETY RULES (must follow):
+- ALWAYS double-quote every string scalar value. A bare value like `description: Summarize meetings: action items` is a parse error because of the embedded `:`. Write `description: "Summarize meetings: action items"` instead.
+- Quote strings that contain any of: `:` `#` `{` `}` `[` `]` `,` `&` `*` `!` `|` `>` `'` `"` `%` `@` `` ` ``, leading/trailing whitespace, or that look like booleans/numbers/null.
+- Use `"..."` (double-quoted style) for ALL human-readable strings in `title`, `description`, `label`, prompt examples, and use-cases.
+- For multi-line content (e.g. long descriptions), use YAML block scalar syntax `|-` on the next line and indent two spaces.
+
 For an agent-mode skill worker, use:
 ```yaml
 exec:
@@ -1302,6 +1308,45 @@ def _detect_connections(prompt_lower: str) -> List[str]:
     return found
 
 
+def _call_draft_llm(
+    client: Any,
+    user_message: str,
+    extra_system_instructions: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Single OpenAI call returning a parsed JSON payload. Raises HTTPException on transport/JSON errors."""
+    system_prompt = _DRAFT_SYSTEM_PROMPT
+    if extra_system_instructions:
+        system_prompt = f"{system_prompt}\n\n{extra_system_instructions}"
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.2,
+            max_tokens=3000,
+            response_format={"type": "json_object"},
+        )
+    except Exception as exc:
+        logger.exception("OpenAI call failed in draft-from-prompt")
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
+
+    raw_content = (response.choices[0].message.content or "").strip()
+    if raw_content.startswith("```"):
+        raw_content = "\n".join(raw_content.split("\n")[1:])
+    if raw_content.endswith("```"):
+        raw_content = "\n".join(raw_content.split("\n")[:-1])
+    raw_content = raw_content.strip()
+
+    try:
+        return json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        logger.error("LLM returned non-JSON for draft-from-prompt: %s", raw_content[:500])
+        raise HTTPException(status_code=502, detail=f"LLM returned invalid JSON: {exc}") from exc
+
+
 @app.post("/workers/draft-from-prompt", response_model=DraftFromPromptResponse)
 async def draft_worker_from_prompt(payload: DraftFromPromptRequest) -> DraftFromPromptResponse:
     """Draft a WorkerContract YAML from a natural-language prompt using LLM."""
@@ -1323,60 +1368,58 @@ async def draft_worker_from_prompt(payload: DraftFromPromptRequest) -> DraftFrom
 
 {prompt}
 
-Detected Composio apps that may be needed: {detected_connections if detected_connections else 'none detected — infer from context'}
+Detected Composio apps that may be needed: {detected_connections if detected_connections else 'none detected, infer from context'}
 
-Generate the full WorkerContract YAML and metadata JSON as specified. Make sure the YAML is valid and passes schema_version 0.3 validation."""
+Generate the full WorkerContract YAML and metadata JSON as specified. Make sure the YAML is valid and passes schema_version 0.3 validation. Remember: every string scalar in the YAML must be wrapped in double quotes."""
 
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": _DRAFT_SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.2,
-            max_tokens=3000,
-        )
-    except Exception as exc:
-        logger.exception("OpenAI call failed in draft-from-prompt")
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
-
-    raw_content = response.choices[0].message.content or ""
-
-    # Strip markdown code fences if the model wrapped the response
-    raw_content = raw_content.strip()
-    if raw_content.startswith("```"):
-        raw_content = "\n".join(raw_content.split("\n")[1:])
-    if raw_content.endswith("```"):
-        raw_content = "\n".join(raw_content.split("\n")[:-1])
-    raw_content = raw_content.strip()
-
-    try:
-        parsed = json.loads(raw_content)
-    except json.JSONDecodeError as exc:
-        logger.error("LLM returned non-JSON for draft-from-prompt: %s", raw_content[:500])
-        raise HTTPException(status_code=502, detail=f"LLM returned invalid JSON: {exc}") from exc
-
-    worker_yml = parsed.get("worker_yml", "")
-    if not worker_yml:
-        raise HTTPException(status_code=502, detail="LLM returned empty worker_yml")
-
-    # Validate the YAML round-trips through parse_worker_manifest
+    from openai import OpenAI
     import yaml as pyyaml
-    try:
-        raw_manifest = pyyaml.safe_load(worker_yml)
-        if not isinstance(raw_manifest, dict):
-            raise ValueError("worker_yml must be a YAML mapping")
-        from models import parse_worker_manifest
-        parse_worker_manifest(raw_manifest)
-    except Exception as exc:
-        logger.warning("LLM-generated YAML failed validation: %s", exc)
+    from models import parse_worker_manifest
+
+    client = OpenAI(api_key=openai_key)
+
+    max_attempts = 3
+    last_yaml_error: Optional[str] = None
+    parsed: Dict[str, Any] = {}
+    worker_yml = ""
+
+    for attempt in range(1, max_attempts + 1):
+        extra_instructions: Optional[str] = None
+        if last_yaml_error:
+            extra_instructions = (
+                f"PREVIOUS ATTEMPT FAILED YAML VALIDATION with error: {last_yaml_error}\n"
+                "Retry. Double-quote every single string value in the YAML, including title, description, labels, "
+                "use_cases entries, and any prompt examples. Do not leave any string unquoted. "
+                "Treat colons inside strings as parse hazards and quote the whole value."
+            )
+
+        parsed = _call_draft_llm(client, user_message, extra_instructions)
+        worker_yml = parsed.get("worker_yml", "")
+        if not worker_yml:
+            last_yaml_error = "empty worker_yml returned"
+            continue
+
+        try:
+            raw_manifest = pyyaml.safe_load(worker_yml)
+            if not isinstance(raw_manifest, dict):
+                raise ValueError("worker_yml must be a YAML mapping")
+            parse_worker_manifest(raw_manifest)
+            last_yaml_error = None
+            break
+        except Exception as exc:
+            last_yaml_error = str(exc)
+            logger.warning(
+                "draft-from-prompt YAML validation failed on attempt %d/%d: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+
+    if last_yaml_error:
         raise HTTPException(
             status_code=502,
-            detail=f"LLM-generated worker YAML is not valid: {exc}",
-        ) from exc
+            detail=f"LLM-generated worker YAML is not valid after {max_attempts} attempts: {last_yaml_error}",
+        )
 
     suggested_name = parsed.get("suggested_name", "my-worker")
     suggested_title = parsed.get("suggested_title", "My Worker")
