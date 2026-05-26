@@ -797,6 +797,8 @@ class SecretItem(BaseModel):
     name: str
     status: SecretStatus
     last_used_at: Optional[str] = None
+    last_checked_at: Optional[str] = None
+    last_check_status: Optional[str] = None
     used_by: List[str] = Field(default_factory=list)
 
 
