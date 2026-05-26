@@ -111,7 +111,7 @@ async def auth_middleware(request: Request, call_next):
       - /webhooks/*       — HMAC-authed by per-worker secret
       - /healthz          — liveness probe, no secret
       - /composio-events  — Composio webhook receiver
-      - /connections/callback — OAuth redirect landing
+      - /connections/callback — OAuth browser redirect validates connection state
       - OPTIONS           — CORS preflight
 
     When FLOOM_SECRET is not set (localhost dev mode), all requests pass.

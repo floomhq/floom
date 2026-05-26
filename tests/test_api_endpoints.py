@@ -147,6 +147,15 @@ class TestAuthGate(unittest.TestCase):
         r = client.post("/webhooks/some-worker-id", content=b"{}", headers=self._headers(False))
         self.assertNotEqual(r.status_code, 401, f"Expected non-401, got {r.status_code}: {r.text}")
 
+    def test_connections_callback_accessible_without_secret(self):
+        """GET /connections/callback must accept external OAuth browser redirects."""
+        r = client.get(
+            "/connections/callback?connection_id=test&status=success",
+            headers=self._headers(False),
+            follow_redirects=False,
+        )
+        self.assertNotEqual(r.status_code, 401, f"Expected non-401, got {r.status_code}: {r.text}")
+
     def test_options_cors_preflight_passes(self):
         """OPTIONS requests must not be gated by x-floom-secret."""
         r = client.options("/workers")
