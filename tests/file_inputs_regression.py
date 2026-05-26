@@ -621,6 +621,48 @@ def main() -> int:
     run2_opt_files = [f for f in run2_inputs_dir.iterdir() if "optional" in f.name] if run2_inputs_dir.exists() else []
     check("run2 inputs dir has no optional_doc stale file", len(run2_opt_files) == 0, str(run2_opt_files))
 
+    # --- csv_enricher contract: csv_file must be kind:file, media_type:text/csv ---
+    print("\n[section] csv_enricher contract regression")
+    import yaml as _yaml
+    csv_enricher_yml_path = ROOT / "workers" / "csv_enricher" / "worker.yml"
+    check(
+        "csv_enricher worker.yml exists",
+        csv_enricher_yml_path.is_file(),
+        str(csv_enricher_yml_path),
+    )
+    if csv_enricher_yml_path.is_file():
+        csv_enricher_manifest = _yaml.safe_load(csv_enricher_yml_path.read_text())
+        exec_inputs = csv_enricher_manifest.get("exec", {}).get("inputs", [])
+        csv_field = next((f for f in exec_inputs if f.get("name") == "csv_file"), None)
+        check(
+            "csv_enricher has csv_file input (not csv_text)",
+            csv_field is not None,
+            f"inputs found: {[f.get('name') for f in exec_inputs]}",
+        )
+        if csv_field:
+            check(
+                "csv_enricher csv_file is kind:file",
+                csv_field.get("kind") == "file",
+                f"kind={csv_field.get('kind')}",
+            )
+            check(
+                "csv_enricher csv_file media_type is text/csv",
+                csv_field.get("media_type") == "text/csv",
+                f"media_type={csv_field.get('media_type')}",
+            )
+            check(
+                "csv_enricher csv_file is required",
+                csv_field.get("required") is True,
+                f"required={csv_field.get('required')}",
+            )
+        # Verify no field named csv_text remains
+        old_field = next((f for f in exec_inputs if f.get("name") == "csv_text"), None)
+        check(
+            "csv_enricher has no legacy csv_text input",
+            old_field is None,
+            f"csv_text field still present: {old_field}",
+        )
+
     if failures:
         print(f"\n{len(failures)} regression check(s) failed: {', '.join(failures)}")
         return 1
