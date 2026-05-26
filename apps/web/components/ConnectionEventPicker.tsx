@@ -113,7 +113,8 @@ export function ConnectionEventPicker({
     (c) => c.app_name.toLowerCase() === selectedApp
   );
 
-  function handleAppChange(app: string) {
+  function handleAppChange(value: string | null) {
+    const app = value ?? "";
     setSelectedApp(app);
     // Reset event + connection when app changes
     onEventChange("");
@@ -125,7 +126,8 @@ export function ConnectionEventPicker({
     }
   }
 
-  function handleEventChange(event: string) {
+  function handleEventChange(value: string | null) {
+    const event = value ?? "";
     onEventChange(event);
     // Ensure connection is set
     if (!composioConnectionId && appConnections.length === 1) {
@@ -151,12 +153,10 @@ export function ConnectionEventPicker({
     return (
       <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 space-y-2">
         <p className="text-sm text-[#555]">No connected integrations yet.</p>
-        <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-          <a href="/connections/browse">
-            <Plus className="w-3 h-3 mr-1" />
-            Connect an integration
-          </a>
-        </Button>
+        <a href="/connections/browse" className="inline-flex items-center gap-1 rounded-md border border-[#e4e4e7] bg-white px-2 py-1 text-xs hover:bg-[#f4f4f5]">
+          <Plus className="w-3 h-3" />
+          Connect an integration
+        </a>
       </div>
     );
   }
@@ -224,7 +224,7 @@ export function ConnectionEventPicker({
       {selectedApp && appConnections.length > 1 && (
         <div className="space-y-1.5">
           <Label className="text-xs text-[#666] uppercase tracking-wide">Account</Label>
-          <Select value={composioConnectionId} onValueChange={onConnectionIdChange}>
+          <Select value={composioConnectionId} onValueChange={(v) => onConnectionIdChange(v ?? "")}>
             <SelectTrigger className="border-[#e4e4e7]">
               <SelectValue placeholder="Select account" />
             </SelectTrigger>

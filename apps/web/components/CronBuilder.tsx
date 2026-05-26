@@ -224,7 +224,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
         <div className="flex items-end gap-2">
           <div className="space-y-1.5 flex-1">
             <Label className="text-xs text-[#666]">Hour</Label>
-            <Select value={String(hour)} onValueChange={(v) => setHour(parseInt(v))}>
+            <Select value={String(hour)} onValueChange={(v) => setHour(parseInt(v ?? "0"))}>
               <SelectTrigger className="border-[#e4e4e7] h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -239,7 +239,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           </div>
           <div className="space-y-1.5 flex-1">
             <Label className="text-xs text-[#666]">Minute</Label>
-            <Select value={String(minute)} onValueChange={(v) => setMinute(parseInt(v))}>
+            <Select value={String(minute)} onValueChange={(v) => setMinute(parseInt(v ?? "0"))}>
               <SelectTrigger className="border-[#e4e4e7] h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
@@ -282,7 +282,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {showDom && (
         <div className="space-y-1.5">
           <Label className="text-xs text-[#666]">Day of month</Label>
-          <Select value={String(dom)} onValueChange={(v) => setDom(parseInt(v))}>
+          <Select value={String(dom)} onValueChange={(v) => setDom(parseInt(v ?? "1"))}>
             <SelectTrigger className="border-[#e4e4e7] h-8 text-xs w-28">
               <SelectValue />
             </SelectTrigger>
