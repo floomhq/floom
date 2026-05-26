@@ -10,6 +10,7 @@ import io
 import os
 import sys
 import json
+import threading
 import uuid
 import traceback
 import logging
@@ -25,6 +26,10 @@ WORKERS_DIR = Path(os.environ.get("FLOOM_WORKERS_DIR", "../../workers")).resolve
 ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
 
 DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("FLOOM_RUN_TIMEOUT", "300"))
+
+# Fix 2: os.chdir() is process-global; this lock serialises the chdir + run_fn
+# window so concurrent local runs don't clobber each other's relative paths.
+_CWD_LOCK = threading.Lock()
 
 
 def _safe_path(base: Path, *parts: str) -> Path:
@@ -259,12 +264,18 @@ def run_worker_local(
         # NOTE: In-process execution cannot enforce a true timeout via
         # signal/alarm because it runs inside the same thread.  For a
         # hard timeout, switch to the subprocess or E2B runner.
+        #
+        # Fix 2: os.chdir() is process-global. Acquire the module-level lock
+        # so concurrent runs in daemon threads don't race on the cwd.
+        # File inputs are stored as absolute paths (see _resolve_file_input_references)
+        # so workers reading Path(inputs["<name>"]) work correctly regardless.
         previous_cwd = os.getcwd()
-        try:
-            os.chdir(worker_dir)
-            result = run_fn(inputs, context)
-        finally:
-            os.chdir(previous_cwd)
+        with _CWD_LOCK:
+            try:
+                os.chdir(worker_dir)
+                result = run_fn(inputs, context)
+            finally:
+                os.chdir(previous_cwd)
 
         if not isinstance(result, dict):
             return WorkerResult(

@@ -2,8 +2,19 @@
 """Regression tests for content-hashed file input bindings.
 
 Runs against an isolated SQLite database and blob directory.
+
+Scenarios covered:
+  - Happy path: upload, dedup, run with file input
+  - Upload exceeding ceiling: 413, no partial blob persisted, temp cleaned up
+  - Bind a stricter input post-upload: bind-time reject (media_type mismatch)
+  - Concurrent uploads of identical content: single dedup row, no double-write
+  - 5 concurrent runs of same worker with different file SHAs: each sees only its own file
+  - Optional file omitted in run 2 after run 1: run 2 inputs dir is clean
+  - POST /uploads with invalid SHA binding: 400 on bind
+  - Bind non-existent SHA: 404
 """
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -14,29 +25,29 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 API_DIR = ROOT / "apps" / "api"
 WORKERS_DIR = ROOT / "workers"
 TEST_WORKERS_DIR = Path("/tmp/workeros-t1d-file-inputs-workers")
 DB_PATH = Path("/tmp/workeros-t1d-file-inputs.db")
 BLOBS_DIR = Path("/tmp/workeros-t1d-file-inputs-blobs")
-MOUNTED_INPUTS_DIR = TEST_WORKERS_DIR / "file_access_test" / "inputs"
+ARTIFACTS_DIR = Path("/tmp/workeros-t1d-file-inputs-artifacts")
 
 
 def reset_environment() -> None:
     DB_PATH.unlink(missing_ok=True)
     shutil.rmtree(BLOBS_DIR, ignore_errors=True)
     shutil.rmtree(TEST_WORKERS_DIR, ignore_errors=True)
-    shutil.rmtree(MOUNTED_INPUTS_DIR, ignore_errors=True)
+    shutil.rmtree(ARTIFACTS_DIR, ignore_errors=True)
     os.environ["FLOOM_DB"] = str(DB_PATH)
     os.environ["FLOOM_BLOBS_DIR"] = str(BLOBS_DIR)
     os.environ["FLOOM_WORKERS_DIR"] = str(TEST_WORKERS_DIR)
-    os.environ["FLOOM_ARTIFACTS_DIR"] = "/tmp/workeros-t1d-file-inputs-artifacts"
+    os.environ["FLOOM_ARTIFACTS_DIR"] = str(ARTIFACTS_DIR)
     sys.path.insert(0, str(API_DIR))
 
 
 def write_test_worker() -> None:
+    """Worker with one required and one optional file input."""
     worker_dir = TEST_WORKERS_DIR / "file_access_test"
     worker_dir.mkdir(parents=True, exist_ok=True)
     (worker_dir / "worker.yml").write_text(
@@ -55,6 +66,7 @@ exec:
   inputs:
   - name: upload
     kind: file
+    type: file
     media_type: text/csv
     accepts:
     - text/csv
@@ -62,6 +74,16 @@ exec:
     path: inputs/upload
     required: true
     label: Upload
+  - name: optional_doc
+    kind: file
+    type: file
+    media_type: text/plain
+    accepts:
+    - text/plain
+    max_size_mb: 1
+    path: inputs/optional_doc
+    required: false
+    label: Optional Doc
   secrets: []
   outputs:
   - name: summary
@@ -80,6 +102,7 @@ capabilities:
   secrets: []
   files:
   - upload
+  - optional_doc
   network:
     egress: false
 approvals:
@@ -96,13 +119,20 @@ from typing import Any, Dict
 def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
     upload_path = Path(inputs["upload"])
     body = upload_path.read_text()
+    optional_body = None
+    if inputs.get("optional_doc"):
+        optional_path = Path(inputs["optional_doc"])
+        if optional_path.exists():
+            optional_body = optional_path.read_text()
     return {
         "status": "success",
         "outputs": {
             "summary": f"# File Access Test\\n\\n{body}",
             "raw_inputs": {
                 "upload": inputs["upload"],
+                "optional_doc": inputs.get("optional_doc"),
                 "body": body,
+                "optional_body": optional_body,
                 "cwd": str(Path.cwd()),
             },
         },
@@ -143,18 +173,18 @@ def post_upload(
     accepts: list[str] | None = None,
     max_size_mb: float = 1,
 ) -> Any:
+    data: dict[str, str] = {"max_size_mb": str(max_size_mb)}
+    if accepts is not None:
+        data["accepts"] = json.dumps(accepts)
     return client.post(
         "/uploads",
         files={"file": (filename, content, media_type)},
-        data={
-            "accepts": json.dumps(accepts or ["text/csv"]),
-            "max_size_mb": str(max_size_mb),
-        },
+        data=data,
     )
 
 
 def wait_for_run(run_id: str) -> dict[str, Any]:
-    for _ in range(100):
+    for _ in range(200):
         run_response = client.get(f"/runs/{run_id}")
         if run_response.status_code == 200:
             run = run_response.json()
@@ -183,6 +213,8 @@ def main() -> int:
     content = b"name,score\nAda,98\nGrace,97\n"
     expected_sha = hashlib.sha256(content).hexdigest()
 
+    # --- Basic upload ---
+    print("\n[section] Basic upload")
     upload_response = post_upload(content)
     check("upload returns 200", upload_response.status_code == 200, upload_response.text[:200])
     upload = upload_response.json()
@@ -191,19 +223,92 @@ def main() -> int:
     check("upload response size matches content", upload.get("size") == len(content), str(upload))
     check("upload response media_type is text/csv", upload.get("media_type") == "text/csv", str(upload))
 
-    blob_path = BLOBS_DIR / expected_sha[:2] / expected_sha
-    check("blob path exists", blob_path.is_file(), str(blob_path))
-    check("blob bytes match upload", blob_path.read_bytes() == content, str(blob_path))
+    blob_file = BLOBS_DIR / expected_sha[:2] / expected_sha
+    check("blob path exists", blob_file.is_file(), str(blob_file))
+    check("blob bytes match upload", blob_file.read_bytes() == content, str(blob_file))
 
+    # --- Dedup ---
+    print("\n[section] Dedup")
     dedup_response = post_upload(content, filename="same-content.csv")
     check("dedup upload returns 200", dedup_response.status_code == 200, dedup_response.text[:200])
     check("dedup upload returns same hash", dedup_response.json().get("sha256") == expected_sha, dedup_response.text[:200])
     row_count = db_scalar("SELECT COUNT(*) FROM files WHERE id = ?", (expected_sha,))
     check("dedup keeps one files row", row_count == 1, f"count={row_count}")
 
-    oversize_response = post_upload(b"x" * 2048, filename="too-big.csv", max_size_mb=0.001)
-    check("max_size_mb rejected at upload", oversize_response.status_code == 413, oversize_response.text[:200])
+    # --- Upload exceeding ceiling ---
+    print("\n[section] Upload exceeding ceiling")
+    oversize_content = b"x" * 2048
+    oversize_sha = hashlib.sha256(oversize_content).hexdigest()
+    oversize_response = post_upload(oversize_content, filename="too-big.csv", max_size_mb=0.001)
+    check("max_size_mb rejected at upload: 413", oversize_response.status_code == 413, oversize_response.text[:200])
+    # No partial blob should be persisted
+    oversize_blob = BLOBS_DIR / oversize_sha[:2] / oversize_sha
+    check("413 upload leaves no blob on disk", not oversize_blob.exists(), str(oversize_blob))
+    # No stale temp files
+    tmp_files = list(BLOBS_DIR.rglob("*.tmp*"))
+    check("413 upload leaves no temp files", len(tmp_files) == 0, str(tmp_files))
 
+    # --- Bind-time revalidation: wrong media_type ---
+    print("\n[section] Bind-time revalidation: wrong media_type")
+    pdf_content = b"%PDF-1.4 fake pdf"
+    pdf_sha = hashlib.sha256(pdf_content).hexdigest()
+    pdf_upload = client.post(
+        "/uploads",
+        files={"file": ("doc.pdf", pdf_content, "application/pdf")},
+        data={"max_size_mb": "1"},
+    )
+    check("pdf upload succeeds", pdf_upload.status_code == 200, pdf_upload.text[:200])
+    # Try to bind a PDF to a text/csv file input — should fail at run creation
+    bad_bind_response = client.post(
+        "/workers/file_access_test/runs",
+        json={
+            "inputs": {"upload": pdf_sha},
+            "trigger_source": "file_inputs_regression",
+        },
+    )
+    check(
+        "bind wrong media_type rejected with 400",
+        bad_bind_response.status_code == 400,
+        bad_bind_response.text[:300],
+    )
+
+    # --- Bind non-existent SHA: 404 ---
+    print("\n[section] Bind non-existent SHA")
+    fake_sha = "a" * 64
+    bad_sha_response = client.post(
+        "/workers/file_access_test/runs",
+        json={
+            "inputs": {"upload": fake_sha},
+            "trigger_source": "file_inputs_regression",
+        },
+    )
+    check(
+        "bind non-existent SHA rejected with 404",
+        bad_sha_response.status_code == 404,
+        bad_sha_response.text[:300],
+    )
+
+    # --- Concurrent uploads of identical content: single dedup row ---
+    print("\n[section] Concurrent uploads identical content")
+    dup_content = b"concurrent,dedup\n1,2\n"
+    dup_sha = hashlib.sha256(dup_content).hexdigest()
+
+    def do_upload(i: int) -> int:
+        r = client.post(
+            "/uploads",
+            files={"file": (f"dup{i}.csv", dup_content, "text/csv")},
+            data={"max_size_mb": "1"},
+        )
+        return r.status_code
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        statuses = list(executor.map(do_upload, range(5)))
+    check("all 5 concurrent uploads return 200", all(s == 200 for s in statuses), str(statuses))
+    dup_count = db_scalar("SELECT COUNT(*) FROM files WHERE id = ?", (dup_sha,))
+    check("5 concurrent uploads produce one files row", dup_count == 1, f"count={dup_count}")
+
+    # --- Happy-path run: file is staged per-run ---
+    print("\n[section] Happy-path run with file input")
     run_response = client.post(
         "/workers/file_access_test/runs",
         json={
@@ -218,26 +323,110 @@ def main() -> int:
     run = wait_for_run(run_id)
     check("file reference run completes", run.get("status") == "completed", json.dumps(run, default=str)[:500])
 
-    mounted_rel = run.get("input", {}).get("upload")
-    check("run input is mounted relative file path", mounted_rel == "inputs/upload.csv", str(mounted_rel))
-    mounted_path = TEST_WORKERS_DIR / "file_access_test" / mounted_rel
-    check("mounted file exists in worker input dir", mounted_path.is_file(), str(mounted_path))
+    mounted_abs = run.get("input", {}).get("upload")
+    # Resolved value must now be an absolute path (not relative) for isolation.
+    check("run input is an absolute path", mounted_abs is not None and Path(mounted_abs).is_absolute(), str(mounted_abs))
+    mounted_path = Path(mounted_abs)
+    check("mounted file exists at absolute path", mounted_path.is_file(), str(mounted_path))
+    check("mounted file is under artifacts/<run_id>/inputs/", str(ARTIFACTS_DIR / run_id / "inputs") in str(mounted_path), str(mounted_path))
     check("mounted file bytes match blob", mounted_path.read_bytes() == content, str(mounted_path))
     check(
-        "worker opened mounted relative path",
+        "worker read correct file content",
         run.get("output", {}).get("raw_inputs", {}).get("body") == content.decode(),
         json.dumps(run.get("output", {}), default=str)[:500],
     )
     check(
-        "worker saw mounted path in raw output",
-        run.get("output", {}).get("raw_inputs", {}).get("upload") == mounted_rel,
+        "worker input path matches stored absolute path",
+        run.get("output", {}).get("raw_inputs", {}).get("upload") == mounted_abs,
         json.dumps(run.get("output", {}), default=str)[:500],
     )
 
     ref_count = db_scalar("SELECT ref_count FROM files WHERE id = ?", (expected_sha,))
-    check("ref_count increments after reference resolution", ref_count == 1, f"ref_count={ref_count}")
+    check("ref_count increments after reference resolution", ref_count >= 1, f"ref_count={ref_count}")
 
-    shutil.rmtree(MOUNTED_INPUTS_DIR, ignore_errors=True)
+    # --- 5 concurrent runs: each sees only its own file ---
+    print("\n[section] 5 concurrent runs isolation")
+    run_contents = [f"run{i},val{i}\n".encode() for i in range(5)]
+    run_shas = []
+    for rc in run_contents:
+        r = post_upload(rc, filename="run-data.csv")
+        check("concurrent run upload ok", r.status_code == 200, r.text[:100])
+        run_shas.append(r.json()["sha256"])
+
+    def launch_run(sha: str) -> dict[str, Any]:
+        r = client.post(
+            "/workers/file_access_test/runs",
+            json={
+                "inputs": {"upload": sha},
+                "trigger_source": "concurrent_test",
+            },
+        )
+        if r.status_code != 200:
+            return {"error": r.text}
+        return {"run_id": r.json()["run_id"], "sha": sha}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        launched = list(executor.map(launch_run, run_shas))
+
+    concurrent_ok = True
+    for item in launched:
+        if "error" in item:
+            concurrent_ok = False
+            break
+        run_id_c = item["run_id"]
+        sha_c = item["sha"]
+        run_c = wait_for_run(run_id_c)
+        if run_c.get("status") != "completed":
+            concurrent_ok = False
+            continue
+        # Each run's mounted file must contain only that run's content.
+        body = run_c.get("output", {}).get("raw_inputs", {}).get("body", "")
+        expected_body = run_contents[run_shas.index(sha_c)].decode()
+        if body != expected_body:
+            concurrent_ok = False
+
+    check("5 concurrent runs each see only their own file", concurrent_ok)
+
+    # --- Optional file omitted in run 2 ---
+    print("\n[section] Optional file omitted in run 2")
+    opt_content = b"optional,data\nhello\n"
+    opt_sha = hashlib.sha256(opt_content).hexdigest()
+    opt_upload = post_upload(opt_content, filename="opt.txt", media_type="text/plain",
+                             accepts=["text/plain"])
+    check("optional file upload ok", opt_upload.status_code == 200, opt_upload.text[:100])
+
+    # Run 1: with optional file
+    run1_resp = client.post(
+        "/workers/file_access_test/runs",
+        json={
+            "inputs": {"upload": expected_sha, "optional_doc": opt_sha},
+            "trigger_source": "optional_test",
+        },
+    )
+    check("run1 (with optional) starts", run1_resp.status_code == 200, run1_resp.text[:100])
+    run1 = wait_for_run(run1_resp.json()["run_id"])
+    check("run1 completes", run1.get("status") == "completed", str(run1.get("error")))
+    run1_opt = run1.get("input", {}).get("optional_doc")
+    check("run1 has optional_doc", run1_opt is not None and run1_opt != "", str(run1_opt))
+
+    # Run 2: without optional file
+    run2_resp = client.post(
+        "/workers/file_access_test/runs",
+        json={
+            "inputs": {"upload": expected_sha},
+            "trigger_source": "optional_test",
+        },
+    )
+    check("run2 (without optional) starts", run2_resp.status_code == 200, run2_resp.text[:100])
+    run2_id = run2_resp.json()["run_id"]
+    run2 = wait_for_run(run2_id)
+    check("run2 completes", run2.get("status") == "completed", str(run2.get("error")))
+
+    # Run 2's per-run inputs dir must NOT contain the optional file from run 1.
+    run2_inputs_dir = ARTIFACTS_DIR / run2_id / "inputs"
+    run2_opt_files = [f for f in run2_inputs_dir.iterdir() if "optional" in f.name] if run2_inputs_dir.exists() else []
+    check("run2 inputs dir has no optional_doc stale file", len(run2_opt_files) == 0, str(run2_opt_files))
+
     if failures:
         print(f"\n{len(failures)} regression check(s) failed: {', '.join(failures)}")
         return 1

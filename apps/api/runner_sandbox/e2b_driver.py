@@ -129,10 +129,13 @@ class E2BSandboxDriver(SandboxDriver):
             workdir = "/home/user/worker"
             sandbox.files.make_dir(workdir)
 
-            # Upload worker files, including materialized file-input mounts.
+            # Upload bundle files (read-only worker code; never contains inputs/).
             made_dirs = {workdir}
             for fpath in worker_dir.rglob("*"):
                 rel = fpath.relative_to(worker_dir)
+                # Skip any stale inputs/ dir that may exist in older bundles.
+                if rel.parts and rel.parts[0] == "inputs":
+                    continue
                 dest = f"{workdir}/{rel.as_posix()}"
                 if fpath.is_dir():
                     if dest not in made_dirs:
@@ -147,10 +150,33 @@ class E2BSandboxDriver(SandboxDriver):
                 sandbox.files.write(dest, content)
                 log_fn(f"[e2b] Uploaded {rel.as_posix()}", "debug")
 
-            # Write inputs.json
+            # Upload per-run file inputs from their isolated staging paths.
+            # Inputs dict values for file inputs are absolute local paths.
+            e2b_inputs_dir = f"{workdir}/inputs"
+            e2b_inputs_made = False
+            e2b_inputs: dict[str, str] = {}
+            for key, value in inputs.items():
+                if not isinstance(value, str):
+                    continue
+                local_path = Path(value)
+                if local_path.is_absolute() and local_path.is_file():
+                    if not e2b_inputs_made:
+                        sandbox.files.make_dir(e2b_inputs_dir)
+                        made_dirs.add(e2b_inputs_dir)
+                        e2b_inputs_made = True
+                    remote_name = local_path.name
+                    remote_path = f"{e2b_inputs_dir}/{remote_name}"
+                    sandbox.files.write(remote_path, local_path.read_bytes())
+                    log_fn(f"[e2b] Uploaded input file {remote_name}", "debug")
+                    # Remap to the relative path the worker expects inside the sandbox.
+                    e2b_inputs[key] = f"inputs/{remote_name}"
+            # Build sandbox-local inputs dict with remapped file paths.
+            sandbox_inputs = {k: e2b_inputs.get(k, v) for k, v in inputs.items()}
+
+            # Write inputs.json with sandbox-local (relative) file paths.
             sandbox.files.write(
                 f"{workdir}/inputs.json",
-                json.dumps(inputs, indent=2),
+                json.dumps(sandbox_inputs, indent=2),
             )
 
             # Write secrets.json (ephemeral — only visible inside sandbox)
