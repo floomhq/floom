@@ -410,9 +410,6 @@ class SkillRuntimeDriver(SandboxDriver):
 
         for app in self._declared_connections(config):
             tool_name = f"composio__{self._safe_tool_token(app)}__execute"
-            # Constrain tool_slug to the declared app's namespace via a pattern.
-            # The LLM can only pass slugs that start with <APP>_ (case-insensitive
-            # normalised to uppercase, e.g. GMAIL_ for gmail).
             app_prefix = app.upper().replace("-", "_") + "_"
             tools.append({
                 "type": "function",
@@ -428,7 +425,6 @@ class SkillRuntimeDriver(SandboxDriver):
                         "properties": {
                             "tool_slug": {
                                 "type": "string",
-                                "pattern": f"(?i)^{re.escape(app_prefix)}",
                                 "description": f"Composio tool slug. Must start with '{app_prefix}'.",
                             },
                             "arguments": {"type": "object"},

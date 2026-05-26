@@ -342,6 +342,21 @@ class ComposioToolDispatchTest(unittest.TestCase):
         rows = [json.loads(line) for line in transcript.read_text(encoding="utf-8").splitlines()]
         return [r["content"] for r in rows if r.get("type") == "tool_result"]
 
+    def test_composio_schema_does_not_emit_regex_pattern(self):
+        """Backend enforcement is the auth boundary; model schema avoids non-ECMA regex."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _base, worker_dir, _artifacts_dir = self._setup(tmp)
+            driver = skill_driver.SkillRuntimeDriver(openai_client=FakeOpenAIClient([]))
+
+            tools = driver._build_tools(config_for(worker_dir, connections=["gmail"]))
+            composio_tool = next(
+                tool for tool in tools
+                if tool["function"]["name"] == "composio__gmail__execute"
+            )
+            tool_slug_schema = composio_tool["function"]["parameters"]["properties"]["tool_slug"]
+
+            self.assertNotIn("pattern", tool_slug_schema)
+
     def test_composio_tool_slug_outside_namespace_is_rejected_pre_http(self):
         """LLM picking a slug outside its declared app namespace must NOT hit the wire."""
         with tempfile.TemporaryDirectory() as tmp:
