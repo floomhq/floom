@@ -1,12 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Activity, Box, Clock, KeyRound, Settings, Menu, X, Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
+
+function FloomMark({ size = 28 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="Floom"
+      style={{ borderRadius: "22%" }}
+    >
+      <rect width="100" height="100" rx="22" fill="#0a5230" />
+      <path
+        d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z"
+        fill="#FAFAF7"
+      />
+    </svg>
+  );
+}
 
 const nav = [
   { href: "/", label: "Overview", icon: Activity },
@@ -58,7 +77,7 @@ export function Sidebar() {
     <>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--accent-line)] bg-[var(--sidebar-glass)] px-4 shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:hidden">
         <Link href="/" className="flex items-center gap-2">
-          <Image src="/floom-mark.png" width={28} height={28} alt="Floom" className="rounded-md" />
+          <FloomMark size={28} />
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
         </Link>
         <div className="flex items-center gap-2">
@@ -78,7 +97,7 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/70 dark:bg-white/[0.055]" aria-hidden="true" />
         <div className="px-5 py-6">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/floom-mark.png" width={28} height={28} alt="Floom" className="rounded-md" />
+            <FloomMark size={28} />
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
           </Link>
         </div>
@@ -100,7 +119,7 @@ export function Sidebar() {
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/70 dark:bg-white/[0.055]" aria-hidden="true" />
             <div className="flex items-center justify-between border-b border-[var(--accent-line)] px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                <Image src="/floom-mark.png" width={28} height={28} alt="Floom" className="rounded-md" />
+                <FloomMark size={28} />
                 <span className="font-semibold text-[15px] tracking-tight">Floom</span>
               </Link>
               <button
