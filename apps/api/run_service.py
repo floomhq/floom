@@ -332,15 +332,49 @@ def _secret_names_from_db() -> set[str]:
         return set()
 
 
+_PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
+    "FLOOM_SECRET",
+    "OPENAI_API_KEY",
+    "COMPOSIO_API_KEY",
+    "COMPOSIO_WEBHOOK_SIGNING_KEY",
+    "E2B_API_KEY",
+    "WORKERS_FRONTEND_URL",
+    "FLOOM_DB",
+    "FLOOM_WORKERS_DIR",
+    "FLOOM_ARTIFACTS_DIR",
+    "FLOOM_RUN_TIMEOUT",
+    "FLOOM_DEPLOY_SECRET",
+})
+
+
 def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
+    """Resolve the secrets dict that ships to the worker sandbox.
+
+    SECURITY: The sandbox secrets.json must contain ONLY:
+      (a) secrets declared in the worker's worker.yml `exec.secrets` field
+      (b) user-managed secrets stored in the platform's `secrets` DB table
+    It must NEVER contain platform infrastructure credentials (FLOOM_SECRET,
+    E2B_API_KEY, COMPOSIO_API_KEY, COMPOSIO_WEBHOOK_SIGNING_KEY, OPENAI_API_KEY,
+    etc.) because the sandbox runs untrusted worker code and any leak there
+    is equivalent to publishing the secret.
+
+    Pre-fix this function unioned every key in `/root/.config/workeros/api.env`
+    into the result, including all platform secrets above. Audit 2026-05-26
+    flagged it as P0. The `_PLATFORM_SECRET_NAMES` denylist now blocks them
+    regardless of whether they appear in the worker manifest or the DB.
+    """
     _load_runtime_env_files()
     config = _get_worker_config_for_run(worker_id)
     names = set(config.secrets if config else [])
     names.update(_secret_names_from_db())
-    names.update(_env_keys_from_file(LOCAL_ENV_PATH))
-    names.update(_env_keys_from_file(API_ENV_PATH))
+    # DO NOT union env-file keys here. They include platform infra secrets.
     secrets: Dict[str, str] = {}
     for name in names:
+        if name in _PLATFORM_SECRET_NAMES:
+            # Belt-and-suspenders: even if a worker.yml or the secrets table
+            # tries to declare a platform secret name, never propagate it
+            # into the sandbox.
+            continue
         value = os.environ.get(name)
         if value:
             secrets[name] = value
