@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
 from runner_sandbox import AgentDriver, E2BSandboxDriver, LocalSandboxDriver, get_driver
+from runner_sandbox.subprocess_driver import SubprocessSandboxDriver
 
 
 def manifest(exec_block, **extra):
@@ -41,11 +42,16 @@ def test_legacy_python_command_projects_to_pure_script():
     config = worker_contract_to_worker_config(contract, "mode-test")
     assert config.runtime.mode == "pure-script"
     assert config.runtime.entrypoint == "run.py"
-    assert isinstance(get_driver(config.runtime.runner, config=config), LocalSandboxDriver)
+    # runner=local now routes to SubprocessSandboxDriver (env-allowlist + resource limits)
+    assert isinstance(get_driver(config.runtime.runner, config=config), SubprocessSandboxDriver)
 
 
 def test_missing_mode_defaults_to_agent_without_script_command():
-    contract = parse_worker_manifest(manifest({"runtime": "none", "runner": "local"}))
+    # runtime="none" with entrypoints key causes a validation error per the model constraint
+    # "exec.runtime 'none' cannot declare entrypoints". Use a minimal agent contract instead.
+    contract = parse_worker_manifest(
+        manifest({"runtime": "skill", "runner": "local"}, entrypoint="SKILL.md")
+    )
     assert isinstance(contract, WorkerContract)
     assert contract.exec.mode == "agent"
     config = worker_contract_to_worker_config(contract, "mode-test")

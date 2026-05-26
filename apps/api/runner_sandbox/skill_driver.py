@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import stat as _stat
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
@@ -32,12 +33,30 @@ COMPOSIO_BASE = "https://backend.composio.dev/api/v3"
 
 
 def _safe_path(base: Path, *parts: str) -> Path:
-    target = base.joinpath(*parts).resolve()
+    """Resolve a path under base, checking both containment and symlink escape."""
+    candidate = base.joinpath(*parts)
     try:
-        target.relative_to(base.resolve())
+        resolved = candidate.resolve()
+        resolved.relative_to(base.resolve())
     except ValueError:
-        raise ValueError(f"Path traversal attempt: {target}")
-    return target
+        raise ValueError(f"Path traversal attempt: {candidate}")
+    # Symlink escape check: walk each component
+    base_resolved = base.resolve()
+    current = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        current = current / part
+        try:
+            st = current.lstat()
+        except (OSError, PermissionError):
+            break
+        if _stat.S_ISLNK(st.st_mode):
+            try:
+                link_target = current.resolve()
+                link_target.relative_to(base_resolved)
+                current = link_target
+            except ValueError:
+                raise ValueError(f"Symlink escape attempt: {current} -> {current.resolve()}")
+    return resolved
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:

@@ -21,8 +21,12 @@ class RunnerDispatchTest(unittest.TestCase):
         self.assertIsInstance(get_driver("skill"), SkillRuntimeDriver)
         self.assertIsInstance(get_driver("skill.openai"), SkillRuntimeDriver)
 
-    def test_get_driver_keeps_local_code_runtime(self):
-        self.assertIsInstance(get_driver("local"), LocalSandboxDriver)
+    def test_get_driver_local_returns_subprocess_driver(self):
+        from runner_sandbox.subprocess_driver import SubprocessSandboxDriver
+        self.assertIsInstance(get_driver("local"), SubprocessSandboxDriver)
+
+    def test_get_driver_local_trusted_returns_local_driver(self):
+        self.assertIsInstance(get_driver("local-trusted"), LocalSandboxDriver)
 
     def test_runner_key_uses_runtime_type_only_for_skill(self):
         skill_config = WorkerConfig(

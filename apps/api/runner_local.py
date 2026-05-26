@@ -33,12 +33,36 @@ _CWD_LOCK = threading.Lock()
 
 
 def _safe_path(base: Path, *parts: str) -> Path:
-    target = base.joinpath(*parts).resolve()
+    """Resolve a path under base, checking both path containment and symlink escape.
+
+    Uses lstat() at each path component to detect symlinks BEFORE resolving,
+    so a symlink pointing outside base is rejected at the component level.
+    """
+    import stat as _stat
+    candidate = base.joinpath(*parts)
+    # Containment check (existing)
     try:
-        target.relative_to(base.resolve())
+        resolved = candidate.resolve()
+        resolved.relative_to(base.resolve())
     except ValueError:
-        raise ValueError(f"Path traversal attempt: {target}")
-    return target
+        raise ValueError(f"Path traversal attempt: {candidate}")
+    # Symlink escape check: walk each component
+    base_resolved = base.resolve()
+    current = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        current = current / part
+        try:
+            st = current.lstat()
+        except (OSError, PermissionError):
+            break  # path doesn't exist yet — no symlink at this point
+        if _stat.S_ISLNK(st.st_mode):
+            try:
+                link_target = current.resolve()
+                link_target.relative_to(base_resolved)
+                current = link_target  # follow into base — continue
+            except ValueError:
+                raise ValueError(f"Symlink escape attempt: {current} -> {current.resolve()}")
+    return resolved
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:

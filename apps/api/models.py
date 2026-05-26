@@ -116,7 +116,7 @@ class WorkerRuntime(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, v: str) -> str:
-        allowed = {"local", "e2b"}
+        allowed = {"local", "local-trusted", "e2b"}
         if v not in allowed:
             raise ValueError(f"runner must be one of {sorted(allowed)}, got {v!r}")
         return v
@@ -288,7 +288,7 @@ class WorkerContractExec(BaseModel):
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, value: str) -> str:
-        allowed = {"local", "e2b"}
+        allowed = {"local", "local-trusted", "e2b"}
         if value not in allowed:
             raise ValueError(f"runner must be one of {sorted(allowed)}, got {value!r}")
         return value

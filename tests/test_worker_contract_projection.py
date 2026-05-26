@@ -29,6 +29,7 @@ class WorkerContractProjectionTest(unittest.TestCase):
         self.assertEqual(config.outputs[0].name, "brief")
 
     def test_code_runtime_contract_still_projects_to_local_runner(self):
+        # input_types_test has mode=agent (SKILL.md entrypoint) + runner=local
         raw = yaml.safe_load((ROOT / "workers" / "input_types_test" / "worker.yml").read_text())
         parsed = parse_worker_manifest(raw)
         self.assertIsInstance(parsed, WorkerContract)
@@ -37,7 +38,8 @@ class WorkerContractProjectionTest(unittest.TestCase):
 
         self.assertEqual(config.runtime.type, "python311")
         self.assertEqual(config.runtime.runner, "local")
-        self.assertEqual(config.runtime.entrypoint, "run.py")
+        # Agent-mode workers project their declared entrypoint (SKILL.md), not run.py
+        self.assertEqual(config.runtime.entrypoint, "SKILL.md")
         self.assertEqual(config.runtime.command, "python run.py")
 
 
