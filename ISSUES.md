@@ -653,3 +653,97 @@ Currently `trigger: {type, ...}` is a single object. A worker can only have one 
 PR M, PR N, PR O are independent and can run in parallel. PR P is the heaviest because it changes the worker manifest schema.
 
 **Total estimated effort:** 8-12 hours.
+
+---
+
+# Round 3 follow-up — 2026-05-26 night
+
+After PR C's marketplace modal shipped, Federico re-tested and found 4 more issues (#34-#37).
+
+---
+
+### #34 "Connect a tool" should be a full-screen page, not a popup
+
+**Where:** `apps/web/app/connections/page.tsx` (PR C added a `Dialog`-based marketplace modal)
+
+**Federico:** "should be able to see 'select a tool' pane full screen, not just pop up"
+
+**Symptom (Image #23):** The "Connect a tool" modal is a small centered dialog. Browsing 1043 integrations in a small box is bad UX. With 35 pages of results, the user expects a proper marketplace screen.
+
+**Fix scope:**
+- Make the "Connect a tool" button navigate to `/connections/browse` (which already exists from earlier work as a full-page marketplace) instead of opening the modal.
+- OR keep a modal but expand to `max-w-[90vw] max-h-[90vh]` so it visually fills the screen.
+- Recommend the navigation approach (cleaner — `/connections/browse` already has the full-page marketplace UI).
+- Make sure `/connections/browse` is reachable from `/connections` and has a Back link.
+
+**Status:** OPEN — covered by PR Q.
+
+---
+
+### #35 Popular / Social / Data category filters return zero results
+
+**Where:** `apps/web/app/connections/page.tsx` modal + `apps/web/app/connections/browse/page.tsx` + backend `/integrations/catalog?category=<x>`
+
+**Symptom (Image #23):** Clicking "Popular" or "Social" or "Data" in the category chips shows "No integrations found".
+
+**Root cause hypothesis:** The category labels (Popular, Productivity, Email, CRM, Social, Marketing, Data, Collaboration) are hardcoded in the frontend but Composio's catalog uses DIFFERENT category slugs (e.g. "ai-agents", "developer-tools", "team-chat", "scheduling-&-booking", "spreadsheets", "notes", etc., per the earlier `/integrations/catalog` smoke test).
+
+When the user clicks "Social", the request becomes `?category=social` but no Composio app has category=social. Result: empty.
+
+**Fix scope:**
+- Either: (a) update the frontend tab labels to match Composio's actual category slugs (drop "Popular", use real ones).
+- Or: (b) define a CLIENT-SIDE mapping: each top-tab maps to N Composio category slugs. E.g. "Email" → `["email", "messaging"]`, "Social" → `["social media accounts", "social"]`. Send to backend as comma-separated.
+- Or: (c) just drop the category tabs entirely and rely on search (1043 apps is searchable by name).
+- "Popular" is special — backend should expose a `?popular=true` flag that returns a curated list (top 20 by usage or hardcoded). For now, drop Popular and let users use search.
+
+Recommend (b) for the existing labels + (c) for Popular.
+
+**Status:** OPEN — covered by PR Q.
+
+---
+
+### #36 Multiple connections per app (different accounts)
+
+**Where:** `apps/api/main.py` `initiate_connection` + `apps/web/app/connections/page.tsx`
+
+**Federico:** "what if I want to add multiple gmail connections, different accounts?"
+
+**Symptom:** Currently the system enforces one connection per `app_name`. Reconnecting an app overwrites the previous account. A user with two Gmail accounts (personal + work) cannot have both.
+
+**Fix scope:**
+- Allow multiple `composio_connections` rows with the same `app_name` (drop any unique constraint on app_name).
+- UI on `/connections`: render multiple cards per app, each labeled with the account email/handle (already projected in `account_label`).
+- "Connect another Gmail" button on each existing card OR within the marketplace modal.
+- Trigger/worker config: when a worker references an integration that has multiple accounts, the user must pick WHICH account at trigger setup time. ConnectionEventPicker already has a Step 3 dropdown for this when `appConnections.length > 1` — verify it works.
+
+**Status:** OPEN — covered by PR Q.
+
+---
+
+### #37 "Scopes unavailable" wording is still misleading
+
+**Where:** `apps/web/components/connections/ConnectionCard.tsx`
+
+**Federico (repeated):** "connections still say Scopes unavailable"
+
+**PR B agent's earlier note:** Composio doesn't expose scopes for managed auth configs (this is the same as a Composio API limitation, NOT a workeros bug). But the wording "Scopes unavailable" is alarming and looks like an error.
+
+**Fix scope:** Two options:
+1. Try harder to get scopes — call the `GET /connections/auth-configs/{id}` endpoint (which PR B added) to fetch the auth_config's defined scopes. If the auth_config is "managed", it still has SOME scope definitions usually. Surface those.
+2. If scopes truly can't be fetched, change the chip wording from red/alarming "Scopes unavailable" to neutral "Default scopes (managed by Floom)" or just hide the chip entirely.
+
+Recommend trying #1 first (real fix) and falling back to #2 (better wording) when truly unavailable.
+
+**Status:** OPEN — covered by PR Q.
+
+---
+
+## Round 3 follow-up sequencing
+
+| PR | Scope | Issues |
+|----|-------|--------|
+| **PR Q** | Marketplace → full page (navigate to /connections/browse); fix category mappings; allow multiple connections per app; resolve scopes UX (real scope fetch + better wording) | #34 #35 #36 #37 |
+
+PR Q overlaps with PR M (also touches connection UI). Land M first, then dispatch Q on top.
+
+**Total estimated effort for PR Q:** 4-6 hours.
