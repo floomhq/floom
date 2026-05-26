@@ -110,7 +110,7 @@ export function ConnectionCard({
                 </div>
               </>
             ) : (
-              <ScopeChip scope="Scopes unavailable" muted />
+              <ScopeChip scope="Default scopes" muted />
             )}
           </div>
 

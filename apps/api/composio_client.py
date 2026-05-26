@@ -128,6 +128,10 @@ def list_catalog_apps(
 
     Composio v3 currently exposes the catalog at /toolkits. The older /apps
     path returns 404, so this client uses the live v3 catalog endpoint.
+
+    ``category`` is a single Composio category slug. For OR-merge across
+    multiple categories, the caller (main.py endpoint) is responsible for
+    calling this function once per slug and merging the results.
     """
     page = max(1, page)
     limit = max(1, min(100, limit))
@@ -149,7 +153,7 @@ def list_catalog_apps(
         category=normalized_category or None,
     )
     items = [_normalize_catalog_item(item) for item in data.get("items") or []]
-    categories = sorted({category for item in items for category in item["categories"]})
+    categories = sorted({cat for item in items for cat in item["categories"]})
     total_items = int(data.get("total_items") or len(items))
     total_pages = int(data.get("total_pages") or 1)
 
