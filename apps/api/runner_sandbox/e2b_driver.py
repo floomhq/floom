@@ -129,12 +129,23 @@ class E2BSandboxDriver(SandboxDriver):
             workdir = "/home/user/worker"
             sandbox.files.make_dir(workdir)
 
-            # Upload worker files
-            for fpath in worker_dir.iterdir():
-                if fpath.is_file():
-                    content = fpath.read_bytes()
-                    sandbox.files.write(f"{workdir}/{fpath.name}", content)
-                    log_fn(f"[e2b] Uploaded {fpath.name}", "debug")
+            # Upload worker files, including materialized file-input mounts.
+            made_dirs = {workdir}
+            for fpath in worker_dir.rglob("*"):
+                rel = fpath.relative_to(worker_dir)
+                dest = f"{workdir}/{rel.as_posix()}"
+                if fpath.is_dir():
+                    if dest not in made_dirs:
+                        sandbox.files.make_dir(dest)
+                        made_dirs.add(dest)
+                    continue
+                parent = f"{workdir}/{rel.parent.as_posix()}" if rel.parent.as_posix() != "." else workdir
+                if parent not in made_dirs:
+                    sandbox.files.make_dir(parent)
+                    made_dirs.add(parent)
+                content = fpath.read_bytes()
+                sandbox.files.write(dest, content)
+                log_fn(f"[e2b] Uploaded {rel.as_posix()}", "debug")
 
             # Write inputs.json
             sandbox.files.write(

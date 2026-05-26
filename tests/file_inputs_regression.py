@@ -18,23 +18,104 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 API_DIR = ROOT / "apps" / "api"
 WORKERS_DIR = ROOT / "workers"
+TEST_WORKERS_DIR = Path("/tmp/workeros-t1d-file-inputs-workers")
 DB_PATH = Path("/tmp/workeros-t1d-file-inputs.db")
 BLOBS_DIR = Path("/tmp/workeros-t1d-file-inputs-blobs")
-MOUNTED_INPUTS_DIR = WORKERS_DIR / "input_types_test" / "inputs"
+MOUNTED_INPUTS_DIR = TEST_WORKERS_DIR / "file_access_test" / "inputs"
 
 
 def reset_environment() -> None:
     DB_PATH.unlink(missing_ok=True)
     shutil.rmtree(BLOBS_DIR, ignore_errors=True)
+    shutil.rmtree(TEST_WORKERS_DIR, ignore_errors=True)
     shutil.rmtree(MOUNTED_INPUTS_DIR, ignore_errors=True)
     os.environ["FLOOM_DB"] = str(DB_PATH)
     os.environ["FLOOM_BLOBS_DIR"] = str(BLOBS_DIR)
-    os.environ["FLOOM_WORKERS_DIR"] = str(WORKERS_DIR)
+    os.environ["FLOOM_WORKERS_DIR"] = str(TEST_WORKERS_DIR)
     os.environ["FLOOM_ARTIFACTS_DIR"] = "/tmp/workeros-t1d-file-inputs-artifacts"
     sys.path.insert(0, str(API_DIR))
 
 
+def write_test_worker() -> None:
+    worker_dir = TEST_WORKERS_DIR / "file_access_test"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    (worker_dir / "worker.yml").write_text(
+        """schema_version: '0.3'
+name: file-access-test
+title: File Access Test
+description: Reads a mounted file input from the worker cwd.
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
+  runner: local
+  inputs:
+  - name: upload
+    kind: file
+    media_type: text/csv
+    accepts:
+    - text/csv
+    max_size_mb: 1
+    path: inputs/upload
+    required: true
+    label: Upload
+  secrets: []
+  outputs:
+  - name: summary
+    kind: file
+    media_type: text/markdown
+    path: out/summary.md
+    required: true
+    label: Summary
+  - name: raw_inputs
+    kind: file
+    media_type: application/json
+    path: out/raw_inputs.json
+    required: true
+    label: Raw inputs
+capabilities:
+  secrets: []
+  files:
+  - upload
+  network:
+    egress: false
+approvals:
+  required: false
+trigger:
+  type: manual
+"""
+    )
+    (worker_dir / "run.py").write_text(
+        """from pathlib import Path
+from typing import Any, Dict
+
+
+def run(inputs: Dict[str, Any], context) -> Dict[str, Any]:
+    upload_path = Path(inputs["upload"])
+    body = upload_path.read_text()
+    return {
+        "status": "success",
+        "outputs": {
+            "summary": f"# File Access Test\\n\\n{body}",
+            "raw_inputs": {
+                "upload": inputs["upload"],
+                "body": body,
+                "cwd": str(Path.cwd()),
+            },
+        },
+        "artifacts": [],
+    }
+"""
+    )
+    (worker_dir / "requirements.txt").write_text("")
+    (worker_dir / "SKILL.md").write_text("# File Access Test\n")
+
+
 reset_environment()
+write_test_worker()
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -124,15 +205,10 @@ def main() -> int:
     check("max_size_mb rejected at upload", oversize_response.status_code == 413, oversize_response.text[:200])
 
     run_response = client.post(
-        "/workers/input_types_test/runs",
+        "/workers/file_access_test/runs",
         json={
             "inputs": {
-                "text_input": "Hello",
-                "textarea_input": "Notes",
-                "number_input": 42,
-                "select_input": "beta",
-                "boolean_input": True,
-                "file_input": expected_sha,
+                "upload": expected_sha,
             },
             "trigger_source": "file_inputs_regression",
         },
@@ -142,14 +218,19 @@ def main() -> int:
     run = wait_for_run(run_id)
     check("file reference run completes", run.get("status") == "completed", json.dumps(run, default=str)[:500])
 
-    mounted_rel = run.get("input", {}).get("file_input")
-    check("run input is mounted relative file path", mounted_rel == "inputs/file_input.csv", str(mounted_rel))
-    mounted_path = WORKERS_DIR / "input_types_test" / mounted_rel
+    mounted_rel = run.get("input", {}).get("upload")
+    check("run input is mounted relative file path", mounted_rel == "inputs/upload.csv", str(mounted_rel))
+    mounted_path = TEST_WORKERS_DIR / "file_access_test" / mounted_rel
     check("mounted file exists in worker input dir", mounted_path.is_file(), str(mounted_path))
     check("mounted file bytes match blob", mounted_path.read_bytes() == content, str(mounted_path))
     check(
+        "worker opened mounted relative path",
+        run.get("output", {}).get("raw_inputs", {}).get("body") == content.decode(),
+        json.dumps(run.get("output", {}), default=str)[:500],
+    )
+    check(
         "worker saw mounted path in raw output",
-        run.get("output", {}).get("raw_inputs", {}).get("file_input") == mounted_rel,
+        run.get("output", {}).get("raw_inputs", {}).get("upload") == mounted_rel,
         json.dumps(run.get("output", {}), default=str)[:500],
     )
 

@@ -259,7 +259,12 @@ def run_worker_local(
         # NOTE: In-process execution cannot enforce a true timeout via
         # signal/alarm because it runs inside the same thread.  For a
         # hard timeout, switch to the subprocess or E2B runner.
-        result = run_fn(inputs, context)
+        previous_cwd = os.getcwd()
+        try:
+            os.chdir(worker_dir)
+            result = run_fn(inputs, context)
+        finally:
+            os.chdir(previous_cwd)
 
         if not isinstance(result, dict):
             return WorkerResult(

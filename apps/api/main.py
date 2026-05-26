@@ -384,7 +384,7 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 manifest.get("name") or worker_id.replace("_", "-"),
                 manifest.get("version") or "0.1.0",
                 json.dumps(manifest),
-                f"workers/{worker_id}",
+                str((WORKERS_DIR / worker_id).resolve()),
                 now,
             ),
         )
