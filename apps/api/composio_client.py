@@ -71,6 +71,12 @@ def _post(path: str, body: Dict[str, Any]) -> Any:
     return r.json()
 
 
+def _patch(path: str, body: Dict[str, Any]) -> Any:
+    r = requests.patch(f"{_BASE}{path}", headers=_headers(), json=body, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
 def _delete(path: str) -> None:
     r = requests.delete(f"{_BASE}{path}", headers=_headers(), timeout=15)
     r.raise_for_status()
@@ -175,6 +181,98 @@ def list_connections() -> List[Dict[str, Any]]:
             "status": (item.get("status") or "unknown").lower(),
         })
     return result
+
+
+def list_triggers() -> List[Dict[str, Any]]:
+    """Return the Composio v3 trigger catalog."""
+    try:
+        data = _get("/triggers_types", limit=1000)
+    except requests.HTTPError as exc:
+        if exc.response is None or exc.response.status_code not in {404, 405, 410}:
+            raise
+        data = _get("/triggers", limit=1000)
+    if isinstance(data, list):
+        return data
+    items = data.get("items") or data.get("triggers") or data.get("data") or data.get("trigger_types") or []
+    return items if isinstance(items, list) else []
+
+
+def _extract_enabled_trigger_id(event: str, data: Any) -> str:
+    """Extract Composio's trigger subscription id from known v3 response shapes."""
+    if not isinstance(data, dict):
+        return event
+    candidates = [
+        data.get("id"),
+        data.get("trigger_id"),
+        data.get("trigger_instance_id"),
+        data.get("triggerInstanceId"),
+        data.get("triggerId"),
+        data.get("enabled_trigger_id"),
+        data.get("connected_account_trigger_id"),
+    ]
+    trigger = data.get("trigger")
+    if isinstance(trigger, dict):
+        candidates.extend([trigger.get("id"), trigger.get("trigger_id")])
+    item = data.get("item") or data.get("data") or data.get("trigger_instance")
+    if isinstance(item, dict):
+        candidates.extend([
+            item.get("id"),
+            item.get("uuid"),
+            item.get("trigger_id"),
+            item.get("trigger_instance_id"),
+        ])
+    for candidate in candidates:
+        if candidate:
+            return str(candidate)
+    return event
+
+
+def _legacy_fallback_enabled(exc: requests.HTTPError) -> bool:
+    return exc.response is not None and exc.response.status_code in {404, 405, 410}
+
+
+def enable_trigger(
+    event: str,
+    connection_id: str,
+    webhook_url: str,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Enable a Composio trigger and return the enabled trigger id."""
+    try:
+        data = _post(
+            f"/trigger_instances/{event}/upsert",
+            {
+                "connected_account_id": connection_id,
+                "trigger_config": config or {},
+            },
+        )
+    except requests.HTTPError as exc:
+        if not _legacy_fallback_enabled(exc):
+            raise
+        data = _post(
+            f"/triggers/{event}/enable",
+            {
+                "connection_id": connection_id,
+                "webhook_url": webhook_url,
+                "config": config or {},
+            },
+        )
+    return _extract_enabled_trigger_id(event, data)
+
+
+def disable_trigger(event: str, composio_trigger_id: Optional[str] = None) -> None:
+    """Disable a Composio trigger subscription for an event."""
+    if composio_trigger_id:
+        try:
+            _patch(f"/trigger_instances/manage/{composio_trigger_id}", {"status": "disable"})
+            return
+        except requests.HTTPError as exc:
+            if not _legacy_fallback_enabled(exc):
+                raise
+    body: Dict[str, Any] = {}
+    if composio_trigger_id:
+        body["trigger_id"] = composio_trigger_id
+    _post(f"/triggers/{event}/disable", body)
 
 
 def _resolve_auth_config_id(app_name: str) -> str:
