@@ -1,11 +1,11 @@
 "use client";
 
-import { Plus, X, Copy } from "lucide-react";
+import { Plus, X, Copy, Hand, Clock as ClockIcon, Webhook, Plug as PlugIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { CronBuilder } from "@/components/CronBuilder";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 import type { ConnectionItem, TriggerSpec } from "@/lib/types";
@@ -117,6 +117,16 @@ interface TriggerRowEditorProps {
   onRemove: () => void;
 }
 
+// S29e (F8.8): radio-cards-with-subtitles replaced with a single inline
+// segmented control. Subtitle lives once under the picker (changes with
+// the active type) so the visual hierarchy is type-picker -> config -> done.
+const TRIGGER_TYPES: { value: TriggerType; label: string; icon: typeof Hand; subtitle: string }[] = [
+  { value: "manual",   label: "Manual",   icon: Hand,       subtitle: "Run only on demand from the Run tab." },
+  { value: "schedule", label: "Schedule", icon: ClockIcon,  subtitle: "Recurring on a cron schedule." },
+  { value: "webhook",  label: "Webhook",  icon: Webhook,    subtitle: "Run when an HTTP POST hits a unique URL." },
+  { value: "composio", label: "App event", icon: PlugIcon,  subtitle: "Run on an event from a connected app." },
+];
+
 function TriggerRowEditor({
   row,
   index,
@@ -127,68 +137,50 @@ function TriggerRowEditor({
   onRemove,
 }: TriggerRowEditorProps) {
   const isOnly = total === 1;
+  const activeMeta = TRIGGER_TYPES.find((t) => t.value === row.type) ?? TRIGGER_TYPES[0];
 
   return (
-    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Trigger {total > 1 ? index + 1 : ""}
-        </span>
-        {!isOnly && (
+    <div className="space-y-4">
+      {!isOnly && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Trigger {index + 1}
+          </span>
           <button
             type="button"
             onClick={onRemove}
-            className="text-muted-foreground hover:text-red-500 transition-colors"
+            className="text-muted-foreground hover:text-destructive transition-colors"
             title="Remove trigger"
           >
             <X className="w-3.5 h-3.5" />
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* S22g (roast P2): trigger-type picker reworked. Original 4 black/
-          outline buttons read as "Manual is selected" instead of "pick
-          one". New form: explicit "Trigger type" label, each option as
-          a radio-card with a 1-line subtitle, active state in Floom blue
-          (not inverted black). Layout 1-col on mobile, 2-col on >=sm. */}
-      <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground uppercase tracking-wide">
-          Trigger type
-        </Label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {(["manual", "schedule", "webhook", "composio"] as const).map((value) => {
-            const labels: Record<string, string> = {
-              manual: "Manual",
-              schedule: "Cron",
-              webhook: "Webhook",
-              composio: "Connection event",
-            };
-            const subtitles: Record<string, string> = {
-              manual: "Run only on demand from the Run tab",
-              schedule: "Recurring on a cron schedule",
-              webhook: "Run when an HTTP POST hits a unique URL",
-              composio: "Run on an event from a connected app",
-            };
-            const active = row.type === value;
+      <div className="space-y-2">
+        <div className="inline-flex items-center rounded-md border border-line bg-card p-0.5">
+          {TRIGGER_TYPES.map((t) => {
+            const Icon = t.icon;
+            const active = row.type === t.value;
             return (
               <button
-                key={value}
+                key={t.value}
                 type="button"
-                onClick={() => onChange({ ...row, type: value })}
-                className={`flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors ${
+                onClick={() => onChange({ ...row, type: t.value })}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 h-8 rounded text-xs font-medium transition-colors",
                   active
-                    ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                    : "border-border bg-card text-foreground hover:bg-muted hover:border-muted-foreground/30"
-                }`}
+                    ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                )}
               >
-                <span className="text-xs font-semibold">{labels[value]}</span>
-                <span className={`text-[11px] leading-tight ${active ? "text-[var(--accent)] opacity-80" : "text-muted-foreground"}`}>
-                  {subtitles[value]}
-                </span>
+                <Icon className="w-3.5 h-3.5" />
+                {t.label}
               </button>
             );
           })}
         </div>
+        <p className="text-xs text-muted-foreground">{activeMeta.subtitle}</p>
       </div>
 
       {row.type === "schedule" && (
@@ -198,7 +190,7 @@ function TriggerRowEditor({
             onChange={(v) => onChange({ ...row, cronExpr: v })}
           />
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Timezone</Label>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wider">Timezone</Label>
             <Input
               value={row.cronTimezone}
               onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
@@ -221,7 +213,7 @@ function TriggerRowEditor({
 
       {row.type === "webhook" && webhookUrl && (
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Webhook URL</Label>
+          <Label className="text-xs text-muted-foreground uppercase tracking-wider">Webhook URL</Label>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
               {webhookUrl}
@@ -240,19 +232,21 @@ function TriggerRowEditor({
               <Copy className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           </div>
-          <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
+          {/* S29e: was bg-[#1a1a1a] text-[#a8e6a3] (always dark) — unreadable
+              in light mode. Now theme-aware terminal block. */}
+          <pre className="text-xs font-mono bg-[var(--bg-2)] dark:bg-[#1a1a1a] text-foreground dark:text-[#a8e6a3] border border-line rounded p-2 overflow-x-auto whitespace-pre-wrap">
             {`curl -X POST '${webhookUrl}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
           </pre>
         </div>
       )}
 
       {row.type === "webhook" && !webhookUrl && (
-        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+        <div className="rounded-md border border-line bg-muted/30 p-3 space-y-2">
           <p className="text-xs text-muted-foreground font-medium">Webhook URL</p>
           <p className="text-xs text-muted-foreground">
             Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
           </p>
-          <div className="rounded border border-border bg-card p-2 font-mono text-xs text-muted-foreground">
+          <div className="rounded border border-line bg-card p-2 font-mono text-xs text-muted-foreground">
             https://workers-api.floom.dev/webhooks/&lt;worker-id&gt;?token=...
           </div>
         </div>
@@ -270,6 +264,13 @@ interface TriggersEditorProps {
   onChange: (rows: TriggerRow[]) => void;
   connections?: ConnectionItem[];
   webhookUrl?: string;
+  // S29e (F8.8): Save/Discard moved into the editor action bar (was a
+  // floating row below the card). Optional so the /workers/new flow can
+  // still embed the editor without an in-place save.
+  dirty?: boolean;
+  saving?: boolean;
+  onSave?: () => void;
+  onDiscard?: () => void;
 }
 
 export function TriggersEditor({
@@ -277,6 +278,10 @@ export function TriggersEditor({
   onChange,
   connections = [],
   webhookUrl,
+  dirty = false,
+  saving = false,
+  onSave,
+  onDiscard,
 }: TriggersEditorProps) {
   function updateRow(index: number, updated: TriggerRow) {
     onChange(rows.map((r, i) => (i === index ? updated : r)));
@@ -290,33 +295,68 @@ export function TriggersEditor({
     onChange(rows.filter((_, i) => i !== index));
   }
 
+  const showActionBar = Boolean(onSave) || rows.length > 0;
+
   return (
-    <Card className="border-border shadow-none bg-card">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">Triggers</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-medium text-foreground">Triggers</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Decide when this worker runs. Use one trigger or chain several.
+        </p>
+      </div>
+
+      <div className="space-y-6">
         {rows.map((row, index) => (
-          <TriggerRowEditor
-            key={row.id}
-            row={row}
-            index={index}
-            total={rows.length}
-            connections={connections}
-            webhookUrl={row.type === "webhook" ? webhookUrl : undefined}
-            onChange={(updated) => updateRow(index, updated)}
-            onRemove={() => removeRow(index)}
-          />
+          <div key={row.id} className={index > 0 ? "pt-6 border-t border-line" : ""}>
+            <TriggerRowEditor
+              row={row}
+              index={index}
+              total={rows.length}
+              connections={connections}
+              webhookUrl={row.type === "webhook" ? webhookUrl : undefined}
+              onChange={(updated) => updateRow(index, updated)}
+              onRemove={() => removeRow(index)}
+            />
+          </div>
         ))}
-        <button
-          type="button"
-          onClick={addRow}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-black transition-colors py-1"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Add trigger
-        </button>
-      </CardContent>
-    </Card>
+      </div>
+
+      {showActionBar && (
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-line text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add trigger
+          </button>
+          {onSave && (
+            <>
+              <Button
+                size="sm"
+                className="h-8"
+                onClick={onSave}
+                disabled={!dirty || saving}
+              >
+                {saving ? "Saving..." : "Save triggers"}
+              </Button>
+              {onDiscard && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8"
+                  onClick={onDiscard}
+                  disabled={!dirty || saving}
+                >
+                  Discard
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
