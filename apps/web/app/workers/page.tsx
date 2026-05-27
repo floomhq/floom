@@ -61,7 +61,17 @@ function WorkersContent() {
   const initialTab = searchParams.get("tab");
   const [tab, setTab] = useState<WorkersTab>(isValidTab(initialTab) ? initialTab : "all");
   const folderFilter = searchParams.get("folder");
+  // S26: tag filter (clicking a tag on a card filters the list to workers
+  // with that tag; URL-synced so refresh + sharing work).
+  const tagFilter = searchParams.get("tag");
   const [search, setSearch] = useState("");
+
+  const setTagFilter = useCallback((tag: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (tag) params.set("tag", tag);
+    else params.delete("tag");
+    router.replace(`/workers${params.size ? `?${params.toString()}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
 
   useEffect(() => {
     api.workers
@@ -167,6 +177,9 @@ function WorkersContent() {
           (w.folder || "").startsWith(`${folderFilter}/`)
       );
     }
+    if (tagFilter) {
+      pool = pool.filter((w) => (w.tags || []).includes(tagFilter));
+    }
     if (searchLower) {
       pool = pool.filter((w) => {
         const blob = [
@@ -181,10 +194,10 @@ function WorkersContent() {
       });
     }
     return pool;
-  }, [workers, tab, folderFilter, favorites, searchLower]);
+  }, [workers, tab, folderFilter, tagFilter, favorites, searchLower]);
 
   // Folders only render on "all" tab
-  const showFolders = tab === "all" && subFolders.length > 0 && !searchLower;
+  const showFolders = tab === "all" && subFolders.length > 0 && !searchLower && !tagFilter;
 
   return (
     <div className="space-y-6">
@@ -281,6 +294,21 @@ function WorkersContent() {
             </div>
           )}
 
+          {tagFilter && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Filtered by tag:</span>
+              <button
+                type="button"
+                onClick={() => setTagFilter(null)}
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
+              >
+                {tagFilter}
+                <span aria-hidden="true">×</span>
+                <span className="sr-only">Clear tag filter</span>
+              </button>
+            </div>
+          )}
+
           {/* S23: auto-rows-fr stretches every card in a row to equal height. */}
           <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {loading
@@ -292,6 +320,7 @@ function WorkersContent() {
                     key={w.id}
                     worker={w}
                     isFavorite={favorites.has(w.id)}
+                    onTagClick={setTagFilter}
                     onFavoriteToggle={toggleFavorite}
                   />
                 ))}
@@ -445,6 +474,7 @@ function EmptyWorkersState() {
 function WorkerCard({
   worker,
   isFavorite,
+  onTagClick,
   onFavoriteToggle,
   compact,
 }: {
@@ -459,26 +489,22 @@ function WorkerCard({
   const hasStats = stats && stats.runs_7d > 0;
   const hasSparkline = Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && hasStats;
 
-  // S22b card refresh (roast P1):
-  //   - Dropped generic Box icon (every card showed identical icon -> noise)
-  //   - Dropped non-functional "Open worker" pointer-events-none footer button
-  //     (the whole card already navigates)
-  //   - Status dot -> labelled pill via StatusPill (dot was too subtle in dark
-  //     mode; "needs attention" amber blended with "healthy" green at card scale)
-  //   - Tag buttons -> static Badge pills (they routed nowhere; "look like
-  //     buttons but do nothing")
+  // S26: cards trimmed. Default view shows title + status pill + description
+  // + tags + the bare "Last run Xh ago" timestamp. Sparkline, trigger pill,
+  // and extended stats (runs/7d, success rate) collapse on hover via the
+  // `group` + `group-hover:` pattern. Tags become click-to-filter buttons
+  // (Federico request, supersedes the S22b "static pills" decision).
   return (
     <Card
-      className="h-full hover:border-border hover:shadow-sm transition-all overflow-hidden"
+      className="group h-full hover:border-border hover:shadow-sm transition-all overflow-hidden"
       title={hoverDescription || undefined}
     >
       <Link href={`/workers/${worker.id}`} className="block h-full">
-      <CardContent className={`h-full p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
+      <CardContent className={`h-full p-5 ${compact ? "space-y-2" : "space-y-2.5"}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
           </div>
-          {/* S23: star uses Floom blue accent (was amber/yellow — Federico). */}
           <button
             type="button"
             title={isFavorite ? "Remove from favourites" : "Add to favourites"}
@@ -506,46 +532,63 @@ function WorkerCard({
         {!compact && (worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
-              <Badge
+              <button
                 key={tag}
-                variant="outline"
-                className="bg-card text-xs font-normal"
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onTagClick?.(tag);
+                }}
+                className="inline-flex items-center rounded-full border border-border bg-card px-2 py-0.5 text-xs font-normal text-muted-foreground hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] transition-colors"
               >
                 {tag}
-              </Badge>
+              </button>
             ))}
           </div>
         )}
 
-        {(worker.triggers || []).length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {(worker.triggers || []).map((label) => (
-              <span
-                key={label}
-                className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-muted text-muted-foreground"
-              >
-                {label}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">{worker.trigger_type}</p>
-        )}
-
-        {hasSparkline && (
-          <div>
-            <Sparkline data={worker.timeseries!} width={120} height={28} />
-          </div>
-        )}
-
-        {hasStats && (
-          <p className="text-xs text-muted-foreground">
-            {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
-            {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
-            {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
-            {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
+        {/* Bare timestamp shown by default; replaced by extended stats on hover. */}
+        {stats?.last_run_at && (
+          <p className="text-xs text-muted-foreground group-hover:hidden">
+            Last run {formatRelativeTime(stats.last_run_at)}
           </p>
         )}
+
+        {/* Hover-only block: sparkline + trigger + extended stats line.
+            Uses max-h transition so the card grows smoothly on hover instead
+            of jumping. Replaces the bare timestamp above. */}
+        <div className="hidden group-hover:flex flex-col gap-2 pt-1">
+          {(worker.triggers || []).length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {(worker.triggers || []).map((label) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-muted text-muted-foreground"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">{worker.trigger_type}</p>
+          )}
+
+          {hasSparkline && (
+            <div>
+              <Sparkline data={worker.timeseries!} width={120} height={28} />
+            </div>
+          )}
+
+          {hasStats && (
+            <p className="text-xs text-muted-foreground">
+              {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
+              {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
+              {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
+              {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
+            </p>
+          )}
+        </div>
       </CardContent>
       </Link>
     </Card>
