@@ -44,20 +44,19 @@ function StatCard({
   loading: boolean;
 }) {
   return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-muted-foreground">
-            {label}
-          </p>
-          <Icon className="size-4 text-muted-foreground" />
-        </div>
-        <div className="mt-2 text-2xl font-semibold">
-          {loading ? <Skeleton className="h-8 w-16" /> : value}
-        </div>
-        {trend ? <div className="mt-2 text-xs text-muted-foreground">{trend}</div> : null}
-      </CardContent>
-    </Card>
+    // S29q (score walk): KPI cards were bordered, which made the home page
+    // feel like a JIRA dashboard. Now fully flat: big number on top,
+    // sentence-case label below, sparkline inline. No card outline, no bg.
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{label}</p>
+        <Icon className="size-4 text-muted-foreground" />
+      </div>
+      <div className="text-2xl font-semibold">
+        {loading ? <Skeleton className="h-8 w-16" /> : value}
+      </div>
+      {trend ? <div className="text-xs text-muted-foreground">{trend}</div> : null}
+    </div>
   );
 }
 
@@ -139,11 +138,12 @@ export default function OverviewPage() {
       </div>
 
       {attention.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Needs attention</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
+        // S29q: kept as the one bordered block on home (audit P-3: reserve
+        // Card for genuine alarm state). Heading style matches sister
+        // sections though — no CardTitle.
+        <section className="border border-line p-4 space-y-2">
+          <h2 className="text-sm font-medium text-muted-foreground">Needs attention</h2>
+          <div>
             {(() => {
               const expired = attention.filter(
                 (a) => a.type === "connection_expired" || a.type === "connection_expiring",
@@ -197,22 +197,22 @@ export default function OverviewPage() {
                 </div>
               );
             })()}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
-            <Link href="/runs">
-              <Button variant="ghost" size="sm">
-                See all
-                <ArrowUpRight className="size-3.5" />
-              </Button>
+        {/* S29q: dropped Card wrapper. Section heading + content sit flat
+            on the page background; matches Overview tab rhythm. */}
+        <section className="lg:col-span-2 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">Recent runs</h2>
+            <Link href="/runs" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+              See all
+              <ArrowUpRight className="size-3" />
             </Link>
-          </CardHeader>
-          <CardContent className="pt-0">
+          </div>
+          <div>
             {loading ? (
               <div className="space-y-2">
                 {[...Array(5)].map((_, i) => (
@@ -251,14 +251,12 @@ export default function OverviewPage() {
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Scheduled today</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Scheduled today</h2>
+          <div>
             {loading ? (
               <Skeleton className="h-20 w-full" />
             ) : scheduled.length === 0 ? (
@@ -291,8 +289,8 @@ export default function OverviewPage() {
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
     </div>
   );
