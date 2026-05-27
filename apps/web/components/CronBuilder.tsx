@@ -209,8 +209,8 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               onClick={() => handleFreqChange(f)}
               className={`h-7 rounded-md border px-2.5 text-xs font-medium transition-colors ${
                 freq === f
-                  ? "border-black bg-black text-white"
-                  : "border-border bg-card text-[#444] hover:bg-muted"
+                  ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
+                  : "border-line bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
               {label}
@@ -267,8 +267,8 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 onClick={() => toggleDow(v)}
                 className={`h-7 w-10 rounded-md border text-xs font-medium transition-colors ${
                   dow.includes(v)
-                    ? "border-black bg-black text-white"
-                    : "border-border bg-card text-[#444] hover:bg-muted"
+                    ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
+                    : "border-line bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
                 {label}

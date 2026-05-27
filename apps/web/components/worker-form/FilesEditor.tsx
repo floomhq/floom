@@ -267,7 +267,7 @@ function FilesEditorEdit({
           <button
             type="button"
             onClick={() => setAddingFile((v) => !v)}
-            className="text-muted-foreground hover:text-black transition-colors"
+            className="text-muted-foreground hover:text-foreground transition-colors"
             title="Add file"
           >
             <FilePlus className="w-3.5 h-3.5" />
@@ -275,7 +275,7 @@ function FilesEditorEdit({
         </CardHeader>
         <CardContent className="p-0 pb-1">
           {addingFile && (
-            <div className="px-3 py-2 flex gap-1.5 border-b border-[#f4f4f5]">
+            <div className="px-3 py-2 flex gap-1.5 border-b border-line">
               <Input
                 className="h-6 text-xs font-mono border-border py-0"
                 placeholder="lib/helpers.py"
@@ -295,7 +295,7 @@ function FilesEditorEdit({
               key={f.path}
               className={`group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer transition-colors ${
                 f.path === effectiveSelected
-                  ? "bg-muted text-black"
+                  ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:bg-muted/50"
               }`}
               onClick={() => selectPath(f.path)}

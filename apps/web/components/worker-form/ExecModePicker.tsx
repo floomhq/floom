@@ -34,12 +34,12 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
         </p>
         <div
           className={`flex items-start gap-3 rounded-md border px-3 py-2.5 ${
-            isAgent ? "border-black bg-muted/50" : "border-border opacity-60"
+            isAgent ? "border-[var(--accent)] bg-muted/50" : "border-line opacity-60"
           }`}
         >
-          <FileText className="w-4 h-4 mt-0.5 text-[#444]" />
+          <FileText className="w-4 h-4 mt-0.5 text-muted-foreground" />
           <div>
-            <p className="text-sm font-medium text-[#222]">
+            <p className="text-sm font-medium text-foreground">
               Agent (SKILL.md)
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -49,12 +49,12 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
         </div>
         <div
           className={`flex items-start gap-3 rounded-md border px-3 py-2.5 ${
-            isScript ? "border-black bg-muted/50" : "border-border opacity-60"
+            isScript ? "border-[var(--accent)] bg-muted/50" : "border-line opacity-60"
           }`}
         >
-          <FileCode className="w-4 h-4 mt-0.5 text-[#444]" />
+          <FileCode className="w-4 h-4 mt-0.5 text-muted-foreground" />
           <div>
-            <p className="text-sm font-medium text-[#222]">
+            <p className="text-sm font-medium text-foreground">
               Script (run.py)
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
