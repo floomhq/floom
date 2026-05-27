@@ -1,12 +1,19 @@
 """CSV Enricher — E2B-native worker.
 
-Reads inputs.json, secrets.json. Writes result.json.
+Reads inputs.json and secrets from .env.local (python-dotenv). Writes result.json.
+Falls back to secrets.json for backward-compat during transition period.
 """
 import csv
 import io
 import json
 import os
 import re
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(".env.local")
+except ImportError:
+    pass  # dotenv optional; secrets.json fallback covers transition
 
 
 def _extract_columns_from_instruction(instruction: str, client) -> list:
@@ -42,15 +49,20 @@ def _extract_columns_from_instruction(instruction: str, client) -> list:
     return ["enriched"]
 
 
+def _secrets_fallback() -> dict:
+    """Load secrets.json for backward-compat when dotenv import failed."""
+    try:
+        with open("secrets.json") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
 def main():
     with open("inputs.json") as f:
         inputs = json.load(f)
 
-    try:
-        with open("secrets.json") as f:
-            secrets = json.load(f)
-    except FileNotFoundError:
-        secrets = {}
+    _secrets_fb = _secrets_fallback()
 
     try:
         with open("connections.json") as f:
@@ -106,7 +118,7 @@ def main():
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=secrets.get("OPENAI_API_KEY"))
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY") or _secrets_fb.get("OPENAI_API_KEY"))
 
         new_columns = _extract_columns_from_instruction(instruction, client)
 
