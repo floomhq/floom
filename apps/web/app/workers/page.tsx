@@ -195,23 +195,12 @@ function WorkersContent() {
             All available workers. Run, edit, or create.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              api.workers.reload().then(() => window.location.reload())
-            }
-          >
-            Reload
+        <Link href="/workers/new">
+          <Button size="sm">
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            New worker
           </Button>
-          <Link href="/workers/new">
-            <Button size="sm">
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              New worker
-            </Button>
-          </Link>
-        </div>
+        </Link>
       </div>
 
       {!loading && workers.length === 0 ? (

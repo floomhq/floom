@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
+import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 type TabKey = "api" | "system" | "notifications" | "appearance" | "danger";
@@ -219,26 +220,8 @@ function SettingsContent() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Workers</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-sm text-muted-foreground">
-                  Reload workers from disk to pick up config changes.
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleReload}
-                  disabled={reloading}
-                >
-                  {reloading ? "Reloading..." : "Reload workers"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {/* PR S19: removed redundant Workers / Reload card.
+              Workers auto-reload on every page mount via api.workers.list. */}
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4">
@@ -270,10 +253,11 @@ function SettingsContent() {
             <CardHeader>
               <CardTitle className="text-sm font-medium">Theme</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Floom is light-only for now. System and dark themes land after v1.
+                Choose how Floom looks. System follows your operating system.
               </p>
+              <ThemeModeButton />
             </CardContent>
           </Card>
         </TabsContent>

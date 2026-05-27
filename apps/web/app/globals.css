@@ -230,12 +230,23 @@ html.dark {
   background-image: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in srgb, var(--paper) 60%, transparent) 50%,
+    color-mix(in srgb, var(--paper) 80%, transparent) 50%,
     transparent 100%
   );
   background-size: 200% 100%;
   background-repeat: no-repeat;
-  animation: floom-shimmer 1.6s ease-in-out infinite;
+  animation: floom-shimmer 1.4s ease-in-out infinite;
+}
+
+/* PR S19 (I-16): dark-mode text selection rendered as a white block on white
+   text. Use accent at low alpha so the underlying ink stays readable. */
+::selection {
+  background-color: var(--accent-soft);
+  color: var(--ink);
+}
+html.dark ::selection {
+  background-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--ink);
 }
 
 @layer base {

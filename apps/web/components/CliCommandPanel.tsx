@@ -31,7 +31,25 @@ export function CliCommandPanel() {
   const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
-    setStoredSecret(readStoredSecret());
+    const stored = readStoredSecret();
+    if (stored) {
+      setStoredSecret(stored);
+      return;
+    }
+    // PR S19 (I-4): fall back to the server-side env var so the user
+    // doesn't have to hand-paste the token into localStorage before
+    // they can see it on Settings -> API access.
+    fetch("/api/floom-secret")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.api_secret) {
+          setStoredSecret(d.api_secret);
+          try {
+            window.localStorage.setItem("floom_secret", d.api_secret);
+          } catch {}
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const apiSecret = revealed ? (storedSecret || "<YOUR_FLOOM_SECRET>") : maskSecret(storedSecret);
@@ -51,53 +69,89 @@ export function CliCommandPanel() {
     window.setTimeout(() => setCopiedKey(""), 1200);
   }
 
+  async function copyTokenValue() {
+    if (!storedSecret) return;
+    await navigator.clipboard.writeText(storedSecret);
+    setCopiedKey("token");
+    window.setTimeout(() => setCopiedKey(""), 1200);
+  }
+
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Setup commands</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Tabs defaultValue="cli">
-          <TabsList>
-            <TabsTrigger value="cli">CLI</TabsTrigger>
-            <TabsTrigger value="mcp">MCP</TabsTrigger>
-            <TabsTrigger value="api">API</TabsTrigger>
-          </TabsList>
-          <TabsContent value="cli">
-            <SnippetBox
-              text={snippets.cli}
-              copied={copiedKey === "cli"}
-              onCopy={() => void copySnippet("cli")}
-            />
-          </TabsContent>
-          <TabsContent value="mcp">
-            <SnippetBox
-              text={snippets.mcp}
-              copied={copiedKey === "mcp"}
-              onCopy={() => void copySnippet("mcp")}
-            />
-          </TabsContent>
-          <TabsContent value="api" className="space-y-2">
-            <div className="flex items-center justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setRevealed((value) => !value)}
-              >
-                {revealed ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Eye className="mr-1 h-3.5 w-3.5" />}
-                {revealed ? "Hide secret" : "Reveal secret"}
-              </Button>
-            </div>
-            <SnippetBox
-              text={snippets.api}
-              copied={copiedKey === "api"}
-              onCopy={() => void copySnippet("api")}
-            />
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      {/* PR S19 (I-4): "Your token" card at the top so users find it. */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Your Floom token</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Single-user v0: this token is the credential for every CLI / MCP /
+            API call. Keep it private. Rotate from your env config on the API
+            host if you ever paste it somewhere by accident.
+          </p>
+          <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+            <code className="flex-1 truncate font-mono text-xs">
+              {revealed ? (storedSecret || "<not configured>") : maskSecret(storedSecret)}
+            </code>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setRevealed((value) => !value)}
+            >
+              {revealed ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Eye className="mr-1 h-3.5 w-3.5" />}
+              {revealed ? "Hide" : "Reveal"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={!storedSecret}
+              onClick={() => void copyTokenValue()}
+            >
+              {copiedKey === "token" ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
+              {copiedKey === "token" ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Setup commands</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Tabs defaultValue="cli">
+            <TabsList>
+              <TabsTrigger value="cli">CLI</TabsTrigger>
+              <TabsTrigger value="mcp">MCP</TabsTrigger>
+              <TabsTrigger value="api">API</TabsTrigger>
+            </TabsList>
+            <TabsContent value="cli">
+              <SnippetBox
+                text={snippets.cli}
+                copied={copiedKey === "cli"}
+                onCopy={() => void copySnippet("cli")}
+              />
+            </TabsContent>
+            <TabsContent value="mcp">
+              <SnippetBox
+                text={snippets.mcp}
+                copied={copiedKey === "mcp"}
+                onCopy={() => void copySnippet("mcp")}
+              />
+            </TabsContent>
+            <TabsContent value="api">
+              <SnippetBox
+                text={snippets.api}
+                copied={copiedKey === "api"}
+                onCopy={() => void copySnippet("api")}
+              />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
