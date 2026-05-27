@@ -79,15 +79,18 @@
   --ink-faint: oklch(0.7 0.008 285.938);
   --emerald: oklch(0.55 0.13 152);
   --emerald-dark: oklch(0.4 0.12 152);
-  /* Matte: primary is near-black, NOT blue. Keep the blue available as
-     accent-blue for the small number of places that still benefit (eg
-     OAuth provider pill), but default to neutral. */
-  --accent: oklch(0.21 0.006 285.885);
-  --accent-soft: oklch(0.94 0.004 85);
-  --accent-line: oklch(0.85 0.005 285.938);
-  --accent-blue: #3a6ea5;
-  --solid: oklch(0.141 0.005 285.823);
-  --solid-2: oklch(0.21 0.006 285.885);
+  /* PR S20 matte + Floom blue. Federico clarification 2026-05-28: keep
+     the blue accent — Floom identity. Matte everywhere ELSE (neutral
+     surfaces, pure-black/white borders). Blue lives in --accent and
+     surfaces only where it matters: focus rings, active tab/state,
+     link colour, primary CTA. Hover surfaces stay warm-neutral. */
+  --accent: oklch(0.52 0.13 250);              /* Floom blue, oklch */
+  --accent-soft: oklch(0.94 0.012 250);        /* low-chroma blue tint for hover */
+  --accent-line: oklch(0.78 0.08 250);
+  --accent-hover-bg: oklch(0.94 0.004 85);     /* warm-neutral hover (matte) */
+  /* Primary button base: blue. solid-fg = button text colour. */
+  --solid: var(--accent);
+  --solid-2: oklch(0.46 0.14 250);
   --solid-fg: oklch(0.985 0 0);
   --sage: oklch(0.6 0.05 152);
   --sage-tint: oklch(0.95 0.02 152);
@@ -179,14 +182,14 @@ html.dark {
   --ink-faint: oklch(0.42 0.01 286.067);
   --emerald: oklch(0.7 0.16 152);
   --emerald-dark: oklch(0.8 0.13 152);
-  /* Matte dark: primary stays near-white (button bg), no blue tint. */
-  --accent: oklch(0.985 0 0);
-  --accent-soft: hsl(0 0% 100% / 0.06);
-  --accent-line: hsl(0 0% 100% / 0.12);
-  --accent-blue: #7fb0e0;
-  --solid: oklch(0.985 0 0);
-  --solid-2: oklch(0.985 0 0);
-  --solid-fg: oklch(0.21 0.006 285.885);
+  /* Matte dark + Floom blue. Blue lifted for contrast against dark bg. */
+  --accent: oklch(0.72 0.14 250);
+  --accent-soft: oklch(0.32 0.06 250);
+  --accent-line: oklch(0.45 0.1 250);
+  --accent-hover-bg: hsl(0 0% 100% / 0.06);
+  --solid: var(--accent);
+  --solid-2: oklch(0.78 0.13 250);
+  --solid-fg: oklch(0.13 0.02 285);
   --sage: oklch(0.65 0.06 152);
   --sage-tint: oklch(0.3 0.04 152);
   /* Pure white borders in dark mode at low alpha — the matte hallmark. */
