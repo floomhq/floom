@@ -258,7 +258,10 @@ function WorkersContent() {
             </Tabs>
           </div>
 
-          {tab === "all" && (
+          {/* S29u: breadcrumb row only renders when a folder is actually
+              selected. Was always-on (showing "Workers > All" at root),
+              which was a filter rail showing no information. */}
+          {tab === "all" && breadcrumbs.length > 0 && (
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <button
                 type="button"
@@ -267,25 +270,18 @@ function WorkersContent() {
               >
                 Workers
               </button>
-              <ChevronRight className="size-3.5" />
-              {breadcrumbs.length === 0 ? (
-                <span>All</span>
-              ) : (
-                breadcrumbs.map((bc, i) => (
-                  <span key={bc.path} className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setFolder(bc.path)}
-                      className="hover:text-foreground transition-colors"
-                    >
-                      {bc.label}
-                    </button>
-                    {i < breadcrumbs.length - 1 ? (
-                      <ChevronRight className="size-3.5" />
-                    ) : null}
-                  </span>
-                ))
-              )}
+              {breadcrumbs.map((bc, i) => (
+                <span key={bc.path} className="flex items-center gap-1">
+                  <ChevronRight className="size-3.5" />
+                  <button
+                    type="button"
+                    onClick={() => setFolder(bc.path)}
+                    className="hover:text-foreground transition-colors"
+                  >
+                    {bc.label}
+                  </button>
+                </span>
+              ))}
             </div>
           )}
 
@@ -327,12 +323,12 @@ function WorkersContent() {
                     onClick={() => setTagFilter(active ? null : tag)}
                     className={
                       active
-                        ? "inline-flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
-                        : "inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                        ? "inline-flex items-center gap-1 rounded-full border border-foreground bg-foreground px-2.5 py-0.5 text-xs font-medium text-background hover:opacity-90 transition-opacity"
+                        : "inline-flex items-center gap-1 rounded-full border border-line bg-card px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-colors"
                     }
                   >
                     {tag}
-                    <span className={active ? "text-[var(--accent)]" : "text-muted-foreground/60"}>
+                    <span className={active ? "text-background/70" : "text-muted-foreground/60"}>
                       {active ? "×" : count}
                     </span>
                   </button>
