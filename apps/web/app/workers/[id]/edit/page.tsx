@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -196,10 +197,15 @@ export default function EditWorkerPage() {
 
   return (
     <div className="space-y-6">
-      {/* S23: edit page header now matches /workers/<id> chrome. Worker name as
-          H1 (not "Edit worker"), inline "Editing" pill in Floom blue when
-          dirty, no back arrow (sidebar nav covers it). Save replaces the
-          "Edit" button slot on the right. */}
+      {/* S28: back-nav above H1 (Federico request). */}
+      <Link
+        href={`/workers/${id}`}
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <span aria-hidden="true">←</span>
+        {worker.name}
+      </Link>
+      {/* S23: edit page header matches /workers/<id> chrome. */}
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

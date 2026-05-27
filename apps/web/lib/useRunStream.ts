@@ -18,6 +18,7 @@ export function useRunStream(runId: string | null | undefined) {
 
     let closed = false;
     let sawEvent = false;
+    let sawFinish = false;
     const source = new EventSource(`/api/proxy/runs/${encodeURIComponent(runId)}/stream`);
 
     source.addEventListener("open", () => {
@@ -30,6 +31,7 @@ export function useRunStream(runId: string | null | undefined) {
         const part = JSON.parse((event as MessageEvent).data) as RunPart;
         setParts((prev) => [...prev, part]);
         if (part.type === "finish") {
+          sawFinish = true;
           source.close();
           setConnected(false);
         }
@@ -52,9 +54,35 @@ export function useRunStream(runId: string | null | undefined) {
       );
     };
 
+    // S28: stale-running detection. Federico hit a case where the UI showed
+    // "running" for 10 minutes while the actual run had completed.
+    // Mitigation: while we are subscribed but the stream has NOT reported
+    // a finish event, poll the run row every 8s. If the polled run.status
+    // is terminal (completed/failed), update fallbackRun so the UI
+    // reflects reality even though the SSE silently dropped.
+    const pollId = window.setInterval(() => {
+      if (closed || sawFinish) return;
+      void api.runs.get(runId).then(
+        (run) => {
+          if (closed) return;
+          const terminal = run.status === "completed" || run.status === "failed";
+          if (terminal) {
+            sawFinish = true;
+            setFallbackRun(run);
+            source.close();
+            setConnected(false);
+          }
+        },
+        () => {
+          // network blips during polling are fine; SSE error handler covers persistent fail
+        },
+      );
+    }, 8000);
+
     return () => {
       closed = true;
       source.close();
+      window.clearInterval(pollId);
     };
   }, [runId]);
 

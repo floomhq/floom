@@ -5,6 +5,9 @@
 import { TerminalSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// S28: theme-aware Terminal. Was bg-[#111] always (looked broken in light
+// mode against warm matte background). Now uses bg-[var(--bg-2)] in light
+// + bg-[#0d0d0d] in dark via dark: variant. Text colors follow.
 export function Terminal({
   lines,
   className,
@@ -13,8 +16,12 @@ export function Terminal({
   className?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-md border border-border bg-[#111] text-[#e8e8e8]", className)}>
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-xs text-white/70">
+    <div className={cn(
+      "overflow-hidden rounded-md border border-border bg-[var(--bg-2)] text-foreground",
+      "dark:bg-[#0d0d0d] dark:text-[#e8e8e8] dark:border-white/10",
+      className,
+    )}>
+      <div className="flex items-center gap-2 border-b border-line dark:border-white/10 px-3 py-2 text-xs text-muted-foreground dark:text-white/70">
         <TerminalSquare className="size-3.5" />
         Logs
       </div>
@@ -22,8 +29,13 @@ export function Terminal({
         {lines.length === 0
           ? "$ waiting for logs"
           : lines.map((line, index) => (
-              <div key={`${line.timestamp || "line"}-${index}`} className={line.level === "error" ? "text-[#ffb4a8]" : ""}>
-                <span className="text-white/35">{line.timestamp ? `[${new Date(line.timestamp).toLocaleTimeString()}]` : "$"}</span>{" "}
+              <div
+                key={`${line.timestamp || "line"}-${index}`}
+                className={line.level === "error" ? "text-red-700 dark:text-[#ffb4a8]" : ""}
+              >
+                <span className="text-muted-foreground dark:text-white/35">
+                  {line.timestamp ? `[${new Date(line.timestamp).toLocaleTimeString()}]` : "$"}
+                </span>{" "}
                 <span>{line.message}</span>
               </div>
             ))}
