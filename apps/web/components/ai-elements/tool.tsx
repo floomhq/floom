@@ -2,7 +2,8 @@
 
 // Inspired by Vercel AI Elements. MIT License.
 
-import { ChevronDown, Hammer, XCircle } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Hammer, XCircle, Maximize2, Minimize2, Copy, Check } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
@@ -65,11 +66,51 @@ export function Tool({
 }
 
 function ToolBlock({ label, value }: { label: string; value: unknown }) {
+  // S29k (Q3 Codex verdict): Tool input/output payloads were visually capped
+  // at max-h-280 with no escape. Federico needs the full payload for
+  // debugging. Now: Expand button removes the cap; Copy lifts the formatted
+  // value to clipboard so users can paste into a diff tool.
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const formatted = formatValue(value);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(formatted).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
+  };
   return (
     <div className="space-y-1">
-      <p className="text-[11px] font-medium uppercase text-muted-foreground">{label}</p>
-      <pre className="max-h-[280px] overflow-auto rounded-sm bg-muted p-2 font-mono text-xs leading-relaxed">
-        {formatValue(value)}
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium uppercase text-muted-foreground">{label}</p>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Copy"
+          >
+            {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            {expanded ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
+      </div>
+      <pre
+        className={cn(
+          "overflow-auto rounded-sm bg-muted p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words",
+          expanded ? "max-h-none" : "max-h-[280px]",
+        )}
+      >
+        {formatted}
       </pre>
     </div>
   );
