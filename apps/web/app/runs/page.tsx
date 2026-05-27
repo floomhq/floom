@@ -179,15 +179,20 @@ function RunsContent() {
             ))}
           </SelectContent>
         </Select>
-        <div className="flex gap-1.5 flex-wrap">
+        {/* S29q: was 5 saturated pill buttons (All/Queued/Running/Completed/
+            Failed) styled like primaries — looked like 5 CTAs on one screen.
+            Now quiet text-only with a colored underline on the active option.
+            Same visual register as the tabs and /runs/<id> Transcript/Logs/
+            Output bar. */}
+        <div className="flex items-center gap-3 flex-wrap">
           {STATUS_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => updateFilter("status", opt.value)}
-              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+              className={`relative pb-1.5 text-sm transition-colors ${
                 statusFilter === opt.value
-                  ? "bg-foreground text-background border-foreground"
-                  : "bg-card text-muted-foreground border-border hover:border-muted-foreground/50"
+                  ? "text-foreground font-medium after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {opt.label}

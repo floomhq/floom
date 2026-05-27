@@ -122,11 +122,11 @@ export function RunDetailSplitPane({
         </div>
       </div>
 
-      <div className="flex min-h-[520px] gap-0 border border-line bg-card rounded-md overflow-hidden">
+      <div className="flex min-h-[520px] gap-0 border border-line bg-card overflow-hidden">
         <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-auto border-r border-border bg-muted/25">
-          <div className="sticky top-0 border-b border-border bg-card px-3 py-2">
-            <p className="text-xs font-medium uppercase text-muted-foreground">Timeline</p>
-          </div>
+          {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
+              The timeline IS the panel; the label was dead weight (ChatGPT
+              audit P-1). */}
           <div className="p-2">
             {timeline.map((item, index) => (
               <TimelineRow key={`${item.label}-${index}`} item={item} />
