@@ -39,9 +39,16 @@ import { useRunStream } from "@/lib/useRunStream";
 // Section types and nav config
 // ---------------------------------------------------------------------------
 
-type Section = "run" | "code" | "triggers" | "connections" | "runs" | "overview";
+// S31: Federico — "Overview shouldn't even exist. It's the 'other'
+// category. ChatGPT would not have this." Killed the Overview tab.
+// Run is the default. Narrative (long_description + use_cases +
+// how_it_works) moves into a small "About this worker" collapsible
+// ABOVE the Run form on the Run tab. Danger zone moves to /edit only
+// (already exists there). Tech details + I/O chips dropped (redundant
+// with the form fields below + the Run/Source/Edit tabs).
+type Section = "run" | "code" | "triggers" | "connections" | "runs";
 
-const VALID_SECTIONS: Section[] = ["run", "code", "triggers", "connections", "runs", "overview"];
+const VALID_SECTIONS: Section[] = ["run", "code", "triggers", "connections", "runs"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -53,11 +60,7 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
-// S22b: tab order + labels reworked from design-roast. Overview moves to first
-// (it's the "what is this worker" page, was last). Code/Connections/Runs
-// renamed to disambiguate from the global sidebar (Source/Apps/History).
 const NAV_ITEMS: NavItem[] = [
-  { id: "overview", label: "Overview", icon: <Info className="w-4 h-4" /> },
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
   { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
@@ -82,9 +85,10 @@ export default function WorkerDetailPage() {
   const sectionParam =
     (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
     (searchParams.get("section") as string) ||
-    "overview";
+    "run";
+  // S31: Run is the default. Legacy "#overview" URLs collapse to "run".
   const [activeSection, setActiveSection] = useState<Section>(
-    isValidSection(sectionParam) ? sectionParam : "overview"
+    isValidSection(sectionParam) ? sectionParam : "run"
   );
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
@@ -564,10 +568,6 @@ export default function WorkerDetailPage() {
         {activeSection === "runs" && (
           <RunsSection worker={worker} />
         )}
-
-        {activeSection === "overview" && (
-          <OverviewSection worker={worker} canApplySample={canApplySample} onApplySample={applyExampleInput} />
-        )}
       </div>
     </div>
   );
@@ -618,8 +618,46 @@ function RunSection({
   // side-by-side; long inputs (textarea/file/csv) span both columns.
   const isLongInput = (inp: WorkerInput) =>
     inp.type === "textarea" || inp.type === "file";
+  // S31: "About this worker" surfaces what the Overview tab used to
+  // show, collapsed by default so it doesn't dominate the Run form.
+  // Includes long_description + use_cases + how_it_works only -- the
+  // narrative content. Inputs/outputs/example are already represented
+  // by the form below + the "Fill with sample" affordance.
+  const hasAbout = !!(worker.long_description || (worker.use_cases && worker.use_cases.length > 0) || worker.how_it_works);
   return (
     <div className="max-w-xl space-y-6">
+      {hasAbout && (
+        <details className="border border-line">
+          <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors flex items-center justify-between [&::-webkit-details-marker]:hidden">
+            <span>About this worker</span>
+            <ChevronDown className="size-4 text-muted-foreground transition-transform [details[open]_&]:rotate-180" />
+          </summary>
+          <div className="px-3 py-3 space-y-4 border-t border-line">
+            {worker.long_description && (
+              <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{worker.long_description}</p>
+            )}
+            {worker.use_cases && worker.use_cases.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Use cases</p>
+                <ul className="space-y-1.5">
+                  {worker.use_cases.map((uc) => (
+                    <li key={uc} className="flex gap-2.5 text-sm text-foreground leading-relaxed">
+                      <span className="mt-2 size-1 rounded-full bg-muted-foreground shrink-0" aria-hidden="true" />
+                      <span>{uc}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {worker.how_it_works && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">How it works</p>
+                <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{worker.how_it_works}</p>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
       <div className="space-y-4">
         {hasInputs && (worker.example_input || inputsFilled) && (
             <div className="flex items-center gap-2 pb-1">
@@ -917,296 +955,13 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Overview section
-// ---------------------------------------------------------------------------
 
-function OverviewSection({
-  worker,
-  canApplySample,
-  onApplySample,
-}: {
-  worker: WorkerDetail;
-  canApplySample: boolean;
-  onApplySample: () => void;
-}) {
-  // S29d (F8.7): description-first. Lead with what the worker does in plain
-  // English; push Trigger/Runtime/Runner into a collapsible "Technical
-  // details" block at the bottom. Federico: "wtf is this layout and content?
-  // so hard to digest? who is our ICP?" — non-developers read this first,
-  // they need the narrative before the config.
-  const [techOpen, setTechOpen] = useState(false);
-  const leadDescription = worker.long_description || worker.description;
-  const hasUseCases = worker.use_cases && worker.use_cases.length > 0;
-  const hasExampleInput = !!worker.example_input;
-  const hasExampleOutput = !!worker.example_output;
-  const hasInputs = worker.config.inputs.length > 0;
-  const hasOutputs = worker.config.outputs.length > 0;
-
-  return (
-    <div className="max-w-3xl space-y-8">
-      {leadDescription && (
-        <section>
-          <h2 className="text-base font-semibold text-foreground mb-2">What it does</h2>
-          {/* S29n: was whitespace-pre-wrap; YAML's | block scalar preserves
-              single newlines and turned the description into chopped lines.
-              pre-line collapses single \n to space; double \n still breaks
-              paragraphs. Renders as continuous prose. */}
-          <p className="text-base text-foreground leading-relaxed whitespace-pre-line">{leadDescription}</p>
-        </section>
-      )}
-
-      {hasUseCases && (
-        <section>
-          <h2 className="text-base font-semibold text-foreground mb-3">Use cases</h2>
-          {/* S29n: ·-middot bullet was almost invisible. Use a small filled
-              circle aligned with the text baseline. */}
-          <ul className="space-y-2">
-            {worker.use_cases!.map((useCase) => (
-              <li key={useCase} className="flex gap-3 text-sm text-foreground leading-relaxed">
-                <span className="mt-2 size-1 rounded-full bg-muted-foreground shrink-0" aria-hidden="true" />
-                <span>{useCase}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {worker.how_it_works && (
-        <section>
-          <h2 className="text-base font-semibold text-foreground mb-2">How it works</h2>
-          {/* S29n: if author wrote arrow-style flow (lines starting with ->
-              or →), render as a clean stepped list. Otherwise prose. */}
-          {(() => {
-            const lines = worker.how_it_works.split("\n").map((l) => l.trim()).filter(Boolean);
-            const arrowLines = lines.filter((l) => /^(->|→)/.test(l) || lines.indexOf(l) === 0);
-            const isFlow = arrowLines.length >= 2 && lines.slice(1).every((l) => /^(->|→)/.test(l));
-            if (isFlow) {
-              const steps = lines.map((l) => l.replace(/^(->|→)\s*/, ""));
-              return (
-                <ol className="space-y-1.5">
-                  {steps.map((step, i) => (
-                    <li key={i} className="flex items-baseline gap-2.5 text-sm text-foreground leading-relaxed">
-                      <span className="font-mono text-xs text-muted-foreground shrink-0 w-5 tabular-nums">{i + 1}</span>
-                      <span>{step}</span>
-                    </li>
-                  ))}
-                </ol>
-              );
-            }
-            return (
-              <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{worker.how_it_works}</p>
-            );
-          })()}
-        </section>
-      )}
-
-      {(hasInputs || hasOutputs) && (
-        <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div>
-            <h2 className="text-base font-semibold text-foreground mb-2.5">Inputs</h2>
-            <div className="flex flex-wrap gap-1.5">
-              {hasInputs ? (
-                worker.config.inputs.map((inp) => (
-                  <Badge key={inp.name} variant="secondary" className="text-xs font-normal">
-                    {inp.label || inp.name}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">None</span>
-              )}
-            </div>
-          </div>
-          <div>
-            <h2 className="text-base font-semibold text-foreground mb-2.5">Outputs</h2>
-            <div className="flex flex-wrap gap-1.5">
-              {hasOutputs ? (
-                worker.config.outputs.map((o) => (
-                  <Badge key={o.name} variant="outline" className="text-xs font-normal">
-                    {o.label}
-                  </Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">None</span>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {(hasExampleInput || hasExampleOutput) && (
-        <section className="space-y-5">
-          {hasExampleInput && (
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-foreground">Example input</h2>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  onClick={onApplySample}
-                  disabled={!canApplySample}
-                >
-                  <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
-                  Fill with sample input
-                </Button>
-              </div>
-              <ExampleInputPreview inputs={worker.config.inputs} example={worker.example_input!} />
-            </div>
-          )}
-          {hasExampleOutput && (
-            <div className="space-y-2.5">
-              <h2 className="text-base font-semibold text-foreground">Example output</h2>
-              <MarkdownPreview value={worker.example_output!} />
-            </div>
-          )}
-        </section>
-      )}
-
-      <Collapsible open={techOpen} onOpenChange={setTechOpen}>
-        <CollapsibleTrigger
-          className="flex w-full items-center justify-between rounded-md border border-line bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] transition-colors"
-        >
-          <span className="flex items-center gap-2">
-            <span className="text-base font-semibold text-foreground">Technical details</span>
-          </span>
-          <ChevronDown
-            className={`w-4 h-4 text-muted-foreground transition-transform ${techOpen ? "rotate-180" : ""}`}
-          />
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="mt-2 rounded-md border border-line bg-card p-4 space-y-3 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Trigger</span>
-              <span className="font-medium font-mono text-xs">{worker.config.trigger.type}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Runtime</span>
-              <span className="font-medium font-mono text-xs">{worker.config.runtime.type}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Runner</span>
-              <span className="font-medium font-mono text-xs">{worker.config.runtime.runner}</span>
-            </div>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      <DangerZone workerId={worker.id} workerName={worker.name} />
-    </div>
-  );
-}
-
-function DangerZone({ workerId, workerName }: { workerId: string; workerName: string }) {
-  // PR S19 (I-5): the only way to delete a worker. Type-to-confirm guard
-  // because there's no undo and deleting also cancels any running runs.
-  const router = useRouter();
-  const [confirmText, setConfirmText] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const canDelete = confirmText.trim() === workerName.trim();
-
-  async function handleDelete() {
-    if (!canDelete) return;
-    setDeleting(true);
-    try {
-      await api.workers.delete(workerId);
-      toast.success(`Deleted ${workerName}`);
-      router.push("/workers");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete worker");
-      setDeleting(false);
-    }
-  }
-
-  return (
-    <Card className="border-destructive/40">
-      <CardHeader>
-        <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          Deleting a worker cancels in-flight runs and removes its bundle, runs,
-          and configured triggers. There is no undo.
-        </p>
-        <div className="space-y-2">
-          <Label htmlFor="delete-confirm" className="text-xs text-muted-foreground">
-            Type <code className="text-foreground">{workerName}</code> to confirm.
-          </Label>
-          <Input
-            id="delete-confirm"
-            value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
-            placeholder={workerName}
-            className="max-w-sm"
-          />
-        </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={!canDelete || deleting}
-          onClick={() => void handleDelete()}
-        >
-          {deleting ? "Deleting..." : "Delete worker"}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Shared sub-components
 // ---------------------------------------------------------------------------
 
-function ExampleInputPreview({
-  inputs,
-  example,
-}: {
-  inputs: WorkerInput[];
-  example: Record<string, unknown>;
-}) {
-  const entries = inputs.length > 0
-    ? inputs.map((input) => ({
-        name: input.name,
-        label: input.label,
-        type: input.type,
-        value: example[input.name],
-      }))
-    : Object.entries(example).map(([name, value]) => ({
-        name,
-        label: name.replace(/_/g, " "),
-        type: typeof value,
-        value,
-      }));
 
-  if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">This worker has no manual inputs.</p>;
-  }
-
-  // S29u (score walk): was a 2-col table with bg-muted gutter on every row
-  // (nested-table look). Now flat key-value pairs with a quiet hairline
-  // between entries.
-  return (
-    <div className="space-y-3">
-      {entries.map((entry, i) => (
-        <div key={entry.name} className={i > 0 ? "pt-3 border-t border-line" : ""}>
-          <p className="text-xs font-medium text-foreground">{entry.label}</p>
-          <pre className={`mt-1 text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-muted-foreground italic" : "text-foreground"}`}>
-            {formatExampleValue(entry.value, entry.type)}
-          </pre>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function formatExampleValue(value: unknown, type?: string): string {
-  if (value === undefined) return "";
-  if (value === null) {
-    return type === "file" ? "(no sample file, upload one)" : "null";
-  }
-  if (typeof value === "string") return value;
-  return JSON.stringify(value, null, 2);
-}
 
 // S29a: humanize raw enum option keys for display in select dropdowns.
 // "branded_markdown" -> "Branded markdown"
@@ -1219,15 +974,6 @@ function humanizeOptionLabel(raw: string): string {
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
-function MarkdownPreview({ value }: { value: string }) {
-  return (
-    <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-md border border-border">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {value}
-      </ReactMarkdown>
-    </div>
-  );
-}
 
 // S22b: labelled status pill replaces the size-2 dot indicator (roast P1:
 // dot was too subtle, "Weekly Update" 33%-success orange dot blended in
