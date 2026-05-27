@@ -37,7 +37,7 @@ function DownloadButton({
     <Button
       variant="ghost"
       size="sm"
-      className="h-7 px-2 text-xs text-[#666] hover:text-[#333] gap-1"
+      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
       onClick={onClick}
       title={`Download as ${label}`}
     >
@@ -49,11 +49,11 @@ function DownloadButton({
 
 function OutputCSV({ value, filename }: { value: string; filename: string }) {
   const rows = parseCSV(String(value));
-  if (rows.length === 0) return <p className="text-sm text-[#999]">Empty CSV</p>;
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground">Empty CSV</p>;
   const [header, ...body] = rows;
   return (
     <div className="space-y-2">
-      <div className="overflow-auto max-h-[400px] rounded border border-[#eaeaea]">
+      <div className="overflow-auto max-h-[400px] rounded border border-border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -91,7 +91,7 @@ function OutputJSON({ value, filename }: { value: unknown; filename: string }) {
   }
   return (
     <div className="space-y-2">
-      <pre className="text-xs bg-[#f4f4f5] p-3 rounded-md overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
+      <pre className="text-xs bg-muted p-3 rounded-md overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
         {formatted}
       </pre>
       <DownloadButton
@@ -124,14 +124,14 @@ const markdownComponents = {
   li: ({ children }: MarkdownChildProps) => <li className="text-sm">{children}</li>,
   code: ({ inline, children }: MarkdownCodeProps) =>
     inline ? (
-      <code className="bg-[#f4f4f5] px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+      <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{children}</code>
     ) : (
-      <pre className="bg-[#f4f4f5] p-3 rounded-md overflow-auto text-xs font-mono mb-3 whitespace-pre-wrap">
+      <pre className="bg-muted p-3 rounded-md overflow-auto text-xs font-mono mb-3 whitespace-pre-wrap">
         <code>{children}</code>
       </pre>
     ),
   blockquote: ({ children }: MarkdownChildProps) => (
-    <blockquote className="border-l-2 border-[#d4d4d8] pl-3 text-[#666] my-3">{children}</blockquote>
+    <blockquote className="border-l-2 border-border pl-3 text-muted-foreground my-3">{children}</blockquote>
   ),
   strong: ({ children }: MarkdownChildProps) => <strong className="font-semibold">{children}</strong>,
   a: ({ href, children }: MarkdownAnchorProps) => (
@@ -153,18 +153,18 @@ export function OutputRenderer({
   if (value == null || value === "") {
     return (
       <div>
-        <p className="text-xs font-medium text-[#666] uppercase tracking-wide mb-1">{label || name}</p>
-        <p className="text-sm text-[#999]">No output.</p>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{label || name}</p>
+        <p className="text-sm text-muted-foreground">No output.</p>
       </div>
     );
   }
 
   return (
     <div>
-      <p className="text-xs font-medium text-[#666] uppercase tracking-wide mb-2">{label || name}</p>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">{label || name}</p>
       {type === "markdown" ? (
         <div className="space-y-2">
-          <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea]">
+          <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-md border border-border">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as Parameters<typeof ReactMarkdown>[0]["components"]}>
               {String(value)}
             </ReactMarkdown>
@@ -179,12 +179,12 @@ export function OutputRenderer({
       ) : type === "csv" ? (
         <OutputCSV value={String(value)} filename={`${baseFilename}.csv`} />
       ) : type === "file" ? (
-        <div className="bg-[#f4f4f5] p-3 rounded-md text-sm text-[#666]">
+        <div className="bg-muted p-3 rounded-md text-sm text-muted-foreground">
           <span className="font-mono text-xs">{String(value)}</span>
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="bg-[#f4f4f5] p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
+          <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
             {String(value)}
           </div>
           <DownloadButton

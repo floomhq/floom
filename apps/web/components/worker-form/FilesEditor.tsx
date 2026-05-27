@@ -151,15 +151,15 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
   const selected = files.find((f) => f.path === selectedPath) || null;
 
   if (files.length === 0) {
-    return <p className="text-sm text-[#999]">No files found for this worker.</p>;
+    return <p className="text-sm text-muted-foreground">No files found for this worker.</p>;
   }
 
   return (
     <div className="flex gap-4 items-start max-w-5xl">
       <div className="w-52 shrink-0">
-        <Card className="border-[#eaeaea] shadow-none bg-white">
+        <Card className="border-border shadow-none bg-card">
           <CardHeader className="py-2 px-3">
-            <CardTitle className="text-xs font-medium text-[#666] flex items-center gap-1.5">
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <FolderOpen className="w-3.5 h-3.5" />
               Files
             </CardTitle>
@@ -172,12 +172,12 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
                 onClick={() => onSelect?.(f.path)}
                 className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${
                   f.path === selectedPath
-                    ? "bg-[#f4f4f5] text-black font-semibold"
-                    : "text-[#555] hover:bg-[#f9f9f9]"
+                    ? "bg-muted text-black font-semibold"
+                    : "text-muted-foreground hover:bg-muted/50"
                 }`}
                 title={f.path}
               >
-                <File className="w-3 h-3 shrink-0 text-[#aaa]" />
+                <File className="w-3 h-3 shrink-0 text-muted-foreground" />
                 <span className="truncate">{f.path}</span>
               </button>
             ))}
@@ -187,15 +187,15 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
 
       <div className="flex-1 min-w-0">
         {selected ? (
-          <Card className="border-[#eaeaea] shadow-none bg-white">
-            <CardHeader className="py-2 px-4 border-b border-[#eaeaea]">
-              <CardTitle className="text-xs font-medium font-mono text-[#555]">{selected.path}</CardTitle>
+          <Card className="border-border shadow-none bg-card">
+            <CardHeader className="py-2 px-4 border-b border-border">
+              <CardTitle className="text-xs font-medium font-mono text-muted-foreground">{selected.path}</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               {selected.binary ? (
-                <div className="p-4 text-sm text-[#999]">Binary file -- cannot display.</div>
+                <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>
               ) : selected.language === "markdown" ? (
-                <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-b-md overflow-auto max-h-[600px]">
+                <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-b-md overflow-auto max-h-[600px]">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content || ""}</ReactMarkdown>
                 </div>
               ) : (
@@ -204,7 +204,7 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
             </CardContent>
           </Card>
         ) : (
-          <p className="text-sm text-[#999]">Select a file to view.</p>
+          <p className="text-sm text-muted-foreground">Select a file to view.</p>
         )}
       </div>
     </div>
@@ -261,13 +261,13 @@ function FilesEditorEdit({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
-      <Card className="border-[#eaeaea] shadow-none bg-white">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader className="py-2 px-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-xs font-medium text-[#666]">Files</CardTitle>
+          <CardTitle className="text-xs font-medium text-muted-foreground">Files</CardTitle>
           <button
             type="button"
             onClick={() => setAddingFile((v) => !v)}
-            className="text-[#666] hover:text-black transition-colors"
+            className="text-muted-foreground hover:text-black transition-colors"
             title="Add file"
           >
             <FilePlus className="w-3.5 h-3.5" />
@@ -277,7 +277,7 @@ function FilesEditorEdit({
           {addingFile && (
             <div className="px-3 py-2 flex gap-1.5 border-b border-[#f4f4f5]">
               <Input
-                className="h-6 text-xs font-mono border-[#e4e4e7] py-0"
+                className="h-6 text-xs font-mono border-border py-0"
                 placeholder="lib/helpers.py"
                 value={newFilePath}
                 onChange={(e) => setNewFilePath(e.target.value)}
@@ -295,18 +295,18 @@ function FilesEditorEdit({
               key={f.path}
               className={`group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer transition-colors ${
                 f.path === effectiveSelected
-                  ? "bg-[#f4f4f5] text-black"
-                  : "text-[#555] hover:bg-[#f9f9f9]"
+                  ? "bg-muted text-black"
+                  : "text-muted-foreground hover:bg-muted/50"
               }`}
               onClick={() => selectPath(f.path)}
             >
-              <File className="w-3 h-3 shrink-0 text-[#aaa]" />
+              <File className="w-3 h-3 shrink-0 text-muted-foreground" />
               <span className="text-xs font-mono truncate flex-1" title={f.path}>{f.path}</span>
               {f.path !== "worker.yml" && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); deleteFile(f.path); }}
-                  className="opacity-0 group-hover:opacity-100 text-[#bbb] hover:text-red-500 transition-all"
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-all"
                   title={`Delete ${f.path}`}
                 >
                   <Trash2 className="w-3 h-3" />
@@ -317,9 +317,9 @@ function FilesEditorEdit({
         </CardContent>
       </Card>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardHeader className="py-2 px-4 border-b border-[#eaeaea]">
-          <CardTitle className="text-xs font-medium font-mono text-[#555]">
+      <Card className="border-border shadow-none bg-card">
+        <CardHeader className="py-2 px-4 border-b border-border">
+          <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
             {selectedFile ? selectedFile.path : "Select a file"}
           </CardTitle>
         </CardHeader>
@@ -346,7 +346,7 @@ function FilesEditorEdit({
               />
             </div>
           ) : (
-            <p className="text-sm text-[#999] p-3">Select a file to edit.</p>
+            <p className="text-sm text-muted-foreground p-3">Select a file to edit.</p>
           )}
         </CardContent>
       </Card>
