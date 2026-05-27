@@ -1,0 +1,13 @@
+[Unit]
+Description=Workeros daily SQLite snapshot
+After=workeros-api.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/workeros/ops/backup-db.sh
+Nice=10
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

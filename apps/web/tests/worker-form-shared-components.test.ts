@@ -11,6 +11,7 @@
 
 // Verify all 5 shared components are exported from the barrel
 import type {
+  DetectedEntry,
   ExecMode,
   TriggerRow,
   TriggerType,
@@ -31,6 +32,7 @@ import {
 
 // Verify type consistency
 const _mode: ExecMode = "agent";
+const _entry: DetectedEntry = "SKILL.md";
 const _row: TriggerRow = defaultTriggerRow();
 const _triggerType: TriggerType = "manual";
 const _meta: WorkerMetadataValues = { workerId: "test", name: "Test" };
@@ -45,6 +47,7 @@ const _components = [ExecModePicker, FilesEditor, RequirementsEditor, TriggersEd
 
 // Suppress unused variable lint warnings
 void _mode;
+void _entry;
 void _triggerType;
 void _meta;
 void _yaml;

@@ -18,48 +18,17 @@ import {
   makeTriggerRow,
   replaceTriggerBlock,
 } from "@/components/worker-form";
-import type { ExecMode, TriggerRow } from "@/components/worker-form";
+import type { DetectedEntry, TriggerRow } from "@/components/worker-form";
 
 // ---------------------------------------------------------------------------
-// Derive exec mode from the worker YAML / config
+// PR S11: detect the entry point from the file list. agent wins if both exist.
 // ---------------------------------------------------------------------------
 
-function deriveExecMode(worker: WorkerDetail): ExecMode {
-  const yaml = worker.manifest_yaml || "";
-  if (/mode:\s*pure-script/i.test(yaml)) return "pure-script";
-  if (/mode:\s*hybrid/i.test(yaml)) return "hybrid";
-  if (/mode:\s*agent/i.test(yaml)) return "agent";
-  const files = worker.files || [];
-  const hasSkillMd = files.some((f) => f.path === "SKILL.md");
-  const hasRunPy = files.some((f) => f.path === "run.py");
-  if (hasSkillMd && !hasRunPy) return "agent";
-  if (hasRunPy && !hasSkillMd) return "pure-script";
-  return "agent";
-}
-
-// ---------------------------------------------------------------------------
-// Replace exec block helper
-// ---------------------------------------------------------------------------
-
-function buildExecModeYamlFragment(mode: ExecMode): string {
-  if (mode === "agent") {
-    return `exec:\n  runtime: skill\n  mode: agent\n  runner: e2b\n  entrypoint: SKILL.md`;
-  }
-  if (mode === "pure-script") {
-    return `exec:\n  command: python run.py\n  runtime: python311\n  mode: pure-script\n  runner: e2b`;
-  }
-  return `exec:\n  command: python run.py\n  runtime: python311\n  mode: hybrid\n  runner: e2b\n  entrypoint: run.py`;
-}
-
-function replaceExecBlock(yaml: string, execYaml: string): string {
-  const lines = yaml.split("\n");
-  const start = lines.findIndex((line) => /^exec:\s*$/.test(line));
-  if (start === -1) return `${yaml.trimEnd()}\n\n${execYaml}\n`;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^[A-Za-z_][\w_-]*:\s*/.test(lines[i])) { end = i; break; }
-  }
-  return [...lines.slice(0, start), ...execYaml.split("\n"), ...lines.slice(end)].join("\n");
+function detectEntry(files: { path: string }[]): DetectedEntry {
+  const paths = new Set(files.map((f) => f.path));
+  if (paths.has("SKILL.md")) return "SKILL.md";
+  if (paths.has("run.py")) return "run.py";
+  return "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -105,9 +74,9 @@ export default function EditWorkerPage() {
   const [selectedPath, setSelectedPath] = useState<string>("worker.yml");
 
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
-  const [execMode, setExecMode] = useState<ExecMode>("agent");
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [saving, setSaving] = useState(false);
+  const detectedEntry: DetectedEntry = detectEntry(files);
 
   useEffect(() => {
     Promise.all([
@@ -141,7 +110,6 @@ export default function EditWorkerPage() {
         ? loadedWorker.triggers_spec
         : [loadedWorker.config.trigger];
       setTriggerRows(specs.map((s) => makeTriggerRow(s)));
-      setExecMode(deriveExecMode(loadedWorker));
       setConnections(connectionItems);
       setLoading(false);
     }).catch((e) => {
@@ -176,8 +144,7 @@ export default function EditWorkerPage() {
     try {
       const ymlContent = getContent("worker.yml");
       const triggerYaml = buildTriggersYaml(triggerRows);
-      let updatedYml = replaceTriggerBlock(ymlContent, triggerYaml);
-      updatedYml = replaceExecBlock(updatedYml, buildExecModeYamlFragment(execMode));
+      const updatedYml = replaceTriggerBlock(ymlContent, triggerYaml);
 
       const patchedFiles = files.map((f) =>
         f.path === "worker.yml" ? { ...f, content: updatedYml } : f
@@ -244,7 +211,7 @@ export default function EditWorkerPage() {
             webhookUrl={worker.webhook_url}
           />
 
-          <ExecModePicker value={execMode} onChange={setExecMode} />
+          <ExecModePicker detectedEntry={detectedEntry} />
         </div>
 
         {/* Right column: file editor */}
