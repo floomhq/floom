@@ -65,7 +65,7 @@ from worker_registry import (
     invalidate_worker_cache,
 )
 from run_service import create_run, get_worker_config_for_run, start_run, add_log, update_run_status
-from run_service import register_sse_publisher
+from run_service import register_sse_publisher, register_part_publisher
 
 load_dotenv()
 api_env_path = Path("/root/.config/workeros/api.env")
@@ -100,6 +100,7 @@ async def lifespan(app: FastAPI):
     global _sweep_task
     # Wire up SSE publisher before starting workers (avoids circular import)
     register_sse_publisher(_sse_publish)
+    register_part_publisher(_run_part_publish)
     # Startup
     reload_workers()
     from scheduler import start_scheduler
@@ -261,6 +262,10 @@ print(
 # loop the queue was bound to and use call_soon_threadsafe from worker threads.
 _sse_queues: Dict[str, List[tuple]] = {}
 _sse_lock = threading.Lock()
+_run_part_buffers: Dict[str, Dict[str, Any]] = {}
+_run_part_cleanup_timers: Dict[str, threading.Timer] = {}
+_run_part_lock = threading.Lock()
+_RUN_PART_TTL_SECONDS = 300
 
 _TERMINAL_STATUSES = frozenset({
     RunStatus.COMPLETED.value,
@@ -298,6 +303,124 @@ def _sse_cleanup(run_id: str, q: asyncio.Queue) -> None:
             _sse_queues[run_id] = [(eq, el) for (eq, el) in entries if eq is not q]
             if not _sse_queues[run_id]:
                 _sse_queues.pop(run_id, None)
+
+
+def _run_part_state(run_id: str) -> Dict[str, Any]:
+    state = _run_part_buffers.get(run_id)
+    if state is None:
+        state = {
+            "next_id": 0,
+            "parts": collections.deque(maxlen=2000),
+            "queues": [],
+            "finished_at": None,
+        }
+        _run_part_buffers[run_id] = state
+    return state
+
+
+def _run_part_is_finish(part: Dict[str, Any]) -> bool:
+    return part.get("type") == "finish"
+
+
+def _cancel_run_part_cleanup(run_id: str) -> None:
+    timer = _run_part_cleanup_timers.pop(run_id, None)
+    if timer is not None:
+        timer.cancel()
+
+
+def _schedule_run_part_cleanup(run_id: str) -> None:
+    def _cleanup() -> None:
+        with _run_part_lock:
+            _run_part_buffers.pop(run_id, None)
+            _run_part_cleanup_timers.pop(run_id, None)
+
+    with _run_part_lock:
+        _cancel_run_part_cleanup(run_id)
+        timer = threading.Timer(_RUN_PART_TTL_SECONDS, _cleanup)
+        timer.daemon = True
+        _run_part_cleanup_timers[run_id] = timer
+        timer.start()
+
+
+def _run_part_publish(run_id: str, part: Dict[str, Any]) -> None:
+    """Publish one AI SDK part to the replay buffer and active consumers."""
+    with _run_part_lock:
+        state = _run_part_state(run_id)
+        event_id = state["next_id"]
+        state["next_id"] = event_id + 1
+        state["parts"].append((event_id, part))
+        if _run_part_is_finish(part):
+            state["finished_at"] = time.time()
+        entries = list(state["queues"])
+
+    for q, loop in entries:
+        def _put(q=q, event_id=event_id, part=part):
+            try:
+                q.put_nowait((event_id, part))
+            except asyncio.QueueFull:
+                logger.warning("Run part queue full for run %s, dropping part", run_id)
+
+        try:
+            loop.call_soon_threadsafe(_put)
+        except RuntimeError:
+            pass
+
+    if _run_part_is_finish(part):
+        _schedule_run_part_cleanup(run_id)
+
+
+def _run_part_register(run_id: str, q: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
+    with _run_part_lock:
+        state = _run_part_state(run_id)
+        _cancel_run_part_cleanup(run_id)
+        state["queues"].append((q, loop))
+
+
+def _run_part_cleanup(run_id: str, q: asyncio.Queue) -> None:
+    with _run_part_lock:
+        state = _run_part_buffers.get(run_id)
+        if not state:
+            return
+        state["queues"] = [(eq, el) for (eq, el) in state["queues"] if eq is not q]
+        finished = state.get("finished_at") is not None
+    if finished:
+        _schedule_run_part_cleanup(run_id)
+
+
+def _run_part_snapshot(run_id: str) -> Optional[Dict[str, Any]]:
+    with _run_part_lock:
+        state = _run_part_buffers.get(run_id)
+        if state is None:
+            return None
+        return {
+            "parts": list(state["parts"]),
+            "finished": state.get("finished_at") is not None,
+        }
+
+
+def _format_run_part_sse(event_id: int, part: Dict[str, Any]) -> str:
+    return f"id: {event_id}\nevent: part\ndata: {json.dumps(part)}\n\n"
+
+
+def _parse_last_event_id(value: Optional[str]) -> int:
+    if not value:
+        return -1
+    try:
+        return int(value)
+    except ValueError:
+        return -1
+
+
+def _finish_part_from_run_row(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+    status = row["status"]
+    if status == RunStatus.COMPLETED.value:
+        return {"type": "finish", "status": "completed"}
+    if status == RunStatus.FAILED.value:
+        part: Dict[str, Any] = {"type": "finish", "status": "failed"}
+        if row["error"]:
+            part["error"] = row["error"]
+        return part
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -3747,6 +3870,65 @@ def get_run(run_id: str) -> RunDetail:
         completed_at=run.get("completed_at"),
         duration_ms=run.get("duration_ms"),
         created_at=run.get("created_at"),
+    )
+
+
+@app.get("/runs/{run_id}/stream")
+async def stream_run_parts(run_id: str, request: Request):
+    """Server-Sent Events stream of AI SDK parts for a single run."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, status, error FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
+
+    async def event_generator():
+        snapshot = _run_part_snapshot(run_id)
+        if snapshot is None:
+            final_part = _finish_part_from_run_row(row)
+            if final_part is not None:
+                yield _format_run_part_sse(0, final_part)
+                return
+            snapshot = {"parts": [], "finished": False}
+
+        for event_id, part in snapshot["parts"]:
+            if event_id > last_seen:
+                yield _format_run_part_sse(event_id, part)
+
+        if snapshot["finished"]:
+            return
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=512)
+        loop = asyncio.get_running_loop()
+        _run_part_register(run_id, q, loop)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+                yield _format_run_part_sse(event_id, part)
+                if _run_part_is_finish(part):
+                    break
+        finally:
+            _run_part_cleanup(run_id, q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
