@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { ArrowLeft, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { load as parseYaml } from "js-yaml";
 import type { ConnectionItem, TriggerSpec, WorkerDetail, WorkerFile } from "@/lib/types";
 import {
@@ -196,21 +196,27 @@ export default function EditWorkerPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => navigateAway(`/workers/${id}`)}>
-          <ArrowLeft className="w-4 h-4" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Edit worker</h1>
+      {/* S23: edit page header now matches /workers/<id> chrome. Worker name as
+          H1 (not "Edit worker"), inline "Editing" pill in Floom blue when
+          dirty, no back arrow (sidebar nav covers it). Save replaces the
+          "Edit" button slot on the right. */}
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold tracking-tight">{worker.name}</h1>
+            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]">
+              <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+              Editing
+            </span>
             {isDirty && (
-              <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+              <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
                 Unsaved changes
               </span>
             )}
           </div>
-          <p className="text-muted-foreground text-sm">{worker.name}</p>
+          {worker.description && (
+            <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
+          )}
         </div>
         <Button size="sm" onClick={save} disabled={saving || !isDirty}>
           <Save className="w-4 h-4 mr-1.5" />

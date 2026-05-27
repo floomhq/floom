@@ -2,10 +2,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { IconSprite } from "@/components/IconSprite";
 import { ConnectionCard } from "@/components/connections/ConnectionCard";
+import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ConnectionSkeleton } from "@/components/connections/ConnectionSkeleton";
 import { ConnectionsEmptyState } from "@/components/connections/ConnectionsEmptyState";
 import {
@@ -221,21 +221,13 @@ export default function ConnectionsPage() {
     <>
       <IconSprite />
       <div className="space-y-6">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-              Connect apps via OAuth so workers can read and write on your behalf.
-            </p>
-          </div>
-          <a
-            href="/connections/browse"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--line)] bg-[var(--paper)] px-3 text-sm font-medium text-ink shadow-sm transition-colors hover:bg-[var(--paper-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-          >
-            <Plus className="size-3.5" />
-            Connect a tool
-          </a>
+        <header>
+          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+            Connect apps via OAuth so workers can read and write on your behalf.
+          </p>
         </header>
+        <ConnectionsTabs />
 
         <section className="space-y-3" aria-label="Connected tools">
           {loading ? (
