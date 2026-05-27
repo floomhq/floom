@@ -270,6 +270,8 @@ export interface SystemOverviewAttentionItem {
   type: string;
   worker_id?: string;
   connection_id?: string;
+  provider_slug?: string;
+  provider_display_name?: string;
   message: string;
   action_url: string;
 }
