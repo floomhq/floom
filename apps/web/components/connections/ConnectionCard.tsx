@@ -109,15 +109,19 @@ export function ConnectionCard({
                   ))}
                 </div>
               </>
-            ) : (
-              <ScopeChip scope="Default scopes" muted />
-            )}
+            ) : null /* S22f: drop the "Default scopes" placeholder. Roast P1:
+                       label with no value is noise; "Default" is implied. */}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <p className="text-xs text-[var(--ink-mute)]">
-              Last used {formatTimestamp(connection.lastUsedAt)}
-            </p>
+            {/* S22f: only render Last used when we actually have a timestamp.
+                Roast P1: "Last used: Never" appearing on every card read as
+                "nothing ever uses these" which contradicted the dashboard. */}
+            {connection.lastUsedAt && (
+              <p className="text-xs text-[var(--ink-mute)]">
+                Last used {formatTimestamp(connection.lastUsedAt)}
+              </p>
+            )}
             {connection.lastCheckedAt && (
               <p className="text-xs text-[var(--ink-mute)]">
                 Checked {formatRelativeTime(connection.lastCheckedAt)}
