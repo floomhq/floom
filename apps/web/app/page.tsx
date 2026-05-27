@@ -44,14 +44,13 @@ function StatCard({
   loading: boolean;
 }) {
   return (
-    // S29q (score walk): KPI cards were bordered, which made the home page
-    // feel like a JIRA dashboard. Now fully flat: big number on top,
-    // sentence-case label below, sparkline inline. No card outline, no bg.
+    // S29q: flat KPIs.
+    // S29y: dropped the icon entirely. With no card border to anchor it,
+    // the right-aligned icon (justify-between) was orphaned at the column
+    // edge — Federico called it out ("what is this"). The labels carry
+    // their own meaning; the icons were decorative.
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <Icon className="size-4 text-muted-foreground" />
-      </div>
+      <p className="text-sm text-muted-foreground">{label}</p>
       <div className="text-2xl font-semibold">
         {loading ? <Skeleton className="h-8 w-16" /> : value}
       </div>
