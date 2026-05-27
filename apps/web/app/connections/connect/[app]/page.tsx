@@ -6,6 +6,8 @@ import Link from "next/link";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
 
 type AppMeta = {
@@ -83,62 +85,75 @@ export default function ConnectAppPage() {
 
   const providerName = meta?.name || slug;
 
+  // PR S19 (I-31): primary button was rendering invisible because the
+  // hardcoded bg-[var(--ink)] + text-[var(--surface)] tokens didn't survive
+  // theme switches (--surface doesn't exist in this project; we have --paper).
+  // Replaced with shadcn Button (default variant), Card primitives.
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <Link
           href={returnTo}
-          className="inline-flex items-center gap-1.5 text-sm text-[var(--ink-mute)] hover:text-[var(--ink)] mb-6"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6"
         >
           <ArrowLeft className="size-4" />
           Back
         </Link>
 
-        <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-8 shadow-sm">
-          <ProviderLogos providerIcon={slug} />
+        <Card>
+          <CardContent className="p-8">
+            <ProviderLogos providerIcon={slug} />
 
-          <h1 className="mt-6 text-center text-xl font-semibold">
-            Floom wants to connect to {providerName}
-          </h1>
+            <h1 className="mt-6 text-center text-xl font-semibold">
+              Floom wants to connect to {providerName}
+            </h1>
 
-          {meta?.description && (
-            <p className="mt-2 text-center text-sm text-[var(--ink-mute)]">
-              {meta.description}
+            {meta?.description && (
+              <p className="mt-2 text-center text-sm text-muted-foreground">
+                {meta.description}
+              </p>
+            )}
+
+            <div className="mt-6 rounded-lg border bg-muted/40 p-4">
+              <p className="text-sm font-medium">What this allows</p>
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground list-disc list-inside">
+                <li>Read your {providerName} data on your behalf</li>
+                <li>Perform actions in {providerName} that your workers ask for</li>
+                <li>You can revoke this at any time from the Connections page</li>
+              </ul>
+            </div>
+
+            <Button
+              type="button"
+              onClick={handleConnect}
+              disabled={loading || connecting}
+              className="mt-6 w-full"
+              size="lg"
+            >
+              {connecting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Opening...
+                </>
+              ) : (
+                `Connect to ${providerName}`
+              )}
+            </Button>
+
+            <Link
+              href={returnTo}
+              className="mt-3 block text-center text-sm text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </Link>
+
+            <p className="mt-6 text-center text-xs text-muted-foreground leading-relaxed">
+              You will be redirected to {providerName} to authenticate. Floom uses
+              Composio as its integrations layer, so you may see Composio&apos;s
+              name on the next screen. That is expected.
             </p>
-          )}
-
-          <div className="mt-6 rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4">
-            <p className="text-sm font-medium">What this allows</p>
-            <ul className="mt-2 space-y-1 text-sm text-[var(--ink-mute)] list-disc list-inside">
-              <li>Read your {providerName} data on your behalf</li>
-              <li>Perform actions in {providerName} that your workers ask for</li>
-              <li>You can revoke this at any time from the Connections page</li>
-            </ul>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleConnect}
-            disabled={loading || connecting}
-            className="mt-6 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--ink)] text-[var(--surface)] py-2.5 text-sm font-medium hover:opacity-90 disabled:opacity-50"
-          >
-            {connecting ? <Loader2 className="size-4 animate-spin" /> : null}
-            {connecting ? "Opening..." : `Connect to ${providerName}`}
-          </button>
-
-          <Link
-            href={returnTo}
-            className="mt-3 block text-center text-sm text-[var(--ink-mute)] hover:text-[var(--ink)]"
-          >
-            Cancel
-          </Link>
-
-          <p className="mt-6 text-center text-xs text-[var(--ink-mute)] leading-relaxed">
-            You will be redirected to {providerName} to authenticate. Floom uses
-            Composio as its integrations layer, so you may see Composio&apos;s
-            name on the next screen. That is expected.
-          </p>
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
