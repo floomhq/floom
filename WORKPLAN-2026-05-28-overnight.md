@@ -1,117 +1,119 @@
-# Overnight Workplan — Federico asleep, 2026-05-28
+# Overnight Workplan v2 — revised after Codex 4/10 review
 
-Federico is asleep. He left these instructions:
+Codex graded the v1 plan **4/10** at `docs/audits/overnight-2026-05-28/codex-workplan-review.md`. Three substantive criticisms accepted; this v2 addresses all three.
 
-> "You work on the UI, codex work on the backend, and maybe take a step right
-> now to just do a workplan of how you will work. You can work ten hours,
-> twenty hours, doesn't matter. I just want perfect UI, agent interface, and
-> backend when I wake up, and everything should be tested by different agents
-> in every way possible. We want to leverage different skills that we have."
+## What changed from v1
+1. **UI order reflows by P0 gate, not "card polish first"** — though batches 1-4 already shipped most of those P0s; this doc now reflects reality + queues what's left.
+2. **I-52 promoted to a deterministic contract fix** (per Codex root-cause analysis). Smoke alone won't validate the agent contract.
+3. **The "95/100 by 8am" promise is replaced by a Release Gate** with 6 named flows + an acceptance matrix + hard evidence per flow.
 
-This file IS that plan. I (Claude, Opus 4.7) am driving.
+## Release Gate (replaces the "95/100" target)
 
-Federico's specific newest complaints (from message just before sleep):
-- I-52 research_brief run `run_59f3013d9468` failed with `Output schema violation: Missing declared output 'brief'` after 8 agent iterations. Cards say "manual" everywhere or "cron" with a cryptic value. I never actually ran the workers to verify.
-- I-53 Worker card sparkline makes cards too tall.
-- I-54 Trigger labels broken (cryptic cron string, generic "manual").
-- I-55 "Run worker" button position inconsistent across cards (cards have variable heights).
-- I-56 Need a demo / clone-per-person sharing flow.
-- "You don't seem to have the intelligence... maybe you're not invoking the right skills." — invoke skills hard. Multi-agent everything.
+Six flows. Each must pass with hard evidence in `docs/audits/overnight-2026-05-28/release-evidence/`.
 
-## Goal
+| # | Flow | Acceptance | Evidence |
+|---|---|---|---|
+| 1 | **Create worker from prompt** | Click example pill → fills textarea (no auto-submit). Click Generate → completes within 60s OR shows the real error. | screenshot of created worker `/workers/<new_id>/edit` + run_id |
+| 2 | **Run a worker, see output** | Trigger every stock worker (12 of them). All return `status=completed`. Output panel shows real content. | `worker-smoke.md` with run_id, status, duration per worker; output preview screenshot for one |
+| 3 | **Debug a failed run** | Force a failure (bad input). Failed run detail shows the inline Error panel + the raw error + transcript artifact (transcript MUST persist on failure). | run_id of forced-fail + screenshot of error panel + transcript file path |
+| 4 | **Connect a new tool** | `/connections/connect/<app>` Connect button visible in both themes. Click → opens OAuth tab. Returns to `/connections` showing the new connection with the correct email. | screenshot light + dark + post-connect `/connections` row with email |
+| 5 | **Clear runs safety** | `/settings → Danger zone → Clear runs` requires typing `DELETE ALL RUNS`. No single-click destructive path. | screenshot of locked button + screenshot of typed-confirm + 200 from `/runs/clear` |
+| 6 | **Theme controls sync** | Sidebar Light/Dark/System toggle and `Settings → Appearance` toggle. Click either → both update + page re-themes. No drift. | short video / 3-step screenshot proof of click-here-update-both |
 
-Multi-agent score ≥ 95/100 by 8am tomorrow. Zero P0s. Every flow end-to-end tested by at least two different agents. Workers actually triggered and verified.
+**SHIP when all 6 flows pass + zero open P0s + agent contract tests green.**
 
 ## Lanes
 
 ### Lane A — Backend (Codex)
-Codex is back. Dispatch focused codex briefs one at a time (not in parallel — codex shares one cli-config).
+Codex is back. Briefs go one at a time (shared cli-config).
 
-1. **I-52 + worker contract audit** — root-cause `research_brief` schema violation. Likely: agent driver doesn't enforce or signal the declared output names to the LLM. Fix path: include the declared `outputs:` schema in the system prompt + a finishing tool that requires those keys. Then audit every other agent-mode worker for the same bug.
-2. **/system/metrics polish** — add `runs_failed_24h`, per-worker last_error so the UI can flag failures inline.
-3. **Demo-clone-per-person endpoint** (I-56) — `POST /demo/clones` that spawns a fresh isolated demo workspace (in-process for v0; document the design). Returns a unique URL + secret. Stub if too big.
-4. **Run-detail snapshot serving** — verify S12-BE actually persists per-run bundle snapshots and `/runs/<id>/bundle/<file>` serves them.
+**A1 — I-52 deterministic agent contract fix (THE P0)** — per Codex's review section 7:
+- Inject the full declared `outputs:` schema into AgentDriver system prompt (not just names)
+- Add `finish_with_outputs` terminal tool with JSON schema generated from `config.outputs`
+- Restrict `write_output` `name` property to an enum of declared outputs (was free string)
+- Move transcript persistence BEFORE schema validation (currently lost on failure — `agent_driver.py:258-276`)
+- Reconcile `web_search`: it's in SKILL.md but stripped from runtime. Either re-enable via Responses API or strip from SKILL.md.
+- Fix path mismatch: `worker.yml` declares `out/brief.md`; driver writes `outputs/brief.txt`. Either honour declared paths OR document the normalization and update workers.
+- Deterministic fake-model tests: (a) model returns prose-only with no tool call → driver retries via `finish_with_outputs` or fails-with-transcript; (b) model calls wrong output name → driver returns corrective tool error.
 
-### Lane B — UI (Claude, me)
-Continue in tight batches, each commits + Vercel-builds before moving on. Pull main between batches to absorb backend fixes.
+**A2 — Backend follow-ups, only if A1 lands clean and tested**:
+- `/system/metrics`: add `runs_failed_24h` + per-worker last_error
+- `/runs/<id>` API: include `bundle_snapshot_path` so the UI can show code-at-run-time
 
-Order:
-1. **I-53 + I-55**: rework worker card layout. Drop sparkline by default (show on hover). Pin "Run worker" button to the bottom of the card via flex (so cards equalize). Trigger label gets a real translation (cron → human, composio → "When new Gmail thread", etc).
-2. **I-46 URL-sync sweep**: /runs filter, /workers search/folder (partially done), /connections/browse — all state to URL params.
-3. **I-48 + I-49**: Worker > Connections > Configure routes properly. /connections/browse Connect routes through pre-confirm + flags already-connected.
-4. **I-36 token mask polish**: `XXXX...XXXX` not 60 asterisks.
-5. **I-27**: merge /connections + /connections/browse into ONE page with Connected / Explore toggle + search.
-6. **I-39 label drift**: pick one canonical phrase per verb. Audit every CTA. Update.
-7. **I-42 /cli-auth**: move to its own route group, strip the app chrome, show scopes/expiry/fingerprint.
-8. **I-38 skeleton sweep**: every fetching page has a proper skeleton block matching its content shape.
-9. **I-50 Overview stat cards**: drill-in OR remove hover styles (decide via test).
-10. **I-51 tag filter indicator**: when a tag is clicked, render an active-tag chip above results with an `X`.
-11. **I-28 setup commands redesign**: bigger token + cleaner snippet boxes + syntax highlight.
-12. **I-26 hover/transitions sweep**: every hoverable surface gets `transition-colors duration-150`. No layout shift on hover.
-13. **I-45 doubled <a>+<button> sweep**: switch to `<a className={buttonVariants(...)}>` from shadcn helpers across all `<Link><Button>` call sites.
-
-### Lane C — Testing / verification (multi-agent)
-
-Run after each batch lands. Cross-agent rule: never let the agent that built something audit its own work.
-
-| Skill / agent | Trigger | Output |
-|---|---|---|
-| `/launch-readiness` | After each batch | 0-100 score + P0/P1 ranked |
-| `/ux-review-everywhere` | After UI batch | 4-viewport × 3-state screenshots + bug report |
-| `/layout-eyes` | After UI batch | Adversarial UI bugs |
-| `kimi-agent` | Hard mode | Probe every endpoint + UI element, score, repeat |
-| `/codex review` | Each PR before merge | Adversarial code review |
-| `/cso` | Once tonight | OWASP + STRIDE pass |
-| `claude-virgin` agent | After all batches | Real-user 22-step UI walk |
-
-Each agent writes to `docs/audits/overnight-2026-05-28/<agent>/findings.md`. I aggregate findings into a delta tracker and fix loop.
-
-### Lane D — Actually run workers (Federico's biggest gripe)
-
-I never actually triggered workers to verify they work. Tonight:
-1. Trigger research_brief, weekly_update, csv_enricher, dach_compliance, reverse_match_crm, cv_writeup, gmail_intake_brief — every stock worker — with realistic inputs.
-2. Capture status, duration, output of each. Save to `docs/audits/overnight-2026-05-28/worker-smoke.md`.
-3. Any failure → root-cause and fix (likely Codex lane).
-4. Re-trigger until all pass.
-
-## Iteration loop
-
-Until score ≥ 95 AND zero new findings:
+### Lane B — UI (Claude)
+Status (truth after batches 1-4 deployed):
+- ✅ Shipped P0s: I-23 (Generate), I-31 (Connect CTA), I-44 (Clear runs), I-32 (race), I-43 (theme sync), I-22 (dark mode), I-11/I-24 (cards + tabs)
+- 🔄 In flight: S20 matte palette (PR #73)
+- ❌ Outstanding from ISSUES.md, in order of release-gate priority:
 
 ```
-for batch in lanes_AB:
-  - implement batch
-  - commit + push
-  - wait for Vercel green
-  - merge PR
+B1: openchat-v2 polish port (deeper than colours — fonts, scale, spacing, skeleton, Card padding, tighter Button sizes). [opensource the references]
+B2: I-47 failed-run transcript surface (paired with A1 — UI needs to show what A1 persists)
+B3: I-30 /runs page align with locked ASCII spec
+B4: I-34 connection rows show email/account_label prominently
+B5: I-35 hide /settings Notifications "Soon" toggles in production
+B6: I-36 token mask 4-and-4 pattern
+B7: I-37 status/pill/card/button conventions consolidated
+B8: I-27 /connections + /connections/browse merged with Connected/Explore + search
+B9: I-38 skeleton sweep (matches content shape, no flip-flash)
+B10: I-39 label drift sweep
+B11: I-42 /cli-auth strip app chrome
+B12: I-46 URL-sync filter/search/pagination
+B13: I-48 Configure routes correctly
+B14: I-49 /connections/browse Connect via pre-confirm + flag already-connected
+B15: I-50 Overview stat cards drill-in or remove hover styles
+B16: I-51 tag-click → active-tag chip indicator
+B17: I-53/I-54/I-55 worker card polish (sparkline hover-only, sticky Run, human trigger labels)
+```
+
+### Lane C — Verification (multi-agent)
+Run AFTER each PR merges, per the loops in `docs/audits/overnight-2026-05-28/assessment-loops.md`. Gemini free tier OK (Federico re-authorised).
+
+### Lane D — Hard worker smoke (replaces "trigger and check status")
+Per Codex section 6:
+- For each declared output in `worker.yml`, response MUST contain exact required key
+- For each declared output path/media type, artifact path matches declared OR documented normalization
+- Failed runs MUST persist a transcript artifact (this is also A1 acceptance)
+- `research_brief` output MUST contain `## Sources` (since SKILL.md asserts citations)
+- Tool list in agent driver MUST be a superset of tools advertised in SKILL.md
+- Two fake-model regression tests added (see A1)
+
+## Iteration loop (concrete)
+
+```
+for batch in [A1, B1, B2, A2, B3, ...]:
+  - implement
+  - commit + push, wait Vercel
+  - merge
   - alias to prod
-  - run lane C agents
+  - run Lane C loops (ui or backend depending on what shipped)
+  - run Lane D for backend changes
   - aggregate findings → ISSUES.md
-  - run lane D worker smoke
-  - if (P0 found) inject into next batch
+  - if any release-gate flow fails: STOP the loop, fix the flow, then resume
+end when: all 6 release-gate flows green AND zero open P0s
 ```
 
-Stop conditions:
-- Score ≥ 95 + 0 P0s + 0 P1s = ship
-- 5 consecutive batches with no new findings = ship at current score
-- Federico wakes up
+## Stop conditions (replaces "score >= 95")
 
-## Promote / share path (I-56 demo access)
+1. All 6 Release Gate flows pass with evidence files.
+2. Zero open P0s in `ISSUES.md`.
+3. Lane D agent contract tests green (the 2 fake-model regression tests + worker smoke).
+4. Codex final-gate review of the merged release branch (composed of all overnight PRs) returns no P0s.
 
-Brutally simple v0: a "Demo" button on `/settings` that creates a snapshot of the current worker bundles + a fresh database file, archives them, and hands the user a URL like `workers.floom.dev/d/<token>` that boots an isolated sub-instance. For v0 demo without infra:
+If any of those fail, the morning report names which flow failed and the residual P0s — no "fake green".
 
-- Document the design in `docs/demo-clone-design.md` and code a stub `POST /demo/clones` endpoint.
-- Actual implementation (separate Vercel project + per-clone Cloudflare alias + isolated SQLite) is a 4-hour build — defer if time runs short.
+## Current snapshot (07:25 UTC)
+
+- Codex workplan review: **DONE** (4/10). All criticisms folded into this v2.
+- PR #73 S20 matte palette: open, awaits Vercel. Once green, merge + alias.
+- Codex A1 (I-52 contract fix): dispatching now.
+- B1 openchat-v2 polish: starting after A1 dispatch + matte merge.
 
 ## Reporting
 
-When I finish (or when Federico wakes, whichever first), this file gets a `## Outcome` section appended with:
-- Final score
-- PRs landed (with commit SHAs)
-- Worker smoke results
-- Outstanding P1s/P2s
-- Cost: tokens used per lane
-
-## Now
-
-Starting at 06:45 UTC 2026-05-28. First action: merge codex's PR #70 (R5 CORS + uploads). Then lane B batch 1 (worker card layout). Then lane D worker smoke #1. Then lane C audit #1. Then lane B batch 2.
+Final report → `docs/audits/overnight-2026-05-28/RELEASE.md` with:
+- Release Gate matrix marked pass/fail with evidence file paths
+- PR list with commit SHAs
+- Outstanding P1/P2 with severity + size estimates
+- Codex/Kimi/claude-virgin per-agent verdicts
+- Re-run command for Federico to reproduce
