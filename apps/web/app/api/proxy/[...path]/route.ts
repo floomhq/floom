@@ -26,6 +26,10 @@ async function handler(
   };
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
+  const lastEventId = req.headers.get("last-event-id");
+  if (lastEventId) forwardHeaders["last-event-id"] = lastEventId;
+  const accept = req.headers.get("accept");
+  if (accept) forwardHeaders["accept"] = accept;
 
   const isUpload = upstreamPath === "/uploads";
   let body: BodyInit | null | undefined;
@@ -52,6 +56,8 @@ async function handler(
   if (cd) responseHeaders.set("content-disposition", cd);
   const cl = upstream.headers.get("content-length");
   if (cl) responseHeaders.set("content-length", cl);
+  const cacheControl = upstream.headers.get("cache-control");
+  if (cacheControl) responseHeaders.set("cache-control", cacheControl);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

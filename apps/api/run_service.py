@@ -35,6 +35,7 @@ LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
 # Populated by main.py at startup to avoid circular imports.
 # Signature: (run_id: str, event: dict) -> None
 _sse_publish_fn: Optional[Callable[[str, dict], None]] = None
+_part_publish_fn: Optional[Callable[[str, dict], None]] = None
 
 
 def register_sse_publisher(fn: Callable[[str, dict], None]) -> None:
@@ -43,12 +44,26 @@ def register_sse_publisher(fn: Callable[[str, dict], None]) -> None:
     _sse_publish_fn = fn
 
 
+def register_part_publisher(fn: Callable[[str, dict], None]) -> None:
+    """Called from main.py to wire up the AI SDK part publisher."""
+    global _part_publish_fn
+    _part_publish_fn = fn
+
+
 def _publish_sse(run_id: str, event: dict) -> None:
     if _sse_publish_fn is not None:
         try:
             _sse_publish_fn(run_id, event)
         except Exception as exc:
             logger.warning("SSE publish failed for run %s: %s", run_id, exc)
+
+
+def publish_run_part(run_id: str, part: dict) -> None:
+    if _part_publish_fn is not None:
+        try:
+            _part_publish_fn(run_id, part)
+        except Exception as exc:
+            logger.warning("Part publish failed for run %s: %s", run_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -451,12 +466,14 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     if not config:
         err = "Worker config not found"
         update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
 
     if instance and not instance.get("enabled", True):
         err = "Worker is disabled"
         update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
 
@@ -465,6 +482,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         if inp.required and (inp.name not in effective_inputs or effective_inputs[inp.name] in (None, "")):
             err = f"Missing required input: {inp.name}"
             update_run_status(run_id, RunStatus.FAILED.value, error=err)
+            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
             log_fn(err, level="error")
             return
 
@@ -474,6 +492,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     if missing:
         err = f"Missing secrets: {', '.join(missing)}"
         update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
 
@@ -485,6 +504,7 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
         if conn_err:
             update_run_status(run_id, RunStatus.FAILED.value, error=conn_err)
+            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})
             log_fn(conn_err, level="error")
             return
 
@@ -526,10 +546,16 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     # Both "error" and "failed" terminal statuses map to a failed run
     if result.status in ("error", "failed"):
         update_run_status(run_id, RunStatus.FAILED.value, error=result.error)
+        finish_status = "timeout" if (result.error_code or "").lower().find("timeout") >= 0 else "failed"
+        publish_run_part(
+            run_id,
+            {"type": "finish", "status": finish_status, "error": result.error or "Run failed"},
+        )
         log_fn(f"Run failed: {result.error}", level="error")
         return
 
     update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
+    publish_run_part(run_id, {"type": "finish", "status": "completed"})
     log_fn("Output generated")
     log_fn("Run completed")
 
