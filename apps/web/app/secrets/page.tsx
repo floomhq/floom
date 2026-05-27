@@ -184,11 +184,11 @@ function SecretsContent() {
         </Card>
       )}
 
-      <Card className="border-border shadow-none bg-card">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Environment secrets</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
+      {/* S29v (score walk): dropped Card wrapper. Matches /settings flat
+          section rhythm. */}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Environment secrets</h2>
+        <div className="space-y-2">
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : secrets.length === 0 ? (
@@ -255,16 +255,17 @@ function SecretsContent() {
                         {testResults[s.name].status === "valid" ? "Valid" : "Invalid"}
                       </Badge>
                     )}
-                    <Badge
-                      variant="outline"
-                      className={
-                        s.status === "set"
-                          ? "text-emerald-600 border-emerald-200 bg-emerald-50"
-                          : "text-red-600 border-red-200 bg-red-50"
-                      }
-                    >
-                      {s.status === "set" ? "Set" : "Missing"}
-                    </Badge>
+                    {/* S29v: only show pill when state needs attention.
+                        Default-success ("Set") was decoration per
+                        ChatGPT audit P-2. */}
+                    {s.status !== "set" && (
+                      <Badge
+                        variant="outline"
+                        className="text-red-600 border-red-200 bg-red-50"
+                      >
+                        Missing
+                      </Badge>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -328,18 +329,16 @@ function SecretsContent() {
               </div>
             ))
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card className="border-border shadow-none bg-card">
-        <CardContent className="p-5 text-sm text-muted-foreground">
-          <p>
-            Secret values are write-only; they are never returned by the API. Changes to{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code>{" "}
-            take effect immediately without restarting workers.
-          </p>
-        </CardContent>
-      </Card>
+      {/* S29v: dropped Card around the footer help text. Flat note matches
+          /connections footer rhythm. */}
+      <p className="text-sm text-muted-foreground">
+        Secret values are write-only; they are never returned by the API. Changes to{" "}
+        <code className="bg-muted px-1 py-0.5 text-xs">.env</code>{" "}
+        take effect immediately without restarting workers.
+      </p>
     </div>
   );
 }
