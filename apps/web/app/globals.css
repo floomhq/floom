@@ -1,4 +1,6 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;680&family=JetBrains+Mono:wght@400;500;600&display=swap");
+/* PR S20: Inter + JetBrains Mono replaced by Geist Sans + Geist Mono
+   (loaded via next/font in layout.tsx). The previous @import added a
+   network hop the new approach inlines instead. */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -128,9 +130,10 @@
   --t-slow: 320ms;
   --negative: #c0392b;
   --positive: #2f7a59;
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  /* PR S20: Geist via next/font. Fallback chain kept for SSR / pre-hydration. */
+  --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
   --font: var(--font-sans);
-  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Code", monospace;
+  --font-mono: var(--font-geist-mono), "SF Mono", ui-monospace, "Cascadia Code", monospace;
   --font-feat: "cv11" 1, "ss01" 1, "calt" 1;
 
   --background: var(--bg);
