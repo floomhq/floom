@@ -160,8 +160,8 @@ export default function RunsPage() {
               onClick={() => setStatusFilter(opt.value)}
               className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                 statusFilter === opt.value
-                  ? "bg-[#333] text-white border-[#333]"
-                  : "bg-card text-muted-foreground border-border hover:border-[#999]"
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-card text-muted-foreground border-border hover:border-muted-foreground/50"
               }`}
             >
               {opt.label}

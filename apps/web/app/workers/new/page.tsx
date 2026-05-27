@@ -260,7 +260,7 @@ function NewWorkerContent() {
 
           <Button
             onClick={() => void handleGenerate()}
-            disabled={isBusy || !getLivePrompt()}
+            disabled={isBusy || !prompt.trim()}
             className="h-8 px-4 text-sm"
           >
             {generating ? (

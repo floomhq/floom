@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -256,97 +257,76 @@ export default function WorkerDetailPage() {
   const triggerSummary = worker.trigger_type || "manual";
 
   // ---------------------------------------------------------------------------
-  // Layout: side-rail + content
+  // Layout: page header + HORIZONTAL TABS at the top (Federico 2026-05-27 round 2:
+  // side rail next to the main app sidebar read as "two sidebars" and he kept
+  // saying "no tabs at the top". Switched from side-nav B to shadcn Tabs at top.
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] -mx-6 -mt-6">
-      {/* Worker rail (180px) */}
-      <nav className="w-[180px] shrink-0 border-r border-border bg-card flex flex-col pt-4">
-        {/* Nav items */}
-        <div className="flex-1 px-2 space-y-0.5">
-          {NAV_ITEMS.map((item) => {
-            const isActive = activeSection === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setSection(item.id)}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left ${
-                  isActive
-                    ? "bg-muted font-medium text-foreground border-l-2 border-black"
-                    : "text-muted-foreground hover:bg-muted/50 border-l-2 border-transparent"
-                }`}
-              >
-                <span className={isActive ? "text-foreground" : "text-muted-foreground"}>{item.icon}</span>
-                <span className="flex-1">{item.label}</span>
-                {item.id === "triggers" && triggersCount > 1 && (
-                  <span className="text-[10px] bg-muted text-muted-foreground rounded px-1">{triggersCount}</span>
-                )}
-                {item.id === "runs" && runsCount > 0 && (
-                  <span className="text-[10px] bg-muted text-muted-foreground rounded px-1">{runsCount}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Meta block */}
-        <div className="px-3 pb-4 border-t border-border mt-2 pt-3 space-y-2">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Meta</p>
-          {lastRunAt && (
-            <div>
-              <p className="text-[11px] text-muted-foreground">Last run</p>
-              <p className="text-[11px] text-muted-foreground font-medium">{formatRelativeTime(lastRunAt)}</p>
-            </div>
+    <div className="space-y-6">
+      {/* Worker header */}
+      <div className="flex items-start gap-2">
+        <Button variant="ghost" size="sm" onClick={() => router.push("/workers")} className="shrink-0 mt-0.5">
+          <ArrowLeft className="w-4 h-4" />
+        </Button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+            <Box className="w-5 h-5 text-muted-foreground shrink-0" />
+            {worker.name}
+            <span
+              className={`size-2 rounded-full shrink-0 ${
+                worker.status === "healthy"
+                  ? "bg-emerald-500"
+                  : worker.status === "error"
+                  ? "bg-red-500"
+                  : "bg-amber-500"
+              }`}
+              title={worker.status.replace("_", " ")}
+            />
+          </h1>
+          {worker.description && (
+            <p className="text-muted-foreground text-sm mt-0.5">{worker.description}</p>
           )}
-          <div>
-            <p className="text-[11px] text-muted-foreground">Status</p>
-            <p className={`text-[11px] font-medium ${
-              worker.status === "healthy" ? "text-emerald-600" :
-              worker.status === "error" ? "text-red-600" : "text-amber-600"
-            }`}>{worker.status.replace("_", " ")}</p>
-          </div>
-          <div>
-            <p className="text-[11px] text-muted-foreground">Triggers</p>
-            <p className="text-[11px] text-muted-foreground font-medium truncate" title={triggerSummary}>{triggerSummary}</p>
-          </div>
-        </div>
-      </nav>
-
-      {/* Content pane */}
-      <div className="flex-1 min-w-0 p-6 overflow-auto">
-        {/* Worker header */}
-        <div className="flex items-start gap-2 mb-6">
-          <Button variant="ghost" size="sm" onClick={() => router.push("/workers")} className="shrink-0 mt-0.5">
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
-              <Box className="w-5 h-5 text-muted-foreground shrink-0" />
-              {worker.name}
-            </h1>
-            {worker.description && (
-              <p className="text-muted-foreground text-sm mt-0.5">{worker.description}</p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+            {worker.folder && (
+              <Badge variant="secondary" className="text-xs font-normal">{worker.folder}</Badge>
             )}
-            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-              {worker.folder && (
-                <Badge variant="secondary" className="text-xs font-normal">{worker.folder}</Badge>
-              )}
-              {(worker.tags || []).map((tag) => (
-                <Badge key={tag} variant="outline" className="text-xs font-normal bg-card">{tag}</Badge>
-              ))}
-            </div>
+            {(worker.tags || []).map((tag) => (
+              <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
+            ))}
+            {lastRunAt && (
+              <span className="text-xs text-muted-foreground">· Last run {formatRelativeTime(lastRunAt)}</span>
+            )}
           </div>
-          <Link href={`/workers/${worker.id}/edit`} className="shrink-0">
-            <Button variant="outline" size="sm" className="border-border">
-              <Pencil className="w-4 h-4 mr-1.5" />
-              Edit
-            </Button>
-          </Link>
         </div>
+        <Link href={`/workers/${worker.id}/edit`} className="shrink-0">
+          <Button variant="outline" size="sm">
+            <Pencil className="w-4 h-4 mr-1.5" />
+            Edit
+          </Button>
+        </Link>
+      </div>
 
-        {/* Section content */}
+      {/* Top tabs (shadcn) */}
+      <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
+        <TabsList>
+          {NAV_ITEMS.map((item) => (
+            <TabsTrigger key={item.id} value={item.id}>
+              {item.icon}
+              <span>{item.label}</span>
+              {item.id === "triggers" && triggersCount > 1 && (
+                <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+              )}
+              {item.id === "runs" && runsCount > 0 && (
+                <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      {/* Section content */}
+      <div>
         {activeSection === "run" && (
           <RunSection
             worker={worker}

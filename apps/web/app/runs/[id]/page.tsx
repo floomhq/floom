@@ -10,8 +10,8 @@ import { RunStatusBadge } from "@/components/RunStatus";
 import { formatAbsolute, formatLogTime } from "@/lib/formatters";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Download, Pencil, RotateCcw, Search, X } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ArrowLeft, ChevronRight, Copy, Download, Pencil, RotateCcw, Search, X } from "lucide-react";
 import type { RunDetail, LogEntry, TranscriptRow } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
 import { toast } from "sonner";
@@ -94,7 +94,8 @@ export default function RunDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [logSearch, setLogSearch] = useState("");
-  const [rawErrorOpen, setRawErrorOpen] = useState(false);
+  // PR S19 (I-30): rawErrorOpen state retired with the redesign — Error panel
+  // shows the raw error inline by default now.
 
   const load = useCallback(async () => {
     try {
@@ -239,212 +240,173 @@ export default function RunDetailPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Run</TabsTrigger>
-          {hasTranscript && <TabsTrigger value="transcript">Transcript</TabsTrigger>}
-        </TabsList>
+      {/* PR S19 (I-30): rewrite to match the locked ASCII spec.
+          Output is the primary visual weight at top, full width. Below it,
+          three collapsibles (Inputs / Logs / Artifacts). Failed runs swap
+          the Output panel for a red Error panel of the same shape. */}
 
-        <TabsContent value="overview">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="space-y-6">
-              {/* Timeline with log search + step timings */}
-              <Card className="border-border shadow-none bg-card">
-                <CardHeader>
-                  <div className="flex items-center justify-between gap-3">
-                    <CardTitle className="text-sm font-medium">Timeline</CardTitle>
-                    <div className="relative flex-1 max-w-[200px]">
-                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                      <Input
-                        placeholder="Filter logs..."
-                        value={logSearch}
-                        onChange={(e) => setLogSearch(e.target.value)}
-                        className="h-7 pl-7 pr-6 text-xs border-border"
-                      />
-                      {logSearch && (
-                        <button
-                          onClick={() => setLogSearch("")}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
+      {run.status === "failed" && errorInfo ? (
+        <Card className="border-destructive/40">
+          <CardHeader>
+            <CardTitle className="text-base text-destructive flex items-center gap-2">
+              Error
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm font-medium">{errorInfo.headline}</p>
+            <pre className="text-xs text-destructive/90 whitespace-pre-wrap bg-destructive/10 p-3 rounded-md overflow-auto max-h-[260px]">
+              {errorInfo.raw}
+            </pre>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Output</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(!run.output_schema || run.output_schema.length === 0) && Object.keys(run.output || {}).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No output yet.</p>
+            ) : run.output_schema && run.output_schema.length > 0 ? (
+              <div className="space-y-6">
+                {run.output_schema.map((field) => (
+                  <OutputRenderer key={field.name} field={field} runId={run.id} />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {Object.entries(run.output).map(([key, value]) => (
+                  <div key={key}>
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{key}</p>
+                    <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                      {String(value)}
                     </div>
                   </div>
-                  {logSearch && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {filteredLogs.length} of {run.logs.length} entries
-                    </p>
-                  )}
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {run.logs.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No logs yet.</p>
-                  ) : filteredLogs.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No entries match your filter.</p>
-                  ) : (
-                    filteredWithIdx.map(({ log, origIdx }) => (
-                      <div key={origIdx} className="flex items-start gap-3 text-sm">
-                        <span className="text-muted-foreground text-xs mt-0.5 min-w-[80px] shrink-0">
-                          {formatLogTime(log.timestamp)}
-                        </span>
-                        <span className={`flex-1 ${log.level === "error" ? "text-red-600" : "text-foreground"}`}>
-                          {log.message}
-                        </span>
-                        {allDeltas[origIdx] && (
-                          <span className="text-muted-foreground text-xs shrink-0">{allDeltas[origIdx]}</span>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-              <Card className="border-border shadow-none bg-card">
-                <CardHeader>
-                  <CardTitle className="text-sm font-medium">Input</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <pre className="text-xs bg-muted p-3 rounded-md overflow-auto">
-                    {JSON.stringify(run.input, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            </div>
+      <Collapsible>
+        <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:text-muted-foreground transition-colors">
+          <ChevronRight className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+          Inputs
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-3">
+          <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-[280px]">
+            {JSON.stringify(run.input, null, 2)}
+          </pre>
+        </CollapsibleContent>
+      </Collapsible>
 
-            <div className="space-y-6">
-              <Card className="border-border shadow-none bg-card">
-                <CardHeader>
-                  <CardTitle className="text-sm font-medium">Output</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {(!run.output_schema || run.output_schema.length === 0) && Object.keys(run.output || {}).length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No output yet.</p>
-                  ) : run.output_schema && run.output_schema.length > 0 ? (
-                    <div className="space-y-6">
-                      {run.output_schema.map((field) => (
-                        <OutputRenderer key={field.name} field={field} runId={run.id} />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {Object.entries(run.output).map(([key, value]) => (
-                        <div key={key}>
-                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{key}</p>
-                          <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
-                            {String(value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Structured error panel */}
-              {run.status === "failed" && errorInfo && (
-                <Card className="border-red-200 bg-red-50 shadow-none">
-                  <CardContent className="p-5 space-y-3">
-                    <p className="font-medium text-red-900">{errorInfo.headline}</p>
-                    <button
-                      onClick={() => setRawErrorOpen((v) => !v)}
-                      className="flex items-center gap-1 text-xs text-red-600 hover:text-red-800"
-                    >
-                      {rawErrorOpen ? (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      )}
-                      Raw error
-                    </button>
-                    {rawErrorOpen && (
-                      <pre className="text-xs text-red-700 whitespace-pre-wrap bg-red-100 p-3 rounded-md overflow-auto max-h-[200px]">
-                        {errorInfo.raw}
-                      </pre>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Non-failed errors */}
-              {run.error && run.status !== "failed" && (
-                <Card className="border-red-200 bg-red-50 shadow-none">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium text-red-800">Error</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <pre className="text-xs text-red-700 whitespace-pre-wrap">{run.error}</pre>
-                  </CardContent>
-                </Card>
-              )}
-
-              {run.artifacts.length > 0 && (
-                <Card className="border-border shadow-none bg-card">
-                  <CardHeader>
-                    <CardTitle className="text-sm font-medium">Artifacts</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {run.artifacts.map((a) => {
-                      const downloadUrl = `/api/proxy/runs/${run.id}/artifacts/${a.id}/download`;
-                      return (
-                        <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-muted">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-sm truncate">{a.name}</span>
-                            {a.type && <span className="text-xs text-muted-foreground shrink-0">{a.type}</span>}
-                            {a.size_bytes != null && (
-                              <span className="text-xs text-muted-foreground shrink-0">{Math.round(a.size_bytes / 1024)}KB</span>
-                            )}
-                          </div>
-                          <a
-                            href={downloadUrl}
-                            download={a.name}
-                            className="text-xs text-blue-600 hover:underline ml-2 shrink-0"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            Download
-                          </a>
-                        </div>
-                      );
-                    })}
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </div>
-        </TabsContent>
-
-        {hasTranscript && (
-          <TabsContent value="transcript">
-            <Card className="border-border shadow-none bg-card">
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Transcript</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {transcriptRows.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No transcript entries.</p>
-                ) : (
-                  transcriptRows.map((row, index) => (
-                    <div key={index} className="rounded-md border border-border bg-muted/30 p-3">
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          {transcriptLabel(row)}
-                        </span>
-                        {row.tool_call_id && (
-                          <span className="text-[11px] text-muted-foreground">{row.tool_call_id}</span>
-                        )}
-                      </div>
-                      <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
-                        {transcriptBody(row)}
-                      </pre>
-                    </div>
-                  ))
+      <Collapsible>
+        <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:text-muted-foreground transition-colors">
+          <ChevronRight className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+          Logs ({run.logs.length})
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-3 space-y-2">
+          {run.logs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No logs yet.</p>
+          ) : (
+            <>
+              <div className="relative max-w-sm">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+                <Input
+                  placeholder="Filter logs..."
+                  value={logSearch}
+                  onChange={(e) => setLogSearch(e.target.value)}
+                  className="h-7 pl-7 pr-6 text-xs"
+                />
+                {logSearch && (
+                  <button
+                    onClick={() => setLogSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-      </Tabs>
+              </div>
+              <div className="space-y-1 max-h-[420px] overflow-auto">
+                {filteredWithIdx.map(({ log, origIdx }) => (
+                  <div key={origIdx} className="flex items-start gap-3 text-sm">
+                    <span className="text-muted-foreground text-xs mt-0.5 min-w-[80px] shrink-0 font-mono">
+                      {formatLogTime(log.timestamp)}
+                    </span>
+                    <span className={`flex-1 ${log.level === "error" ? "text-red-600" : "text-foreground"}`}>
+                      {log.message}
+                    </span>
+                    {allDeltas[origIdx] && (
+                      <span className="text-muted-foreground text-xs shrink-0">{allDeltas[origIdx]}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+
+      {run.artifacts.length > 0 && (
+        <Collapsible>
+          <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:text-muted-foreground transition-colors">
+            <ChevronRight className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+            Artifacts ({run.artifacts.length})
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3 space-y-2">
+            {run.artifacts.map((a) => {
+              const downloadUrl = `/api/proxy/runs/${run.id}/artifacts/${a.id}/download`;
+              return (
+                <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-muted">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm truncate">{a.name}</span>
+                    {a.type && <span className="text-xs text-muted-foreground shrink-0">{a.type}</span>}
+                    {a.size_bytes != null && (
+                      <span className="text-xs text-muted-foreground shrink-0">{Math.round(a.size_bytes / 1024)}KB</span>
+                    )}
+                  </div>
+                  <a
+                    href={downloadUrl}
+                    download={a.name}
+                    className="text-xs text-foreground hover:underline ml-2 shrink-0"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Download
+                  </a>
+                </div>
+              );
+            })}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+      {hasTranscript && (
+        <Collapsible>
+          <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium hover:text-muted-foreground transition-colors">
+            <ChevronRight className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+            Transcript ({transcriptRows.length})
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3 space-y-3">
+            {transcriptRows.map((row, index) => (
+              <div key={index} className="rounded-md border bg-muted/30 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {transcriptLabel(row)}
+                  </span>
+                  {row.tool_call_id && (
+                    <span className="text-[11px] text-muted-foreground">{row.tool_call_id}</span>
+                  )}
+                </div>
+                <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
+                  {transcriptBody(row)}
+                </pre>
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }

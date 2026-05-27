@@ -466,11 +466,16 @@ function WorkerCard({
   const hasStats = stats && stats.runs_7d > 0;
   const hasSparkline = Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && hasStats;
 
+  // PR S19 I-24a: Federico couldn't click cards, only the Run button.
+  // Wrap the entire body in a Link to /workers/<id>. Nested controls
+  // (Star, Run button, tag chips) stop propagation to avoid hijacking
+  // the parent navigation.
   return (
     <Card
-      className="hover:border-border hover:shadow-sm transition-all"
+      className="hover:border-border hover:shadow-sm transition-all overflow-hidden"
       title={hoverDescription || undefined}
     >
+      <Link href={`/workers/${worker.id}`} className="block">
       <CardContent className={`p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
         {/* Header row */}
         {/* PR S19 I-11: header was 5 elements deep (Box + name + star + eye +
@@ -497,7 +502,11 @@ function WorkerCard({
           <button
             type="button"
             title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-            onClick={() => onFavoriteToggle(worker.id)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onFavoriteToggle(worker.id);
+            }}
             className={`size-7 flex items-center justify-center rounded transition-colors shrink-0 ${
               isFavorite
                 ? "text-amber-400 hover:text-amber-500"
@@ -519,7 +528,15 @@ function WorkerCard({
         {!compact && (worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
-              <button key={tag} type="button" onClick={() => onTagClick(tag)}>
+              <button
+                key={tag}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onTagClick(tag);
+                }}
+              >
                 <Badge variant="outline" className="cursor-pointer bg-card text-xs font-normal hover:bg-muted">
                   {tag}
                 </Badge>
@@ -562,14 +579,13 @@ function WorkerCard({
         )}
 
         <div className="pt-1">
-          <Link href={`/workers/${worker.id}`}>
-            <Button variant="secondary" size="sm" className="w-full">
-              <Play className="w-3.5 h-3.5 mr-1.5" />
-              Run worker
-            </Button>
-          </Link>
+          <Button variant="secondary" size="sm" className="w-full pointer-events-none">
+            <Play className="w-3.5 h-3.5 mr-1.5" />
+            Open worker
+          </Button>
         </div>
       </CardContent>
+      </Link>
     </Card>
   );
 }
