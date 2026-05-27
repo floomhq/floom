@@ -4,9 +4,28 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "highlight.js/styles/github-dark-dimmed.css";
 
 @custom-variant dark (&:is(.dark *));
+
+/* S29c F8.11: theme-aware syntax highlighting. Light theme uses
+   github.css (imported by FilesEditor); dark variants override only
+   token colors so the same DOM stays readable in either palette. */
+.hljs { background: transparent; }
+
+.dark .hljs { color: #adbac7; }
+.dark .hljs-comment, .dark .hljs-quote { color: #768390; font-style: italic; }
+.dark .hljs-keyword, .dark .hljs-selector-tag, .dark .hljs-literal,
+.dark .hljs-section, .dark .hljs-link { color: #f47067; }
+.dark .hljs-number, .dark .hljs-built_in, .dark .hljs-type,
+.dark .hljs-symbol { color: #6cb6ff; }
+.dark .hljs-string, .dark .hljs-doctag, .dark .hljs-regexp,
+.dark .hljs-template-variable { color: #96d0ff; }
+.dark .hljs-title, .dark .hljs-attr, .dark .hljs-attribute,
+.dark .hljs-name, .dark .hljs-selector-class, .dark .hljs-selector-id { color: #dcbdfb; }
+.dark .hljs-tag { color: #8ddb8c; }
+.dark .hljs-meta, .dark .hljs-deletion { color: #f69d50; }
+.dark .hljs-emphasis { font-style: italic; }
+.dark .hljs-strong { font-weight: bold; }
 
 @theme inline {
   --color-background: var(--background);
