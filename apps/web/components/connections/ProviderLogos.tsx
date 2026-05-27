@@ -17,17 +17,36 @@ function FloomMark({ className }: { className?: string }) {
   );
 }
 
+// PR S21 (verification fix): the IconSprite registers brand symbols with
+// hyphen-separated IDs (google-calendar, google-drive, etc.) but Composio
+// returns lower-no-hyphen slugs (googlecalendar, googledrive). Normalize
+// here so the BrandLogo lookup succeeds. Live test caught a blank square
+// next to the Floom mark on /connections/connect/googlecalendar.
+const SLUG_ALIASES: Record<string, string> = {
+  googlecalendar: "google-calendar",
+  googledrive: "google-drive",
+  googledocs: "google-docs",
+  googlesheets: "google-sheets",
+  googlemeet: "google-meet",
+};
+
+function normalizeIcon(slug: string): string {
+  const lower = slug.toLowerCase();
+  return SLUG_ALIASES[lower] ?? lower;
+}
+
 export function ProviderLogos({ providerIcon }: { providerIcon: string }) {
+  const icon = normalizeIcon(providerIcon);
   return (
     <div className="flex items-center justify-center gap-3">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--line)] bg-white shadow-sm">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
         <FloomMark className="size-9" />
       </div>
-      <span aria-hidden className="text-2xl text-[var(--ink-mute)] leading-none">
+      <span aria-hidden className="text-2xl text-muted-foreground leading-none">
         ·
       </span>
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--line)] bg-white shadow-sm">
-        <BrandLogo icon={providerIcon} className="size-7" />
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
+        <BrandLogo icon={icon} className="size-7" />
       </div>
     </div>
   );
