@@ -182,10 +182,12 @@ html.dark {
   --shadow-md: 0 6px 18px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05), var(--edge);
   --shadow-pop: 0 22px 48px -16px rgba(0, 0, 0, 0.66), 0 0 0 1px rgba(255, 255, 255, 0.06), var(--edge);
   --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --sidebar-glass: color-mix(in srgb, var(--accent) 7%, color-mix(in srgb, var(--paper) 68%, transparent));
-  --sidebar-glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(127, 176, 224, 0.06);
-  --card-glass: color-mix(in srgb, var(--paper) 40%, transparent);
-  --card-border: color-mix(in srgb, var(--accent) 12%, var(--line));
+  /* PR S18: dark sidebar drops the accent (blue) tint so the left rail
+     matches the dark main content tone. Light theme keeps the blue. */
+  --sidebar-glass: color-mix(in srgb, var(--paper) 92%, var(--ink) 4%);
+  --sidebar-glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.2);
+  --card-glass: color-mix(in srgb, var(--paper) 60%, transparent);
+  --card-border: var(--line-strong);
   --card-shadow: var(--shadow-sm);
 
   --background: var(--bg);
@@ -213,6 +215,27 @@ html.dark {
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--card-border);
   --sidebar-ring: var(--accent-line);
+}
+
+/* PR S18: shimmer skeleton — replaces the default tailwind animate-pulse
+   (flat opacity tween) with a left-to-right sheen that reads as real
+   loading motion. Uses bg-2 as the rest tone and a soft highlight band. */
+@keyframes floom-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background-color: var(--bg-2);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--paper) 60%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: floom-shimmer 1.6s ease-in-out infinite;
 }
 
 @layer base {
@@ -315,8 +338,10 @@ html.dark {
 }
 
 html.dark .spacebg .c {
-  mix-blend-mode: screen;
-  opacity: 0.22;
+  /* PR S18: dark theme used screen blend + 0.22 opacity which still made
+     the page read as slightly-blue. Killed the colour pollution; if we
+     want any dark ambient back, use a neutral lift instead of the accent. */
+  display: none;
 }
 
 @media (max-width: 640px) {
