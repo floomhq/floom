@@ -428,9 +428,9 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="text-center space-y-3">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-none bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
-          <Loader2 className="size-7 animate-spin" aria-hidden="true" />
-        </div>
+        {/* S29r: dropped the colorful gradient hero. Federico: "I don't like
+            too many colours overall, as a rule." Plain spinner + heading. */}
+        <Loader2 className="size-7 animate-spin mx-auto text-muted-foreground" aria-hidden="true" />
         <h1 className="text-2xl font-semibold tracking-tight">Drafting your worker</h1>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
           Floom is reading your prompt, picking integrations, and writing the worker files.
