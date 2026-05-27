@@ -862,3 +862,28 @@ Tackle order (small-to-impact, with bundling where it makes sense):
 14. **I-19**: audit every route vs spec, fix gaps.
 
 **Multi-agent audit waits until all P0 + the layout-eyes P1 items are addressed.**
+
+---
+
+# Round 5 production audit (2026-05-27, external auditor) — Score 52/100
+
+## I-20 — CORS allows `http://localhost:3000` with credentials in prod (HIGH-4)
+- **Status:** OPEN
+- **Where:** every API endpoint preflight
+- **What:** `Access-Control-Allow-Origin: http://localhost:3000` + `Access-Control-Allow-Credentials: true` + all HTTP methods including DELETE. Any malicious page running on `localhost:3000` (developer's machine) can make authenticated cross-origin requests with the user's `x-floom-secret` cookie/header.
+- **Fix:** In `apps/api/main.py` CORSMiddleware allowed origins, drop `http://localhost:3000` for production deployments. Keep it for the dev environment only. Either gate by env var OR drop entirely (the frontend uses same-origin via `/api/proxy/...`).
+
+## I-21 — `/uploads` accepts arbitrary files, no validation, no size limit (HIGH-5)
+- **Status:** OPEN
+- **Where:** `POST /uploads`
+- **What:** Auditor uploaded `/etc/passwd`, a 20MB zero file, and an XSS HTML file. All accepted. Files aren't retrievable directly (good) but a malicious authed caller can exhaust disk.
+- **Fix:** Backend MUST enforce:
+  - Content-Type allowlist (csv, pdf, docx, txt, md, json, png, jpg, jpeg, webp)
+  - Per-file size cap (e.g. 25 MB)
+  - Total per-day upload cap per secret (e.g. 1 GB)
+  - Reject obviously executable content (extensions: exe, sh, dll, js, php)
+
+## Notes
+- 28 vectors verified SAFE by Round 5: SQLi, command injection, path traversal, XXE, GraphQL, method override, response splitting, cache poisoning, host header bypass, TRACE, subdomain enumeration, ReDoS, prototype pollution, ZIP traversal, exposed config files, directory listing.
+- Previous "SSRF via /connections/callback" + "Open redirect" + "/health unauth" are NOW verified SAFE (auditor reversed Round 4 findings — those endpoints are actually fixed-redirect / 403).
+- Weekly_update worker has 100% failure rate today (2 runs, 0 completed). Not in audit scope but flagged.
