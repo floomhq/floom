@@ -18,6 +18,28 @@ from worker_registry import WORKERS_DIR
 logger = logging.getLogger("floom.runner_sandbox.e2b")
 
 
+def _format_env_line(key: str, value: str) -> str:
+    """Format a single KEY=value line for .env.local.
+
+    Values containing double-quotes, backslashes, newlines, carriage-returns, or
+    null bytes are wrapped in double quotes with those characters escaped.
+    Plain values that need no escaping are written unquoted (safer for most
+    shell parsers and python-dotenv alike).
+    """
+    needs_quoting = any(c in value for c in ('"', '\\', '\n', '\r', '\0'))
+    if needs_quoting:
+        escaped = (
+            value
+            .replace('\\', '\\\\')
+            .replace('"', '\\"')
+            .replace('\n', '\\n')
+            .replace('\r', '\\r')
+            .replace('\0', '\\0')
+        )
+        return f'{key}="{escaped}"'
+    return f'{key}={value}'
+
+
 def _safe_path(base: Path, *parts: str) -> Path:
     target = base.joinpath(*parts).resolve()
     try:
@@ -183,7 +205,17 @@ class E2BSandboxDriver(SandboxDriver):
                 json.dumps(sandbox_inputs, indent=2),
             )
 
-            # Write secrets.json (ephemeral — only visible inside sandbox)
+            # Write .env.local — industry-standard convention; workers load via
+            # python-dotenv's load_dotenv(".env.local") + os.environ.
+            env_local_lines = [_format_env_line(k, v) for k, v in secrets.items()]
+            sandbox.files.write(
+                f"{workdir}/.env.local",
+                "\n".join(env_local_lines) + ("\n" if env_local_lines else ""),
+            )
+
+            # Write secrets.json — kept for ONE release as backward-compat with
+            # user-uploaded workers still using json.load(open("secrets.json")).
+            # Will be removed in PR S11.
             sandbox.files.write(
                 f"{workdir}/secrets.json",
                 json.dumps(secrets, indent=2),

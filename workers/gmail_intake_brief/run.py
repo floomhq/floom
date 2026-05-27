@@ -1,10 +1,11 @@
 """Gmail Intake Brief — E2B-native worker.
 
 Fetches recent emails via Composio Gmail integration and returns a markdown summary.
-Reads inputs.json, secrets.json, connections.json. Writes result.json.
+Reads inputs.json and secrets from .env.local (python-dotenv), connections.json. Writes result.json.
+Falls back to secrets.json for backward-compat during transition period.
 
 connections.json contains: {"gmail": "<composio_connection_id>"}
-secrets.json contains: {"OPENAI_API_KEY": "...", "COMPOSIO_API_KEY": "..."}
+.env.local contains: OPENAI_API_KEY=... COMPOSIO_API_KEY=...
 """
 
 from __future__ import annotations
@@ -12,21 +13,32 @@ from __future__ import annotations
 import json
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(".env.local")
+except ImportError:
+    pass  # dotenv optional; secrets.json fallback covers transition
+
 
 def _write_error(error: str) -> None:
     with open("result.json", "w") as f:
         json.dump({"status": "error", "error": error}, f)
 
 
+def _secrets_fallback() -> dict:
+    """Load secrets.json for backward-compat when dotenv import failed."""
+    try:
+        with open("secrets.json") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
 def main():
     with open("inputs.json") as f:
         inputs = json.load(f)
 
-    try:
-        with open("secrets.json") as f:
-            secrets = json.load(f)
-    except FileNotFoundError:
-        secrets = {}
+    _secrets_fb = _secrets_fallback()
 
     try:
         with open("connections.json") as f:
@@ -37,8 +49,8 @@ def main():
     query = str(inputs.get("query") or "is:unread").strip()
     max_results = int(inputs.get("max_results") or 5)
 
-    composio_api_key = os.environ.get("COMPOSIO_API_KEY") or secrets.get("COMPOSIO_API_KEY", "")
-    openai_api_key = secrets.get("OPENAI_API_KEY", "")
+    composio_api_key = os.environ.get("COMPOSIO_API_KEY") or _secrets_fb.get("COMPOSIO_API_KEY", "")
+    openai_api_key = os.environ.get("OPENAI_API_KEY") or _secrets_fb.get("OPENAI_API_KEY", "")
 
     if not composio_api_key:
         _write_error("COMPOSIO_API_KEY not set")
