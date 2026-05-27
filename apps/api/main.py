@@ -9,6 +9,7 @@ import mimetypes
 import hashlib
 import hmac
 import base64
+import io
 import shutil
 import fcntl
 import re
@@ -18,13 +19,16 @@ import collections
 import threading
 import tempfile
 import uuid as _uuid_mod
+import zipfile
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -319,6 +323,138 @@ def row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
+def _parse_iso8601(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _normalize_run_status(status_value: str) -> str:
+    value = (status_value or "").lower()
+    if value in {"completed", "approved", "success"}:
+        return "success"
+    if value in {"running", "queued", "pending_approval"}:
+        return "running"
+    return "error"
+
+
+def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
+    if not raw_status:
+        return []
+    mapping = {
+        "success": ["completed"],
+        "error": ["failed"],
+        "running": ["running", "queued"],
+        "cancelled": ["cancelled"],
+        "completed": ["completed"],
+        "failed": ["failed"],
+        "queued": ["queued"],
+    }
+    statuses: List[str] = []
+    for token in raw_status.split(","):
+        key = token.strip().lower()
+        if not key:
+            continue
+        resolved = mapping.get(key)
+        if resolved is None:
+            raise HTTPException(status_code=400, detail=f"Invalid status filter: {token.strip()}")
+        for item in resolved:
+            if item not in statuses:
+                statuses.append(item)
+    return statuses
+
+
+def _sanitize_download_name(name: str) -> str:
+    sanitized = (
+        (name or "file")
+        .replace("\\", "_")
+        .replace("/", "_")
+        .replace('"', "_")
+        .replace("\r", "_")
+        .replace("\n", "_")
+    )
+    return sanitized or "file"
+
+
+def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tuple[str, bytes]]:
+    def _decode_data_uri(value: str) -> Optional[tuple[bytes, Optional[str]]]:
+        if not value.startswith("data:") or ";base64," not in value:
+            return None
+        header, _, encoded = value.partition(",")
+        if not encoded:
+            return None
+        media_type = "application/octet-stream"
+        if ":" in header:
+            media_type = header.split(":", 1)[1].split(";", 1)[0] or media_type
+        try:
+            decoded = base64.b64decode(encoded, validate=True)
+        except Exception:
+            return None
+        guessed = mimetypes.guess_extension(media_type) or ".bin"
+        return decoded, guessed
+
+    def _decode_entry(entry: Any) -> Optional[tuple[str, bytes]]:
+        if isinstance(entry, str):
+            maybe_uri = _decode_data_uri(entry)
+            if maybe_uri:
+                payload, ext = maybe_uri
+                return (f"output{ext or '.bin'}", payload)
+            return None
+        if not isinstance(entry, dict):
+            return None
+        b64_value = None
+        for key in ("content_base64", "data_base64", "base64", "data"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                b64_value = value
+                break
+        if not b64_value:
+            return None
+        maybe_uri = _decode_data_uri(b64_value)
+        if maybe_uri:
+            payload, ext = maybe_uri
+            filename = entry.get("filename") if isinstance(entry.get("filename"), str) else None
+            if filename:
+                ext = Path(filename).suffix or ext
+            return (f"output{ext or '.bin'}", payload)
+        try:
+            payload = base64.b64decode(b64_value, validate=True)
+        except Exception:
+            return None
+        filename = entry.get("filename") if isinstance(entry.get("filename"), str) else ""
+        if filename:
+            ext = Path(filename).suffix or ".bin"
+        else:
+            content_type = (
+                entry.get("content_type")
+                if isinstance(entry.get("content_type"), str)
+                else entry.get("mime_type")
+                if isinstance(entry.get("mime_type"), str)
+                else ""
+            )
+            ext = mimetypes.guess_extension(content_type) if content_type else None
+            ext = ext or ".bin"
+        return (f"output{ext}", payload)
+
+    for key in ("primary_output", "output_artifact", "artifact", "file"):
+        if key in output_payload:
+            decoded = _decode_entry(output_payload.get(key))
+            if decoded:
+                return decoded
+    for value in output_payload.values():
+        decoded = _decode_entry(value)
+        if decoded:
+            return decoded
+    return None
+
+
 def _get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
@@ -336,11 +472,21 @@ def _get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
 
 def _make_run_summary(row: sqlite3.Row) -> RunSummary:
     d = row_to_dict(row)
+    status_value = str(d.get("status") or "").lower()
+    status_aliases = {
+        "approved": RunStatus.COMPLETED.value,
+        "success": RunStatus.COMPLETED.value,
+        "rejected": RunStatus.FAILED.value,
+        "error": RunStatus.FAILED.value,
+        "cancelled": RunStatus.FAILED.value,
+        "pending_approval": RunStatus.RUNNING.value,
+    }
+    normalized_status = status_aliases.get(status_value, status_value or RunStatus.FAILED.value)
     return RunSummary(
         id=d["id"],
         worker_id=d["worker_id"],
         worker_name=d.get("worker_name"),
-        status=RunStatus(d["status"]),
+        status=RunStatus(normalized_status),
         trigger_source=d["trigger_source"],
         created_at=d.get("created_at"),
         started_at=d.get("started_at"),
@@ -3098,16 +3244,50 @@ def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> A
     return ActionResponse(status="running", run_id=run_id)
 
 
+@app.post("/workers/{worker_id}/runs/{run_id}/replay")
+def replay_run(worker_id: str, run_id: str) -> Dict[str, str]:
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT input_json FROM runs WHERE id = ? AND worker_id = ?",
+            (run_id, worker_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    source_inputs = json.loads(row["input_json"] or "{}")
+    replay_inputs = json.loads(json.dumps(source_inputs))
+    new_run_id = create_run(worker_id, replay_inputs, trigger_source="manual")
+    start_run(new_run_id, worker_id, replay_inputs)
+    return {"run_id": new_run_id}
+
+
 @app.get("/runs", response_model=List[RunSummary])
 def list_runs(
+    response: Response,
     worker_id: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=500),
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> List[RunSummary]:
+    statuses = _resolve_run_status_filters(status)
+    since_dt = _parse_iso8601(since) if since else None
+    if since and since_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid since value")
+    until_dt = _parse_iso8601(until) if until else None
+    if until and until_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid until value")
+    if since_dt and until_dt and since_dt > until_dt:
+        raise HTTPException(status_code=400, detail="since must be before until")
+
     with get_db() as conn:
         cursor = conn.cursor()
-        query = """
+        select_clause = """
             SELECT r.id, r.worker_id,
                    COALESCE(
                        JSON_EXTRACT(sv.manifest_json, '$.title'),
@@ -3123,15 +3303,27 @@ def list_runs(
         """
         params: list[Any] = []
         if worker_id:
-            query += " AND r.worker_id = ?"
+            select_clause += " AND r.worker_id = ?"
             params.append(worker_id)
-        if status:
-            query += " AND r.status = ?"
-            params.append(status)
-        query += " ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        cursor.execute(query, tuple(params))
+        if statuses:
+            placeholders = ", ".join(["?"] * len(statuses))
+            select_clause += f" AND r.status IN ({placeholders})"
+            params.extend(statuses)
+        if since_dt:
+            select_clause += " AND r.created_at >= ?"
+            params.append(since_dt.isoformat())
+        if until_dt:
+            select_clause += " AND r.created_at <= ?"
+            params.append(until_dt.isoformat())
+
+        count_query = f"SELECT COUNT(*) AS total FROM ({select_clause}) AS filtered_runs"
+        total_count = conn.execute(count_query, tuple(params)).fetchone()["total"]
+
+        query = f"{select_clause} ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
+        query_params = [*params, limit, offset]
+        cursor.execute(query, tuple(query_params))
         rows = cursor.fetchall()
+    response.headers["X-Total-Count"] = str(int(total_count or 0))
     return [_make_run_summary(r) for r in rows]
 
 
@@ -3190,6 +3382,101 @@ def cancel_run(run_id: str) -> ActionResponse:
         )
     logger.info("Cancel requested for run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
+
+
+@app.get("/runs/{run_id}/download")
+def download_run_bundle(run_id: str):
+    with get_db() as conn:
+        run_row = conn.execute(
+            "SELECT id, input_json, output_json FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if not run_row:
+            raise HTTPException(status_code=404, detail="Run not found")
+        log_rows = conn.execute(
+            "SELECT timestamp, level, message FROM logs WHERE run_id = ? ORDER BY timestamp",
+            (run_id,),
+        ).fetchall()
+        artifact_rows = conn.execute(
+            "SELECT name, path FROM artifacts WHERE run_id = ? ORDER BY created_at, name",
+            (run_id,),
+        ).fetchall()
+
+    input_payload = json.loads(run_row["input_json"] or "{}")
+    output_payload = json.loads(run_row["output_json"] or "{}")
+    if not isinstance(input_payload, dict):
+        input_payload = {}
+    if not isinstance(output_payload, dict):
+        output_payload = {}
+
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("inputs.json", json.dumps(input_payload, indent=2, sort_keys=True))
+        archive.writestr("outputs.json", json.dumps(output_payload, indent=2, sort_keys=True))
+
+        primary_output = _extract_primary_output_file(output_payload)
+        if primary_output:
+            output_name, output_bytes = primary_output
+            archive.writestr(output_name, output_bytes)
+
+        log_lines = []
+        for row in log_rows:
+            ts = row["timestamp"] or ""
+            level = (row["level"] or "info").upper()
+            msg = row["message"] or ""
+            log_lines.append(f"[{ts}] {level} {msg}")
+        archive.writestr("logs.txt", "\n".join(log_lines))
+
+        from runner_utils import ARTIFACTS_DIR
+
+        artifacts_root = ARTIFACTS_DIR.resolve()
+        for row in artifact_rows:
+            path_value = row["path"] or ""
+            try:
+                resolved = Path(path_value).resolve()
+                resolved.relative_to(artifacts_root)
+            except Exception:
+                continue
+            if not resolved.is_file():
+                continue
+            artifact_name = _sanitize_download_name(str(row["name"] or resolved.name))
+            with resolved.open("rb") as handle:
+                archive.writestr(f"artifacts/{artifact_name}", handle.read())
+
+    archive_buffer.seek(0)
+    short_id = run_id.split("_", 1)[-1][:8] or run_id[:8]
+    filename = f"run-{_sanitize_download_name(short_id)}.zip"
+    return StreamingResponse(
+        archive_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/runs/{run_id}/bundle/{filename:path}")
+def get_run_bundle_file(run_id: str, filename: str):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT bundle_snapshot_path FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    snapshot_path = row["bundle_snapshot_path"]
+    if not snapshot_path:
+        raise HTTPException(status_code=410, detail="Bundle snapshot is not available for this run")
+
+    base_dir = (Path(DB_PATH).resolve().parent / snapshot_path).resolve()
+    try:
+        target = (base_dir / filename).resolve()
+        target.relative_to(base_dir)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid bundle path")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Bundle file not found")
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(path=target, media_type=media_type)
 
 
 @app.get("/runs/{run_id}/artifacts/{artifact_id}/download")
@@ -4693,6 +4980,263 @@ class PlatformConfig(BaseModel):
     missing: List[str]
     set_count: int
     required_count: int
+
+
+class OverviewStats(BaseModel):
+    runs_24h: int
+    runs_24h_sparkline: List[int]
+    success_rate_7d: float
+    active_workers_count: int
+    connections_healthy: int
+    connections_total: int
+
+
+class OverviewRunItem(BaseModel):
+    run_id: str
+    worker_id: str
+    worker_name: str
+    status: str
+    started_at: Optional[str] = None
+    duration_ms: int
+    trigger_source: str
+
+
+class OverviewScheduledItem(BaseModel):
+    worker_id: str
+    worker_name: str
+    next_fire_at: str
+    trigger_label: str
+
+
+class OverviewAttentionItem(BaseModel):
+    type: str
+    worker_id: Optional[str] = None
+    connection_id: Optional[str] = None
+    message: str
+    action_url: str
+
+
+class OverviewResponse(BaseModel):
+    stats: OverviewStats
+    recent_runs: List[OverviewRunItem]
+    scheduled_today: List[OverviewScheduledItem]
+    needs_attention: List[OverviewAttentionItem]
+
+
+@app.get("/system/overview", response_model=OverviewResponse)
+def system_overview() -> OverviewResponse:
+    now = datetime.now(timezone.utc)
+    window_24h = now - timedelta(hours=24)
+    window_7d = now - timedelta(days=7)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow_start = today_start + timedelta(days=1)
+
+    with get_db() as conn:
+        runs_24h_rows = conn.execute(
+            "SELECT created_at FROM runs WHERE created_at >= ?",
+            (window_24h.isoformat(),),
+        ).fetchall()
+        sparkline = [0] * 24
+        for row in runs_24h_rows:
+            created_at = _parse_iso8601(row["created_at"])
+            if created_at is None or created_at < window_24h or created_at > now:
+                continue
+            bucket = int((created_at - window_24h).total_seconds() // 3600)
+            if bucket < 0:
+                continue
+            if bucket > 23:
+                bucket = 23
+            sparkline[bucket] += 1
+        runs_24h = int(sum(sparkline))
+
+        runs_7d_counts = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS succeeded
+            FROM runs
+            WHERE created_at >= ?
+            """,
+            (window_7d.isoformat(),),
+        ).fetchone()
+        runs_total_7d = int((runs_7d_counts["total"] if runs_7d_counts else 0) or 0)
+        runs_success_7d = int((runs_7d_counts["succeeded"] if runs_7d_counts else 0) or 0)
+        success_rate_7d = (runs_success_7d / runs_total_7d) if runs_total_7d else 0.0
+
+        active_workers_count = int(
+            (
+                conn.execute("SELECT COUNT(*) AS total FROM workers WHERE enabled = 1").fetchone()["total"]
+            )
+            or 0
+        )
+
+        connection_counts = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(
+                    CASE
+                        WHEN status = 'active'
+                             AND (last_check_status IS NULL OR last_check_status = 'valid')
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS healthy
+            FROM composio_connections
+            """
+        ).fetchone()
+        connections_total = int((connection_counts["total"] if connection_counts else 0) or 0)
+        connections_healthy = int((connection_counts["healthy"] if connection_counts else 0) or 0)
+
+        recent_rows = conn.execute(
+            """
+            SELECT
+                r.id AS run_id,
+                r.worker_id,
+                COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name, r.worker_id) AS worker_name,
+                r.status,
+                COALESCE(r.started_at, r.created_at) AS started_at,
+                r.duration_ms,
+                r.trigger_source
+            FROM runs r
+            LEFT JOIN workers w ON r.worker_id = w.id
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            ORDER BY r.created_at DESC
+            LIMIT 5
+            """
+        ).fetchall()
+        recent_runs = [
+            OverviewRunItem(
+                run_id=row["run_id"],
+                worker_id=row["worker_id"],
+                worker_name=row["worker_name"] or row["worker_id"],
+                status=_normalize_run_status(row["status"] or ""),
+                started_at=row["started_at"],
+                duration_ms=int((row["duration_ms"] or 0)),
+                trigger_source=row["trigger_source"] or "manual",
+            )
+            for row in recent_rows
+        ]
+
+        scheduled_rows = conn.execute(
+            """
+            SELECT id, name, next_run_at, cron_expr, trigger_type, triggers_json
+            FROM workers
+            WHERE enabled = 1
+              AND next_run_at IS NOT NULL
+              AND next_run_at >= ?
+              AND next_run_at < ?
+            ORDER BY next_run_at ASC
+            LIMIT 5
+            """,
+            (today_start.isoformat(), tomorrow_start.isoformat()),
+        ).fetchall()
+        scheduled_today: List[OverviewScheduledItem] = []
+        for row in scheduled_rows:
+            trigger = {"type": row["trigger_type"] or "schedule", "cron": row["cron_expr"]}
+            if row["triggers_json"]:
+                try:
+                    parsed_triggers = json.loads(row["triggers_json"])
+                    if isinstance(parsed_triggers, list):
+                        schedule_trigger = next(
+                            (
+                                item
+                                for item in parsed_triggers
+                                if isinstance(item, dict)
+                                and str(item.get("type", "")).lower() in {"schedule", "scheduled"}
+                            ),
+                            None,
+                        )
+                        if schedule_trigger is not None:
+                            trigger = schedule_trigger
+                except Exception:
+                    pass
+            scheduled_today.append(
+                OverviewScheduledItem(
+                    worker_id=row["id"],
+                    worker_name=row["name"],
+                    next_fire_at=row["next_run_at"],
+                    trigger_label=_trigger_label(trigger),
+                )
+            )
+
+        attention_items: List[OverviewAttentionItem] = []
+        failure_rows = conn.execute(
+            """
+            SELECT worker_id, COUNT(*) AS failure_count
+            FROM runs
+            WHERE status = 'failed' AND created_at >= ?
+            GROUP BY worker_id
+            HAVING COUNT(*) >= 3
+            ORDER BY failure_count DESC
+            LIMIT 3
+            """,
+            (window_24h.isoformat(),),
+        ).fetchall()
+        for row in failure_rows:
+            failure_count = int(row["failure_count"] or 0)
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="failure_cluster",
+                    worker_id=row["worker_id"],
+                    message=f"Worker failed {failure_count} times in the last 24 hours.",
+                    action_url=f"/workers/{row['worker_id']}",
+                )
+            )
+
+        expired_rows = conn.execute(
+            """
+            SELECT id
+            FROM composio_connections
+            WHERE status = 'expired' OR last_check_status = 'expired'
+            ORDER BY updated_at DESC
+            LIMIT 3
+            """
+        ).fetchall()
+        for row in expired_rows:
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="connection_expired",
+                    connection_id=row["id"],
+                    message="Connection has expired and needs re-authorization.",
+                    action_url=f"/connections/{row['id']}",
+                )
+            )
+
+        expiring_rows = conn.execute(
+            """
+            SELECT id
+            FROM composio_connections
+            WHERE status = 'active'
+              AND last_check_status = 'failed'
+              AND LOWER(COALESCE(last_check_error, '')) LIKE '%expir%'
+            ORDER BY updated_at DESC
+            LIMIT 3
+            """
+        ).fetchall()
+        for row in expiring_rows:
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="connection_expiring",
+                    connection_id=row["id"],
+                    message="Connection may expire soon. Reconnect to avoid failures.",
+                    action_url=f"/connections/{row['id']}",
+                )
+            )
+
+    return OverviewResponse(
+        stats=OverviewStats(
+            runs_24h=runs_24h,
+            runs_24h_sparkline=sparkline,
+            success_rate_7d=success_rate_7d,
+            active_workers_count=active_workers_count,
+            connections_healthy=connections_healthy,
+            connections_total=connections_total,
+        ),
+        recent_runs=recent_runs,
+        scheduled_today=scheduled_today,
+        needs_attention=attention_items,
+    )
 
 
 @app.get("/system/platform-config", response_model=PlatformConfig)
