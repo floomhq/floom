@@ -492,7 +492,7 @@ function WorkerCard({
               title={worker.status.replace("_", " ")}
               aria-label={worker.status.replace("_", " ")}
             />
-            <h3 className="font-medium text-[15px] truncate">{worker.name}</h3>
+            <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
           </div>
           <button
             type="button"
