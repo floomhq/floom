@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { IconSprite } from "@/components/IconSprite";
-import { ConnectionCard } from "@/components/connections/ConnectionCard";
+import { ConnectionRow } from "@/components/connections/ConnectionRow";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ConnectionSkeleton } from "@/components/connections/ConnectionSkeleton";
 import { ConnectionsEmptyState } from "@/components/connections/ConnectionsEmptyState";
@@ -229,26 +229,43 @@ export default function ConnectionsPage() {
         </header>
         <ConnectionsTabs />
 
-        <section className="space-y-3" aria-label="Connected tools">
+        <section aria-label="Connected tools">
           {loading ? (
-            Array.from({ length: 3 }).map((_, index) => <ConnectionSkeleton key={index} />)
+            <div className="rounded-md border border-border bg-card overflow-hidden">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <ConnectionSkeleton key={index} />
+              ))}
+            </div>
           ) : connectionViews.length === 0 ? (
             <ConnectionsEmptyState onConnect={() => { window.location.href = "/connections/browse"; }} />
           ) : (
-            connectionViews.map((connection) => (
-              <ConnectionCard
-                key={connection.id}
-                connection={connection}
-                deleting={deleting === connection.id}
-                refreshing={refreshing === connection.id}
-                reconnecting={connecting === connection.app_name}
-                testing={testing === connection.id}
-                onDelete={handleDelete}
-                onReconnect={handleConnect}
-                onRefresh={handleRefresh}
-                onTest={handleTest}
-              />
-            ))
+            // S27: compact row list (was a vertical list of 116px-tall cards).
+            // Single bordered container, rows separated by line. Header row
+            // with column labels on >=md. Mobile collapses to a 3-line row.
+            <div className="rounded-md border border-border bg-card overflow-hidden">
+              <div className="hidden md:grid grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-4 px-3 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
+                <span />
+                <span>App / Account</span>
+                <span>Scopes</span>
+                <span>Last used</span>
+                <span>Status</span>
+                <span className="text-right pr-1">Actions</span>
+              </div>
+              {connectionViews.map((connection) => (
+                <ConnectionRow
+                  key={connection.id}
+                  connection={connection}
+                  deleting={deleting === connection.id}
+                  refreshing={refreshing === connection.id}
+                  reconnecting={connecting === connection.app_name}
+                  testing={testing === connection.id}
+                  onDelete={handleDelete}
+                  onReconnect={handleConnect}
+                  onRefresh={handleRefresh}
+                  onTest={handleTest}
+                />
+              ))}
+            </div>
           )}
         </section>
 
