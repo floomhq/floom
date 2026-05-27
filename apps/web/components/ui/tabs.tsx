@@ -33,7 +33,11 @@ const tabsListVariants = cva(
       },
     },
     defaultVariants: {
-      variant: "default",
+      // S29p: flip site-wide default to line (underline) variant. Worker
+      // detail tabs, settings tabs, and CLI sub-tabs were the boxed default
+      // and looked out of place vs /runs/<id> + /connections which already
+      // pass variant="line". One change realigns the whole surface.
+      variant: "line",
     },
   }
 )
