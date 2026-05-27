@@ -29,7 +29,7 @@ export function WorkerMetadataForm({
   const isEdit = mode === "edit";
 
   return (
-    <Card className="border-[#eaeaea] shadow-none bg-white">
+    <Card className="border-border shadow-none bg-card">
       <CardHeader>
         <CardTitle className="text-sm font-medium">Identity</CardTitle>
       </CardHeader>
@@ -39,9 +39,9 @@ export function WorkerMetadataForm({
             Worker ID {!isEdit && <span className="text-red-500">*</span>}
           </Label>
           {isEdit ? (
-            <div className="rounded-md border border-[#e4e4e7] bg-[#f9f9f9] px-3 py-2">
-              <span className="text-sm font-mono text-[#555]">{values.workerId}</span>
-              <p className="text-xs text-[#999] mt-0.5">Worker ID cannot be changed after creation.</p>
+            <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
+              <span className="text-sm font-mono text-muted-foreground">{values.workerId}</span>
+              <p className="text-xs text-muted-foreground mt-0.5">Worker ID cannot be changed after creation.</p>
             </div>
           ) : (
             <>
@@ -53,7 +53,7 @@ export function WorkerMetadataForm({
                     workerId: e.target.value.toLowerCase().replace(/[\s_]+/g, "-"),
                   })
                 }
-                className={`border-[#e4e4e7] font-mono ${idError ? "border-red-400" : ""}`}
+                className={`border-border font-mono ${idError ? "border-red-400" : ""}`}
                 placeholder="my-worker"
               />
               {idError && <p className="text-xs text-red-500">{idError}</p>}
@@ -66,7 +66,7 @@ export function WorkerMetadataForm({
           <Input
             value={values.name}
             onChange={(e) => onChange({ ...values, name: e.target.value })}
-            className="border-[#e4e4e7]"
+            className="border-border"
             placeholder="My Worker"
           />
         </div>
@@ -76,7 +76,7 @@ export function WorkerMetadataForm({
           <Textarea
             value={values.description ?? ""}
             onChange={(e) => onChange({ ...values, description: e.target.value })}
-            className="min-h-[60px] border-[#e4e4e7]"
+            className="min-h-[60px] border-border"
             placeholder="What does this worker do?"
           />
         </div>

@@ -193,7 +193,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
     <div className="space-y-3">
       {/* Frequency */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-[#666] uppercase tracking-wide">Frequency</Label>
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide">Frequency</Label>
         <div className="flex flex-wrap gap-1.5">
           {([
             ["minute", "Every minute"],
@@ -210,7 +210,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               className={`h-7 rounded-md border px-2.5 text-xs font-medium transition-colors ${
                 freq === f
                   ? "border-black bg-black text-white"
-                  : "border-[#e4e4e7] bg-white text-[#444] hover:bg-[#f4f4f5]"
+                  : "border-border bg-card text-[#444] hover:bg-muted"
               }`}
             >
               {label}
@@ -223,9 +223,9 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {showTimePicker && (
         <div className="flex items-end gap-2">
           <div className="space-y-1.5 flex-1">
-            <Label className="text-xs text-[#666]">Hour</Label>
+            <Label className="text-xs text-muted-foreground">Hour</Label>
             <Select value={String(hour)} onValueChange={(v) => setHour(parseInt(v ?? "0"))}>
-              <SelectTrigger className="border-[#e4e4e7] h-8 text-xs">
+              <SelectTrigger className="border-border h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-52">
@@ -238,9 +238,9 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
             </Select>
           </div>
           <div className="space-y-1.5 flex-1">
-            <Label className="text-xs text-[#666]">Minute</Label>
+            <Label className="text-xs text-muted-foreground">Minute</Label>
             <Select value={String(minute)} onValueChange={(v) => setMinute(parseInt(v ?? "0"))}>
-              <SelectTrigger className="border-[#e4e4e7] h-8 text-xs">
+              <SelectTrigger className="border-border h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-52">
@@ -258,7 +258,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {/* Day-of-week multi-select (weekly) */}
       {showDow && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-[#666]">Days of week</Label>
+          <Label className="text-xs text-muted-foreground">Days of week</Label>
           <div className="flex flex-wrap gap-1.5">
             {DOW_LABELS.map(([v, label]) => (
               <button
@@ -268,7 +268,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 className={`h-7 w-10 rounded-md border text-xs font-medium transition-colors ${
                   dow.includes(v)
                     ? "border-black bg-black text-white"
-                    : "border-[#e4e4e7] bg-white text-[#444] hover:bg-[#f4f4f5]"
+                    : "border-border bg-card text-[#444] hover:bg-muted"
                 }`}
               >
                 {label}
@@ -281,9 +281,9 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {/* Day-of-month (monthly) */}
       {showDom && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-[#666]">Day of month</Label>
+          <Label className="text-xs text-muted-foreground">Day of month</Label>
           <Select value={String(dom)} onValueChange={(v) => setDom(parseInt(v ?? "1"))}>
-            <SelectTrigger className="border-[#e4e4e7] h-8 text-xs w-28">
+            <SelectTrigger className="border-border h-8 text-xs w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="max-h-52">
@@ -299,7 +299,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
 
       {/* Human preview */}
       {preview && (
-        <p className="text-xs text-[#666] bg-[#f4f4f5] rounded-md px-3 py-2 font-medium">
+        <p className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2 font-medium">
           {preview}
         </p>
       )}
@@ -309,7 +309,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
         <button
           type="button"
           onClick={() => handleFreqChange(freq === "custom" ? "daily" : "custom")}
-          className="text-xs text-[#999] underline underline-offset-2 hover:text-[#666] transition-colors"
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-muted-foreground transition-colors"
         >
           {freq === "custom" ? "Back to visual picker" : "Use custom cron expression"}
         </button>
@@ -318,15 +318,15 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
       {/* Custom raw input */}
       {freq === "custom" && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-[#666]">Cron expression</Label>
+          <Label className="text-xs text-muted-foreground">Cron expression</Label>
           <Input
             value={customExpr}
             onChange={(e) => handleCustomChange(e.target.value)}
-            className="border-[#e4e4e7] font-mono text-sm"
+            className="border-border font-mono text-sm"
             placeholder="0 9 * * *"
             spellCheck={false}
           />
-          <p className="text-xs text-[#999]">5-field standard cron: minute hour day-of-month month day-of-week</p>
+          <p className="text-xs text-muted-foreground">5-field standard cron: minute hour day-of-month month day-of-week</p>
         </div>
       )}
     </div>

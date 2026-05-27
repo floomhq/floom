@@ -23,18 +23,18 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
   const isScript = detectedEntry === "run.py";
 
   return (
-    <Card className="border-[#eaeaea] shadow-none bg-white">
+    <Card className="border-border shadow-none bg-card">
       <CardHeader>
         <CardTitle className="text-sm font-medium">Entry point</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-xs text-[#888]">
+        <p className="text-xs text-muted-foreground">
           The worker mode is inferred from the entry file in your bundle.
           Add a SKILL.md to run as an agent; add a run.py to run as a script.
         </p>
         <div
           className={`flex items-start gap-3 rounded-md border px-3 py-2.5 ${
-            isAgent ? "border-black bg-[#f9f9f9]" : "border-[#e4e4e7] opacity-60"
+            isAgent ? "border-black bg-muted/50" : "border-border opacity-60"
           }`}
         >
           <FileText className="w-4 h-4 mt-0.5 text-[#444]" />
@@ -42,14 +42,14 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
             <p className="text-sm font-medium text-[#222]">
               Agent (SKILL.md)
             </p>
-            <p className="text-xs text-[#888] mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Platform runs an LLM tool loop with web_search, file tools, and your connections.
             </p>
           </div>
         </div>
         <div
           className={`flex items-start gap-3 rounded-md border px-3 py-2.5 ${
-            isScript ? "border-black bg-[#f9f9f9]" : "border-[#e4e4e7] opacity-60"
+            isScript ? "border-black bg-muted/50" : "border-border opacity-60"
           }`}
         >
           <FileCode className="w-4 h-4 mt-0.5 text-[#444]" />
@@ -57,7 +57,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
             <p className="text-sm font-medium text-[#222]">
               Script (run.py)
             </p>
-            <p className="text-xs text-[#888] mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Platform executes run.py in an E2B sandbox. Use any libraries you need.
             </p>
           </div>

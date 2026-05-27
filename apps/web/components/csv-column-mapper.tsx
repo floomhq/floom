@@ -233,7 +233,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         {label && <p className="text-sm font-medium mb-1.5">{label}</p>}
         <div
           className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
-            dragging ? "border-black bg-[#f4f4f5]" : "border-[#e4e4e7] hover:border-[#aaa]"
+            dragging ? "border-black bg-muted" : "border-border hover:border-[#aaa]"
           }`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
@@ -250,9 +250,9 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
               if (file) loadFile(file);
             }}
           />
-          <Upload className="w-6 h-6 text-[#999] mx-auto mb-2" />
-          <p className="text-sm text-[#666]">Drop a CRM CSV here or click to browse</p>
-          <p className="text-xs text-[#999] mt-1">Headers will be auto-detected</p>
+          <Upload className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">Drop a CRM CSV here or click to browse</p>
+          <p className="text-xs text-muted-foreground mt-1">Headers will be auto-detected</p>
         </div>
         {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
       </div>
@@ -262,39 +262,39 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
   return (
     <div className="space-y-4">
       {label && <p className="text-sm font-medium">{label}</p>}
-      <div className="flex items-center gap-2 p-2 rounded bg-[#f4f4f5] text-xs text-[#666]">
+      <div className="flex items-center gap-2 p-2 rounded bg-muted text-xs text-muted-foreground">
         <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
         <span className="font-medium truncate">{fileName}</span>
-        <span className="text-[#999]">({csvRows.length} rows)</span>
+        <span className="text-muted-foreground">({csvRows.length} rows)</span>
         <button
-          className="ml-auto text-[#999] hover:text-[#333] underline"
+          className="ml-auto text-muted-foreground hover:text-foreground underline"
           onClick={() => { setCsvHeaders([]); setCsvRows([]); setMapping({}); setAutoMappedCount(0); setFileName(""); setError(null); }}
         >
           Change
         </button>
       </div>
-      <p className="text-xs text-[#666]">
+      <p className="text-xs text-muted-foreground">
         Auto-mapped <span className="font-medium">{autoMappedCount} of {requiredColumns.length}</span> columns
         {autoMappedCount < requiredColumns.length && (
           <span className="text-amber-600"> ({requiredColumns.length - autoMappedCount} need manual selection)</span>
         )}
       </p>
 
-      <div className="border border-[#eaeaea] rounded-lg overflow-hidden">
-        <div className="grid grid-cols-2 gap-0 bg-[#f9f9f9] px-4 py-2 text-xs font-medium text-[#666] border-b border-[#eaeaea]">
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="grid grid-cols-2 gap-0 bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border">
           <span>Required column</span>
           <span>Your CSV column</span>
         </div>
         <div className="divide-y divide-[#f0f0f0]">
           {requiredColumns.map((col) => (
             <div key={col} className="grid grid-cols-2 gap-0 items-center px-4 py-2">
-              <span className="text-sm font-mono text-[#333]">{col}</span>
+              <span className="text-sm font-mono text-foreground">{col}</span>
               <div className="flex items-center gap-2">
                 <Select
                   value={mapping[col] || ""}
                   onValueChange={(val: string | null) => setMapping((prev) => ({ ...prev, [col]: val ?? "" }))}
                 >
-                  <SelectTrigger className="h-7 text-xs border-[#e4e4e7] w-full">
+                  <SelectTrigger className="h-7 text-xs border-border w-full">
                     <SelectValue placeholder="(skip)" />
                   </SelectTrigger>
                   <SelectContent>

@@ -51,13 +51,13 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
 
   if (status === "set") {
     return (
-      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-[#f0fdf4]">
+      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-border bg-[#f0fdf4]">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
           <span className="text-sm font-mono font-medium text-[#15803d]">{name}</span>
           <span className="text-xs text-[#16a34a]">Set</span>
         </div>
-        <button type="button" onClick={() => { setStatus("missing"); setShowInput(true); }} className="text-xs text-[#999] hover:text-[#666] transition-colors">
+        <button type="button" onClick={() => { setStatus("missing"); setShowInput(true); }} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">
           Change
         </button>
       </div>
@@ -65,9 +65,9 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
   }
 
   return (
-    <div className="rounded-md border border-[#e4e4e7] bg-white p-3 space-y-2">
+    <div className="rounded-md border border-border bg-card p-3 space-y-2">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-mono font-medium text-[#333]">{name}</span>
+        <span className="text-sm font-mono font-medium text-foreground">{name}</span>
         <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
       </div>
       {showInput && (
@@ -78,7 +78,7 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
             placeholder={`Enter ${name}`}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="border-[#e4e4e7] font-mono text-sm flex-1"
+            className="border-border font-mono text-sm flex-1"
             disabled={status === "saving"}
             onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
           />
@@ -212,7 +212,7 @@ function InlineRequirementRow({
   }
 
   const methodToggle = canToggle ? (
-    <div className="flex items-center rounded border border-[#e4e4e7] overflow-hidden text-xs font-mono">
+    <div className="flex items-center rounded border border-border overflow-hidden text-xs font-mono">
       {(["oauth", "api_key"] as const).map((m) => (
         <button
           key={m}
@@ -221,7 +221,7 @@ function InlineRequirementRow({
           className={`px-2 py-0.5 transition-colors ${
             requirement.method === m
               ? m === "oauth" ? "bg-[#2563eb] text-white" : "bg-[#7c3aed] text-white"
-              : "bg-white text-[#666] hover:bg-[#f4f4f5]"
+              : "bg-card text-muted-foreground hover:bg-muted"
           }`}
         >
           {m === "oauth" ? "OAuth" : "API key"}
@@ -240,7 +240,7 @@ function InlineRequirementRow({
 
   if (isReady) {
     return (
-      <div className="rounded-md border border-[#e4e4e7] bg-[#f0fdf4] p-3 space-y-2">
+      <div className="rounded-md border border-border bg-[#f0fdf4] p-3 space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
@@ -248,14 +248,14 @@ function InlineRequirementRow({
             {methodToggle}
           </div>
           {isOAuth ? (
-            <button type="button" onClick={handleConnect} className="text-xs text-[#999] hover:text-[#666] transition-colors">
+            <button type="button" onClick={handleConnect} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">
               Reconnect
             </button>
           ) : (
             <button
               type="button"
               onClick={() => { setSecretStatus("missing"); setShowSecretInput(true); }}
-              className="text-xs text-[#999] hover:text-[#666] transition-colors"
+              className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
             >
               Change
             </button>
@@ -266,10 +266,10 @@ function InlineRequirementRow({
   }
 
   return (
-    <div className="rounded-md border border-[#e4e4e7] bg-white p-3 space-y-2">
+    <div className="rounded-md border border-border bg-card p-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-[#333]">{app.displayName}</span>
+          <span className="text-sm font-medium text-foreground">{app.displayName}</span>
           {methodToggle}
         </div>
         {isOAuth && (
@@ -286,7 +286,7 @@ function InlineRequirementRow({
       {!isOAuth && effectiveSecretName && (
         <>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-[#555]">{effectiveSecretName}</span>
+            <span className="text-xs font-mono text-muted-foreground">{effectiveSecretName}</span>
             <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
           </div>
           {showSecretInput && (
@@ -297,7 +297,7 @@ function InlineRequirementRow({
                 placeholder={`Enter ${effectiveSecretName}`}
                 value={secretValue}
                 onChange={(e) => setSecretValue(e.target.value)}
-                className="border-[#e4e4e7] font-mono text-sm flex-1"
+                className="border-border font-mono text-sm flex-1"
                 disabled={secretStatus === "saving"}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSaveSecret(); }}
               />
@@ -440,7 +440,7 @@ export function RequirementsEditor({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-[#999]">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="w-4 h-4 animate-spin" />
         Checking existing secrets and connections...
       </div>
@@ -453,7 +453,7 @@ export function RequirementsEditor({
   if (!hasRequirements) return null;
 
   return (
-    <Card className="border-[#eaeaea] shadow-none bg-white">
+    <Card className="border-border shadow-none bg-card">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium">
@@ -465,13 +465,13 @@ export function RequirementsEditor({
             ) : "Set up requirements"}
           </CardTitle>
           {!allReady && !skipped && (
-            <button type="button" onClick={onSkip} className="text-xs text-[#999] hover:text-[#666] transition-colors">
+            <button type="button" onClick={onSkip} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">
               Skip for now
             </button>
           )}
         </div>
         {!allReady && !skipped && (
-          <p className="text-xs text-[#999] mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Connect the integrations this worker needs before creating it.
           </p>
         )}
@@ -504,7 +504,7 @@ export function RequirementsEditor({
             <>
               {requiredSecrets.length > 0 && (
                 <div className="space-y-2">
-                  <Label className="text-xs text-[#666] uppercase tracking-wide">API keys</Label>
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">API keys</Label>
                   <div className="space-y-2">
                     {secretStates.map((s) => (
                       <InlineSecretRow key={s.name} name={s.name} initialStatus={s.status} onSaved={handleSecretSaved} />
@@ -514,13 +514,13 @@ export function RequirementsEditor({
               )}
               {requiredConnections.length > 0 && (
                 <div className="space-y-2">
-                  <Label className="text-xs text-[#666] uppercase tracking-wide">OAuth connections</Label>
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">OAuth connections</Label>
                   <div className="space-y-2">
                     {connectionStates.map((c) => {
                       const appData = getSupportedApp(c.slug);
                       return (
-                        <div key={c.slug} className="flex items-center justify-between py-2 px-3 rounded-md border border-[#e4e4e7] bg-white">
-                          <span className="text-sm font-medium text-[#333]">{appData.displayName}</span>
+                        <div key={c.slug} className="flex items-center justify-between py-2 px-3 rounded-md border border-border bg-card">
+                          <span className="text-sm font-medium text-foreground">{appData.displayName}</span>
                           {c.connected ? (
                             <div className="flex items-center gap-2">
                               <CheckCircle2 className="w-4 h-4 text-[#16a34a]" />
