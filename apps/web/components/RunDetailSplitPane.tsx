@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Copy, Download, Pencil, RotateCcw, Square } from "lucide-react";
+import { Copy, Check, Download, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -140,6 +141,7 @@ export function RunDetailSplitPane({
                 <TabsTrigger value="transcript">Transcript</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="output">Output</TabsTrigger>
+                <TabsTrigger value="raw">Raw</TabsTrigger>
                 <TabsTrigger value="metadata">Metadata</TabsTrigger>
               </TabsList>
             </div>
@@ -151,6 +153,9 @@ export function RunDetailSplitPane({
             </TabsContent>
             <TabsContent value="output" className="p-4">
               <OutputView run={run} />
+            </TabsContent>
+            <TabsContent value="raw" className="p-4">
+              <RawView run={run} parts={transcriptParts} />
             </TabsContent>
             <TabsContent value="metadata" className="p-4">
               <MetadataView run={run} />
@@ -267,6 +272,88 @@ function OutputView({ run }: { run: RunDetail }) {
           </pre>
         </div>
       ))}
+    </div>
+  );
+}
+
+function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
+  // S29k (Q3 Codex verdict): canonical full-fidelity surface for debugging.
+  // SSE parts (no timestamps; stream order is time order) + server-side
+  // logs (timestamped) joined into one document. JSON download button
+  // exports everything so users can diff offline or share with support.
+  const payload = {
+    run_id: run.id,
+    worker_id: run.worker_id,
+    status: run.status,
+    error: run.error,
+    started_at: run.started_at,
+    completed_at: run.completed_at,
+    duration_ms: run.duration_ms,
+    input: run.input,
+    output: run.output,
+    artifacts: run.artifacts,
+    parts,
+    logs: run.logs,
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const download = () => {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${run.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(json).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
+  };
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Raw run data</p>
+          <p className="text-xs text-muted-foreground">
+            Full SSE part stream, logs, inputs, outputs, and artifacts. Use this when transcript/output don&apos;t show enough.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={copy}>
+            {copied ? <Check className="size-3.5 mr-1.5" /> : <Copy className="size-3.5 mr-1.5" />}
+            {copied ? "Copied" : "Copy JSON"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={download}>
+            <Download className="size-3.5 mr-1.5" />
+            Download
+          </Button>
+        </div>
+      </div>
+
+      <section className="space-y-2">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Parts (SSE stream order)</p>
+        {parts.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No parts captured.</p>
+        ) : (
+          <pre className="rounded-md border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
+            {parts.map((p, i) => `[${i.toString().padStart(3, "0")}] ${p.type}\n${JSON.stringify(p, null, 2)}`).join("\n\n")}
+          </pre>
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Logs (server-side, timestamped)</p>
+        {run.logs.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No logs captured.</p>
+        ) : (
+          <pre className="rounded-md border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
+            {run.logs.map((l) => `${l.timestamp} [${l.level.toUpperCase()}]${l.trace_id ? ` ${l.trace_id}` : ""} ${l.message}`).join("\n")}
+          </pre>
+        )}
+      </section>
     </div>
   );
 }
