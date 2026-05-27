@@ -165,6 +165,40 @@ async function request(
   return parsed;
 }
 
+async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
+  if (app) {
+    return request("GET", "/integrations/triggers", undefined, { app });
+  }
+  if (!workerId) {
+    return request("GET", "/integrations/triggers");
+  }
+  const worker = await request("GET", `/workers/${encodeURIComponent(workerId)}`) as JsonObject;
+  const config = (worker.config && typeof worker.config === "object") ? worker.config as JsonObject : {};
+  const connections = Array.isArray(config.connections) ? config.connections.filter((item) => typeof item === "string") : [];
+  if (!connections.length) {
+    return { items: [] };
+  }
+  const merged: JsonObject[] = [];
+  const seen = new Set<string>();
+  for (const connection of connections) {
+    const payload = await request("GET", "/integrations/triggers", undefined, { app: connection }) as JsonObject;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const eventName = String((item as JsonObject).name || (item as JsonObject).slug || JSON.stringify(item));
+      const dedupeKey = `${connection}:${eventName}`;
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+      merged.push(item as JsonObject);
+    }
+  }
+  return { items: merged };
+}
+
 async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObject> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -519,6 +553,76 @@ export function createServer(): McpServer {
     },
     async ({ id, timeout_ms }) =>
       callTool(async () => jsonResult(await watchRunEvents(id, timeout_ms), "Run watch completed.")),
+  );
+
+  server.registerTool(
+    "secrets.list",
+    {
+      title: "List Secrets",
+      description: "List configured secret names and status.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/secrets"))),
+  );
+
+  server.registerTool(
+    "secrets.set",
+    {
+      title: "Set Secret",
+      description: "Create or update a secret value.",
+      inputSchema: {
+        key: z.string().min(1).describe("Secret name."),
+        value: z.string().min(1).describe("Secret value."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ key, value }) =>
+      callTool(async () =>
+        jsonResult(await request("POST", `/secrets/${encodeURIComponent(key)}`, { value }), "Secret saved."),
+      ),
+  );
+
+  server.registerTool(
+    "secrets.delete",
+    {
+      title: "Delete Secret",
+      description: "Delete a secret by key.",
+      inputSchema: {
+        key: z.string().min(1).describe("Secret name."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ key }) =>
+      callTool(async () =>
+        jsonResult(await request("DELETE", `/secrets/${encodeURIComponent(key)}`), "Secret deleted."),
+      ),
+  );
+
+  server.registerTool(
+    "connections.list",
+    {
+      title: "List Connections",
+      description: "List configured app connections.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/connections"))),
+  );
+
+  server.registerTool(
+    "triggers.list",
+    {
+      title: "List Triggers",
+      description: "List integration triggers, globally or filtered by worker/app.",
+      inputSchema: {
+        worker_id: z.string().optional().describe("Optional worker id to scope triggers by worker connections."),
+        app: z.string().optional().describe("Optional app slug filter."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ worker_id, app }) =>
+      callTool(async () => jsonResult(await listTriggers(worker_id, app))),
   );
 
   return server;
