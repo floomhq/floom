@@ -129,16 +129,16 @@ function TriggerRowEditor({
   const isOnly = total === 1;
 
   return (
-    <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 space-y-3">
+    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-[#666] uppercase tracking-wide">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Trigger {total > 1 ? index + 1 : ""}
         </span>
         {!isOnly && (
           <button
             type="button"
             onClick={onRemove}
-            className="text-[#bbb] hover:text-red-500 transition-colors"
+            className="text-muted-foreground hover:text-red-500 transition-colors"
             title="Remove trigger"
           >
             <X className="w-3.5 h-3.5" />
@@ -162,7 +162,7 @@ function TriggerRowEditor({
               className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
                 row.type === value
                   ? "border-black bg-black text-white"
-                  : "border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5]"
+                  : "border-border bg-card text-foreground hover:bg-muted"
               }`}
             >
               {labels[value]}
@@ -178,11 +178,11 @@ function TriggerRowEditor({
             onChange={(v) => onChange({ ...row, cronExpr: v })}
           />
           <div className="space-y-1.5">
-            <Label className="text-xs text-[#666] uppercase tracking-wide">Timezone</Label>
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Timezone</Label>
             <Input
               value={row.cronTimezone}
               onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
-              className="border-[#e4e4e7] font-mono text-sm"
+              className="border-border font-mono text-sm"
               placeholder="Europe/Berlin"
             />
           </div>
@@ -201,9 +201,9 @@ function TriggerRowEditor({
 
       {row.type === "webhook" && webhookUrl && (
         <div className="space-y-2">
-          <Label className="text-xs text-[#666] uppercase tracking-wide">Webhook URL</Label>
+          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Webhook URL</Label>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs font-mono bg-[#f4f4f5] border border-[#e4e4e7] rounded px-2 py-1.5 break-all">
+            <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
               {webhookUrl}
             </code>
             <button
@@ -215,9 +215,9 @@ function TriggerRowEditor({
                   () => toast.error("Failed to copy"),
                 );
               }}
-              className="shrink-0 p-1.5 rounded border border-[#e4e4e7] bg-white hover:bg-[#f4f4f5] transition-colors"
+              className="shrink-0 p-1.5 rounded border border-border bg-card hover:bg-muted transition-colors"
             >
-              <Copy className="w-3.5 h-3.5 text-[#666]" />
+              <Copy className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           </div>
           <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
@@ -227,12 +227,12 @@ function TriggerRowEditor({
       )}
 
       {row.type === "webhook" && !webhookUrl && (
-        <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 space-y-2">
-          <p className="text-xs text-[#666] font-medium">Webhook URL</p>
-          <p className="text-xs text-[#888]">
+        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+          <p className="text-xs text-muted-foreground font-medium">Webhook URL</p>
+          <p className="text-xs text-muted-foreground">
             Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
           </p>
-          <div className="rounded border border-[#e4e4e7] bg-white p-2 font-mono text-xs text-[#999]">
+          <div className="rounded border border-border bg-card p-2 font-mono text-xs text-muted-foreground">
             https://workers-api.floom.dev/webhooks/&lt;worker-id&gt;?token=...
           </div>
         </div>
@@ -271,7 +271,7 @@ export function TriggersEditor({
   }
 
   return (
-    <Card className="border-[#eaeaea] shadow-none bg-white">
+    <Card className="border-border shadow-none bg-card">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">Triggers</CardTitle>
       </CardHeader>
@@ -291,7 +291,7 @@ export function TriggersEditor({
         <button
           type="button"
           onClick={addRow}
-          className="flex items-center gap-1.5 text-xs text-[#666] hover:text-black transition-colors py-1"
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-black transition-colors py-1"
         >
           <Plus className="w-3.5 h-3.5" />
           Add trigger

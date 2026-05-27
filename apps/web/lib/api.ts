@@ -6,12 +6,20 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    let err: string;
+    // PR S19 (I-6): surface SOMETHING actionable even when the upstream
+    // returns no JSON body (Vercel 504 timeouts hand back empty HTML).
+    let err = "";
     try {
       const body = await res.json();
       err = body.detail || JSON.stringify(body);
     } catch {
-      err = res.statusText;
+      err = "";
+    }
+    if (!err || err === "{}") {
+      err =
+        res.status === 504
+          ? "Request timed out. The server took too long to respond."
+          : res.statusText || `HTTP ${res.status}`;
     }
     throw new Error(err);
   }

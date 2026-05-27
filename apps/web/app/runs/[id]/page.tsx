@@ -129,7 +129,7 @@ export default function RunDetailPage() {
   }
 
   if (!run) {
-    return <div className="text-sm text-[#999]">Run not found.</div>;
+    return <div className="text-sm text-muted-foreground">Run not found.</div>;
   }
 
   // Log filtering
@@ -167,7 +167,7 @@ export default function RunDetailPage() {
             {run.worker_name || run.worker_id}
           </h1>
           <div className="flex items-center gap-2 mt-0.5">
-            <code className="text-xs font-mono text-[#999]">{run.id}</code>
+            <code className="text-xs font-mono text-muted-foreground">{run.id}</code>
             <button
               type="button"
               title="Copy run ID"
@@ -177,17 +177,17 @@ export default function RunDetailPage() {
                   () => toast.error("Failed to copy"),
                 );
               }}
-              className="text-[#bbb] hover:text-[#555] transition-colors"
+              className="text-muted-foreground hover:text-muted-foreground transition-colors"
             >
               <Copy className="w-3 h-3" />
             </button>
-            <span className="text-xs text-[#999]">
+            <span className="text-xs text-muted-foreground">
               {formatAbsolute(run.created_at)}
             </span>
           </div>
         </div>
         <RunStatusBadge status={run.status} />
-        {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}
+        {refreshing && <span className="text-xs text-muted-foreground">Refreshing...</span>}
         <div className="flex items-center gap-2">
           <Link href={`/workers/${run.worker_id}?section=code`}>
             <Button variant="outline" size="sm">
@@ -249,22 +249,22 @@ export default function RunDetailPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-6">
               {/* Timeline with log search + step timings */}
-              <Card className="border-[#eaeaea] shadow-none bg-white">
+              <Card className="border-border shadow-none bg-card">
                 <CardHeader>
                   <div className="flex items-center justify-between gap-3">
                     <CardTitle className="text-sm font-medium">Timeline</CardTitle>
                     <div className="relative flex-1 max-w-[200px]">
-                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#aaa]" />
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                       <Input
                         placeholder="Filter logs..."
                         value={logSearch}
                         onChange={(e) => setLogSearch(e.target.value)}
-                        className="h-7 pl-7 pr-6 text-xs border-[#e4e4e7]"
+                        className="h-7 pl-7 pr-6 text-xs border-border"
                       />
                       {logSearch && (
                         <button
                           onClick={() => setLogSearch("")}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[#aaa] hover:text-[#555]"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -272,27 +272,27 @@ export default function RunDetailPage() {
                     </div>
                   </div>
                   {logSearch && (
-                    <p className="text-xs text-[#999] mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       {filteredLogs.length} of {run.logs.length} entries
                     </p>
                   )}
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {run.logs.length === 0 ? (
-                    <p className="text-sm text-[#999]">No logs yet.</p>
+                    <p className="text-sm text-muted-foreground">No logs yet.</p>
                   ) : filteredLogs.length === 0 ? (
-                    <p className="text-sm text-[#999]">No entries match your filter.</p>
+                    <p className="text-sm text-muted-foreground">No entries match your filter.</p>
                   ) : (
                     filteredWithIdx.map(({ log, origIdx }) => (
                       <div key={origIdx} className="flex items-start gap-3 text-sm">
-                        <span className="text-[#999] text-xs mt-0.5 min-w-[80px] shrink-0">
+                        <span className="text-muted-foreground text-xs mt-0.5 min-w-[80px] shrink-0">
                           {formatLogTime(log.timestamp)}
                         </span>
-                        <span className={`flex-1 ${log.level === "error" ? "text-red-600" : "text-[#333]"}`}>
+                        <span className={`flex-1 ${log.level === "error" ? "text-red-600" : "text-foreground"}`}>
                           {log.message}
                         </span>
                         {allDeltas[origIdx] && (
-                          <span className="text-[#bbb] text-xs shrink-0">{allDeltas[origIdx]}</span>
+                          <span className="text-muted-foreground text-xs shrink-0">{allDeltas[origIdx]}</span>
                         )}
                       </div>
                     ))
@@ -300,12 +300,12 @@ export default function RunDetailPage() {
                 </CardContent>
               </Card>
 
-              <Card className="border-[#eaeaea] shadow-none bg-white">
+              <Card className="border-border shadow-none bg-card">
                 <CardHeader>
                   <CardTitle className="text-sm font-medium">Input</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <pre className="text-xs bg-[#f4f4f5] p-3 rounded-md overflow-auto">
+                  <pre className="text-xs bg-muted p-3 rounded-md overflow-auto">
                     {JSON.stringify(run.input, null, 2)}
                   </pre>
                 </CardContent>
@@ -313,13 +313,13 @@ export default function RunDetailPage() {
             </div>
 
             <div className="space-y-6">
-              <Card className="border-[#eaeaea] shadow-none bg-white">
+              <Card className="border-border shadow-none bg-card">
                 <CardHeader>
                   <CardTitle className="text-sm font-medium">Output</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {(!run.output_schema || run.output_schema.length === 0) && Object.keys(run.output || {}).length === 0 ? (
-                    <p className="text-sm text-[#999]">No output yet.</p>
+                    <p className="text-sm text-muted-foreground">No output yet.</p>
                   ) : run.output_schema && run.output_schema.length > 0 ? (
                     <div className="space-y-6">
                       {run.output_schema.map((field) => (
@@ -330,8 +330,8 @@ export default function RunDetailPage() {
                     <div className="space-y-4">
                       {Object.entries(run.output).map(([key, value]) => (
                         <div key={key}>
-                          <p className="text-xs font-medium text-[#666] uppercase tracking-wide mb-1">{key}</p>
-                          <div className="bg-[#f4f4f5] p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{key}</p>
+                          <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
                             {String(value)}
                           </div>
                         </div>
@@ -379,7 +379,7 @@ export default function RunDetailPage() {
               )}
 
               {run.artifacts.length > 0 && (
-                <Card className="border-[#eaeaea] shadow-none bg-white">
+                <Card className="border-border shadow-none bg-card">
                   <CardHeader>
                     <CardTitle className="text-sm font-medium">Artifacts</CardTitle>
                   </CardHeader>
@@ -387,12 +387,12 @@ export default function RunDetailPage() {
                     {run.artifacts.map((a) => {
                       const downloadUrl = `/api/proxy/runs/${run.id}/artifacts/${a.id}/download`;
                       return (
-                        <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                        <div key={a.id} className="flex items-center justify-between p-2 rounded-md bg-muted">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-sm truncate">{a.name}</span>
-                            {a.type && <span className="text-xs text-[#999] shrink-0">{a.type}</span>}
+                            {a.type && <span className="text-xs text-muted-foreground shrink-0">{a.type}</span>}
                             {a.size_bytes != null && (
-                              <span className="text-xs text-[#999] shrink-0">{Math.round(a.size_bytes / 1024)}KB</span>
+                              <span className="text-xs text-muted-foreground shrink-0">{Math.round(a.size_bytes / 1024)}KB</span>
                             )}
                           </div>
                           <a
@@ -416,25 +416,25 @@ export default function RunDetailPage() {
 
         {hasTranscript && (
           <TabsContent value="transcript">
-            <Card className="border-[#eaeaea] shadow-none bg-white">
+            <Card className="border-border shadow-none bg-card">
               <CardHeader>
                 <CardTitle className="text-sm font-medium">Transcript</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {transcriptRows.length === 0 ? (
-                  <p className="text-sm text-[#999]">No transcript entries.</p>
+                  <p className="text-sm text-muted-foreground">No transcript entries.</p>
                 ) : (
                   transcriptRows.map((row, index) => (
-                    <div key={index} className="rounded-md border border-[#eaeaea] bg-[#fafafa] p-3">
+                    <div key={index} className="rounded-md border border-border bg-muted/30 p-3">
                       <div className="mb-2 flex items-center justify-between gap-3">
-                        <span className="text-xs font-medium uppercase tracking-wide text-[#666]">
+                        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                           {transcriptLabel(row)}
                         </span>
                         {row.tool_call_id && (
-                          <span className="text-[11px] text-[#999]">{row.tool_call_id}</span>
+                          <span className="text-[11px] text-muted-foreground">{row.tool_call_id}</span>
                         )}
                       </div>
-                      <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-[#333]">
+                      <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
                         {transcriptBody(row)}
                       </pre>
                     </div>
