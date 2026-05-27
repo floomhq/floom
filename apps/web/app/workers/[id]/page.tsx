@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Play, Box, Plug, Pencil, ClipboardCheck, ChevronRight,
+  Play, Plug, Pencil, ClipboardCheck, ChevronRight,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
 } from "lucide-react";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec } from "@/lib/types";
@@ -40,13 +40,16 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
+// S22b: tab order + labels reworked from design-roast. Overview moves to first
+// (it's the "what is this worker" page, was last). Code/Connections/Runs
+// renamed to disambiguate from the global sidebar (Source/Apps/History).
 const NAV_ITEMS: NavItem[] = [
-  { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
-  { id: "code", label: "Code", icon: <Code2 className="w-4 h-4" /> },
-  { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
-  { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
-  { id: "runs", label: "Runs", icon: <ListChecks className="w-4 h-4" /> },
   { id: "overview", label: "Overview", icon: <Info className="w-4 h-4" /> },
+  { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
+  { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
+  { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
+  { id: "connections", label: "Apps", icon: <Plug2 className="w-4 h-4" /> },
+  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -58,7 +61,9 @@ export default function WorkerDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const sectionParam = (searchParams.get("section") as Section) || "run";
+  // S22b: Overview is now the default landing section (was "run"). Promotes
+  // the "what is this worker" page from position 6 of the tab row to 1.
+  const sectionParam = (searchParams.get("section") as Section) || "overview";
   const [activeSection, setActiveSection] = useState<Section>(sectionParam);
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
@@ -281,32 +286,27 @@ export default function WorkerDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Worker header */}
-      <div className="flex items-start gap-2">
-        <Button variant="ghost" size="sm" onClick={() => router.push("/workers")} className="shrink-0 mt-0.5">
-          <ArrowLeft className="w-4 h-4" />
-        </Button>
+      {/* Worker header. S22b: dropped redundant ArrowLeft (sidebar + Cmd-K
+          palette + breadcrumb already provide back-nav). Status dot replaced
+          with a labelled pill so users can read the state at a glance.
+          Category badge differentiated from tag badges visually. */}
+      <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
-            <Box className="w-5 h-5 text-muted-foreground shrink-0" />
-            {worker.name}
-            <span
-              className={`size-2 rounded-full shrink-0 ${
-                worker.status === "healthy"
-                  ? "bg-emerald-500"
-                  : worker.status === "error"
-                  ? "bg-red-500"
-                  : "bg-amber-500"
-              }`}
-              title={worker.status.replace("_", " ")}
-            />
-          </h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold tracking-tight">{worker.name}</h1>
+            <StatusPill status={worker.status} />
+          </div>
           {worker.description && (
-            <p className="text-muted-foreground text-sm mt-0.5">{worker.description}</p>
+            <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
           )}
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
             {worker.folder && (
-              <Badge variant="secondary" className="text-xs font-normal">{worker.folder}</Badge>
+              <Badge
+                variant="secondary"
+                className="text-[11px] font-medium uppercase tracking-wide bg-[var(--accent-soft)] text-[var(--accent)] border-0"
+              >
+                {worker.folder}
+              </Badge>
             )}
             {(worker.tags || []).map((tag) => (
               <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
@@ -993,5 +993,38 @@ function MarkdownPreview({ value }: { value: string }) {
         {value}
       </ReactMarkdown>
     </div>
+  );
+}
+
+// S22b: labelled status pill replaces the size-2 dot indicator (roast P1:
+// dot was too subtle, "Weekly Update" 33%-success orange dot blended in
+// with healthy green dots).
+function StatusPill({ status }: { status: string }) {
+  const conf: Record<string, { label: string; classes: string }> = {
+    healthy: {
+      label: "Healthy",
+      classes: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+    },
+    needs_attention: {
+      label: "Needs attention",
+      classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+    },
+    missing_secret: {
+      label: "Missing secret",
+      classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+    },
+    error: {
+      label: "Error",
+      classes: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
+    },
+  };
+  const { label, classes } = conf[status] ?? { label: status, classes: "bg-muted text-muted-foreground border-border" };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${classes}`}
+    >
+      <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+      {label}
+    </span>
   );
 }
