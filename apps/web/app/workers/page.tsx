@@ -18,6 +18,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { Sparkline } from "@/components/Sparkline";
+import { WorkerAvatar } from "@/components/WorkerAvatar";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -539,7 +540,9 @@ function WorkerCard({
     >
       <Link href={`/workers/${worker.id}`} className="block h-full" target="_blank" rel="noopener noreferrer">
       <CardContent className={`h-full flex flex-col p-5 ${compact ? "gap-2" : "gap-2.5"}`}>
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start justify-between gap-3">
+          {/* S29n: worker avatar makes the card feel like an employee, not a script. */}
+          <WorkerAvatar seed={worker.id} name={worker.name} size="size-10" />
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
           </div>
