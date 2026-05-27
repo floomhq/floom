@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, KeyRound, Settings, Menu, X, Plug } from "lucide-react";
+import { Activity, Box, Clock, KeyRound, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
+import { openCommandPalette } from "@/components/CommandPalette";
 
 function FloomMark({ size = 28 }: { size?: number }) {
   return (
@@ -62,6 +63,38 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
   );
 }
 
+function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
+  const onSearch = () => {
+    onNavigate?.();
+    openCommandPalette();
+  };
+  return (
+    <div className="px-3 pb-3 space-y-1.5">
+      <Link
+        href="/workers/new"
+        onClick={onNavigate}
+        className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-2.5 text-sm font-medium text-[var(--solid-fg)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
+      >
+        <Plus className="w-4 h-4" />
+        New worker
+      </Link>
+      <button
+        type="button"
+        onClick={onSearch}
+        className="flex h-9 w-full items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] hover:text-ink transition-colors duration-150"
+        aria-label="Open command palette"
+      >
+        <Search className="w-4 h-4 opacity-70" />
+        <span>Search...</span>
+        <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
+          <kbd className="rounded border border-line bg-[var(--bg-2)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded border border-line bg-[var(--bg-2)] px-1 py-0.5 font-mono">K</kbd>
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -81,6 +114,14 @@ export function Sidebar() {
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
         </Link>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="Open command palette"
+            onClick={openCommandPalette}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+          >
+            <Search className="w-5 h-5" />
+          </button>
           <ThemeModeButton className="theme-mode-button-compact" />
           <button
             type="button"
@@ -95,12 +136,13 @@ export function Sidebar() {
 
       <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--accent-line)] bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-        <div className="px-5 py-6">
+        <div className="px-5 py-5">
           <Link href="/" className="flex items-center gap-2">
             <FloomMark size={28} />
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
           </Link>
         </div>
+        <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
         <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
           <span>Floom v0</span>
@@ -132,6 +174,7 @@ export function Sidebar() {
               </button>
             </div>
             <div className="py-3 flex-1 overflow-auto">
+              <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">

@@ -229,9 +229,9 @@ export default function WorkerDetailPage() {
       <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
         <p className="text-sm font-medium text-foreground">Worker not found</p>
         <p className="text-xs text-muted-foreground">This worker may have been deleted or the ID is incorrect.</p>
-        <a href="/workers" className="text-xs underline text-muted-foreground hover:text-foreground transition-colors">
+        <Link href="/workers" className="text-xs underline text-muted-foreground hover:text-foreground transition-colors">
           Back to workers
-        </a>
+        </Link>
       </div>
     );
   }

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Ambient } from "@/components/Ambient";
 import { Sidebar } from "@/components/layout/sidebar";
+import { CommandPalette } from "@/components/CommandPalette";
 import { Toaster } from "@/components/ui/sonner";
 
 // PR S20 polish: Geist Sans + Geist Mono (openchat-v2). Replaces the previous
@@ -39,6 +40,7 @@ export default function RootLayout({
         <main className="relative z-10 flex-1 min-w-0">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
         </main>
+        <CommandPalette />
         <Toaster position="bottom-right" />
       </body>
     </html>
