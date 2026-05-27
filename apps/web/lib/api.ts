@@ -74,10 +74,19 @@ export const api = {
       fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" }),
   },
   runs: {
-    list: (params?: { worker_id?: string; status?: string; limit?: number; offset?: number }) => {
+    list: (params?: {
+      worker_id?: string;
+      status?: string;
+      since?: string;
+      until?: string;
+      limit?: number;
+      offset?: number;
+    }) => {
       const qs = new URLSearchParams();
       if (params?.worker_id) qs.append("worker_id", params.worker_id);
       if (params?.status) qs.append("status", params.status);
+      if (params?.since) qs.append("since", params.since);
+      if (params?.until) qs.append("until", params.until);
       if (params?.limit) qs.append("limit", String(params.limit));
       if (params?.offset) qs.append("offset", String(params.offset));
       return fetchJson<import("./types").RunSummary[]>(`/runs?${qs.toString()}`);
@@ -88,6 +97,14 @@ export const api = {
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
+    replay: (workerId: string, runId: string) =>
+      fetchJson<{ run_id: string }>(
+        `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
+        { method: "POST" }
+      ),
+    downloadUrl: (id: string) => `${API_BASE}/runs/${encodeURIComponent(id)}/download`,
+    bundleUrl: (id: string, filename: string) =>
+      `${API_BASE}/runs/${encodeURIComponent(id)}/bundle/${encodeURIComponent(filename)}`,
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
@@ -108,6 +125,8 @@ export const api = {
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
     platformConfig: () => fetchJson<import("./types").PlatformConfig>("/system/platform-config"),
+    overview: () => fetchJson<import("./types").SystemOverview>("/system/overview"),
+    metrics: () => fetchJson<import("./types").SystemMetrics>("/system/metrics"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
   },
   connections: {

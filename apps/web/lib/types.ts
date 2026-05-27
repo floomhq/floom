@@ -240,6 +240,59 @@ export interface PlatformConfig {
   required_count: number;
 }
 
+export interface SystemOverviewStats {
+  runs_24h: number;
+  runs_24h_sparkline: number[];
+  success_rate_7d: number;
+  active_workers_count: number;
+  connections_healthy: number;
+  connections_total: number;
+}
+
+export interface SystemOverviewRunItem {
+  run_id: string;
+  worker_id: string;
+  worker_name: string;
+  status: string;
+  started_at: string | null;
+  duration_ms: number;
+  trigger_source: string;
+}
+
+export interface SystemOverviewScheduledItem {
+  worker_id: string;
+  worker_name: string;
+  next_fire_at: string;
+  trigger_label: string;
+}
+
+export interface SystemOverviewAttentionItem {
+  type: string;
+  worker_id?: string;
+  connection_id?: string;
+  message: string;
+  action_url: string;
+}
+
+export interface SystemOverview {
+  stats: SystemOverviewStats;
+  recent_runs: SystemOverviewRunItem[];
+  scheduled_today: SystemOverviewScheduledItem[];
+  needs_attention: SystemOverviewAttentionItem[];
+}
+
+export interface SystemMetrics {
+  workers_count: number;
+  runs_total: number;
+  runs_7d: number;
+  runs_failed_7d: number;
+  connections_count: number;
+  secrets_count: number;
+  active_triggers: number;
+  uptime_seconds: number;
+  drafts_last_hour?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Connections (Composio OAuth)
 // ---------------------------------------------------------------------------
