@@ -10,7 +10,6 @@ import {
   Clock,
   Plug,
   Plus,
-  XCircle,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -21,6 +20,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Sparkline } from "@/components/Sparkline";
+import { RunStatusGlyph } from "@/components/RunStatus";
+import {
+  formatDuration,
+  formatRelative,
+  formatRelativeFuture,
+  formatTimeOfDay,
+} from "@/lib/formatters";
 
 function StatCard({
   label,
@@ -51,71 +58,6 @@ function StatCard({
       </CardContent>
     </Card>
   );
-}
-
-function Sparkline({ data }: { data: number[] }) {
-  const max = Math.max(1, ...data);
-  return (
-    <svg
-      viewBox={`0 0 ${data.length * 4} 24`}
-      preserveAspectRatio="none"
-      className="h-6 w-24 text-emerald-500"
-      aria-hidden
-    >
-      {data.map((v, i) => {
-        const h = Math.max(1, (v / max) * 22);
-        return (
-          <rect
-            key={i}
-            x={i * 4}
-            y={24 - h}
-            width={3}
-            height={h}
-            fill="currentColor"
-            rx={0.5}
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
-function StatusGlyph({ status }: { status: string }) {
-  const s = status.toLowerCase();
-  if (s === "completed" || s === "success" || s === "succeeded") {
-    return <CheckCircle2 className="size-4 text-emerald-600" />;
-  }
-  if (s === "failed" || s === "error") {
-    return <XCircle className="size-4 text-red-600" />;
-  }
-  return <Clock className="size-4 text-blue-600 animate-pulse" />;
-}
-
-function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s ago`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}min ago`;
-  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
-  return `${Math.round(ms / 86_400_000)}d ago`;
-}
-
-function formatDuration(ms: number): string {
-  if (!ms) return "-";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function formatTimeOfDay(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatRelativeFuture(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now();
-  if (ms <= 0) return "now";
-  if (ms < 3_600_000) return `in ${Math.round(ms / 60_000)}min`;
-  return `in ${Math.round(ms / 3_600_000)}h`;
 }
 
 export default function OverviewPage() {
@@ -168,7 +110,11 @@ export default function OverviewPage() {
           value={stats?.runs_24h ?? 0}
           icon={Clock}
           loading={loading}
-          trend={stats ? <Sparkline data={stats.runs_24h_sparkline} /> : null}
+          trend={
+            stats ? (
+              <Sparkline data={stats.runs_24h_sparkline} width={96} height={24} />
+            ) : null
+          }
         />
         <StatCard
           label="Success 7d"
@@ -253,7 +199,7 @@ export default function OverviewPage() {
                     className="flex items-center justify-between gap-3 py-3 hover:bg-accent rounded-md px-2 -mx-2 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <StatusGlyph status={r.status} />
+                      <RunStatusGlyph status={r.status} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{r.worker_name}</p>
                         <p className="text-xs text-muted-foreground">

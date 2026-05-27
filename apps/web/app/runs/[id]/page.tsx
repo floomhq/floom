@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RunStatusBadge } from "@/components/RunStatus";
+import { formatAbsolute, formatLogTime } from "@/lib/formatters";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -181,11 +182,11 @@ export default function RunDetailPage() {
               <Copy className="w-3 h-3" />
             </button>
             <span className="text-xs text-[#999]">
-              {run.created_at ? new Date(run.created_at).toLocaleString() : ""}
+              {formatAbsolute(run.created_at)}
             </span>
           </div>
         </div>
-        <StatusBadge status={run.status} />
+        <RunStatusBadge status={run.status} />
         {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
@@ -285,7 +286,7 @@ export default function RunDetailPage() {
                     filteredWithIdx.map(({ log, origIdx }) => (
                       <div key={origIdx} className="flex items-start gap-3 text-sm">
                         <span className="text-[#999] text-xs mt-0.5 min-w-[80px] shrink-0">
-                          {new Date(log.timestamp).toLocaleTimeString()}
+                          {formatLogTime(log.timestamp)}
                         </span>
                         <span className={`flex-1 ${log.level === "error" ? "text-red-600" : "text-[#333]"}`}>
                           {log.message}
@@ -448,16 +449,4 @@ export default function RunDetailPage() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    running: "text-blue-600 border-blue-200 bg-blue-50",
-    completed: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    failed: "text-red-600 border-red-200 bg-red-50",
-    queued: "text-gray-600 border-gray-200 bg-gray-50",
-  };
-  return (
-    <Badge variant="outline" className={map[status] || map.queued}>
-      {status.replace("_", " ")}
-    </Badge>
-  );
-}
+// PR S12-UI-dry: local StatusBadge removed, callers use <RunStatusBadge>.
