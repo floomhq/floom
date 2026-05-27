@@ -314,34 +314,23 @@ function NewWorkerContent() {
       {/* S25: examples promoted from pills to a tappable card grid with the
           full prompt visible. Less heartless: users see what kind of work
           Floom can do, not just abstract one-liners. */}
+      {/* S29u (score walk): "Recommended first" accent label dropped (per
+          ChatGPT audit: don't paint things to look special unless they ARE
+          state). First tile no longer rendered in saturated --accent-soft;
+          all tiles now equal-weight ghost-style, hover lifts. */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground">Or start from a popular workflow</p>
-          {idx0NoteVisible(EXAMPLES) && (
-            <span className="text-[11px] text-[var(--accent)]">
-              Recommended first
-            </span>
-          )}
-        </div>
+        <p className="text-sm font-medium text-foreground">Or start from a popular workflow</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {EXAMPLES.map((ex, idx) => (
+          {EXAMPLES.map((ex) => (
             <button
               key={ex.label}
               type="button"
               disabled={isBusy}
               onClick={() => setPrompt(ex.prompt)}
-              className={
-                idx === 0
-                  ? "group flex flex-col items-start gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-3 text-left hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-                  : "group flex flex-col items-start gap-1.5 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-muted hover:border-muted-foreground/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              }
+              className="group flex flex-col items-start gap-1.5 border border-line bg-card px-4 py-3 text-left hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <span className={idx === 0 ? "text-sm font-semibold text-[var(--accent)]" : "text-sm font-semibold text-foreground"}>
-                {ex.label}
-              </span>
-              <span className={idx === 0 ? "text-xs text-[var(--accent)] opacity-80 line-clamp-2" : "text-xs text-muted-foreground line-clamp-2"}>
-                {ex.prompt}
-              </span>
+              <span className="text-sm font-medium text-foreground">{ex.label}</span>
+              <span className="text-xs text-muted-foreground line-clamp-2">{ex.prompt}</span>
             </button>
           ))}
         </div>
