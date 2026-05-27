@@ -161,6 +161,20 @@ function WorkersContent() {
 
   const searchLower = search.trim().toLowerCase();
 
+  // S29b: all unique tags across workers, sorted by frequency (most common
+  // first). Used to render a horizontal filter pill row above the cards.
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const w of workers) {
+      for (const t of (w.tags || [])) {
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag, count]) => ({ tag, count }));
+  }, [workers]);
+
   // Worker selection per tab
   const displayedWorkers = useMemo(() => {
     let pool = workers;
@@ -299,18 +313,37 @@ function WorkersContent() {
             </div>
           )}
 
-          {tagFilter && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Filtered by tag:</span>
-              <button
-                type="button"
-                onClick={() => setTagFilter(null)}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
-              >
-                {tagFilter}
-                <span aria-hidden="true">×</span>
-                <span className="sr-only">Clear tag filter</span>
-              </button>
+          {/* S29b: top-level tag filter row. Federico (F8.5) — clicking
+              a card tag was the only path to filter; promote to a visible
+              pill row above the grid. Each pill shows tag + count; click
+              toggles the URL ?tag=X. Active tag pill rendered in Floom
+              blue with an × to clear. */}
+          {allTags.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground mr-1">Tags:</span>
+              {allTags.slice(0, 12).map(({ tag, count }) => {
+                const active = tagFilter === tag;
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setTagFilter(active ? null : tag)}
+                    className={
+                      active
+                        ? "inline-flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
+                        : "inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                    }
+                  >
+                    {tag}
+                    <span className={active ? "text-[var(--accent)]" : "text-muted-foreground/60"}>
+                      {active ? "×" : count}
+                    </span>
+                  </button>
+                );
+              })}
+              {allTags.length > 12 && (
+                <span className="text-xs text-muted-foreground">+{allTags.length - 12} more</span>
+              )}
             </div>
           )}
 
@@ -505,7 +538,7 @@ function WorkerCard({
       title={hoverDescription || undefined}
     >
       <Link href={`/workers/${worker.id}`} className="block h-full">
-      <CardContent className={`h-full p-5 ${compact ? "space-y-2" : "space-y-2.5"}`}>
+      <CardContent className={`h-full flex flex-col p-5 ${compact ? "gap-2" : "gap-2.5"}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
@@ -553,46 +586,40 @@ function WorkerCard({
           </div>
         )}
 
-        {/* Bare timestamp shown by default; replaced by extended stats on hover. */}
-        {stats?.last_run_at && (
-          <p className="text-xs text-muted-foreground group-hover:hidden">
-            Last run {formatRelativeTime(stats.last_run_at)}
-          </p>
-        )}
-
-        {/* Hover-only block: sparkline + trigger + extended stats line.
-            Uses max-h transition so the card grows smoothly on hover instead
-            of jumping. Replaces the bare timestamp above. */}
-        <div className="hidden group-hover:flex flex-col gap-2 pt-1">
-          {(worker.triggers || []).length > 0 ? (
-            <div className="flex flex-wrap gap-1">
-              {(worker.triggers || []).map((label) => (
-                <span
-                  key={label}
-                  className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-muted text-muted-foreground"
-                >
-                  {label}
-                </span>
-              ))}
+        {/* S29b: card height stays fixed on hover. Bottom block is a
+            crossfade: default = "Last run Xh ago", hover = sparkline +
+            trigger + extended stats. Both layers absolute-positioned in
+            the same reserved height; card never grows. */}
+        <div className="relative h-16 mt-auto">
+          <div className="absolute inset-x-0 bottom-0 transition-opacity duration-200 opacity-100 group-hover:opacity-0 pointer-events-none">
+            {stats?.last_run_at && (
+              <p className="text-xs text-muted-foreground">
+                Last run {formatRelativeTime(stats.last_run_at)}
+              </p>
+            )}
+          </div>
+          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1.5 transition-opacity duration-200 opacity-0 group-hover:opacity-100 pointer-events-none">
+            <div className="flex items-center gap-2 flex-wrap">
+              {(worker.triggers || []).length > 0 ? (
+                (worker.triggers || []).map((label) => (
+                  <span key={label} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-muted text-muted-foreground">
+                    {label}
+                  </span>
+                ))
+              ) : (
+                <span className="text-[11px] text-muted-foreground">{worker.trigger_type}</span>
+              )}
+              {hasSparkline && (
+                <Sparkline data={worker.timeseries!} width={80} height={20} />
+              )}
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">{worker.trigger_type}</p>
-          )}
-
-          {hasSparkline && (
-            <div>
-              <Sparkline data={worker.timeseries!} width={120} height={28} />
-            </div>
-          )}
-
-          {hasStats && (
-            <p className="text-xs text-muted-foreground">
-              {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
-              {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
-              {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
-              {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
-            </p>
-          )}
+            {hasStats && (
+              <p className="text-xs text-muted-foreground truncate">
+                {stats.runs_7d > 0 && `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d`}
+                {stats.success_rate_7d != null && stats.runs_7d > 0 && ` · ${Math.round(stats.success_rate_7d * 100)}% success`}
+              </p>
+            )}
+          </div>
         </div>
       </CardContent>
       </Link>
