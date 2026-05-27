@@ -42,86 +42,86 @@ export function RunDetailSplitPane({
   const isActive = run.status === "running" || run.status === "queued";
 
   return (
-    <div className={cn("min-h-[calc(100vh-7rem)]", inline && "min-h-[560px]")}>
-      {/* S27/S28: header aligned with /workers/<id>. S28 adds "← Runs"
-          breadcrumb above the H1 (Federico request). */}
-      <div className="sticky top-0 z-10 border-b border-border bg-background/95 py-4 backdrop-blur">
-        {!inline && (
-          <Link
-            href="/runs"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-2 transition-colors"
-          >
-            <span aria-hidden="true">←</span>
-            Runs
-          </Link>
-        )}
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className={cn("truncate font-semibold tracking-tight", inline ? "text-base" : "text-xl")}>
-                {run.worker_name || run.worker_id}
-              </h1>
-              <RunStatusBadge status={latestStatus(run, transcriptParts)} />
-              {streamConnected && <span className="text-xs text-pending">Streaming</span>}
-              {streamError && <span className="text-xs text-error">{streamError}</span>}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              <code className="font-mono">{run.id}</code>
-              <button
-                type="button"
-                title="Copy run ID"
-                className="rounded p-0.5 hover:bg-muted"
-                onClick={() => {
-                  navigator.clipboard.writeText(run.id).then(
-                    () => toast.success("Run ID copied"),
-                    () => toast.error("Copy failed"),
-                  );
-                }}
-              >
-                <Copy className="size-3" />
-              </button>
-              {run.created_at && (
-                <>
-                  <span className="text-muted-foreground/60">·</span>
-                  <span>{formatAbsolute(run.created_at)}</span>
-                </>
-              )}
-              {run.duration_ms != null && (
-                <>
-                  <span className="text-muted-foreground/60">·</span>
-                  <span>{formatDuration(run.duration_ms)}</span>
-                </>
-              )}
-            </div>
+    <div className={cn("space-y-6", !inline && "min-h-[calc(100vh-7rem)]", inline && "min-h-[560px]")}>
+      {/* S29h (F8.1): match /workers/<id> chrome exactly. Drop the
+          sticky/backdrop/border-b header pattern (no other page has it),
+          drop the border-x box around the split pane. Header is now flat
+          with the same flex/gap/padding rhythm as /workers/<id>. */}
+      {!inline && (
+        <Link
+          href="/runs"
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span aria-hidden="true">←</span>
+          Runs
+        </Link>
+      )}
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className={cn("truncate font-semibold tracking-tight", inline ? "text-base" : "text-xl")}>
+              {run.worker_name || run.worker_id}
+            </h1>
+            <RunStatusBadge status={latestStatus(run, transcriptParts)} />
+            {streamConnected && <span className="text-xs text-pending">Streaming</span>}
+            {streamError && <span className="text-xs text-error">{streamError}</span>}
           </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <Link href={`/workers/${run.worker_id}?section=code`}>
-              <Button variant="outline" size="sm">
-                <Pencil className="size-3.5 mr-1.5" />
-                Edit
-              </Button>
-            </Link>
-            <Button variant="outline" size="sm" onClick={onReplay}>
-              <RotateCcw className="size-3.5 mr-1.5" />
-              Re-run
-            </Button>
-            <a href={api.runs.downloadUrl(run.id)} download>
-              <Button variant="outline" size="sm">
-                <Download className="size-3.5 mr-1.5" />
-                Download
-              </Button>
-            </a>
-            {isActive && (
-              <Button variant="outline" size="sm" onClick={onCancel}>
-                <Square className="size-3.5 mr-1.5" />
-                Cancel
-              </Button>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <code className="font-mono">{run.id}</code>
+            <button
+              type="button"
+              title="Copy run ID"
+              className="rounded p-0.5 hover:bg-muted"
+              onClick={() => {
+                navigator.clipboard.writeText(run.id).then(
+                  () => toast.success("Run ID copied"),
+                  () => toast.error("Copy failed"),
+                );
+              }}
+            >
+              <Copy className="size-3" />
+            </button>
+            {run.created_at && (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span>{formatAbsolute(run.created_at)}</span>
+              </>
+            )}
+            {run.duration_ms != null && (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span>{formatDuration(run.duration_ms)}</span>
+              </>
             )}
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Link href={`/workers/${run.worker_id}#code`}>
+            <Button variant="outline" size="sm">
+              <Pencil className="size-3.5 mr-1.5" />
+              Edit
+            </Button>
+          </Link>
+          <Button variant="outline" size="sm" onClick={onReplay}>
+            <RotateCcw className="size-3.5 mr-1.5" />
+            Re-run
+          </Button>
+          <a href={api.runs.downloadUrl(run.id)} download>
+            <Button variant="outline" size="sm">
+              <Download className="size-3.5 mr-1.5" />
+              Download
+            </Button>
+          </a>
+          {isActive && (
+            <Button variant="outline" size="sm" onClick={onCancel}>
+              <Square className="size-3.5 mr-1.5" />
+              Cancel
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="flex min-h-[520px] gap-0 border-x border-b border-border bg-card">
+      <div className="flex min-h-[520px] gap-0 border border-line bg-card rounded-md overflow-hidden">
         <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-auto border-r border-border bg-muted/25">
           <div className="sticky top-0 border-b border-border bg-card px-3 py-2">
             <p className="text-xs font-medium uppercase text-muted-foreground">Timeline</p>
