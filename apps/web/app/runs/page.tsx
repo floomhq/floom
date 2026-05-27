@@ -253,6 +253,8 @@ function RunsContent() {
               key={r.id}
               href={`/runs/${r.id}`}
               title={r.id}
+              target="_blank"
+              rel="noopener noreferrer"
               className="grid grid-cols-[1fr_auto] md:grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2.5 border-b border-line last:border-b-0 hover:bg-muted transition-colors items-center cursor-pointer"
             >
               <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
