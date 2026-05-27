@@ -36,7 +36,6 @@ def load_db(monkeypatch, tmp_path):
         "db.factory",
         "db.dependency",
         "db.interface",
-        "db.supabase",
         "models",
     ]:
         sys.modules.pop(name, None)
