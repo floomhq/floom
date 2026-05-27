@@ -2,7 +2,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
 import { IconSprite } from "@/components/IconSprite";
 import { ConnectionRow } from "@/components/connections/ConnectionRow";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
@@ -43,6 +45,7 @@ export default function ConnectionsPage() {
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
+  const [connectionSearch, setConnectionSearch] = useState("");
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hydrateOneConnection = useCallback(async (record: ConnectionRecord) => {
@@ -161,6 +164,15 @@ export default function ConnectionsPage() {
     });
   }, [connections, lastUsedBySlug, metadataByConnectionId, scopesByConnectionId]);
 
+  // S28: search bar filters by displayName, accountLabel, or app_name.
+  const filteredConnections = useMemo(() => {
+    const q = connectionSearch.trim().toLowerCase();
+    if (!q) return connectionViews;
+    return connectionViews.filter((v) =>
+      [v.displayName, v.accountLabel, v.app_name].filter(Boolean).some((s) => s!.toLowerCase().includes(q))
+    );
+  }, [connectionViews, connectionSearch]);
+
   function handleConnect(slug: string) {
     // PR S17: route through our pre-confirm page instead of going straight to OAuth.
     window.location.href = `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`;
@@ -239,33 +251,49 @@ export default function ConnectionsPage() {
           ) : connectionViews.length === 0 ? (
             <ConnectionsEmptyState onConnect={() => { window.location.href = "/connections/browse"; }} />
           ) : (
-            // S27: compact row list (was a vertical list of 116px-tall cards).
-            // Single bordered container, rows separated by line. Header row
-            // with column labels on >=md. Mobile collapses to a 3-line row.
-            <div className="rounded-md border border-border bg-card overflow-hidden">
-              <div className="hidden md:grid grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-4 px-3 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
-                <span />
-                <span>App / Account</span>
-                <span>Scopes</span>
-                <span>Last used</span>
-                <span>Status</span>
-                <span className="text-right pr-1">Actions</span>
-              </div>
-              {connectionViews.map((connection) => (
-                <ConnectionRow
-                  key={connection.id}
-                  connection={connection}
-                  deleting={deleting === connection.id}
-                  refreshing={refreshing === connection.id}
-                  reconnecting={connecting === connection.app_name}
-                  testing={testing === connection.id}
-                  onDelete={handleDelete}
-                  onReconnect={handleConnect}
-                  onRefresh={handleRefresh}
-                  onTest={handleTest}
+            // S27 (kept after S28 revert): compact row table. Federico
+            // walked back from "make it a grid like browse" to "this is
+            // fine, just add a search bar". The row table stays.
+            <>
+              <div className="mb-3 relative max-w-sm">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search connections..."
+                  value={connectionSearch}
+                  onChange={(e) => setConnectionSearch(e.target.value)}
+                  className="pl-9 h-9"
                 />
-              ))}
-            </div>
+              </div>
+              <div className="rounded-md border border-border bg-card overflow-hidden">
+                <div className="hidden md:grid grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-4 px-3 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
+                  <span />
+                  <span>App / Account</span>
+                  <span>Scopes</span>
+                  <span>Last used</span>
+                  <span>Status</span>
+                  <span className="text-right pr-1">Actions</span>
+                </div>
+                {filteredConnections.map((connection) => (
+                  <ConnectionRow
+                    key={connection.id}
+                    connection={connection}
+                    deleting={deleting === connection.id}
+                    refreshing={refreshing === connection.id}
+                    reconnecting={connecting === connection.app_name}
+                    testing={testing === connection.id}
+                    onDelete={handleDelete}
+                    onReconnect={handleConnect}
+                    onRefresh={handleRefresh}
+                    onTest={handleTest}
+                  />
+                ))}
+                {filteredConnections.length === 0 && connectionSearch && (
+                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No connections match &quot;{connectionSearch}&quot;.
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </section>
 
