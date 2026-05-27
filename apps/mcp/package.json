@@ -25,10 +25,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "commander": "^14.0.2",
+    "open": "^10.2.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
   "license": "MIT"

@@ -18,6 +18,7 @@ import time
 import collections
 import threading
 import tempfile
+import secrets as pysecrets
 import uuid as _uuid_mod
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -216,6 +217,8 @@ async def auth_middleware(request: Request, call_next):
             or path in {"/healthz", "/health"}
             or path == "/composio-events"
             or path == "/connections/callback"
+            or path == "/cli-auth/devices"
+            or path.startswith("/cli-auth/poll/")
         ):
             return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
@@ -5484,6 +5487,181 @@ def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
 
     raw_secret = generate_webhook_secret(worker_id)
     return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret)
+
+
+# ---------------------------------------------------------------------------
+# CLI device-code auth (single-instance in-memory v0)
+# ---------------------------------------------------------------------------
+
+# Single-instance launch tradeoff:
+# Device auth state is in memory only. Restarting the API process or running
+# multiple API replicas will invalidate in-flight device codes.
+_cli_auth_lock = threading.Lock()
+_cli_auth_devices: Dict[str, Dict[str, Any]] = {}
+_CLI_AUTH_EXPIRES_SECONDS = 600
+_CLI_AUTH_POLL_INTERVAL_SECONDS = 2
+_CLI_AUTH_USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+class CliAuthDeviceCreateRequest(BaseModel):
+    client_name: str
+    scopes: List[str] = []
+
+
+class CliAuthCodeRequest(BaseModel):
+    user_code: str
+
+
+def _cli_auth_prune_expired(now_ts: Optional[float] = None) -> None:
+    ts = now_ts or time.time()
+    expired_codes = [
+        code
+        for code, record in _cli_auth_devices.items()
+        if float(record.get("expires_at", 0.0)) <= ts
+    ]
+    for code in expired_codes:
+        _cli_auth_devices.pop(code, None)
+
+
+def _new_device_code() -> str:
+    return base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
+
+
+def _new_user_code() -> str:
+    left = "".join(pysecrets.choice(_CLI_AUTH_USER_CODE_ALPHABET) for _ in range(4))
+    right = "".join(pysecrets.choice(_CLI_AUTH_USER_CODE_ALPHABET) for _ in range(4))
+    return f"{left}-{right}"
+
+
+def _api_public_base() -> str:
+    return (os.environ.get("WORKEROS_API_BASE") or "https://workers-api.floom.dev").rstrip("/")
+
+
+def _frontend_public_base() -> str:
+    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
+
+
+@app.post("/cli-auth/devices")
+def create_cli_device(payload: CliAuthDeviceCreateRequest) -> Dict[str, Any]:
+    client_name = (payload.client_name or "").strip()
+    if not client_name:
+        raise HTTPException(status_code=400, detail="client_name is required")
+
+    now_ts = time.time()
+    expires_at = now_ts + _CLI_AUTH_EXPIRES_SECONDS
+    with _cli_auth_lock:
+        _cli_auth_prune_expired(now_ts)
+
+        device_code = _new_device_code()
+        while device_code in _cli_auth_devices:
+            device_code = _new_device_code()
+
+        existing_user_codes = {str(record.get("user_code", "")) for record in _cli_auth_devices.values()}
+        user_code = _new_user_code()
+        while user_code in existing_user_codes:
+            user_code = _new_user_code()
+
+        _cli_auth_devices[device_code] = {
+            "user_code": user_code,
+            "status": "pending",
+            "created_at": now_ts,
+            "expires_at": expires_at,
+            "secret": None,
+            "client_name": client_name,
+            "scopes": list(payload.scopes or []),
+        }
+
+    verification_url = f"{_frontend_public_base()}/cli-auth?code={user_code}"
+    return {
+        "device_code": device_code,
+        "user_code": user_code,
+        "verification_url": verification_url,
+        "polling_interval_seconds": _CLI_AUTH_POLL_INTERVAL_SECONDS,
+        "expires_in_seconds": _CLI_AUTH_EXPIRES_SECONDS,
+    }
+
+
+@app.get("/cli-auth/poll/{device_code}")
+def poll_cli_device(device_code: str) -> Dict[str, Any]:
+    now_ts = time.time()
+    with _cli_auth_lock:
+        record = _cli_auth_devices.get(device_code)
+        if not record:
+            raise HTTPException(status_code=404, detail="Device code not found")
+
+        if float(record.get("expires_at", 0.0)) <= now_ts:
+            _cli_auth_devices.pop(device_code, None)
+            raise HTTPException(status_code=410, detail="Device code expired")
+
+        status = str(record.get("status", "pending"))
+        if status == "pending":
+            return {"status": "pending"}
+
+        if status == "denied":
+            _cli_auth_devices.pop(device_code, None)
+            raise HTTPException(status_code=403, detail="Device code denied")
+
+        if status == "approved":
+            secret = str(record.get("secret") or "")
+            if not secret:
+                _cli_auth_devices.pop(device_code, None)
+                raise HTTPException(status_code=500, detail="Approved device missing API secret")
+            _cli_auth_devices.pop(device_code, None)
+            return {
+                "status": "approved",
+                "api_secret": secret,
+                "api_base": _api_public_base(),
+            }
+
+        raise HTTPException(status_code=500, detail=f"Unexpected device status: {status}")
+
+
+def _find_device_code_by_user_code(user_code: str) -> Optional[str]:
+    needle = user_code.strip().upper()
+    for device_code, record in _cli_auth_devices.items():
+        if str(record.get("user_code", "")).upper() == needle:
+            return device_code
+    return None
+
+
+@app.post("/cli-auth/approve")
+def approve_cli_device(payload: CliAuthCodeRequest) -> Dict[str, Any]:
+    floom_secret = os.environ.get("FLOOM_SECRET", "")
+    if not floom_secret:
+        raise HTTPException(status_code=503, detail="FLOOM_SECRET is not configured")
+
+    now_ts = time.time()
+    with _cli_auth_lock:
+        _cli_auth_prune_expired(now_ts)
+        device_code = _find_device_code_by_user_code(payload.user_code)
+        if not device_code:
+            raise HTTPException(status_code=404, detail="User code not found")
+        record = _cli_auth_devices.get(device_code)
+        if not record:
+            raise HTTPException(status_code=404, detail="User code not found")
+        if str(record.get("status")) != "pending":
+            raise HTTPException(status_code=409, detail="Device code is no longer pending")
+        record["status"] = "approved"
+        record["secret"] = floom_secret
+        return {"ok": True, "client_name": record.get("client_name") or "unknown"}
+
+
+@app.post("/cli-auth/deny")
+def deny_cli_device(payload: CliAuthCodeRequest) -> Dict[str, Any]:
+    now_ts = time.time()
+    with _cli_auth_lock:
+        _cli_auth_prune_expired(now_ts)
+        device_code = _find_device_code_by_user_code(payload.user_code)
+        if not device_code:
+            raise HTTPException(status_code=404, detail="User code not found")
+        record = _cli_auth_devices.get(device_code)
+        if not record:
+            raise HTTPException(status_code=404, detail="User code not found")
+        if str(record.get("status")) != "pending":
+            raise HTTPException(status_code=409, detail="Device code is no longer pending")
+        record["status"] = "denied"
+        record["secret"] = None
+        return {"ok": True, "client_name": record.get("client_name") or "unknown"}
 
 
 if __name__ == "__main__":
