@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
+  Trash2,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
@@ -444,6 +445,14 @@ export default function WorkerDetailPage() {
               }}
               onRun={handleRun}
               onApplySample={applyExampleInput}
+              onClearInputs={() => {
+                const defaults: Record<string, unknown> = {};
+                for (const inp of worker.config.inputs) {
+                  defaults[inp.name] = inp.default ?? "";
+                }
+                setInputs(defaults);
+                setFileNames({});
+              }}
             />
           )
         )}
@@ -458,7 +467,7 @@ export default function WorkerDetailPage() {
         )}
 
         {activeSection === "triggers" && (
-          <div className="max-w-xl space-y-4">
+          <div className="max-w-2xl">
             <TriggersEditor
               rows={triggerRows}
               onChange={(rows) => {
@@ -467,29 +476,19 @@ export default function WorkerDetailPage() {
               }}
               connections={connections}
               webhookUrl={worker.webhook_url}
+              dirty={triggersDirty}
+              saving={savingTriggers}
+              onSave={handleSaveTriggers}
+              onDiscard={() => {
+                const specs: TriggerSpec[] = worker.triggers_spec || [];
+                if (specs.length > 0) {
+                  setTriggerRows(specs.map((s) => makeTriggerRow(s)));
+                } else if (worker.config.trigger) {
+                  setTriggerRows([makeTriggerRow(worker.config.trigger as TriggerSpec)]);
+                }
+                setTriggersDirty(false);
+              }}
             />
-            {triggersDirty && (
-              <div className="flex items-center gap-2">
-                <Button onClick={handleSaveTriggers} disabled={savingTriggers} size="sm">
-                  {savingTriggers ? "Saving..." : "Save triggers"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    const specs: TriggerSpec[] = worker.triggers_spec || [];
-                    if (specs.length > 0) {
-                      setTriggerRows(specs.map((s) => makeTriggerRow(s)));
-                    } else if (worker.config.trigger) {
-                      setTriggerRows([makeTriggerRow(worker.config.trigger as TriggerSpec)]);
-                    }
-                    setTriggersDirty(false);
-                  }}
-                >
-                  Discard
-                </Button>
-              </div>
-            )}
           </div>
         )}
 
@@ -530,6 +529,7 @@ function RunSection({
   onFileUploaded,
   onRun,
   onApplySample,
+  onClearInputs,
 }: {
   worker: WorkerDetail;
   inputs: Record<string, unknown>;
@@ -542,7 +542,15 @@ function RunSection({
   onFileUploaded: (name: string, sha256: string, fileName: string) => void;
   onRun: () => void;
   onApplySample: () => void;
+  onClearInputs: () => void;
 }) {
+  // S29e (F8.10): "Use sample input" was buried under the inputs; users
+  // didn't notice it. Moved to a compact action bar at the top with a
+  // trash icon to clear all inputs in one click.
+  const hasInputs = worker.config.inputs.length > 0;
+  const inputsFilled = hasInputs && Object.values(inputs).some(
+    (v) => v !== null && v !== undefined && v !== "" && v !== false
+  );
   return (
     <div className="max-w-xl space-y-4">
       <Card className="border-border shadow-none bg-card">
@@ -550,6 +558,34 @@ function RunSection({
           <CardTitle className="text-sm font-medium">Run worker</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {hasInputs && (worker.example_input || inputsFilled) && (
+            <div className="flex items-center gap-2 pb-1">
+              {worker.example_input && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-line"
+                  onClick={onApplySample}
+                  disabled={!canApplySample}
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
+                  Fill with sample input
+                </Button>
+              )}
+              {inputsFilled && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-muted-foreground hover:text-foreground"
+                  onClick={onClearInputs}
+                  title="Clear all inputs"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                  Clear
+                </Button>
+              )}
+            </div>
+          )}
           {worker.config.inputs.map((inp: WorkerInput) => (
             <div key={inp.name} className="space-y-1.5">
               <Label className="text-sm">
@@ -626,19 +662,6 @@ function RunSection({
 
           {worker.config.inputs.length === 0 && (
             <p className="text-sm text-muted-foreground">This worker has no inputs.</p>
-          )}
-
-          {worker.example_input && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onApplySample}
-              disabled={!canApplySample}
-              className="border-border"
-            >
-              <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
-              Use sample input
-            </Button>
           )}
 
           {missingConnections.length > 0 && (
