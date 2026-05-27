@@ -1,15 +1,35 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+
 import { api } from "@/lib/api";
 import type { PlatformConfig, SystemInfo } from "@/lib/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CliCommandPanel } from "@/components/CliCommandPanel";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
+
+type TabKey = "api" | "system" | "notifications" | "appearance" | "danger";
+
+const TAB_KEYS: TabKey[] = ["api", "system", "notifications", "appearance", "danger"];
+
+function isValidTab(value: string | null): value is TabKey {
+  return value !== null && TAB_KEYS.includes(value as TabKey);
+}
 
 export default function SettingsPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [tab, setTab] = useState<TabKey>(isValidTab(tabParam) ? tabParam : "api");
+
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
   const [reloading, setReloading] = useState(false);
@@ -32,6 +52,18 @@ export default function SettingsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (isValidTab(tabParam) && tabParam !== tab) setTab(tabParam);
+  }, [tabParam, tab]);
+
+  function handleTabChange(value: string) {
+    if (!isValidTab(value)) return;
+    setTab(value);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", value);
+    router.replace(`/settings?${params.toString()}`, { scroll: false });
+  }
 
   async function handleReload() {
     setReloading(true);
@@ -77,151 +109,238 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-[#666] text-sm mt-1">System configuration and maintenance.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          System configuration and access.
+        </p>
       </div>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">System Info</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          {info ? (
-            <>
-              <div className="flex justify-between">
-                <span className="text-[#666]">Version</span>
-                <span className="font-medium font-mono">{info.version}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#666]">Started at</span>
-                <span className="font-medium font-mono">{info.started_at}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#666]">Python</span>
-                <span className="font-medium font-mono">{info.python_version}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#666]">Runner</span>
-                <span className="font-medium">{info.runner}</span>
-              </div>
-            </>
-          ) : (
-            // N8 fix: skeleton placeholders instead of "Loading..." text to
-            // eliminate the 4-6s flash on first load.
-            <div className="space-y-3">
-              {[120, 96, 80].map((w, i) => (
-                <div key={i} className="flex justify-between items-center">
-                  <Skeleton className="h-4" style={{ width: 80 }} />
-                  <Skeleton className="h-4" style={{ width: w }} />
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <Tabs value={tab} onValueChange={handleTabChange}>
+        <TabsList>
+          <TabsTrigger value="api">API access</TabsTrigger>
+          <TabsTrigger value="system">System</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          <TabsTrigger value="appearance">Appearance</TabsTrigger>
+          <TabsTrigger value="danger">Danger zone</TabsTrigger>
+        </TabsList>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Platform configuration</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-xs font-medium text-[#555] mb-2">Required secrets</p>
-            <p className="text-xs text-[#999] mb-3">
-              Configure required environment variables on the API host.
-            </p>
-            {!platformConfig ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                    <Skeleton className="h-4 w-36" />
-                    <Skeleton className="h-8 w-20 rounded" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                  <span className="text-sm text-[#555]">Configured</span>
-                  <span className="font-medium text-sm">
-                    {platformConfig.set_count}/{platformConfig.required_count}
-                  </span>
-                </div>
+        <TabsContent value="api" className="space-y-4">
+          <CliCommandPanel />
+        </TabsContent>
 
-                {platformConfig.all_required_set ? (
-                  <div className="flex items-center justify-between p-2 rounded-md bg-emerald-50 border border-emerald-200">
-                    <span className="text-sm text-emerald-700">All required secrets are configured.</span>
-                    <Badge variant="outline" className="text-emerald-700 border-emerald-300 bg-emerald-100">
-                      ready
-                    </Badge>
+        <TabsContent value="system" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">System info</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {info ? (
+                <>
+                  <Row label="Version" value={info.version} mono />
+                  <Row label="Started at" value={info.started_at} mono />
+                  <Row label="Python" value={info.python_version} mono />
+                  <Row label="Runner" value={info.runner} />
+                </>
+              ) : (
+                <div className="space-y-3">
+                  {[120, 96, 80].map((w, i) => (
+                    <div key={i} className="flex justify-between items-center">
+                      <Skeleton className="h-4" style={{ width: 80 }} />
+                      <Skeleton className="h-4" style={{ width: w }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Platform configuration</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {!platformConfig ? (
+                <Skeleton className="h-12 w-full" />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-md bg-muted p-3">
+                    <span className="text-sm">Configured</span>
+                    <span className="text-sm font-medium">
+                      {platformConfig.set_count}/{platformConfig.required_count}
+                    </span>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {platformConfig.missing.map((name) => (
-                      <div key={name} className="flex items-center justify-between p-2 rounded-md bg-[#fef2f2] border border-red-200">
-                        <div className="min-w-0">
-                          <span className="text-sm font-mono text-[#333]">{name}</span>
-                          <p className="text-xs text-[#a33] mt-0.5">Missing</p>
+                  {platformConfig.all_required_set ? (
+                    <Alert>
+                      <CheckCircle2 className="size-4" />
+                      <AlertTitle>All required secrets are set</AlertTitle>
+                      <AlertDescription>
+                        Workers can run with full platform configuration.
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="size-4" />
+                      <AlertTitle>
+                        {platformConfig.missing.length} required{" "}
+                        {platformConfig.missing.length === 1 ? "secret" : "secrets"} missing
+                      </AlertTitle>
+                      <AlertDescription>
+                        <div className="mt-2 space-y-1.5">
+                          {platformConfig.missing.map((name) => (
+                            <div
+                              key={name}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <code className="text-xs">{name}</code>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void copySecretName(name)}
+                              >
+                                Copy name
+                              </Button>
+                            </div>
+                          ))}
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0"
-                          onClick={() => void copySecretName(name)}
-                        >
-                          Copy name
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Workers</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-[#666]">Reload workers from disk to pick up config changes.</p>
-            <Button variant="outline" size="sm" onClick={handleReload} disabled={reloading}>
-              {reloading ? "Reloading..." : "Reload workers"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Workers</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-muted-foreground">
+                  Reload workers from disk to pick up config changes.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReload}
+                  disabled={reloading}
+                >
+                  {reloading ? "Reloading..." : "Reload workers"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      <Card className="border-red-200 shadow-none bg-white">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium text-red-800">Danger Zone</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium">Clear run history</p>
-              <p className="text-xs text-[#999] mt-0.5">
-                Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
+        <TabsContent value="notifications" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Email notifications</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <ToggleRow
+                title="Email on run failure"
+                description="Send an email when a worker run ends in error."
+                disabled
+              />
+              <ToggleRow
+                title="Email on connection expiry"
+                description="Warn when a connected account is about to lose access."
+                disabled
+              />
+              <p className="text-xs text-muted-foreground">
+                Email delivery is not wired up yet. Toggles will activate once
+                outbound email is configured.
               </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className={
-                confirmClear
-                  ? "border-red-500 text-red-700 bg-red-50 hover:bg-red-100 shrink-0"
-                  : "border-red-200 text-red-700 hover:bg-red-50 shrink-0"
-              }
-              onClick={handleClearRuns}
-              disabled={clearing}
-            >
-              {clearing ? "Clearing..." : confirmClear ? "Confirm clear" : "Clear runs"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="appearance" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Theme</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Floom is light-only for now. System and dark themes land after v1.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="danger" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium">Danger zone</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium">Clear run history</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
+                  </p>
+                </div>
+                <Button
+                  variant={confirmClear ? "destructive" : "outline"}
+                  size="sm"
+                  className="shrink-0"
+                  onClick={handleClearRuns}
+                  disabled={clearing}
+                >
+                  {clearing
+                    ? "Clearing..."
+                    : confirmClear
+                    ? "Confirm clear"
+                    : "Clear runs"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function ToggleRow({
+  title,
+  description,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Switch disabled={disabled} />
+      {disabled ? (
+        <Badge variant="outline" className="text-xs">
+          Soon
+        </Badge>
+      ) : null}
     </div>
   );
 }

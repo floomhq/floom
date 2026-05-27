@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Download, Pencil, RotateCcw, Search, X } from "lucide-react";
 import type { RunDetail, LogEntry, TranscriptRow } from "@/lib/types";
 import { OutputRenderer } from "@/components/output-renderer";
 import { toast } from "sonner";
@@ -186,23 +187,55 @@ export default function RunDetailPage() {
         </div>
         <StatusBadge status={run.status} />
         {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}
-        {(run.status === "running" || run.status === "queued") && (
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/workers/${run.worker_id}?section=code`}>
+              <Pencil className="w-3.5 h-3.5" />
+              Edit worker
+            </Link>
+          </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={async () => {
-              if (!confirm("Cancel this run?")) return;
               try {
-                await api.runs.cancel(run.id);
-                toast.success("Cancellation requested");
+                const result = await api.runs.replay(run.worker_id, run.id);
+                toast.success("Re-running with same inputs");
+                router.push(`/runs/${result.run_id}`);
               } catch (e) {
-                toast.error(`Cancel failed: ${e instanceof Error ? e.message : "unknown"}`);
+                toast.error(
+                  `Re-run failed: ${e instanceof Error ? e.message : "unknown"}`
+                );
               }
             }}
           >
-            Cancel run
+            <RotateCcw className="w-3.5 h-3.5" />
+            Re-run
           </Button>
-        )}
+          <Button variant="outline" size="sm" asChild>
+            <a href={api.runs.downloadUrl(run.id)} download>
+              <Download className="w-3.5 h-3.5" />
+              Download all
+            </a>
+          </Button>
+          {(run.status === "running" || run.status === "queued") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!confirm("Cancel this run?")) return;
+                try {
+                  await api.runs.cancel(run.id);
+                  toast.success("Cancellation requested");
+                } catch (e) {
+                  toast.error(`Cancel failed: ${e instanceof Error ? e.message : "unknown"}`);
+                }
+              }}
+            >
+              Cancel run
+            </Button>
+          )}
+        </div>
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
