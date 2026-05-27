@@ -30,6 +30,8 @@ import { FileInputUpload } from "@/components/FileInputUpload";
 import { FilesEditor, TriggersEditor, makeTriggerRow, buildTriggersYaml, replaceTriggerBlock } from "@/components/worker-form";
 import type { TriggerRow } from "@/components/worker-form";
 import { formatRelativeTime } from "@/components/connections/connection-data";
+import { formatRelative, formatDuration } from "@/lib/formatters";
+import { RunStatusBadge } from "@/components/RunStatus";
 import { RunDetailSplitPane } from "@/components/RunDetailSplitPane";
 import { useRunStream } from "@/lib/useRunStream";
 
@@ -846,18 +848,28 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
       {worker.recent_runs?.length === 0 ? (
         <p className="text-sm text-muted-foreground">No runs yet.</p>
       ) : (
+        // S29q: was rendering run.id as BOTH title and font-mono secondary
+        // line (duplicate), every row showed a "completed" Badge (decoration
+        // — should route through RunStatusBadge which hides for default-success).
+        // Now: relative-time title, dot-separated meta (duration · trigger),
+        // RunStatusBadge for non-success states only. Matches /runs list rhythm.
         worker.recent_runs?.map((r) => (
-          <Link key={r.id} href={`/runs/${r.id}`} target="_blank" rel="noopener noreferrer">
-            <div className="flex items-center justify-between p-2 rounded-md hover:bg-muted cursor-pointer transition-colors">
-              <div>
-                <p className="text-sm font-medium">{r.worker_name || r.id}</p>
-                <p className="text-xs text-muted-foreground font-mono">{r.id}</p>
-                <p className="text-xs text-muted-foreground">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">{r.status}</Badge>
-                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
+          <Link
+            key={r.id}
+            href={`/runs/${r.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between p-2 hover:bg-muted cursor-pointer transition-colors"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{formatRelative(r.created_at) || "Unknown time"}</p>
+              <p className="text-xs text-muted-foreground">
+                {formatDuration(r.duration_ms)} · {(r.trigger_source || "manual")}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <RunStatusBadge status={r.status} />
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
             </div>
           </Link>
         ))
