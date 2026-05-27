@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { Paperclip, Loader2 } from "lucide-react";
+import { Paperclip, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -397,18 +397,21 @@ async function readText(file: File): Promise<string | null> {
   });
 }
 
-// S24: GeneratingPanel — replaces the frozen "Generating..." button with a
-// real loading surface. Steps auto-advance on a timer (Drafting -> Writing
-// run -> Validating -> Opening editor). The advancement is aspirational
-// (we do not know which step the API is on); it gives users a sense of
-// progress instead of a static spinner.
-// S25: honest indeterminate loader. Federico called the prior 4-step panel
-// out for (a) hardcoding "Writing run.py + SKILL.md" which doesn't apply to
-// every worker (pure-script vs agent), and (b) getting stuck on the last
-// step forever when the API takes longer than 4*2.2s. Removed the fake
-// progress. Single elegant indeterminate state with the prompt echoed,
-// an animated indeterminate bar, an elapsed counter, and an escape hatch
-// after 60s in case the request really hung.
+// S29g (F8.12): Federico — "0 progress showing, 0 engagement for me I
+// leave the page." S25's pure indeterminate bar was honest but boring.
+// New: 5 named stages cycle on timer thresholds, the bar fills determinately
+// through them, and the last stage holds with a shimmer (backend status
+// still unknown). Stages are timing-best-guess, not backend-driven —
+// labeled as such below the progress so engagement gain doesn't come from
+// lying. Real solution is the async-draft SSE backend (Codex queued).
+const DRAFT_STAGES = [
+  { id: "read",     label: "Reading your prompt",          targetSec: 3 },
+  { id: "plan",     label: "Picking integrations",         targetSec: 9 },
+  { id: "draft",    label: "Drafting worker.yml",          targetSec: 16 },
+  { id: "write",    label: "Writing run.py + dependencies", targetSec: 24 },
+  { id: "validate", label: "Validating + opening editor",  targetSec: 38 },
+] as const;
+
 function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () => void }) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -416,6 +419,14 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
     const id = window.setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => window.clearInterval(id);
   }, []);
+
+  const stageIndex = DRAFT_STAGES.findIndex((s) => elapsed < s.targetSec);
+  const activeStage = stageIndex === -1 ? DRAFT_STAGES.length - 1 : stageIndex;
+  const lastStage = stageIndex === -1;
+  const stageRatio = (activeStage + (lastStage ? 0 : 1)) / DRAFT_STAGES.length;
+  // Cap at 92% until backend confirms completion — never claim 100% before
+  // we actually know we're done (would erode trust the next time).
+  const progress = Math.min(0.92, stageRatio);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -439,18 +450,49 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
         </div>
       )}
 
-      {/* Indeterminate progress bar - pure animation, not tied to fake steps */}
-      <div className="space-y-2">
-        <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--bg-2)] relative">
-          <div className="absolute inset-y-0 w-1/3 rounded-full bg-[var(--accent)] animate-[s25-slide_1.8s_ease-in-out_infinite]" />
+      <div className="space-y-3">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-2)] relative">
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-[var(--accent)] transition-[width] duration-700 ease-out"
+            style={{ width: `${progress * 100}%` }}
+          />
+          {lastStage && (
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10 animate-[s29g-shimmer_1.6s_ease-in-out_infinite]"
+              style={{ width: `${progress * 100}%` }}
+            />
+          )}
         </div>
-        <div className="flex justify-between text-[11px] text-muted-foreground">
-          <span>Working...</span>
-          <span>{formatElapsed(elapsed)}</span>
+        <ol className="space-y-1.5">
+          {DRAFT_STAGES.map((stage, i) => {
+            const done = i < activeStage;
+            const active = i === activeStage;
+            return (
+              <li key={stage.id} className="flex items-center gap-2.5 text-sm">
+                <span
+                  className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] ${
+                    done
+                      ? "bg-[var(--accent)] text-[var(--solid-fg)]"
+                      : active
+                      ? "border border-[var(--accent)] text-[var(--accent)]"
+                      : "border border-line text-muted-foreground"
+                  }`}
+                >
+                  {done ? <Check className="w-2.5 h-2.5" /> : active ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : null}
+                </span>
+                <span className={done ? "text-muted-foreground" : active ? "text-foreground font-medium" : "text-muted-foreground"}>
+                  {stage.label}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+        <div className="flex justify-between text-[11px] text-muted-foreground pt-1">
+          <span>Stages are best-guess timing, not backend-streamed.</span>
+          <span className="tabular-nums">{formatElapsed(elapsed)}</span>
         </div>
       </div>
 
-      {/* Escape hatch after 60s in case the request hung */}
       {elapsed >= 60 && onCancel && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:bg-amber-950/30 dark:border-amber-900">
           <p className="text-xs text-amber-800 dark:text-amber-300">
@@ -467,10 +509,10 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
       )}
 
       <style>{`
-        @keyframes s25-slide {
-          0% { transform: translateX(-100%); }
-          50% { transform: translateX(200%); }
-          100% { transform: translateX(-100%); }
+        @keyframes s29g-shimmer {
+          0% { transform: translateX(-100%); opacity: 0; }
+          50% { opacity: 1; }
+          100% { transform: translateX(100%); opacity: 0; }
         }
       `}</style>
     </div>
