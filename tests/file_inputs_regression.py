@@ -5,7 +5,7 @@ Runs against an isolated SQLite database and blob directory.
 
 Scenarios covered:
   - Happy path: upload, dedup, run with file input
-  - Upload exceeding ceiling: 413, no partial blob persisted, temp cleaned up
+  - Upload exceeding ceiling: 400, no partial blob persisted, temp cleaned up
   - Bind a stricter input post-upload: bind-time reject (media_type mismatch)
   - Concurrent uploads of identical content: single dedup row, no double-write
   - 10 same-loop async uploads: all succeed and dedup by SHA
@@ -279,13 +279,13 @@ def main() -> int:
     oversize_content = b"x" * 2048
     oversize_sha = hashlib.sha256(oversize_content).hexdigest()
     oversize_response = post_upload(oversize_content, filename="too-big.csv", max_size_mb=0.001)
-    check("max_size_mb rejected at upload: 413", oversize_response.status_code == 413, oversize_response.text[:200])
+    check("max_size_mb rejected at upload: 400", oversize_response.status_code == 400, oversize_response.text[:200])
     # No partial blob should be persisted
     oversize_blob = BLOBS_DIR / oversize_sha[:2] / oversize_sha
-    check("413 upload leaves no blob on disk", not oversize_blob.exists(), str(oversize_blob))
+    check("400 upload leaves no blob on disk", not oversize_blob.exists(), str(oversize_blob))
     # No stale temp files
     tmp_files = list(BLOBS_DIR.rglob("*.tmp*"))
-    check("413 upload leaves no temp files", len(tmp_files) == 0, str(tmp_files))
+    check("400 upload leaves no temp files", len(tmp_files) == 0, str(tmp_files))
 
     # --- Bind-time revalidation: wrong media_type ---
     print("\n[section] Bind-time revalidation: wrong media_type")
