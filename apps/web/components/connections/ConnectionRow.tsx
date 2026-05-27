@@ -23,14 +23,15 @@ import { formatTimestamp, type ConnectionView } from "./connection-data";
 //   - Disconnect: ghost destructive button
 //   - Refresh status: icon-only
 function StatusPill({ status }: { status: string }) {
+  // S29l (ChatGPT-audit P-2): "Active" on every connection row is decoration.
+  // Only render the pill when the user needs to act (initiated/expired/failed/
+  // inactive). Active state is implied by the absence of a warning pill.
+  if (status === "active") return null;
   const map: Record<string, string> = {
-    active: "border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]",
     initiated: "border-[color-mix(in_srgb,#9a6a16_24%,var(--line))] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]",
   };
   const label =
-    status === "active"
-      ? "Active"
-      : status === "initiated"
+    status === "initiated"
       ? "Connecting"
       : status === "expired"
       ? "Expired"

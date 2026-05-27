@@ -153,7 +153,7 @@ export function OutputRenderer({
   if (value == null || value === "") {
     return (
       <div>
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{label || name}</p>
+        <p className="text-xs font-medium text-muted-foreground mb-1">{label || name}</p>
         <p className="text-sm text-muted-foreground">No output.</p>
       </div>
     );
@@ -161,7 +161,7 @@ export function OutputRenderer({
 
   return (
     <div>
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">{label || name}</p>
+      <p className="text-xs font-medium text-muted-foreground mb-2">{label || name}</p>
       {type === "markdown" ? (
         <div className="space-y-2">
           <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-md border border-border">

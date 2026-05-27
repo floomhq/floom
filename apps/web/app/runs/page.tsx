@@ -241,7 +241,7 @@ function RunsContent() {
       ) : (
         <div className="rounded-md border border-border bg-card overflow-hidden">
           {/* Column header row. Hidden on mobile (rows stack instead). */}
-          <div className="hidden md:grid grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
+          <div className="hidden md:grid grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
             <span>Worker</span>
             <span>Trigger</span>
             <span>Duration</span>
