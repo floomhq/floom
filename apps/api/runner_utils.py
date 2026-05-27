@@ -143,14 +143,16 @@ def _validate_output_schema(
     """
     config = config or get_worker_config(worker_id)
     if not config or not config.outputs:
-        return None  # No schema declared — skip validation
+        return None  # No schema declared, skip validation
 
     for declared in config.outputs:
         name = declared.name
         output_type = declared.type
 
         if name not in outputs:
-            return f"Missing declared output '{name}'"
+            if declared.required:
+                return f"Missing declared output '{name}'"
+            continue
 
         value = outputs[name]
 
