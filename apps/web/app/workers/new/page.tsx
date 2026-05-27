@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, use, useRef, useState } from "react";
+import { Suspense, use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -47,7 +47,7 @@ function NewWorkerPageInner({
 
 function NewWorkerSkeleton() {
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pt-8">
+    <div className="max-w-4xl mx-auto space-y-6 pt-8">
       <div className="h-8 w-56 bg-[#e4e4e7] rounded-md" />
       <div className="h-4 w-80 bg-[#ececef] rounded-md" />
       <div className="h-[280px] bg-card border border-border rounded-lg" />
@@ -197,8 +197,19 @@ function NewWorkerContent() {
   const isUploading = uploadState !== "idle";
   const isBusy = generating || isUploading;
 
+  // S24: when generating, swap the entire hero+pills surface for a
+  // dedicated GeneratingPanel that auto-advances through 4 steps so the
+  // user has a sense of progress instead of a frozen "Generating..." button.
+  if (generating) {
+    return (
+      <div className="max-w-4xl mx-auto pt-8 pb-16">
+        <GeneratingPanel prompt={prompt} />
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pt-8 pb-16">
+    <div className="max-w-4xl mx-auto space-y-6 pt-8 pb-16">
       {/* Page header. S22c (roast P2): dropped subtitle that duplicated the
           sidebar context. */}
       <div>
@@ -355,4 +366,99 @@ async function readText(file: File): Promise<string | null> {
     };
     reader.readAsText(file);
   });
+}
+
+// S24: GeneratingPanel — replaces the frozen "Generating..." button with a
+// real loading surface. Steps auto-advance on a timer (Drafting -> Writing
+// run -> Validating -> Opening editor). The advancement is aspirational
+// (we do not know which step the API is on); it gives users a sense of
+// progress instead of a static spinner.
+function GeneratingPanel({ prompt }: { prompt: string }) {
+  const steps = [
+    "Understanding what you want",
+    "Drafting worker.yml",
+    "Writing run.py + SKILL.md",
+    "Validating + opening editor",
+  ];
+  const [activeStep, setActiveStep] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setActiveStep((prev) => Math.min(prev + 1, steps.length - 1));
+    }, 2200);
+    return () => window.clearInterval(id);
+  }, [steps.length]);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Creating your worker</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Floom is drafting code from your prompt. This usually takes 15-30 seconds.
+        </p>
+      </div>
+
+      {prompt && (
+        <div className="rounded-lg border border-line bg-[var(--bg-2)] px-4 py-3">
+          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+            Your prompt
+          </p>
+          <p className="text-sm text-foreground line-clamp-3">{prompt}</p>
+        </div>
+      )}
+
+      <div className="rounded-lg border border-border bg-card p-6">
+        <ol className="space-y-3">
+          {steps.map((label, i) => {
+            const done = i < activeStep;
+            const current = i === activeStep;
+            return (
+              <li key={label} className="flex items-center gap-3">
+                <span
+                  className={
+                    done
+                      ? "inline-flex size-6 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--solid-fg)]"
+                      : current
+                      ? "inline-flex size-6 items-center justify-center rounded-full border-2 border-[var(--accent)] bg-[var(--accent-soft)]"
+                      : "inline-flex size-6 items-center justify-center rounded-full border border-line bg-card"
+                  }
+                  aria-hidden="true"
+                >
+                  {done ? (
+                    <svg viewBox="0 0 16 16" fill="none" className="size-3.5">
+                      <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : current ? (
+                    <Loader2 className="size-3 animate-spin text-[var(--accent)]" />
+                  ) : null}
+                </span>
+                <span
+                  className={
+                    current
+                      ? "text-sm font-medium text-foreground"
+                      : done
+                      ? "text-sm text-muted-foreground"
+                      : "text-sm text-muted-foreground/60"
+                  }
+                >
+                  {label}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+
+        <div className="mt-6 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-2)]">
+          <div
+            className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-500 ease-out"
+            style={{ width: `${((activeStep + 1) / steps.length) * 100}%` }}
+          />
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground text-center">
+        Keep this tab open. You will land in the worker editor when it is ready.
+      </p>
+    </div>
+  );
 }
