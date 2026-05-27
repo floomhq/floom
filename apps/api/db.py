@@ -599,6 +599,10 @@ MIGRATIONS: list[Migration] = [
         SELECT skill_version_id FROM workers WHERE skill_version_id IS NOT NULL
     );
     """,
+    # -- migration 22: persist worker bundle snapshot path per run -------------
+    """
+    ALTER TABLE runs ADD COLUMN bundle_snapshot_path TEXT;
+    """,
 ]
 
 
@@ -626,7 +630,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
