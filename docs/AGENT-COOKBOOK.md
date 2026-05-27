@@ -118,7 +118,7 @@ workers.create({
 ### 1.3 Smoke-test
 
 ```
-runs.create({ worker_id: "text-summarizer", inputs: { text: "Long text here..." } })
+workers.run({ worker_id: "text-summarizer", inputs: { text: "Long text here..." } })
 runs.watch({ run_id: "<returned-id>" })
 ```
 
