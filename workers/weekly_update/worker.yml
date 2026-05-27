@@ -76,8 +76,6 @@ exec:
     - internal
     - investor
     - customer
-  secrets:
-  - OPENAI_API_KEY
   outputs:
   - name: update
     kind: file
@@ -87,8 +85,7 @@ exec:
     label: Weekly update
   entry: SKILL.md
 capabilities:
-  secrets:
-  - OPENAI_API_KEY
+  secrets: []
   network:
     egress: true
 approvals:
