@@ -50,7 +50,7 @@ function NewWorkerSkeleton() {
     <div className="max-w-2xl mx-auto space-y-6 pt-8">
       <div className="h-8 w-56 bg-[#e4e4e7] rounded-md" />
       <div className="h-4 w-80 bg-[#ececef] rounded-md" />
-      <div className="h-[280px] bg-white border border-[#eaeaea] rounded-lg" />
+      <div className="h-[280px] bg-card border border-border rounded-lg" />
     </div>
   );
 }
@@ -202,11 +202,11 @@ function NewWorkerContent() {
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Create a worker</h1>
-        <p className="text-[#666] text-sm mt-1">Tell Floom what to automate.</p>
+        <p className="text-muted-foreground text-sm mt-1">Tell Floom what to automate.</p>
       </div>
 
       {/* Hero card */}
-      <div className="rounded-lg border border-[#e4e4e7] bg-white p-6 space-y-4">
+      <div className="rounded-lg border border-border bg-card p-6 space-y-4">
         <Textarea
           ref={textareaRef}
           placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
@@ -216,7 +216,7 @@ function NewWorkerContent() {
             const val = (e.target as HTMLTextAreaElement).value;
             if (val !== prompt) setPrompt(val);
           }}
-          className="min-h-[120px] resize-none border-[#e4e4e7] text-sm focus-visible:ring-0 focus-visible:border-black"
+          className="min-h-[120px] resize-none border-border text-sm focus-visible:ring-0 focus-visible:border-black"
           disabled={isBusy}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -235,7 +235,7 @@ function NewWorkerContent() {
             type="button"
             disabled={isBusy}
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 text-xs text-[#888] hover:text-[#333] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isUploading ? (
               <>
@@ -280,7 +280,7 @@ function NewWorkerContent() {
 
       {/* Example chips */}
       <div className="space-y-3">
-        <p className="text-sm text-[#666]">Or start from an example:</p>
+        <p className="text-sm text-muted-foreground">Or start from an example:</p>
         <div className="flex flex-wrap gap-2">
           {EXAMPLES.map((ex) => (
             <button

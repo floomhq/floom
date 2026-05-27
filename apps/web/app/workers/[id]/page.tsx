@@ -197,7 +197,7 @@ export default function WorkerDetailPage() {
     return (
       <div className="flex gap-0">
         {/* Rail skeleton */}
-        <div className="w-[180px] shrink-0 border-r border-[#eaeaea] min-h-screen">
+        <div className="w-[180px] shrink-0 border-r border-border min-h-screen">
           <div className="p-3 space-y-1">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <Skeleton key={i} className="h-8 w-full rounded" />
@@ -209,7 +209,7 @@ export default function WorkerDetailPage() {
           <Skeleton className="h-8 w-52" />
           <Skeleton className="h-4 w-72" />
           <div className="max-w-xl space-y-3 mt-4">
-            <div className="rounded-lg border border-[#eaeaea] bg-white p-5 space-y-3">
+            <div className="rounded-lg border border-border bg-card p-5 space-y-3">
               {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-9 w-full" />)}
             </div>
           </div>
@@ -221,9 +221,9 @@ export default function WorkerDetailPage() {
   if (notFound || !worker) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-        <p className="text-sm font-medium text-[#333]">Worker not found</p>
-        <p className="text-xs text-[#999]">This worker may have been deleted or the ID is incorrect.</p>
-        <a href="/workers" className="text-xs underline text-[#555] hover:text-[#222] transition-colors">
+        <p className="text-sm font-medium text-foreground">Worker not found</p>
+        <p className="text-xs text-muted-foreground">This worker may have been deleted or the ID is incorrect.</p>
+        <a href="/workers" className="text-xs underline text-muted-foreground hover:text-foreground transition-colors">
           Back to workers
         </a>
       </div>
@@ -262,7 +262,7 @@ export default function WorkerDetailPage() {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] -mx-6 -mt-6">
       {/* Worker rail (180px) */}
-      <nav className="w-[180px] shrink-0 border-r border-[#eaeaea] bg-white flex flex-col pt-4">
+      <nav className="w-[180px] shrink-0 border-r border-border bg-card flex flex-col pt-4">
         {/* Nav items */}
         <div className="flex-1 px-2 space-y-0.5">
           {NAV_ITEMS.map((item) => {
@@ -274,17 +274,17 @@ export default function WorkerDetailPage() {
                 onClick={() => setSection(item.id)}
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors text-left ${
                   isActive
-                    ? "bg-[#f4f4f5] font-medium text-[#111] border-l-2 border-black"
-                    : "text-[#666] hover:bg-[#f9f9f9] border-l-2 border-transparent"
+                    ? "bg-muted font-medium text-foreground border-l-2 border-black"
+                    : "text-muted-foreground hover:bg-muted/50 border-l-2 border-transparent"
                 }`}
               >
-                <span className={isActive ? "text-[#111]" : "text-[#999]"}>{item.icon}</span>
+                <span className={isActive ? "text-foreground" : "text-muted-foreground"}>{item.icon}</span>
                 <span className="flex-1">{item.label}</span>
                 {item.id === "triggers" && triggersCount > 1 && (
-                  <span className="text-[10px] bg-[#e4e4e7] text-[#555] rounded px-1">{triggersCount}</span>
+                  <span className="text-[10px] bg-muted text-muted-foreground rounded px-1">{triggersCount}</span>
                 )}
                 {item.id === "runs" && runsCount > 0 && (
-                  <span className="text-[10px] bg-[#e4e4e7] text-[#555] rounded px-1">{runsCount}</span>
+                  <span className="text-[10px] bg-muted text-muted-foreground rounded px-1">{runsCount}</span>
                 )}
               </button>
             );
@@ -292,24 +292,24 @@ export default function WorkerDetailPage() {
         </div>
 
         {/* Meta block */}
-        <div className="px-3 pb-4 border-t border-[#eaeaea] mt-2 pt-3 space-y-2">
-          <p className="text-[10px] text-[#999] uppercase tracking-wide font-medium">Meta</p>
+        <div className="px-3 pb-4 border-t border-border mt-2 pt-3 space-y-2">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Meta</p>
           {lastRunAt && (
             <div>
-              <p className="text-[11px] text-[#999]">Last run</p>
-              <p className="text-[11px] text-[#555] font-medium">{formatRelativeTime(lastRunAt)}</p>
+              <p className="text-[11px] text-muted-foreground">Last run</p>
+              <p className="text-[11px] text-muted-foreground font-medium">{formatRelativeTime(lastRunAt)}</p>
             </div>
           )}
           <div>
-            <p className="text-[11px] text-[#999]">Status</p>
+            <p className="text-[11px] text-muted-foreground">Status</p>
             <p className={`text-[11px] font-medium ${
               worker.status === "healthy" ? "text-emerald-600" :
               worker.status === "error" ? "text-red-600" : "text-amber-600"
             }`}>{worker.status.replace("_", " ")}</p>
           </div>
           <div>
-            <p className="text-[11px] text-[#999]">Triggers</p>
-            <p className="text-[11px] text-[#555] font-medium truncate" title={triggerSummary}>{triggerSummary}</p>
+            <p className="text-[11px] text-muted-foreground">Triggers</p>
+            <p className="text-[11px] text-muted-foreground font-medium truncate" title={triggerSummary}>{triggerSummary}</p>
           </div>
         </div>
       </nav>
@@ -323,23 +323,23 @@ export default function WorkerDetailPage() {
           </Button>
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
-              <Box className="w-5 h-5 text-[#999] shrink-0" />
+              <Box className="w-5 h-5 text-muted-foreground shrink-0" />
               {worker.name}
             </h1>
             {worker.description && (
-              <p className="text-[#666] text-sm mt-0.5">{worker.description}</p>
+              <p className="text-muted-foreground text-sm mt-0.5">{worker.description}</p>
             )}
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               {worker.folder && (
                 <Badge variant="secondary" className="text-xs font-normal">{worker.folder}</Badge>
               )}
               {(worker.tags || []).map((tag) => (
-                <Badge key={tag} variant="outline" className="text-xs font-normal bg-white">{tag}</Badge>
+                <Badge key={tag} variant="outline" className="text-xs font-normal bg-card">{tag}</Badge>
               ))}
             </div>
           </div>
           <Link href={`/workers/${worker.id}/edit`} className="shrink-0">
-            <Button variant="outline" size="sm" className="border-[#e4e4e7]">
+            <Button variant="outline" size="sm" className="border-border">
               <Pencil className="w-4 h-4 mr-1.5" />
               Edit
             </Button>
@@ -463,7 +463,7 @@ function RunSection({
 }) {
   return (
     <div className="max-w-xl space-y-4">
-      <Card className="border-[#eaeaea] shadow-none bg-white">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader>
           <CardTitle className="text-sm font-medium">Run worker</CardTitle>
         </CardHeader>
@@ -475,21 +475,21 @@ function RunSection({
                 {inp.required && <span className="text-red-500 ml-0.5">*</span>}
               </Label>
               {inp.description && (
-                <p className="text-xs text-[#777]">{inp.description}</p>
+                <p className="text-xs text-muted-foreground">{inp.description}</p>
               )}
               {inp.type === "textarea" ? (
                 <Textarea
                   placeholder={inp.placeholder}
                   value={(inputs[inp.name] as string) || ""}
                   onChange={(e) => onInputChange(inp.name, e.target.value)}
-                  className="min-h-[100px] border-[#e4e4e7]"
+                  className="min-h-[100px] border-border"
                 />
               ) : inp.type === "select" ? (
                 <Select
                   value={(inputs[inp.name] as string) || (inp.default as string) || ""}
                   onValueChange={(val) => onInputChange(inp.name, val)}
                 >
-                  <SelectTrigger className="border-[#e4e4e7]">
+                  <SelectTrigger className="border-border">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -505,9 +505,9 @@ function RunSection({
                     id={`inp-${inp.name}`}
                     checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
                     onChange={(e) => onInputChange(inp.name, e.target.checked)}
-                    className="w-4 h-4 rounded border-[#e4e4e7] accent-black cursor-pointer"
+                    className="w-4 h-4 rounded border-border accent-black cursor-pointer"
                   />
-                  <label htmlFor={`inp-${inp.name}`} className="text-sm text-[#666] cursor-pointer select-none">
+                  <label htmlFor={`inp-${inp.name}`} className="text-sm text-muted-foreground cursor-pointer select-none">
                     {inp.placeholder || inp.label}
                   </label>
                 </div>
@@ -532,14 +532,14 @@ function RunSection({
                   placeholder={inp.placeholder}
                   value={(inputs[inp.name] as string) || ""}
                   onChange={(e) => onInputChange(inp.name, e.target.value)}
-                  className="border-[#e4e4e7]"
+                  className="border-border"
                 />
               )}
             </div>
           ))}
 
           {worker.config.inputs.length === 0 && (
-            <p className="text-sm text-[#999]">This worker has no inputs.</p>
+            <p className="text-sm text-muted-foreground">This worker has no inputs.</p>
           )}
 
           {worker.example_input && (
@@ -548,7 +548,7 @@ function RunSection({
               size="sm"
               onClick={onApplySample}
               disabled={!canApplySample}
-              className="border-[#e4e4e7]"
+              className="border-border"
             >
               <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
               Use sample input
@@ -590,18 +590,18 @@ function RunSection({
       </Card>
 
       {worker.webhook_url && (
-        <Card className="border-[#eaeaea] shadow-none bg-white">
+        <Card className="border-border shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Webhook</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-xs text-[#666]">
+            <p className="text-xs text-muted-foreground">
               Send a POST request to this URL to trigger the worker. The token authenticates the request.
             </p>
             <div className="space-y-1">
-              <Label className="text-xs text-[#666] uppercase tracking-wide">Webhook URL</Label>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Webhook URL</Label>
               <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs font-mono bg-[#f4f4f5] border border-[#e4e4e7] rounded px-2 py-1.5 break-all">
+                <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
                   {worker.webhook_url}
                 </code>
                 <button
@@ -613,14 +613,14 @@ function RunSection({
                       () => toast.error("Failed to copy"),
                     );
                   }}
-                  className="shrink-0 p-1.5 rounded border border-[#e4e4e7] bg-white hover:bg-[#f4f4f5] transition-colors"
+                  className="shrink-0 p-1.5 rounded border border-border bg-card hover:bg-muted transition-colors"
                 >
-                  <Copy className="w-3.5 h-3.5 text-[#666]" />
+                  <Copy className="w-3.5 h-3.5 text-muted-foreground" />
                 </button>
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-[#666] uppercase tracking-wide">Example curl</Label>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Example curl</Label>
               <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
                 {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
               </pre>
@@ -650,7 +650,7 @@ function ConnectionsSection({
   return (
     <div className="max-w-xl space-y-6">
       {requiredConnections.length > 0 ? (
-        <Card className="border-[#eaeaea] shadow-none bg-white">
+        <Card className="border-border shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Required integrations</CardTitle>
           </CardHeader>
@@ -658,7 +658,7 @@ function ConnectionsSection({
             {requiredConnections.map((slug) => {
               const isActive = activeConnectionSlugs.has(slug.toLowerCase());
               return (
-                <div key={slug} className="flex items-center justify-between py-2 border-b border-[#f4f4f5] last:border-0">
+                <div key={slug} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                   <span className="text-sm capitalize font-medium">{slug}</span>
                   {isActive ? (
                     <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-200 bg-emerald-50">
@@ -670,7 +670,7 @@ function ConnectionsSection({
                         Missing
                       </Badge>
                       <Link href="/connections">
-                        <Button size="sm" variant="outline" className="h-6 text-xs border-[#e4e4e7]">
+                        <Button size="sm" variant="outline" className="h-6 text-xs border-border">
                           Connect
                         </Button>
                       </Link>
@@ -682,20 +682,20 @@ function ConnectionsSection({
           </CardContent>
         </Card>
       ) : (
-        <p className="text-sm text-[#999]">This worker requires no integrations.</p>
+        <p className="text-sm text-muted-foreground">This worker requires no integrations.</p>
       )}
 
       {requiredSecrets.length > 0 && (
-        <Card className="border-[#eaeaea] shadow-none bg-white">
+        <Card className="border-border shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Required secrets</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {requiredSecrets.map((s) => (
-              <div key={s} className="flex items-center justify-between py-2 border-b border-[#f4f4f5] last:border-0">
+              <div key={s} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                 <span className="text-sm font-mono font-medium">{s}</span>
                 <Link href="/settings">
-                  <Button size="sm" variant="outline" className="h-6 text-xs border-[#e4e4e7]">
+                  <Button size="sm" variant="outline" className="h-6 text-xs border-border">
                     Configure
                   </Button>
                 </Link>
@@ -715,25 +715,25 @@ function ConnectionsSection({
 function RunsSection({ worker }: { worker: WorkerDetail }) {
   return (
     <div className="max-w-2xl">
-      <Card className="border-[#eaeaea] shadow-none bg-white">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader>
           <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {worker.recent_runs?.length === 0 ? (
-            <p className="text-sm text-[#999]">No runs yet.</p>
+            <p className="text-sm text-muted-foreground">No runs yet.</p>
           ) : (
             worker.recent_runs?.map((r) => (
               <Link key={r.id} href={`/runs/${r.id}`}>
-                <div className="flex items-center justify-between p-2 rounded-md hover:bg-[#f4f4f5] cursor-pointer transition-colors">
+                <div className="flex items-center justify-between p-2 rounded-md hover:bg-muted cursor-pointer transition-colors">
                   <div>
                     <p className="text-sm font-medium">{r.worker_name || r.id}</p>
-                    <p className="text-xs text-[#999] font-mono">{r.id}</p>
-                    <p className="text-xs text-[#999]">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{r.id}</p>
+                    <p className="text-xs text-muted-foreground">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{r.status}</Badge>
-                    <ChevronRight className="w-3.5 h-3.5 text-[#bbb]" />
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                 </div>
               </Link>
@@ -760,29 +760,29 @@ function OverviewSection({
 }) {
   return (
     <div className="max-w-2xl space-y-6">
-      <Card className="border-[#eaeaea] shadow-none bg-white">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader>
           <CardTitle className="text-sm font-medium">Configuration</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-[#666]">Trigger</span>
+            <span className="text-muted-foreground">Trigger</span>
             <span className="font-medium">{worker.config.trigger.type}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#666]">Runtime</span>
+            <span className="text-muted-foreground">Runtime</span>
             <span className="font-medium">{worker.config.runtime.type}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#666]">Runner</span>
+            <span className="text-muted-foreground">Runner</span>
             <span className="font-medium">{worker.config.runtime.runner}</span>
           </div>
           <Separator className="my-2" />
           <div>
-            <span className="text-[#666]">Inputs</span>
+            <span className="text-muted-foreground">Inputs</span>
             <div className="flex flex-wrap gap-1.5 mt-1.5">
               {worker.config.inputs.length === 0 ? (
-                <span className="text-xs text-[#999]">None</span>
+                <span className="text-xs text-muted-foreground">None</span>
               ) : (
                 worker.config.inputs.map((inp) => (
                   <Badge key={inp.name} variant="secondary" className="text-xs font-normal">
@@ -793,10 +793,10 @@ function OverviewSection({
             </div>
           </div>
           <div>
-            <span className="text-[#666]">Outputs</span>
+            <span className="text-muted-foreground">Outputs</span>
             <div className="flex flex-wrap gap-1.5 mt-1.5">
               {worker.config.outputs.length === 0 ? (
-                <span className="text-xs text-[#999]">None</span>
+                <span className="text-xs text-muted-foreground">None</span>
               ) : (
                 worker.config.outputs.map((o) => (
                   <Badge key={o.name} variant="outline" className="text-xs font-normal">
@@ -810,7 +810,7 @@ function OverviewSection({
       </Card>
 
       {(worker.long_description || worker.use_cases?.length || worker.example_input || worker.example_output || worker.how_it_works) && (
-        <Card className="border-[#eaeaea] shadow-none bg-white">
+        <Card className="border-border shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Worker guide</CardTitle>
           </CardHeader>
@@ -818,7 +818,7 @@ function OverviewSection({
             {worker.long_description && (
               <section>
                 <h2 className="text-sm font-medium mb-2">Description</h2>
-                <p className="text-sm text-[#666] leading-relaxed whitespace-pre-wrap">{worker.long_description}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{worker.long_description}</p>
               </section>
             )}
 
@@ -827,7 +827,7 @@ function OverviewSection({
                 <h2 className="text-sm font-medium mb-2">Use cases</h2>
                 <ul className="list-disc pl-5 space-y-1">
                   {worker.use_cases.map((useCase) => (
-                    <li key={useCase} className="text-sm text-[#666]">{useCase}</li>
+                    <li key={useCase} className="text-sm text-muted-foreground">{useCase}</li>
                   ))}
                 </ul>
               </section>
@@ -862,7 +862,7 @@ function OverviewSection({
             {worker.how_it_works && (
               <section>
                 <h2 className="text-sm font-medium mb-2">How it works</h2>
-                <pre className="text-xs leading-relaxed overflow-auto font-mono bg-[#f4f4f5] p-3 rounded-md border border-[#eaeaea] whitespace-pre-wrap">
+                <pre className="text-xs leading-relaxed overflow-auto font-mono bg-muted p-3 rounded-md border border-border whitespace-pre-wrap">
                   {worker.how_it_works}
                 </pre>
               </section>
@@ -870,7 +870,65 @@ function OverviewSection({
           </CardContent>
         </Card>
       )}
+
+      <DangerZone workerId={worker.id} workerName={worker.name} />
     </div>
+  );
+}
+
+function DangerZone({ workerId, workerName }: { workerId: string; workerName: string }) {
+  // PR S19 (I-5): the only way to delete a worker. Type-to-confirm guard
+  // because there's no undo and deleting also cancels any running runs.
+  const router = useRouter();
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = confirmText.trim() === workerName.trim();
+
+  async function handleDelete() {
+    if (!canDelete) return;
+    setDeleting(true);
+    try {
+      await api.workers.delete(workerId);
+      toast.success(`Deleted ${workerName}`);
+      router.push("/workers");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete worker");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <Card className="border-destructive/40">
+      <CardHeader>
+        <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Deleting a worker cancels in-flight runs and removes its bundle, runs,
+          and configured triggers. There is no undo.
+        </p>
+        <div className="space-y-2">
+          <Label htmlFor="delete-confirm" className="text-xs text-muted-foreground">
+            Type <code className="text-foreground">{workerName}</code> to confirm.
+          </Label>
+          <Input
+            id="delete-confirm"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={workerName}
+            className="max-w-sm"
+          />
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={!canDelete || deleting}
+          onClick={() => void handleDelete()}
+        >
+          {deleting ? "Deleting..." : "Delete worker"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -900,19 +958,19 @@ function ExampleInputPreview({
       }));
 
   if (entries.length === 0) {
-    return <p className="text-sm text-[#999]">This worker has no manual inputs.</p>;
+    return <p className="text-sm text-muted-foreground">This worker has no manual inputs.</p>;
   }
 
   return (
-    <div className="rounded-md border border-[#eaeaea] overflow-hidden">
+    <div className="rounded-md border border-border overflow-hidden">
       {entries.map((entry) => (
-        <div key={entry.name} className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)] border-b border-[#eaeaea] last:border-b-0">
-          <div className="bg-[#fafafa] px-3 py-2">
-            <p className="text-xs font-medium text-[#555]">{entry.label}</p>
-            <p className="text-[11px] text-[#999] font-mono">{entry.name} · {entry.type}</p>
+        <div key={entry.name} className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)] border-b border-border last:border-b-0">
+          <div className="bg-muted/30 px-3 py-2">
+            <p className="text-xs font-medium text-muted-foreground">{entry.label}</p>
+            <p className="text-[11px] text-muted-foreground font-mono">{entry.name} · {entry.type}</p>
           </div>
           <div className="px-3 py-2">
-            <pre className={`text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-[#999] italic" : "text-[#333]"}`}>
+            <pre className={`text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-muted-foreground italic" : "text-foreground"}`}>
               {formatExampleValue(entry.value, entry.type)}
             </pre>
           </div>
@@ -933,7 +991,7 @@ function formatExampleValue(value: unknown, type?: string): string {
 
 function MarkdownPreview({ value }: { value: string }) {
   return (
-    <div className="prose prose-sm max-w-none text-[#333] bg-[#fafafa] p-4 rounded-md border border-[#eaeaea]">
+    <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-md border border-border">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>
         {value}
       </ReactMarkdown>

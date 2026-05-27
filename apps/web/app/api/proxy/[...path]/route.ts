@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with
+// YAML retry. On hard prompts that's 30-60s. Default 10s Vercel timeout
+// was returning empty 504 -> the UI showed an empty error toast.
+export const maxDuration = 60;
+
 const API_BASE =
   process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";

@@ -210,7 +210,7 @@ export default function EditWorkerPage() {
               </span>
             )}
           </div>
-          <p className="text-[#666] text-sm">{worker.name}</p>
+          <p className="text-muted-foreground text-sm">{worker.name}</p>
         </div>
         <Button size="sm" onClick={save} disabled={saving || !isDirty}>
           <Save className="w-4 h-4 mr-1.5" />

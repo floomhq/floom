@@ -115,7 +115,7 @@ export default function SecretsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
-          <p className="text-[#666] text-sm mt-1">Manage environment secrets for your workers. Values are write-only.</p>
+          <p className="text-muted-foreground text-sm mt-1">Manage environment secrets for your workers. Values are write-only.</p>
         </div>
         <Button
           size="sm"
@@ -129,7 +129,7 @@ export default function SecretsPage() {
       </div>
 
       {addingOpen && (
-        <Card className="border-[#eaeaea] shadow-none bg-white">
+        <Card className="border-border shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Add new secret</CardTitle>
           </CardHeader>
@@ -139,14 +139,14 @@ export default function SecretsPage() {
                 placeholder="SECRET_NAME"
                 value={addingName}
                 onChange={(e) => setAddingName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
-                className="font-mono text-sm w-[220px] border-[#e4e4e7]"
+                className="font-mono text-sm w-[220px] border-border"
               />
               <Input
                 type="password"
                 placeholder="Value (write-only)"
                 value={addingValue}
                 onChange={(e) => setAddingValue(e.target.value)}
-                className="text-sm flex-1 border-[#e4e4e7]"
+                className="text-sm flex-1 border-border"
                 onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
               />
               <Button onClick={handleAdd} disabled={saving} size="sm" className="gap-1">
@@ -165,7 +165,7 @@ export default function SecretsPage() {
         </Card>
       )}
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader>
           <CardTitle className="text-sm font-medium">Environment secrets</CardTitle>
         </CardHeader>
@@ -174,12 +174,12 @@ export default function SecretsPage() {
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : secrets.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-3 text-center">
-              <div className="w-10 h-10 rounded-full bg-[#f4f4f5] flex items-center justify-center">
-                <KeyRound className="w-5 h-5 text-[#aaa]" />
+              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                <KeyRound className="w-5 h-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-sm font-medium text-[#333]">No secrets configured</p>
-                <p className="text-xs text-[#999] mt-1 max-w-xs">
+                <p className="text-sm font-medium text-foreground">No secrets configured</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
                   Workers that call external APIs require secrets. Add them here and reference them in your worker YAML.
                 </p>
               </div>
@@ -196,16 +196,16 @@ export default function SecretsPage() {
           ) : (
             secrets.map((s) => (
               <div key={s.name} className="space-y-2">
-                <div className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors">
+                <div className="flex items-center justify-between p-3 rounded-md hover:bg-muted transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
-                    <KeyRound className="w-4 h-4 text-[#999] shrink-0" />
+                    <KeyRound className="w-4 h-4 text-muted-foreground shrink-0" />
                     <div className="min-w-0">
                       <p className="text-sm font-medium font-mono">{s.name}</p>
                       {s.used_by.length > 0 && (
-                        <p className="text-xs text-[#999]">Used by: {s.used_by.join(", ")}</p>
+                        <p className="text-xs text-muted-foreground">Used by: {s.used_by.join(", ")}</p>
                       )}
                       {s.last_checked_at && (
-                        <p className="text-xs text-[#999]">
+                        <p className="text-xs text-muted-foreground">
                           Checked {formatRelativeTime(s.last_checked_at)}
                           {s.last_check_status && (
                             <span
@@ -249,7 +249,7 @@ export default function SecretsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-xs text-[#666] hover:text-[#333]"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                       onClick={() => handleTest(s.name)}
                       disabled={testingName === s.name}
                       title="Test this secret"
@@ -260,7 +260,7 @@ export default function SecretsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-xs text-[#666] hover:text-[#333]"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                       onClick={() => {
                         setUpdatingName(updatingName === s.name ? null : s.name);
                         setUpdatingValue("");
@@ -288,7 +288,7 @@ export default function SecretsPage() {
                       placeholder="New value (write-only)"
                       value={updatingValue}
                       onChange={(e) => setUpdatingValue(e.target.value)}
-                      className="text-sm flex-1 border-[#e4e4e7] h-8"
+                      className="text-sm flex-1 border-border h-8"
                       onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(s.name); if (e.key === "Escape") setUpdatingName(null); }}
                       autoFocus
                     />
@@ -312,11 +312,11 @@ export default function SecretsPage() {
         </CardContent>
       </Card>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardContent className="p-5 text-sm text-[#666]">
+      <Card className="border-border shadow-none bg-card">
+        <CardContent className="p-5 text-sm text-muted-foreground">
           <p>
             Secret values are write-only; they are never returned by the API. Changes to{" "}
-            <code className="bg-[#f4f4f5] px-1 py-0.5 rounded text-xs">.env</code>{" "}
+            <code className="bg-muted px-1 py-0.5 rounded text-xs">.env</code>{" "}
             take effect immediately without restarting workers.
           </p>
         </CardContent>
