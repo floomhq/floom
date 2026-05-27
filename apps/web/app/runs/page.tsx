@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Papa from "papaparse";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,14 +31,35 @@ const STATUS_OPTIONS = [
 const PAGE_SIZE = 20;
 
 export default function RunsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading runs...</div>}>
+      <RunsContent />
+    </Suspense>
+  );
+}
+
+function RunsContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // S22e: filter state lives in the URL (?status=failed&worker_id=foo) so
+  // links are shareable, refresh preserves filters, and back-button works.
+  const workerFilter = searchParams.get("worker_id") ?? "";
+  const statusFilter = searchParams.get("status") ?? "";
+
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [workerFilter, setWorkerFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+
+  const updateFilter = useCallback((key: "status" | "worker_id", value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set(key, value);
+    else params.delete(key);
+    router.replace(`/runs${params.size ? `?${params.toString()}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
 
   useEffect(() => {
     api.workers.list().then(setWorkers).catch(() => {});
@@ -126,21 +148,24 @@ export default function RunsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
           <p className="text-muted-foreground text-sm mt-1">All worker executions.</p>
         </div>
+        {/* S22e: Export demoted to ghost (roast P1: was as loud as primary
+            New worker CTA elsewhere; export is a power-user destination). */}
         <Button
-          variant="outline"
+          variant="ghost"
           size="sm"
           onClick={exportCSV}
           disabled={runs.length === 0}
-          className="gap-1.5"
+          className="gap-1.5 text-muted-foreground"
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-3.5 h-3.5" />
           Export CSV
         </Button>
       </div>
 
-      {/* Filters */}
+      {/* Filters. S22e: filter state synced to URL so ?status=failed
+          is shareable + refresh preserves filters + back-button works. */}
       <div className="flex gap-3 flex-wrap items-center">
-        <Select value={workerFilter} onValueChange={(v) => setWorkerFilter(v ?? "")}>
+        <Select value={workerFilter} onValueChange={(v) => updateFilter("worker_id", v ?? "")}>
           <SelectTrigger className="w-[200px] text-sm h-8">
             <SelectValue placeholder="All workers" />
           </SelectTrigger>
@@ -157,7 +182,7 @@ export default function RunsPage() {
           {STATUS_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => setStatusFilter(opt.value)}
+              onClick={() => updateFilter("status", opt.value)}
               className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                 statusFilter === opt.value
                   ? "bg-foreground text-background border-foreground"
@@ -203,7 +228,7 @@ export default function RunsPage() {
               {(workerFilter || statusFilter) && (
                 <button
                   type="button"
-                  onClick={() => { setWorkerFilter(""); setStatusFilter(""); }}
+                  onClick={() => { updateFilter("status", ""); updateFilter("worker_id", ""); router.replace("/runs", { scroll: false }); }}
                   className="text-xs text-muted-foreground hover:text-foreground underline"
                 >
                   Clear filters
@@ -216,14 +241,23 @@ export default function RunsPage() {
                 <Link
                   key={r.id}
                   href={`/runs/${r.id}`}
+                  title={r.id}
                   className="flex items-center justify-between p-3 rounded-md hover:bg-muted transition-colors cursor-pointer"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      <span className="font-mono text-[10px]">{r.id}</span>
-                      <span className="text-muted-foreground/60 mx-1">·</span>
-                      <span className="text-muted-foreground">{r.trigger_source} · {formatRelative(r.created_at)}</span>
+                      {/* S22e: dropped inline 12-char run ID (roast P1: took
+                          as much real estate as the timestamp; users scan
+                          name + time + status, not IDs). The full ID is
+                          surfaced via the row's title= tooltip. */}
+                      {r.trigger_source && r.trigger_source !== "manual" && (
+                        <>
+                          <span>{r.trigger_source}</span>
+                          <span className="text-muted-foreground/60 mx-1">·</span>
+                        </>
+                      )}
+                      <span>{formatRelative(r.created_at)}</span>
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
