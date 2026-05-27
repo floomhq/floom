@@ -10,6 +10,7 @@ data/floom.db
 data/artifacts/*
 !data/artifacts/.gitkeep
 data/blobs/
+data/run-bundles/
 
 # Audit reports (may contain leaked secret values in evidence; keep local only)
 docs/launch-readiness/agent-runs/
