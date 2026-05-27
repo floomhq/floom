@@ -1,0 +1,166 @@
+schema_version: '0.3'
+name: openblog
+title: OpenBlog Article Draft
+description: Generates an AEO-optimized blog article draft from a topic, target keyword, audience, and word-count target.
+long_description: |
+  Manual-shim port of the OpenBlog Neo pipeline (federicodeponte/openblog). The upstream pipeline
+  has 5 stages: Set Context, Blog Gen + Images, Quality Check, URL Verify, Internal Links. It uses
+  Gemini 3 Flash with Google Search grounding, generates hero / mid / bottom images via Imagen,
+  validates external URLs, embeds internal links from a sitemap, and exports to HTML / Markdown /
+  JSON / CSV / XLSX / PDF. That full pipeline requires GEMINI_API_KEY, defusedxml + httpx +
+  openpyxl + markdownify deps, and (for the sitemap stage) network access to the user's domain.
+
+  This worker runs a single-pass agent version of the article generator stage. It writes a
+  publishable first draft in markdown with H1/H2/H3 structure, an opening hook, key sections,
+  pull-quote candidates, suggested internal-link anchor opportunities (described by intent, not
+  specific URLs), and an SEO meta block. It does NOT verify URLs, generate images, or fetch a
+  sitemap. Live web search and Google Search grounding are not currently available in the agent
+  runtime; any time-sensitive claims must be qualified.
+use_cases:
+- Generate a publishable draft for a target keyword before final editing.
+- Spin out 5 article drafts on the same topic at different angles for an editorial sprint.
+- Produce a structured outline + draft that a writer can extend with verified sources.
+example_input:
+  topic: How small recruiting firms in DACH use AI for candidate writeups
+  target_keyword: ai candidate writeup tool
+  audience: recruiting-operator
+  word_count: 1500
+  format: article
+example_output: |
+  # How small recruiting firms in DACH use AI for candidate writeups
+
+  > **TL;DR.** Small DACH recruiting firms are adopting AI tools to turn raw CVs into client-ready
+  > writeups. The wedge is hour-savings per submission, not full automation.
+
+  ## Why writeups are the bottleneck
+
+  In a five-person Berlin search firm, the recruiter spends 30–45 minutes per submission turning a
+  CV into a client-ready writeup...
+
+  ## The current tooling landscape
+
+  ...
+
+  ## What "good" looks like in 2026
+
+  ...
+
+  ## Adoption playbook for a 5-person firm
+
+  ...
+
+  ## SEO meta
+
+  - title: AI candidate writeup tool — DACH recruiting playbook
+  - meta_description: How small DACH recruiting firms use AI candidate writeup tools to cut prep time per submission.
+  - target_keyword: ai candidate writeup tool
+how_it_works: |
+  Topic + target keyword + audience + word_count + format
+    -> draft a working angle and TL;DR
+    -> outline H2/H3 structure scaled to word_count
+    -> write the body with concrete sections (no fabricated stats / dates / sources)
+    -> add internal-link anchor opportunities (described by intent)
+    -> append SEO meta block (title, meta_description, target_keyword)
+    -> return a publishable markdown draft
+folder: Content/Blog
+tags:
+- blog
+- article
+- seo
+- openblog
+- content
+- marketing
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+entrypoints:
+- name: main
+  path: SKILL.md
+  type: markdown
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 8192
+  max_total_tokens: 60000
+  timeout_seconds: 300
+exec:
+  runtime: skill
+  runner: e2b
+  inputs:
+  - name: topic
+    kind: scalar
+    type: string
+    required: true
+    label: Article topic
+    placeholder: e.g. "How small recruiting firms in DACH use AI for candidate writeups"
+  - name: target_keyword
+    kind: scalar
+    type: string
+    required: true
+    label: Target SEO keyword
+    placeholder: e.g. "ai candidate writeup tool"
+  - name: audience
+    kind: scalar
+    type: select
+    required: true
+    default: general
+    enum:
+    - general
+    - executive
+    - technical
+    - recruiting-operator
+    - founder
+    label: Target audience
+    options:
+    - general
+    - executive
+    - technical
+    - recruiting-operator
+    - founder
+  - name: word_count
+    kind: scalar
+    type: select
+    required: true
+    default: '1500'
+    enum:
+    - '800'
+    - '1500'
+    - '2500'
+    label: Target word count
+    options:
+    - '800'
+    - '1500'
+    - '2500'
+  - name: format
+    kind: scalar
+    type: select
+    required: true
+    default: article
+    enum:
+    - article
+    - listicle
+    - guide
+    - comparison
+    label: Article format
+    options:
+    - article
+    - listicle
+    - guide
+    - comparison
+  outputs:
+  - name: draft
+    kind: file
+    media_type: text/markdown
+    path: out/draft.md
+    required: true
+    label: Article draft
+  entry: SKILL.md
+capabilities:
+  secrets: []
+  network:
+    egress: true
+approvals:
+  required: false
+  label: Approve article draft
+trigger:
+  type: manual

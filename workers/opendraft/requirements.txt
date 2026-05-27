@@ -1,0 +1,10 @@
+# Agent-mode worker — no Python deps needed in the sandbox.
+# Upstream engine (out of scope for this shim) uses:
+#   anthropic>=0.20.0,<1.0.0
+#   openai>=1.0.0,<2.0.0
+#   google-genai>=1.0.0,<2.0.0
+#   weasyprint>=60.0,<70.0
+#   python-docx>=1.0.0,<2.0.0
+#   pybtex>=0.24.0,<0.25.0
+#   citeproc-py>=0.6.0,<0.7.0
+# See https://github.com/federicodeponte/opendraft for the full long-form engine.

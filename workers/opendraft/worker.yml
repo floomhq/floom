@@ -1,0 +1,151 @@
+schema_version: '0.3'
+name: opendraft
+title: OpenDraft Research Outline
+description: Generates an academic research outline from a topic, level, and length target, modeled on the OpenDraft engine.
+long_description: |
+  Manual-shim port of the OpenDraft engine (federicodeponte/opendraft). The full upstream engine
+  drives 19 specialized agents across research, structure, writing, citation, polish, and export
+  phases to produce a 5–80 page draft with verified citations. That pipeline takes 10–20 minutes,
+  calls CrossRef / OpenAlex / Semantic Scholar / arXiv, and needs weasyprint + python-docx + Gemini
+  + Anthropic + OpenAI clients; it does not fit the current E2B sandbox budget (300s timeout, agent
+  runner, no external Python packages bundled).
+
+  This worker runs the agent-mode planning phases of OpenDraft only: it produces a structured
+  research outline (sections, key questions, candidate sub-arguments, suggested source types) that
+  a human or downstream worker can hand to the full engine to render the long-form draft. Citations
+  in the outline are described by type, not fabricated. Live web search is not currently available
+  in the agent runtime, so all source suggestions are qualified.
+use_cases:
+- Get a thesis-level outline before kicking off a long-form draft.
+- "Compare two framings of the same topic (audience: undergrad vs phd) side by side."
+- Draft a literature-review skeleton that a researcher fills in with verified citations.
+example_input:
+  topic: The role of synthetic data in training small language models
+  level: masters
+  length_target: 30_pages
+  language: en
+example_output: |
+  # The role of synthetic data in training small language models
+
+  ## Working thesis
+
+  Synthetic data is becoming a primary lever for training compact, capable SLMs when high-quality
+  human-authored data is scarce; the open question is whether quality-controlled synthetic data can
+  match real data on out-of-distribution generalization.
+
+  ## Outline
+
+  1. Introduction — define SLMs, synthetic data, motivation.
+  2. Literature review — Phi family, Orca, distillation literature, TinyStories.
+  3. Methods — categories of synthetic-data generation (paraphrase, programmatic, model-generated).
+  4. Evidence — published benchmarks, ablations, failure modes.
+  5. Risks — model collapse, contamination, evaluation leakage.
+  6. Discussion — when synthetic data is strictly better, neutral, worse.
+  7. Conclusion — open problems, recommended next experiments.
+
+  ## Suggested source types (not specific papers)
+
+  - Peer-reviewed ML conference papers (NeurIPS, ICML, ICLR) on data distillation.
+  - Technical reports from major labs (Microsoft Phi, Anthropic, Mistral).
+  - Survey papers on synthetic data for NLP.
+  - Empirical benchmark papers covering model collapse.
+how_it_works: |
+  Topic + level + length_target + language
+    -> draft a working thesis
+    -> generate a section-level outline appropriate for the target length
+    -> name the kinds of sources to seek per section (do not fabricate citations)
+    -> qualify any time-sensitive claims (no live web search in runtime)
+    -> return a markdown outline ready for the OpenDraft long-form engine
+folder: Research/Drafting
+tags:
+- research
+- thesis
+- outline
+- opendraft
+- academic
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+entrypoints:
+- name: main
+  path: SKILL.md
+  type: markdown
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 6144
+  max_total_tokens: 60000
+  timeout_seconds: 300
+exec:
+  runtime: skill
+  runner: e2b
+  inputs:
+  - name: topic
+    kind: scalar
+    type: string
+    required: true
+    label: Research topic
+    placeholder: e.g. "The role of synthetic data in training small language models"
+  - name: level
+    kind: scalar
+    type: select
+    required: true
+    default: masters
+    enum:
+    - undergrad
+    - masters
+    - phd
+    label: Academic level
+    options:
+    - undergrad
+    - masters
+    - phd
+  - name: length_target
+    kind: scalar
+    type: select
+    required: true
+    default: 30_pages
+    enum:
+    - 10_pages
+    - 30_pages
+    - 60_pages
+    - 100_pages
+    label: Target length
+    options:
+    - 10_pages
+    - 30_pages
+    - 60_pages
+    - 100_pages
+  - name: language
+    kind: scalar
+    type: select
+    required: true
+    default: en
+    enum:
+    - en
+    - de
+    - es
+    - fr
+    label: Output language
+    options:
+    - en
+    - de
+    - es
+    - fr
+  outputs:
+  - name: outline
+    kind: file
+    media_type: text/markdown
+    path: out/outline.md
+    required: true
+    label: Research outline
+  entry: SKILL.md
+capabilities:
+  secrets: []
+  network:
+    egress: true
+approvals:
+  required: false
+  label: Approve research outline
+trigger:
+  type: manual
