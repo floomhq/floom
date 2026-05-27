@@ -137,6 +137,10 @@ Goal: take launch-readiness score from 78 → 91 / 100. Brutally simple: cut any
 - Web pages are usually safe: each page is its own file.
 - `run_service.py`, `e2b_driver.py`, `models.py`, `agent_driver.py` are bottlenecks — only one PR may touch them at a time.
 
+### Post-merge audit plan
+
+Locked at `docs/audits/PLAN-2026-05-28.md`. Run after S12 + S13 + S15 + S17 land. 9 sections, evidence per finding, cross-agent rule: no agent audits what it built (claude-virgin + codex-roast + nvidia-deepseek dispatched for the virgin walks, security probes, and edge-case reasoning).
+
 ### Path to 91 / 100
 
 | PR | Score delta | Cumulative |
