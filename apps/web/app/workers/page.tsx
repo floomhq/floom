@@ -285,22 +285,24 @@ function WorkersContent() {
             </div>
           )}
 
+          {/* S29z (score walk toward 100): was a 4-up grid of bordered
+              folder cards. Each tile a tall bordered button with icon +
+              label + count. Now a compact horizontal chip row matching
+              the tag chip pattern below. Same information, 90% less
+              chrome. */}
           {showFolders && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-muted-foreground mr-1">Folders:</span>
               {subFolders.map(({ path, label, count }) => (
                 <button
                   key={path}
                   type="button"
                   onClick={() => setFolder(path)}
-                  className="flex items-center gap-3 rounded-md border bg-card px-4 py-3 hover:bg-muted transition-colors text-left"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-colors"
                 >
-                  <Folder className="size-5 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {count} worker{count === 1 ? "" : "s"}
-                    </p>
-                  </div>
+                  <Folder className="size-3" />
+                  {label}
+                  <span className="text-muted-foreground/60">{count}</span>
                 </button>
               ))}
             </div>
