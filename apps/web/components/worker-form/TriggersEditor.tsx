@@ -143,7 +143,7 @@ function TriggerRowEditor({
     <div className="space-y-4">
       {!isOnly && (
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <span className="text-xs font-medium text-muted-foreground ">
             Trigger {index + 1}
           </span>
           <button
@@ -190,7 +190,7 @@ function TriggerRowEditor({
             onChange={(v) => onChange({ ...row, cronExpr: v })}
           />
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wider">Timezone</Label>
+            <Label className="text-xs text-muted-foreground ">Timezone</Label>
             <Input
               value={row.cronTimezone}
               onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
@@ -213,7 +213,7 @@ function TriggerRowEditor({
 
       {row.type === "webhook" && webhookUrl && (
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground uppercase tracking-wider">Webhook URL</Label>
+          <Label className="text-xs text-muted-foreground ">Webhook URL</Label>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
               {webhookUrl}

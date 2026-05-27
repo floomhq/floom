@@ -383,7 +383,7 @@ export default function WorkerDetailPage() {
             {worker.folder && (
               <Badge
                 variant="secondary"
-                className="text-[11px] font-medium uppercase tracking-wide bg-[var(--accent-soft)] text-[var(--accent)] border-0"
+                className="text-[11px] font-medium bg-[var(--accent-soft)] text-[var(--accent)] border-0"
               >
                 {worker.folder}
               </Badge>
@@ -736,7 +736,7 @@ function RunSection({
               Send a POST request to this URL to trigger the worker. The token authenticates the request.
             </p>
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Webhook URL</Label>
+              <Label className="text-xs text-muted-foreground ">Webhook URL</Label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
                   {worker.webhook_url}
@@ -757,7 +757,7 @@ function RunSection({
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Example curl</Label>
+              <Label className="text-xs text-muted-foreground ">Example curl</Label>
               <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
                 {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
               </pre>
@@ -912,14 +912,14 @@ function OverviewSection({
     <div className="max-w-3xl space-y-8">
       {leadDescription && (
         <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">What it does</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-2">What it does</h2>
           <p className="text-base text-foreground leading-relaxed whitespace-pre-wrap">{leadDescription}</p>
         </section>
       )}
 
       {hasUseCases && (
         <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Use cases</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-3">Use cases</h2>
           <ul className="space-y-2">
             {worker.use_cases!.map((useCase) => (
               <li key={useCase} className="flex gap-2.5 text-sm text-foreground leading-relaxed">
@@ -933,7 +933,7 @@ function OverviewSection({
 
       {worker.how_it_works && (
         <section>
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">How it works</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-2">How it works</h2>
           <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{worker.how_it_works}</p>
         </section>
       )}
@@ -941,7 +941,7 @@ function OverviewSection({
       {(hasInputs || hasOutputs) && (
         <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">Inputs</h2>
+            <h2 className="text-sm font-medium text-muted-foreground mb-2.5">Inputs</h2>
             <div className="flex flex-wrap gap-1.5">
               {hasInputs ? (
                 worker.config.inputs.map((inp) => (
@@ -955,7 +955,7 @@ function OverviewSection({
             </div>
           </div>
           <div>
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">Outputs</h2>
+            <h2 className="text-sm font-medium text-muted-foreground mb-2.5">Outputs</h2>
             <div className="flex flex-wrap gap-1.5">
               {hasOutputs ? (
                 worker.config.outputs.map((o) => (
@@ -976,7 +976,7 @@ function OverviewSection({
           {hasExampleInput && (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Example input</h2>
+                <h2 className="text-sm font-medium text-muted-foreground">Example input</h2>
                 <Button
                   variant="outline"
                   size="sm"
@@ -993,7 +993,7 @@ function OverviewSection({
           )}
           {hasExampleOutput && (
             <div className="space-y-2.5">
-              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Example output</h2>
+              <h2 className="text-sm font-medium text-muted-foreground">Example output</h2>
               <MarkdownPreview value={worker.example_output!} />
             </div>
           )}
@@ -1005,7 +1005,7 @@ function OverviewSection({
           className="flex w-full items-center justify-between rounded-md border border-line bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] transition-colors"
         >
           <span className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Technical details</span>
+            <span className="text-sm font-medium text-muted-foreground">Technical details</span>
           </span>
           <ChevronDown
             className={`w-4 h-4 text-muted-foreground transition-transform ${techOpen ? "rotate-180" : ""}`}
@@ -1172,11 +1172,9 @@ function MarkdownPreview({ value }: { value: string }) {
 // dot was too subtle, "Weekly Update" 33%-success orange dot blended in
 // with healthy green dots).
 function StatusPill({ status }: { status: string }) {
+  // S29l: quiet by default. Show only states the user must act on.
+  if (status === "healthy" || !status) return null;
   const conf: Record<string, { label: string; classes: string }> = {
-    healthy: {
-      label: "Healthy",
-      classes: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
-    },
     needs_attention: {
       label: "Needs attention",
       classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
