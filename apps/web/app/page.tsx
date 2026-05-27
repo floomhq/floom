@@ -46,7 +46,7 @@ function StatCard({
     <Card>
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs font-medium text-muted-foreground">
             {label}
           </p>
           <Icon className="size-4 text-muted-foreground" />

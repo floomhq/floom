@@ -39,18 +39,21 @@ export function Tool({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span
-              className={cn(
-                "rounded border px-1.5 py-0.5 text-[11px] font-medium",
-                state === "error"
-                  ? "border-error/30 bg-error/10 text-error"
-                  : state === "done"
-                    ? "border-success/30 bg-success/10 text-success"
+            {/* S29l (ChatGPT-audit): "done" pill is decoration once the
+                Hammer icon + (in failure case) XCircle already signal state.
+                Show pill only for error + called (in-flight). */}
+            {state !== "done" && (
+              <span
+                className={cn(
+                  "rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                  state === "error"
+                    ? "border-error/30 bg-error/10 text-error"
                     : "border-pending/30 bg-pending/10 text-pending",
-              )}
-            >
-              {state}
-            </span>
+                )}
+              >
+                {state}
+              </span>
+            )}
             <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180" />
           </div>
         </CollapsibleTrigger>

@@ -461,7 +461,7 @@ function EmptyWorkersState() {
         </div>
 
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">
+          <p className="text-xs font-medium text-muted-foreground mb-3">
             Or start from a template
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -484,7 +484,7 @@ function EmptyWorkersState() {
         </div>
 
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">
+          <p className="text-xs font-medium text-muted-foreground mb-3">
             Example prompts
           </p>
           <ul className="space-y-1.5">
@@ -628,11 +628,10 @@ function WorkerCard({
 }
 
 function CardStatusPill({ status }: { status: string }) {
+  // S29l (ChatGPT-audit P-2): every card showing a saturated Healthy pill is
+  // decoration, not state. Show ONLY for states the user must act on.
+  if (status === "healthy" || !status) return null;
   const conf: Record<string, { label: string; classes: string }> = {
-    healthy: {
-      label: "Healthy",
-      classes: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
-    },
     needs_attention: {
       label: "Needs attention",
       classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
