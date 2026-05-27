@@ -112,6 +112,14 @@ export interface TranscriptRow {
   tool_call_id?: string;
 }
 
+export type RunPart =
+  | { type: "text"; text: string }
+  | { type: "tool-call"; toolName: string; args: unknown; callId: string }
+  | { type: "tool-result"; callId: string; result: unknown; isError: boolean }
+  | { type: "reasoning"; text: string }
+  | { type: "step-start"; stepNumber: number }
+  | { type: "finish"; status: "completed" | "failed" | "timeout"; error?: string };
+
 export interface OutputField {
   name: string;
   type: string;  // "markdown" | "json" | "csv" | "text" | "file"
