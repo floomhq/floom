@@ -36,12 +36,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 
+from auth import AuthContext, get_auth_context, get_auth_provider
+
 try:
     from slowapi.util import get_remote_address as _slowapi_get_remote_address
 except Exception:  # pragma: no cover - fallback only used when dependency is absent locally
     _slowapi_get_remote_address = None
 
-from db import init_db, get_db, now_iso, DB_PATH
+from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_db, now_iso
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from models import (
     RunCreate,
@@ -109,21 +111,27 @@ async def lifespan(app: FastAPI):
     register_sse_publisher(_sse_publish)
     register_part_publisher(_run_part_publish)
     # Startup
-    reload_workers()
-    from scheduler import start_scheduler
-    start_scheduler()
-    # Launch hourly connection health sweep
-    _sweep_task = asyncio.create_task(_hourly_sweep_loop())
+    _validate_startup_configuration()
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local":
+        _reload_workers_for_user(_bootstrap_user_id())
+        from scheduler import start_scheduler
+
+        start_scheduler()
+        # Launch hourly connection health sweep
+        _sweep_task = asyncio.create_task(_hourly_sweep_loop())
     yield
     # Shutdown
-    from scheduler import stop_scheduler
-    stop_scheduler()
-    if _sweep_task:
-        _sweep_task.cancel()
-        try:
-            await _sweep_task
-        except asyncio.CancelledError:
-            pass
+    if deploy == "local":
+        from scheduler import stop_scheduler
+
+        stop_scheduler()
+        if _sweep_task:
+            _sweep_task.cancel()
+            try:
+                await _sweep_task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(
@@ -134,7 +142,6 @@ app = FastAPI(
 )
 
 
-DEFAULT_USER_ID = "federico"
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
 DEFAULT_RATE_LIMIT = (60, 60.0)
@@ -177,35 +184,32 @@ app.add_middleware(
 )
 
 
-def require_secret(request: Request) -> None:
-    secret = os.environ.get("FLOOM_SECRET", "")
-    if not secret:
-        return
-    header = request.headers.get("x-floom-secret", "")
-    if header != secret:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+def _validate_startup_configuration() -> None:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy != "local":
+        get_auth_provider()
 
 
-def _request_user_id(request: Request) -> str:
-    if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
-        header_user = (request.headers.get("x-floom-user") or "").strip()
-        if header_user:
-            return header_user[:128]
-    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
-    return configured or DEFAULT_USER_ID
+async def require_secret(request: Request) -> str:
+    """DEPRECATED: use Depends(get_auth_context) instead."""
+    ctx = await get_auth_context(request)
+    return ctx.user_id
 
 
-def _connection_row_for_user(connection_id: str, user_id: str, columns: str) -> sqlite3.Row:
-    with get_db() as conn:
-        row = conn.execute(
-            f"SELECT {columns}, user_id FROM composio_connections WHERE id = ?",
-            (connection_id,),
-        ).fetchone()
+def _connection_row_for_user(
+    connection_id: str,
+    user_id: str,
+    columns: str,
+    repos: Repositories | None = None,
+) -> Dict[str, Any]:
+    _ = columns
+    row = (repos or get_repositories()).connections.get(
+        user_id=user_id,
+        composio_id=connection_id,
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Connection not found")
-    if row["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return row
+    return dict(row)
 
 
 def _rate_limit_for_path(path: str) -> tuple[int, float]:
@@ -299,11 +303,6 @@ async def request_body_size_middleware(request: Request, call_next):
     body = await request.body()
     if len(body) > max_bytes:
         return JSONResponse(status_code=413, content={"detail": "Request body too large"})
-
-    async def receive() -> Dict[str, Any]:
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    request._receive = receive  # type: ignore[attr-defined]
     return await call_next(request)
 
 
@@ -641,7 +640,11 @@ async def generic_error_handler(_request, exc: Exception):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+def row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return dict(row)
     return {key: row[key] for key in row.keys()}
 
 
@@ -777,22 +780,17 @@ def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tup
     return None
 
 
-def _get_last_run_for_worker(worker_id: str) -> Optional[Dict[str, Any]]:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, worker_id, 'manual' as trigger_source, status,
-                   created_at, started_at, completed_at, duration_ms
-            FROM runs WHERE worker_id = ? ORDER BY created_at DESC LIMIT 1
-            """,
-            (worker_id,),
-        )
-        row = cursor.fetchone()
-    return row_to_dict(row) if row else None
+def _get_last_run_for_worker(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    row = repos.workers.get_last_run(user_id=user_id, worker_id=worker_id)
+    return dict(row) if row else None
 
 
-def _make_run_summary(row: sqlite3.Row) -> RunSummary:
+def _make_run_summary(row: Any) -> RunSummary:
     d = row_to_dict(row)
     status_value = str(d.get("status") or "").lower()
     status_aliases = {
@@ -818,44 +816,29 @@ def _make_run_summary(row: sqlite3.Row) -> RunSummary:
     )
 
 
-def _get_stats_batch(worker_ids: List[str]) -> Dict[str, RecentStats]:
+def _get_stats_batch(
+    worker_ids: List[str],
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Dict[str, RecentStats]:
     """Batch-query 7-day run stats for a list of worker IDs in one SQL call."""
     if not worker_ids:
         return {}
     placeholders = ",".join("?" for _ in worker_ids)
     try:
-        with get_db() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    worker_id,
-                    MAX(created_at) AS last_run_at,
-                    COUNT(*) AS runs_7d,
-                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS success_rate_7d
-                FROM runs
-                WHERE created_at > datetime('now', '-7 days')
-                  AND worker_id IN ({placeholders})
-                GROUP BY worker_id
-                """,
-                worker_ids,
-            ).fetchall()
+        return repos.workers.stats_batch(user_id=user_id, worker_ids=worker_ids)
     except sqlite3.OperationalError:
         return {}
-    result: Dict[str, RecentStats] = {}
-    for row in rows:
-        d = row_to_dict(row)
-        wid = d["worker_id"]
-        runs_7d = int(d["runs_7d"] or 0)
-        rate = float(d["success_rate_7d"]) if d["success_rate_7d"] is not None and runs_7d > 0 else None
-        result[wid] = RecentStats(
-            last_run_at=d.get("last_run_at"),
-            runs_7d=runs_7d,
-            success_rate_7d=rate,
-        )
-    return result
 
 
-def _get_timeseries_batch(worker_ids: List[str], days: int = 14) -> Dict[str, List[TimeseriesDay]]:
+def _get_timeseries_batch(
+    worker_ids: List[str],
+    *,
+    user_id: str,
+    repos: Repositories,
+    days: int = 14,
+) -> Dict[str, List[TimeseriesDay]]:
     """Batch-query per-day run counts for sparkline charts (last N days).
 
     Returns a dict mapping worker_id -> list of N TimeseriesDay objects,
@@ -863,66 +846,29 @@ def _get_timeseries_batch(worker_ids: List[str], days: int = 14) -> Dict[str, Li
     """
     if not worker_ids:
         return {}
-    import datetime as _dt
-    today = _dt.date.today()
-    date_range = [(today - _dt.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
-
-    placeholders = ",".join("?" for _ in worker_ids)
     try:
-        with get_db() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    worker_id,
-                    DATE(created_at) AS run_date,
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
-                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
-                FROM runs
-                WHERE created_at > datetime('now', '-{days} days')
-                  AND worker_id IN ({placeholders})
-                GROUP BY worker_id, DATE(created_at)
-                """,
-                worker_ids,
-            ).fetchall()
+        return repos.workers.timeseries_batch(user_id=user_id, worker_ids=worker_ids, days=days)
     except sqlite3.OperationalError:
         return {}
-
-    # Index raw DB rows by (worker_id, date)
-    raw: Dict[tuple, Dict[str, Any]] = {}
-    for row in rows:
-        d = row_to_dict(row)
-        raw[(d["worker_id"], d["run_date"])] = d
-
-    result: Dict[str, List[TimeseriesDay]] = {}
-    for wid in worker_ids:
-        days_list: List[TimeseriesDay] = []
-        for date_str in date_range:
-            key = (wid, date_str)
-            if key in raw:
-                r = raw[key]
-                days_list.append(TimeseriesDay(
-                    date=date_str,
-                    total=int(r.get("total") or 0),
-                    completed=int(r.get("completed") or 0),
-                    failed=int(r.get("failed") or 0),
-                ))
-            else:
-                days_list.append(TimeseriesDay(date=date_str, total=0, completed=0, failed=0))
-        result[wid] = days_list
-    return result
 
 
 @app.get("/workers/{worker_id}/runs/timeseries", response_model=List[TimeseriesDay])
 def get_worker_timeseries(
     worker_id: str,
     days: int = Query(default=14, ge=1, le=90),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> List[TimeseriesDay]:
     """Return per-day run counts for the last N days (default 14). Zero-filled."""
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
-    batch = _get_timeseries_batch([worker_id], days=days)
+    batch = _get_timeseries_batch(
+        [worker_id],
+        user_id=auth.user_id,
+        repos=repos,
+        days=days,
+    )
     return batch.get(worker_id, [])
 
 
@@ -1074,6 +1020,10 @@ def _composio_webhook_url() -> str:
     return f"{base}/composio-events"
 
 
+def _bootstrap_user_id() -> str:
+    return "federico"
+
+
 def _composio_trigger_signature(config: Optional[WorkerConfig]) -> Optional[Dict[str, Any]]:
     if not config or config.trigger.type != "composio" or not config.trigger.composio:
         return None
@@ -1206,7 +1156,12 @@ def _extract_triggers_from_manifest(manifest: Dict[str, Any], config: Dict[str, 
     return [{"type": "manual"}]
 
 
-def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str, Any]]) -> None:
+def _persist_discovered_workers(
+    conn: sqlite3.Connection,
+    workers: List[Dict[str, Any]],
+    *,
+    user_id: str,
+) -> None:
     now = now_iso()
     for w in workers:
         manifest = w.get("manifest") or {}
@@ -1258,13 +1213,14 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                  notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
                  composio_trigger_id, composio_event, triggers_json)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, 'federico', ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
                 trigger_type=excluded.trigger_type,
                 cron_expr=excluded.cron_expr,
                 cron_timezone=excluded.cron_timezone,
+                owner_id=excluded.owner_id,
                 composio_trigger_id=excluded.composio_trigger_id,
                 composio_event=excluded.composio_event,
                 triggers_json=excluded.triggers_json
@@ -1279,6 +1235,7 @@ def _persist_discovered_workers(conn: sqlite3.Connection, workers: List[Dict[str
                 json.dumps({}),
                 json.dumps({}),
                 now,
+                user_id,
                 composio_trigger_id,
                 composio_event,
                 triggers_json_str,
@@ -1311,35 +1268,25 @@ def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     }
 
 
-def _list_db_workers() -> List[Dict[str, Any]]:
+def _list_db_workers(
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> List[Dict[str, Any]]:
     try:
-        with get_db() as conn:
-            rows = conn.execute(
-                """
-                SELECT w.id, w.name, w.trigger_type, w.triggers_json, sv.manifest_json
-                FROM workers w
-                JOIN skill_versions sv ON sv.id = w.skill_version_id
-                ORDER BY w.created_at, w.id
-                """
-            ).fetchall()
-        return [_db_worker_from_row(row) for row in rows]
+        return repos.workers.list(user_id=user_id)
     except sqlite3.OperationalError:
         return []
 
 
-def _get_db_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+def _get_db_worker(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
     try:
-        with get_db() as conn:
-            row = conn.execute(
-                """
-                SELECT w.id, w.name, w.trigger_type, w.triggers_json, sv.manifest_json
-                FROM workers w
-                JOIN skill_versions sv ON sv.id = w.skill_version_id
-                WHERE w.id = ?
-                """,
-                (worker_id,),
-            ).fetchone()
-        return _db_worker_from_row(row) if row else None
+        return repos.workers.get(user_id=user_id, worker_id=worker_id)
     except sqlite3.OperationalError:
         return None
 
@@ -1839,21 +1786,25 @@ async def upload_file(
 
 
 @app.get("/workers", response_model=List[WorkerSummary])
-def list_workers() -> List[WorkerSummary]:
-    workers = _list_db_workers() or discover_workers(use_cache=True)
+def list_workers(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[WorkerSummary]:
+    workers = _list_db_workers(user_id=auth.user_id, repos=repos) or discover_workers(use_cache=True)
     worker_ids = [w["id"] for w in workers]
-    stats_by_id = _get_stats_batch(worker_ids)
-    timeseries_by_id = _get_timeseries_batch(worker_ids, days=14)
+    stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
+    timeseries_by_id = _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
+    available_secret_names = repos.secrets.list_names(user_id=auth.user_id)
     result: List[WorkerSummary] = []
     for w in workers:
-        last_run_row = _get_last_run_for_worker(w["id"])
+        last_run_row = _get_last_run_for_worker(w["id"], user_id=auth.user_id, repos=repos)
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
         # Check secrets
         config = get_worker_config_for_run(w["id"])
         status = WorkerStatus(w["status"])
         if config and config.secrets:
-            missing = [s for s in config.secrets if s not in os.environ]
+            missing = [s for s in config.secrets if s not in available_secret_names]
             if missing:
                 status = WorkerStatus.MISSING_SECRET
         if (
@@ -1893,23 +1844,25 @@ def list_workers() -> List[WorkerSummary]:
     return result
 
 
-@app.get("/workers/{worker_id}", response_model=WorkerDetail)
-def get_worker_detail(worker_id: str) -> WorkerDetail:
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+def _build_worker_detail(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> WorkerDetail:
+    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, worker_id, status, trigger_source,
-                   created_at, started_at, completed_at, duration_ms, error
-            FROM runs WHERE worker_id = ? ORDER BY created_at DESC LIMIT 10
-            """,
-            (worker_id,),
+    recent_runs = [
+        _make_run_summary(row)
+        for row in repos.runs.list_for_worker(
+            user_id=user_id,
+            worker_id=worker_id,
+            limit=10,
+            offset=0,
         )
-        recent_runs = [_make_run_summary(r) for r in cursor.fetchall()]
+    ]
 
     config_dict = worker.get("config", {})
     try:
@@ -1924,7 +1877,8 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
 
     status = WorkerStatus(worker["status"])
     if config and config.secrets:
-        missing = [s for s in config.secrets if s not in os.environ]
+        available_secret_names = repos.secrets.list_names(user_id=user_id)
+        missing = [s for s in config.secrets if s not in available_secret_names]
         if missing:
             status = WorkerStatus.MISSING_SECRET
     if (
@@ -1963,7 +1917,7 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
     # Build webhook URL if this worker has a webhook trigger
     from webhook_service import build_webhook_url as _build_webhook_url
     webhook_url: Optional[str] = None
-    if _worker_has_webhook_trigger(worker["id"], config):
+    if _worker_has_webhook_trigger(worker, config):
         try:
             webhook_url = _build_webhook_url(worker["id"])
         except Exception:
@@ -1997,19 +1951,33 @@ def get_worker_detail(worker_id: str) -> WorkerDetail:
     )
 
 
+@app.get("/workers/{worker_id}", response_model=WorkerDetail)
+def get_worker_detail(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
 # ---------------------------------------------------------------------------
 # PATCH /workers/{worker_id} — partial update
 # ---------------------------------------------------------------------------
 
 @app.patch("/workers/{worker_id}", response_model=WorkerDetail)
-def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
+def update_worker(
+    worker_id: str,
+    payload: WorkerUpdateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
     """Partially update a worker instance.
 
     All fields are optional. Rotation of webhook_secret returns the new raw
     secret once in the response (new_webhook_secret field) — it is never
     stored in plaintext.
     """
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -2029,24 +1997,19 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
             if not _re.fullmatch(r"[\d\*\-\,\/]+(?: [\d\*\-\,\/]+){4}", new_cron_expr.strip()):
                 raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
 
-    updates: list[str] = []
-    params: list[Any] = []
+    updates: Dict[str, Any] = {}
 
     if payload.trigger_type is not None:
-        updates.append("trigger_type = ?")
-        params.append(payload.trigger_type)
+        updates["trigger_type"] = payload.trigger_type
 
     if new_cron_expr is not None:
-        updates.append("cron_expr = ?")
-        params.append(new_cron_expr)
+        updates["cron_expr"] = new_cron_expr
 
     if payload.cron_timezone is not None:
-        updates.append("cron_timezone = ?")
-        params.append(payload.cron_timezone)
+        updates["cron_timezone"] = payload.cron_timezone
 
     if payload.input_values is not None:
-        updates.append("input_values_json = ?")
-        params.append(json.dumps(payload.input_values))
+        updates["input_values_json"] = payload.input_values
 
     # capabilities field is declared-not-enforced per T1c flip — just accept it
     # No DB column to write to currently; stored in manifest only.
@@ -2056,29 +2019,24 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
         from webhook_service import generate_webhook_secret
         # Verify the worker actually has a webhook trigger before rotating
         config = get_worker_config_for_run(worker_id)
-        if not _worker_has_webhook_trigger(worker_id, config):
+        if not _worker_has_webhook_trigger(worker, config):
             raise HTTPException(
                 status_code=400,
                 detail=f"Worker {worker_id!r} does not have a webhook trigger — cannot rotate secret",
             )
-        new_raw_secret = generate_webhook_secret(worker_id)
+        new_raw_secret = generate_webhook_secret(worker_id, repos=repos)
 
     if updates:
-        params.append(worker_id)
-        with get_db() as conn:
-            conn.execute(
-                f"UPDATE workers SET {', '.join(updates)} WHERE id = ?",
-                tuple(params),
-            )
+        repos.workers.update(user_id=auth.user_id, worker_id=worker_id, **updates)
         invalidate_worker_cache()
 
     # Reload cron schedule if trigger/cron changed
     if payload.trigger_type is not None or new_cron_expr is not None or payload.cron_timezone is not None:
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE workers SET next_run_at = NULL WHERE id = ?",
-                (worker_id,),
-            )
+        repos.workers.update(
+            user_id=auth.user_id,
+            worker_id=worker_id,
+            next_run_at=None,
+        )
 
     # N6 fix: persist trigger changes to worker.yml on disk so they survive
     # a server restart / worker registry reload (which reads from disk).
@@ -2145,7 +2103,7 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
                     exc,
                 )
 
-    detail = get_worker_detail(worker_id)
+    detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
     if new_raw_secret is not None:
         detail.new_webhook_secret = new_raw_secret
     return detail
@@ -2156,7 +2114,11 @@ def update_worker(worker_id: str, payload: WorkerUpdateRequest) -> WorkerDetail:
 # ---------------------------------------------------------------------------
 
 @app.delete("/workers/{worker_id}", status_code=204)
-def delete_worker(worker_id: str):
+def delete_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
     """Delete a worker and all dependent rows (runs, artifacts, logs).
 
     - FK ON DELETE CASCADE handles dependent rows.
@@ -2165,14 +2127,16 @@ def delete_worker(worker_id: str):
     - Removes scheduler slot (next_run_at cleared before delete).
     - skill_version is preserved if other workers share it.
     """
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, skill_version_id FROM workers WHERE id = ?", (worker_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Worker not found")
-        skill_version_id = row["skill_version_id"]
-        composio_state = _existing_composio_state(conn, worker_id)
+    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    skill_version_id = worker.get("skill_version_id")
+    config = get_worker_config_for_run(worker_id)
+    composio_state = {
+        "trigger_id": worker.get("composio_trigger_id"),
+        "event": worker.get("composio_event"),
+        "signature": _composio_trigger_signature(config),
+    }
 
     if composio_state.get("trigger_id"):
         try:
@@ -2185,17 +2149,17 @@ def delete_worker(worker_id: str):
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Cancel any in-progress runs gracefully before deletion
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id FROM runs WHERE worker_id = ? AND status IN ('queued', 'running')",
-            (worker_id,),
-        )
-        active_runs = [r["id"] for r in cursor.fetchall()]
+    active_runs = repos.workers.list_active_run_ids(user_id=auth.user_id, worker_id=worker_id)
 
     for run_id in active_runs:
         try:
-            update_run_status(run_id, RunStatus.FAILED.value, error="Worker deleted")
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error="Worker deleted",
+                user_id=auth.user_id,
+                repos=repos,
+            )
             logger.info("Cancelled active run %s before worker deletion", run_id)
         except Exception as exc:
             logger.warning("Could not cancel run %s: %s", run_id, exc)
@@ -2203,30 +2167,20 @@ def delete_worker(worker_id: str):
     # Remove webhook secret
     try:
         from webhook_service import delete_webhook_secret
-        delete_webhook_secret(worker_id)
+        delete_webhook_secret(worker_id, repos=repos)
     except Exception as exc:
         logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
 
     # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
-    with get_db() as conn:
-        conn.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+    repos.workers.delete(user_id=auth.user_id, worker_id=worker_id)
 
     # Check if skill_version is still referenced by other workers; preserve if so.
     # If unreferenced, also delete the skill_versions row so name+version can
     # be reused when the user recreates a worker with the same ID (N5 fix).
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) as cnt FROM workers WHERE skill_version_id = ?",
-            (skill_version_id,),
-        )
-        ref_count = cursor.fetchone()["cnt"]
-        if ref_count == 0 and skill_version_id:
-            conn.execute(
-                "DELETE FROM skill_versions WHERE id = ?",
-                (skill_version_id,),
-            )
-            logger.info("Removed unreferenced skill_version %s", skill_version_id)
+    ref_count = repos.workers.get_skill_version_ref_count(skill_version_id=skill_version_id)
+    if ref_count == 0 and skill_version_id:
+        repos.workers.delete_skill_version(skill_version_id=skill_version_id)
+        logger.info("Removed unreferenced skill_version %s", skill_version_id)
 
     # Remove bundle files from disk only if no other worker references this skill_version
     from worker_registry import WORKERS_DIR
@@ -2970,7 +2924,12 @@ class DraftAndCreateResponse(BaseModel):
 
 
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
-async def draft_and_create_worker(payload: DraftAndCreateRequest, request: Request) -> DraftAndCreateResponse:
+async def draft_and_create_worker(
+    payload: DraftAndCreateRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> DraftAndCreateResponse:
     """Draft a worker via LLM (or from pre-supplied files) and immediately register it.
 
     If ``files`` is provided (non-empty), skips the LLM and writes those files directly.
@@ -3034,7 +2993,7 @@ async def draft_and_create_worker(payload: DraftAndCreateRequest, request: Reque
         workers = discover_workers()
         with get_db() as conn:
             try:
-                _persist_discovered_workers(conn, workers)
+                _persist_discovered_workers(conn, workers, user_id=auth.user_id)
             except (sqlite3.IntegrityError, RuntimeError) as exc:
                 import shutil
                 shutil.rmtree(target_dir, ignore_errors=True)
@@ -3174,7 +3133,7 @@ async def draft_and_create_worker(payload: DraftAndCreateRequest, request: Reque
     workers = discover_workers()
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers)
+            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
         except (sqlite3.IntegrityError, RuntimeError) as exc:
             import shutil
             shutil.rmtree(target_dir, ignore_errors=True)
@@ -3227,7 +3186,11 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
 
 
 @app.post("/workers", response_model=WorkerDetail)
-def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
+def create_worker(
+    payload: WorkerCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
     """Create a new worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
@@ -3258,7 +3221,7 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
     # Persist to DB
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers)
+            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
         except sqlite3.IntegrityError as exc:
             # Orphaned skill_versions row from a previously-deleted worker with
             # the same name+version caused a FK or UNIQUE conflict. Clean up
@@ -3278,7 +3241,11 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Return the new worker detail
-    return get_worker_detail(worker_id)
+    return _build_worker_detail(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3288,6 +3255,8 @@ def create_worker(payload: WorkerCreateRequest) -> WorkerDetail:
 @app.post("/workers/from-bundle", response_model=WorkerDetail)
 async def create_worker_from_bundle(
     bundle: UploadFile = File(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """Create a new worker from an uploaded zip bundle.
 
@@ -3379,18 +3348,27 @@ async def create_worker_from_bundle(
     workers = discover_workers()
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers)
+            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
         except RuntimeError as exc:
             import shutil
             shutil.rmtree(target_dir, ignore_errors=True)
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return get_worker_detail(worker_id)
+    return _build_worker_detail(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+    )
 
 
 @app.put("/workers/{worker_id}", response_model=WorkerDetail)
-def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
+def update_worker(
+    worker_id: str,
+    payload: WorkerCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
@@ -3431,7 +3409,7 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
     workers = discover_workers()
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers)
+            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
         except RuntimeError as exc:
             if old_worker_yml is not None:
                 worker_yml_path.write_text(old_worker_yml)
@@ -3445,7 +3423,11 @@ def update_worker(worker_id: str, payload: WorkerCreateRequest) -> WorkerDetail:
                 skill_path.unlink()
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return get_worker_detail(worker_id)
+    return _build_worker_detail(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3474,7 +3456,12 @@ def _validate_worker_file_path(path: str) -> None:
 
 
 @app.put("/workers/{worker_id}/files", response_model=WorkerDetail)
-def update_worker_files(worker_id: str, payload: WorkerFilesUpdateRequest) -> WorkerDetail:
+def update_worker_files(
+    worker_id: str,
+    payload: WorkerFilesUpdateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
     """Replace all files in a worker's directory atomically.
 
     Accepts a list of {path, content} objects and writes them to disk.
@@ -3486,7 +3473,7 @@ def update_worker_files(worker_id: str, payload: WorkerFilesUpdateRequest) -> Wo
     """
     from worker_registry import WORKERS_DIR
 
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=get_repositories()) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -3578,7 +3565,7 @@ def update_worker_files(worker_id: str, payload: WorkerFilesUpdateRequest) -> Wo
             raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after update")
         with get_db() as conn:
             try:
-                _persist_discovered_workers(conn, this_worker_list)
+                _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
             except RuntimeError as exc:
                 # Roll back: restore backups
                 for orig, bak in reversed(backed_up):
@@ -3596,7 +3583,11 @@ def update_worker_files(worker_id: str, payload: WorkerFilesUpdateRequest) -> Wo
             bak.unlink(missing_ok=True)
         backed_up.clear()
 
-        return get_worker_detail(worker_id)
+        return _build_worker_detail(
+            worker_id,
+            user_id=auth.user_id,
+            repos=repos,
+        )
 
     except HTTPException:
         raise
@@ -3619,16 +3610,23 @@ def update_worker_files(worker_id: str, payload: WorkerFilesUpdateRequest) -> Wo
                 pass
 
 
-@app.post("/workers/reload", response_model=ReloadResponse)
-def reload_workers() -> ReloadResponse:
+def _reload_workers_for_user(user_id: str) -> ReloadResponse:
     invalidate_worker_cache()
     workers = discover_workers()
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers)
+            _persist_discovered_workers(conn, workers, user_id=user_id)
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ReloadResponse(status="success", workers_loaded=len(workers))
+
+
+@app.post("/workers/reload", response_model=ReloadResponse)
+def reload_workers(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ReloadResponse:
+    return _reload_workers_for_user(auth.user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -3636,8 +3634,14 @@ def reload_workers() -> ReloadResponse:
 # ---------------------------------------------------------------------------
 
 @app.post("/workers/{worker_id}/runs", response_model=ActionResponse)
-def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> ActionResponse:
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+def create_worker_run(
+    worker_id: str,
+    payload: RunCreate,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -3659,47 +3663,70 @@ def create_worker_run(worker_id: str, payload: RunCreate, request: Request) -> A
             )
 
     # Create the run record first so we have a run_id for per-run file staging.
-    run_id = create_run(worker_id, payload.inputs, payload.trigger_source)
+    run_id = create_run(
+        worker_id,
+        payload.inputs,
+        payload.trigger_source,
+        user_id=auth.user_id,
+        repos=repos,
+    )
     bound_by = request.headers.get("x-floom-user") or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(
             worker_id, run_id, payload.inputs, bound_by=bound_by
         )
     except HTTPException as exc:
-        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc.detail))
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=str(exc.detail),
+            user_id=auth.user_id,
+            repos=repos,
+        )
         raise
     except Exception as exc:
-        update_run_status(run_id, RunStatus.FAILED.value, error=str(exc))
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=str(exc),
+            user_id=auth.user_id,
+            repos=repos,
+        )
         raise
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE runs SET input_json = ? WHERE id = ?",
-            (json.dumps(resolved_inputs), run_id),
-        )
-    start_run(run_id, worker_id, resolved_inputs)
+    repos.runs.set_input_json(user_id=auth.user_id, run_id=run_id, input_json=resolved_inputs)
+    start_run(run_id, worker_id, resolved_inputs, user_id=auth.user_id, repos=repos)
     return ActionResponse(status="running", run_id=run_id)
 
 
 @app.post("/workers/{worker_id}/runs/{run_id}/replay")
-def replay_run(worker_id: str, run_id: str) -> Dict[str, str]:
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+def replay_run(
+    worker_id: str,
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT input_json FROM runs WHERE id = ? AND worker_id = ?",
-            (run_id, worker_id),
-        ).fetchone()
+    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row["worker_id"] != worker_id:
         raise HTTPException(status_code=404, detail="Run not found")
 
     source_inputs = json.loads(row["input_json"] or "{}")
     replay_inputs = json.loads(json.dumps(source_inputs))
-    new_run_id = create_run(worker_id, replay_inputs, trigger_source="manual")
-    start_run(new_run_id, worker_id, replay_inputs)
+    new_run_id = create_run(
+        worker_id,
+        replay_inputs,
+        trigger_source="manual",
+        user_id=auth.user_id,
+        repos=repos,
+    )
+    start_run(new_run_id, worker_id, replay_inputs, user_id=auth.user_id, repos=repos)
     return {"run_id": new_run_id}
 
 
@@ -3712,6 +3739,8 @@ def list_runs(
     until: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> List[RunSummary]:
     statuses = _resolve_run_status_filters(status)
     since_dt = _parse_iso8601(since) if since else None
@@ -3723,50 +3752,25 @@ def list_runs(
     if since_dt and until_dt and since_dt > until_dt:
         raise HTTPException(status_code=400, detail="since must be before until")
 
-    with get_db() as conn:
-        cursor = conn.cursor()
-        select_clause = """
-            SELECT r.id, r.worker_id,
-                   COALESCE(
-                       JSON_EXTRACT(sv.manifest_json, '$.title'),
-                       w.name
-                   ) as worker_name,
-                   r.status,
-                   r.trigger_source, r.created_at,
-                   r.started_at, r.completed_at, r.duration_ms, r.error
-            FROM runs r
-            LEFT JOIN workers w ON r.worker_id = w.id
-            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-            WHERE 1=1
-        """
-        params: list[Any] = []
-        if worker_id:
-            select_clause += " AND r.worker_id = ?"
-            params.append(worker_id)
-        if statuses:
-            placeholders = ", ".join(["?"] * len(statuses))
-            select_clause += f" AND r.status IN ({placeholders})"
-            params.extend(statuses)
-        if since_dt:
-            select_clause += " AND r.created_at >= ?"
-            params.append(since_dt.isoformat())
-        if until_dt:
-            select_clause += " AND r.created_at <= ?"
-            params.append(until_dt.isoformat())
-
-        count_query = f"SELECT COUNT(*) AS total FROM ({select_clause}) AS filtered_runs"
-        total_count = conn.execute(count_query, tuple(params)).fetchone()["total"]
-
-        query = f"{select_clause} ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
-        query_params = [*params, limit, offset]
-        cursor.execute(query, tuple(query_params))
-        rows = cursor.fetchall()
+    rows, total_count = repos.runs.list(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        statuses=statuses,
+        since=since_dt.isoformat() if since_dt else None,
+        until=until_dt.isoformat() if until_dt else None,
+        limit=limit,
+        offset=offset,
+    )
     response.headers["X-Total-Count"] = str(int(total_count or 0))
     return [_make_run_summary(r) for r in rows]
 
 
 @app.post("/runs/clear")
-def clear_runs(confirm: str = Query("", description="Must be 'yes-wipe-all-runs' to proceed.")):
+def clear_runs(
+    confirm: str = Query("", description="Must be 'yes-wipe-all-runs' to proceed."),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
     """Wipe all run history.
 
     Destructive operation. Requires explicit `?confirm=yes-wipe-all-runs`
@@ -3783,13 +3787,7 @@ def clear_runs(confirm: str = Query("", description="Must be 'yes-wipe-all-runs'
                 "proceed. This wipes every run, log, and artifact record."
             ),
         )
-    with get_db() as conn:
-        cursor = conn.execute("SELECT COUNT(*) AS n FROM runs")
-        row = cursor.fetchone()
-        deleted_count = int(row["n"]) if row else 0
-        conn.execute("DELETE FROM artifacts")
-        conn.execute("DELETE FROM logs")
-        conn.execute("DELETE FROM runs")
+    deleted_count = repos.runs.clear_all(user_id=auth.user_id)
     logger.warning("All run history cleared (%d runs deleted)", deleted_count)
     return {"status": "cleared", "deleted_runs": deleted_count}
 
@@ -3798,7 +3796,11 @@ _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
 
 
 @app.post("/runs/{run_id}/cancel", response_model=ActionResponse)
-def cancel_run(run_id: str) -> ActionResponse:
+def cancel_run(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
     """Request cancellation of an in-flight run.
 
     Sets cancel_requested=1 on the run row. The runner respects this between
@@ -3806,39 +3808,31 @@ def cancel_run(run_id: str) -> ActionResponse:
     Returns 404 if no such run, 409 if already terminal, 200 if cancellation
     was recorded (idempotent).
     """
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT status, cancel_requested FROM runs WHERE id = ?", (run_id,))
-        row = cursor.fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-        if row["status"] in _TERMINAL_RUN_STATUSES:
-            raise HTTPException(status_code=409, detail=f"Run already {row['status']}")
-        conn.execute(
-            "UPDATE runs SET cancel_requested = 1, cancelled_at = ? WHERE id = ?",
-            (now_iso(), run_id),
-        )
+    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row["status"] in _TERMINAL_RUN_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Run already {row['status']}")
+    repos.runs.cancel(
+        user_id=auth.user_id,
+        run_id=run_id,
+        cancelled_at=now_iso(),
+    )
     logger.info("Cancel requested for run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
 
 
 @app.get("/runs/{run_id}/download")
-def download_run_bundle(run_id: str):
-    with get_db() as conn:
-        run_row = conn.execute(
-            "SELECT id, input_json, output_json FROM runs WHERE id = ?",
-            (run_id,),
-        ).fetchone()
-        if not run_row:
-            raise HTTPException(status_code=404, detail="Run not found")
-        log_rows = conn.execute(
-            "SELECT timestamp, level, message FROM logs WHERE run_id = ? ORDER BY timestamp",
-            (run_id,),
-        ).fetchall()
-        artifact_rows = conn.execute(
-            "SELECT name, path FROM artifacts WHERE run_id = ? ORDER BY created_at, name",
-            (run_id,),
-        ).fetchall()
+def download_run_bundle(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Run not found")
+    log_rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+    artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
 
     input_payload = json.loads(run_row["input_json"] or "{}")
     output_payload = json.loads(run_row["output_json"] or "{}")
@@ -3892,17 +3886,20 @@ def download_run_bundle(run_id: str):
 
 
 @app.get("/runs/{run_id}/bundle/{filename:path}")
-def get_run_bundle_file(run_id: str, filename: str):
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT bundle_snapshot_path FROM runs WHERE id = ?",
-            (run_id,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Run not found")
-    snapshot_path = row["bundle_snapshot_path"]
-    if not snapshot_path:
+def get_run_bundle_file(
+    run_id: str,
+    filename: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    snapshot_path = repos.runs.get_bundle_snapshot_path(user_id=auth.user_id, run_id=run_id)
+    if snapshot_path is None:
+        run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+        if run_row is None:
+            raise HTTPException(status_code=404, detail="Run not found")
         raise HTTPException(status_code=410, detail="Bundle snapshot is not available for this run")
+    if not snapshot_path:
+        raise HTTPException(status_code=404, detail="Run not found")
 
     base_dir = (Path(DB_PATH).resolve().parent / snapshot_path).resolve()
     try:
@@ -3918,14 +3915,20 @@ def get_run_bundle_file(run_id: str, filename: str):
 
 
 @app.get("/runs/{run_id}/artifacts/{artifact_id}/download")
-def download_artifact(run_id: str, artifact_id: str):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM artifacts WHERE id = ? AND run_id = ?",
-            (artifact_id, run_id),
-        )
-        row = cursor.fetchone()
+def download_artifact(
+    run_id: str,
+    artifact_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    row = next(
+        (
+            artifact
+            for artifact in repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
+            if artifact["id"] == artifact_id
+        ),
+        None,
+    )
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
@@ -3971,71 +3974,53 @@ def download_artifact(run_id: str, artifact_id: str):
 
 
 @app.get("/runs/{run_id}", response_model=RunDetail)
-def get_run(run_id: str) -> RunDetail:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT r.id, r.worker_id,
-                   COALESCE(
-                       JSON_EXTRACT(sv.manifest_json, '$.title'),
-                       w.name
-                   ) as worker_name,
-                   r.status, r.trigger_source, r.runner,
-                   r.input_json, r.output_json, r.error,
-                   r.started_at, r.completed_at, r.duration_ms, r.created_at
-            FROM runs r
-            LEFT JOIN workers w ON r.worker_id = w.id
-            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-            WHERE r.id = ?
-            """,
-            (run_id,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Run not found")
+def get_run(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> RunDetail:
+    run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
 
-        run = row_to_dict(row)
-        run["input"] = json.loads(run.get("input_json") or "{}")
-        run["output"] = json.loads(run.get("output_json") or "{}")
-        # Build typed output schema from worker config
-        output_config = get_worker_config_for_run(run["worker_id"])
-        output_schema = []
-        if output_config:
-            raw_output = run["output"]
-            for out in output_config.outputs:
-                output_schema.append(OutputField(
-                    name=out.name,
-                    label=out.label,
-                    type=out.type,
-                    value=raw_output.get(out.name),
-                ))
+    run["input"] = json.loads(run.get("input_json") or "{}")
+    run["output"] = json.loads(run.get("output_json") or "{}")
+    # Build typed output schema from worker config
+    output_config = get_worker_config_for_run(run["worker_id"])
+    output_schema = []
+    if output_config:
+        raw_output = run["output"]
+        for out in output_config.outputs:
+            output_schema.append(OutputField(
+                name=out.name,
+                label=out.label,
+                type=out.type,
+                value=raw_output.get(out.name),
+            ))
 
-        cursor.execute(
-            """
-            SELECT level, message, timestamp, trace_id
-            FROM logs WHERE run_id = ? ORDER BY timestamp
-            """,
-            (run_id,),
+    logs = [
+        LogEntry(
+            level=r["level"],
+            message=r["message"],
+            timestamp=r["timestamp"],
+            trace_id=row_to_dict(r).get("trace_id"),
         )
-        logs = [
-            LogEntry(level=r["level"], message=r["message"], timestamp=r["timestamp"], trace_id=row_to_dict(r).get("trace_id"))
-            for r in cursor.fetchall()
-        ]
+        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+    ]
 
-        cursor.execute(
-            "SELECT * FROM artifacts WHERE run_id = ?",
-            (run_id,),
+    artifacts = [
+        Artifact(
+            id=r["id"],
+            run_id=r["run_id"],
+            name=r["name"],
+            type=row_to_dict(r).get("type"),
+            path=r["path"],
+            size_bytes=row_to_dict(r).get("size_bytes"),
+            created_at=r["created_at"],
         )
-        artifacts = [
-            Artifact(
-                id=r["id"], run_id=r["run_id"], name=r["name"],
-                type=row_to_dict(r).get("type"), path=r["path"],
-                size_bytes=row_to_dict(r).get("size_bytes"), created_at=r["created_at"],
-            )
-            for r in cursor.fetchall()
-        ]
-        transcript = _read_transcript_rows(run["runner"], artifacts)
+        for r in repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
+    ]
+    transcript = _read_transcript_rows(run["runner"], artifacts)
 
     return RunDetail(
         id=run["id"],
@@ -4061,13 +4046,14 @@ def get_run(run_id: str) -> RunDetail:
 
 
 @app.get("/runs/{run_id}/stream")
-async def stream_run_parts(run_id: str, request: Request):
+async def stream_run_parts(
+    run_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
     """Server-Sent Events stream of AI SDK parts for a single run."""
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT id, status, error FROM runs WHERE id = ?",
-            (run_id,),
-        ).fetchone()
+    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -4120,7 +4106,12 @@ async def stream_run_parts(run_id: str, request: Request):
 
 
 @app.get("/runs/{run_id}/events")
-async def stream_run_events(run_id: str, request: Request):
+async def stream_run_events(
+    run_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
     """Server-Sent Events stream for a single run.
 
     Emits one ``data: <json>\\n\\n`` line per state change: status updates,
@@ -4136,10 +4127,7 @@ async def stream_run_events(run_id: str, request: Request):
       immediately then the stream closes.
     """
     # Check run exists
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, status FROM runs WHERE id = ?", (run_id,))
-        run_row = cursor.fetchone()
+    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -4151,13 +4139,7 @@ async def stream_run_events(run_id: str, request: Request):
 
         # If run already terminal, emit current state and close immediately
         if already_terminal:
-            with get_db() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, worker_id, status, error, completed_at FROM runs WHERE id = ?",
-                    (run_id,),
-                )
-                final_row = cursor.fetchone()
+            final_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
             if final_row:
                 evt = {
                     "type": "status",
@@ -4221,20 +4203,14 @@ def _redact_public_log_message(message: str) -> str:
 
 
 @app.get("/runs/{run_id}/logs")
-def get_run_logs(run_id: str) -> List[Dict[str, Any]]:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
-        if cursor.fetchone() is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-        cursor.execute(
-            """
-            SELECT level, message, timestamp, trace_id
-            FROM logs WHERE run_id = ? ORDER BY timestamp
-            """,
-            (run_id,),
-        )
-        rows = cursor.fetchall()
+def get_run_logs(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    if repos.runs.get(user_id=auth.user_id, run_id=run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
     return [
         {
             "level": r["level"],
@@ -4337,7 +4313,12 @@ def _delete_env_var(name: str) -> bool:
 
 
 @app.post("/secrets/{name}", response_model=SecretTestResult)
-def upsert_secret(name: SecretName, payload: SecretUpsertRequest) -> SecretTestResult:
+def upsert_secret(
+    name: SecretName,
+    payload: SecretUpsertRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> SecretTestResult:
     """Create or update a secret. Value is write-only — never returned.
 
     SECURITY: refuses to overwrite a platform infrastructure secret. A
@@ -4355,26 +4336,22 @@ def upsert_secret(name: SecretName, payload: SecretUpsertRequest) -> SecretTestR
                 "secrets API. See ARCHITECTURE.md."
             ),
         )
-    try:
-        _upsert_env_var(name, payload.value)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    # Refresh DB record
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO secrets (name, status, created_at, updated_at)
-            VALUES (?, 'set', ?, ?)
-            ON CONFLICT(name) DO UPDATE SET status='set', updated_at=excluded.updated_at
-            """,
-            (name, now_iso(), now_iso()),
-        )
+    repos.secrets.set(
+        user_id=auth.user_id,
+        name=name,
+        value=payload.value,
+        status=SecretStatus.SET.value,
+    )
     logger.info("Secret %s upserted", name)
     return SecretTestResult(status="valid", reason=f"Secret {name!r} saved.")
 
 
 @app.delete("/secrets/{name}", response_model=SecretTestResult)
-def delete_secret(name: SecretName) -> SecretTestResult:
+def delete_secret(
+    name: SecretName,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> SecretTestResult:
     """Delete a secret from .env and env.
 
     SECURITY: refuses to delete a platform infrastructure secret for the
@@ -4388,19 +4365,21 @@ def delete_secret(name: SecretName) -> SecretTestResult:
                 "be deleted via the secrets API."
             ),
         )
-    removed = _delete_env_var(name)
-    with get_db() as conn:
-        conn.execute("DELETE FROM secrets WHERE name = ?", (name,))
-    if not removed:
+    if repos.secrets.get(user_id=auth.user_id, name=name) is None:
         raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
+    repos.secrets.delete(user_id=auth.user_id, name=name)
     logger.info("Secret %s deleted", name)
     return SecretTestResult(status="valid", reason=f"Secret {name!r} removed.")
 
 
 @app.post("/secrets/{name}/test", response_model=SecretTestResult)
-def test_secret(name: SecretName) -> SecretTestResult:
+def test_secret(
+    name: SecretName,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> SecretTestResult:
     """Test a secret. For OPENAI_API_KEY: does a 1-token completion. Others: confirms env var is set."""
-    value = os.environ.get(name)
+    value = repos.secrets.read_value(user_id=auth.user_id, name=name)
     if not value:
         return SecretTestResult(status="invalid", reason=f"{name} is not set in the environment.")
 
@@ -4509,16 +4488,16 @@ PLATFORM_SECRETS: frozenset[str] = frozenset(s["name"] for s in PLATFORM_SECRET_
 
 
 @app.get("/secrets", response_model=List[SecretItem])
-def list_secrets() -> List[SecretItem]:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name, status, last_used_at, last_checked_at, last_check_status "
-            "FROM secrets ORDER BY name"
-        )
-        db_secrets = {r["name"]: row_to_dict(r) for r in cursor.fetchall()}
+def list_secrets(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[SecretItem]:
+    db_secrets = {
+        row["name"]: row_to_dict(row)
+        for row in repos.secrets.list(user_id=auth.user_id)
+    }
 
-    workers = _list_db_workers() or discover_workers(use_cache=True)
+    workers = _list_db_workers(user_id=auth.user_id, repos=repos) or discover_workers(use_cache=True)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
@@ -4527,42 +4506,23 @@ def list_secrets() -> List[SecretItem]:
         if config:
             worker_secret_names.update(config.secrets)
 
-    # (b) All keys present in the .env file (user-added secrets not yet referenced by a worker)
-    env_secret_names: set[str] = set()
-    for line in _read_env_lines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0].strip()
-            if key:
-                env_secret_names.add(key)
-
     # Filter out platform-managed secrets — they appear in Settings, not here
-    all_secret_names = (worker_secret_names | env_secret_names) - PLATFORM_SECRETS
+    all_secret_names = (worker_secret_names | set(db_secrets)) - PLATFORM_SECRETS
 
     result: List[SecretItem] = []
     for name in sorted(all_secret_names):
-        value = os.environ.get(name)
-        status = SecretStatus.SET if value else SecretStatus.MISSING
+        db_row = db_secrets.get(name, {})
+        value = db_row.get("value")
+        status_value = str(db_row.get("status") or "").lower()
+        if status_value in SecretStatus._value2member_map_:
+            status = SecretStatus(status_value)
+        else:
+            status = SecretStatus.SET if value else SecretStatus.MISSING
         used_by = []
         for w in workers:
             config = get_worker_config_for_run(w["id"])
             if config and name in config.secrets:
                 used_by.append(w["name"])
-
-        with get_db() as conn:
-            now = now_iso()
-            conn.execute(
-                """
-                INSERT INTO secrets (name, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(name) DO UPDATE SET
-                    status=excluded.status,
-                    updated_at=excluded.updated_at
-                """,
-                (name, status.value, now, now),
-            )
-
-        db_row = db_secrets.get(name, {})
         result.append(
             SecretItem(
                 name=name,
@@ -4718,7 +4678,7 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     return []
 
 
-def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[str]:
+def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str) -> Optional[str]:
     """Resolve the connected user's email via Composio's tool-execute proxy.
 
     Composio masks the raw OAuth access_token from `/connected_accounts/<id>`
@@ -4751,7 +4711,7 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[
         r = _requests.post(
             f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
             headers={"x-api-key": key, "Content-Type": "application/json"},
-            json={"connected_account_id": composio_conn_id, "user_id": "federico", "arguments": {}},
+            json={"connected_account_id": composio_conn_id, "user_id": user_id, "arguments": {}},
             timeout=8,
         )
         if not r.ok:
@@ -4773,7 +4733,7 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[
     return None
 
 
-def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
+def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict[str, Any]:
     """Fetch Composio connected-account and return normalized account info.
 
     Returns a dict with keys: email, scopes, user_id, auth_config_id.
@@ -4817,7 +4777,7 @@ def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
         if not email:
             toolkit_slug = ((account.get("toolkit") or {}).get("slug") or "").lower()
             if toolkit_slug and composio_conn_id:
-                email = _fetch_provider_email(toolkit_slug, composio_conn_id)
+                email = _fetch_provider_email(toolkit_slug, composio_conn_id, user_id)
         return {
             "email": email,
             "scopes": scopes,
@@ -4833,18 +4793,12 @@ def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
         return {}
 
 
-@app.get("/connections", response_model=List[ConnectionItem], dependencies=[Depends(require_secret)])
-def list_connections(request: Request) -> List[ConnectionItem]:
-    user_id = _request_user_id(request)
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at, "
-            "scopes_json, account_label, last_checked_at, last_check_status "
-            "FROM composio_connections WHERE user_id = ? ORDER BY app_name",
-            (user_id,),
-        )
-        rows = cursor.fetchall()
+@app.get("/connections", response_model=List[ConnectionItem])
+def list_connections(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[ConnectionItem]:
+    rows = repos.connections.list(user_id=auth.user_id)
 
     result = []
     for row in rows:
@@ -4854,8 +4808,12 @@ def list_connections(request: Request) -> List[ConnectionItem]:
     return result
 
 
-@app.post("/connections", response_model=ConnectionInitResponse, dependencies=[Depends(require_secret)])
-def initiate_connection(payload: ConnectionInitRequest, request: Request) -> ConnectionInitResponse:
+@app.post("/connections", response_model=ConnectionInitResponse)
+def initiate_connection(
+    payload: ConnectionInitRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ConnectionInitResponse:
     from composio_client import initiate_connection as composio_initiate, NoManagedAuthError
     app_name = payload.app_name.lower().strip()
     if not app_name:
@@ -4863,7 +4821,7 @@ def initiate_connection(payload: ConnectionInitRequest, request: Request) -> Con
 
     callback_url = _get_callback_url()
     try:
-        result = composio_initiate(app_name, callback_url)
+        result = composio_initiate(app_name, callback_url, user_id=auth.user_id)
     except NoManagedAuthError as exc:
         # App does not support Composio-managed OAuth (e.g. API-key-only apps).
         # Return 422 with a prefixed detail string so the frontend can detect it
@@ -4878,19 +4836,19 @@ def initiate_connection(payload: ConnectionInitRequest, request: Request) -> Con
 
     composio_conn_id = result["composio_connection_id"]
     redirect_url = result["redirect_url"]
-    user_id = _request_user_id(request)
-
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
     conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO composio_connections "
-            "(id, app_name, composio_connection_id, status, created_at, updated_at, user_id) "
-            "VALUES (?, ?, ?, 'initiated', ?, ?, ?)",
-            (conn_id, app_name, composio_conn_id, now, now, user_id),
-        )
+    repos.connections.upsert(
+        user_id=auth.user_id,
+        id=conn_id,
+        app_name=app_name,
+        composio_connection_id=composio_conn_id,
+        status="initiated",
+        created_at=now,
+        updated_at=now,
+    )
 
     return ConnectionInitResponse(
         id=conn_id,
@@ -4910,11 +4868,10 @@ def connections_callback(connection_id: str = "", status: str = ""):
     from fastapi.responses import RedirectResponse
 
     if connection_id:
-        with get_db() as conn:
-            existing = conn.execute(
-                "SELECT status FROM composio_connections WHERE composio_connection_id = ?",
-                (connection_id,),
-            ).fetchone()
+        repos = get_repositories()
+        existing = repos.connections.get_by_composio_connection_id(
+            composio_connection_id=connection_id,
+        )
 
         # Ignore unknown callback IDs; known IDs are validated by persisted state.
         if not existing:
@@ -4934,12 +4891,13 @@ def connections_callback(connection_id: str = "", status: str = ""):
             else (status or existing["status"])
         )
         now = now_iso()
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE composio_connections SET status=?, composio_connection_id=?, updated_at=? "
-                "WHERE composio_connection_id=?",
-                (final_status, connection_id, now, connection_id),
-            )
+        repos.connections.update(
+            user_id=existing["user_id"],
+            composio_id=existing["id"],
+            status=final_status,
+            composio_connection_id=connection_id,
+            updated_at=now,
+        )
 
     frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
     return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
@@ -4957,14 +4915,19 @@ def connections_callback_alias(connection_id: str = "", status: str = ""):
     return connections_callback(connection_id=connection_id, status=status)
 
 
-@app.get("/connections/{connection_id}/status", response_model=ConnectionItem, dependencies=[Depends(require_secret)])
-def get_connection_status(connection_id: str, request: Request) -> ConnectionItem:
-    user_id = _request_user_id(request)
+@app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
+def get_connection_status(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ConnectionItem:
+    user_id = auth.user_id
     row = _connection_row_for_user(
         connection_id,
         user_id,
         "id, app_name, composio_connection_id, status, created_at, updated_at, "
         "scopes_json, account_label, last_checked_at, last_check_status",
+        repos=repos,
     )
 
     item = row_to_dict(row)
@@ -4976,11 +4939,12 @@ def get_connection_status(connection_id: str, request: Request) -> ConnectionIte
         remote_status = check_status(item["composio_connection_id"])
         if remote_status and remote_status != item["status"]:
             now = now_iso()
-            with get_db() as conn:
-                conn.execute(
-                    "UPDATE composio_connections SET status=?, updated_at=? WHERE id=?",
-                    (remote_status, now, connection_id),
-                )
+            repos.connections.update(
+                user_id=user_id,
+                composio_id=connection_id,
+                status=remote_status,
+                updated_at=now,
+            )
             item["status"] = remote_status
             item["updated_at"] = now
     except Exception as exc:
@@ -4989,10 +4953,14 @@ def get_connection_status(connection_id: str, request: Request) -> ConnectionIte
     return ConnectionItem(**item)
 
 
-@app.delete("/connections/{connection_id}", dependencies=[Depends(require_secret)])
-def delete_connection(connection_id: str, request: Request):
-    user_id = _request_user_id(request)
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
+@app.delete("/connections/{connection_id}")
+def delete_connection(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    user_id = auth.user_id
+    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id", repos=repos)
 
     composio_conn_id = row["composio_connection_id"]
 
@@ -5003,37 +4971,45 @@ def delete_connection(connection_id: str, request: Request):
     except Exception as exc:
         logger.warning("Could not revoke Composio connection %s: %s", composio_conn_id, exc)
 
-    with get_db() as conn:
-        conn.execute("DELETE FROM composio_connections WHERE id = ?", (connection_id,))
+    repos.connections.delete(user_id=user_id, composio_id=connection_id)
 
     return {"status": "deleted"}
 
 
-@app.get("/connections/{connection_id}/account-info", dependencies=[Depends(require_secret)])
-def get_connection_account_info(connection_id: str, request: Request) -> Dict[str, Any]:
+@app.get("/connections/{connection_id}/account-info")
+def get_connection_account_info(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
     """Return Composio connected-account info needed by the UI.
 
     The frontend calls this to hydrate connection cards. The Composio API key
     lives here on the API service so it never needs to be on Vercel.
     """
-    user_id = _request_user_id(request)
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id, created_at")
+    row = _connection_row_for_user(
+        connection_id,
+        auth.user_id,
+        "composio_connection_id, created_at",
+        repos=repos,
+    )
 
     composio_conn_id = row["composio_connection_id"]
-    info = _fetch_composio_account_info(composio_conn_id)
+    info = _fetch_composio_account_info(composio_conn_id, user_id=auth.user_id)
     if not info:
         raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
 
     # Cache scopes + account_label in DB for list endpoint
     if info.get("scopes") is not None or info.get("email"):
         now = now_iso()
-        scopes_json = json.dumps(info.get("scopes") or [])
         account_label = info.get("email") or ""
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE composio_connections SET scopes_json=?, account_label=?, updated_at=? WHERE id=?",
-                (scopes_json, account_label, now, connection_id),
-            )
+        repos.connections.update(
+            user_id=auth.user_id,
+            composio_id=connection_id,
+            scopes_json=info.get("scopes") or [],
+            account_label=account_label,
+            updated_at=now,
+        )
 
     return {
         "email": info.get("email"),
@@ -5042,7 +5018,7 @@ def get_connection_account_info(connection_id: str, request: Request) -> Dict[st
     }
 
 
-@app.get("/connections/auth-configs/{auth_config_id}", dependencies=[Depends(require_secret)])
+@app.get("/connections/auth-configs/{auth_config_id}", dependencies=[Depends(get_auth_context)])
 def get_auth_config(auth_config_id: str) -> Dict[str, Any]:
     """Return Composio auth_config (scopes definition) for a given auth_config_id.
 
@@ -5134,11 +5110,19 @@ def _extract_auth_config_scopes(body: Any) -> List[str]:
     return []
 
 
-@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult, dependencies=[Depends(require_secret)])
-def test_connection(connection_id: str, request: Request) -> ConnectionTestResult:
+@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult)
+def test_connection(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ConnectionTestResult:
     """Test whether a connection's token is still valid by calling Composio."""
-    user_id = _request_user_id(request)
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
+    row = _connection_row_for_user(
+        connection_id,
+        auth.user_id,
+        "composio_connection_id",
+        repos=repos,
+    )
 
     composio_conn_id = row["composio_connection_id"]
     tested_at = now_iso()
@@ -5147,7 +5131,7 @@ def test_connection(connection_id: str, request: Request) -> ConnectionTestResul
         from composio_client import check_status
         remote_status = check_status(composio_conn_id)
     except Exception as exc:
-        _write_connection_check(connection_id, "failed", str(exc), tested_at)
+        _write_connection_check(connection_id, "failed", str(exc), tested_at, repos=repos)
         return ConnectionTestResult(
             status="failed",
             reason=f"Upstream check failed: {exc}",
@@ -5155,21 +5139,33 @@ def test_connection(connection_id: str, request: Request) -> ConnectionTestResul
         )
 
     if remote_status == "not_found":
-        _write_connection_check(connection_id, "failed", "Connection not found in upstream", tested_at)
+        _write_connection_check(
+            connection_id,
+            "failed",
+            "Connection not found in upstream",
+            tested_at,
+            repos=repos,
+        )
         return ConnectionTestResult(
             status="failed",
             reason="Connection not found in the integration service",
             tested_at=tested_at,
         )
     if remote_status in ("expired", "failed"):
-        _write_connection_check(connection_id, remote_status, f"Status: {remote_status}", tested_at)
+        _write_connection_check(
+            connection_id,
+            remote_status,
+            f"Status: {remote_status}",
+            tested_at,
+            repos=repos,
+        )
         return ConnectionTestResult(
             status=remote_status,
             reason=f"Connection status is {remote_status}",
             tested_at=tested_at,
         )
     if remote_status == "active":
-        _write_connection_check(connection_id, "valid", None, tested_at)
+        _write_connection_check(connection_id, "valid", None, tested_at, repos=repos)
         return ConnectionTestResult(
             status="valid",
             reason="Connection is active",
@@ -5177,7 +5173,13 @@ def test_connection(connection_id: str, request: Request) -> ConnectionTestResul
         )
 
     # Unknown status: treat as valid but note it
-    _write_connection_check(connection_id, "valid", f"Status: {remote_status}", tested_at)
+    _write_connection_check(
+        connection_id,
+        "valid",
+        f"Status: {remote_status}",
+        tested_at,
+        repos=repos,
+    )
     return ConnectionTestResult(
         status="valid",
         reason=f"Connection status: {remote_status}",
@@ -5185,29 +5187,41 @@ def test_connection(connection_id: str, request: Request) -> ConnectionTestResul
     )
 
 
+def _connection_by_id(
+    connection_id: str,
+    repos: Repositories | None = None,
+) -> Optional[Dict[str, Any]]:
+    rows = (repos or get_repositories()).connections.list_all()
+    return next((row_to_dict(row) for row in rows if row["id"] == connection_id), None)
+
+
 def _write_connection_check(
     connection_id: str,
     check_status: str,
     error: Optional[str],
     checked_at: str,
+    repos: Repositories | None = None,
 ) -> None:
     """Persist health-check result to the DB row."""
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE composio_connections "
-            "SET last_checked_at=?, last_check_status=?, last_check_error=? "
-            "WHERE id=?",
-            (checked_at, check_status, error, connection_id),
-        )
+    repos_obj = repos or get_repositories()
+    row = _connection_by_id(connection_id, repos_obj)
+    if row is None:
+        return
+    repos_obj.connections.update(
+        user_id=row["user_id"],
+        composio_id=connection_id,
+        last_checked_at=checked_at,
+        last_check_status=check_status,
+        last_check_error=error,
+        updated_at=checked_at,
+    )
 
 
 async def _run_connection_sweep() -> None:
     """Background task: test every connection and update last_checked_at columns."""
     logger.info("Connection health sweep starting")
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, composio_connection_id FROM composio_connections")
-        rows = cursor.fetchall()
+    repos = get_repositories()
+    rows = repos.connections.list_all()
 
     for row in rows:
         conn_id = row["id"]
@@ -5223,21 +5237,22 @@ async def _run_connection_sweep() -> None:
         except Exception as exc:
             check = "failed"
             error = str(exc)
-        _write_connection_check(conn_id, check, error, tested_at)
+        _write_connection_check(conn_id, check, error, tested_at, repos=repos)
         # Also refresh account_label + scopes for ACTIVE connections so the
         # user sees their actual email rather than the hardcoded "federico"
         # user_id. _fetch_composio_account_info uses Composio's tool-execute
         # proxy to get the real email via GMAIL_GET_PROFILE etc.
         if check == "valid":
             try:
-                info = _fetch_composio_account_info(composio_conn_id)
+                info = _fetch_composio_account_info(composio_conn_id, user_id=row["user_id"])
                 email_or_user = info.get("email") or info.get("user_id") or ""
                 if email_or_user:
-                    with get_db() as conn2:
-                        conn2.execute(
-                            "UPDATE composio_connections SET account_label=?, updated_at=? WHERE id=?",
-                            (email_or_user, tested_at, conn_id),
-                        )
+                    repos.connections.update(
+                        user_id=row["user_id"],
+                        composio_id=conn_id,
+                        account_label=email_or_user,
+                        updated_at=tested_at,
+                    )
             except Exception as exc:
                 logger.debug("account_label refresh failed for %s: %s", conn_id, exc)
         logger.debug("Swept connection %s: %s", conn_id, check)
@@ -5532,214 +5547,178 @@ class OverviewResponse(BaseModel):
 
 
 @app.get("/system/overview", response_model=OverviewResponse)
-def system_overview() -> OverviewResponse:
+def system_overview(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> OverviewResponse:
     now = datetime.now(timezone.utc)
     window_24h = now - timedelta(hours=24)
     window_7d = now - timedelta(days=7)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow_start = today_start + timedelta(days=1)
 
-    with get_db() as conn:
-        runs_24h_rows = conn.execute(
-            "SELECT created_at FROM runs WHERE created_at >= ?",
-            (window_24h.isoformat(),),
-        ).fetchall()
-        sparkline = [0] * 24
-        for row in runs_24h_rows:
-            created_at = _parse_iso8601(row["created_at"])
-            if created_at is None or created_at < window_24h or created_at > now:
-                continue
-            bucket = int((created_at - window_24h).total_seconds() // 3600)
-            if bucket < 0:
-                continue
-            if bucket > 23:
-                bucket = 23
-            sparkline[bucket] += 1
-        runs_24h = int(sum(sparkline))
+    runs_24h_rows, _ = repos.runs.list(
+        user_id=auth.user_id,
+        since=window_24h.isoformat(),
+        limit=100000,
+        offset=0,
+    )
+    sparkline = [0] * 24
+    for row in runs_24h_rows:
+        created_at = _parse_iso8601(row["created_at"])
+        if created_at is None or created_at < window_24h or created_at > now:
+            continue
+        bucket = int((created_at - window_24h).total_seconds() // 3600)
+        if bucket < 0:
+            continue
+        if bucket > 23:
+            bucket = 23
+        sparkline[bucket] += 1
+    runs_24h = int(sum(sparkline))
 
-        runs_7d_counts = conn.execute(
-            """
-            SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS succeeded
-            FROM runs
-            WHERE created_at >= ?
-            """,
-            (window_7d.isoformat(),),
-        ).fetchone()
-        runs_total_7d = int((runs_7d_counts["total"] if runs_7d_counts else 0) or 0)
-        runs_success_7d = int((runs_7d_counts["succeeded"] if runs_7d_counts else 0) or 0)
-        success_rate_7d = (runs_success_7d / runs_total_7d) if runs_total_7d else 0.0
+    runs_7d_rows, runs_total_7d = repos.runs.list(
+        user_id=auth.user_id,
+        since=window_7d.isoformat(),
+        limit=100000,
+        offset=0,
+    )
+    runs_success_7d = sum(1 for row in runs_7d_rows if row["status"] == RunStatus.COMPLETED.value)
+    success_rate_7d = (runs_success_7d / runs_total_7d) if runs_total_7d else 0.0
 
-        active_workers_count = int(
-            (
-                conn.execute("SELECT COUNT(*) AS total FROM workers WHERE enabled = 1").fetchone()["total"]
+    workers = repos.workers.list(user_id=auth.user_id)
+    active_workers_count = sum(1 for row in workers if row.get("enabled"))
+
+    connections = repos.connections.list(user_id=auth.user_id)
+    connections_total = len(connections)
+    connections_healthy = sum(
+        1
+        for row in connections
+        if row.get("status") == "active"
+        and row.get("last_check_status") in (None, "valid")
+    )
+
+    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=5, offset=0)
+    recent_runs = [
+        OverviewRunItem(
+            run_id=row["id"],
+            worker_id=row["worker_id"],
+            worker_name=row.get("worker_name") or row["worker_id"],
+            status=_normalize_run_status(row["status"] or ""),
+            started_at=row.get("started_at") or row.get("created_at"),
+            duration_ms=int((row.get("duration_ms") or 0)),
+            trigger_source=row.get("trigger_source") or "manual",
+        )
+        for row in recent_rows
+    ]
+
+    scheduled_today: List[OverviewScheduledItem] = []
+    for row in sorted(
+        (
+            worker
+            for worker in workers
+            if worker.get("enabled")
+            and worker.get("next_run_at")
+            and today_start.isoformat() <= worker["next_run_at"] < tomorrow_start.isoformat()
+        ),
+        key=lambda worker: worker["next_run_at"],
+    )[:5]:
+        trigger = {"type": row["trigger_type"] or "schedule", "cron": row.get("cron_expr")}
+        if row.get("triggers_json"):
+            try:
+                parsed_triggers = json.loads(row["triggers_json"])
+                if isinstance(parsed_triggers, list):
+                    schedule_trigger = next(
+                        (
+                            item
+                            for item in parsed_triggers
+                            if isinstance(item, dict)
+                            and str(item.get("type", "")).lower() in {"schedule", "scheduled"}
+                        ),
+                        None,
+                    )
+                    if schedule_trigger is not None:
+                        trigger = schedule_trigger
+            except Exception:
+                pass
+        scheduled_today.append(
+            OverviewScheduledItem(
+                worker_id=row["id"],
+                worker_name=row["name"],
+                next_fire_at=row["next_run_at"],
+                trigger_label=_trigger_label(trigger),
             )
-            or 0
         )
 
-        connection_counts = conn.execute(
-            """
-            SELECT
-                COUNT(*) AS total,
-                SUM(
-                    CASE
-                        WHEN status = 'active'
-                             AND (last_check_status IS NULL OR last_check_status = 'valid')
-                        THEN 1
-                        ELSE 0
-                    END
-                ) AS healthy
-            FROM composio_connections
-            """
-        ).fetchone()
-        connections_total = int((connection_counts["total"] if connection_counts else 0) or 0)
-        connections_healthy = int((connection_counts["healthy"] if connection_counts else 0) or 0)
-
-        recent_rows = conn.execute(
-            """
-            SELECT
-                r.id AS run_id,
-                r.worker_id,
-                COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name, r.worker_id) AS worker_name,
-                r.status,
-                COALESCE(r.started_at, r.created_at) AS started_at,
-                r.duration_ms,
-                r.trigger_source
-            FROM runs r
-            LEFT JOIN workers w ON r.worker_id = w.id
-            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-            ORDER BY r.created_at DESC
-            LIMIT 5
-            """
-        ).fetchall()
-        recent_runs = [
-            OverviewRunItem(
-                run_id=row["run_id"],
-                worker_id=row["worker_id"],
-                worker_name=row["worker_name"] or row["worker_id"],
-                status=_normalize_run_status(row["status"] or ""),
-                started_at=row["started_at"],
-                duration_ms=int((row["duration_ms"] or 0)),
-                trigger_source=row["trigger_source"] or "manual",
+    attention_items: List[OverviewAttentionItem] = []
+    failure_runs, _ = repos.runs.list(
+        user_id=auth.user_id,
+        statuses=[RunStatus.FAILED.value],
+        since=window_24h.isoformat(),
+        limit=100000,
+        offset=0,
+    )
+    failure_counts: Dict[str, int] = collections.Counter(
+        row["worker_id"] for row in failure_runs if row.get("worker_id")
+    )
+    for worker_id, failure_count in sorted(
+        failure_counts.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:3]:
+        if failure_count < 3:
+            continue
+        attention_items.append(
+            OverviewAttentionItem(
+                type="failure_cluster",
+                worker_id=worker_id,
+                message=f"Worker failed {failure_count} times in the last 24 hours.",
+                action_url=f"/workers/{worker_id}",
             )
-            for row in recent_rows
-        ]
+        )
 
-        scheduled_rows = conn.execute(
-            """
-            SELECT id, name, next_run_at, cron_expr, trigger_type, triggers_json
-            FROM workers
-            WHERE enabled = 1
-              AND next_run_at IS NOT NULL
-              AND next_run_at >= ?
-              AND next_run_at < ?
-            ORDER BY next_run_at ASC
-            LIMIT 5
-            """,
-            (today_start.isoformat(), tomorrow_start.isoformat()),
-        ).fetchall()
-        scheduled_today: List[OverviewScheduledItem] = []
-        for row in scheduled_rows:
-            trigger = {"type": row["trigger_type"] or "schedule", "cron": row["cron_expr"]}
-            if row["triggers_json"]:
-                try:
-                    parsed_triggers = json.loads(row["triggers_json"])
-                    if isinstance(parsed_triggers, list):
-                        schedule_trigger = next(
-                            (
-                                item
-                                for item in parsed_triggers
-                                if isinstance(item, dict)
-                                and str(item.get("type", "")).lower() in {"schedule", "scheduled"}
-                            ),
-                            None,
-                        )
-                        if schedule_trigger is not None:
-                            trigger = schedule_trigger
-                except Exception:
-                    pass
-            scheduled_today.append(
-                OverviewScheduledItem(
-                    worker_id=row["id"],
-                    worker_name=row["name"],
-                    next_fire_at=row["next_run_at"],
-                    trigger_label=_trigger_label(trigger),
-                )
+    for row in sorted(
+        (
+            connection
+            for connection in connections
+            if connection.get("status") == "expired" or connection.get("last_check_status") == "expired"
+        ),
+        key=lambda connection: connection.get("updated_at") or "",
+        reverse=True,
+    )[:3]:
+        slug = (row.get("app_name") or "").lower() or None
+        attention_items.append(
+            OverviewAttentionItem(
+                type="connection_expired",
+                connection_id=row["id"],
+                provider_slug=slug,
+                provider_display_name=row.get("app_name") or None,
+                message="Connection has expired and needs re-authorization.",
+                action_url=f"/connections/{row['id']}",
             )
+        )
 
-        attention_items: List[OverviewAttentionItem] = []
-        failure_rows = conn.execute(
-            """
-            SELECT worker_id, COUNT(*) AS failure_count
-            FROM runs
-            WHERE status = 'failed' AND created_at >= ?
-            GROUP BY worker_id
-            HAVING COUNT(*) >= 3
-            ORDER BY failure_count DESC
-            LIMIT 3
-            """,
-            (window_24h.isoformat(),),
-        ).fetchall()
-        for row in failure_rows:
-            failure_count = int(row["failure_count"] or 0)
-            attention_items.append(
-                OverviewAttentionItem(
-                    type="failure_cluster",
-                    worker_id=row["worker_id"],
-                    message=f"Worker failed {failure_count} times in the last 24 hours.",
-                    action_url=f"/workers/{row['worker_id']}",
-                )
+    for row in sorted(
+        (
+            connection
+            for connection in connections
+            if connection.get("status") == "active"
+            and connection.get("last_check_status") == "failed"
+            and "expir" in str(connection.get("last_check_error") or "").lower()
+        ),
+        key=lambda connection: connection.get("updated_at") or "",
+        reverse=True,
+    )[:3]:
+        slug = (row.get("app_name") or "").lower() or None
+        attention_items.append(
+            OverviewAttentionItem(
+                type="connection_expiring",
+                connection_id=row["id"],
+                provider_slug=slug,
+                provider_display_name=row.get("app_name") or None,
+                message="Connection may expire soon. Reconnect to avoid failures.",
+                action_url=f"/connections/{row['id']}",
             )
-
-        # PR S19 (I-7): include provider_slug + provider_display_name so the
-        # Overview alert can name the connection ("Gmail" instead of opaque
-        # "Connection expired") and the UI can render the right logo.
-        expired_rows = conn.execute(
-            """
-            SELECT id, app_name
-            FROM composio_connections
-            WHERE status = 'expired' OR last_check_status = 'expired'
-            ORDER BY updated_at DESC
-            LIMIT 3
-            """
-        ).fetchall()
-        for row in expired_rows:
-            slug = (row["app_name"] or "").lower() or None
-            attention_items.append(
-                OverviewAttentionItem(
-                    type="connection_expired",
-                    connection_id=row["id"],
-                    provider_slug=slug,
-                    provider_display_name=row["app_name"] or None,
-                    message="Connection has expired and needs re-authorization.",
-                    action_url=f"/connections/{row['id']}",
-                )
-            )
-
-        expiring_rows = conn.execute(
-            """
-            SELECT id, app_name
-            FROM composio_connections
-            WHERE status = 'active'
-              AND last_check_status = 'failed'
-              AND LOWER(COALESCE(last_check_error, '')) LIKE '%expir%'
-            ORDER BY updated_at DESC
-            LIMIT 3
-            """
-        ).fetchall()
-        for row in expiring_rows:
-            slug = (row["app_name"] or "").lower() or None
-            attention_items.append(
-                OverviewAttentionItem(
-                    type="connection_expiring",
-                    connection_id=row["id"],
-                    provider_slug=slug,
-                    provider_display_name=row["app_name"] or None,
-                    message="Connection may expire soon. Reconnect to avoid failures.",
-                    action_url=f"/connections/{row['id']}",
-                )
-            )
+        )
 
     return OverviewResponse(
         stats=OverviewStats(
@@ -5786,44 +5765,37 @@ def system_info():
 
 
 @app.get("/system/metrics")
-def system_metrics():
+def system_metrics(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
     """Operational metrics for the dashboard / external monitors.
 
     Gated by x-floom-secret like other admin routes. Returns a flat counters
     payload suitable for cron-scraped JSON monitoring.
     """
-    workers = discover_workers(use_cache=True)
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as cnt FROM runs")
-        runs_total = cursor.fetchone()["cnt"]
-        cursor.execute(
-            "SELECT COUNT(*) as cnt FROM runs WHERE created_at >= datetime('now', '-7 days')"
-        )
-        runs_7d = cursor.fetchone()["cnt"]
-        cursor.execute(
-            "SELECT COUNT(*) as cnt FROM runs "
-            "WHERE created_at >= datetime('now', '-7 days') AND status = ?",
-            (RunStatus.FAILED.value,),
-        )
-        runs_failed_7d = cursor.fetchone()["cnt"]
-        try:
-            cursor.execute("SELECT COUNT(*) as cnt FROM composio_connections WHERE status = 'active'")
-            connections_count = cursor.fetchone()["cnt"]
-        except sqlite3.OperationalError:
-            connections_count = 0
-        try:
-            cursor.execute("SELECT COUNT(*) as cnt FROM secrets")
-            secrets_count = cursor.fetchone()["cnt"]
-        except sqlite3.OperationalError:
-            secrets_count = 0
-        try:
-            cursor.execute(
-                "SELECT COUNT(*) as cnt FROM workers WHERE enabled = 1 AND trigger_type != 'manual'"
-            )
-            active_triggers = cursor.fetchone()["cnt"]
-        except sqlite3.OperationalError:
-            active_triggers = 0
+    workers = repos.workers.list(user_id=auth.user_id)
+    _runs_page, runs_total = repos.runs.list(user_id=auth.user_id, limit=1, offset=0)
+    _runs_7d_page, runs_7d = repos.runs.list(
+        user_id=auth.user_id,
+        since=(datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),
+        limit=1,
+        offset=0,
+    )
+    _failed_7d_page, runs_failed_7d = repos.runs.list(
+        user_id=auth.user_id,
+        statuses=[RunStatus.FAILED.value],
+        since=(datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),
+        limit=1,
+        offset=0,
+    )
+    connections_count = len(repos.connections.list(user_id=auth.user_id))
+    secrets_count = len(repos.secrets.list(user_id=auth.user_id))
+    active_triggers = sum(
+        1
+        for worker in workers
+        if worker.get("enabled") and worker.get("trigger_type") != "manual"
+    )
     return {
         "workers_count": len(workers),
         "runs_total": int(runs_total or 0),
@@ -5875,7 +5847,7 @@ class WebhookSecretResponse(BaseModel):
     secret: Optional[str] = None  # Only present on generation/rotation
 
 
-def _worker_has_webhook_trigger(worker_id: str, config: Optional["WorkerConfig"]) -> bool:
+def _worker_has_webhook_trigger(worker: Dict[str, Any], config: Optional["WorkerConfig"]) -> bool:
     """Return True if any of the worker's triggers is of type 'webhook'.
 
     Checks triggers_json in the DB first (multi-trigger support), then
@@ -5883,13 +5855,8 @@ def _worker_has_webhook_trigger(worker_id: str, config: Optional["WorkerConfig"]
     """
     # Check multi-trigger DB column first
     try:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT triggers_json FROM workers WHERE id = ?",
-                (worker_id,),
-            ).fetchone()
-        if row and row["triggers_json"]:
-            triggers = json.loads(row["triggers_json"])
+        if worker.get("triggers_json"):
+            triggers = json.loads(worker["triggers_json"])
             if isinstance(triggers, list):
                 return any(
                     isinstance(t, dict) and t.get("type") == "webhook"
@@ -5919,6 +5886,7 @@ async def webhook_trigger(
     On success returns run_id immediately (non-blocking).
     """
     from webhook_service import get_webhook_secret_hash, verify_signature, verify_webhook_token
+    repos = get_repositories()
 
     # Rate limit: 60 req/60s per (worker_id, client_ip) — in-memory sliding window
     client_ip = (request.client.host if request.client else "unknown")
@@ -5926,12 +5894,13 @@ async def webhook_trigger(
     if not _check_webhook_rate_limit(rl_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")
 
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    worker = repos.workers.get_any(worker_id=worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
+    user_id = worker.get("owner_id")
     config = get_worker_config_for_run(worker_id)
-    if not _worker_has_webhook_trigger(worker_id, config):
+    if not _worker_has_webhook_trigger(worker, config):
         raise HTTPException(
             status_code=400,
             detail=f"Worker {worker_id!r} does not have a webhook trigger",
@@ -5948,7 +5917,7 @@ async def webhook_trigger(
         # Signature verification (only when webhook.secret=true on first trigger)
         webhook_cfg = config.trigger.webhook if config else None
         if webhook_cfg and webhook_cfg.secret:
-            secret_hash = get_webhook_secret_hash(worker_id)
+            secret_hash = get_webhook_secret_hash(worker_id, repos=repos)
             if not secret_hash:
                 raise HTTPException(
                     status_code=500,
@@ -5974,44 +5943,49 @@ async def webhook_trigger(
             inputs = {"raw": body.decode("utf-8", errors="replace")}
 
     # Create and start run (non-blocking)
-    run_id = create_run(worker_id, inputs, trigger_source="webhook")
-    start_run(run_id, worker_id, inputs)
+    run_id = create_run(
+        worker_id,
+        inputs,
+        trigger_source="webhook",
+        user_id=user_id,
+        repos=repos,
+    )
+    start_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
 
     return ActionResponse(status="queued", run_id=run_id)
 
 
 @app.post("/workers/{worker_id}/webhook-secret/rotate", response_model=WebhookSecretResponse)
-def rotate_webhook_secret(worker_id: str) -> WebhookSecretResponse:
+def rotate_webhook_secret(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WebhookSecretResponse:
     """Rotate the webhook HMAC secret for a worker.
 
     Returns the new raw secret exactly once — it is never stored in plaintext.
     """
     from webhook_service import generate_webhook_secret
 
-    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     config = get_worker_config_for_run(worker_id)
-    if not _worker_has_webhook_trigger(worker_id, config):
+    if not _worker_has_webhook_trigger(worker, config):
         raise HTTPException(
             status_code=400,
             detail=f"Worker {worker_id!r} does not have a webhook trigger",
         )
 
-    raw_secret = generate_webhook_secret(worker_id)
+    raw_secret = generate_webhook_secret(worker_id, repos=repos)
     return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret)
 
 
 # ---------------------------------------------------------------------------
-# CLI device-code auth (single-instance in-memory v0)
+# CLI device-code auth
 # ---------------------------------------------------------------------------
 
-# Single-instance launch tradeoff:
-# Device auth state is in memory only. Restarting the API process or running
-# multiple API replicas will invalidate in-flight device codes.
-_cli_auth_lock = threading.Lock()
-_cli_auth_devices: Dict[str, Dict[str, Any]] = {}
 _CLI_AUTH_EXPIRES_SECONDS = 600
 _CLI_AUTH_POLL_INTERVAL_SECONDS = 2
 _CLI_AUTH_USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -6025,26 +5999,6 @@ class CliAuthDeviceCreateRequest(BaseModel):
 
 class CliAuthCodeRequest(BaseModel):
     user_code: str
-
-
-def _cli_auth_prune_expired(now_ts: Optional[float] = None) -> None:
-    ts = now_ts or time.time()
-    expired_codes = [
-        code
-        for code, record in _cli_auth_devices.items()
-        if float(record.get("expires_at", 0.0)) <= ts
-    ]
-    for code in expired_codes:
-        _cli_auth_devices.pop(code, None)
-
-
-def _cli_auth_evict_oldest_if_full() -> None:
-    while len(_cli_auth_devices) >= _CLI_AUTH_MAX_DEVICES:
-        oldest_code = min(
-            _cli_auth_devices,
-            key=lambda code: float(_cli_auth_devices[code].get("created_at", 0.0)),
-        )
-        _cli_auth_devices.pop(oldest_code, None)
 
 
 def _new_device_code() -> str:
@@ -6071,31 +6025,40 @@ def create_cli_device(payload: CliAuthDeviceCreateRequest, request: Request) -> 
     if not client_name:
         raise HTTPException(status_code=400, detail="client_name is required")
 
+    repos = get_repositories()
     now_ts = time.time()
     expires_at = now_ts + _CLI_AUTH_EXPIRES_SECONDS
-    with _cli_auth_lock:
-        _cli_auth_prune_expired(now_ts)
-        _cli_auth_evict_oldest_if_full()
+    user_id = _bootstrap_user_id()
+    repos.cli_auth.prune_expired(now_ts=now_ts)
 
+    existing_devices = repos.cli_auth.list(user_id=user_id)
+    while len(existing_devices) >= _CLI_AUTH_MAX_DEVICES:
+        oldest = min(existing_devices, key=lambda row: float(row.get("created_at", 0.0)))
+        repos.cli_auth.delete(device_code=oldest["device_code"])
+        existing_devices = repos.cli_auth.list(user_id=user_id)
+
+    device_code = _new_device_code()
+    existing_device_codes = {row["device_code"] for row in existing_devices}
+    while device_code in existing_device_codes:
         device_code = _new_device_code()
-        while device_code in _cli_auth_devices:
-            device_code = _new_device_code()
 
-        existing_user_codes = {str(record.get("user_code", "")) for record in _cli_auth_devices.values()}
+    existing_user_codes = {str(record.get("user_code", "")) for record in existing_devices}
+    user_code = _new_user_code()
+    while user_code in existing_user_codes:
         user_code = _new_user_code()
-        while user_code in existing_user_codes:
-            user_code = _new_user_code()
 
-        _cli_auth_devices[device_code] = {
-            "user_code": user_code,
-            "status": "pending",
-            "created_at": now_ts,
-            "expires_at": expires_at,
-            "secret": None,
-            "client_name": client_name,
-            "scopes": list(payload.scopes or []),
-            "created_ip": _client_ip(request),
-        }
+    repos.cli_auth.create_device(
+        user_id=user_id,
+        device_code=device_code,
+        user_code=user_code,
+        status="pending",
+        secret=None,
+        client_name=client_name,
+        scopes=list(payload.scopes or []),
+        created_ip=_client_ip(request),
+        created_at=now_ts,
+        expires_at=expires_at,
+    )
 
     verification_url = f"{_frontend_public_base()}/cli-auth?code={user_code}"
     return {
@@ -6109,85 +6072,85 @@ def create_cli_device(payload: CliAuthDeviceCreateRequest, request: Request) -> 
 
 @app.get("/cli-auth/poll/{device_code}")
 def poll_cli_device(device_code: str) -> Dict[str, Any]:
+    repos = get_repositories()
     now_ts = time.time()
-    with _cli_auth_lock:
-        record = _cli_auth_devices.get(device_code)
-        if not record:
+    record = repos.cli_auth.get_by_device_code(device_code)
+    if not record:
+        raise HTTPException(status_code=404, detail="Device code not found")
+
+    if float(record.get("expires_at", 0.0)) <= now_ts:
+        repos.cli_auth.delete(device_code=device_code)
+        raise HTTPException(status_code=410, detail="Device code expired")
+
+    status = str(record.get("status", "pending"))
+    if status == "pending":
+        return {"status": "pending"}
+
+    if status == "denied":
+        repos.cli_auth.delete(device_code=device_code)
+        raise HTTPException(status_code=403, detail="Device code denied")
+
+    if status == "approved":
+        consumed = repos.cli_auth.consume(device_code)
+        if consumed is None:
             raise HTTPException(status_code=404, detail="Device code not found")
+        secret = str(consumed.get("secret") or "")
+        if not secret:
+            raise HTTPException(status_code=500, detail="Approved device missing API secret")
+        return {
+            "status": "approved",
+            "api_secret": secret,
+            "api_base": _api_public_base(),
+        }
 
-        if float(record.get("expires_at", 0.0)) <= now_ts:
-            _cli_auth_devices.pop(device_code, None)
-            raise HTTPException(status_code=410, detail="Device code expired")
-
-        status = str(record.get("status", "pending"))
-        if status == "pending":
-            return {"status": "pending"}
-
-        if status == "denied":
-            _cli_auth_devices.pop(device_code, None)
-            raise HTTPException(status_code=403, detail="Device code denied")
-
-        if status == "approved":
-            secret = str(record.get("secret") or "")
-            if not secret:
-                _cli_auth_devices.pop(device_code, None)
-                raise HTTPException(status_code=500, detail="Approved device missing API secret")
-            _cli_auth_devices.pop(device_code, None)
-            return {
-                "status": "approved",
-                "api_secret": secret,
-                "api_base": _api_public_base(),
-            }
-
-        raise HTTPException(status_code=500, detail=f"Unexpected device status: {status}")
-
-
-def _find_device_code_by_user_code(user_code: str) -> Optional[str]:
-    needle = user_code.strip().upper()
-    for device_code, record in _cli_auth_devices.items():
-        if str(record.get("user_code", "")).upper() == needle:
-            return device_code
-    return None
+    raise HTTPException(status_code=500, detail=f"Unexpected device status: {status}")
 
 
 @app.post("/cli-auth/approve")
-def approve_cli_device(payload: CliAuthCodeRequest) -> Dict[str, Any]:
+def approve_cli_device(
+    payload: CliAuthCodeRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
     floom_secret = os.environ.get("FLOOM_SECRET", "")
     if not floom_secret:
         raise HTTPException(status_code=503, detail="FLOOM_SECRET is not configured")
 
     now_ts = time.time()
-    with _cli_auth_lock:
-        _cli_auth_prune_expired(now_ts)
-        device_code = _find_device_code_by_user_code(payload.user_code)
-        if not device_code:
-            raise HTTPException(status_code=404, detail="User code not found")
-        record = _cli_auth_devices.get(device_code)
-        if not record:
-            raise HTTPException(status_code=404, detail="User code not found")
-        if str(record.get("status")) != "pending":
-            raise HTTPException(status_code=409, detail="Device code is no longer pending")
-        record["status"] = "approved"
-        record["secret"] = floom_secret
-        return {"ok": True, "client_name": record.get("client_name") or "unknown"}
+    repos.cli_auth.prune_expired(now_ts=now_ts)
+    record = repos.cli_auth.verify_device(payload.user_code)
+    if not record or record["user_id"] != auth.user_id:
+        raise HTTPException(status_code=404, detail="User code not found")
+    if str(record.get("status")) != "pending":
+        raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    repos.cli_auth.update(
+        device_code=record["device_code"],
+        status="approved",
+        secret=floom_secret,
+        approved_at=now_ts,
+    )
+    return {"ok": True, "client_name": record.get("client_name") or "unknown"}
 
 
 @app.post("/cli-auth/deny")
-def deny_cli_device(payload: CliAuthCodeRequest) -> Dict[str, Any]:
+def deny_cli_device(
+    payload: CliAuthCodeRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
     now_ts = time.time()
-    with _cli_auth_lock:
-        _cli_auth_prune_expired(now_ts)
-        device_code = _find_device_code_by_user_code(payload.user_code)
-        if not device_code:
-            raise HTTPException(status_code=404, detail="User code not found")
-        record = _cli_auth_devices.get(device_code)
-        if not record:
-            raise HTTPException(status_code=404, detail="User code not found")
-        if str(record.get("status")) != "pending":
-            raise HTTPException(status_code=409, detail="Device code is no longer pending")
-        record["status"] = "denied"
-        record["secret"] = None
-        return {"ok": True, "client_name": record.get("client_name") or "unknown"}
+    repos.cli_auth.prune_expired(now_ts=now_ts)
+    record = repos.cli_auth.verify_device(payload.user_code)
+    if not record or record["user_id"] != auth.user_id:
+        raise HTTPException(status_code=404, detail="User code not found")
+    if str(record.get("status")) != "pending":
+        raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    repos.cli_auth.update(
+        device_code=record["device_code"],
+        status="denied",
+        secret=None,
+    )
+    return {"ok": True, "client_name": record.get("client_name") or "unknown"}
 
 
 if __name__ == "__main__":
