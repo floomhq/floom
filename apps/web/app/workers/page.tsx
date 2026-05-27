@@ -58,7 +58,11 @@ function WorkersContent() {
   const [loading, setLoading] = useState(true);
   const [favorites, setFavorites] = useState<Set<string>>(() => getFavorites());
 
-  const initialTab = searchParams.get("tab");
+  // S28: tabs (All/Starred/Recent) live in URL hash. Folder + tag stay as
+  // query params (those are filters, not tab selection).
+  const initialTab =
+    (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
+    searchParams.get("tab");
   const [tab, setTab] = useState<WorkersTab>(isValidTab(initialTab) ? initialTab : "all");
   const folderFilter = searchParams.get("folder");
   // S26: tag filter (clicking a tag on a card filters the list to workers
@@ -96,12 +100,13 @@ function WorkersContent() {
   function handleTabChange(value: string) {
     if (!isValidTab(value)) return;
     setTab(value);
+    // S28: hash slug instead of query param. Preserve folder/tag query
+    // filters in place.
     const params = new URLSearchParams(searchParams.toString());
-    if (value === "all") params.delete("tab");
-    else params.set("tab", value);
-    router.replace(`/workers${params.size ? `?${params.toString()}` : ""}`, {
-      scroll: false,
-    });
+    params.delete("tab");
+    const qs = params.size ? `?${params.toString()}` : "";
+    const hash = value === "all" ? "" : `#${value}`;
+    router.replace(`/workers${qs}${hash}`, { scroll: false });
   }
 
   function setFolder(path: string | null) {

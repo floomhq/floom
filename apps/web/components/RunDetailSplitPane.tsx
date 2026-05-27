@@ -43,11 +43,18 @@ export function RunDetailSplitPane({
 
   return (
     <div className={cn("min-h-[calc(100vh-7rem)]", inline && "min-h-[560px]")}>
-      {/* S27: header chrome aligned with /workers/<id>. Dropped the
-          ArrowLeft (sidebar nav + browser back already cover that), H1 is
-          worker name (status pill inline), subtitle holds run-id +
-          timestamp + duration. Edit/Re-run/Download keep their slot. */}
+      {/* S27/S28: header aligned with /workers/<id>. S28 adds "← Runs"
+          breadcrumb above the H1 (Federico request). */}
       <div className="sticky top-0 z-10 border-b border-border bg-background/95 py-4 backdrop-blur">
+        {!inline && (
+          <Link
+            href="/runs"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-2 transition-colors"
+          >
+            <span aria-hidden="true">←</span>
+            Runs
+          </Link>
+        )}
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">

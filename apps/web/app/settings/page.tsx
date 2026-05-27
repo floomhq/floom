@@ -44,9 +44,12 @@ export default function SettingsPage() {
 function SettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tabParam = searchParams.get("tab");
-  // S22f: fall back to "api" when a hidden-from-UI tab (e.g. notifications)
-  // is requested via URL.
+  // S28: tabs use URL hash now (#api, #danger, etc.). Fall back to legacy
+  // ?tab= for old links.
+  const tabParam =
+    (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
+    searchParams.get("tab");
+  // S22f: hidden tab (e.g. notifications) requested via URL falls back to api.
   const [tab, setTab] = useState<TabKey>(
     isValidTab(tabParam) && VISIBLE_TAB_KEYS.includes(tabParam) ? tabParam : "api"
   );
@@ -82,9 +85,11 @@ function SettingsContent() {
   function handleTabChange(value: string) {
     if (!isValidTab(value)) return;
     setTab(value);
+    // S28: hash slug instead of query param.
     const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", value);
-    router.replace(`/settings?${params.toString()}`, { scroll: false });
+    params.delete("tab");
+    const qs = params.size ? `?${params.toString()}` : "";
+    router.replace(`/settings${qs}#${value}`, { scroll: false });
   }
 
   async function handleReload() {
