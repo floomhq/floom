@@ -135,7 +135,7 @@ const markdownComponents = {
   ),
   strong: ({ children }: MarkdownChildProps) => <strong className="font-semibold">{children}</strong>,
   a: ({ href, children }: MarkdownAnchorProps) => (
-    <a href={href} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">{children}</a>
+    <a href={href} className="text-foreground underline decoration-muted-foreground/40 underline-offset-4 hover:decoration-foreground" target="_blank" rel="noopener noreferrer">{children}</a>
   ),
 };
 
