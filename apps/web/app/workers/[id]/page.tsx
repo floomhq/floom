@@ -1149,19 +1149,17 @@ function ExampleInputPreview({
     return <p className="text-sm text-muted-foreground">This worker has no manual inputs.</p>;
   }
 
+  // S29u (score walk): was a 2-col table with bg-muted gutter on every row
+  // (nested-table look). Now flat key-value pairs with a quiet hairline
+  // between entries.
   return (
-    <div className="rounded-md border border-border overflow-hidden">
-      {entries.map((entry) => (
-        <div key={entry.name} className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)] border-b border-border last:border-b-0">
-          <div className="bg-muted/30 px-3 py-2">
-            <p className="text-xs font-medium text-muted-foreground">{entry.label}</p>
-            <p className="text-[11px] text-muted-foreground font-mono">{entry.name} · {entry.type}</p>
-          </div>
-          <div className="px-3 py-2">
-            <pre className={`text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-muted-foreground italic" : "text-foreground"}`}>
-              {formatExampleValue(entry.value, entry.type)}
-            </pre>
-          </div>
+    <div className="space-y-3">
+      {entries.map((entry, i) => (
+        <div key={entry.name} className={i > 0 ? "pt-3 border-t border-line" : ""}>
+          <p className="text-xs font-medium text-foreground">{entry.label}</p>
+          <pre className={`mt-1 text-xs font-mono whitespace-pre-wrap break-words ${entry.value === null && entry.type === "file" ? "text-muted-foreground italic" : "text-foreground"}`}>
+            {formatExampleValue(entry.value, entry.type)}
+          </pre>
         </div>
       ))}
     </div>
