@@ -48,7 +48,6 @@ limits:
   max_total_tokens: 50000
   timeout_seconds: 300
 exec:
-  mode: pure-script
   command: python run.py
   runtime: python311
   runner: e2b
@@ -118,6 +117,7 @@ exec:
     path: out/analysis_summary.md
     required: true
     label: Analysis Summary
+  entry: run.py
 capabilities:
   secrets:
   - OPENAI_API_KEY

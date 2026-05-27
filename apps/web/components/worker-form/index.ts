@@ -1,7 +1,7 @@
 export { WorkerMetadataForm } from "./WorkerMetadataForm";
 export type { WorkerMetadataValues } from "./WorkerMetadataForm";
 export { ExecModePicker } from "./ExecModePicker";
-export type { ExecMode } from "./ExecModePicker";
+export type { ExecMode, DetectedEntry } from "./ExecModePicker";
 export {
   TriggersEditor,
   makeTriggerRow,
