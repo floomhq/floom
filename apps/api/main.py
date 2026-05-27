@@ -50,6 +50,7 @@ from models import (
     WorkerUpdateRequest,
     RecentStats,
     TriggerSpec,
+    TimeseriesDay,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -379,6 +380,77 @@ def _get_stats_batch(worker_ids: List[str]) -> Dict[str, RecentStats]:
             success_rate_7d=rate,
         )
     return result
+
+
+def _get_timeseries_batch(worker_ids: List[str], days: int = 14) -> Dict[str, List[TimeseriesDay]]:
+    """Batch-query per-day run counts for sparkline charts (last N days).
+
+    Returns a dict mapping worker_id -> list of N TimeseriesDay objects,
+    oldest first, zero-filled for days with no runs.
+    """
+    if not worker_ids:
+        return {}
+    import datetime as _dt
+    today = _dt.date.today()
+    date_range = [(today - _dt.timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+
+    placeholders = ",".join("?" for _ in worker_ids)
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    worker_id,
+                    DATE(created_at) AS run_date,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+                FROM runs
+                WHERE created_at > datetime('now', '-{days} days')
+                  AND worker_id IN ({placeholders})
+                GROUP BY worker_id, DATE(created_at)
+                """,
+                worker_ids,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+
+    # Index raw DB rows by (worker_id, date)
+    raw: Dict[tuple, Dict[str, Any]] = {}
+    for row in rows:
+        d = row_to_dict(row)
+        raw[(d["worker_id"], d["run_date"])] = d
+
+    result: Dict[str, List[TimeseriesDay]] = {}
+    for wid in worker_ids:
+        days_list: List[TimeseriesDay] = []
+        for date_str in date_range:
+            key = (wid, date_str)
+            if key in raw:
+                r = raw[key]
+                days_list.append(TimeseriesDay(
+                    date=date_str,
+                    total=int(r.get("total") or 0),
+                    completed=int(r.get("completed") or 0),
+                    failed=int(r.get("failed") or 0),
+                ))
+            else:
+                days_list.append(TimeseriesDay(date=date_str, total=0, completed=0, failed=0))
+        result[wid] = days_list
+    return result
+
+
+@app.get("/workers/{worker_id}/runs/timeseries", response_model=List[TimeseriesDay])
+def get_worker_timeseries(
+    worker_id: str,
+    days: int = Query(default=14, ge=1, le=90),
+) -> List[TimeseriesDay]:
+    """Return per-day run counts for the last N days (default 14). Zero-filled."""
+    worker = _get_db_worker(worker_id) or get_worker(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    batch = _get_timeseries_batch([worker_id], days=days)
+    return batch.get(worker_id, [])
 
 
 def _trigger_label(trigger: Dict[str, Any]) -> str:
@@ -1182,6 +1254,7 @@ def list_workers() -> List[WorkerSummary]:
     workers = _list_db_workers() or discover_workers(use_cache=True)
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids)
+    timeseries_by_id = _get_timeseries_batch(worker_ids, days=14)
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"])
@@ -1204,6 +1277,7 @@ def list_workers() -> List[WorkerSummary]:
         triggers = _build_triggers_list(w)
         triggers_spec = _build_triggers_spec(w)
         recent_stats = stats_by_id.get(w["id"])
+        timeseries = timeseries_by_id.get(w["id"])
 
         result.append(
             WorkerSummary(
@@ -1224,6 +1298,7 @@ def list_workers() -> List[WorkerSummary]:
                 triggers=triggers,
                 triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
+                timeseries=timeseries,
             )
         )
     return result
@@ -1622,74 +1697,220 @@ _COMPOSIO_APP_KEYWORDS: Dict[str, List[str]] = {
     "apollo": ["apollo"],
 }
 
-_DRAFT_SYSTEM_PROMPT = """You are a Workeros worker designer. Given a natural-language description of an automation task, you must output a VALID YAML WorkerContract and extracted metadata as JSON.
+_DRAFT_SYSTEM_PROMPT = """You are a Workeros worker designer. Given a natural-language description of an automation task, you output a skill bundle: a set of files that define the worker.
 
-The WorkerContract YAML must follow schema_version "0.3" exactly. Key rules:
+The bundle is returned via the `files` array. Every file has `path` (relative, e.g. "worker.yml") and `content` (UTF-8 string). The bundle MUST contain `worker.yml` at the root.
+
+=== WORKER ARCHETYPES ===
+
+Pick ONE archetype based on the task:
+
+A — AGENT-ONLY (pure reasoning over inputs, no external API calls in code):
+Use when: the task is pure reasoning, analysis, summarisation, or writing.
+Files: worker.yml + SKILL.md
+worker.yml exec block:
+  exec:
+    runtime: "skill"
+    mode: "agent"
+    runner: "e2b"
+    entrypoint: "SKILL.md"
+
+B — PURE-SCRIPT (deterministic data transform, no LLM call inside):
+Use when: the task is a predictable data transform, file conversion, or calculation.
+Files: worker.yml + run.py + requirements.txt
+worker.yml exec block:
+  exec:
+    runtime: "python311"
+    mode: "pure-script"
+    runner: "e2b"
+    command: "python run.py"
+
+C — HYBRID (fetch data via API + LLM reasoning + write back):
+Use when: the task fetches from external APIs, processes with LLM reasoning, and writes results back.
+Files: worker.yml + run.py + SKILL.md + lib/*.py + requirements.txt
+worker.yml exec block:
+  exec:
+    runtime: "python311"
+    mode: "hybrid"
+    runner: "e2b"
+    command: "python run.py"
+
+=== WORKED EXAMPLES ===
+
+Example A (agent-only):
+files:
+  worker.yml: |
+    schema_version: "0.3"
+    name: "research-brief"
+    title: "Research Brief Generator"
+    description: "Generate a structured research brief from topic and audience."
+    version: "0.1.0"
+    entrypoint: "SKILL.md"
+    targets: [generic]
+    exec:
+      runtime: "skill"
+      mode: "agent"
+      runner: "e2b"
+      inputs:
+      - name: topic
+        kind: scalar
+        type: string
+        required: true
+        label: "Research topic"
+      - name: audience
+        kind: scalar
+        type: string
+        required: false
+        label: "Target audience"
+        default: "general"
+      outputs:
+      - name: brief
+        kind: file
+        media_type: text/markdown
+        path: out/brief.md
+        required: true
+        label: "Research brief"
+    trigger:
+      type: manual
+  SKILL.md: |
+    You are a research analyst. The user provides a topic, audience, and depth.
+    Generate a structured markdown brief. Call write_output(name="brief", content="...").
+
+Example B (pure-script):
+files:
+  worker.yml: |
+    schema_version: "0.3"
+    name: "csv-enricher"
+    title: "CSV Enricher"
+    description: "Enrich a CSV file with computed columns."
+    version: "0.1.0"
+    targets: [generic]
+    exec:
+      runtime: "python311"
+      mode: "pure-script"
+      runner: "e2b"
+      command: "python run.py"
+      inputs:
+      - name: csv_data
+        kind: file
+        media_type: text/csv
+        required: true
+        label: "Input CSV"
+      outputs:
+      - name: result
+        kind: file
+        media_type: text/csv
+        path: out/result.csv
+        required: true
+        label: "Enriched CSV"
+    trigger:
+      type: manual
+  run.py: |
+    import json, csv, io
+    inputs = json.load(open("inputs.json"))
+    # process inputs["csv_data"] ...
+    json.dump({"status": "completed", "outputs": {}, "artifacts": []}, open("result.json", "w"))
+  requirements.txt: |
+    # no deps
+
+Example C (hybrid):
+files:
+  worker.yml: |
+    schema_version: "0.3"
+    name: "granola-hubspot-sync"
+    title: "Granola to HubSpot Meeting Sync"
+    description: "Fetch recent Granola meetings and update HubSpot with action items."
+    version: "0.1.0"
+    targets: [generic]
+    exec:
+      runtime: "python311"
+      mode: "hybrid"
+      runner: "e2b"
+      command: "python run.py"
+      secrets:
+      - GRANOLA_API_KEY
+      connections:
+      - hubspot
+      outputs:
+      - name: summary
+        kind: file
+        media_type: text/markdown
+        path: out/summary.md
+        required: true
+        label: "Sync summary"
+    trigger:
+      type: schedule
+      cron: "0 9 * * *"
+      timezone: "Europe/Berlin"
+  SKILL.md: |
+    You are summarising a Granola meeting transcript into HubSpot-ready action items.
+    Input: meeting transcript. Output JSON: {"summary": str, "action_items": [str]}.
+  run.py: |
+    import json
+    from agent import run as run_agent
+    from lib.granola_client import fetch_recent_meetings
+    from lib.hubspot_client import create_note
+    secrets = json.load(open("secrets.json"))
+    for meeting in fetch_recent_meetings(secrets["GRANOLA_API_KEY"]):
+        result = run_agent("SKILL.md", input=meeting["transcript"])
+        create_note(secrets.get("HUBSPOT_ACCESS_TOKEN", ""), meeting["id"], result["summary"])
+    json.dump({"status": "completed", "outputs": {}, "artifacts": []}, open("result.json", "w"))
+  lib/granola_client.py: |
+    import requests
+    def fetch_recent_meetings(api_key):
+        resp = requests.get("https://api.granola.so/v1/meetings", headers={"Authorization": f"Bearer {api_key}"})
+        return resp.json().get("meetings", [])
+  lib/hubspot_client.py: |
+    import requests
+    def create_note(token, contact_id, body):
+        requests.post("https://api.hubapi.com/crm/v3/objects/notes", json={"properties": {"hs_note_body": body}}, headers={"Authorization": f"Bearer {token}"})
+  requirements.txt: |
+    requests>=2.31
+
+=== YAML RULES ===
+
+The WorkerContract YAML must follow schema_version "0.3":
 - `name`: lowercase slug 3-64 chars (letters, digits, hyphens)
 - `title`: human-readable title
 - `description`: 1-2 sentence description (max 500 chars)
-- `exec.runtime`: must be "skill" for agent mode, or "python311"/"bash"/"node22"/"none"
-- `exec.mode`: "agent" (default for skill runtime) or "pure-script"
-- `exec.runner`: "e2b" (default, sandboxed) or "local"
-- `exec.inputs`: list of fields with name/kind/type/required/label. kind is "scalar" or "file". scalar fields need type (string/number/boolean/select). File fields need media_type.
-- `exec.outputs`: list of fields with name/kind and for files: media_type+path, for scalars: type
-- `exec.secrets`: list of env var names (UPPER_SNAKE_CASE)
-- `trigger.type`: "manual" (default), "schedule", "webhook", or "composio"
-- `trigger.cron`: REQUIRED when trigger.type is "schedule". ALWAYS include a cron expression. If the user did not specify a time, use `"0 9 * * *"` (daily at 9am). If no schedule context at all, prefer trigger.type "manual" over an empty schedule. Example: `trigger:\n  type: schedule\n  cron: "0 9 * * *"\n  timezone: "UTC"`
+- ALWAYS double-quote every string scalar value (colons inside strings cause parse errors)
+- `trigger.cron`: REQUIRED when trigger.type is "schedule". Default: "0 9 * * *" if not specified.
 - `version`: semver like "0.1.0"
-- `entrypoint`: "SKILL.md" for agent mode
 - `targets`: ["generic"]
-- `connections`: list of Composio app slugs if integrations are needed
-- `use_cases`: list of 3-5 items
 
-CRITICAL YAML SAFETY RULES (must follow):
-- ALWAYS double-quote every string scalar value. A bare value like `description: Summarize meetings: action items` is a parse error because of the embedded `:`. Write `description: "Summarize meetings: action items"` instead.
-- Quote strings that contain any of: `:` `#` `{` `}` `[` `]` `,` `&` `*` `!` `|` `>` `'` `"` `%` `@` `` ` ``, leading/trailing whitespace, or that look like booleans/numbers/null.
-- Use `"..."` (double-quoted style) for ALL human-readable strings in `title`, `description`, `label`, prompt examples, and use-cases.
-- For multi-line content (e.g. long descriptions), use YAML block scalar syntax `|-` on the next line and indent two spaces.
+=== INTEGRATION RULES ===
 
-For an agent-mode skill worker, use:
-```yaml
-exec:
-  runtime: skill
-  mode: agent
-  runner: e2b
-  entrypoint: SKILL.md
-```
+- Only include integrations for apps EXPLICITLY NAMED in the user's prompt.
+- Choose ONE auth method per app: "oauth" (for Gmail/HubSpot/Slack/etc.) or "api_key" (for Granola/Apollo/Stripe/etc.)
+- Never list the same app twice.
 
-The SKILL.md content (returned as `skill_md` key) should be detailed system-prompt-style instructions for the agent. Include what tools/APIs to call, what the output format should be, error handling, and any important context.
+=== RESPONSE FORMAT ===
 
-IMPORTANT RULES FOR INTEGRATION REQUIREMENTS:
-- Only include integrations (connections/secrets) for apps that are EXPLICITLY NAMED in the user's prompt. Do not infer apps from generic words.
-  - "Granola meetings" -> only granola (NOT google-calendar)
-  - "post to Slack" -> only slack
-  - "update HubSpot" -> only hubspot
-  - "Google Calendar event" -> google-calendar (because "Google Calendar" is explicit)
-- For each required integration, choose ONE authentication method: either "oauth" (preferred, when the app supports it) OR "api_key" (when OAuth is not available or the app uses API keys). Never list the same app twice with different methods.
-- Apps that commonly use OAuth: gmail, hubspot, slack, notion, github, linear, google-calendar, google-sheets, google-drive, salesforce, linkedin, discord, twitter, dropbox, airtable, jira
-- Apps that commonly use API keys: granola, apollo, stripe, figma, and most niche/specialty APIs
-- For required_secrets: only include for api_key method integrations (e.g. GRANOLA_API_KEY, APOLLO_API_KEY)
-- For required_connections: only include app slugs for oauth method integrations
+Respond with ONLY valid JSON (no markdown fences). The `files` array is mandatory. `worker_yml` must match the content of the worker.yml file.
 
-CRITICAL: Only include apps in `requirements` that are LITERALLY MENTIONED BY NAME in the user's prompt. Do not copy any apps from the example shape below. The example shape uses placeholder names like `<app-slug>` purely to show the JSON structure, NOT the actual apps to include.
-
-Respond with ONLY valid JSON in this exact shape (no markdown fences, no extra text). Replace every `<placeholder>` with values derived from the user's actual prompt:
 {
-  "worker_yml": "<full YAML string>",
-  "skill_md": "<markdown instructions for the agent>",
+  "files": [
+    {"path": "worker.yml", "content": "<full YAML string>"},
+    {"path": "SKILL.md", "content": "<agent instructions>"},
+    {"path": "run.py", "content": "<python code>"},
+    {"path": "requirements.txt", "content": "<pip deps>"}
+  ],
+  "worker_yml": "<same as files[0].content>",
+  "skill_md": "<same as SKILL.md content or null>",
   "suggested_name": "<slug>",
   "suggested_title": "<human title>",
   "requirements": [
-    {"app": "<app-slug-from-user-prompt>", "method": "oauth_or_api_key", "reason": "<one-line why>"}
+    {"app": "<app-slug>", "method": "oauth_or_api_key", "reason": "<one-line why>"}
   ],
   "available_methods_hint": {"<app-slug>": ["oauth", "api_key"]},
-  "required_connections": ["<oauth-app-slugs-from-user-prompt-only>"],
-  "required_secrets": ["<UPPER_SNAKE_CASE_API_KEY_only_for_api_key_apps>"],
+  "required_connections": ["<oauth-app-slugs>"],
+  "required_secrets": ["<UPPER_SNAKE_CASE_API_KEY>"],
   "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
   "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}]
 }
 
-The `requirements` array is the authoritative source for integrations. `required_connections` must contain only the `app` slugs from requirements where `method` is "oauth". `required_secrets` must contain only the secret names (UPPER_SNAKE_CASE of app_API_KEY) for requirements where `method` is "api_key". If the user's prompt mentions zero integrations, return an empty `requirements` array."""
+Only include files that are needed. Omit run.py for agent-only (A), omit SKILL.md for pure-script (B).
+The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only."""
 
 
 class DraftFromPromptRequest(BaseModel):
@@ -1779,6 +2000,12 @@ def _available_methods_for_app(app_slug: str) -> List[str]:
     return ["oauth", "api_key"]
 
 
+class DraftFile(BaseModel):
+    """A single file in a skill bundle returned by draft-from-prompt."""
+    path: str      # e.g. "worker.yml", "run.py", "SKILL.md", "lib/granola_client.py"
+    content: str   # UTF-8 text content
+
+
 class DraftFromPromptResponse(BaseModel):
     worker_yml: str
     skill_md: Optional[str] = None
@@ -1786,6 +2013,9 @@ class DraftFromPromptResponse(BaseModel):
     suggested_title: str
     # New: one entry per app, method is "oauth" or "api_key"
     requirements: List[RequirementItem] = []
+    # Skill-bundle: all files returned by the LLM (worker.yml, run.py, SKILL.md, lib/*.py, etc.)
+    # When present, the frontend should use these files directly instead of constructing them.
+    files: List[DraftFile] = []
     # Legacy fields kept for backward compatibility
     required_connections: List[str]
     required_secrets: List[str]
@@ -2018,12 +2248,40 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
 
     skill_md = parsed.get("skill_md") or None
 
+    # Build the files list from the LLM's files array (new bundle format)
+    raw_files = parsed.get("files") or []
+    draft_files: List[DraftFile] = []
+    if isinstance(raw_files, list):
+        for f in raw_files:
+            if not isinstance(f, dict):
+                continue
+            path = (f.get("path") or "").strip()
+            content = f.get("content") or ""
+            if not path:
+                continue
+            # Guard against path traversal in LLM-generated paths
+            parts = path.replace("\\", "/").split("/")
+            if any(p in ("", "..") for p in parts):
+                continue
+            draft_files.append(DraftFile(path=path, content=content))
+
+    # If the LLM returned files but worker.yml isn't in the list, synthesise it from worker_yml
+    paths_in_files = {f.path for f in draft_files}
+    if draft_files and "worker.yml" not in paths_in_files:
+        draft_files.insert(0, DraftFile(path="worker.yml", content=worker_yml))
+    elif not draft_files:
+        # Legacy LLM: no files array — synthesise from worker_yml + skill_md
+        draft_files.append(DraftFile(path="worker.yml", content=worker_yml))
+        if skill_md:
+            draft_files.append(DraftFile(path="SKILL.md", content=skill_md))
+
     return DraftFromPromptResponse(
         worker_yml=worker_yml,
         skill_md=skill_md,
         suggested_name=suggested_name,
         suggested_title=suggested_title,
         requirements=requirements,
+        files=draft_files,
         required_connections=required_connections,
         required_secrets=required_secrets,
         inputs=inputs,
