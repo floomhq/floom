@@ -299,7 +299,7 @@ function WorkersContent() {
                   key={path}
                   type="button"
                   onClick={() => setFolder(path)}
-                  className="flex items-center gap-3 rounded-md border bg-card px-4 py-3 hover:bg-accent transition-colors text-left"
+                  className="flex items-center gap-3 rounded-md border bg-card px-4 py-3 hover:bg-muted transition-colors text-left"
                 >
                   <Folder className="size-5 text-muted-foreground" />
                   <div className="min-w-0">
@@ -469,7 +469,7 @@ function EmptyWorkersState() {
               <Link
                 key={t.id}
                 href={`/workers/new?template=${t.id}`}
-                className="group block rounded-lg border bg-card hover:bg-accent transition-colors p-4"
+                className="group block rounded-lg border bg-card hover:bg-muted transition-colors p-4"
               >
                 <div className="text-2xl mb-2" aria-hidden>
                   {t.icon}
@@ -492,7 +492,7 @@ function EmptyWorkersState() {
               <li key={i}>
                 <Link
                   href={`/workers/new?prompt=${encodeURIComponent(ex)}`}
-                  className="block rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
+                  className="block rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                 >
                   &quot;{ex}&quot;
                 </Link>
@@ -537,7 +537,7 @@ function WorkerCard({
       className="group h-full hover:border-border hover:shadow-sm transition-all overflow-hidden"
       title={hoverDescription || undefined}
     >
-      <Link href={`/workers/${worker.id}`} className="block h-full">
+      <Link href={`/workers/${worker.id}`} className="block h-full" target="_blank" rel="noopener noreferrer">
       <CardContent className={`h-full flex flex-col p-5 ${compact ? "gap-2" : "gap-2.5"}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
