@@ -97,7 +97,7 @@ function SyntaxHighlightedCode({ content, language }: { content: string; languag
   }, [content, language]);
 
   return (
-    <pre className="text-xs font-mono overflow-auto max-h-[600px] bg-[#1e1e2e] rounded-b-md whitespace-pre m-0">
+    <pre className="text-xs font-mono overflow-auto max-h-[600px] bg-[var(--bg-2)] dark:bg-[#1e1e2e] rounded-b-md whitespace-pre m-0">
       <code
         ref={codeRef}
         className={language ? `language-${language}` : ""}
@@ -172,7 +172,7 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
                 onClick={() => onSelect?.(f.path)}
                 className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${
                   f.path === selectedPath
-                    ? "bg-muted text-black font-semibold"
+                    ? "bg-muted text-foreground font-semibold"
                     : "text-muted-foreground hover:bg-muted/50"
                 }`}
                 title={f.path}
