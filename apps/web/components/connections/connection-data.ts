@@ -96,19 +96,9 @@ export function formatTimestamp(value?: string) {
   }).format(date);
 }
 
-export function formatRelativeTime(value?: string | null): string {
-  if (!value) return "never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const diffMs = Date.now() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 2) return "just now";
-  if (diffMin < 60) return `${diffMin} min ago`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}h ago`;
-  const diffD = Math.floor(diffH / 24);
-  return `${diffD}d ago`;
-}
+// PR S12-UI-dry: canonical impl now lives in lib/formatters; re-export here
+// for existing import paths so connection cards/workers don't change.
+export { formatRelativeTime } from "@/lib/formatters";
 
 export function getConnectionAccountLabel(conn: ConnectionRecord) {
   // N10 fix: fall back to connection ID suffix when all human-readable labels

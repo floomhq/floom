@@ -5,9 +5,10 @@ import Link from "next/link";
 import Papa from "papaparse";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RunStatusBadge } from "@/components/RunStatus";
+import { formatRelative } from "@/lib/formatters";
 import {
   Select,
   SelectContent,
@@ -222,11 +223,11 @@ export default function RunsPage() {
                     <p className="text-xs text-[#bbb] mt-0.5">
                       <span className="font-mono text-[10px]">{r.id}</span>
                       <span className="text-[#ccc] mx-1">·</span>
-                      <span className="text-[#999]">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</span>
+                      <span className="text-[#999]">{r.trigger_source} · {formatRelative(r.created_at)}</span>
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={r.status} />
+                    <RunStatusBadge status={r.status} />
                     <ChevronRight className="w-3.5 h-3.5 text-[#bbb]" />
                   </div>
                 </Link>
@@ -252,19 +253,5 @@ export default function RunsPage() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    running: "text-blue-600 border-blue-200 bg-blue-50",
-    completed: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    failed: "text-red-600 border-red-200 bg-red-50",
-    pending_approval: "text-amber-600 border-amber-200 bg-amber-50",
-    approved: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    rejected: "text-red-600 border-red-200 bg-red-50",
-    queued: "text-gray-600 border-gray-200 bg-gray-50",
-  };
-  return (
-    <Badge variant="outline" className={map[status] || map.queued}>
-      {status.replace("_", " ")}
-    </Badge>
-  );
-}
+// PR S12-UI-dry: local StatusBadge removed, callers use <RunStatusBadge>
+// from @/components/RunStatus instead.
