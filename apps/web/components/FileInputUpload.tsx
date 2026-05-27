@@ -89,7 +89,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
       <button
         type="button"
         className={`relative w-full rounded-md border-2 border-dashed p-4 text-left transition-colors ${
-          dragging ? "border-black bg-muted" : "border-border hover:border-[#aaa]"
+          dragging ? "border-[var(--accent)] bg-muted" : "border-line hover:border-muted-foreground/40"
         }`}
         onClick={() => inputRef.current?.click()}
         onDragOver={(event) => {
@@ -131,13 +131,13 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
           </div>
         </div>
         {uploading && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#ececef]">
-            <div className="h-full rounded-full bg-black transition-all" style={{ width: `${progress}%` }} />
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--bg-2)]">
+            <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: `${progress}%` }} />
           </div>
         )}
       </button>
       {value && (
-        <p className="truncate text-xs text-[#777]">
+        <p className="truncate text-xs text-muted-foreground">
           Bound hash <span className="font-mono">{value}</span>
         </p>
       )}
