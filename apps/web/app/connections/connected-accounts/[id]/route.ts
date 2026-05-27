@@ -58,8 +58,7 @@ export async function GET(
       id: body["id"] ?? composioConnId,
       email: body["email"] ?? undefined,
       scopes: Array.isArray(body["scopes"]) ? body["scopes"] : [],
-      user_id: body["user_id"] ?? undefined,
-      auth_config_id: body["auth_config_id"] ?? undefined,
+      connected_at: body["connected_at"] ?? undefined,
     });
   } catch {
     return NextResponse.json({ id: composioConnId, scopes: [] }, { status: 200 });
