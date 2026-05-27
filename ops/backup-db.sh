@@ -9,13 +9,13 @@
 # Idempotent. Designed to run from systemd-timer with no arguments.
 #
 # Override via env:
-#   FLOOM_DB           SQLite path  (default: /root/workeros/apps/api/floom.db)
+#   FLOOM_DB           SQLite path  (default: /root/workeros/data/floom.db)
 #   FLOOM_BACKUP_DIR   destination  (default: /var/backups/workeros)
 #   FLOOM_BACKUP_DAYS  retention    (default: 30)
 
 set -euo pipefail
 
-DB_PATH="${FLOOM_DB:-/root/workeros/apps/api/floom.db}"
+DB_PATH="${FLOOM_DB:-/root/workeros/data/floom.db}"
 BACKUP_DIR="${FLOOM_BACKUP_DIR:-/var/backups/workeros}"
 RETENTION_DAYS="${FLOOM_BACKUP_DAYS:-30}"
 

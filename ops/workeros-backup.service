@@ -4,10 +4,12 @@ After=workeros-api.service
 
 [Service]
 Type=oneshot
+WorkingDirectory=/root/workeros/apps/api
+EnvironmentFile=/root/.config/workeros/api.env
 ExecStart=/root/workeros/ops/backup-db.sh
 Nice=10
 ProtectSystem=full
-ProtectHome=true
+ProtectHome=false
 PrivateTmp=true
 StandardOutput=journal
 StandardError=journal
