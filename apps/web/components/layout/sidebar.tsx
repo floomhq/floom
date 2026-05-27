@@ -147,10 +147,7 @@ export function Sidebar() {
         </div>
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
-        <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
-          <span>Workeros</span>
-          <ThemeModeButton />
-        </div>
+        <UserProfileFooter />
       </aside>
 
       {open && (
@@ -180,13 +177,31 @@ export function Sidebar() {
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
-            <div className="flex items-center justify-between gap-3 border-t border-line px-5 py-4 text-xs text-[var(--ink-mute)]">
-              <span>Workeros</span>
-              <ThemeModeButton />
-            </div>
+            <UserProfileFooter />
           </aside>
         </div>
       )}
     </>
+  );
+}
+
+// S29b: replaces the "Workeros" bottom-left footer with a user profile chip.
+// Today's single-user v0 shows "Local user"; the cloud build (see
+// hosted builds) will swap this for the
+// signed-in Supabase user's email + avatar. Theme toggle stays on the right.
+function UserProfileFooter() {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-3">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <div className="size-7 shrink-0 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] grid place-items-center text-[11px] font-semibold">
+          LU
+        </div>
+        <div className="min-w-0 leading-tight">
+          <p className="text-xs font-medium text-foreground truncate">Local user</p>
+          <p className="text-[10px] text-muted-foreground truncate">Workeros v0</p>
+        </div>
+      </div>
+      <ThemeModeButton />
+    </div>
   );
 }
