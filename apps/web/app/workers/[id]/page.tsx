@@ -253,24 +253,52 @@ export default function WorkerDetailPage() {
   // ---------------------------------------------------------------------------
 
   if (loading) {
+    // S29f (F8.6): skeleton now matches the live top-tabs layout
+    // (header → tabs row → Run-form card). Was a stale left-rail layout
+    // that hadn't been updated since the S22 redesign.
     return (
-      <div className="flex gap-0">
-        {/* Rail skeleton */}
-        <div className="w-[180px] shrink-0 border-r border-border min-h-screen">
-          <div className="p-3 space-y-1">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Skeleton key={i} className="h-8 w-full rounded" />
-            ))}
-          </div>
-        </div>
-        {/* Content skeleton */}
-        <div className="flex-1 p-6 space-y-4">
-          <Skeleton className="h-8 w-52" />
-          <Skeleton className="h-4 w-72" />
-          <div className="max-w-xl space-y-3 mt-4">
-            <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-              {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-9 w-full" />)}
+      <div className="space-y-6">
+        {/* Header: name + status pill + description + tags + Edit button */}
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-6 w-48 rounded" />
+              <Skeleton className="h-5 w-16 rounded-full" />
             </div>
+            <Skeleton className="h-4 w-72 rounded" />
+            <div className="flex items-center gap-1.5 pt-1">
+              <Skeleton className="h-5 w-16 rounded" />
+              <Skeleton className="h-5 w-14 rounded" />
+              <Skeleton className="h-5 w-12 rounded" />
+            </div>
+          </div>
+          <Skeleton className="h-8 w-16 shrink-0 rounded" />
+        </div>
+        {/* Tabs row */}
+        <div className="flex gap-2 border-b border-line pb-px">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Skeleton key={i} className="h-8 w-20 rounded" />
+          ))}
+        </div>
+        {/* Run-form card (the default section is "run") */}
+        <div className="max-w-xl space-y-4">
+          <div className="rounded-md border border-line bg-card p-5 space-y-4">
+            <Skeleton className="h-4 w-20 rounded" />
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-24 rounded" />
+                <Skeleton className="h-9 w-full rounded" />
+              </div>
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-28 rounded" />
+                <Skeleton className="h-9 w-full rounded" />
+              </div>
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-20 rounded" />
+                <Skeleton className="h-24 w-full rounded" />
+              </div>
+            </div>
+            <Skeleton className="h-9 w-full rounded" />
           </div>
         </div>
       </div>
