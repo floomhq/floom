@@ -570,12 +570,16 @@ function RunSection({
                   value={(inputs[inp.name] as string) || (inp.default as string) || ""}
                   onValueChange={(val) => onInputChange(inp.name, val)}
                 >
-                  <SelectTrigger className="border-border">
-                    <SelectValue />
+                  <SelectTrigger className="border-border w-full">
+                    <SelectValue placeholder={inp.placeholder || "Select an option"} />
                   </SelectTrigger>
                   <SelectContent>
                     {(inp.options || []).map((opt) => (
-                      <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      // S29a: humanize raw enum values for display (e.g.
+                      // "branded_markdown" -> "Branded markdown"). Federico
+                      // saw the raw enum keys in the dropdown and they read
+                      // as developer leftovers. Value sent to API stays raw.
+                      <SelectItem key={opt} value={opt}>{humanizeOptionLabel(opt)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1068,6 +1072,17 @@ function formatExampleValue(value: unknown, type?: string): string {
   }
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
+}
+
+// S29a: humanize raw enum option keys for display in select dropdowns.
+// "branded_markdown" -> "Branded markdown"
+// "two_pager"        -> "Two pager"
+// "PLAIN_TEXT"       -> "Plain text"
+function humanizeOptionLabel(raw: string): string {
+  if (!raw) return raw;
+  const lower = raw.replace(/[_-]+/g, " ").toLowerCase().trim();
+  if (!lower) return raw;
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function MarkdownPreview({ value }: { value: string }) {
