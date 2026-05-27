@@ -21,8 +21,12 @@ import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
+// S22f: Notifications tab is currently hidden. The TabKey type still includes
+// it so the URL ?tab=notifications doesn't blow up; we just silently fall back
+// to "api" when a hidden tab is requested.
 type TabKey = "api" | "system" | "notifications" | "appearance" | "danger";
 
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
 const TAB_KEYS: TabKey[] = ["api", "system", "notifications", "appearance", "danger"];
 
 function isValidTab(value: string | null): value is TabKey {
@@ -41,7 +45,11 @@ function SettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const [tab, setTab] = useState<TabKey>(isValidTab(tabParam) ? tabParam : "api");
+  // S22f: fall back to "api" when a hidden-from-UI tab (e.g. notifications)
+  // is requested via URL.
+  const [tab, setTab] = useState<TabKey>(
+    isValidTab(tabParam) && VISIBLE_TAB_KEYS.includes(tabParam) ? tabParam : "api"
+  );
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
@@ -68,7 +76,7 @@ function SettingsContent() {
   }, [loadData]);
 
   useEffect(() => {
-    if (isValidTab(tabParam) && tabParam !== tab) setTab(tabParam);
+    if (isValidTab(tabParam) && VISIBLE_TAB_KEYS.includes(tabParam) && tabParam !== tab) setTab(tabParam);
   }, [tabParam, tab]);
 
   function handleTabChange(value: string) {
@@ -125,11 +133,13 @@ function SettingsContent() {
         </p>
       </div>
 
+      {/* S22f: hide Notifications tab. Roast P1: it shipped two "Soon"
+          placeholder toggles, which read as "this team ships features that
+          don't exist yet". When the feature ships, restore the tab. */}
       <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="api">API access</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
-          <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
