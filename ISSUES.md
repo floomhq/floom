@@ -950,3 +950,98 @@ Tackle order (small-to-impact, with bundling where it makes sense):
 - **Status:** OPEN
 - **What:** Federico: "the runs page just didn't change at all". The /runs list page still has the original layout, doesn't show the clickable rows + filter chips + sparkline header.
 - **Fix:** Audit /runs page; align with the locked ASCII spec from `docs/design/ascii-mockups-2026-05-27.md`.
+
+---
+
+# Multi-agent UI roast findings (2026-05-27, fresh-context claude-virgin agents)
+
+## Design + visual roast (grade C+)
+
+### I-31 — `/connections/connect/<app>` Connect button INVISIBLE in light mode (P0)
+- **What:** Primary Connect button renders as black bar with no visible label because the label colour token equals the button background. Provider logo also renders as a blank square.
+- **Fix:** In `apps/web/app/connections/connect/[app]/page.tsx` the Button uses default variant. Inspect; the `--solid-fg` token might be miswired. Also BrandLogo for googlecalendar might be missing.
+
+### I-32 — Worker detail "Worker not found" race condition (P0)
+- **What:** First navigation to /workers/<id> from list flashes "Worker not found" + red "Failed to load worker: Failed to fetch" toast for ~500ms before API returns. First-time users see "deleted" and leave.
+- **Fix:** Show a skeleton state while loading; never render the "not found" error UI unless the fetch ACTUALLY returns 404. Currently the "not found" renders during the loading state.
+
+### I-33 — Mobile sub-nav crushes page on `/workers/<id>` (P0)
+- **What:** At 375px, the secondary sub-nav (Run/Code/Triggers/Connections/Runs/Overview) takes a fixed 140px vertical column, crushing H1 to two lines and squeezing the run-form to 230px.
+- **Note:** S19 batch 3 (PR #71) switched this to horizontal shadcn Tabs at the top — may already be addressed. Re-verify on mobile.
+
+### I-34 — Connections list shows duplicate provider rows
+- **What:** Two visually identical Google Calendar rows differentiated only by a 6-char hex suffix.
+- **Fix:** Show the connected email/account_label as the primary distinguisher, hex suffix only as secondary.
+
+### I-35 — Settings → Notifications placeholders in production
+- **What:** Two toggles labelled "Soon" shipped to production users.
+- **Fix:** Either remove the Notifications tab until email infra exists, or hide the toggles entirely behind a "Coming soon" message.
+
+### I-36 — Token mask uses 60+ asterisks
+- **What:** API token mask `••••••••••...` is much longer than the actual token, looks broken.
+- **Fix:** Use the standard `XXXX...XXXX` pattern (first 4 + last 4 + 8 dots in middle). Already in `maskSecret()` — but the call site might pass the full secret unmasked then mask it weirdly.
+
+### I-37 — Status / pill / card / button conventions inconsistent
+- **What:** Same primitive rendered three different ways across `/workers`, `/runs`, `/connections`, `/settings`.
+- **Fix:** Audit and unify. Use ONE shared `<StatusBadge>`, `<RunStatusGlyph>` (already exists in `components/RunStatus.tsx`); sweep callers to use them.
+
+### I-38 — No skeleton/loading states anywhere
+- **What:** Pages flip directly from empty to populated, creating the race condition in I-32.
+- **Fix:** Add proper skeleton blocks on every page that fetches on mount. Sweep pages.
+
+### I-39 — Cross-page label drift
+- **What:** "Run worker" vs "Run". "Edit worker" vs "Edit". "Connect" vs "Connect a tool" vs "Connect to X".
+- **Fix:** Pick one canonical phrase per verb. Document in a small style guide. Sweep.
+
+### I-40 — Browse integrations grid: 30 identical Connect buttons
+- **What:** Visual fatigue on `/connections/browse`. On mobile, description truncates to "Composio enables AI…" (also exposes the brand name we should be hiding).
+- **Fix:** Reduce CTA visual weight in grid (use icon-only button or just border the card), expand on hover. Replace truncated copy.
+
+### I-41 — Run-detail H1 uses slug, not display name
+- **What:** /runs/<id> header shows `research_brief` (slug) while every other page uses "Research Brief".
+- **Fix:** Use `run.worker_name` consistently. (S19 batch 3 may have already addressed via `worker.worker_name || worker.worker_id`.)
+
+### I-42 — `/cli-auth` rendered inside full app chrome (security)
+- **What:** OAuth/CLI consent surface shows the sidebar + nav. Should be a stripped-down centered card. Also shows no scopes, no expiry, no client fingerprint.
+- **Fix:** Move /cli-auth out of the main layout (use a route group with its own layout), centre the consent card, show scopes/expiry/fingerprint.
+
+## Functional + interaction roast (grade C+)
+
+### I-43 — Settings Theme has TWO competing controls (P0)
+- **What:** Sidebar footer Light/Dark button AND Settings → Appearance toggle. Both labelled with the current theme, NEITHER updates when the other is clicked. Federico's "align the appearance with sidebar" complaint exactly.
+- **Fix:** Both must read + write the SAME state source (localStorage key `floom-theme` already used by ThemeModeButton). The Appearance tab embeds the same component now (after S19 batch 1) — verify they share state. The "doesn't update" bug means re-mount doesn't read localStorage, OR the click handler doesn't propagate.
+
+### I-44 — `/settings → Danger zone → Clear runs` is single-click nuke (P0)
+- **What:** Type-to-confirm exists for delete-worker but NOT for clear-all-runs. Click → all runs gone. Cannot undo.
+- **Fix:** Add type-to-confirm "DELETE ALL RUNS" in the same pattern as the worker delete.
+
+### I-45 — Every primary CTA renders as BOTH `<a>` and `<button>` (P1)
+- **What:** `<Link><Button>...</Button></Link>` pattern creates doubled DOM and doubled screen-reader noise.
+- **Fix:** Either:
+  - Switch Button to use Radix Slot pattern + `asChild` prop (requires bumping the @base-ui/react/button to a version that supports it), OR
+  - Render `<a className={buttonVariants({...})}>` via shadcn's `buttonVariants` helper directly.
+- Sweep call sites.
+
+### I-46 — Filter / search / pagination state not URL-synced
+- **What:** /runs filter, /workers search/folder (partially synced post-S12), /connections/browse state — all component-local. Reload kills the view.
+- **Fix:** URL-sync everything user-controlled.
+
+### I-47 — Failed runs lose the Transcript tab
+- **What:** The exact tab you need to debug a failure is hidden when there is a failure.
+- **Note:** S19 batch 3 retired the Tabs in favour of collapsibles — transcript is a collapsible now. Verify it shows for failed runs.
+
+### I-48 — Worker > Connections > Configure routes to wrong path
+- **What:** "Configure" goes to `/settings` instead of `/secrets` or `/connections`.
+- **Fix:** Find the link target on the worker detail Connections section and update.
+
+### I-49 — `/connections/browse` Connect opens silent new tab
+- **What:** No pre-confirm; already-connected providers aren't flagged → user has accidentally created two Google Calendar tokens.
+- **Fix:** All Connect clicks route through `/connections/connect/<slug>` (already exists). Mark already-connected providers in the browse grid.
+
+### I-50 — Stat cards on Overview look clickable but aren't
+- **What:** Cards have hover styles + cursor changes but no destination.
+- **Fix:** Either wire each card to drill-in (Runs 24h → /runs?since=24h, Active workers → /workers, Connections → /connections) OR remove the hover/cursor styles.
+
+### I-51 — Tag click on Worker card dumps into search with no indicator
+- **What:** Clicking a tag silently filters via search box but doesn't show "Filtered by tag: X" affordance.
+- **Fix:** Show an active-tag chip above results with an `X` to clear.
