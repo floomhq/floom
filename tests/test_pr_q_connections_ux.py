@@ -10,7 +10,7 @@ import sys
 import types
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -259,30 +259,17 @@ class TestScopesUX:
         body = resp.json()
         assert "https://www.googleapis.com/auth/gmail.readonly" in body["scopes"]
         assert "https://www.googleapis.com/auth/gmail.send" in body["scopes"]
-        assert body["auth_config_id"] == "ac_gmail_123"
+        assert "auth_config_id" not in body
+        assert "user_id" not in body
 
-    def test_auth_config_endpoint_returns_scopes(self, monkeypatch, tmp_path):
-        """GET /connections/auth-configs/{id} returns scopes when Composio has them."""
+    def test_auth_config_endpoint_is_internal_only(self, monkeypatch, tmp_path):
+        """GET /connections/auth-configs/{id} is not publicly exposed."""
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
 
-        import requests as _requests
-        mock_response = MagicMock()
-        mock_response.ok = True
-        mock_response.json.return_value = {
-            "id": "ac_gmail_123",
-            "auth_config": {
-                "id": "ac_gmail_123",
-                "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
-            },
-        }
+        resp = client.get("/connections/auth-configs/ac_gmail_123", headers={})
 
-        with patch("requests.get", return_value=mock_response):
-            resp = client.get("/connections/auth-configs/ac_gmail_123", headers={})
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "https://www.googleapis.com/auth/gmail.readonly" in body["scopes"]
+        assert resp.status_code == 404
 
     def test_scopes_cached_after_account_info_fetch(self, monkeypatch, tmp_path):
         """After fetching account-info with scopes, the list endpoint shows them."""
