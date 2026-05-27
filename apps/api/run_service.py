@@ -6,14 +6,15 @@ import json
 import threading
 import re
 import logging
+import shutil
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime
 
 from dotenv import load_dotenv
 
-from db import get_db, now_iso
-from worker_registry import get_worker_config
+from db import DB_PATH, get_db, now_iso
+from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
     WorkerConfig,
@@ -144,6 +145,42 @@ def _runner_key(config: Optional[WorkerConfig]) -> str:
             return runtime_type
         return config.runtime.runner or "local"
     return "local"
+
+
+def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
+    bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    if bundle_path:
+        raw_path = Path(bundle_path)
+        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
+    else:
+        target = WORKERS_DIR.joinpath(worker_id)
+    resolved = target.resolve()
+    allowed_root = WORKERS_DIR.parent.resolve()
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError as exc:
+        raise ValueError(f"Path traversal attempt: {resolved}") from exc
+    return resolved
+
+
+def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[WorkerConfig]) -> Optional[str]:
+    """Best-effort copy of the worker bundle for run reproducibility."""
+    data_dir = Path(DB_PATH).resolve().parent
+    snapshot_dir = data_dir / "run-bundles" / run_id
+    try:
+        worker_dir = _worker_dir_for_run(worker_id, config)
+        if not worker_dir.is_dir():
+            raise FileNotFoundError(f"worker directory not found: {worker_dir}")
+        snapshot_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            worker_dir,
+            snapshot_dir,
+            ignore=shutil.ignore_patterns("__pycache__", ".git", "node_modules"),
+        )
+        return snapshot_dir.relative_to(data_dir).as_posix()
+    except Exception as exc:
+        logger.warning("Run %s bundle snapshot failed for worker %s: %s", run_id, worker_id, exc)
+        return None
 
 def create_run(
     worker_id: str,
@@ -450,6 +487,13 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
             update_run_status(run_id, RunStatus.FAILED.value, error=conn_err)
             log_fn(conn_err, level="error")
             return
+
+    bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE runs SET bundle_snapshot_path = ? WHERE id = ?",
+            (bundle_snapshot_path, run_id),
+        )
 
     # Dispatch to the appropriate sandbox driver based on worker config
     runner = "local"
