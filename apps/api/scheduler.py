@@ -13,7 +13,7 @@ from typing import Optional
 
 from croniter import croniter
 
-from db import get_db, now_iso
+from db.factory import get_repositories
 from run_service import create_run, start_run
 
 logger = logging.getLogger("floom.scheduler")
@@ -38,63 +38,45 @@ def compute_next_run_at(cron_expr: str, after: datetime) -> Optional[str]:
 
 def _is_worker_running(worker_id: str) -> bool:
     """Return True if there is a run in 'running' state for this worker."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) as cnt FROM runs WHERE worker_id = ? AND status = 'running'",
-            (worker_id,),
-        )
-        row = cursor.fetchone()
-        return (row["cnt"] if row else 0) > 0
+    repos = get_repositories()
+    owner_id = repos.workers.get_owner(worker_id=worker_id)
+    if not owner_id:
+        return False
+    return repos.runs.count_running_for_worker(user_id=owner_id, worker_id=worker_id) > 0
 
 
 def _get_or_init_next_run_at(worker_id: str, cron_expr: str) -> Optional[str]:
     """Get next_run_at from DB, initializing it if NULL."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT next_run_at FROM workers WHERE id = ?",
-            (worker_id,),
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        if row["next_run_at"]:
-            return row["next_run_at"]
+    repos = get_repositories()
+    row = repos.workers.get_schedule_state(worker_id=worker_id)
+    if not row:
+        return None
+    if row["next_run_at"]:
+        return row["next_run_at"]
 
     # Initialize: compute from now
     now = datetime.now(timezone.utc)
     next_at = compute_next_run_at(cron_expr, now)
     if next_at:
-        with get_db() as conn:
-            conn.execute(
-                "UPDATE workers SET next_run_at = ? WHERE id = ?",
-                (next_at, worker_id),
-            )
+        repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=next_at)
     return next_at
 
 
 def _list_scheduled_worker_instances() -> list[dict[str, str]]:
     """Return enabled scheduled worker instances from the database."""
-    with get_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, cron_expr, next_run_at
-            FROM workers
-            WHERE enabled = 1 AND trigger_type = 'schedule'
-            """
-        ).fetchall()
-    return [dict(row) for row in rows]
+    return list(get_repositories().workers.list_scheduled())
 
 
 def _tick() -> None:
     """One scheduler tick — fire any due scheduled workers."""
+    repos = get_repositories()
     now = datetime.now(timezone.utc)
     now_iso_str = now.isoformat()
 
     workers = _list_scheduled_worker_instances()
     for w in workers:
         worker_id = w["id"]
+        user_id = w.get("owner_id")
         cron_expr = w.get("cron_expr")
         if not cron_expr:
             logger.warning(
@@ -126,41 +108,41 @@ def _tick() -> None:
         # Note: the scheduler runs in a single daemon thread, so this is
         # belt-and-suspenders for future multi-scheduler safety.
         new_next = compute_next_run_at(cron_expr, now)
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT COUNT(*) as cnt FROM runs WHERE worker_id = ? AND status = 'running'",
-                (worker_id,),
+        running_count = (
+            repos.runs.count_running_for_worker(user_id=user_id, worker_id=worker_id)
+            if user_id
+            else 0
+        )
+        if running_count:
+            # Still running — advance slot to avoid retrying on every tick
+            if new_next:
+                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+            logger.info(
+                "Skipping scheduled run for %s — previous run still running", worker_id
             )
-            running_row = cursor.fetchone()
-            running_count = running_row["cnt"] if running_row else 0
-            if running_count:
-                # Still running — advance slot to avoid retrying on every tick
-                if new_next:
-                    conn.execute(
-                        "UPDATE workers SET next_run_at = ? WHERE id = ?",
-                        (new_next, worker_id),
-                    )
-                logger.info(
-                    "Skipping scheduled run for %s — previous run still running", worker_id
-                )
-                continue
+            continue
 
         # Fire the run
         logger.info(
             "Firing scheduled run for worker %s (was due %s)", worker_id, next_at_str
         )
         try:
-            run_id = create_run(worker_id, {}, trigger_source="schedule")
-            start_run(run_id, worker_id, {})
+            run_id = create_run(
+                worker_id,
+                {},
+                trigger_source="schedule",
+                user_id=user_id,
+                repos=repos,
+            )
+            start_run(run_id, worker_id, {}, user_id=user_id, repos=repos)
 
             # Update last_scheduled_run_at + next_run_at
             new_next = compute_next_run_at(cron_expr, now)
-            with get_db() as conn:
-                conn.execute(
-                    "UPDATE workers SET last_scheduled_run_at = ?, next_run_at = ? WHERE id = ?",
-                    (now_iso_str, new_next, worker_id),
-                )
+            repos.workers.mark_scheduled_run(
+                worker_id=worker_id,
+                last_scheduled_run_at=now_iso_str,
+                next_run_at=new_next,
+            )
             logger.info(
                 "Scheduled run %s started for worker %s, next at %s",
                 run_id,
