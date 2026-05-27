@@ -12,6 +12,7 @@ import base64
 import shutil
 import fcntl
 import re
+import sys
 import time
 import collections
 import threading
@@ -223,6 +224,7 @@ logger = logging.getLogger("floom.api")
 
 # Process start time for /system/metrics uptime reporting.
 _PROCESS_START_TIME = time.time()
+_PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_PROCESS_START_TIME))
 
 
 # Architecture banner: visible in journalctl on every API boot so auditors
@@ -2010,6 +2012,75 @@ def _available_methods_for_app(app_slug: str) -> List[str]:
     return ["oauth", "api_key"]
 
 
+_draft_rate_lock = threading.Lock()
+_draft_rate_store: Dict[str, collections.deque] = {}
+_DRAFT_RATE_LIMIT_HOUR = int(os.environ.get("WORKEROS_DRAFT_RATE_HOUR", "20"))
+_DRAFT_RATE_WINDOW_SECONDS = 3600.0
+
+
+def _draft_rate_key(request: Request) -> str:
+    """Per-secret bucket key for draft endpoints.
+
+    Hashes x-floom-secret so the raw value is never persisted in-memory logs.
+    In dev mode (no header), all callers share the same "anon" bucket.
+    """
+    secret = request.headers.get("x-floom-secret") or ""
+    if not secret:
+        return "anon"
+    return "s:" + hashlib.sha256(secret.encode()).hexdigest()[:16]
+
+
+def _claim_draft_slot(request: Request) -> Optional[int]:
+    """Reserve one draft slot.
+
+    Returns:
+      - None when allowed
+      - retry_after_seconds when rate-limited
+    """
+    now = time.monotonic()
+    cutoff = now - _DRAFT_RATE_WINDOW_SECONDS
+    key = _draft_rate_key(request)
+    with _draft_rate_lock:
+        dq = _draft_rate_store.setdefault(key, collections.deque())
+        while dq and dq[0] <= cutoff:
+            dq.popleft()
+        if len(dq) >= _DRAFT_RATE_LIMIT_HOUR:
+            oldest = dq[0]
+            retry_after = max(1, int(_DRAFT_RATE_WINDOW_SECONDS - (now - oldest)))
+            return retry_after
+        dq.append(now)
+        return None
+
+
+def _drafts_last_hour_total() -> int:
+    """Total accepted drafts in the last hour across all callers."""
+    now = time.monotonic()
+    cutoff = now - _DRAFT_RATE_WINDOW_SECONDS
+    total = 0
+    with _draft_rate_lock:
+        stale_keys: List[str] = []
+        for key, dq in _draft_rate_store.items():
+            while dq and dq[0] <= cutoff:
+                dq.popleft()
+            if dq:
+                total += len(dq)
+            else:
+                stale_keys.append(key)
+        for key in stale_keys:
+            _draft_rate_store.pop(key, None)
+    return total
+
+
+def _enforce_draft_rate_limit(request: Request) -> None:
+    retry_after = _claim_draft_slot(request)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Draft rate limit reached: {_DRAFT_RATE_LIMIT_HOUR}/hour. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
 class DraftFile(BaseModel):
     """A single file in a skill bundle returned by draft-from-prompt."""
     path: str      # e.g. "worker.yml", "run.py", "SKILL.md", "lib/granola_client.py"
@@ -2082,7 +2153,7 @@ def _call_draft_llm(
 
 
 @app.post("/workers/draft-from-prompt", response_model=DraftFromPromptResponse)
-async def draft_worker_from_prompt(payload: DraftFromPromptRequest) -> DraftFromPromptResponse:
+async def draft_worker_from_prompt(payload: DraftFromPromptRequest, request: Request) -> DraftFromPromptResponse:
     """Draft a WorkerContract YAML from a natural-language prompt using LLM."""
     prompt = (payload.prompt or "").strip()
     if not prompt:
@@ -2093,6 +2164,7 @@ async def draft_worker_from_prompt(payload: DraftFromPromptRequest) -> DraftFrom
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+    _enforce_draft_rate_limit(request)
 
     # Pre-detect connections for the prompt to give the LLM a hint
     prompt_lower = prompt.lower()
@@ -2314,7 +2386,7 @@ class DraftAndCreateResponse(BaseModel):
 
 
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
-async def draft_and_create_worker(payload: DraftAndCreateRequest) -> DraftAndCreateResponse:
+async def draft_and_create_worker(payload: DraftAndCreateRequest, request: Request) -> DraftAndCreateResponse:
     """Draft a worker via LLM (or from pre-supplied files) and immediately register it.
 
     If ``files`` is provided (non-empty), skips the LLM and writes those files directly.
@@ -2399,6 +2471,7 @@ async def draft_and_create_worker(payload: DraftAndCreateRequest) -> DraftAndCre
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
         raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+    _enforce_draft_rate_limit(request)
 
     from openai import OpenAI
 
@@ -4058,6 +4131,18 @@ def connections_callback(connection_id: str = "", status: str = ""):
     return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
 
 
+@app.get(
+    "/webhooks/oauth-callback",
+    summary="OAuth callback alias",
+    description=(
+        "Alias for /connections/callback for cleaner webhook namespace. "
+        "The existing /connections/callback route remains the primary callback URL."
+    ),
+)
+def connections_callback_alias(connection_id: str = "", status: str = ""):
+    return connections_callback(connection_id=connection_id, status=status)
+
+
 @app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
 def get_connection_status(connection_id: str) -> ConnectionItem:
     with get_db() as conn:
@@ -4556,7 +4641,10 @@ def _find_worker_for_composio_event(payload: Any, request: Request) -> Optional[
 
 @app.post("/composio-events", response_model=ActionResponse)
 async def composio_events(request: Request) -> ActionResponse:
-    """Receive signed Composio trigger webhooks and create worker runs."""
+    """Receive signed Composio trigger webhooks and create worker runs.
+
+    Alias route: /webhooks/composio-events
+    """
     signing_key = os.environ.get("COMPOSIO_WEBHOOK_SIGNING_KEY", "")
     if not signing_key:
         raise HTTPException(status_code=503, detail="COMPOSIO_WEBHOOK_SIGNING_KEY is not configured")
@@ -4583,43 +4671,56 @@ async def composio_events(request: Request) -> ActionResponse:
     return ActionResponse(status="queued", run_id=run_id)
 
 
+@app.post(
+    "/webhooks/composio-events",
+    response_model=ActionResponse,
+    summary="Composio events alias",
+    description=(
+        "Alias for /composio-events for cleaner webhook namespace. "
+        "The existing /composio-events path remains the primary webhook URL."
+    ),
+)
+async def composio_events_alias(request: Request) -> ActionResponse:
+    return await composio_events(request)
+
+
 # ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
 
-@app.get("/system/platform-config")
-def platform_config():
-    """Return platform-level configuration vars with set/missing status (values never returned)."""
-    def _to_item(spec: PlatformSecretSpec) -> dict:
-        return {
-            "name": spec["name"],
-            "status": "set" if os.environ.get(spec["name"]) else "missing",
-            "required": spec["required"],
-            "default": spec["default"],
-            "description": spec["description"],
-        }
+class PlatformConfig(BaseModel):
+    all_required_set: bool
+    missing: List[str]
+    set_count: int
+    required_count: int
 
-    platform_items = [_to_item(s) for s in PLATFORM_SECRET_SPECS]
-    infra_items = [_to_item(s) for s in INFRA_PATH_SPECS]
-    return {"platform_secrets": platform_items, "infra_paths": infra_items}
+
+@app.get("/system/platform-config", response_model=PlatformConfig)
+def platform_config():
+    """Return a redacted platform-config summary.
+
+    PR S13: keep this minimal shape stable. The old settings page and the S12
+    tabbed settings page both consume this response.
+    """
+    required_specs = [s for s in (PLATFORM_SECRET_SPECS + INFRA_PATH_SPECS) if s["required"]]
+    missing = [s["name"] for s in required_specs if not os.environ.get(s["name"])]
+    required_count = len(required_specs)
+    set_count = required_count - len(missing)
+    return PlatformConfig(
+        all_required_set=(len(missing) == 0),
+        missing=missing,
+        set_count=set_count,
+        required_count=required_count,
+    )
 
 
 @app.get("/system/info")
 def system_info():
-    workers = discover_workers(use_cache=True)
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as cnt FROM runs")
-        run_count = cursor.fetchone()["cnt"]
-    from runner_utils import ARTIFACTS_DIR
-    from worker_registry import WORKERS_DIR
     return {
-        "api_version": app.version,
-        "workers_dir": str(WORKERS_DIR),
-        "db_path": DB_PATH,
-        "artifacts_dir": str(ARTIFACTS_DIR),
-        "run_count": run_count,
-        "worker_count": len(workers),
+        "version": app.version,
+        "started_at": _PROCESS_STARTED_AT,
+        "python_version": sys.version.split()[0],
+        "runner": "e2b",
     }
 
 
@@ -4670,6 +4771,7 @@ def system_metrics():
         "connections_count": int(connections_count or 0),
         "secrets_count": int(secrets_count or 0),
         "active_triggers": int(active_triggers or 0),
+        "drafts_last_hour": _drafts_last_hour_total(),
         "uptime_seconds": int(time.time() - _PROCESS_START_TIME),
     }
 

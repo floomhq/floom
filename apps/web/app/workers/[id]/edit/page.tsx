@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ArrowLeft, Save } from "lucide-react";
+import { load as parseYaml } from "js-yaml";
 import type { ConnectionItem, TriggerSpec, WorkerDetail, WorkerFile } from "@/lib/types";
 import {
   ExecModePicker,
@@ -21,14 +22,43 @@ import {
 import type { DetectedEntry, TriggerRow } from "@/components/worker-form";
 
 // ---------------------------------------------------------------------------
-// PR S11: detect the entry point from the file list. agent wins if both exist.
+// PR S13 hotfix: parse exec.entry from worker.yml; file-list heuristic only as legacy fallback.
 // ---------------------------------------------------------------------------
 
-function detectEntry(files: { path: string }[]): DetectedEntry {
+function detectEntry(files: { path: string; content: string }[]): {
+  entry: DetectedEntry;
+  legacyFallback: boolean;
+} {
+  const workerYml = files.find((f) => f.path === "worker.yml")?.content ?? "";
+  if (workerYml.trim()) {
+    try {
+      const parsed = parseYaml(workerYml) as { exec?: { entry?: unknown } } | null;
+      const entryValue = parsed?.exec?.entry;
+      if (typeof entryValue === "string" && entryValue.trim()) {
+        const normalized = entryValue.trim().toLowerCase();
+        if (normalized.endsWith(".md")) {
+          return { entry: "SKILL.md", legacyFallback: false };
+        }
+        if (
+          normalized.endsWith(".py")
+          || normalized.endsWith(".sh")
+          || normalized.endsWith(".js")
+        ) {
+          return { entry: "run.py", legacyFallback: false };
+        }
+      }
+    } catch {
+      // Fall through to legacy file-list inference.
+    }
+  }
+
   const paths = new Set(files.map((f) => f.path));
-  if (paths.has("SKILL.md")) return "SKILL.md";
-  if (paths.has("run.py")) return "run.py";
-  return "none";
+  if (paths.has("SKILL.md")) return { entry: "SKILL.md", legacyFallback: true };
+  if (paths.has("run.py")) return { entry: "run.py", legacyFallback: true };
+  if (files.some((f) => /\.(py|sh|js)$/.test(f.path))) {
+    return { entry: "run.py", legacyFallback: true };
+  }
+  return { entry: "none", legacyFallback: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +106,7 @@ export default function EditWorkerPage() {
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [saving, setSaving] = useState(false);
-  const detectedEntry: DetectedEntry = detectEntry(files);
+  const { entry: detectedEntry, legacyFallback } = detectEntry(files);
 
   useEffect(() => {
     Promise.all([
@@ -212,6 +242,11 @@ export default function EditWorkerPage() {
           />
 
           <ExecModePicker detectedEntry={detectedEntry} />
+          {legacyFallback && (
+            <p className="text-xs text-amber-700">
+              Legacy worker - set <code>exec.entry</code> in worker.yml
+            </p>
+          )}
         </div>
 
         {/* Right column: file editor */}
