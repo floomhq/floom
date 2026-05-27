@@ -142,7 +142,7 @@ export function ConnectionEventPicker({
 
   if (loadingConnections) {
     return (
-      <div className="flex items-center gap-2 text-xs text-[#999] py-2">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
         <Loader2 className="w-3.5 h-3.5 animate-spin" />
         Loading connected apps...
       </div>
@@ -151,9 +151,9 @@ export function ConnectionEventPicker({
 
   if (connectedApps.length === 0) {
     return (
-      <div className="rounded-md border border-[#e4e4e7] bg-[#fafafa] p-3 space-y-2">
-        <p className="text-sm text-[#555]">No connected integrations yet.</p>
-        <a href="/connections/browse" className="inline-flex items-center gap-1 rounded-md border border-[#e4e4e7] bg-white px-2 py-1 text-xs hover:bg-[#f4f4f5]">
+      <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+        <p className="text-sm text-muted-foreground">No connected integrations yet.</p>
+        <a href="/connections/browse" className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs hover:bg-muted">
           <Plus className="w-3 h-3" />
           Connect an integration
         </a>
@@ -165,9 +165,9 @@ export function ConnectionEventPicker({
     <div className="space-y-3">
       {/* Step 1: App */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-[#666] uppercase tracking-wide">Integration</Label>
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide">Integration</Label>
         <Select value={selectedApp} onValueChange={handleAppChange}>
-          <SelectTrigger className="w-full border-[#e4e4e7]">
+          <SelectTrigger className="w-full border-border">
             <SelectValue placeholder="Pick a connected integration">
               {selectedApp ? appDisplayName(selectedApp) : null}
             </SelectValue>
@@ -185,7 +185,7 @@ export function ConnectionEventPicker({
         </Select>
         <a
           href="/connections/browse"
-          className="text-xs text-[#999] underline underline-offset-2 hover:text-[#666] transition-colors"
+          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-muted-foreground transition-colors"
         >
           Connect another integration
         </a>
@@ -194,17 +194,17 @@ export function ConnectionEventPicker({
       {/* Step 2: Event (only after app is chosen) */}
       {selectedApp && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-[#666] uppercase tracking-wide">Event</Label>
+          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Event</Label>
           {loadingTriggers ? (
-            <div className="flex items-center gap-2 text-xs text-[#999] py-1">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               Loading events...
             </div>
           ) : triggers.length === 0 ? (
-            <p className="text-xs text-[#999]">No events found for this integration.</p>
+            <p className="text-xs text-muted-foreground">No events found for this integration.</p>
           ) : (
             <Select value={composioEvent} onValueChange={handleEventChange}>
-              <SelectTrigger className="w-full border-[#e4e4e7]">
+              <SelectTrigger className="w-full border-border">
                 <SelectValue placeholder="Select an event">
                   {composioEvent
                     ? (triggers.find((t) => triggerEventId(t) === composioEvent)
@@ -231,9 +231,9 @@ export function ConnectionEventPicker({
       {/* Step 3: Connection (only if multiple connections for the same app) */}
       {selectedApp && appConnections.length > 1 && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-[#666] uppercase tracking-wide">Account</Label>
+          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Account</Label>
           <Select value={composioConnectionId} onValueChange={(v) => onConnectionIdChange(v ?? "")}>
-            <SelectTrigger className="w-full border-[#e4e4e7]">
+            <SelectTrigger className="w-full border-border">
               <SelectValue placeholder="Select account" />
             </SelectTrigger>
             <SelectContent className="z-50">

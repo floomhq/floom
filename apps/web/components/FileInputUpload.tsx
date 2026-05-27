@@ -89,7 +89,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
       <button
         type="button"
         className={`relative w-full rounded-md border-2 border-dashed p-4 text-left transition-colors ${
-          dragging ? "border-black bg-[#f4f4f5]" : "border-[#e4e4e7] hover:border-[#aaa]"
+          dragging ? "border-black bg-muted" : "border-border hover:border-[#aaa]"
         }`}
         onClick={() => inputRef.current?.click()}
         onDragOver={(event) => {
@@ -112,14 +112,14 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
           onChange={(event) => pickFile(event.target.files?.[0])}
         />
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#f4f4f5] text-[#555]">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
             {value ? <FileText className="h-4 w-4" /> : <UploadCloud className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-[#333]">
+            <p className="truncate text-sm font-medium text-foreground">
               {fileName || (uploading ? "Uploading..." : "Drop a file or click to browse")}
             </p>
-            <p className="text-xs text-[#888]">
+            <p className="text-xs text-muted-foreground">
               {lastUpload
                 ? `${formatBytes(lastUpload.size)} · ${lastUpload.media_type}`
                 : maxSizeMb

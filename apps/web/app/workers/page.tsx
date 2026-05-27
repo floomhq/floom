@@ -468,56 +468,59 @@ function WorkerCard({
 
   return (
     <Card
-      className="border-[#eaeaea] shadow-none bg-white hover:border-[#d4d4d8] transition-colors"
+      className="hover:border-border hover:shadow-sm transition-all"
       title={hoverDescription || undefined}
     >
       <CardContent className={`p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
         {/* Header row */}
+        {/* PR S19 I-11: header was 5 elements deep (Box + name + star + eye +
+            pencil + status badge with text). At 250px card width the name
+            truncated to "Re...". Solution: keep Box + name + truncate, drop
+            inline View/Edit (whole card click goes to /workers/<id>),
+            replace text badge with a status dot. Star moved to top-right. */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Box className="w-4 h-4 text-[#999] shrink-0" />
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Box className="size-4 text-muted-foreground shrink-0" />
+            <span
+              className={`size-2 rounded-full shrink-0 ${
+                worker.status === "healthy"
+                  ? "bg-emerald-500"
+                  : worker.status === "error"
+                  ? "bg-red-500"
+                  : "bg-amber-500"
+              }`}
+              title={worker.status.replace("_", " ")}
+              aria-label={worker.status.replace("_", " ")}
+            />
             <h3 className="font-medium text-[15px] truncate">{worker.name}</h3>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-              onClick={() => onFavoriteToggle(worker.id)}
-              className={`h-7 w-7 flex items-center justify-center rounded transition-colors ${
-                isFavorite ? "text-amber-400 hover:text-amber-500" : "text-[#ccc] hover:text-amber-400"
-              }`}
-            >
-              <Star className={`w-3.5 h-3.5 ${isFavorite ? "fill-current" : ""}`} />
-            </button>
-            <Link href={`/workers/${worker.id}`} title="View worker">
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[#888] hover:text-[#333]">
-                <Eye className="w-3.5 h-3.5" />
-              </Button>
-            </Link>
-            <Link href={`/workers/${worker.id}/edit`} title="Edit worker">
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-[#888] hover:text-[#333]">
-                <Pencil className="w-3.5 h-3.5" />
-              </Button>
-            </Link>
-            <Badge variant="outline" className={statusColor[worker.status] || statusColor.healthy}>
-              {worker.status.replace("_", " ")}
-            </Badge>
-          </div>
+          <button
+            type="button"
+            title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+            onClick={() => onFavoriteToggle(worker.id)}
+            className={`size-7 flex items-center justify-center rounded transition-colors shrink-0 ${
+              isFavorite
+                ? "text-amber-400 hover:text-amber-500"
+                : "text-muted-foreground/40 hover:text-amber-400"
+            }`}
+          >
+            <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+          </button>
         </div>
 
         {!compact && (
-          <p className="text-sm text-[#666] line-clamp-2">{worker.description || "No description."}</p>
+          <p className="text-sm text-muted-foreground line-clamp-2">{worker.description || "No description."}</p>
         )}
 
         {worker.folder && (
-          <p className="text-xs text-[#999]">{worker.folder}</p>
+          <p className="text-xs text-muted-foreground">{worker.folder}</p>
         )}
 
         {!compact && (worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
               <button key={tag} type="button" onClick={() => onTagClick(tag)}>
-                <Badge variant="outline" className="cursor-pointer bg-white text-xs font-normal hover:bg-[#f4f4f5]">
+                <Badge variant="outline" className="cursor-pointer bg-card text-xs font-normal hover:bg-muted">
                   {tag}
                 </Badge>
               </button>
@@ -531,14 +534,14 @@ function WorkerCard({
             {(worker.triggers || []).map((label) => (
               <span
                 key={label}
-                className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-[#f4f4f5] text-[#555]"
+                className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-muted text-muted-foreground"
               >
                 {label}
               </span>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-[#999]">{worker.trigger_type}</p>
+          <p className="text-xs text-muted-foreground">{worker.trigger_type}</p>
         )}
 
         {/* Sparkline (only shown when timeseries data available and has runs) */}
@@ -550,7 +553,7 @@ function WorkerCard({
 
         {/* Usage stats text */}
         {hasStats && (
-          <p className="text-xs text-[#999]">
+          <p className="text-xs text-muted-foreground">
             {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
             {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
             {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}

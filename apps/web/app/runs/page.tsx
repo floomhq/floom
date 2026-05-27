@@ -124,7 +124,7 @@ export default function RunsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
-          <p className="text-[#666] text-sm mt-1">All worker executions.</p>
+          <p className="text-muted-foreground text-sm mt-1">All worker executions.</p>
         </div>
         <Button
           variant="outline"
@@ -161,7 +161,7 @@ export default function RunsPage() {
               className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                 statusFilter === opt.value
                   ? "bg-[#333] text-white border-[#333]"
-                  : "bg-white text-[#666] border-[#eaeaea] hover:border-[#999]"
+                  : "bg-card text-muted-foreground border-border hover:border-[#999]"
               }`}
             >
               {opt.label}
@@ -170,7 +170,7 @@ export default function RunsPage() {
         </div>
       </div>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader>
           <CardTitle className="text-sm font-medium">History</CardTitle>
         </CardHeader>
@@ -179,14 +179,14 @@ export default function RunsPage() {
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : runs.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-3 text-center">
-              <div className="w-10 h-10 rounded-full bg-[#f4f4f5] flex items-center justify-center">
-                <Play className="w-5 h-5 text-[#aaa]" />
+              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                <Play className="w-5 h-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-sm font-medium text-[#333]">
+                <p className="text-sm font-medium text-foreground">
                   {workerFilter || statusFilter ? "No runs match these filters" : "No runs yet"}
                 </p>
-                <p className="text-xs text-[#999] mt-1 max-w-xs">
+                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
                   {workerFilter || statusFilter
                     ? "Try clearing filters to see all runs."
                     : "Runs appear here when you execute a worker manually or via a trigger."}
@@ -204,7 +204,7 @@ export default function RunsPage() {
                 <button
                   type="button"
                   onClick={() => { setWorkerFilter(""); setStatusFilter(""); }}
-                  className="text-xs text-[#666] hover:text-[#333] underline"
+                  className="text-xs text-muted-foreground hover:text-foreground underline"
                 >
                   Clear filters
                 </button>
@@ -216,19 +216,19 @@ export default function RunsPage() {
                 <Link
                   key={r.id}
                   href={`/runs/${r.id}`}
-                  className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors cursor-pointer"
+                  className="flex items-center justify-between p-3 rounded-md hover:bg-muted transition-colors cursor-pointer"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
-                    <p className="text-xs text-[#bbb] mt-0.5">
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       <span className="font-mono text-[10px]">{r.id}</span>
-                      <span className="text-[#ccc] mx-1">·</span>
-                      <span className="text-[#999]">{r.trigger_source} · {formatRelative(r.created_at)}</span>
+                      <span className="text-muted-foreground/60 mx-1">·</span>
+                      <span className="text-muted-foreground">{r.trigger_source} · {formatRelative(r.created_at)}</span>
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <RunStatusBadge status={r.status} />
-                    <ChevronRight className="w-3.5 h-3.5 text-[#bbb]" />
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                 </Link>
               ))}
