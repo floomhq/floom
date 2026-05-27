@@ -199,10 +199,10 @@ function NewWorkerContent() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 pt-8 pb-16">
-      {/* Page header */}
+      {/* Page header. S22c (roast P2): dropped subtitle that duplicated the
+          sidebar context. */}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Create a worker</h1>
-        <p className="text-muted-foreground text-sm mt-1">Tell Floom what to automate.</p>
       </div>
 
       {/* Hero card */}
@@ -216,7 +216,7 @@ function NewWorkerContent() {
             const val = (e.target as HTMLTextAreaElement).value;
             if (val !== prompt) setPrompt(val);
           }}
-          className="min-h-[120px] resize-none border-border text-sm focus-visible:ring-0 focus-visible:border-black"
+          className="min-h-[120px] resize-none border-border text-sm focus-visible:ring-0 focus-visible:border-black placeholder:text-muted-foreground/50"
           disabled={isBusy}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -229,13 +229,16 @@ function NewWorkerContent() {
         {/* Divider */}
         <div className="border-t border-[#f0f0f0]" />
 
-        {/* Bottom row: upload (left) + generate (right) */}
+        {/* Bottom row: upload (left) + generate (right).
+            S22c (roast P1/P2): upload now reads as a button (border + padded
+            rectangle), shortcut hint moves outside the disabled-button shadow
+            so it remains visible. */}
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
             disabled={isBusy}
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isUploading ? (
               <>
@@ -258,38 +261,53 @@ function NewWorkerContent() {
             onChange={handleFileInputChange}
           />
 
-          <Button
-            onClick={() => void handleGenerate()}
-            disabled={isBusy || !prompt.trim()}
-            className="h-8 px-4 text-sm"
-          >
-            {generating ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Generating...
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5">
-                Generate
-                <kbd className="text-[10px] opacity-60 font-mono ml-0.5">{"⌘↵"}</kbd>
-              </span>
-            )}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => void handleGenerate()}
+              disabled={isBusy || !prompt.trim()}
+              className="h-8 px-4 text-sm"
+            >
+              {generating ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Generating...
+                </span>
+              ) : (
+                "Generate"
+              )}
+            </Button>
+            <kbd
+              className="hidden sm:inline-flex items-center gap-0.5 rounded border border-line bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]"
+              aria-hidden="true"
+            >
+              <span style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</span>
+              <span>↵</span>
+            </kbd>
+          </div>
         </div>
       </div>
 
-      {/* Example chips */}
+      {/* Example chips. S22c (roast P1): first pill gets a "Try this" accent
+          so users have a clear suggested starting point instead of 5
+          equally-weighted options. */}
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">Or start from an example:</p>
         <div className="flex flex-wrap gap-2">
-          {EXAMPLES.map((ex) => (
+          {EXAMPLES.map((ex, idx) => (
             <button
               key={ex.label}
               type="button"
               disabled={isBusy}
               onClick={() => setPrompt(ex.prompt)}
-              className="inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className={
+                idx === 0
+                  ? "inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                  : "inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              }
             >
+              {idx === 0 && (
+                <span className="mr-1.5 inline-flex h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+              )}
               {ex.label}
             </button>
           ))}
