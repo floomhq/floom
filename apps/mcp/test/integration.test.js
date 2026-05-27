@@ -286,9 +286,14 @@ test("workeros MCP exposes nine tools and covers lifecycle happy paths", async (
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      "connections.list",
       "runs.get",
       "runs.list",
       "runs.watch",
+      "secrets.delete",
+      "secrets.list",
+      "secrets.set",
+      "triggers.list",
       "workers.create",
       "workers.delete",
       "workers.get",
@@ -506,10 +511,10 @@ test("install subcommand prints manual snippets when no agent config file exists
   try {
     const result = await runCli(["install"], { HOME: home, WORKEROS_API_SECRET: "test-secret" });
     assert.equal(result.code, 0);
-    assert.match(result.stdout, /No supported agent config file was found/);
-    assert.match(result.stdout, /Claude Code: ~\/\.claude\/settings\.json/);
-    assert.match(result.stdout, /Cursor: ~\/\.cursor\/mcp\.json/);
-    assert.match(result.stdout, /Continue: ~\/\.continue\/\.continuerc\.json/);
+    assert.match(result.stdout, /No supported (agent config file|MCP client config) was found/);
+    assert.match(result.stdout, /- ~\/\.claude\/settings\.json/);
+    assert.match(result.stdout, /- ~\/\.cursor\/mcp\.json/);
+    assert.match(result.stdout, /- ~\/\.continue\/\.continuerc\.json/);
     assert.match(result.stdout, /"@floomhq\/workeros"/);
     assert.doesNotMatch(result.stdout, /test-secret/);
   } finally {
