@@ -603,6 +603,12 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE runs ADD COLUMN bundle_snapshot_path TEXT;
     """,
+    # -- migration 23: scope OAuth connections to the owning user -------------
+    """
+    ALTER TABLE composio_connections ADD COLUMN user_id TEXT NOT NULL DEFAULT 'federico';
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_user_id
+        ON composio_connections(user_id);
+    """,
 ]
 
 
