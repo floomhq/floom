@@ -339,9 +339,27 @@ export default function ConnectionsBrowsePage() {
             />
           ))
         ) : (
-          <div className="col-span-full rounded-lg border border-dashed border-line bg-[var(--paper)] px-4 py-12 text-center">
+          // S24: when Composio catalog returns no match for the search,
+          // bridge to the manual path: store a raw API key as a Secret.
+          // Many apps that lack Composio OAuth still expose a simple key.
+          <div className="col-span-full rounded-lg border border-dashed border-line bg-[var(--paper)] px-6 py-10 text-center">
             <p className="text-sm font-medium text-ink">No integrations found</p>
-            <p className="mt-1 text-sm text-[var(--ink-soft)]">Clear filters or try a broader search.</p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">
+              Clear filters or try a broader search.
+            </p>
+            {search.trim().length > 0 && (
+              <div className="mt-5 inline-flex flex-col items-center gap-2">
+                <p className="text-xs text-[var(--ink-mute)]">
+                  Does the app you need expose an API key? Add it as a secret and any worker can read it.
+                </p>
+                <Link
+                  href={`/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
+                >
+                  Add {search.trim()} as a secret
+                </Link>
+              </div>
+            )}
           </div>
         )}
       </section>

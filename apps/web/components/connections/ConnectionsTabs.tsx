@@ -3,23 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// S23: shared tabs row mounted at the top of both /connections (Connected)
-// and /connections/browse (Browse). Visual unification without merging the
-// page code (each route still owns its data fetching and chrome).
+// Shared tabs row at the top of /connections, /connections/browse, and
+// /secrets. S24: added "Secrets" so the sidebar drops its standalone item.
+// Connections + secrets are the same mental model (credentials a worker
+// can read) so they share a surface.
 export function ConnectionsTabs() {
   const pathname = usePathname();
   const tabs = [
-    { href: "/connections", label: "Connected" },
-    { href: "/connections/browse", label: "Browse" },
+    { href: "/connections", label: "Connected", match: (p: string) => p === "/connections" },
+    { href: "/connections/browse", label: "Browse", match: (p: string) => p.startsWith("/connections/browse") },
+    { href: "/secrets", label: "Secrets", match: (p: string) => p.startsWith("/secrets") },
   ];
 
   return (
     <nav className="flex items-center gap-1 border-b border-line" aria-label="Connections sections">
       {tabs.map((tab) => {
-        const active =
-          tab.href === "/connections"
-            ? pathname === "/connections"
-            : pathname.startsWith(tab.href);
+        const active = tab.match(pathname);
         return (
           <Link
             key={tab.href}
