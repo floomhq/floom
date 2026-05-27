@@ -76,53 +76,53 @@ function CliAuthContent() {
   }
 
   return (
-    <div className="max-w-xl space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Authorize CLI</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">A CLI is requesting access</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          <p>
-            Code: <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{code || "(missing)"}</code>
+    <div className="max-w-xl space-y-6">
+      {/* S29s: dropped Card wrapper. The page IS the action; a card around
+          a 4-line form added nothing. Heading + content sit flat. */}
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Authorize CLI</h1>
+        <p className="text-sm text-muted-foreground mt-1">A CLI is requesting access.</p>
+      </div>
+      <div className="space-y-4 text-sm">
+        <p>
+          Code: <code className="bg-muted px-1.5 py-0.5 font-mono">{code || "(missing)"}</code>
+        </p>
+        <p>Client: floom-cli</p>
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground" htmlFor="cli-auth-confirm-code">
+            Confirm code
+          </label>
+          <Input
+            id="cli-auth-confirm-code"
+            autoComplete="off"
+            inputMode="text"
+            placeholder={code || "ABCD-2345"}
+            value={confirmCode}
+            onChange={(event) => setConfirmCode(event.target.value.toUpperCase())}
+          />
+        </div>
+        {!secret && (
+          <p className="text-muted-foreground">
+            Sign in first. Paste your secret in <Link className="underline" href="/settings">Settings</Link>, then reload this page.
           </p>
-          <p>Client: floom-cli</p>
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="cli-auth-confirm-code">
-              Confirm code
-            </label>
-            <Input
-              id="cli-auth-confirm-code"
-              autoComplete="off"
-              inputMode="text"
-              placeholder={code || "ABCD-2345"}
-              value={confirmCode}
-              onChange={(event) => setConfirmCode(event.target.value.toUpperCase())}
-            />
-          </div>
-          {!secret && (
-            <p className="text-muted-foreground">
-              Sign in first. Paste your secret in <Link className="underline" href="/settings">Settings</Link>, then reload this page.
-            </p>
-          )}
-          <div className="flex gap-2">
-            <Button
-              disabled={!canApprove || busyAction !== null}
-              onClick={() => void submit("approve")}
-            >
-              {busyAction === "approve" ? "Approving..." : "Approve"}
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!canDeny || busyAction !== null}
-              onClick={() => void submit("deny")}
-            >
-              {busyAction === "deny" ? "Denying..." : "Deny"}
-            </Button>
-          </div>
-          {statusText && <p className="text-sm">{statusText}</p>}
-        </CardContent>
-      </Card>
+        )}
+        <div className="flex gap-2">
+          <Button
+            disabled={!canApprove || busyAction !== null}
+            onClick={() => void submit("approve")}
+          >
+            {busyAction === "approve" ? "Approving..." : "Approve"}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!canDeny || busyAction !== null}
+            onClick={() => void submit("deny")}
+          >
+            {busyAction === "deny" ? "Denying..." : "Deny"}
+          </Button>
+        </div>
+        {statusText && <p className="text-sm">{statusText}</p>}
+      </div>
     </div>
   );
 }

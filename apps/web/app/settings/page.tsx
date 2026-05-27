@@ -153,12 +153,12 @@ function SettingsContent() {
           <CliCommandPanel />
         </TabsContent>
 
-        <TabsContent value="system" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">System info</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+        <TabsContent value="system" className="space-y-8">
+          {/* S29s: dropped Card wrappers. Match sister tabs (API access,
+              Appearance) which also flat-section now. */}
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
+            <div className="space-y-3 text-sm">
               {info ? (
                 <>
                   <Row label="Version" value={info.version} mono />
@@ -176,19 +176,17 @@ function SettingsContent() {
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Platform configuration</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
+            <div className="space-y-3">
               {!platformConfig ? (
                 <Skeleton className="h-12 w-full" />
               ) : (
                 <>
-                  <div className="flex items-center justify-between rounded-md bg-muted p-3">
+                  <div className="flex items-center justify-between bg-muted p-3">
                     <span className="text-sm">Configured</span>
                     <span className="text-sm font-medium">
                       {platformConfig.set_count}/{platformConfig.required_count}
@@ -232,11 +230,8 @@ function SettingsContent() {
                   )}
                 </>
               )}
-            </CardContent>
-          </Card>
-
-          {/* PR S19: removed redundant Workers / Reload card.
-              Workers auto-reload on every page mount via api.workers.list. */}
+            </div>
+          </section>
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4">
@@ -263,18 +258,13 @@ function SettingsContent() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="appearance" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Theme</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Choose how Floom looks. System follows your operating system.
-              </p>
-              <ThemeModeButton />
-            </CardContent>
-          </Card>
+        <TabsContent value="appearance" className="space-y-3">
+          {/* S29s: dropped Card. Theme is a one-liner section. */}
+          <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
+          <p className="text-sm text-muted-foreground">
+            Choose how Floom looks. System follows your operating system.
+          </p>
+          <ThemeModeButton />
         </TabsContent>
 
         <TabsContent value="danger" className="space-y-4">
