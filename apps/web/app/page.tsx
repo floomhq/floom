@@ -141,31 +141,66 @@ export default function OverviewPage() {
       </div>
 
       {attention.length > 0 && (
-        <div className="space-y-2">
-          {attention.map((item, idx) => (
-            <Alert key={`${item.type}-${idx}`} variant="destructive">
-              <AlertTriangle className="size-4" />
-              <AlertTitle className="text-sm">
-                {item.type === "failure_cluster"
-                  ? "Worker keeps failing"
-                  : item.type === "connection_expired"
-                  ? "Connection expired"
-                  : item.type === "connection_expiring"
-                  ? "Connection expiring"
-                  : "Needs attention"}
-              </AlertTitle>
-              <AlertDescription className="flex items-center justify-between gap-3">
-                <span>{item.message}</span>
-                <Link href={item.action_url}>
-                  <Button variant="ghost" size="sm">
-                    Open
-                    <ArrowUpRight className="size-3.5" />
-                  </Button>
-                </Link>
-              </AlertDescription>
-            </Alert>
-          ))}
-        </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Needs attention</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {(() => {
+              const expired = attention.filter(
+                (a) => a.type === "connection_expired" || a.type === "connection_expiring",
+              );
+              const failures = attention.filter((a) => a.type === "failure_cluster");
+              return (
+                <div className="divide-y">
+                  {/* PR S19 (I-7 + I-10): collapse N connection issues into one
+                      informational row; reserve destructive variant for actual
+                      worker failures. Per-connection details linked below. */}
+                  {expired.length > 0 && (
+                    <Link
+                      href="/connections"
+                      className="flex items-center justify-between gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-accent transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Plug className="size-4 text-amber-600" />
+                        <div>
+                          <p className="text-sm font-medium">
+                            {expired.length}{" "}
+                            {expired.length === 1 ? "connection needs" : "connections need"}{" "}
+                            re-authorization
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {expired
+                              .map((c) => c.provider_display_name || c.connection_id?.slice(0, 8))
+                              .filter(Boolean)
+                              .join(", ") || "Open Connections to fix."}
+                          </p>
+                        </div>
+                      </div>
+                      <ArrowUpRight className="size-4 text-muted-foreground" />
+                    </Link>
+                  )}
+                  {failures.map((item, idx) => (
+                    <Link
+                      key={`failure-${idx}`}
+                      href={item.action_url}
+                      className="flex items-center justify-between gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-accent transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle className="size-4 text-red-600" />
+                        <div>
+                          <p className="text-sm font-medium">Worker keeps failing</p>
+                          <p className="text-xs text-muted-foreground">{item.message}</p>
+                        </div>
+                      </div>
+                      <ArrowUpRight className="size-4 text-muted-foreground" />
+                    </Link>
+                  ))}
+                </div>
+              );
+            })()}
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
