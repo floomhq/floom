@@ -2,164 +2,258 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  Box,
+  CheckCircle2,
+  Clock,
+  Plug,
+  Plus,
+} from "lucide-react";
+
 import { api } from "@/lib/api";
-import Papa from "papaparse";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { SystemOverview } from "@/lib/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Box, Clock, AlertTriangle, Download } from "lucide-react";
-import type { WorkerSummary, RunSummary } from "@/lib/types";
+import { Separator } from "@/components/ui/separator";
+import { Sparkline } from "@/components/Sparkline";
+import { RunStatusGlyph } from "@/components/RunStatus";
+import {
+  formatDuration,
+  formatRelative,
+  formatRelativeFuture,
+  formatTimeOfDay,
+} from "@/lib/formatters";
+
+function StatCard({
+  label,
+  value,
+  trend,
+  icon: Icon,
+  loading,
+}: {
+  label: string;
+  value: string | number;
+  trend?: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
+  loading: boolean;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {label}
+          </p>
+          <Icon className="size-4 text-muted-foreground" />
+        </div>
+        <div className="mt-2 text-2xl font-semibold">
+          {loading ? <Skeleton className="h-8 w-16" /> : value}
+        </div>
+        {trend ? <div className="mt-2 text-xs text-muted-foreground">{trend}</div> : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function OverviewPage() {
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [data, setData] = useState<SystemOverview | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       try {
-        const [w, r] = await Promise.all([
-          api.workers.list(),
-          api.runs.list({ limit: 5 }),
-        ]);
-        setWorkers(w);
-        setRuns(r);
+        const result = await api.system.overview();
+        if (!cancelled) setData(result);
       } catch (e) {
         console.error(e);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
     load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const API_PAGE_MAX = 500;
-
-  async function exportAllRuns() {
-    try {
-      let allRuns: typeof runs = [];
-      let offset = 0;
-      while (true) {
-        const page = await api.runs.list({ limit: API_PAGE_MAX, offset });
-        allRuns = [...allRuns, ...page];
-        if (page.length < API_PAGE_MAX) break;
-        offset += API_PAGE_MAX;
-      }
-      const rows = allRuns.map((r) => ({
-        id: r.id,
-        worker_id: r.worker_id,
-        status: r.status,
-        trigger_source: r.trigger_source,
-        created_at: r.created_at || "",
-        started_at: r.started_at || "",
-        completed_at: r.completed_at || "",
-        duration_ms: r.duration_ms ?? "",
-      }));
-      const csv = Papa.unparse(rows);
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `workeros-all-runs-${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  const runsToday = runs.filter((r) => {
-    if (!r.created_at) return false;
-    const d = new Date(r.created_at);
-    const now = new Date();
-    return d.toDateString() === now.toDateString();
-  }).length;
-
-  const failedRuns = runs.filter((r) => r.status === "failed").length;
-
-  const stats = [
-    { label: "Workers", value: workers.length, icon: Box },
-    { label: "Runs today", value: runsToday, icon: Clock },
-    { label: "Failed", value: failedRuns, icon: AlertTriangle },
-  ];
+  const stats = data?.stats;
+  const recent = data?.recent_runs ?? [];
+  const scheduled = data?.scheduled_today ?? [];
+  const attention = data?.needs_attention ?? [];
 
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-          <p className="text-[#666] text-sm mt-1">What is running and what needs attention.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            What ran, what is running, and what is next.
+          </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={exportAllRuns}
-          className="gap-1.5"
-        >
-          <Download className="w-4 h-4" />
-          Export all runs
+        <Button asChild size="sm">
+          <Link href="/workers/new">
+            <Plus className="size-4" />
+            New worker
+          </Link>
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {stats.map((s) => (
-          <Card key={s.label} className="shadow-none border-[#eaeaea] bg-white">
-            <CardContent className="p-5 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-[#666]">
-                  {s.label}
-                </p>
-                <div className="text-2xl font-semibold mt-1">
-                  {loading ? <Skeleton className="h-8 w-12" /> : s.value}
-                </div>
-              </div>
-              <s.icon className="w-5 h-5 text-[#999]" />
-            </CardContent>
-          </Card>
-        ))}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard
+          label="Runs 24h"
+          value={stats?.runs_24h ?? 0}
+          icon={Clock}
+          loading={loading}
+          trend={
+            stats ? (
+              <Sparkline data={stats.runs_24h_sparkline} width={96} height={24} />
+            ) : null
+          }
+        />
+        <StatCard
+          label="Success 7d"
+          value={stats ? `${Math.round(stats.success_rate_7d * 100)}%` : "0%"}
+          icon={CheckCircle2}
+          loading={loading}
+        />
+        <StatCard
+          label="Active workers"
+          value={stats?.active_workers_count ?? 0}
+          icon={Box}
+          loading={loading}
+        />
+        <StatCard
+          label="Connections"
+          value={
+            stats
+              ? `${stats.connections_healthy} / ${stats.connections_total}`
+              : "0 / 0"
+          }
+          icon={Plug}
+          loading={loading}
+        />
       </div>
 
-      <Card className="border-[#eaeaea] shadow-none bg-white">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {loading ? (
-            <Skeleton className="h-20 w-full" />
-          ) : runs.length === 0 ? (
-            <p className="text-sm text-[#999]">No runs yet.</p>
-          ) : (
-            runs.map((r) => (
-              <Link
-                key={r.id}
-                href={`/runs/${r.id}`}
-                className="flex items-center justify-between p-3 rounded-md hover:bg-[#f4f4f5] transition-colors"
-              >
-                <div>
-                  <p className="text-sm font-medium">{r.worker_name || r.worker_id}</p>
-                  <p className="text-xs text-[#999] mt-0.5">{r.trigger_source} · {r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
-                </div>
-                <StatusBadge status={r.status} />
-              </Link>
-            ))
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+      {attention.length > 0 && (
+        <div className="space-y-2">
+          {attention.map((item, idx) => (
+            <Alert key={`${item.type}-${idx}`} variant="destructive">
+              <AlertTriangle className="size-4" />
+              <AlertTitle className="text-sm">
+                {item.type === "failure_cluster"
+                  ? "Worker keeps failing"
+                  : item.type === "connection_expired"
+                  ? "Connection expired"
+                  : item.type === "connection_expiring"
+                  ? "Connection expiring"
+                  : "Needs attention"}
+              </AlertTitle>
+              <AlertDescription className="flex items-center justify-between gap-3">
+                <span>{item.message}</span>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={item.action_url}>
+                    Open
+                    <ArrowUpRight className="size-3.5" />
+                  </Link>
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ))}
+        </div>
+      )}
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    running: "text-blue-600 border-blue-200 bg-blue-50",
-    completed: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    failed: "text-red-600 border-red-200 bg-red-50",
-    queued: "text-gray-600 border-gray-200 bg-gray-50",
-  };
-  return (
-    <Badge variant="outline" className={map[status] || map.queued}>
-      {status.replace("_", " ")}
-    </Badge>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/runs">
+                See all
+                <ArrowUpRight className="size-3.5" />
+              </Link>
+            </Button>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {loading ? (
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : recent.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                No runs yet. Run a worker to see it here.
+              </p>
+            ) : (
+              <div className="divide-y">
+                {recent.map((r) => (
+                  <Link
+                    key={r.run_id}
+                    href={`/runs/${r.run_id}`}
+                    className="flex items-center justify-between gap-3 py-3 hover:bg-accent rounded-md px-2 -mx-2 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <RunStatusGlyph status={r.status} />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{r.worker_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatRelative(r.started_at)} · {formatDuration(r.duration_ms)} ·{" "}
+                          {r.trigger_source}
+                        </p>
+                      </div>
+                    </div>
+                    <ArrowUpRight className="size-4 text-muted-foreground shrink-0" />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Scheduled today</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {loading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : scheduled.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nothing scheduled today.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {scheduled.map((item) => (
+                  <li key={`${item.worker_id}-${item.next_fire_at}`}>
+                    <Link
+                      href={`/workers/${item.worker_id}`}
+                      className="flex items-start justify-between gap-3 hover:bg-accent rounded-md px-2 -mx-2 py-1.5 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{item.worker_name}</p>
+                        <p className="text-xs text-muted-foreground">{item.trigger_label}</p>
+                      </div>
+                      <Badge variant="secondary" className="shrink-0 font-mono text-xs">
+                        {formatTimeOfDay(item.next_fire_at)}
+                      </Badge>
+                    </Link>
+                    <p className="ml-2 text-xs text-muted-foreground">
+                      {formatRelativeFuture(item.next_fire_at)}
+                    </p>
+                    <Separator className="mt-3" />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
