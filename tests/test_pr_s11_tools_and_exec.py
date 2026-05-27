@@ -277,6 +277,7 @@ def test_system_metrics_returns_expected_shape(monkeypatch, tmp_path):
         "connections_count",
         "secrets_count",
         "active_triggers",
+        "drafts_last_hour",
         "uptime_seconds",
     }
     assert set(body.keys()) == expected_keys

@@ -226,6 +226,20 @@ export interface ActionResponse {
   run_id?: string;
 }
 
+export interface SystemInfo {
+  version: string;
+  started_at: string;
+  python_version: string;
+  runner: string;
+}
+
+export interface PlatformConfig {
+  all_required_set: boolean;
+  missing: string[];
+  set_count: number;
+  required_count: number;
+}
+
 // ---------------------------------------------------------------------------
 // Connections (Composio OAuth)
 // ---------------------------------------------------------------------------
