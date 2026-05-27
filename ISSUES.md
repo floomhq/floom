@@ -747,3 +747,118 @@ Recommend trying #1 first (real fix) and falling back to #2 (better wording) whe
 PR Q overlaps with PR M (also touches connection UI). Land M first, then dispatch Q on top.
 
 **Total estimated effort for PR Q:** 4-6 hours.
+
+---
+
+# ISSUES — Federico's 2026-05-27 walkthrough (post S18 design pass)
+
+Raised verbally during a real browser walk of `workers.floom.dev` after merging S17 + S12-BE + S12-UI + S15 + S13 + S18. Status legend: OPEN / FIXING / FIXED / VERIFIED.
+
+Screenshots referenced (need pulling from Mac): `~/Desktop/Screenshot 2026-05-26 at 22.19.14.png`, `22.22.35.png`, `22.39.21.png`.
+
+## P0 — broken or seriously misleading
+
+### I-1 — Generate hangs forever then empty error
+- **Where:** `/workers/new`, after clicking "Granola → HubSpot daily" pill
+- **What:** Click pill → textarea fills AND draft-and-create auto-fires → spinner forever → empty error toast → no worker created
+- **Likely cause:** OpenAI timeout on the prompt OR an error path that swallows the message. Auto-submit on pill click compounds the bad UX (see I-9).
+
+### I-2 — Worker detail page has no tabs (side-nav B not deployed)
+- **Where:** `/workers/<id>`
+- **What:** Spec is side-nav B (Run / Code / Triggers / Connections / Runs / Overview). Live page does not show this layout.
+- **Action:** Inspect `apps/web/app/workers/[id]/page.tsx` vs the ASCII spec. Either S8 didn't refactor it or it regressed.
+
+### I-3 — Settings "Appearance" tab lies about theme support
+- **Where:** `/settings?tab=appearance`
+- **What:** Body reads "Floom is light-only for now." FALSE — the sidebar already has a Light / Dark / System toggle (`ThemeModeButton.tsx`).
+- **Fix:** Wire the actual theme toggle into the Appearance tab.
+
+### I-4 — Settings API access design weird, no token shown, no way to get one
+- **Where:** `/settings?tab=api`
+- **What:** Current panel = `CliCommandPanel` with CLI/MCP/API sub-tabs. None expose the actual `x-floom-secret`. User has no idea how to obtain a token.
+- **Fix:** "Your token" section at top with reveal / copy / rotate, THEN the setup snippets.
+
+### I-5 — Cannot delete a worker
+- **Where:** `/workers/<id>` and worker cards
+- **What:** No delete affordance. API has `DELETE /workers/<id>`. UI doesn't expose it.
+- **Fix:** Delete button on `/workers/<id>` (in a Danger zone of side-nav B), and a dropdown on worker cards.
+
+### I-6 — Generate from prompt has no error diagnostic
+- **Where:** `/workers/new`
+- **What:** Same as I-1. Empty toast on failure. Surface the actual reason (rate limit / model error / etc.).
+
+### I-7 — Overview "Connection expired" doesn't name the connection
+- **Where:** `/`, "Needs attention" alerts
+- **What:** Each alert reads "Connection has expired and needs re-authorization." No provider name, no logo. URL is right but the label is opaque.
+- **Fix:** Backend `/system/overview` `needs_attention[]` already carries `connection_id`. Extend response to also include `provider_slug` + `provider_display_name`. UI renders name + logo.
+
+### I-8 — Run detail page (`/runs/<id>`) not redesigned per spec
+- **Where:** e.g. `https://workers.floom.dev/runs/run_4f661958b88e`
+- **What:** Output-first layout, collapsibles, Edit / Re-run / Download top-bar — needs alignment with the ASCII spec.
+- **Also:** Federico wants the ASCII spec REFRESHED before iterating.
+
+### I-9 — Example pill click auto-submits Generate
+- **Where:** `/workers/new`
+- **What:** Pill click fills textarea AND fires draft-and-create. Should ONLY fill the prompt; user explicitly clicks Generate.
+- **Fix:** `apps/web/app/workers/new/page.tsx` — remove the auto-call after setPrompt.
+
+## P1 — quality / polish
+
+### I-10 — Too many red error messages on Overview, panic-inducing
+- **What:** 4 red Alert cards = the page reads as on fire. Most are "connection expired" which is recoverable.
+- **Fix:** Use `default` Alert variant for connection-expired (informational). Reserve `destructive` for actual failures. Possibly collapse N connection-expired alerts into one summary row "3 connections need re-auth".
+
+### I-11 — Worker card layout issues (Screenshot 22.19.14.png)
+- **What:** Federico's screenshot flags a layout issue. Candidates: title truncation, "healthy" badge crowding the title, action icons crammed, sparkline mismatched with cards that have no runs.
+- **Action:** Pull screenshot via `ssh mac` to know specifics.
+
+### I-12 — Some connections still show "Federico" as account label
+- **What:** `account_label` falls back to "federico" instead of `depontefede@gmail.com` for some rows. Sweep should refresh; some rows are missed OR the provider response shape doesn't include email reliably.
+- **Fix:** Look at `_fetch_provider_email` for the affected providers; force a re-fetch.
+
+### I-13 — Skeletons still too basic (S18 partial)
+- **What:** After S18 shimmer, still too basic. Likely the shimmer is too subtle OR skeleton SHAPES don't match the content that lands, causing layout jump.
+- **Fix:** Bump shimmer contrast. Audit each skeleton block to match its target card / row dimensions.
+
+### I-14 — Edit worker looks different from View worker
+- **What:** `/workers/<id>` and `/workers/<id>/edit` render differently. Either consolidate or align chrome.
+- **Fix:** Per spec, side-nav B's Code tab IS the editable surface. Consolidate the two routes or align visual chrome.
+
+### I-15 — Reload buttons everywhere — should auto-reload
+- **What:** Manual "Reload workers" buttons in `/workers` and `/settings` System tab. Auto-reload already happens on mount.
+- **Fix:** Remove manual buttons. Keep underlying `api.workers.reload()` calls for any cron auto-refresh.
+
+### I-16 — Highlighted text on dark mode has white background
+- **What:** Selecting text in dark mode shows a white selection background.
+- **Fix:** Add `::selection { background: var(--accent-soft); color: var(--ink); }` to `globals.css`. Audit highlight.js usage.
+
+### I-17 — `/workers/new` page needs more design polish
+- **What:** Federico wants the hero card / upload / chips / typography reworked.
+- **Action:** Discuss ASCII refresh, then iterate.
+
+### I-18 — `/runs/<id>` ASCII spec needs refresh before iteration
+- **What:** Update `docs/design/ascii-mockups-2026-05-27.md` with the run detail page spec. Get sign-off, then implement.
+
+### I-19 — Some pages haven't been updated to match the ASCII spec yet
+- **What:** Federico noted "the run page also has not been updated according to design changes." Need to audit each route against the locked spec.
+
+## Order
+
+Tackle order (small-to-impact, with bundling where it makes sense):
+
+1. **I-9** (5 min): kill auto-submit on pill click.
+2. **I-15** (10 min): remove manual reload buttons.
+3. **I-3** (15 min): wire theme toggle into Appearance tab.
+4. **I-4** (45 min): "Your token" section + reveal/copy/rotate in API access tab (need backend endpoint to fetch the secret hash or accept reveal via a separate authed call).
+5. **I-7 + I-10** (30 min): overview alerts — name the connection, tone down to non-destructive.
+6. **I-16** (5 min): selection styles in dark mode.
+7. **I-2 + I-14** (1-2h): side-nav B on `/workers/<id>` (re-verify it's actually deployed) + consolidate view/edit.
+8. **I-5** (30 min): delete affordance in side-nav B Danger zone.
+9. **I-1 + I-6** (45 min): draft endpoint error path — surface real diagnostic; investigate why granola→hubspot hangs.
+10. **I-11** (after viewing screenshot): worker card fix.
+11. **I-12** (30 min): re-fetch account_label for connections still showing "federico".
+12. **I-13** (20 min): bump shimmer contrast + audit skeleton shapes.
+13. **I-17 + I-18**: refresh ASCII for `/workers/new` and `/runs/<id>`, then re-implement.
+14. **I-19**: audit every route vs spec, fix gaps.
+
+**Multi-agent audit waits until all P0 + the layout-eyes P1 items are addressed.**
